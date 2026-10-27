@@ -34,6 +34,7 @@ pub mod process_guard;
 pub mod project_import;
 pub mod provider_contract;
 pub mod provider_health;
+pub mod provider_install;
 pub mod provider_observation;
 pub mod provider_permissions;
 pub mod provider_registry;
@@ -48,6 +49,7 @@ pub mod usage;
 pub mod usage_receipts;
 pub mod web_fetch;
 pub mod workspace_check;
+pub mod workspace_roots;
 pub mod workspace_sandbox;
 pub mod worktrees;
 
@@ -178,6 +180,9 @@ pub use provider_health::{
     provider_runtime_status_from_output, provider_subscription_label,
     should_skip_codex_login_for_external_env, ProviderHealthCheck, ProviderHealthRequest,
     ProviderHealthService, PROVIDER_HEALTH_CACHE_TTL,
+};
+pub use provider_install::{
+    install_command, install_guide, install_hint, ProviderInstallGuide, PROVIDER_INSTALL_GUIDES,
 };
 pub use provider_permissions::{
     acp_permission_args, approval_posture, approve_for_me_keeps_escalations,

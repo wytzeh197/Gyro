@@ -858,17 +858,18 @@ const expired = composerLimitWindows(
   [],
   now + 3_600_001,
 );
-// Past their reset the windows are spent-free, not gone: the plan still
-// meters them, so the composer keeps the row at a full allowance.
+// Past their reset the windows are unmeasured, not gone and not empty: the
+// plan still meters them, and the composer waits for the next live reading.
 assert.deepEqual(
   expired.map((window) => [
     window.id,
     window.remainingPercentLabel,
+    window.status,
     window.resetsLabel,
   ]),
   [
-    ["five-hour", "100%", undefined],
-    ["weekly", "100%", undefined],
+    ["five-hour", "\u2014", "unknown", undefined],
+    ["weekly", "\u2014", "unknown", undefined],
   ],
 );
 const newWindow = composerLimitWindows(

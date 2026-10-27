@@ -605,8 +605,27 @@ export {
   workspaceRootForPath,
   parseGyroWorkspaceFile,
   serializeGyroWorkspaceFile,
+  normalizedWorkspaceFolderList,
 } from "./workspace-project";
 export type { GyroWorkspaceFile } from "./workspace-project";
+export {
+  assessWorkspaceRoots,
+  relocateWorkspaceFolderPreferences,
+  validateWorkspaceRoots,
+  workspaceRootIdentity,
+  workspaceRootIssueIsTransient,
+  workspaceRootIssueMessage,
+  workspaceRootIssueSummary,
+} from "./workspace-roots";
+export type { WorkspaceRootIssuesModel } from "./workspace-root-issues";
+export type {
+  WorkspaceRootHealth,
+  WorkspaceRootInspection,
+  WorkspaceRootIssue,
+  WorkspaceRootIssueCode,
+  WorkspaceRootStatus,
+  WorkspaceRootValidation,
+} from "./workspace-roots";
 export {
   defaultWorkspaceUserSettings,
   normalizedWorkspaceScopedSettings,
@@ -670,6 +689,19 @@ export type {
   ChatQuestionRequest,
 } from "./chat-questions";
 export { ChatQuestionPopup } from "./chat-question-popup";
+export {
+  ChatTaskSuggestions,
+  ChatTaskSuggestionsContext,
+  chatTaskSuggestionsFromEvent,
+  type ChatStartTaskSuggestion,
+  type ChatStartTaskSuggestionsSource,
+  type ChatTaskOrigin,
+  type ChatTaskStart,
+  type ChatTaskStatus,
+  type ChatTaskSuggestion,
+  type ChatTaskSuggestionHandlers,
+  type ChatTaskSuggestionsController,
+} from "./chat-task-suggestions";
 export { ChatQuestionAnswers, ImplementPlanDock, PlanCard } from "./plan-mode";
 export {
   droppedFileUrls,

@@ -279,7 +279,10 @@ fn retire_stale_arguments(message: &mut Value) -> usize {
     };
     let mut saved = 0;
     for call in calls {
-        let Some(arguments) = call.get_mut("function").and_then(|f| f.get_mut("arguments")) else {
+        let Some(arguments) = call
+            .get_mut("function")
+            .and_then(|f| f.get_mut("arguments"))
+        else {
             continue;
         };
         match arguments {
@@ -945,8 +948,8 @@ mod tests {
         assert_eq!(call["function"]["name"], "write_file");
         let retired_text = call["function"]["arguments"].as_str().unwrap();
         assert!(retired_text.len() < before);
-        let retired: Value = serde_json::from_str(retired_text)
-            .expect("retired arguments stay valid json");
+        let retired: Value =
+            serde_json::from_str(retired_text).expect("retired arguments stay valid json");
         assert_eq!(retired["path"], "a.rs");
         assert!(retired["content"].as_str().unwrap().contains("retired"));
         assert_eq!(retire_stale_tool_results(&mut messages), 0);

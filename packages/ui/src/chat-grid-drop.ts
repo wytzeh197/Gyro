@@ -4,8 +4,9 @@
 // choose have to match what is on screen:
 // - an empty grid opens the first chat full size;
 // - a lone chat splits Left / Right;
-// - rows and stacks offer broad insertion tiles, with corners offering a 2×2
-//   grid instead; moving a chat already in the layout keeps a cancellation tile;
+// - two chats already in the layout swap; a new chat still picks an edge or corner;
+// - three or more rows and stacks offer broad insertion tiles, with corners
+//   offering a 2×2 grid; moving a chat already in the layout keeps a cancellation tile;
 // - anything else that still has room offers the 2×2 quadrants;
 // - a full row or stack accepts rearrangement of its own chats, but no new chat.
 import type { ChatGridArrangement, ChatPaneRef } from "./types";
@@ -107,6 +108,33 @@ export function chatGridDropZones(
   // At capacity every layout only accepts a chat already in it. Offering a
   // target to an incoming chat would promise placement the reducer rejects.
   if (occupied.length >= CHAT_GRID_MAX_SLOTS && !allowFullRowReorder) return [];
+  // Two chats already open trade places. A release stays on that pane, so
+  // the corner of a split does not open a row, stack, or 2×2 chooser.
+  if (
+    occupied.length === 2 &&
+    allowFullRowReorder &&
+    (arrangement === "columns" || arrangement === "rows")
+  ) {
+    const horizontal = arrangement === "columns";
+    const sourceSlotIndex = pointer?.sourceSlotIndex ?? -1;
+    return occupied.map((slotIndex, index) => {
+      const position = horizontal
+        ? index === 0
+          ? "left"
+          : "right"
+        : index === 0
+          ? "stack-start"
+          : "stack-end";
+      const isSource = slotIndex === sourceSlotIndex;
+      return {
+        id: position,
+        label: isSource ? "Keep here" : "Swap",
+        isSource: isSource || undefined,
+        position,
+        slotIndex,
+      };
+    });
+  }
   if (arrangement === "columns" || arrangement === "rows") {
     if (pointer && pointerWithinBounds(pointer.bounds, pointer.x, pointer.y)) {
       const x = (pointer.x - pointer.bounds.left) / pointer.bounds.width;

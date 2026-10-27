@@ -129,10 +129,19 @@ impl GyroPaths {
     }
 }
 
+/// Every store open runs this for each data directory, so the settled case is
+/// one `lstat`: an existing private directory is neither re-created nor
+/// re-chmodded (a chmod still writes the inode's change time).
 pub(crate) fn ensure_private_directory(path: &Path) -> Result<()> {
-    std::fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))?;
-    let metadata =
-        std::fs::symlink_metadata(path).with_context(|| format!("inspect {}", path.display()))?;
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))?;
+            std::fs::symlink_metadata(path)
+                .with_context(|| format!("inspect {}", path.display()))?
+        }
+        Err(error) => return Err(error).with_context(|| format!("inspect {}", path.display())),
+    };
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(anyhow!(
             "private Gyro data path is not a regular directory: {}",
@@ -142,8 +151,10 @@ pub(crate) fn ensure_private_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-            .with_context(|| format!("secure {}", path.display()))?;
+        if metadata.permissions().mode() & 0o7777 != 0o700 {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+                .with_context(|| format!("secure {}", path.display()))?;
+        }
     }
     Ok(())
 }
@@ -165,8 +176,12 @@ pub(crate) fn secure_private_file(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("secure {}", path.display()))?;
+        let already_private = std::fs::metadata(path)
+            .is_ok_and(|metadata| metadata.permissions().mode() & 0o7777 == 0o600);
+        if !already_private {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("secure {}", path.display()))?;
+        }
     }
     Ok(())
 }

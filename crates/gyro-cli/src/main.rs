@@ -5341,9 +5341,11 @@ fn setup_command(args: SetupArgs) -> Result<()> {
             next: if command_in_path(agent).is_some() {
                 None
             } else {
-                Some(format!(
-                    "install {agent} before selecting it with `gyro run --profile {profile_hint}`"
-                ))
+                Some(gyro_core::provider_install::install_hint_for_binary(agent).unwrap_or_else(|| {
+                    format!(
+                        "install {agent} before selecting it with `gyro run --profile {profile_hint}`"
+                    )
+                }))
             },
         });
     }

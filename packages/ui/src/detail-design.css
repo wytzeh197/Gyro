@@ -170,14 +170,31 @@
   gap: var(--gyro-space-standard);
   min-width: 0;
 }
+/* A long path gives way from the left, so the filename always stays in view.
+   The directory is laid out right to left only to move its ellipsis to the
+   front; the <bdi> inside keeps the path itself reading left to right. */
 .gyro-change-file-path {
+  display: flex;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .gyro-change-file-directory {
   color: var(--gyro-muted);
+  direction: rtl;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gyro-change-file-directory > bdi {
+  direction: ltr;
+}
+.gyro-change-file-name {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* A clear rim and thumb keep on/off states crisp at every interface size. */

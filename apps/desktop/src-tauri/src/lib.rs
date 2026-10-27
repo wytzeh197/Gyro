@@ -45,6 +45,7 @@ mod capability_execution_guard;
 mod command_execution;
 use command_execution::*;
 mod provider_api_keys;
+mod provider_install;
 mod window_controls;
 #[cfg(target_os = "macos")]
 pub(crate) use window_controls::apply_macos_traffic_light_position;
@@ -68,6 +69,7 @@ use kimi_usage::*;
 mod browser_knowledge;
 mod browser_pointer;
 mod file_patch_counts;
+mod workspace_roots;
 mod workspace_search;
 use workspace_search::{
     bound_model_search_results, confine_search_directory, literal_search_ranges,
@@ -84,8 +86,8 @@ use automation_scheduler::{
 };
 use base64::Engine as _;
 use desktop_notifications::{
-    notification_permission_allows_delivery, notify_automation_outcome,
-    notify_provider_approval_question,
+    native_permission, notify_automation_outcome, notify_provider_approval_question,
+    send_test_notification,
 };
 use gyro_core::augmented_gui_path;
 #[cfg(test)]
@@ -153,7 +155,6 @@ use std::sync::{
 };
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{Emitter, Manager};
-use tauri_plugin_notification::{NotificationExt, PermissionState};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -189,6 +190,7 @@ use provider_identity::provider_model_identity;
 mod dictation_access;
 mod source_control_review;
 mod system_access;
+mod task_suggestions;
 mod terminal_capability;
 mod terminal_process;
 mod terminal_wait;
@@ -2911,32 +2913,16 @@ fn automation_notification_content(
 
 #[tauri::command]
 async fn get_notification_permission(app: tauri::AppHandle) -> Result<String, String> {
-    app.notification()
-        .permission_state()
-        .map(|permission| permission.to_string())
+    tauri::async_runtime::spawn_blocking(move || native_permission(&app).to_string())
+        .await
         .map_err(to_string)
 }
 
 #[tauri::command]
 async fn test_notification(app: tauri::AppHandle) -> Result<String, String> {
-    let notifications = app.notification();
-    let mut permission = notifications.permission_state().map_err(to_string)?;
-    if matches!(
-        permission,
-        PermissionState::Prompt | PermissionState::PromptWithRationale
-    ) {
-        permission = notifications.request_permission().map_err(to_string)?;
-    }
-    if !notification_permission_allows_delivery(permission) {
-        return Ok(permission.to_string());
-    }
-    notifications
-        .builder()
-        .title("Gyro notifications are ready")
-        .body("Automation outcomes can now appear while Gyro is in the background.")
-        .show()
-        .map_err(to_string)?;
-    Ok(permission.to_string())
+    tauri::async_runtime::spawn_blocking(move || send_test_notification(&app).to_string())
+        .await
+        .map_err(to_string)
 }
 
 fn cancel_scheduled_automation(app: &tauri::AppHandle, automation_id: Uuid) {
@@ -4572,6 +4558,23 @@ fn run_compaction_summary_call(
         workspace_context: None,
         workspace_check: None,
     };
+    // An auto-compaction runs inside a turn that already bound its context. A
+    // manual `/compact` runs between turns, where nothing is bound, and every
+    // runner refuses to start without one -- so the summarizer binds its own,
+    // under the same deny-all council policy as the request.
+    if active_provider_capability_context(app, &request.session_id).is_err() {
+        let session_uuid = parse_uuid(&request.session_id)?;
+        let session = store
+            .get_session(session_uuid)
+            .map_err(to_string)?
+            .ok_or_else(|| "provider chat session no longer exists".to_string())?;
+        let run_id = request
+            .turn_id
+            .as_deref()
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .unwrap_or_else(Uuid::new_v4);
+        bind_provider_capability_context(app, store, &summary_request, run_id, false, &session)?;
+    }
     // The caller already holds this session's cancellation flag for the whole
     // compaction, so Stop ends the summarizer like it ends any other turn.
     let _mute = context_compaction::mute_summary_stream(&request.session_id);
@@ -5023,6 +5026,9 @@ fn run_provider_chat_blocking_in_lease(
         }
         if let Some(questions) = questions {
             object.insert("questions".into(), questions);
+        }
+        if let Some(tasks) = control_markers.tasks.clone() {
+            object.insert("tasks".into(), tasks);
         }
         if let Some(update) = control_markers.agent_update.as_ref() {
             object.insert("agentUpdate".into(), update.clone());
@@ -5497,12 +5503,14 @@ fn compact_local_provider_chat(
     ));
     emit_provider_activity_event(app, request, &running, Some(0));
 
-    // A new provider session starts from the saved checkpoint on the next
-    // turn. If writing the checkpoint fails, the transcript still carries the
-    // original messages and the normal handoff path can reconstruct them.
-    store
-        .clear_provider_session_binding(session_id, &request.provider_id)
-        .map_err(to_string)?;
+    // A resumable provider session holds the whole thread, tool results
+    // included. Only a real summary is worth trading it for; the local rewrite
+    // clips every turn, so dropping the session for it loses context to save
+    // none.
+    let resumable = store
+        .get_provider_session_binding(session_id, &request.provider_id)
+        .map_err(to_string)?
+        .is_some();
 
     let started = Instant::now();
     let (compaction, usage, failure) = match run_compaction_summary_call(store, app, request) {
@@ -5519,6 +5527,31 @@ fn compact_local_provider_chat(
         // rewrite, worded as the rewrite it is.
         Err(error) => (fallback, None, Some(error)),
     };
+    if let (Some(error), true) = (failure.as_deref(), resumable) {
+        let failed = ProviderActivity {
+            id: running.id,
+            kind: "context".into(),
+            label: "Context compaction failed".into(),
+            detail: Some(format!(
+                "Could not summarize this chat ({error}). The conversation continues unchanged."
+            )),
+            file_counts: None,
+            note: None,
+            status: "failed".into(),
+        };
+        emit_provider_activity_event(app, request, &failed, Some(0));
+        let _ = store.append_system_events_with_turn_id(
+            session_id,
+            vec![provider_activity_event_entry(request, run_id, 0, &failed)],
+        );
+        return Err(error.to_string());
+    }
+    // A new provider session starts from the saved checkpoint on the next
+    // turn. If writing the checkpoint fails, the transcript still carries the
+    // original messages and the normal handoff path can reconstruct them.
+    store
+        .clear_provider_session_binding(session_id, &request.provider_id)
+        .map_err(to_string)?;
     let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     let report = context_compaction::CompactionSummary {
         label,
@@ -6203,7 +6236,7 @@ fn provider_context_message_with_capabilities_for_turn(
             // Stated once per provider thread. Telling the model to refresh the
             // attached check made Codex open every turn with tool discovery and
             // context calls, roughly doubling model calls per turn.
-            stable.push("Gyro Workspace tools are available, alongside IDE, proposal, task, test, terminal, and browser tools. A compact workspace check is attached to each turn and is current: rely on it, and call gyro_workspace_check, gyro_workspace_get_context, or other Workspace tools only when the task needs fresher facts, file contents, diagnostics, or an action. Every result is tied to this chat, turn, project, and policy; describe the evidence you found, never internal workspace mechanics.".into());
+            stable.push("Gyro Workspace tools are available, alongside IDE, proposal, task, test, terminal, and browser tools. A compact workspace check is attached to each turn and is current: rely on it, and call gyro_workspace_check, gyro_workspace_get_context, or other Workspace tools only when the task needs fresher facts, file contents, diagnostics, or an action. The check names the top-level layout, so do not list the workspace root only to discover that layout. Every result is tied to this chat, turn, project, and policy; describe the evidence you found, never internal workspace mechanics.".into());
             // gyro_terminal_wait's own description already covers the wait loop
             // and remote CI. This line is the part that description cannot say:
             // ending the turn drops the work, and waiting is not permission.
@@ -6223,7 +6256,7 @@ fn provider_context_message_with_capabilities_for_turn(
         }
         if !turn.resumed {
             stable.push(
-                "Call gyro_tool_catalog with the tool's domain prefix (gyro_workspace_, gyro_code_, gyro_terminal_, gyro_browser_, gyro_git_, gyro_ide_, gyro_github_, gyro_memory_, gyro_research_, or gyro_agent_) before using a tool whose schema was not inlined.".into(),
+                "Deferred tools include a compact argument schema (names, types, and limits). Call them directly. Use gyro_tool_catalog with the tool's domain prefix only when an argument is still unclear or a call is rejected as invalid.".into(),
             );
         }
     }
@@ -6232,6 +6265,7 @@ fn provider_context_message_with_capabilities_for_turn(
         stable.push(
             "Ask only for a user decision that changes your action and cannot be settled by project reads; otherwise keep working. Write one short sentence, then one hidden JSON line: GYRO_QUESTIONS: {\"questions\":[{\"question\":\"Decision?\",\"options\":[{\"label\":\"A\",\"detail\":\"Effect\",\"recommended\":true},{\"label\":\"B\",\"detail\":\"Effect\"}]}]}. At most 3 questions, 2–4 options each, at most one recommended option per question. Do not repeat questions in prose; end the turn and wait for answers.".into(),
         );
+        stable.push(task_suggestions::TASK_SUGGESTION_INSTRUCTION.into());
     }
     if request.mode == ChatMode::Plan {
         context.push("Plan mode is read-only. Inspect and reason, but do not mutate files, run mutating commands, or start services.".into());
@@ -12238,6 +12272,7 @@ async fn check_provider_auth(provider_id: String) -> Result<ProviderHealthCheck,
     .map_err(|error| format!("provider auth worker failed: {error}"))?
 }
 
+
 /// What one chat has cost, read from Gyro's own ledger.
 ///
 /// Unlike `get_provider_usage`, this answers for every provider: it counts what
@@ -12276,12 +12311,35 @@ async fn get_provider_usage(
 ///
 /// Claude Code announces a plan window at the start of each request but never
 /// says how full it is, so the announcement is the cue to ask the account API.
-/// The poll behind `fresh` coalesces bursts, so a tool-heavy turn announcing
-/// the window many times still costs at most one request a minute.
+/// A new request's occupancy is the same cue: the meter moves during the turn,
+/// not only after it. The poll behind `fresh` coalesces bursts, and a second
+/// start inside that minute is skipped, so a tool-heavy turn still costs at
+/// most one account read a minute.
 fn publish_live_provider_usage(app: &tauri::AppHandle, provider_id: &str) {
+    spawn_provider_usage_refresh(app, provider_id, true);
+}
+
+/// Ask again when a turn settles, even if a mid-turn read started recently.
+///
+/// The account poll still refuses a second network read inside its fresh
+/// window. This only makes sure the settle is not dropped because the turn
+/// already asked once.
+fn publish_settled_provider_usage(app: &tauri::AppHandle, provider_id: &str) {
+    spawn_provider_usage_refresh(app, provider_id, false);
+}
+
+fn spawn_provider_usage_refresh(
+    app: &tauri::AppHandle,
+    provider_id: &str,
+    respect_interval: bool,
+) {
     if !matches!(provider_id, "anthropic" | "openai" | "xai" | "kimi") {
         return;
     }
+    if respect_interval && !provider_usage_refresh_due(provider_id) {
+        return;
+    }
+    provider_usage_refresh_mark(provider_id);
     let app = app.clone();
     let provider_id = provider_id.to_string();
     std::thread::spawn(move || {
@@ -12289,6 +12347,25 @@ fn publish_live_provider_usage(app: &tauri::AppHandle, provider_id: &str) {
             let _ = app.emit(PROVIDER_USAGE_UPDATED_EVENT, &snapshot);
         }
     });
+}
+
+fn provider_usage_refresh_due(provider_id: &str) -> bool {
+    provider_usage_refresh_slots()
+        .lock()
+        .ok()
+        .and_then(|slots| slots.get(provider_id).copied())
+        .is_none_or(|at| at.elapsed() >= ANTHROPIC_FRESH_USAGE_MAX_AGE)
+}
+
+fn provider_usage_refresh_mark(provider_id: &str) {
+    if let Ok(mut slots) = provider_usage_refresh_slots().lock() {
+        slots.insert(provider_id.to_string(), Instant::now());
+    }
+}
+
+fn provider_usage_refresh_slots() -> &'static Mutex<HashMap<String, Instant>> {
+    static SLOTS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    SLOTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// The plan windows Gyro can state for a provider right now.
@@ -12721,13 +12798,15 @@ fn anthropic_usage_windows_by_key(payload: &serde_json::Value) -> Vec<ProviderRa
     .collect();
     // The 5-hour session only opens with the first message after the last one
     // closed, and until then the account reports it as null. Beside a measured
-    // week that null is an untouched allowance, not a plan without one, and
-    // leaving it out made the row vanish whenever Claude sat idle.
+    // week that null is still a window the plan meters. Leaving it out made the
+    // row vanish whenever Claude sat idle. It is not a measurement of zero:
+    // the level stays absent until the account reports a utilization.
     let session_idle = payload.get("five_hour").is_some_and(|window| {
-        window
-            .get("utilization")
-            .and_then(serde_json::Value::as_f64)
-            .is_none()
+        window.is_null()
+            || window
+                .get("utilization")
+                .and_then(serde_json::Value::as_f64)
+                .is_none()
     });
     if session_idle && windows.iter().any(|window| window.id == "weekly") {
         windows.insert(
@@ -12736,7 +12815,7 @@ fn anthropic_usage_windows_by_key(payload: &serde_json::Value) -> Vec<ProviderRa
                 id: "five-hour".into(),
                 label: "5-hour limit".into(),
                 status: "ok".into(),
-                used_percent: Some(0),
+                used_percent: None,
                 resets_at: None,
             },
         );
@@ -13483,6 +13562,8 @@ fn session_context_signal(event: &SessionEvent) -> provider_context::SessionCont
                 .get("activityId")
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|id| id.starts_with("context-compaction-"))
+            // A failed compaction released nothing.
+            && payload.get("status").and_then(serde_json::Value::as_str) != Some("failed")
     });
     // Usage written onto the compaction itself is the summary call, not the
     // thread the next turn will resume. Treating it as a fresh reading would
@@ -16478,7 +16559,7 @@ fn claude_multimodal_input(
 const ANTIGRAVITY_CURSOR_KIND: &str = "antigravity-conversation";
 
 /// Shown when the official CLI is missing from this machine.
-const ANTIGRAVITY_INSTALL_DETAIL: &str = "The Antigravity CLI (`agy`) is not installed. Add Google's official CLI with `curl -fsSL https://antigravity.google/cli/install.sh | bash`, then run `agy` once to sign in with your Google account.";
+
 
 /// Google Antigravity through Google's official CLI (`agy`).
 ///
@@ -16559,7 +16640,12 @@ fn run_antigravity_chat(
         // failure already says what went wrong.
         let detail = error.to_string();
         if detail.contains("No such file") || detail.contains("not found") {
-            anyhow::anyhow!("{ANTIGRAVITY_INSTALL_DETAIL}")
+            anyhow::anyhow!(
+                "{}",
+                gyro_core::install_hint("antigravity").unwrap_or_else(|| {
+                    "The Antigravity CLI (`agy`) is not installed.".to_string()
+                })
+            )
         } else {
             error
         }
@@ -18223,6 +18309,7 @@ struct StrippedControlMarkers {
     goal_update: Option<serde_json::Value>,
     agent_update: Option<serde_json::Value>,
     questions: Option<serde_json::Value>,
+    tasks: Option<serde_json::Value>,
     artifacts: Vec<serde_json::Value>,
 }
 
@@ -18245,6 +18332,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
     let mut goal_update = None;
     let mut agent_update = None;
     let mut questions = None;
+    let mut tasks = None;
     let mut artifacts = Vec::new();
     let mut kept_lines = Vec::new();
 
@@ -18256,6 +18344,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
             &mut goal_update,
             &mut agent_update,
             &mut questions,
+            &mut tasks,
             &mut artifacts,
         );
         if cleaned.trim().is_empty() {
@@ -18283,6 +18372,7 @@ fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
         goal_update,
         agent_update,
         questions,
+        tasks,
         artifacts,
     }
 }
@@ -18311,6 +18401,7 @@ fn strip_control_markers_from_line(
     goal_update: &mut Option<serde_json::Value>,
     agent_update: &mut Option<serde_json::Value>,
     questions: &mut Option<serde_json::Value>,
+    tasks: &mut Option<serde_json::Value>,
     artifacts: &mut Vec<serde_json::Value>,
 ) -> String {
     let mut rest = line;
@@ -18373,6 +18464,17 @@ fn strip_control_markers_from_line(
                     rest = "";
                 }
             },
+            task_suggestions::GYRO_TASKS_MARKER => {
+                match take_leading_json_value(after_marker.trim_start()) {
+                    Some((value, remainder)) => {
+                        if tasks.is_none() {
+                            *tasks = task_suggestions::normalize_tasks(&value);
+                        }
+                        rest = remainder;
+                    }
+                    None => rest = "",
+                }
+            }
             GYRO_ARTIFACTS_MARKER => match take_leading_json_value(after_marker.trim_start()) {
                 Some((value, remainder)) => {
                     collect_chat_artifacts_from_value(value, artifacts);
@@ -18402,6 +18504,7 @@ fn next_control_marker(text: &str) -> Option<(&'static str, usize)> {
         GYRO_GOAL_UPDATE_MARKER,
         GYRO_AGENT_UPDATE_MARKER,
         GYRO_QUESTIONS_MARKER,
+        task_suggestions::GYRO_TASKS_MARKER,
         GYRO_ARTIFACTS_MARKER,
     ];
     candidates
@@ -18531,6 +18634,7 @@ fn derive_session_summary(response: &str) -> Option<String> {
                 && !line.starts_with("GYRO_PLAN_UPDATE:")
                 && !line.starts_with("GYRO_GOAL_UPDATE:")
                 && !line.starts_with("GYRO_QUESTIONS:")
+                && !line.starts_with(task_suggestions::GYRO_TASKS_MARKER)
         })
         .map(|line| {
             line.trim_start_matches(['#', '-', '*', '>'])
@@ -19114,6 +19218,11 @@ struct StreamingCommandState {
     /// The title from that line, once it was long enough to keep. The visible
     /// transcript does not contain the marker.
     captured_session_title: Option<String>,
+    /// Timeline item count when the last text boundary was handled. The
+    /// boundary flag only clears once text reaches the timeline, and text held
+    /// as a possible title marker never does, so the same boundary must not
+    /// split the next chunk off that held prefix (`G` | `YRO_PLAN_UPDATE:`).
+    text_boundary_handled_at: Option<u64>,
 }
 
 impl StreamingCommandState {
@@ -19149,7 +19258,17 @@ impl StreamingCommandState {
             last_emit_at: None,
             session_title_hold: String::new(),
             captured_session_title: None,
+            text_boundary_handled_at: None,
         }
+    }
+
+    /// Whether a timeline boundary still needs to end the current text block.
+    fn take_text_boundary(&mut self, has_boundary: bool, item_count: u64) -> bool {
+        if !has_boundary || self.text_boundary_handled_at == Some(item_count) {
+            return false;
+        }
+        self.text_boundary_handled_at = Some(item_count);
+        true
     }
 
     fn note_intervening_work(&mut self) {
@@ -19776,6 +19895,14 @@ fn run_streaming_command(
         }
     }
     let outcome = outcome?;
+    // The last occupancy frame is the one the meter keeps. Emit it again so a
+    // frame the UI missed still lands with the turn, and ask the account for
+    // the plan level this turn just spent. A stop, timeout, or output limit
+    // spent the same window, so those endings ask too.
+    if let Some(usage) = &stream_state.context_usage {
+        emit_provider_context_usage(app, request, usage);
+    }
+    publish_settled_provider_usage(app, &request.provider_id);
     match outcome.termination {
         // Nothing else can read the reason back: the token is shared, but the
         // sentence describing why it was cancelled only exists here.
@@ -19965,6 +20092,18 @@ fn handle_provider_stdout_line(
             emit_provider_context_usage(app, request, usage);
         }
     }
+    // A new request puts a new prompt in the window and draws on the plan.
+    // Output deltas keep the context meter live without another account read.
+    let previous_input = previous_usage
+        .as_ref()
+        .and_then(|usage| usage.input_tokens);
+    let next_input = stream_state
+        .context_usage
+        .as_ref()
+        .and_then(|usage| usage.input_tokens);
+    if next_input.is_some() && next_input != previous_input {
+        publish_live_provider_usage(app, &request.provider_id);
+    }
 }
 
 fn handle_provider_stdout_value(
@@ -20089,7 +20228,10 @@ fn handle_provider_stdout_value(
         }
     }
     if let Some(chunk) = extract_provider_text_chunk(value) {
-        if provider_timeline::text_has_boundary(app, &request.session_id) {
+        if stream_state.take_text_boundary(
+            provider_timeline::text_has_boundary(app, &request.session_id),
+            provider_timeline::item_count(app, &request.session_id),
+        ) {
             // Broker calls can arrive while provider text awaits its flush.
             // Preserve the earlier block before buffering text after that call.
             stream_state.flush_pending_delta(app, request, true);
@@ -24266,6 +24408,7 @@ pub fn run() {
             check_provider_auth,
             check_browser_preview,
             check_provider_health,
+            provider_install::install_provider_cli,
             provider_api_keys::provider_api_key_status,
             provider_api_keys::set_provider_api_key,
             provider_api_keys::clear_provider_api_key,
@@ -24351,8 +24494,10 @@ pub fn run() {
             list_active_capability_resources,
             list_due_automations,
             list_sessions,
+            task_suggestions::list_start_task_suggestions,
             list_workspace_files,
             list_workspace_tree,
+            workspace_roots::inspect_workspace_folders,
             load_config,
             warm_desktop_shell,
             logout_account,
@@ -25960,6 +26105,9 @@ mod tests {
         assert!(opening.contains("gyro_workspace_edit"));
         assert!(opening.contains("knownContentHash"));
         assert!(opening.contains("Reuse current evidence"));
+        assert!(opening.contains("compact argument schema"));
+        assert!(opening.contains("top-level layout"));
+        assert!(!opening.contains("before using a tool whose schema was not inlined"));
     }
 
     #[test]
@@ -29414,6 +29562,32 @@ while True:
     }
 
     #[test]
+    fn a_held_marker_prefix_is_not_split_by_the_same_boundary_twice() {
+        // After a tool call, the reply's first token `G` is held as a possible
+        // `GYRO_SESSION_TITLE:` prefix. The boundary was already handled for
+        // it; the next chunk must join it, not flush it as its own block.
+        let mut state = StreamingCommandState::new();
+        state.push_assistant_delta("Running the checks:");
+        assert!(state.take_text_boundary(true, 3));
+        state.note_intervening_work();
+        state.push_assistant_delta("G");
+        assert!(state.session_title_hold == "G");
+        assert!(!state.take_text_boundary(true, 3));
+        state.push_assistant_delta("YRO_PLAN_UPDATE: {}\nDone.");
+        assert_eq!(
+            state.assistant_text,
+            "Running the checks:\n\nGYRO_PLAN_UPDATE: {}\nDone."
+        );
+        assert_eq!(
+            strip_hidden_control_markers(&state.assistant_text).message,
+            "Running the checks:\n\nDone."
+        );
+        // New timeline work is a new boundary again.
+        assert!(state.take_text_boundary(true, 4));
+        assert!(!state.take_text_boundary(false, 5));
+    }
+
+    #[test]
     fn streaming_state_keeps_the_session_title_off_the_visible_text() {
         let mut state = StreamingCommandState::new();
         state.push_assistant_delta("I'll check the window. GYRO_SESS");
@@ -30517,9 +30691,10 @@ while True:
     }
 
     /// An idle account has no open session, so `five_hour` comes back null.
-    /// The plan still meters one, and none of it is spent yet.
+    /// The plan still meters one. The level is absent until a later reading
+    /// names a utilization; inventing zero would show a full allowance.
     #[test]
-    fn anthropic_idle_session_reads_as_a_full_five_hour_allowance() {
+    fn anthropic_idle_session_keeps_an_unmeasured_five_hour_window() {
         let windows = provider_usage_windows_from_anthropic_usage(&serde_json::json!({
             "five_hour": serde_json::Value::Null,
             "seven_day": {
@@ -30533,7 +30708,7 @@ while True:
                 .iter()
                 .map(|window| (window.id.as_str(), window.used_percent))
                 .collect::<Vec<_>>(),
-            vec![("five-hour", Some(0)), ("weekly", Some(3))]
+            vec![("five-hour", None), ("weekly", Some(3))]
         );
         assert!(windows[0].resets_at.is_none());
     }

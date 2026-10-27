@@ -440,18 +440,20 @@ impl Default for CreateSessionContext {
 
 pub struct SessionStore {
     paths: GyroPaths,
-    conn: Connection,
+    conn: crate::sqlite::PooledConnection,
 }
 
 impl SessionStore {
     pub fn open(paths: GyroPaths) -> Result<Self> {
         paths.ensure()?;
         reject_unsafe_private_file(&paths.database_path)?;
-        let conn = crate::sqlite::open_private_database(&paths.database_path)
+        let conn = crate::sqlite::open_pooled_database(&paths.database_path)
             .with_context(|| format!("open {}", paths.database_path.display()))?;
         secure_private_file(&paths.database_path)?;
         let store = Self { paths, conn };
-        store.initialize()?;
+        store
+            .conn
+            .ensure_schema(crate::sqlite::StoreSchema::Sessions, || store.initialize())?;
         store.recover_project_imports()?;
         Ok(store)
     }

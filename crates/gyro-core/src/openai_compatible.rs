@@ -2655,7 +2655,8 @@ mod tests {
                 assert!(cancellation.is_cancelled());
                 assert!(began.elapsed() < Duration::from_secs(1), "{error}");
             } else {
-                let response = result.expect("a text-only length finish returns the partial answer");
+                let response =
+                    result.expect("a text-only length finish returns the partial answer");
                 assert_eq!(response.content, "partial");
                 assert!(response.truncated);
                 assert!(response.tool_calls.is_empty());

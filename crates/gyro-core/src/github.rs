@@ -26,8 +26,7 @@ const GH_MAX_LOG_CHARS: usize = 1_024_000;
 pub const MAX_WORKFLOW_RUNS: usize = 50;
 pub const MAX_PULL_REQUESTS: usize = 50;
 
-const INSTALL_HINT: &str =
-    "Install the GitHub CLI (https://cli.github.com) and run `gh auth login` to enable GitHub features.";
+const INSTALL_HINT: &str = crate::provider_install::GH_CLI_INSTALL_HINT;
 const LOGIN_HINT: &str = "Run `gh auth login` to connect Gyro to GitHub.";
 
 /// Normalized run state shared by workflow runs, jobs, and steps.

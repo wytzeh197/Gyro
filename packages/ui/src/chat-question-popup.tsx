@@ -196,20 +196,6 @@ export function ChatQuestionPopup({
         </h3>
         {total > 1 ? (
           <span className="gyro-question-dock-pager">
-            <span aria-hidden="true" className="gyro-question-dock-steps">
-              {request.questions.map((_, index) => (
-                <i
-                  className={
-                    index === page
-                      ? "is-current"
-                      : answers[index] !== undefined
-                        ? "is-done"
-                        : ""
-                  }
-                  key={index}
-                />
-              ))}
-            </span>
             <button
               aria-label="Previous question"
               disabled={page === 0}

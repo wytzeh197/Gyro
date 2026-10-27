@@ -470,18 +470,28 @@
 }
 
 :root[data-theme] .gyro-titlebar-switch {
-  background: color-mix(in srgb, var(--gyro-text) 3%, var(--gyro-sidebar));
-  border-radius: var(--gyro-radius-md);
+  background: color-mix(in srgb, var(--gyro-text) 4%, var(--gyro-sidebar));
+  border: 1px solid color-mix(in srgb, var(--gyro-text) 8%, transparent);
+  /* Nested radii: the chip's radius plus the 2px gutter and 1px border. */
+  border-radius: var(--gyro-radius-lg);
   box-shadow: none;
+  gap: 2px;
+  height: calc(28px * var(--gyro-ui-scale, 1));
+  padding: 2px;
 }
 
 :root[data-theme] .gyro-titlebar-switch-option {
   border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
+  height: calc(28px * var(--gyro-ui-scale, 1) - 6px);
 }
 
 :root[data-theme] .gyro-titlebar-switch-option svg {
   transition: color var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+:root[data-theme] .gyro-titlebar-switch-option:not(.is-active):hover {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
 }
 
 :root[data-theme] .gyro-titlebar-switch-option:not(.is-active):hover svg {
@@ -490,9 +500,20 @@
 
 :root[data-theme] .gyro-titlebar-switch-option.is-active,
 :root[data-theme] .gyro-titlebar-switch-option.is-active:hover {
-  background: color-mix(in srgb, var(--gyro-text) 9%, var(--gyro-sidebar));
+  /* Fallback chip until the sliding indicator measures itself and takes over. */
+  background: color-mix(in srgb, var(--gyro-text) 11%, var(--gyro-sidebar));
   box-shadow: none;
   color: var(--gyro-text);
+}
+
+/* The raised chip is the sliding indicator, so the lift lives there: a lighter
+   fill with a hairline ring and a soft drop reads as a physical segment. */
+:root[data-theme] .gyro-titlebar-switch > .gyro-selection-indicator {
+  background: color-mix(in srgb, var(--gyro-text) 11%, var(--gyro-sidebar));
+  border-radius: var(--gyro-radius-md);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--gyro-text) 7%, transparent),
+    0 1px 2px rgb(0 0 0 / 0.08);
 }
 
 :root[data-theme] .gyro-titlebar-switch-option.is-active svg {
@@ -514,6 +535,12 @@
   background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
   color: var(--gyro-text);
   transform: none;
+}
+
+/* Workspace's empty toggle slot tracks the toggle's scaled width, so the
+   surface switch keeps its pixel at every interface scale. */
+:root[data-theme] .gyro-sidebar-window-actions.is-placeholder {
+  min-width: max(28px, calc(26px * var(--gyro-ui-scale, 1)));
 }
 
 :root[data-theme] .gyro-sidebar .gyro-session-actions {

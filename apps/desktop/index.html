@@ -10,17 +10,18 @@
       /* Quiet themed canvas only — no boot gate. First paint is the early
          chat shell from main.tsx. */
       html,
-      body {
+      body,
+      #root {
         background: #181818;
         color: #ededed;
         height: 100%;
         margin: 0;
-      }
-      #root {
-        min-height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
       }
       html[data-theme="light"],
-      html[data-theme="light"] body {
+      html[data-theme="light"] body,
+      html[data-theme="light"] #root {
         background: #f7f7f7;
         color: #252525;
       }

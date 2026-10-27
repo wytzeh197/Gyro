@@ -655,7 +655,7 @@ try {
   assert.equal((await state()).drafts.alpha, "retain this draft");
   await screenshot("pointer-environment-split.png");
 
-  await mouseStart("document.querySelector('[data-chat-pane-drag=alpha]')");
+  await mouseStart(row("Alpha"));
   const farRight = await gridPoint();
   await mouseMove(farRight);
   await mouseRelease(farRight);
@@ -667,15 +667,14 @@ try {
     "draft survives real pane reorder",
   );
 
-  // Releasing over either half of a neighbouring pane must reorder it. The
-  // nearest seam used to be adjacent to the source and silently do nothing.
+  // Releasing over the other pane swaps the two chats.
   for (const arrangement of ["columns", "rows"]) {
     for (const [source, fraction, expected] of [
       ["beta", 0.4, ["beta", "alpha"]],
       ["alpha", 0.6, ["beta", "alpha"]],
     ]) {
       await setLayout(["alpha", "beta"], arrangement);
-      await mouseStart("document.querySelector('[data-chat-pane-drag=" + source + "]')");
+      await mouseStart(row(source[0].toUpperCase() + source.slice(1)));
       const destination = arrangement === "columns"
         ? await gridPoint(fraction, 0.6)
         : await gridPoint(0.6, fraction);

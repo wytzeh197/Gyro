@@ -912,6 +912,15 @@ export type ProviderRuntimeStatus =
 export type ProviderAuthOwner =
   "provider-cli" | "provider-env" | "provider-sdk";
 
+/** Vendor install guidance carried by a provider health payload. */
+export type ProviderInstallGuide = {
+  providerId: string;
+  binary: string;
+  command: string | null;
+  docsUrl: string;
+  summary: string;
+};
+
 export type ProviderHealthDetails = {
   runtimeStatus: ProviderRuntimeStatus;
   authOwner: ProviderAuthOwner;
@@ -923,6 +932,8 @@ export type ProviderHealthDetails = {
   secretStorage: string;
   privacyNote: string;
   diagnosticsOptIn: boolean;
+  /** Vendor install guidance when this provider's CLI is missing. */
+  install?: ProviderInstallGuide | null;
 };
 
 export type ProviderModel = {
@@ -1341,7 +1352,13 @@ export type WorkbenchPreferences = {
   workspaceTrust: Record<string, WorkspaceTrustDecision>;
   projectDetails?: Record<
     string,
-    { name: string; pinned: boolean; primaryFolder?: string }
+    {
+      name: string;
+      pinned: boolean;
+      primaryFolder?: string;
+      /** Let one source folder sit inside another. Off by default. */
+      allowNestedFolders?: boolean;
+    }
   >;
   workspaceFolders: Record<string, string[]>;
   workspaceUserSettings: WorkspaceScopedSettings;

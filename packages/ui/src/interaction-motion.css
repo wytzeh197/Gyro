@@ -171,6 +171,55 @@
     background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
     color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
 }
+/* Sessions <-> Workspace crossfade (surface-switch-transition.ts). The sidebar
+   and main pane glide to their new columns while their contents blend; the
+   rail and window chrome fade with the root. The switch is left live so its
+   indicator slides once instead of ghosting under the fade. */
+:root[data-surface-switch] .gyro-app-shell > .gyro-sidebar {
+  view-transition-name: gyro-surface-sidebar;
+}
+:root[data-surface-switch] .gyro-app-shell > .gyro-main {
+  view-transition-name: gyro-surface-main;
+}
+:root[data-surface-switch] .gyro-app-shell .gyro-titlebar-switch {
+  view-transition-name: gyro-surface-switch;
+}
+/* The new state is a live image, so the shell's own column, rail and title-bar
+   tweens and the routes' fade-up would play a second time inside the blend.
+   A zero duration, unlike animation: none, lets the fade-up finish in place
+   rather than restart when the attribute clears. */
+:root[data-surface-switch] .gyro-app-shell.is-chat-shell.is-workspace-shell,
+:root[data-surface-switch] .gyro-app-shell.is-workspace-shell .gyro-sidebar-windowbar,
+:root[data-surface-switch] .gyro-app-shell > .gyro-workspace-activity-rail {
+  transition: none;
+}
+:root[data-surface-switch]
+  .gyro-app-shell.is-workspace-shell
+  :is(
+    .gyro-workspace-route > *,
+    .gyro-sidebar-persistent-header ~ *
+  ) {
+  animation-duration: 0s;
+}
+::view-transition-group(*) {
+  animation-duration: var(--gyro-premium-motion-slow);
+  animation-timing-function: var(--gyro-premium-ease);
+}
+/* Crop rather than stretch while a pane changes width: text never scales. */
+::view-transition-old(gyro-surface-sidebar),
+::view-transition-new(gyro-surface-sidebar),
+::view-transition-old(gyro-surface-main),
+::view-transition-new(gyro-surface-main) {
+  height: 100%;
+  object-fit: none;
+  object-position: left top;
+}
+::view-transition-old(gyro-surface-switch) {
+  display: none;
+}
+::view-transition-new(gyro-surface-switch) {
+  animation: none;
+}
 @keyframes gyro-anchored-surface-in {
   from { opacity: 0; translate: 0 var(--gyro-popover-offset, 4px); }
   to { opacity: 1; translate: 0 0; }

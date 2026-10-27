@@ -80,26 +80,10 @@
   letter-spacing: 0;
 }
 
-/* Pane selection stays local to its header; changing focus never dims a reply. */
+/* Pane selection never paints an edge or dims a reply; only the inactive
+   pane's title falls back to muted (styles.css). */
 :root[data-theme] .gyro-chat-grid.has-multiple-panes > .gyro-chat-grid-slot {
   border-color: var(--gyro-border-soft);
-}
-:root[data-theme]
-  .gyro-chat-grid.has-multiple-panes
-  > .is-current-pane
-  .gyro-chat-thread-topbar {
-  box-shadow: inset 0 2px 0
-    color-mix(in srgb, var(--gyro-accent) 38%, transparent);
-}
-:root[data-theme]
-  .gyro-chat-grid.has-multiple-panes
-  > .is-subdued-pane
-  .gyro-chat-thread-topbar {
-  box-shadow: none;
-}
-:root[data-theme] .gyro-chat-grid.has-multiple-panes .gyro-chat-thread-topbar {
-  transition: box-shadow var(--gyro-premium-motion-fast)
-    var(--gyro-premium-ease);
 }
 
 /* Retain the compact composer without shrinking its smallest hit targets. */

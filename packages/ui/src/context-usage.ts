@@ -532,6 +532,8 @@ export function contextOccupancyEpoch(events: SessionEvent[]): string {
     const activityId: unknown = payload.activityId;
     if (typeof activityId !== "string") continue;
     if (!activityId.startsWith("context-compaction-")) continue;
+    // A failed compaction released nothing, so the peak stands.
+    if (payload.status === "failed") continue;
     release = activityId;
   }
   return `${events[0]?.sessionId ?? ""}#${release}`;
@@ -684,14 +686,16 @@ export function composerLimitWindows(
     });
   }
 
-  // Cached readings and thread events must not survive their allowance reset,
-  // but the plan still meters the window: past its reset nothing is spent yet.
+  // A reset has passed, so the stored level describes an allowance that no
+  // longer exists. The plan still meters the window, but this process has not
+  // measured the new one. Keep the row and wait for the next live reading
+  // instead of claiming the allowance is empty.
   for (const [id, window] of byId) {
     if (window.resetsAt && Date.parse(window.resetsAt) <= now) {
       byId.set(id, {
         ...window,
-        usedPercent: 0,
-        status: "ok",
+        usedPercent: undefined,
+        status: "unknown",
         resetsAt: undefined,
       });
     }

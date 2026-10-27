@@ -26,6 +26,10 @@ const ACP_MAX_STDERR_CHARS: usize = 64 * 1024;
 const ACP_MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
 const ACP_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const KIMI_USAGE_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
+// Why each reopen-causing usage probe ended. Tests assert which deadline fired
+// instead of measuring wall time, which a loaded machine stretches.
+#[cfg(test)]
+thread_local! { static USAGE_PROBE_FAILURES: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) }; }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KimiAcpMode {
@@ -570,19 +574,60 @@ impl KimiAcpConnection {
         self.receive_until(None)
     }
 
+    /// The usage-probe wait can outlive more than one limit when the
+    /// scheduler resumes this thread late. Report the deadline that expired
+    /// first. A plain check of the run limit, then inactivity, then the probe
+    /// would relabel a 1s probe timeout as whichever later limit had also passed.
+    fn earliest_probe_wait_failure(&self, probe_deadline: Instant) -> Option<String> {
+        let mut chosen: Option<(&'static str, Duration)> = None;
+        let mut offer = |kind: &'static str, overrun: Option<Duration>| {
+            let Some(overrun) = overrun else {
+                return;
+            };
+            let replace = match chosen {
+                Some((_, best)) => overrun > best,
+                None => true,
+            };
+            if replace {
+                chosen = Some((kind, overrun));
+            }
+        };
+        offer("run", self.started_at.elapsed().checked_sub(self.timeout));
+        offer(
+            "inactive",
+            self.last_activity_at
+                .elapsed()
+                .checked_sub(self.inactivity_timeout),
+        );
+        offer(
+            "probe",
+            Instant::now().checked_duration_since(probe_deadline),
+        );
+        let kind = chosen.map(|(kind, _)| kind)?;
+        let message = match kind {
+            "probe" => format!("{} ACP usage query timed out", self.provider_label),
+            "inactive" => format!("{} ACP run became inactive", self.provider_label),
+            _ => format!("{} ACP run timed out", self.provider_label),
+        };
+        Some(message)
+    }
+
     fn receive_until(&mut self, deadline: Option<Instant>) -> Result<Value> {
         loop {
             if self.cancellation.is_cancelled() {
                 anyhow::bail!("{} ACP run cancelled", self.provider_label);
             }
-            if self.started_at.elapsed() >= self.timeout {
-                anyhow::bail!("{} ACP run timed out", self.provider_label);
-            }
-            if self.last_activity_at.elapsed() >= self.inactivity_timeout {
-                anyhow::bail!("{} ACP run became inactive", self.provider_label);
-            }
-            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-                anyhow::bail!("{} ACP usage query timed out", self.provider_label);
+            if let Some(probe_deadline) = deadline {
+                if let Some(message) = self.earliest_probe_wait_failure(probe_deadline) {
+                    anyhow::bail!("{message}");
+                }
+            } else {
+                if self.started_at.elapsed() >= self.timeout {
+                    anyhow::bail!("{} ACP run timed out", self.provider_label);
+                }
+                if self.last_activity_at.elapsed() >= self.inactivity_timeout {
+                    anyhow::bail!("{} ACP run became inactive", self.provider_label);
+                }
             }
             match self.incoming.recv_timeout(ACP_POLL_INTERVAL) {
                 Ok(Ok(frame)) => {
@@ -948,7 +993,11 @@ where
     let usage_baseline = if allow_usage_probe && connection.supports_kimi_usage_probe() {
         match connection.kimi_usage_probe(&session_id) {
             Ok(snapshot) => snapshot,
-            Err(_) if !request.cancellation.is_cancelled() => {
+            Err(_probe_error) if !request.cancellation.is_cancelled() => {
+                #[cfg(test)]
+                USAGE_PROBE_FAILURES.with(|failures| {
+                    failures.borrow_mut().push(_probe_error.to_string());
+                });
                 // A timed-out metadata response can arrive late as uncorrelated
                 // session/update text. Reopen before the one real generation,
                 // so it can never leak into or replace the user's answer.
@@ -2582,7 +2631,7 @@ mod tests {
         classify_approval, is_acp_method_not_found, permission_option_id,
         plan_mode_denies_approval, resolve_workspace_write_path, run_kimi_acp, thought_tail,
         CredentialPolicy, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpHealthStatus,
-        KimiAcpMode, KimiAcpRequest, THOUGHT_LABEL_CHARS,
+        KimiAcpMode, KimiAcpRequest, THOUGHT_LABEL_CHARS, USAGE_PROBE_FAILURES,
     };
 
     #[test]
@@ -2629,7 +2678,7 @@ done
             program,
             vec![],
             &["gemini-api-key"],
-            std::time::Duration::from_secs(2),
+            std::time::Duration::from_secs(30),
         )
         .unwrap();
         assert_eq!(result.models[0].id, "gemini-3.8-flash");
@@ -3538,9 +3587,14 @@ done
             CancellationToken::default(),
             None,
         );
+        // Both limits stay at 6s. The fixture default inactivity is 3s, and
+        // under load that fires during handshake before the probe starts.
+        // The recorded failure is whichever of the 6s limits, or the 1s probe
+        // deadline, expired first.
         request.timeout = Duration::from_secs(6);
+        request.inactivity_timeout = Duration::from_secs(6);
+        USAGE_PROBE_FAILURES.with(|failures| failures.borrow_mut().clear());
         let mut deltas = String::new();
-        let started = std::time::Instant::now();
         let output = run_kimi_acp(
             request,
             |text| deltas.push_str(text),
@@ -3549,7 +3603,12 @@ done
             |_, _| Ok(()),
         )
         .unwrap();
-        assert!(started.elapsed() < Duration::from_secs(3));
+        // The fixture stalls the first /usage for 10s. The 1s probe deadline
+        // is the one that expired first, ahead of both 6s limits.
+        assert_eq!(
+            USAGE_PROBE_FAILURES.with(|failures| failures.take()),
+            vec!["Kimi ACP usage query timed out".to_string()]
+        );
         assert_eq!(
             std::fs::read_to_string(temp.path().join("starts")).unwrap(),
             "2"

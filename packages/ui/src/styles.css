@@ -41616,6 +41616,10 @@ textarea:focus-visible,
   overflow-wrap: anywhere;
   margin-top: 4px;
 }
+.gyro-provider-install { display: grid; gap: 6px; justify-items: start; margin-top: 4px; max-width: 52ch; }
+.gyro-provider-install-command { display: block; max-width: 100%; padding: 6px 8px; border-radius: 6px; background: var(--gyro-surface-soft); font-size: calc(11px * var(--gyro-ui-scale, 1)); white-space: pre-wrap; overflow-wrap: anywhere; }
+.gyro-provider-install-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
 .gyro-provider-connect-help,
 #gyro-provider-api-keys,
 #gyro-provider-ollama {

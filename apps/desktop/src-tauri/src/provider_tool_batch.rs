@@ -107,14 +107,35 @@ fn first_sentence(text: &str) -> &str {
 }
 
 pub(super) fn advertised_tool_parameters(id: CapabilityId) -> serde_json::Value {
+    let schema = desktop_capability_tool_schema(id);
     if inline_tool_schema(id) {
-        desktop_capability_tool_schema(id)
+        schema
     } else {
-        serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {}
-        })
+        // Names, types, and limits only. The prose stays on the catalog page,
+        // so a deferred tool is callable without a discovery round and without
+        // carrying its manual on every request.
+        compact_parameter_schema(&schema)
+    }
+}
+
+/// Drop schema prose. A string `description` is documentation; an object under
+/// that key would be a real argument and is kept.
+pub(super) fn compact_parameter_schema(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut compact = serde_json::Map::new();
+            for (key, child) in map {
+                if key == "description" && child.is_string() {
+                    continue;
+                }
+                compact.insert(key.clone(), compact_parameter_schema(child));
+            }
+            serde_json::Value::Object(compact)
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(compact_parameter_schema).collect())
+        }
+        other => other.clone(),
     }
 }
 
@@ -381,15 +402,19 @@ mod tests {
                         desktop_capability_tool_schema(descriptor.id)
                     );
                 } else {
-                    let parameters = &tool["function"]["parameters"];
-                    assert!(parameters.get("description").is_none());
-                    assert_eq!(parameters["type"], "object");
-                    assert_eq!(parameters["additionalProperties"], false);
-                    assert_eq!(parameters["properties"], serde_json::json!({}));
-                    assert_ne!(
-                        parameters,
-                        &desktop_capability_tool_schema(descriptor.id)
+                    let full = desktop_capability_tool_schema(descriptor.id);
+                    let compact = compact_parameter_schema(&full);
+                    assert_eq!(&tool["function"]["parameters"], &compact);
+                    assert_eq!(compact["type"], "object");
+                    assert_eq!(compact["additionalProperties"], false);
+                    assert!(
+                        !serde_json::to_string(&compact).unwrap().contains("\"description\""),
+                        "{}",
+                        descriptor.id.provider_tool_name()
                     );
+                    if serde_json::to_string(&full).unwrap().contains("\"description\"") {
+                        assert_ne!(compact, full, "{}", descriptor.id.provider_tool_name());
+                    }
                 }
             }
             let current = serde_json::Value::Array(current_tools);
@@ -414,6 +439,20 @@ mod tests {
             }
             eprintln!("native catalog {mode:?}: {} tools, {rooted} root fields, {before_bytes} -> {after_bytes} bytes, {before_chars} -> {after_chars} text/schema characters", current.as_array().unwrap().len());
         }
+        let create = model_tools(CapabilityRunMode::Normal, true)
+            .into_iter()
+            .find(|tool| tool["function"]["name"] == "gyro_workspace_create")
+            .unwrap();
+        assert_eq!(
+            create["function"]["parameters"]["properties"]["kind"]["enum"],
+            serde_json::json!(["file", "directory"])
+        );
+        assert!(create["function"]["parameters"]["properties"]["path"].is_object());
+        assert!(create["function"]["parameters"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|name| name == "path"));
         let without_delegation = model_tools(CapabilityRunMode::Normal, false);
         assert!(without_delegation.iter().all(|tool| {
             let name = tool["function"]["name"].as_str().unwrap();

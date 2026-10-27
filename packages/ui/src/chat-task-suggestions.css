@@ -1,0 +1,335 @@
+/* Suggested tasks under a reply: quiet cards that hand a separate piece of
+   work to a new chat. Tokens only, so both themes come for free. */
+.gyro-task-suggestions {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.gyro-task-suggestions-title {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-chat-font-work, 13px);
+  font-weight: 500;
+}
+
+.gyro-task-suggestion {
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+  display: grid;
+  gap: 6px;
+  padding: 12px 12px 10px 14px;
+}
+
+.gyro-task-suggestion-head {
+  align-items: start;
+  display: flex;
+  gap: 10px;
+}
+
+.gyro-task-suggestion-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gyro-task-suggestion-text strong {
+  color: var(--gyro-text);
+  font-size: var(--gyro-chat-font-body, 14px);
+  font-weight: 560;
+  line-height: 1.4;
+}
+
+.gyro-task-suggestion-text p {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-chat-font-work, 13px);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.gyro-task-suggestion-dismiss,
+.gyro-task-suggestion-disclosure,
+.gyro-task-suggestion-link {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--gyro-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  padding: 0;
+}
+
+.gyro-task-suggestion-dismiss {
+  border-radius: var(--gyro-radius-sm);
+  flex: none;
+  height: 24px;
+  justify-content: center;
+  margin: -3px -4px 0 0;
+  width: 24px;
+}
+
+.gyro-task-suggestion-dismiss:hover,
+.gyro-task-suggestion-chip:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+
+.gyro-task-suggestion-disclosure {
+  font-size: var(--gyro-chat-font-work, 13px);
+  gap: 4px;
+  justify-self: start;
+  margin-left: -2px;
+}
+
+.gyro-task-suggestion-disclosure:hover,
+.gyro-task-suggestion-link:hover {
+  color: var(--gyro-text);
+}
+
+.gyro-task-suggestion-disclosure > svg {
+  transition: rotate var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+}
+
+.gyro-task-suggestion-disclosure[aria-expanded="true"] > svg {
+  rotate: 90deg;
+}
+
+.gyro-task-suggestion-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.gyro-task-suggestion-editor textarea {
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  box-sizing: border-box;
+  color: var(--gyro-text);
+  font: var(--gyro-chat-font-work, 13px) / 1.5 var(--gyro-font-sans);
+  min-height: 84px;
+  padding: 8px 10px;
+  resize: vertical;
+  width: 100%;
+}
+
+.gyro-task-suggestion-editor textarea:focus-visible {
+  border-color: var(--gyro-border-strong);
+  outline: none;
+}
+
+.gyro-task-suggestion-context {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  font-size: var(--gyro-chat-font-work, 13px);
+  gap: 6px;
+}
+
+.gyro-task-suggestion-context input {
+  accent-color: var(--gyro-accent);
+  margin: 0;
+}
+
+.gyro-task-suggestion-bar {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+  margin-top: 2px;
+  min-width: 0;
+}
+
+.gyro-task-suggestion-bar > .gyro-composer-control {
+  position: relative;
+}
+
+.gyro-task-suggestion-chip {
+  margin-left: -5px;
+  margin-right: 5px;
+}
+
+.gyro-task-suggestion-chip[aria-expanded="true"] {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+
+.gyro-task-suggestion-start {
+  align-items: center;
+  appearance: none;
+  background: var(--gyro-text);
+  border: 0;
+  border-radius: 999px;
+  color: var(--gyro-surface);
+  cursor: pointer;
+  display: inline-flex;
+  font: 500 var(--gyro-chat-font-work, 13px) / 1 var(--gyro-font-sans);
+  gap: 5px;
+  margin-left: auto;
+  min-height: 28px;
+  padding: 0 10px 0 12px;
+  white-space: nowrap;
+}
+
+.gyro-task-suggestion-start:hover {
+  background: color-mix(in srgb, var(--gyro-text) 86%, transparent);
+}
+
+.gyro-task-suggestion-start:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.gyro-task-suggestion :is(button, textarea, input):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
+/* A started task folds to one line that links to its chat. */
+.gyro-task-suggestion.is-started {
+  align-items: center;
+  background: transparent;
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: var(--gyro-chat-font-work, 13px);
+  gap: 8px;
+  padding-block: 8px;
+}
+
+.gyro-task-suggestion.is-started > svg {
+  color: var(--gyro-accent);
+  flex: none;
+}
+
+.gyro-task-suggestion-started-title {
+  color: var(--gyro-text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-task-suggestion-link {
+  font-size: var(--gyro-chat-font-work, 13px);
+  gap: 3px;
+}
+
+/* A chat started from a suggestion names its source above the first message. */
+.gyro-task-origin {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--gyro-chat-font-work, 13px);
+  gap: 6px;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+.gyro-task-origin :is(button, strong) {
+  appearance: none;
+  background: none;
+  border: 0;
+  color: var(--gyro-text);
+  font: inherit;
+  font-weight: 400;
+  padding: 0;
+}
+
+.gyro-task-origin button {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--gyro-border-strong);
+  text-underline-offset: 3px;
+}
+
+.gyro-task-origin button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Suggestions still waiting in the project's recent chats, offered again as
+   thin rows under the new-chat composer. */
+/* The composer's context strip hangs below its box, so the list clears it and
+   lines up with the composer's edges. */
+.gyro-start-tasks {
+  box-sizing: border-box;
+  display: grid;
+  gap: 0;
+  margin-top: 28px;
+  padding-inline: 18px;
+  width: 100%;
+}
+
+.gyro-start-task {
+  align-items: center;
+  border-radius: var(--gyro-radius-md);
+  display: flex;
+  min-width: 0;
+}
+
+.gyro-start-task:hover,
+.gyro-start-task:focus-within {
+  background: var(--gyro-control-hover);
+}
+
+.gyro-start-task-main,
+.gyro-start-task-dismiss {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--gyro-muted);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+}
+
+.gyro-start-task-main {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 400;
+  gap: 8px;
+  min-height: 28px;
+  min-width: 0;
+  padding: 0 4px 0 12px;
+  text-align: start;
+}
+
+.gyro-start-task-arrow {
+  flex: none;
+  stroke-width: 1;
+}
+
+.gyro-start-task-title {
+  font-weight: 400;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-start-task-dismiss {
+  border-radius: var(--gyro-radius-sm);
+  flex: none;
+  height: 26px;
+  justify-content: center;
+  margin-right: 4px;
+  opacity: 0;
+  width: 26px;
+}
+
+.gyro-start-task:is(:hover, :focus-within) .gyro-start-task-dismiss {
+  opacity: 1;
+}
+
+.gyro-start-task-dismiss:hover {
+  color: var(--gyro-text);
+}
+
+.gyro-start-task :is(button):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}

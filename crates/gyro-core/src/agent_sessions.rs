@@ -6,7 +6,7 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use rand::{rngs::OsRng, RngCore};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
@@ -267,17 +267,21 @@ pub struct PolledRelayTask {
 
 pub struct AgentSessionStore {
     paths: GyroPaths,
-    conn: Connection,
+    conn: crate::sqlite::PooledConnection,
 }
 
 impl AgentSessionStore {
     pub fn open(paths: GyroPaths) -> Result<Self> {
         paths.ensure()?;
-        let conn = crate::sqlite::open_private_database(&paths.database_path)
+        let conn = crate::sqlite::open_pooled_database(&paths.database_path)
             .with_context(|| format!("open {}", paths.database_path.display()))?;
         secure_private_file(&paths.database_path)?;
         let store = Self { paths, conn };
-        store.initialize()?;
+        store
+            .conn
+            .ensure_schema(crate::sqlite::StoreSchema::AgentSessions, || {
+                store.initialize()
+            })?;
         Ok(store)
     }
 
@@ -688,9 +692,8 @@ impl AgentSessionStore {
              order by updated_at desc
              limit ?2",
         )?;
-        let ids = statement.query_map(params![before, limit as i64], |row| {
-            row.get::<_, String>(0)
-        })?;
+        let ids =
+            statement.query_map(params![before, limit as i64], |row| row.get::<_, String>(0))?;
         let mut items = Vec::new();
         for id in ids {
             let id = Uuid::parse_str(&id?)?;
@@ -799,9 +802,7 @@ impl AgentSessionStore {
                 "prompt cannot exceed {MAX_PROMPT_CHARS} characters"
             ));
         }
-        let row = self
-            .get(id)?
-            .ok_or_else(|| anyhow!("unknown session"))?;
+        let row = self.get(id)?.ok_or_else(|| anyhow!("unknown session"))?;
         if matches!(
             row.state,
             AgentSessionState::Queued | AgentSessionState::Running
@@ -864,9 +865,7 @@ impl AgentSessionStore {
     }
 
     pub fn stop_session(&self, id: Uuid) -> Result<AgentControl> {
-        let row = self
-            .get(id)?
-            .ok_or_else(|| anyhow!("unknown session"))?;
+        let row = self.get(id)?.ok_or_else(|| anyhow!("unknown session"))?;
         match row.state {
             AgentSessionState::Queued => {
                 self.cancel(row.id)?;
@@ -995,13 +994,15 @@ impl AgentSessionStore {
                 params![inbox_id.to_string()],
                 |row| {
                     Ok(AgentPendingApproval {
-                        proposal_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|error| {
-                            rusqlite::Error::FromSqlConversionFailure(
-                                0,
-                                rusqlite::types::Type::Text,
-                                error.into(),
-                            )
-                        })?,
+                        proposal_id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(
+                            |error| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    0,
+                                    rusqlite::types::Type::Text,
+                                    error.into(),
+                                )
+                            },
+                        )?,
                         tool: "command".into(),
                         summary: row.get(1)?,
                         requested_at: parse_time(row.get(2)?)?,
@@ -1127,9 +1128,9 @@ impl AgentSessionStore {
     }
 
     fn command_ack_ids(&self) -> Result<Vec<String>> {
-        let mut statement = self.conn.prepare(
-            "select command_id from agent_relay_command_acks order by command_id asc",
-        )?;
+        let mut statement = self
+            .conn
+            .prepare("select command_id from agent_relay_command_acks order by command_id asc")?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
@@ -2163,7 +2164,10 @@ fn apply_one_polled_command(store: &AgentSessionStore, command: &Value) -> Resul
                     .get("providerId")
                     .and_then(Value::as_str)
                     .map(str::to_string),
-                model_id: command.get("modelId").and_then(Value::as_str).map(str::to_string),
+                model_id: command
+                    .get("modelId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
                 reasoning_effort: command
                     .get("reasoningEffort")
                     .and_then(Value::as_str)
@@ -3320,7 +3324,9 @@ mod tests {
         assert_eq!(page.turns.len(), 1);
         assert_eq!(page.turns[0].text, "first");
         assert!(page.has_more);
-        let next = store.read_session(row.id, Some(page.turns[0].id), 1).unwrap();
+        let next = store
+            .read_session(row.id, Some(page.turns[0].id), 1)
+            .unwrap();
         assert_eq!(next.turns.len(), 1);
         assert_eq!(next.turns[0].id, second.id);
         assert_eq!(next.turns[0].text, "second");
@@ -3373,7 +3379,11 @@ mod tests {
         let claimed = store.claim_next().unwrap().unwrap();
         assert!(store.finish(claimed.id, Ok("first answer".into())).unwrap());
         let continued = store
-            .continue_session(row.session_id.unwrap(), "Second task", ChoiceRequest::default())
+            .continue_session(
+                row.session_id.unwrap(),
+                "Second task",
+                ChoiceRequest::default(),
+            )
             .unwrap();
         assert_eq!(continued.session_id, row.session_id);
         assert_eq!(continued.state, AgentSessionState::Queued);
@@ -3401,11 +3411,18 @@ mod tests {
             .unwrap();
         store.claim_next().unwrap().unwrap();
         let error = store
-            .continue_session(running.session_id.unwrap(), "Again", ChoiceRequest::default())
+            .continue_session(
+                running.session_id.unwrap(),
+                "Again",
+                ChoiceRequest::default(),
+            )
             .unwrap_err()
             .to_string();
         assert!(error.contains("workspace already has a running session"));
-        assert_eq!(store.get(other.id).unwrap().unwrap().state, AgentSessionState::Running);
+        assert_eq!(
+            store.get(other.id).unwrap().unwrap().state,
+            AgentSessionState::Running
+        );
     }
 
     #[test]

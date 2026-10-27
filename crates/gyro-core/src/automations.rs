@@ -4,7 +4,7 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, TimeZone, Utc};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -194,18 +194,22 @@ pub struct CreateAutomationRequest {
 }
 
 pub struct AutomationStore {
-    conn: Connection,
+    conn: crate::sqlite::PooledConnection,
 }
 
 impl AutomationStore {
     pub fn open(paths: GyroPaths) -> Result<Self> {
         paths.ensure()?;
         reject_unsafe_private_file(&paths.database_path)?;
-        let conn = crate::sqlite::open_private_database(&paths.database_path)
+        let conn = crate::sqlite::open_pooled_database(&paths.database_path)
             .with_context(|| format!("open {}", paths.database_path.display()))?;
         secure_private_file(&paths.database_path)?;
         let store = Self { conn };
-        store.initialize()?;
+        store
+            .conn
+            .ensure_schema(crate::sqlite::StoreSchema::Automations, || {
+                store.initialize()
+            })?;
         Ok(store)
     }
 

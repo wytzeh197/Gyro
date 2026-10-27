@@ -1,0 +1,20 @@
+/* Edit project: the nesting opt-in under Source folders. The rest of the
+   dialog lives in styles.css under .gyro-project-edit-dialog. */
+.gyro-project-nested-toggle {
+  align-items: center;
+  color: var(--gyro-muted);
+  cursor: pointer;
+  display: flex;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  gap: 8px;
+  margin: 10px 2px 0;
+}
+
+.gyro-project-nested-toggle input {
+  accent-color: var(--gyro-accent);
+  margin: 0;
+}
+
+.gyro-project-nested-toggle:hover {
+  color: var(--gyro-text);
+}

@@ -68,6 +68,7 @@ function useScrollEdges(
 export function ComposerModelRail({
   id,
   placement,
+  align = "end",
   providers,
   activeProviderId,
   activeModelId,
@@ -79,6 +80,8 @@ export function ComposerModelRail({
 }: {
   id: string;
   placement: "up" | "down";
+  /** Which chip edge the panel hangs from; a chip on the left opens rightward. */
+  align?: "start" | "end";
   providers: ModelRailProvider[];
   activeProviderId?: string;
   activeModelId?: string;
@@ -153,7 +156,7 @@ export function ComposerModelRail({
       panel.style.maxHeight = `${(direction === "up" ? above : below) / scaleY}px`;
       // Use layout dimensions so the opening animation cannot skew the anchor.
       const width = panel.offsetWidth * scaleX;
-      const naturalLeft = anchor.right - width;
+      const naturalLeft = align === "start" ? anchor.left : anchor.right - width;
       const left = Math.min(
         Math.max(naturalLeft, bounds.left + pad),
         bounds.right - pad - width,
@@ -181,7 +184,7 @@ export function ComposerModelRail({
       window.removeEventListener("resize", position);
       window.removeEventListener("scroll", position, true);
     };
-  }, [placement]);
+  }, [placement, align]);
 
   const focusIn = (container: HTMLElement | null, selector: string) =>
     Array.from(container?.querySelectorAll<HTMLElement>(selector) ?? []);
@@ -302,7 +305,7 @@ export function ComposerModelRail({
     <div
       aria-label="Choose a model"
       className="gyro-composer-popover gyro-model-rail"
-      data-align="end"
+      data-align={align}
       data-placement={resolvedPlacement}
       id={id}
       ref={panelRef}

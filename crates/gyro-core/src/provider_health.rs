@@ -7,6 +7,7 @@ use crate::{
     provider_api_key_env_name, provider_has_api_key, try_stored_provider_api_key_env,
     KimiAcpHealthStatus, ProviderHealthKind,
 };
+use crate::provider_install::{install_guide, ProviderInstallGuide};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
@@ -200,6 +201,9 @@ pub struct ProviderHealthCheck {
     pub secret_storage: String,
     pub privacy_note: String,
     pub diagnostics_opt_in: bool,
+    /// Vendor install guidance for this provider's CLI, when Gyro knows one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install: Option<ProviderInstallGuide>,
 }
 
 #[derive(Default)]
@@ -224,6 +228,18 @@ impl ProviderHealthService {
     }
 
     fn check_with_data_home(
+        &self,
+        request: ProviderHealthRequest,
+        data_home: Option<&Path>,
+    ) -> Result<ProviderHealthCheck> {
+        let mut check = self.check_core(request, data_home)?;
+        // Attached here so every provider kind carries the guide, not only the
+        // CLI paths that already build their own health checks.
+        check.install = install_guide(&check.provider_id).copied();
+        Ok(check)
+    }
+
+    fn check_core(
         &self,
         request: ProviderHealthRequest,
         data_home: Option<&Path>,
@@ -365,6 +381,7 @@ impl ProviderHealthService {
             privacy_note:
                 "Gyro stores readiness summaries only; provider tokens stay outside Gyro.".into(),
             diagnostics_opt_in: false,
+            install: None,
             output,
         })
     }
@@ -404,6 +421,7 @@ fn ollama_provider_health(base_url: Option<&str>) -> ProviderHealthCheck {
                 secret_storage: "No credentials; Ollama is contacted only over loopback.".into(),
                 privacy_note: "Gyro sends prompts only to the configured loopback Ollama runtime.".into(),
                 diagnostics_opt_in: false,
+                install: None,
             }
         }
         Err(error) => ProviderHealthCheck {
@@ -421,6 +439,7 @@ fn ollama_provider_health(base_url: Option<&str>) -> ProviderHealthCheck {
             secret_storage: "No credentials; Ollama is contacted only over loopback.".into(),
             privacy_note: "Gyro sends prompts only to the configured loopback Ollama runtime.".into(),
             diagnostics_opt_in: false,
+            install: None,
         },
     }
 }
@@ -450,6 +469,7 @@ fn openai_compatible_provider_health(
             "Gyro sends prompts straight to the endpoint you configured; no vendor CLI is involved."
                 .into(),
         diagnostics_opt_in: false,
+        install: None,
     };
     let Some(raw) = base_url.map(str::trim).filter(|value| !value.is_empty()) else {
         return check(
@@ -530,6 +550,7 @@ fn kimi_provider_health() -> ProviderHealthCheck {
         secret_storage: "Kimi Code provider-owned files".into(),
         privacy_note: "Gyro stores readiness summaries only; Kimi tokens stay outside Gyro.".into(),
         diagnostics_opt_in: false,
+        install: None,
     }
 }
 
@@ -637,6 +658,7 @@ fn acp_provider_health(provider_id: &str) -> ProviderHealthCheck {
             "Gyro checks the local ACP login state without reading provider credential values."
                 .into(),
         diagnostics_opt_in: false,
+        install: None,
     }
 }
 
@@ -718,6 +740,7 @@ fn env_provider_health(
         privacy_note: "Gyro stores readiness summaries only; provider tokens stay outside Gyro."
             .into(),
         diagnostics_opt_in: false,
+        install: None,
         output,
     }
 }

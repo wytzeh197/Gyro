@@ -2218,6 +2218,7 @@ function isHiddenRunEvent(event: SessionEvent) {
     (label.includes("GYRO_SESSION_TITLE:") ||
       label.includes("GYRO_ARTIFACTS:") ||
       label.includes("GYRO_QUESTIONS:") ||
+      label.includes("GYRO_TASKS:") ||
       label.includes("GYRO_AGENT_UPDATE:")) &&
     !stripHiddenControlMarkers(label).trim()
   );

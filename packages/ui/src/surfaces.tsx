@@ -13,6 +13,10 @@ import { createTranscriptTurnCache } from "./chat-history-efficiency";
 import { capabilityLabel } from "./capability-ui.ts";
 import { EfficiencySettings } from "./efficiency-settings";
 import { Folder, FolderOpen, Folders } from "./workspace-folder-icons";
+import {
+  WorkspaceRootIssues,
+  type WorkspaceRootIssuesModel,
+} from "./workspace-root-issues";
 import { validateWorkspaceEntryName } from "./workspace-names";
 import {
   CHAT_SESSION_DRAG_MIME,
@@ -73,6 +77,7 @@ import {
 import { providerAllowance } from "./provider-allowance";
 import "./provider-allowance.css";
 import { SettingsSegmented } from "./settings-controls";
+import { runSurfaceSwitch } from "./surface-switch-transition";
 import { SelectionTrack } from "./selection-track";
 import { useDialogDismiss } from "./use-dialog-dismiss";
 import "./scheduled-work.css";
@@ -101,6 +106,16 @@ import {
 } from "./browser-capture-view";
 import { latestChatQuestions, parseChatAnswers } from "./chat-questions";
 import { ChatQuestionPopup } from "./chat-question-popup";
+import {
+  ChatEventTaskSuggestions,
+  ChatStartTaskSuggestions,
+  ChatTaskOriginRow,
+  ChatTaskSuggestionsContext,
+  type ChatStartTaskSuggestionsSource,
+  type ChatTaskOrigin,
+  type ChatTaskSuggestionHandlers,
+  type ChatTaskSuggestionsController,
+} from "./chat-task-suggestions";
 import {
   ChatQuestionAnswers,
   EnvironmentPlanSteps,
@@ -831,6 +846,7 @@ type AppChromeProps = {
   onOpenWorkspace: () => void;
   onAddWorkspaceFolder?: () => void;
   onRemoveWorkspaceFolder?: (path: string) => void;
+  workspaceRootIssues?: WorkspaceRootIssuesModel;
   onSelectWorkspaceFolder?: (path: string) => void;
   onOpenWorkspaceFile?: (
     path: string,
@@ -1701,6 +1717,7 @@ export function AppChrome({
   onOpenWorkspace,
   onAddWorkspaceFolder,
   onRemoveWorkspaceFolder,
+  workspaceRootIssues,
   onSelectWorkspaceFolder,
   onOpenWorkspaceFile,
   onPinEditorTab,
@@ -2519,6 +2536,7 @@ export function AppChrome({
               onOpenWorkspace={onOpenWorkspace}
               onAddWorkspaceFolder={onAddWorkspaceFolder}
               onRemoveWorkspaceFolder={onRemoveWorkspaceFolder}
+              workspaceRootIssues={workspaceRootIssues}
               onSelectWorkspaceFolder={onSelectWorkspaceFolder}
               onPinSession={onPinSession}
               onRenameSession={onRenameSession}
@@ -3761,6 +3779,7 @@ function WorkspaceSidebarContent({
   onOpenWorkspace,
   onAddWorkspaceFolder,
   onRemoveWorkspaceFolder,
+  workspaceRootIssues,
   onSelectWorkspaceFolder,
   onOpenWorkspaceFile,
   onPinEditorTab,
@@ -3857,6 +3876,7 @@ function WorkspaceSidebarContent({
   onOpenWorkspace: () => void;
   onAddWorkspaceFolder?: () => void;
   onRemoveWorkspaceFolder?: (path: string) => void;
+  workspaceRootIssues?: WorkspaceRootIssuesModel;
   onSelectWorkspaceFolder?: (path: string) => void;
   onOpenWorkspaceFile?: (
     path: string,
@@ -4525,6 +4545,28 @@ function WorkspaceSidebarContent({
       };
     });
   };
+  const [recentsVisibleCount, setRecentsVisibleCount] = useState(
+    SIDEBAR_INITIAL_RECENT_SESSION_COUNT,
+  );
+  const recentsHaveRevealedMore =
+    recentsVisibleCount > SIDEBAR_INITIAL_RECENT_SESSION_COUNT;
+  const firstRecentSessions = unprojectedRecentSessions.slice(
+    0,
+    recentsVisibleCount,
+  );
+  const activeRecentSession = unprojectedRecentSessions.find(
+    (session) => session.id === activeSessionId,
+  );
+  // The open chat stays listed even when it falls past the visible count.
+  const visibleRecentSessions =
+    activeRecentSession && !firstRecentSessions.includes(activeRecentSession)
+      ? [
+          ...firstRecentSessions.slice(0, Math.max(0, recentsVisibleCount - 1)),
+          activeRecentSession,
+        ]
+      : firstRecentSessions;
+  const hiddenRecentCount =
+    unprojectedRecentSessions.length - visibleRecentSessions.length;
   const showLessProjectSessions = (projectKey: string) => {
     setProjectVisibleCounts((current) => {
       const next = { ...current };
@@ -4748,10 +4790,9 @@ function WorkspaceSidebarContent({
         : null}
       <div className="gyro-sidebar-persistent-header">
         <div className="gyro-sidebar-windowbar" aria-label="Window navigation">
-          {/* Workspace hides the sidebar from the activity rail instead, so the
-              slot is left out rather than rendered empty: an empty box still
-              costs a flex gap and would push the surface switch away from the
-              traffic lights it belongs beside. */}
+          {/* Workspace keeps its sidebar, so it has no toggle, but the slot
+              stays as an empty spacer: dropping it pulled the surface switch
+              36px left, out from under the pointer that had just clicked it. */}
           {canHideSidebar ? (
             <div className="gyro-sidebar-window-actions">
               <button
@@ -4764,7 +4805,12 @@ function WorkspaceSidebarContent({
                 <PanelLeft size={16} strokeWidth={1.5} />
               </button>
             </div>
-          ) : null}
+          ) : (
+            <span
+              aria-hidden="true"
+              className="gyro-sidebar-window-actions is-placeholder"
+            />
+          )}
           <SelectionTrack
             label="Primary surfaces"
             className="gyro-titlebar-switch"
@@ -4902,6 +4948,7 @@ function WorkspaceSidebarContent({
             >
               {workspacePath ? (
                 <>
+                  <WorkspaceRootIssues model={workspaceRootIssues} />
                   {files.some((file) => file.isWorkspaceRoot) ? null : (
                     <SidebarProjectRow
                       icon={Folder}
@@ -6980,7 +7027,7 @@ function WorkspaceSidebarContent({
                 <div className="gyro-sidebar-small-title">Recents</div>
                 {unprojectedDraftChats.map((draft) => renderDraftRow(draft))}
                 {unprojectedRecentSessions.length > 0 ? (
-                  unprojectedRecentSessions.map((session) =>
+                  visibleRecentSessions.map((session) =>
                     renderSessionRow(session),
                   )
                 ) : unprojectedDraftChats.length > 0 ? null : (
@@ -6988,6 +7035,42 @@ function WorkspaceSidebarContent({
                     No standalone chats yet
                   </div>
                 )}
+                {hiddenRecentCount > 0 || recentsHaveRevealedMore ? (
+                  <div className="gyro-sidebar-more-actions">
+                    {hiddenRecentCount > 0 ? (
+                      <button
+                        aria-expanded={recentsHaveRevealedMore}
+                        className="gyro-sidebar-more-button"
+                        onClick={() =>
+                          setRecentsVisibleCount((count) =>
+                            Math.min(
+                              unprojectedRecentSessions.length,
+                              count + SIDEBAR_PROJECT_SESSION_BATCH_SIZE,
+                            ),
+                          )
+                        }
+                        type="button"
+                      >
+                        <ChevronDown aria-hidden="true" size={12} />
+                        <span>more</span>
+                      </button>
+                    ) : null}
+                    {recentsHaveRevealedMore ? (
+                      <button
+                        className="gyro-sidebar-more-button"
+                        onClick={() =>
+                          setRecentsVisibleCount(
+                            SIDEBAR_INITIAL_RECENT_SESSION_COUNT,
+                          )
+                        }
+                        type="button"
+                      >
+                        <ChevronUp aria-hidden="true" size={12} />
+                        <span>less</span>
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </section>
             </div>
           )}
@@ -7288,9 +7371,6 @@ function SessionSidebarRow({
             : "gyro-sidebar-thread-main"
         }
         onClick={onSelect}
-        title={[session.summary ?? session.title, ...badgeLabels]
-          .filter(Boolean)
-          .join(" · ")}
         type="button"
       >
         {sessionProviderId ? (
@@ -7456,6 +7536,7 @@ type SidebarProjectGroupData = {
 const SIDEBAR_PROJECT_ORDER_STORAGE_KEY = "gyro.sidebar-project-order-v1";
 const SIDEBAR_PROJECT_COLLAPSE_STORAGE_KEY = "gyro.sidebar-project-collapse-v1";
 const SIDEBAR_INITIAL_PROJECT_SESSION_COUNT = 5;
+const SIDEBAR_INITIAL_RECENT_SESSION_COUNT = 7;
 const SIDEBAR_PROJECT_SESSION_BATCH_SIZE = 15;
 
 function sidebarProjectGroups(
@@ -8133,7 +8214,7 @@ function SidebarModeRow({
           : "gyro-titlebar-switch-option"
       }
       data-sidebar-mode={label.toLowerCase()}
-      onClick={onClick}
+      onClick={() => (isActive ? onClick() : runSurfaceSwitch(onClick))}
       title={label}
       type="button"
     >
@@ -8659,9 +8740,8 @@ export function ChatGridSurface({
           event.dataTransfer,
         )?.dragId;
         guardChatDragsOutsideGrid();
-        // Render the targets before the pointer leaves the title bar.
-        // Previously the grid consumed pane drops but no chat ever produced
-        // this payload, so reordering a split was impossible.
+        // The pane title is not a drag handle. Sidebar rows move an open
+        // chat; this payload is what a native drag still has to carry.
         dragPointer.current = undefined;
         setDragIdentity(currentChatDrag());
         setDragSource("pane");
@@ -8962,7 +9042,6 @@ export function ChatGridSurface({
           }}
           role="separator"
           tabIndex={0}
-          title="Drag to resize the right pane"
           type="button"
         />
       ) : null}
@@ -9180,6 +9259,12 @@ type ChatSurfaceProps = {
     providerLabel?: string;
     reasoningEffort?: ReasoningEffort;
   };
+  /** Suggested-task cards under replies; omitted, replies show none. */
+  taskSuggestions?: ChatTaskSuggestionHandlers;
+  /** Set on a chat a suggested task started. */
+  taskOrigin?: ChatTaskOrigin;
+  /** Pending suggestions from the project's chats, under the new-chat composer. */
+  startTaskSuggestions?: ChatStartTaskSuggestionsSource;
   workspacePath?: string;
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
@@ -9584,9 +9669,6 @@ export function ChatSurface({
   onReusePrompt,
   onStopChat,
   onCloseChat,
-  onPaneDragStart,
-  onPaneDragEnd,
-  onPanePointerDown,
   onContinueChat,
   hasMoreBefore = false,
   isLoadingEarlier = false,
@@ -9616,7 +9698,46 @@ export function ChatSurface({
   onToggleEnvironmentRail,
   onTogglePlanPanel,
   onPlanEditorRequestHandled,
+  taskSuggestions,
+  taskOrigin,
+  startTaskSuggestions,
 }: ChatSurfaceProps) {
+  const taskController = useMemo<
+    ChatTaskSuggestionsController | undefined
+  >(() => {
+    if (!taskSuggestions) return undefined;
+    const providerConfigs = providersForConfig(config);
+    return {
+      ...taskSuggestions,
+      providers: modelRailProvidersFor(providerConfigs),
+      defaultChoice:
+        sessionModel?.providerId && sessionModel.modelId
+          ? {
+              providerId: sessionModel.providerId,
+              modelId: sessionModel.modelId,
+              reasoningEffort: sessionModel.reasoningEffort,
+            }
+          : undefined,
+      effortsFor: (providerId, modelId) => {
+        const provider = providerConfigs.find((item) => item.id === providerId);
+        const model = provider ? getProviderModel(provider, modelId) : undefined;
+        return (model?.supportedReasoningEfforts ?? []).map((effort) => ({
+          value: effort,
+          label: reasoningEffortLabel(effort),
+          isDefault: effort === model?.defaultReasoningEffort,
+        }));
+      },
+      renderLogo: (providerId) => (
+        <ProviderLogo providerId={providerId as ProviderId} />
+      ),
+    };
+  }, [
+    config,
+    sessionModel?.providerId,
+    sessionModel?.modelId,
+    sessionModel?.reasoningEffort,
+    taskSuggestions,
+  ]);
   const [localDraft, setLocalDraft] = useState(draft);
   const [goalDraft, setGoalDraft] = useState<string>();
   const [goalSaveNotice, setGoalSaveNotice] = useState("");
@@ -10568,14 +10689,7 @@ export function ChatSurface({
                 className="gyro-thread-project-icon"
                 size={16}
               />
-              <strong
-                data-chat-pane-drag={paneKey}
-                draggable={Boolean(onPaneDragStart)}
-                onDragStart={onPaneDragStart}
-                onDragEnd={onPaneDragEnd}
-                onPointerDown={onPanePointerDown}
-                title={onPaneDragStart ? "Drag to rearrange chats" : "New chat"}
-              >
+              <strong data-chat-pane-drag={paneKey} title="New chat">
                 New chat
               </strong>
             </div>
@@ -10703,6 +10817,21 @@ export function ChatSurface({
             usageSafety={usageSafety}
             onResumeUsage={onResumeUsage}
           />
+          {startTaskSuggestions && startProjectLabel && !isTiled ? (
+            <ChatStartTaskSuggestions
+              choice={
+                sessionModel?.providerId && sessionModel.modelId
+                  ? {
+                      providerId: sessionModel.providerId,
+                      modelId: sessionModel.modelId,
+                      reasoningEffort: sessionModel.reasoningEffort,
+                    }
+                  : undefined
+              }
+              source={startTaskSuggestions}
+              workspacePath={workspacePath!}
+            />
+          ) : null}
         </section>
         {sidePanel}
       </div>
@@ -10739,15 +10868,7 @@ export function ChatSurface({
           />
           <strong
             data-chat-pane-drag={paneKey}
-            draggable={Boolean(onPaneDragStart)}
-            onDragStart={onPaneDragStart}
-            onDragEnd={onPaneDragEnd}
-            onPointerDown={onPanePointerDown}
-            title={
-              onPaneDragStart
-                ? `${sessionTitle ?? "Chat"} · Drag to rearrange chats`
-                : (sessionTitle ?? "Gyro session")
-            }
+            title={sessionTitle ?? "Gyro session"}
           >
             {sessionTitle ?? "Gyro session"}
           </strong>
@@ -10837,7 +10958,10 @@ export function ChatSurface({
               </button>
             </div>
           ) : null}
-          {transcriptContent}
+          <ChatTaskSuggestionsContext.Provider value={taskController}>
+            {taskOrigin ? <ChatTaskOriginRow origin={taskOrigin} /> : null}
+            {transcriptContent}
+          </ChatTaskSuggestionsContext.Provider>
         </div>
 
         <div className="gyro-chat-composer-dock">
@@ -11107,7 +11231,7 @@ function ChatMessageQueue({
                 {message.hasFailed ? (
                   <RefreshCw size={13} />
                 ) : (
-                  <CornerDownRight size={13} />
+                  <ArrowUp size={13} />
                 )}
                 {message.hasFailed ? "Retry" : "Steer"}
               </button>
@@ -22251,6 +22375,131 @@ function ConnectedProviderAllowances({
   );
 }
 
+/** What one confirmed provider install reports back to the setup panel. */
+type ProviderInstallOutcome = {
+  installed: boolean;
+  message: string;
+};
+
+/**
+ * Turns "this provider's CLI is missing" into the vendor's own command.
+ *
+ * The first click only reveals the command; the second click is the
+ * confirmation the installer requires, so nothing runs unseen.
+ */
+function ProviderInstallPanel({
+  guide,
+  onInstall,
+}: {
+  guide: {
+    providerId: string;
+    binary: string;
+    command: string | null;
+    docsUrl: string;
+    summary: string;
+  };
+  onInstall?: (providerId: string) => Promise<ProviderInstallOutcome>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [outcome, setOutcome] = useState<ProviderInstallOutcome | null>(null);
+  const command = guide.command;
+
+  if (!command || !onInstall) {
+    return (
+      <small className="gyro-provider-setup-message" role="status">
+        {guide.summary} Follow the{" "}
+        <a href={guide.docsUrl} rel="noreferrer" target="_blank">
+          vendor install steps
+        </a>
+        .
+      </small>
+    );
+  }
+
+  if (running) {
+    return (
+      <small className="gyro-provider-setup-message" role="status">
+        Installing {guide.binary}… This can take a few minutes and may ask for a
+        password.
+      </small>
+    );
+  }
+
+  if (outcome) {
+    return (
+      <small className="gyro-provider-setup-message" role="status">
+        {outcome.installed
+          ? `${guide.binary} installed. Signing in…`
+          : `${guide.binary} still does not respond. ${outcome.message}`}
+      </small>
+    );
+  }
+
+  if (!confirming) {
+    return (
+      <div className="gyro-provider-install">
+        <small className="gyro-provider-setup-message" role="status">
+          {guide.summary}
+        </small>
+        <div className="gyro-provider-install-actions">
+          <button
+            className="gyro-secondary-button"
+            onClick={() => setConfirming(true)}
+            type="button"
+          >
+            Install {guide.binary}
+          </button>
+          <a href={guide.docsUrl} rel="noreferrer" target="_blank">
+            Vendor docs
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="gyro-provider-install">
+      <small className="gyro-provider-setup-message" role="status">
+        Gyro runs this vendor installer only after you confirm it.
+      </small>
+      <code className="gyro-provider-install-command">{command}</code>
+      <div className="gyro-provider-install-actions">
+        <button
+          className="gyro-primary-button"
+          onClick={() => {
+            setConfirming(false);
+            setRunning(true);
+            void onInstall(guide.providerId)
+              .then((next) => setOutcome(next))
+              .catch((error: unknown) =>
+                setOutcome({
+                  installed: false,
+                  message:
+                    error instanceof Error ? error.message : String(error),
+                }),
+              )
+              .finally(() => setRunning(false));
+          }}
+          type="button"
+        >
+          Run install
+        </button>
+        <button
+          className="gyro-secondary-button"
+          onClick={() => setConfirming(false)}
+          type="button"
+        >
+          Cancel
+        </button>
+        <a href={guide.docsUrl} rel="noreferrer" target="_blank">
+          Vendor docs
+        </a>
+      </div>
+    </div>
+  );
+}
+
 export type SettingsSurfaceProps = {
   projectImport?: ProjectImportSettingsProps;
   config: GyroConfig;
@@ -22311,6 +22560,11 @@ export type SettingsSurfaceProps = {
   onTestProvider?: (providerId: string) => void;
   /** Repairs a connected provider whose credential the provider itself rejected. */
   onSignInProvider?: (providerId: string) => void;
+  /**
+   * Runs one provider's vendor installer once the user confirmed the command.
+   * Resolves with what the setup panel should say; the caller re-probes health.
+   */
+  onInstallProvider?: (providerId: string) => Promise<ProviderInstallOutcome>;
   providerApiKeyConfigured?: Partial<Record<string, boolean>>;
   savingProviderApiKeyId?: string;
   onSaveProviderApiKey?: (
@@ -22561,6 +22815,7 @@ export function SettingsSurface({
   onToggleProvider,
   onTestProvider,
   onSignInProvider,
+  onInstallProvider,
   providerApiKeyConfigured,
   savingProviderApiKeyId,
   onSaveProviderApiKey,
@@ -23021,8 +23276,16 @@ export function SettingsSurface({
                 const needsModelInstall =
                   provider.id === "ollama" &&
                   health?.runtimeStatus === "no-models";
+                // The guide rides every health check, so a missing binary is
+                // enough: the panel owns the command and the confirmation.
+                const installGuide = health?.healthDetails?.install ?? null;
+                const needsCliInstall =
+                  !needsModelInstall &&
+                  health?.runtimeStatus === "not-installed" &&
+                  Boolean(installGuide);
                 const needsSignInRepair =
                   !needsModelInstall &&
+                  !needsCliInstall &&
                   providerNeedsSignInRepair(provider, health);
                 const isConnecting =
                   connectingProviderIds.includes(provider.id) ||
@@ -23067,7 +23330,12 @@ export function SettingsSurface({
                             Selected provider
                           </small>
                         ) : null}
-                        {setupMessage ? (
+                        {needsCliInstall && installGuide ? (
+                          <ProviderInstallPanel
+                            guide={installGuide}
+                            onInstall={onInstallProvider}
+                          />
+                        ) : setupMessage ? (
                           <small
                             className="gyro-provider-setup-message"
                             role="status"
@@ -23158,6 +23426,7 @@ export function SettingsSurface({
                       ) : null}
                       {provider.authStatus !== "connected" ||
                       needsSignInRepair ||
+                      needsCliInstall ||
                       needsModelInstall ? (
                         <button
                           className={
@@ -23167,6 +23436,7 @@ export function SettingsSurface({
                           }
                           disabled={
                             isChecking ||
+                            needsCliInstall ||
                             needsModelInstall ||
                             (provider.authStatus === "connected" &&
                               !needsSignInRepair)
@@ -23195,17 +23465,19 @@ export function SettingsSurface({
                         >
                           {isChecking
                             ? "Connecting…"
-                            : needsModelInstall
-                              ? "Model required"
-                              : needsSignInRepair
-                                ? "Sign in again"
-                                : provider.authStatus === "connected"
-                                  ? "Connected"
-                                  : provider.authMode === "env"
-                                    ? providerSupportsApiKey(provider.id)
-                                      ? "Add API key"
-                                      : "Check environment"
-                                    : providerPrimaryActionLabel(provider)}
+                            : needsCliInstall
+                              ? "Install required"
+                              : needsModelInstall
+                                ? "Model required"
+                                : needsSignInRepair
+                                  ? "Sign in again"
+                                  : provider.authStatus === "connected"
+                                    ? "Connected"
+                                    : provider.authMode === "env"
+                                      ? providerSupportsApiKey(provider.id)
+                                        ? "Add API key"
+                                        : "Check environment"
+                                      : providerPrimaryActionLabel(provider)}
                         </button>
                       ) : null}
                       <ProviderDetailsMenu
@@ -25091,6 +25363,26 @@ function providerConnectedHealthCopy(provider: { id: ProviderId }) {
 }
 
 /** CLI, API, and local runtimes are separate catalog connections. */
+/** Same order as the provider list: connected A–Z, then the rest A–Z. */
+function modelRailProvidersFor(providerConfigs: ModelProviderConfig[]) {
+  return providerConfigs
+    .filter((provider) => isProviderExecutable(provider.id))
+    .map((provider) => ({
+      id: provider.id,
+      label: provider.displayName,
+      connection: providerConnectionKind(provider.capabilities?.executionKind),
+      connected: provider.authStatus === "connected",
+      models: provider.models,
+    }))
+    .sort(
+      (left, right) =>
+        Number(right.connected) - Number(left.connected) ||
+        left.label.localeCompare(right.label, undefined, {
+          sensitivity: "base",
+        }),
+    );
+}
+
 function providerConnectionKind(
   executionKind: string | undefined,
 ): "CLI" | "API" | "Local" {
@@ -26160,23 +26452,7 @@ function Composer({
   });
   const isHero = variant === "hero";
   const shouldShowContextRow = showContextRow ?? isHero;
-  // Same order as the provider list: connected A–Z, then the rest A–Z.
-  const modelRailProviders = providerConfigs
-    .filter((provider) => isProviderExecutable(provider.id))
-    .map((provider) => ({
-      id: provider.id,
-      label: provider.displayName,
-      connection: providerConnectionKind(provider.capabilities?.executionKind),
-      connected: provider.authStatus === "connected",
-      models: provider.models,
-    }))
-    .sort(
-      (left, right) =>
-        Number(right.connected) - Number(left.connected) ||
-        left.label.localeCompare(right.label, undefined, {
-          sensitivity: "base",
-        }),
-    );
+  const modelRailProviders = modelRailProvidersFor(providerConfigs);
   const isModelRailPane =
     modelMenuPane === "model" ||
     modelMenuPane === "provider" ||
@@ -26293,13 +26569,19 @@ function Composer({
           },
         ]
       : []),
+    // A mode that is already on shows its check, and picking it again turns
+    // it off, so the menu never offers to switch on what is already running.
     {
-      action: "set-chat-mode-plan",
+      action:
+        chatMode === "plan" ? "set-chat-mode-normal" : "set-chat-mode-plan",
+      active: chatMode === "plan",
       icon: ListChecks,
       label: "Plan",
+      tooltip: chatMode === "plan" ? "Turn Plan mode off" : undefined,
     },
     {
       action: "add-goal",
+      active: isGoalModeActive,
       icon: Goal,
       label: "Goal",
     },
@@ -29465,9 +29747,11 @@ function ChatRunChangeSummary({
                 />
                 <span className="gyro-change-file-path">
                   <span className="gyro-change-file-directory">
-                    {file.path.slice(0, slash + 1)}
+                    <bdi>{file.path.slice(0, slash + 1)}</bdi>
                   </span>
-                  {file.path.slice(slash + 1)}
+                  <span className="gyro-change-file-name">
+                    {file.path.slice(slash + 1)}
+                  </span>
                 </span>
               </span>
             );
@@ -29985,6 +30269,7 @@ function AssistantResponse({
         artifacts={artifacts}
         previewCapture={previewCapture}
       />
+      {isStreaming ? null : <ChatEventTaskSuggestions event={event} />}
       <footer className="gyro-response-actions">
         <button
           aria-label="Copy response"
@@ -30835,7 +31120,7 @@ function stripHiddenSessionTitleMarker(message: string) {
   return lines
     .filter((line) => {
       const trimmed = line.trim();
-      return !/^GYRO_(?:SESSION_TITLE|ARTIFACTS|QUESTIONS):/.test(trimmed);
+      return !/^GYRO_(?:SESSION_TITLE|ARTIFACTS|QUESTIONS|TASKS):/.test(trimmed);
     })
     .join("\n")
     .trim();

@@ -1,6 +1,12 @@
 import type { WorkspaceFile, WorkspaceScopedSettings } from "./types";
 
 export const MAX_WORKSPACE_FOLDERS = 20;
+/**
+ * Folders read from one workspace file. Larger than the workspace cap on
+ * purpose: the import reports the overflow as `cap-exceeded` instead of
+ * trimming it here, where nobody would hear about it.
+ */
+const MAX_WORKSPACE_FILE_FOLDERS = 64;
 
 export type GyroWorkspaceFile = {
   version: 1;
@@ -51,6 +57,34 @@ export function normalizedWorkspaceFolderPath(path: string) {
   return normalized || "/";
 }
 
+/**
+ * The one normalizer for a stored list of extra roots.
+ *
+ * Reducers and the persisted-preference loader share it, so a list loaded
+ * from disk can never hold something an action would refuse. Policy
+ * rejections happen earlier, in `validateWorkspaceRoots` (workspace-roots.ts).
+ * Reaching the cap here means a caller skipped validation, and the overflow
+ * is dropped rather than persisted.
+ */
+export function normalizedWorkspaceFolderList(
+  workspacePath: string,
+  paths: readonly unknown[],
+) {
+  const workspace = normalizedWorkspaceFolderPath(workspacePath);
+  return paths
+    .filter(
+      (path): path is string =>
+        typeof path === "string" &&
+        path.trim().length > 0 &&
+        path.length <= 4096,
+    )
+    .map(normalizedWorkspaceFolderPath)
+    .filter(
+      (path, index, all) => path !== workspace && all.indexOf(path) === index,
+    )
+    .slice(0, MAX_WORKSPACE_FOLDERS - 1);
+}
+
 export function workspaceFolderPaths(
   primaryPath: string | undefined,
   foldersByWorkspace: Readonly<Record<string, readonly string[]>> | undefined,
@@ -58,13 +92,13 @@ export function workspaceFolderPaths(
 ) {
   if (!primaryPath) return [];
   const primary = normalizedWorkspaceFolderPath(primaryPath);
-  const configured = foldersByWorkspace?.[primary] ?? [];
-  const roots = [primary, ...configured]
-    .map(normalizedWorkspaceFolderPath)
-    .filter(
-      (path, index, paths) => Boolean(path) && paths.indexOf(path) === index,
-    )
-    .slice(0, MAX_WORKSPACE_FOLDERS);
+  const roots = [
+    primary,
+    ...normalizedWorkspaceFolderList(
+      primary,
+      foldersByWorkspace?.[primary] ?? [],
+    ),
+  ];
   const preferred = preferredPrimary
     ? normalizedWorkspaceFolderPath(preferredPrimary)
     : undefined;
@@ -401,7 +435,7 @@ export function parseGyroWorkspaceFile(content: string, filePath: string) {
       (folder, index, all) =>
         all.findIndex((candidate) => candidate.path === folder.path) === index,
     )
-    .slice(0, MAX_WORKSPACE_FOLDERS);
+    .slice(0, MAX_WORKSPACE_FILE_FOLDERS);
   if (folders.length === 0) {
     throw new Error("Workspace file does not contain any valid folders");
   }

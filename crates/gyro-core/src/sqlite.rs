@@ -7,7 +7,9 @@
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, ErrorCode};
-use std::path::Path;
+use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -53,6 +55,205 @@ pub fn open_private_database(path: &Path) -> Result<Connection> {
         .with_context(|| format!("open sqlite database {}", path.display()))?;
     configure_connection(&conn)?;
     Ok(conn)
+}
+
+/// Idle connections kept for one database: the most commands the app runs at
+/// once. Each holds its own page cache, so the pool never grows past this.
+const POOL_IDLE_PER_DATABASE: usize = 8;
+
+/// Idle connections kept across every path. Production opens one database;
+/// the bound keeps test processes, which use a fresh path per test, from
+/// holding descriptors for every database they ever opened.
+const POOL_IDLE_CAPACITY: usize = 16;
+
+/// A store's schema, ensured once per process rather than once per open.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum StoreSchema {
+    Sessions,
+    Automations,
+    AgentSessions,
+}
+
+/// Device and inode of a database file. A connection only goes back to a
+/// caller while the path still names the file it was opened on, so a deleted
+/// or replaced database is opened afresh, as it was before pooling.
+type FileIdentity = (u64, u64);
+
+/// `schema_version` changes with every schema change, from any process;
+/// `user_version` is the store's own migration level.
+type SchemaStamp = (i64, i64);
+
+struct IdleConnection {
+    path: PathBuf,
+    identity: FileIdentity,
+    conn: Connection,
+}
+
+#[derive(Default)]
+struct ConnectionPool {
+    idle: VecDeque<IdleConnection>,
+    ensured: HashMap<(PathBuf, StoreSchema), (FileIdentity, SchemaStamp)>,
+}
+
+fn connection_pool() -> MutexGuard<'static, ConnectionPool> {
+    static POOL: OnceLock<Mutex<ConnectionPool>> = OnceLock::new();
+    POOL.get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn file_identity(path: &Path) -> Option<FileIdentity> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(path)
+            .ok()
+            .map(|metadata| (metadata.dev(), metadata.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// A configured connection borrowed from the per-process pool.
+///
+/// Opening a connection and parsing the schema on its first statement costs
+/// about half a millisecond, and most backend actions open a store. Each
+/// connection is still an ordinary WAL connection with the shared busy
+/// timeout, so the CLI and the app interleave exactly as with fresh opens;
+/// reuse only skips the open. A connection is pooled again on drop unless a
+/// transaction was left open or the thread is unwinding.
+pub struct PooledConnection {
+    conn: Option<Connection>,
+    path: PathBuf,
+    identity: Option<FileIdentity>,
+}
+
+impl PooledConnection {
+    /// Run `initialize` unless this process already ensured `schema` on this
+    /// database and no process has changed its schema since.
+    pub(crate) fn ensure_schema(
+        &self,
+        schema: StoreSchema,
+        initialize: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        let key = (self.path.clone(), schema);
+        let current = match self.identity {
+            Some(identity) => {
+                let stamp = self.schema_stamp()?;
+                let ensured = connection_pool().ensured.get(&key) == Some(&(identity, stamp));
+                if ensured {
+                    return Ok(());
+                }
+                Some(identity)
+            }
+            None => None,
+        };
+        initialize()?;
+        if let Some(identity) = current {
+            let stamp = self.schema_stamp()?;
+            connection_pool().ensured.insert(key, (identity, stamp));
+        }
+        Ok(())
+    }
+
+    fn schema_stamp(&self) -> Result<SchemaStamp> {
+        with_busy_retry(|| {
+            self.query_row(
+                "select schema_version, user_version from pragma_schema_version, pragma_user_version",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .context("read sqlite schema stamp")
+        })
+    }
+}
+
+impl std::ops::Deref for PooledConnection {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        self.conn.as_ref().expect("pooled connection is present")
+    }
+}
+
+impl std::ops::DerefMut for PooledConnection {
+    fn deref_mut(&mut self) -> &mut Connection {
+        self.conn.as_mut().expect("pooled connection is present")
+    }
+}
+
+impl Drop for PooledConnection {
+    fn drop(&mut self) {
+        let (Some(conn), Some(identity)) = (self.conn.take(), self.identity) else {
+            return;
+        };
+        if thread::panicking() || !conn.is_autocommit() {
+            return;
+        }
+        let evicted = {
+            let mut pool = connection_pool();
+            let same_database = pool
+                .idle
+                .iter()
+                .filter(|idle| idle.path == self.path)
+                .count();
+            if same_database >= POOL_IDLE_PER_DATABASE {
+                Some(conn)
+            } else {
+                pool.idle.push_back(IdleConnection {
+                    path: std::mem::take(&mut self.path),
+                    identity,
+                    conn,
+                });
+                (pool.idle.len() > POOL_IDLE_CAPACITY)
+                    .then(|| pool.idle.pop_front())
+                    .flatten()
+                    .map(|idle| idle.conn)
+            }
+        };
+        // Closing a connection can checkpoint the WAL; never under the lock.
+        drop(evicted);
+    }
+}
+
+/// Borrow an idle connection to `path`, or open one with the shared profile.
+pub(crate) fn open_pooled_database(path: &Path) -> Result<PooledConnection> {
+    let identity = file_identity(path);
+    let (reused, stale) = {
+        let mut pool = connection_pool();
+        let mut stale = Vec::new();
+        let mut reused = None;
+        let mut index = pool.idle.len();
+        while index > 0 {
+            index -= 1;
+            if pool.idle[index].path != path {
+                continue;
+            }
+            if Some(pool.idle[index].identity) != identity {
+                stale.extend(pool.idle.remove(index));
+            } else if reused.is_none() {
+                reused = pool.idle.remove(index);
+            }
+        }
+        (reused, stale)
+    };
+    drop(stale);
+    if let Some(idle) = reused {
+        return Ok(PooledConnection {
+            conn: Some(idle.conn),
+            path: idle.path,
+            identity: Some(idle.identity),
+        });
+    }
+    let conn = open_private_database(path)?;
+    Ok(PooledConnection {
+        conn: Some(conn),
+        path: path.to_path_buf(),
+        identity: file_identity(path),
+    })
 }
 
 /// Run `PRAGMA optimize` so the query planner keeps useful stats after warm-up
@@ -195,6 +396,89 @@ mod tests {
         assert!(is_duplicate_column_error(&error));
         add_column_if_missing(&conn, "t", "note text").expect("duplicate add is a no-op");
         assert!(add_column_if_missing(&conn, "missing", "note text").is_err());
+    }
+
+    fn has_marker(conn: &Connection) -> bool {
+        conn.query_row(
+            "select count(*) from sqlite_temp_master where name = 'marker'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap()
+            == 1
+    }
+
+    #[test]
+    fn a_returned_connection_is_reused_unless_a_transaction_was_left_open() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("pool.sqlite3");
+        let conn = open_pooled_database(&path).unwrap();
+        // A temporary table lives on one connection only.
+        conn.execute_batch("create temp table marker(id integer);")
+            .unwrap();
+        drop(conn);
+        let conn = open_pooled_database(&path).unwrap();
+        assert!(has_marker(&conn));
+        conn.execute_batch("begin immediate;").unwrap();
+        drop(conn);
+        let conn = open_pooled_database(&path).unwrap();
+        assert!(!has_marker(&conn));
+        assert!(conn.is_autocommit());
+        // The abandoned write lock went with the discarded connection.
+        conn.execute_batch("begin immediate; commit;").unwrap();
+    }
+
+    #[test]
+    fn a_replaced_database_file_is_opened_afresh() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("pool.sqlite3");
+        let conn = open_pooled_database(&path).unwrap();
+        conn.execute_batch("create temp table marker(id integer); create table kept(id integer);")
+            .unwrap();
+        drop(conn);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
+        let conn = open_pooled_database(&path).unwrap();
+        assert!(!has_marker(&conn));
+        let tables: i64 = conn
+            .query_row(
+                "select count(*) from sqlite_master where name = 'kept'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 0);
+    }
+
+    #[test]
+    fn a_schema_is_ensured_again_after_any_schema_change() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("pool.sqlite3");
+        let runs = std::cell::Cell::new(0);
+        let ensure = |conn: &PooledConnection| {
+            conn.ensure_schema(StoreSchema::Automations, || {
+                runs.set(runs.get() + 1);
+                conn.execute_batch("create table if not exists ensured(id integer);")?;
+                Ok(())
+            })
+            .unwrap();
+        };
+        ensure(&open_pooled_database(&path).unwrap());
+        ensure(&open_pooled_database(&path).unwrap());
+        assert_eq!(runs.get(), 1);
+        // Another process, here a plain connection, drops the table.
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch("drop table ensured;")
+            .unwrap();
+        let conn = open_pooled_database(&path).unwrap();
+        ensure(&conn);
+        assert_eq!(runs.get(), 2);
+        conn.query_row("select count(*) from ensured", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap();
     }
 
     #[test]

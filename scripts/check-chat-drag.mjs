@@ -501,6 +501,39 @@ for (const count of [2, 3, 4]) {
   const slots = Array.from({ length: count }, (_, index) =>
     pane(String(index)),
   );
+  if (count === 2) {
+    const zones = chatGridDropZones(slots, "columns", true);
+    assert.equal(zones.length, 2);
+    assert.equal(zones[0].placement, undefined);
+    assert.equal(zones[1].placement, undefined);
+    assert.equal(at(zones, 0.25)?.id, zones[0].id);
+    assert.equal(at(zones, 0.75)?.id, zones[1].id);
+    const corner = chatGridDropZones(slots, "columns", true, {
+      bounds,
+      x: bounds.left + 10,
+      y: bounds.top + 10,
+      sourceSlotIndex: 0,
+    });
+    assert.equal(corner.length, 2, "two panes do not open a corner grid");
+    assert.equal(corner[0].label, "Keep here");
+    assert.equal(corner[1].label, "Swap");
+    assert.equal(
+      chatGridDropZones(slots, "columns").length,
+      3,
+      "a new chat on two panes still chooses an edge",
+    );
+    const stacked = chatGridDropZones(slots, "rows", true);
+    assert.equal(stacked.length, 2);
+    assert.equal(
+      at(stacked, 0.5, bounds.top + 80)?.id,
+      stacked[0].id,
+    );
+    assert.equal(
+      at(stacked, 0.5, bounds.top + bounds.height - 80)?.id,
+      stacked[1].id,
+    );
+    continue;
+  }
   const zones = chatGridDropZones(slots, "columns", true);
   assert.equal(zones.length, count + 1);
   for (let boundary = 0; boundary <= count; boundary++) {

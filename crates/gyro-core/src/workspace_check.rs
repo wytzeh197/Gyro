@@ -1,8 +1,9 @@
 //! Fast, bounded workspace readiness used at turn start.
 //!
 //! This is not a full Workspace catalog. It answers whether the model can work
-//! here, what kind of project it is, and a Git branch/dirtiness brief — within
-//! a few hundred milliseconds. A missing folder fails closed. Slow Git degrades
+//! here, what kind of project it is, which top-level directories it has, and a
+//! Git branch/dirtiness brief — within a few hundred milliseconds. A missing
+//! folder fails closed. Slow Git degrades
 //! the report instead of stalling the first provider token.
 
 use crate::execution::{run_command, CancellationToken, ExecutionRequest, ExecutionTermination};
@@ -52,6 +53,14 @@ const MARKER_SLOTS: usize = PROJECT_MARKERS.len();
 /// scan stops and the markers a listing did not reach fall back to stats.
 const MAX_SCAN_ENTRIES: usize = 512;
 
+/// Top-level directories named in the chat briefing. One extra name is observed
+/// only to mark that the list is incomplete.
+const MAX_LAYOUT_ENTRIES: usize = 16;
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum WorkspaceCheckStatus {
@@ -88,6 +97,13 @@ pub struct WorkspaceCheckReport {
     pub project_kind: Option<String>,
     #[serde(default)]
     pub markers: Vec<String>,
+    /// Top-level directories from the same root listing, sorted. Dot-directories
+    /// are omitted. At most [`MAX_LAYOUT_ENTRIES`] names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layout: Vec<String>,
+    /// True when another top-level directory existed past the layout cap.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub layout_truncated: bool,
     pub home_workspace: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -106,6 +122,8 @@ impl WorkspaceCheckReport {
             git: None,
             project_kind: None,
             markers: Vec::new(),
+            layout: Vec::new(),
+            layout_truncated: false,
             home_workspace: false,
             error: None,
         }
@@ -146,6 +164,14 @@ impl WorkspaceCheckReport {
             lines.push(format!("Project: {kind}{markers}."));
         } else if !self.markers.is_empty() {
             lines.push(format!("Project files: {}.", self.markers.join(", ")));
+        }
+        if !self.layout.is_empty() {
+            let mut line = format!("Layout: {}", self.layout.join(", "));
+            if self.layout_truncated {
+                line.push_str(", and more");
+            }
+            line.push('.');
+            lines.push(line);
         }
         match self.git.as_ref() {
             Some(git) if git.available => {
@@ -320,7 +346,7 @@ pub fn record_prepared_workspace(path: impl AsRef<Path>, git: WorkspaceGitBrief)
         return false;
     };
     let home_workspace = canonical_home().is_some_and(|home| home == canonical);
-    let (project_kind, markers) = detect_project(&canonical);
+    let project = detect_project(&canonical);
     let report = WorkspaceCheckReport {
         schema: WORKSPACE_CHECK_SCHEMA_V1.into(),
         workspace_key: canonical.display().to_string(),
@@ -330,8 +356,10 @@ pub fn record_prepared_workspace(path: impl AsRef<Path>, git: WorkspaceGitBrief)
         is_directory: true,
         readable: true,
         git: Some(git),
-        project_kind,
-        markers,
+        project_kind: project.project_kind,
+        markers: project.markers,
+        layout: project.layout,
+        layout_truncated: project.layout_truncated,
         home_workspace,
         error: home_workspace.then(|| {
             "Workspace is the home folder; treat it as a broad, sensitive root.".to_string()
@@ -389,7 +417,10 @@ pub fn check_workspace_with_timeout(
     let canonical = raw.canonicalize().unwrap_or_else(|_| raw.to_path_buf());
     let workspace_key = canonical.display().to_string();
     let home_workspace = canonical_home().is_some_and(|home| home == canonical);
-    let (project_kind, markers) = (project.project_kind, project.markers);
+    let project_kind = project.project_kind;
+    let markers = project.markers;
+    let layout = project.layout;
+    let layout_truncated = project.layout_truncated;
 
     let remaining = timeout.saturating_sub(started.elapsed());
     let git = if remaining >= MIN_GIT_BUDGET {
@@ -440,6 +471,8 @@ pub fn check_workspace_with_timeout(
         git: git_brief,
         project_kind,
         markers,
+        layout,
+        layout_truncated,
         home_workspace,
         error,
     }
@@ -463,6 +496,8 @@ fn unavailable_report(
         git: None,
         project_kind: None,
         markers: Vec::new(),
+        layout: Vec::new(),
+        layout_truncated: false,
         home_workspace: false,
         error: Some(WORKSPACE_UNAVAILABLE_MESSAGE.into()),
     }
@@ -488,17 +523,22 @@ fn counted(count: usize, singular: &str, plural: &str) -> String {
 struct ProjectScan {
     project_kind: Option<String>,
     markers: Vec<String>,
+    layout: Vec<String>,
+    layout_truncated: bool,
 }
 
-/// One pass over a project root answers both questions the check asks of it:
-/// can it be listed at all, and which project markers it carries. A listing is
-/// one directory read instead of one stat per marker; a root too large to list
-/// cheaply falls back to those stats, which stay bounded either way.
+/// One pass over a project root answers the questions the check asks of it:
+/// can it be listed at all, which project markers it carries, and which
+/// top-level directories the chat should see. A listing is one directory read
+/// instead of one stat per marker; a root too large to list cheaply falls back
+/// to those stats, which stay bounded either way.
 fn scan_project_root(root: &Path) -> std::io::Result<ProjectScan> {
     let mut found = [false; MARKER_SLOTS];
     let mut outstanding = MARKER_SLOTS;
     let mut entries = 0usize;
-    let mut settled = false;
+    let mut markers_settled = false;
+    let mut layout = Vec::new();
+    let mut layout_truncated = false;
     let mut listing = fs::read_dir(root)?;
     while let Some(Ok(entry)) = listing.next() {
         entries += 1;
@@ -507,19 +547,27 @@ fn scan_project_root(root: &Path) -> std::io::Result<ProjectScan> {
                 found[index] = true;
                 outstanding -= 1;
                 if outstanding == 0 {
-                    settled = true;
-                    break;
+                    markers_settled = true;
                 }
             }
         }
-        if entries >= MAX_SCAN_ENTRIES {
+        if !layout_truncated {
+            if let Some(name) = layout_directory_name(&entry) {
+                if layout.len() == MAX_LAYOUT_ENTRIES {
+                    layout_truncated = true;
+                } else {
+                    layout.push(name);
+                }
+            }
+        }
+        if entries >= MAX_SCAN_ENTRIES || (markers_settled && layout_truncated) {
             break;
         }
     }
-    if !settled {
+    if !markers_settled {
         mark_markers_by_stat(root, &mut found);
     }
-    Ok(project_scan(&found))
+    Ok(project_scan(&found, layout, layout_truncated))
 }
 
 fn marker_index(name: &std::ffi::OsStr) -> Option<usize> {
@@ -539,6 +587,20 @@ fn entry_is_file(entry: &fs::DirEntry) -> bool {
     }
 }
 
+fn layout_directory_name(entry: &fs::DirEntry) -> Option<String> {
+    let name = entry.file_name();
+    let name = name.to_str()?;
+    if name.is_empty() || name.starts_with('.') {
+        return None;
+    }
+    let is_dir = match entry.file_type() {
+        Ok(file_type) if file_type.is_symlink() => entry.path().is_dir(),
+        Ok(file_type) => file_type.is_dir(),
+        Err(_) => false,
+    };
+    is_dir.then(|| name.to_string())
+}
+
 fn mark_markers_by_stat(root: &Path, found: &mut [bool; MARKER_SLOTS]) {
     for (index, (file_name, _)) in PROJECT_MARKERS.iter().enumerate() {
         if !found[index] && root.join(file_name).is_file() {
@@ -547,7 +609,11 @@ fn mark_markers_by_stat(root: &Path, found: &mut [bool; MARKER_SLOTS]) {
     }
 }
 
-fn project_scan(found: &[bool; MARKER_SLOTS]) -> ProjectScan {
+fn project_scan(
+    found: &[bool; MARKER_SLOTS],
+    mut layout: Vec<String>,
+    layout_truncated: bool,
+) -> ProjectScan {
     let mut markers = Vec::new();
     let mut kind = None;
     for (index, (file_name, project_kind)) in PROJECT_MARKERS.iter().enumerate() {
@@ -562,20 +628,22 @@ fn project_scan(found: &[bool; MARKER_SLOTS]) -> ProjectScan {
             kind = Some((*project_kind).to_string());
         }
     }
+    layout.sort();
     ProjectScan {
         project_kind: kind,
         markers,
+        layout,
+        layout_truncated,
     }
 }
 
-fn detect_project(root: &Path) -> (Option<String>, Vec<String>) {
-    let scan = scan_project_root(root).unwrap_or_else(|_| {
+fn detect_project(root: &Path) -> ProjectScan {
+    scan_project_root(root).unwrap_or_else(|_| {
         // Not listable from here; a plain stat still knows what is there.
         let mut found = [false; MARKER_SLOTS];
         mark_markers_by_stat(root, &mut found);
-        project_scan(&found)
-    });
-    (scan.project_kind, scan.markers)
+        project_scan(&found, Vec::new(), false)
+    })
 }
 
 enum GitInspection {
@@ -801,6 +869,40 @@ mod tests {
     }
 
     #[test]
+    fn layout_names_sorted_directories_and_skips_hidden_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        fs::create_dir(root.join("crates")).unwrap();
+        fs::create_dir(root.join("apps")).unwrap();
+        fs::create_dir(root.join(".git")).unwrap();
+        fs::write(root.join("Cargo.toml"), "[package]\n").unwrap();
+        fs::write(root.join("README.md"), "hi\n").unwrap();
+        let report = check_workspace(root);
+        assert_eq!(
+            report.layout,
+            vec!["apps".to_string(), "crates".to_string()]
+        );
+        assert!(!report.layout_truncated);
+        assert!(report.briefing().contains("Layout: apps, crates."));
+        assert!(!report.briefing().contains(".git"));
+        assert!(!report.briefing().contains("README.md"));
+    }
+
+    #[test]
+    fn layout_caps_a_wide_root_and_marks_that_more_exist() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        for index in 0..=MAX_LAYOUT_ENTRIES {
+            fs::create_dir(root.join(format!("dir{index:02}"))).unwrap();
+        }
+        let report = check_workspace(root);
+        assert_eq!(report.layout.len(), MAX_LAYOUT_ENTRIES);
+        assert!(report.layout_truncated);
+        assert!(report.layout.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert!(report.briefing().contains(", and more."));
+    }
+
+    #[test]
     fn git_repository_brief_includes_branch_and_dirty_files() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
@@ -908,12 +1010,14 @@ mod tests {
         fs::write(root.join("package.json"), "{}\n").unwrap();
         // A directory that shares a marker's name is not a marker.
         fs::create_dir(root.join("go.mod")).unwrap();
-        let (kind, markers) = detect_project(root);
-        assert_eq!(kind.as_deref(), Some("rust"));
+        let project = detect_project(root);
+        assert_eq!(project.project_kind.as_deref(), Some("rust"));
         assert_eq!(
-            markers,
+            project.markers,
             vec!["Cargo.toml".to_string(), "package.json".to_string()]
         );
+        assert_eq!(project.layout, vec!["go.mod".to_string()]);
+        assert!(!project.layout_truncated);
     }
 
     #[cfg(unix)]
@@ -923,9 +1027,10 @@ mod tests {
         let target = temp.path().join("real-package.json");
         fs::write(&target, "{}\n").unwrap();
         std::os::unix::fs::symlink(&target, temp.path().join("package.json")).unwrap();
-        let (kind, markers) = detect_project(temp.path());
-        assert_eq!(kind.as_deref(), Some("node"));
-        assert_eq!(markers, vec!["package.json".to_string()]);
+        let project = detect_project(temp.path());
+        assert_eq!(project.project_kind.as_deref(), Some("node"));
+        assert_eq!(project.markers, vec!["package.json".to_string()]);
+        assert!(project.layout.is_empty());
     }
 
     #[test]

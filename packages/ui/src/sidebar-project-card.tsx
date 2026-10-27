@@ -7,22 +7,44 @@ import {
   Settings,
   X,
 } from "lucide-react";
+import { MAX_WORKSPACE_FOLDERS } from "./workspace-project";
+import type { WorkspaceRootValidation } from "./workspace-roots";
+import "./sidebar-project-card.css";
 
 export type SidebarProjectSettings = {
   details: Record<
     string,
-    { name: string; pinned: boolean; primaryFolder?: string }
+    {
+      name: string;
+      pinned: boolean;
+      primaryFolder?: string;
+      allowNestedFolders?: boolean;
+    }
   >;
   folders: Record<string, string[]>;
   pickFolder: () => Promise<string | null>;
+  /**
+   * Check candidate folders against `[path, ...folders]`. Without it the
+   * dialog only refuses exact repeats, as before.
+   */
+  validateFolders?: (
+    path: string,
+    folders: readonly string[],
+    candidates: readonly string[],
+    allowNested: boolean,
+  ) => Promise<WorkspaceRootValidation>;
   save: (
     path: string,
     name: string,
     pinned: boolean,
     folders: string[],
     primaryFolder?: string,
+    allowNestedFolders?: boolean,
   ) => void;
 };
+
+/** Extra folders a project may hold next to its original folder. */
+const MAX_EXTRA_PROJECT_FOLDERS = MAX_WORKSPACE_FOLDERS - 1;
 
 export function SidebarProjectCard({
   path,
@@ -155,6 +177,7 @@ export function SidebarProjectCard({
                     !pinned,
                     settings.folders[path] ?? [],
                     settings.details[path]?.primaryFolder,
+                    settings.details[path]?.allowNestedFolders,
                   )
                 }
               >
@@ -191,15 +214,26 @@ export function SidebarProjectCard({
           name={name}
           folders={settings.folders[path] ?? []}
           primaryFolder={settings.details[path]?.primaryFolder ?? path}
+          allowNestedFolders={
+            settings.details[path]?.allowNestedFolders ?? false
+          }
           pickFolder={settings.pickFolder}
+          validateFolders={settings.validateFolders}
           onClose={() => {
             setEditing(false);
             anchor.current
               ?.querySelector<HTMLButtonElement>(".gyro-sidebar-project-toggle")
               ?.focus();
           }}
-          onSave={(nextName, folders, primaryFolder) =>
-            settings.save(path, nextName, pinned, folders, primaryFolder)
+          onSave={(nextName, folders, primaryFolder, allowNested) =>
+            settings.save(
+              path,
+              nextName,
+              pinned,
+              folders,
+              primaryFolder,
+              allowNested,
+            )
           }
           onRemove={onRemove}
         />
@@ -213,7 +247,9 @@ function ProjectEditDialog({
   name,
   folders,
   primaryFolder,
+  allowNestedFolders,
   pickFolder,
+  validateFolders,
   onClose,
   onSave,
   onRemove,
@@ -222,9 +258,16 @@ function ProjectEditDialog({
   name: string;
   folders: string[];
   primaryFolder: string;
+  allowNestedFolders: boolean;
   pickFolder: () => Promise<string | null>;
+  validateFolders?: SidebarProjectSettings["validateFolders"];
   onClose: () => void;
-  onSave: (name: string, folders: string[], primaryFolder: string) => void;
+  onSave: (
+    name: string,
+    folders: string[],
+    primaryFolder: string,
+    allowNested: boolean,
+  ) => void;
   onRemove?: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -233,8 +276,10 @@ function ProjectEditDialog({
   const [draftPrimary, setDraftPrimary] = useState(
     folders.includes(primaryFolder) ? primaryFolder : path,
   );
+  const [draftAllowNested, setDraftAllowNested] = useState(allowNestedFolders);
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState("");
+  const atFolderCap = draftFolders.length >= MAX_EXTRA_PROJECT_FOLDERS;
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
@@ -243,8 +288,25 @@ function ProjectEditDialog({
     setError("");
     try {
       const selected = await pickFolder();
-      if (selected && selected !== path)
-        setDraftFolders((current) => [...new Set([...current, selected])]);
+      if (!selected) return;
+      if (!validateFolders) {
+        if (selected !== path)
+          setDraftFolders((current) => [...new Set([...current, selected])]);
+        return;
+      }
+      const result = await validateFolders(
+        path,
+        draftFolders,
+        [selected],
+        draftAllowNested,
+      );
+      const accepted = result.accepted[0];
+      if (accepted) {
+        setDraftFolders((current) => [...new Set([...current, accepted])]);
+        return;
+      }
+      const label = selected.split(/[\\/]/).filter(Boolean).at(-1) ?? selected;
+      setError(`${label}: ${result.issues[0]?.message ?? "Not added"}`);
     } catch {
       setError("Couldn't open the folder picker. Please try again.");
     } finally {
@@ -274,8 +336,44 @@ function ProjectEditDialog({
         onSubmit={(event) => {
           event.preventDefault();
           if (!draftName.trim() || picking) return;
-          onSave(draftName.trim(), draftFolders, draftPrimary);
-          onClose();
+          void (async () => {
+            // Turning nesting off must not keep folders that now break the
+            // rule. Unavailable folders are kept: they may come back.
+            if (validateFolders && !draftAllowNested && draftFolders.length) {
+              setPicking(true);
+              try {
+                const result = await validateFolders(
+                  path,
+                  [],
+                  draftFolders,
+                  false,
+                );
+                const blocking = result.issues.find(
+                  (issue) => issue.code === "overlap",
+                );
+                if (blocking) {
+                  const label =
+                    blocking.path.split("/").filter(Boolean).at(-1) ??
+                    blocking.path;
+                  setError(
+                    `${label}: ${blocking.message}. Remove it or allow nested folders.`,
+                  );
+                  return;
+                }
+              } catch {
+                // Validation is advisory here; saving still goes through.
+              } finally {
+                setPicking(false);
+              }
+            }
+            onSave(
+              draftName.trim(),
+              draftFolders,
+              draftPrimary,
+              draftAllowNested,
+            );
+            onClose();
+          })();
         }}
       >
         <header>
@@ -347,13 +445,33 @@ function ProjectEditDialog({
           <button
             className="gyro-project-add-folder"
             type="button"
-            disabled={picking || draftFolders.length >= 19}
+            disabled={picking || atFolderCap}
+            title={
+              atFolderCap
+                ? `A project holds up to ${MAX_WORKSPACE_FOLDERS} folders`
+                : undefined
+            }
             onClick={() => void addFolder()}
           >
             <FolderPlus size={19} />
-            {picking ? "Choosing folder…" : "Add folder"}
+            {picking
+              ? "Choosing folder…"
+              : atFolderCap
+                ? `${MAX_WORKSPACE_FOLDERS} of ${MAX_WORKSPACE_FOLDERS} folders`
+                : "Add folder"}
           </button>
         </div>
+        <label className="gyro-project-nested-toggle">
+          <input
+            type="checkbox"
+            checked={draftAllowNested}
+            onChange={(event) => {
+              setDraftAllowNested(event.target.checked);
+              setError("");
+            }}
+          />
+          <span>Allow folders inside other folders</span>
+        </label>
         {error && <p role="alert">{error}</p>}
         <footer>
           <button

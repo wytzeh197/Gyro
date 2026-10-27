@@ -1477,14 +1477,14 @@ pub fn replace_provider_rate_limits(
     Ok(())
 }
 
-/// The last reading for each of a provider's windows, expired ones rolled over.
+/// The last reading for each of a provider's windows, expired ones unmarked.
 ///
 /// A window past its reset time has rolled over, so the stored status describes
 /// an allowance that no longer exists: an exhausted window must not keep
 /// reading as exhausted into the fresh one. Dropping it was no better, since
 /// the plan still meters that window and the composer lost the row until the
-/// next message reopened it. Nothing has been spent since the reset, so the
-/// row is rewritten on the way past as an untouched allowance with no reset.
+/// next message reopened it. The new window has not been measured yet, so the
+/// row stays and its level is cleared until the next live reading.
 pub fn provider_rate_limits(
     conn: &Connection,
     provider_id: &str,
@@ -1496,7 +1496,7 @@ pub fn provider_rate_limits(
     // the old text comparison.
     conn.execute(
         "update provider_rate_limits
-         set status = 'ok', used_percent = 0, resets_at = null
+         set status = 'ok', used_percent = null, resets_at = null
          where provider_id = ?1 and resets_at is not null
            and coalesce(julianday(resets_at) <= julianday(?2), resets_at <= ?2)",
         params![provider_id, now],
@@ -2677,7 +2677,7 @@ mod tests {
     }
 
     #[test]
-    fn a_window_past_its_reset_reads_as_a_fresh_allowance() {
+    fn a_window_past_its_reset_waits_for_the_next_reading() {
         let conn = memory_conn();
         let now = Utc::now();
         let expired = (now - chrono::Duration::minutes(1)).to_rfc3339();
@@ -2698,7 +2698,7 @@ mod tests {
             .find(|record| record.window_id == "five-hour")
             .expect("the plan still meters the rolled-over window");
         assert_eq!(rolled.status, "ok");
-        assert_eq!(rolled.used_percent, Some(0));
+        assert_eq!(rolled.used_percent, None);
         assert!(rolled.resets_at.is_none());
         let weekly = stored
             .iter()

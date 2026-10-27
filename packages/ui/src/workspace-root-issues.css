@@ -1,0 +1,96 @@
+/* Unavailable workspace folders, above the Explorer tree. One quiet row per
+   folder: warning glyph, name, reason, then the fixes that apply. */
+.gyro-root-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px;
+}
+
+.gyro-root-issue {
+  align-items: center;
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text);
+  display: flex;
+  gap: 6px;
+  min-height: 26px;
+  min-width: 0;
+  padding: 2px 4px 2px 8px;
+}
+
+.gyro-root-issue:hover {
+  background: var(--gyro-control-hover);
+}
+
+.gyro-root-issue-icon {
+  color: var(--gyro-warn);
+  flex: none;
+}
+
+.gyro-root-issue[data-code="duplicate"] .gyro-root-issue-icon,
+.gyro-root-issue[data-code="overlap"] .gyro-root-issue-icon {
+  color: var(--gyro-muted);
+}
+
+.gyro-root-issue-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  line-height: 1.3;
+  min-width: 0;
+}
+
+.gyro-root-issue-text strong,
+.gyro-root-issue-text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-root-issue-text strong {
+  font-weight: 500;
+}
+
+.gyro-root-issue-text span {
+  color: var(--gyro-muted);
+}
+
+.gyro-root-issue button,
+.gyro-root-issues-retry {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+}
+
+.gyro-root-issue button {
+  height: 22px;
+  width: 22px;
+}
+
+.gyro-root-issue button:hover,
+.gyro-root-issues-retry:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-hover-text);
+}
+
+.gyro-root-issue button:focus-visible,
+.gyro-root-issues-retry:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+
+.gyro-root-issues-retry {
+  align-self: flex-start;
+  font: inherit;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  gap: 5px;
+  margin-left: 4px;
+  padding: 3px 6px;
+}

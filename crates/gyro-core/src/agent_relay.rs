@@ -765,12 +765,7 @@ fn resolve_approval(conn: &Connection, arguments: &Value) -> Result<Value, Strin
         "deny" => {
             let task_id = task_id_for_proposal(conn, &proposal_id)?
                 .ok_or_else(|| "unknown approval".to_string())?;
-            insert_command(
-                conn,
-                &task_id,
-                "deny",
-                json!({ "proposalId": proposal_id }),
-            )?;
+            insert_command(conn, &task_id, "deny", json!({ "proposalId": proposal_id }))?;
             Ok(json!({ "proposalId": proposal_id, "decision": "denied" }))
         }
         other => Err(format!("decision must be deny or allow, not {other}")),
@@ -1910,7 +1905,10 @@ mod tests {
         assert!(!error, "{status}");
         assert_eq!(status["status"], "waiting-for-approval");
         assert_eq!(status["pendingApproval"]["tool"], "command");
-        assert_eq!(status["pendingApproval"]["proposalId"], proposal_id.to_string());
+        assert_eq!(
+            status["pendingApproval"]["proposalId"],
+            proposal_id.to_string()
+        );
         let (error, allowed_decision) = tool(
             &origin,
             &token,
@@ -1997,7 +1995,9 @@ mod tests {
         assert_eq!(page["gyroSessionId"], gyro_id.to_string());
         let relay_db = open_db(&relay_dir).unwrap();
         let pages_left: i64 = relay_db
-            .query_row("select count(*) from relay_read_pages", [], |row| row.get(0))
+            .query_row("select count(*) from relay_read_pages", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(pages_left, 0);
         drop(relay_db);

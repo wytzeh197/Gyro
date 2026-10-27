@@ -49,6 +49,7 @@ import {
 import { sessionApprovalCounts, sessionQuestionCounts } from "@gyro-dev/ui";
 import { fastModeConfigFromAction } from "@gyro-dev/ui";
 import { useProjectImport } from "./use-project-import";
+import { useTaskHandoff } from "./use-task-handoff";
 import { useChatAutoRetry } from "./use-chat-auto-retry";
 import { applyNativeProviderRetryStatus } from "./provider-retry-stream";
 import {
@@ -179,6 +180,13 @@ import {
   useTerminalAttachmentController,
 } from "./terminal-attachment";
 import { isTauriRuntime } from "./tauri-runtime";
+import {
+  admitWorkspaceFile,
+  admitWorkspaceFolders,
+  useWorkspaceRootHealth,
+  useWorkspaceRootRecovery,
+  workspaceRootRejectionNotice,
+} from "./use-workspace-roots";
 import {
   sameSessionEvents,
   useCoalescedByKey,
@@ -1388,7 +1396,7 @@ export function App() {
     workbench.activePaneTab === "browser" &&
     workbench.isToolPanelOpen &&
     Boolean(activeWorkspaceRoot);
-  const workspaceRoots = useMemo(() => {
+  const configuredWorkspaceRoots = useMemo(() => {
     const configured = workspaceFolderPaths(
       activeWorkspaceRoot,
       workbench.preferences.workspaceFolders,
@@ -1413,6 +1421,13 @@ export function App() {
     workbench.preferences.workspaceFolders,
     workbench.preferences.projectDetails,
   ]);
+  // Unavailable roots stay configured but leave the session, Explorer, and agent.
+  const workspaceRootHealth = useWorkspaceRootHealth(
+    configuredWorkspaceRoots,
+    activeWorkspaceRoot,
+    dispatchWorkbench,
+  );
+  const workspaceRoots = workspaceRootHealth.roots;
   const workspaceActionRoot =
     workspaceRootForPath(workspaceRoots, selectedWorkspaceRoot) ??
     workspaceRootForPath(workspaceRoots, selectedFile) ??
@@ -2235,9 +2250,14 @@ export function App() {
             persistedRoots.some((path, index) => path !== workspaceRoots[index])
           ) {
             dispatchWorkbench({
-              type: "set-workspace-folders",
+              type: "canonicalize-workspace-folders",
               workspacePath: updated.workspacePath,
-              paths: persistedRoots.slice(1),
+              replacements: Object.fromEntries(
+                workspaceRoots.map((root, index) => [
+                  root,
+                  persistedRoots[index] ?? root,
+                ]),
+              ),
             });
             const active = updated.workspaceIdentity?.roots.find(
               (root) => root.id === updated.workspaceIdentity?.activeRootId,
@@ -2355,7 +2375,7 @@ export function App() {
   useEffect(() => {
     if (
       activeDestination !== "settings" ||
-      workbench.preferences.lastSettingsSection !== "permissions" ||
+      workbench.preferences.lastSettingsSection !== "general" ||
       !isTauriRuntime()
     ) {
       return undefined;
@@ -7079,15 +7099,22 @@ export function App() {
       selected = typeof chosen === "string" ? chosen : null;
     }
     if (!selected) return;
-    const normalizedSelected = normalizeProjectPath(selected);
-    if (
-      workspaceRoots.some(
-        (root) => normalizeProjectPath(root) === normalizedSelected,
-      )
-    ) {
-      notify("command-failed", "Folder already added", workspaceName(selected));
+    const admission = await admitWorkspaceFolders(
+      configuredWorkspaceRoots,
+      [selected],
+      workbench.preferences.projectDetails?.[activeWorkspaceRoot]
+        ?.allowNestedFolders,
+    ).catch((error: unknown) => {
+      notify("command-failed", "Folder could not be added", String(error));
+      return undefined;
+    });
+    const rejection =
+      admission && workspaceRootRejectionNotice(admission.issues);
+    if (!admission?.accepted[0]) {
+      if (rejection) notify("command-failed", ...rejection);
       return;
     }
+    selected = admission.accepted[0];
     dispatchWorkbench({
       type: "add-workspace-folder",
       workspacePath: activeWorkspaceRoot,
@@ -7134,8 +7161,10 @@ export function App() {
     setSelectedWorkspaceRoot(selected);
   }, [
     activeWorkspaceRoot,
+    configuredWorkspaceRoots,
     notify,
     openWorkspace,
+    workbench.preferences.projectDetails,
     workbench.preferences.workspaceTrust,
     workspaceRoots,
   ]);
@@ -7246,6 +7275,22 @@ export function App() {
     ],
   );
 
+  const workspaceRootIssues = useWorkspaceRootRecovery({
+    activateWorkspacePath,
+    configured: configuredWorkspaceRoots,
+    dispatch: dispatchWorkbench,
+    health: workspaceRootHealth,
+    notify,
+    pickFolder: async (title) => {
+      if (!isTauriRuntime()) return "/preview/Components";
+      const chosen = await open({ directory: true, multiple: false, title });
+      return typeof chosen === "string" ? chosen : null;
+    },
+    preferences: workbench.preferences,
+    removeFolder: removeWorkspaceFolder,
+    workspacePath: activeWorkspaceRoot,
+  });
+
   const openWorkspaceConfiguration = useCallback(async () => {
     try {
       let filePath: string;
@@ -7279,14 +7324,21 @@ export function App() {
         );
         content = file.content;
       }
-      const workspaceFile = parseGyroWorkspaceFile(content, filePath);
-      const primary = workspaceFile.folders[0]?.path;
+      const parsedFile = parseGyroWorkspaceFile(content, filePath);
+      const primary = parsedFile.folders[0]?.path;
       if (!primary)
         throw new Error("Workspace file does not contain a primary folder");
+      // Every folder goes through the same policy as an Explorer add.
+      const { workspaceFile, extraFolders, rejection } =
+        await admitWorkspaceFile(
+          parsedFile,
+          workbench.preferences.projectDetails?.[primary]?.allowNestedFolders,
+        );
+      if (rejection) notify("command-failed", ...rejection);
       dispatchWorkbench({
         type: "set-workspace-folders",
         workspacePath: primary,
-        paths: workspaceFile.folders.slice(1).map((folder) => folder.path),
+        paths: extraFolders,
       });
       dispatchWorkbench({
         type: "set-workspace-settings",
@@ -7319,7 +7371,12 @@ export function App() {
         String(error),
       );
     }
-  }, [activateWorkspacePath, notify, workbench.preferences.workspaceTrust]);
+  }, [
+    activateWorkspacePath,
+    notify,
+    workbench.preferences.projectDetails,
+    workbench.preferences.workspaceTrust,
+  ]);
 
   const saveWorkspaceConfiguration = useCallback(async () => {
     if (workspaceRoots.length === 0) {
@@ -12574,6 +12631,14 @@ export function App() {
         );
     },
   });
+  const taskHandoff = useTaskHandoff({
+    config,
+    sessions,
+    send: (message, context) => sendDraftRef.current(message, context),
+    refreshSessions,
+    selectSession,
+    notify,
+  });
 
   const handleMutationApprovalAction = useCallback(
     async (proposalId: string, decision: "approve" | "reject") => {
@@ -15077,6 +15142,42 @@ export function App() {
     [connectProvider],
   );
 
+  const installProvider = useCallback(
+    async (providerId: string) => {
+      if (!isProviderId(providerId)) {
+        return { installed: false, message: "Unknown provider." };
+      }
+      try {
+        const outcome = await invoke<{
+          installed: boolean;
+          output: string;
+          health?: ProviderHealthCheck | null;
+        }>("install_provider_cli", { providerId, confirm: true });
+        recordProviderHealthOutput(
+          providerId,
+          outcome.output,
+          outcome.health ?? undefined,
+        );
+        if (outcome.installed) {
+          signInProvider(providerId);
+        }
+        const tail = outcome.output.trim().split("\n").slice(-2).join(" ");
+        return {
+          installed: outcome.installed,
+          message: outcome.installed
+            ? ""
+            : tail || "The installer finished without a working binary.",
+        };
+      } catch (error) {
+        return {
+          installed: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    [recordProviderHealthOutput, signInProvider],
+  );
+
   const testProvider = useCallback(
     async (providerId: string) => {
       if (providerId === "ollama") {
@@ -16912,6 +17013,7 @@ export function App() {
     return (
       <ChatSurface
         {...projectImport.chatProps(paneSession)}
+        {...taskHandoff.chatProps(paneSession)}
         activeChatPanel={panePanel}
         paneKey={paneDraftKey}
         onSelectChatPanel={selectPanePanel}
@@ -17286,6 +17388,7 @@ export function App() {
   const renderWorkspaceChat = () => (
     <ChatSurface
       {...projectImport.chatProps(activeSession)}
+      {...taskHandoff.chatProps(activeSession)}
       chatSwitcher={workspaceChatSwitcher}
       paneKey={activeDraftKey}
       activeChatPanel={activeChatPanel}
@@ -17544,6 +17647,7 @@ export function App() {
       onOpenWorkspace={openWorkspace}
       onAddWorkspaceFolder={addWorkspaceFolder}
       onRemoveWorkspaceFolder={removeWorkspaceFolder}
+      workspaceRootIssues={workspaceRootIssues}
       onSelectWorkspaceFolder={setSelectedWorkspaceRoot}
       onUpdateAction={runUpdateAction}
       onWorkspaceSidebarHiddenChange={(hidden) =>
@@ -17624,13 +17728,16 @@ export function App() {
           });
           return typeof chosen === "string" ? chosen : null;
         },
-        save: (path, name, pinned, folders, primaryFolder) => {
+        validateFolders: (path, folders, candidates, allowNested) =>
+          admitWorkspaceFolders([path, ...folders], candidates, allowNested),
+        save: (path, name, pinned, folders, primaryFolder, allowNested) => {
           dispatchWorkbench({
             type: "set-project-details",
             path,
             name,
             pinned,
             primaryFolder,
+            allowNestedFolders: allowNested,
           });
           dispatchWorkbench({
             type: "set-workspace-folders",
@@ -17784,6 +17891,7 @@ export function App() {
                 {!activeChatLayout?.slots.some(Boolean) ? (
                   <ChatSurface
                     {...projectImport.chatProps(activeSession)}
+                    {...taskHandoff.chatProps(activeSession)}
                     activeChatPanel={activeChatPanel}
                     paneKey={activeDraftKey}
                     onSelectChatPanel={selectSoloChatPanel}
@@ -18388,6 +18496,7 @@ export function App() {
           }}
           onSelectProviderDefaultModel={selectProviderDefaultModel}
           onSignInProvider={signInProvider}
+          onInstallProvider={installProvider}
           {...providerApiKeyProps}
           onTestProvider={testProvider}
           onToggleProvider={toggleProvider}
@@ -18632,6 +18741,7 @@ export function App() {
       {activeDestination === "onboarding" ? (
         <ChatSurface
           {...projectImport.chatProps(activeSession)}
+          {...taskHandoff.chatProps(activeSession)}
           activeChatPanel={activeChatPanel}
           paneKey={activeDraftKey}
           onSelectChatPanel={selectSoloChatPanel}

@@ -6,6 +6,11 @@
 //! snapshot), that no Gyro window is focused, and that macOS granted
 //! permission. Bodies stay generic: a notice can land on a lock screen, so it
 //! never carries a prompt, command, path or model output.
+//!
+//! The notification plugin reports `Granted` on every desktop platform, so on
+//! macOS the permission comes from UserNotifications instead. Trusting the
+//! plugin hid a Gyro switched off in System Settings: Settings read "Allowed
+//! by macOS" and the test said it was sent while macOS dropped every notice.
 
 use crate::menu_bar::{DesktopNotificationPreferences, MenuBarController, MenuBarOutcome};
 use crate::{
@@ -13,7 +18,9 @@ use crate::{
     ProviderApprovalNotificationOpen, PROVIDER_APPROVAL_NOTIFICATION_OPEN_EVENT,
 };
 use tauri::{Emitter, Manager};
-use tauri_plugin_notification::{NotificationExt, PermissionState};
+#[cfg(not(target_os = "macos"))]
+use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_notification::PermissionState;
 use uuid::Uuid;
 
 /// The kind of notice, each switched on or off separately in Settings.
@@ -57,18 +64,45 @@ pub(crate) fn notification_permission_allows_delivery(permission: PermissionStat
     permission == PermissionState::Granted
 }
 
-fn can_deliver(app: &tauri::AppHandle, kind: NoticeKind) -> bool {
-    let preferences = app.state::<MenuBarController>().notification_preferences();
-    if !kind_allowed(&preferences, kind) || !app_is_in_background(app) {
-        return false;
+/// macOS's answer for Gyro's notices. A dev build posts as Terminal, whose
+/// setting Gyro cannot read, so it counts as allowed.
+pub(crate) fn native_permission(app: &tauri::AppHandle) -> PermissionState {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        if tauri::is_dev() {
+            return PermissionState::Granted;
+        }
+        macos::permission()
     }
+    #[cfg(not(target_os = "macos"))]
     app.notification()
         .permission_state()
-        .is_ok_and(notification_permission_allows_delivery)
+        .unwrap_or(PermissionState::Denied)
 }
 
-/// Shows one notice. On macOS a click runs `on_click` (opening what the
-/// notice is about); elsewhere the plugin's plain notice is used.
+/// Shows macOS's permission prompt while it has not decided, and waits for
+/// the answer. After that only System Settings changes it. Never call this on
+/// the main thread: the prompt and its answer need it.
+pub(crate) fn request_native_permission(app: &tauri::AppHandle) -> PermissionState {
+    let permission = native_permission(app);
+    if !matches!(
+        permission,
+        PermissionState::Prompt | PermissionState::PromptWithRationale
+    ) {
+        return permission;
+    }
+    #[cfg(target_os = "macos")]
+    return macos::request_permission();
+    #[cfg(not(target_os = "macos"))]
+    app.notification()
+        .request_permission()
+        .unwrap_or(PermissionState::Denied)
+}
+
+/// Checks the preferences and focus here, then asks macOS and shows the
+/// notice on a thread of its own: the caller may be the main thread, and a
+/// first notice can wait on the permission prompt.
 fn deliver(
     app: &tauri::AppHandle,
     kind: NoticeKind,
@@ -76,15 +110,177 @@ fn deliver(
     body: String,
     on_click: impl FnOnce(&tauri::AppHandle) + Send + 'static,
 ) {
-    if !can_deliver(app, kind) {
+    let preferences = app.state::<MenuBarController>().notification_preferences();
+    if !kind_allowed(&preferences, kind) || !app_is_in_background(app) {
         return;
     }
+    let app = app.clone();
+    let title = title.to_string();
+    std::thread::spawn(move || {
+        if notification_permission_allows_delivery(request_native_permission(&app)) {
+            show(&app, title, body, on_click);
+        }
+    });
+}
 
+/// The Settings test: asks macOS if it has not decided yet, then shows a
+/// sample even with Gyro in front. When macOS blocks Gyro, its notification
+/// settings open instead. Returns the permission Settings shows.
+pub(crate) fn send_test_notification(app: &tauri::AppHandle) -> PermissionState {
+    let permission = request_native_permission(app);
+    if !notification_permission_allows_delivery(permission) {
+        #[cfg(target_os = "macos")]
+        if permission == PermissionState::Denied {
+            macos::open_notification_settings(&app.config().identifier);
+        }
+        return permission;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        show(
+            &app,
+            "Gyro notifications are ready".into(),
+            "Automation outcomes can now appear while Gyro is in the background.".into(),
+            |_| {},
+        );
+    });
+    permission
+}
+
+/// Shows one notice and blocks until it is clicked or dismissed. On macOS a
+/// click runs `on_click` (opening what the notice is about); elsewhere the
+/// plugin's plain notice is used.
+fn show(
+    app: &tauri::AppHandle,
+    title: String,
+    body: String,
+    on_click: impl FnOnce(&tauri::AppHandle) + Send + 'static,
+) {
     #[cfg(target_os = "macos")]
     {
-        let app = app.clone();
-        let title = title.to_string();
-        std::thread::spawn(move || {
+        macos::prepare(app);
+        let mut notification = notify_rust::Notification::new();
+        notification.summary(&title).body(&body);
+        match notification.show() {
+            Ok(handle) => handle.wait_for_action(|action| {
+                if action == "__closed" {
+                    return;
+                }
+                if let Err(error) = restore_main_window(app) {
+                    eprintln!("could not focus Gyro from notification: {error}");
+                }
+                on_click(app);
+            }),
+            Err(error) => eprintln!("could not show Gyro notification: {error}"),
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = on_click;
+        if let Err(error) = app.notification().builder().title(&title).body(body).show() {
+            eprintln!("could not show Gyro notification: {error}");
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod macos {
+    use super::PermissionState;
+    use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, Sel};
+    use objc2::{class, msg_send, sel};
+    use std::sync::{mpsc, Once};
+    use std::time::Duration;
+
+    /// How long a first notice or test waits while the prompt is open.
+    const PROMPT_WAIT: Duration = Duration::from_secs(180);
+    /// `UNAuthorizationOptions`: badge, sound and alert.
+    const ALERT_OPTIONS: usize = 1 | 2 | 4;
+
+    #[link(name = "UserNotifications", kind = "framework")]
+    unsafe extern "C" {
+        #[link_name = "OBJC_CLASS_$_UNUserNotificationCenter"]
+        static UN_USER_NOTIFICATION_CENTER: AnyClass;
+    }
+
+    /// `UNAuthorizationStatus`: 0 not determined, 1 denied, 2 authorized,
+    /// 3 provisional, 4 ephemeral.
+    pub(super) fn permission_from_status(status: isize) -> PermissionState {
+        match status {
+            0 => PermissionState::Prompt,
+            2..=4 => PermissionState::Granted,
+            _ => PermissionState::Denied,
+        }
+    }
+
+    /// UserNotifications raises for a process without a bundle identifier.
+    fn center() -> Option<Retained<AnyObject>> {
+        let bundle: Retained<AnyObject> = unsafe { msg_send![class!(NSBundle), mainBundle] };
+        let identifier: Option<Retained<AnyObject>> =
+            unsafe { msg_send![&*bundle, bundleIdentifier] };
+        identifier?;
+        let class = unsafe { &*std::ptr::addr_of!(UN_USER_NOTIFICATION_CENTER) };
+        unsafe { msg_send![class, currentNotificationCenter] }
+    }
+
+    pub(super) fn permission() -> PermissionState {
+        let Some(center) = center() else {
+            return PermissionState::Granted;
+        };
+        let (tx, rx) = mpsc::channel();
+        let block = RcBlock::new(move |settings: *mut AnyObject| {
+            let status = unsafe { settings.as_ref() }.map_or(1, |settings| unsafe {
+                msg_send![settings, authorizationStatus]
+            });
+            let _ = tx.send(status);
+        });
+        let _: () =
+            unsafe { msg_send![&*center, getNotificationSettingsWithCompletionHandler: &*block] };
+        rx.recv_timeout(Duration::from_secs(5))
+            .map_or(PermissionState::Denied, permission_from_status)
+    }
+
+    pub(super) fn request_permission() -> PermissionState {
+        let Some(center) = center() else {
+            return PermissionState::Granted;
+        };
+        let (tx, rx) = mpsc::channel();
+        let block = RcBlock::new(move |granted: Bool, _error: *mut AnyObject| {
+            let _ = tx.send(granted.as_bool());
+        });
+        let _: () = unsafe {
+            msg_send![
+                &*center,
+                requestAuthorizationWithOptions: ALERT_OPTIONS,
+                completionHandler: &*block
+            ]
+        };
+        match rx.recv_timeout(PROMPT_WAIT) {
+            Ok(true) => PermissionState::Granted,
+            _ => permission(),
+        }
+    }
+
+    pub(super) fn open_notification_settings(identifier: &str) {
+        let url = format!(
+            "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id={identifier}"
+        );
+        if let Err(error) = std::process::Command::new("open").arg(url).spawn() {
+            eprintln!("could not open notification settings: {error}");
+        }
+    }
+
+    /// Runs once before the first notice. It names the app the notices come
+    /// from, and lets them show while Gyro is frontmost: NSUserNotificationCenter
+    /// hides a frontmost app's notices unless its delegate says otherwise, and
+    /// the delegate notify-rust installs never does, so the test from Settings
+    /// could not appear. Real notices still wait for the background in
+    /// [`super::deliver`].
+    pub(super) fn prepare(app: &tauri::AppHandle) {
+        static PREPARED: Once = Once::new();
+        PREPARED.call_once(|| {
             let application = if tauri::is_dev() {
                 "com.apple.Terminal".to_string()
             } else {
@@ -93,29 +289,40 @@ fn deliver(
             if let Err(error) = notify_rust::set_application(&application) {
                 eprintln!("could not configure Gyro notification: {error}");
             }
-            let mut notification = notify_rust::Notification::new();
-            notification.summary(&title).body(&body);
-            match notification.show() {
-                Ok(handle) => handle.wait_for_action(move |action| {
-                    if action == "__closed" {
-                        return;
-                    }
-                    if let Err(error) = restore_main_window(&app) {
-                        eprintln!("could not focus Gyro from notification: {error}");
-                    }
-                    on_click(&app);
-                }),
-                Err(error) => eprintln!("could not show Gyro notification: {error}"),
+
+            extern "C-unwind" fn present(
+                _: &AnyObject,
+                _: Sel,
+                _: *mut AnyObject,
+                _: *mut AnyObject,
+            ) -> Bool {
+                Bool::YES
+            }
+            let Some(delegate) = AnyClass::get(c"NotificationCenterDelegate") else {
+                return;
+            };
+            let types = if cfg!(target_arch = "aarch64") {
+                c"B@:@@"
+            } else {
+                c"c@:@@"
+            };
+            unsafe {
+                objc2::ffi::class_addMethod(
+                    delegate as *const AnyClass as *mut AnyClass,
+                    sel!(userNotificationCenter:shouldPresentNotification:),
+                    std::mem::transmute::<
+                        extern "C-unwind" fn(
+                            &AnyObject,
+                            Sel,
+                            *mut AnyObject,
+                            *mut AnyObject,
+                        ) -> Bool,
+                        Imp,
+                    >(present),
+                    types.as_ptr(),
+                );
             }
         });
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = on_click;
-        if let Err(error) = app.notification().builder().title(title).body(body).show() {
-            eprintln!("could not show Gyro notification: {error}");
-        }
     }
 }
 
@@ -273,6 +480,18 @@ mod tests {
         assert!(!notification_permission_allows_delivery(
             PermissionState::PromptWithRationale
         ));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_authorization_status_maps_to_permission() {
+        use super::macos::permission_from_status;
+        assert_eq!(permission_from_status(0), PermissionState::Prompt);
+        assert_eq!(permission_from_status(1), PermissionState::Denied);
+        assert_eq!(permission_from_status(2), PermissionState::Granted);
+        assert_eq!(permission_from_status(3), PermissionState::Granted);
+        assert_eq!(permission_from_status(4), PermissionState::Granted);
+        assert_eq!(permission_from_status(9), PermissionState::Denied);
     }
 
     #[test]

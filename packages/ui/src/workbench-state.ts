@@ -94,9 +94,10 @@ import {
 } from "./chat-companion.ts";
 import { normalizedWorkspaceTrustPath } from "./workspace-trust.ts";
 import {
-  MAX_WORKSPACE_FOLDERS,
+  normalizedWorkspaceFolderList,
   normalizedWorkspaceFolderPath,
 } from "./workspace-project.ts";
+import { relocateWorkspaceFolderPreferences } from "./workspace-roots.ts";
 import {
   defaultWorkspaceUserSettings,
   normalizedWorkspaceUserSettings,
@@ -1663,9 +1664,21 @@ export type WorkbenchAction =
       name: string;
       pinned: boolean;
       primaryFolder?: string;
+      allowNestedFolders?: boolean;
     }
   | { type: "set-workspace-folders"; workspacePath: string; paths: string[] }
   | { type: "remove-workspace-folder"; workspacePath: string; path: string }
+  | {
+      type: "canonicalize-workspace-folders";
+      workspacePath: string;
+      replacements: Record<string, string>;
+    }
+  | {
+      type: "relocate-workspace-folder";
+      workspacePath: string;
+      from: string;
+      to: string;
+    }
   | {
       type: "set-workspace-settings";
       scope: WorkspaceSettingScope;
@@ -2364,10 +2377,10 @@ export function workbenchReducer(
           ...state.preferences,
           workspaceFolders: {
             ...state.preferences.workspaceFolders,
-            [workspacePath]: [...current, path].slice(
-              0,
-              MAX_WORKSPACE_FOLDERS - 1,
-            ),
+            [workspacePath]: normalizedWorkspaceFolderList(workspacePath, [
+              ...current,
+              path,
+            ]),
           },
         },
       };
@@ -2383,6 +2396,9 @@ export function workbenchReducer(
               name: action.name.trim().slice(0, 120),
               pinned: action.pinned,
               primaryFolder: action.primaryFolder,
+              ...(action.allowNestedFolders
+                ? { allowNestedFolders: true }
+                : {}),
             },
           },
         },
@@ -2390,13 +2406,7 @@ export function workbenchReducer(
     }
     case "set-workspace-folders": {
       const workspacePath = normalizedWorkspaceFolderPath(action.workspacePath);
-      const paths = action.paths
-        .map(normalizedWorkspaceFolderPath)
-        .filter(
-          (path, index, all) =>
-            path !== workspacePath && all.indexOf(path) === index,
-        )
-        .slice(0, MAX_WORKSPACE_FOLDERS - 1);
+      const paths = normalizedWorkspaceFolderList(workspacePath, action.paths);
       return {
         ...state,
         preferences: {
@@ -2425,6 +2435,40 @@ export function workbenchReducer(
         },
       };
     }
+    case "canonicalize-workspace-folders": {
+      const workspacePath = normalizedWorkspaceFolderPath(action.workspacePath);
+      const current = state.preferences.workspaceFolders[workspacePath];
+      if (!current) return state;
+      const next = normalizedWorkspaceFolderList(
+        workspacePath,
+        current.map(
+          (folder) =>
+            action.replacements[normalizedWorkspaceFolderPath(folder)] ??
+            folder,
+        ),
+      );
+      if (next.join("\n") === current.join("\n")) return state;
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          workspaceFolders: {
+            ...state.preferences.workspaceFolders,
+            [workspacePath]: next,
+          },
+        },
+      };
+    }
+    case "relocate-workspace-folder":
+      return {
+        ...state,
+        preferences: relocateWorkspaceFolderPreferences(
+          state.preferences,
+          action.workspacePath,
+          action.from,
+          action.to,
+        ),
+      };
     case "set-workspace-settings": {
       const settings = normalizedWorkspaceScopedSettings(action.settings);
       if (action.scope === "user") {
@@ -5077,6 +5121,9 @@ function normalizeWorkbenchPreferences(
               typeof detail.primaryFolder === "string"
                 ? detail.primaryFolder
                 : undefined,
+            ...(detail.allowNestedFolders === true
+              ? { allowNestedFolders: true }
+              : {}),
           },
         ]),
     ),
@@ -5093,25 +5140,13 @@ function normalizeWorkbenchPreferences(
                   Array.isArray(folders),
               )
               .slice(0, 100)
-              .map(([workspacePath, folders]) => {
-                const normalizedWorkspace =
-                  normalizedWorkspaceFolderPath(workspacePath);
-                const normalizedFolders = (folders as unknown[])
-                  .filter(
-                    (folder): folder is string =>
-                      typeof folder === "string" &&
-                      folder.length > 0 &&
-                      folder.length <= 4096,
-                  )
-                  .map(normalizedWorkspaceFolderPath)
-                  .filter(
-                    (folder, index, all) =>
-                      folder !== normalizedWorkspace &&
-                      all.indexOf(folder) === index,
-                  )
-                  .slice(0, MAX_WORKSPACE_FOLDERS - 1);
-                return [normalizedWorkspace, normalizedFolders];
-              }),
+              .map(([workspacePath, folders]) => [
+                normalizedWorkspaceFolderPath(workspacePath),
+                normalizedWorkspaceFolderList(
+                  workspacePath,
+                  folders as unknown[],
+                ),
+              ]),
           )
         : {},
     workspaceUserSettings: {

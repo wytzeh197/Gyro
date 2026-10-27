@@ -329,6 +329,39 @@ fn restore_main_webview_focus<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// A hidden chat's browser can still end up holding the keyboard: WebKit moves
+/// first responder while the model types into a field, takes a snapshot, or
+/// loads a page with autofocus, and a child created hidden never handed it
+/// back. The person is meanwhile typing in another chat, and every keystroke
+/// lands in a view nobody can see. Unlike `restore_main_webview_focus`, this
+/// only acts when the keyboard is stranded — on a hidden view, on the window
+/// itself, or nowhere — so it never takes focus from a browser on screen.
+fn reclaim_stranded_keyboard<R: Runtime>(app: &AppHandle<R>) {
+    #[cfg(target_os = "macos")]
+    if let Some(main) = app.get_webview(MAIN_WINDOW_LABEL) {
+        let _ = main.with_webview(|platform| unsafe {
+            use objc2_app_kit::NSView;
+            let main_view: &NSView = &*platform.inner().cast();
+            let Some(window) = main_view.window() else {
+                return;
+            };
+            let stranded = match window.firstResponder() {
+                None => true,
+                // The window itself, the one non-view responder here, takes no
+                // typing either.
+                Some(responder) => responder
+                    .downcast_ref::<NSView>()
+                    .is_none_or(|view| view.isHiddenOrHasHiddenAncestor()),
+            };
+            if stranded {
+                window.makeFirstResponder(Some(main_view));
+            }
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+}
+
 /// Only a visibility change can move the window's keyboard focus; repeated
 /// requests for the state the browser is already in must leave the user alone.
 fn visibility_moves_keyboard_focus(was_visible: bool, visible: bool) -> bool {
@@ -1286,6 +1319,7 @@ pub fn open_session_browser<R: Runtime>(
         webview
             .hide()
             .map_err(|error| format!("could not hide browser: {error}"))?;
+        reclaim_stranded_keyboard(app);
     } else if !background_only {
         // A child webview created visible becomes first responder, so a model
         // opening a page must not pull the keyboard out of the user's chat.
@@ -1485,7 +1519,9 @@ pub fn call_agent<R: Runtime>(
         .map_err(|error| format!("could not run browser agent: {error}"))?;
     let encoded = receiver
         .recv_timeout(AGENT_CALL_TIMEOUT)
-        .map_err(|_| "browser agent call timed out".to_string())?;
+        .map_err(|_| "browser agent call timed out".to_string());
+    reclaim_stranded_keyboard(app);
+    let encoded = encoded?;
     let response: Value = serde_json::from_str(&encoded)
         .map_err(|error| format!("invalid browser agent result: {error}"))?;
     if let Some(error) = response.get("error").and_then(Value::as_str) {
@@ -1757,9 +1793,12 @@ pub fn capture_session_browser_png<R: Runtime>(
             })
             .map_err(|error| format!("could not request native browser snapshot: {error}"))?;
 
-        receiver
+        let capture = receiver
             .recv_timeout(Duration::from_secs(8))
-            .map_err(|_| "native browser screenshot timed out".to_string())?
+            .map_err(|_| "native browser screenshot timed out".to_string())
+            .and_then(|capture| capture);
+        reclaim_stranded_keyboard(app);
+        capture
     }
 
     #[cfg(not(target_os = "macos"))]

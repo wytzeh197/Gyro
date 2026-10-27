@@ -2,6 +2,7 @@
 //! stay read-only; a private JSONL snapshot is committed before its SQLite index.
 use super::*;
 use crate::project_import::{NormalizedProjectImport, SourceKind};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -479,24 +480,14 @@ impl SessionStore {
         Ok(())
     }
 
-    fn recover_pending_import_metadata(&self) -> Result<()> {
+    fn recover_pending_import_metadata(&self, journals: Vec<(Uuid, PathBuf)>) -> Result<()> {
         let mut pending = Vec::new();
-        for entry in std::fs::read_dir(&self.paths.sessions_dir)? {
-            let entry = entry?;
-            let name = entry.file_name();
-            let Some(operation_id) = name
-                .to_str()
-                .and_then(|name| name.strip_prefix("import-choice-"))
-                .and_then(|name| name.strip_suffix(".json"))
-                .and_then(|id| Uuid::parse_str(id).ok())
-            else {
-                continue;
-            };
+        for (operation_id, journal) in journals {
             anyhow::ensure!(
                 pending.len() < 10_000,
                 "too many interrupted import choices"
             );
-            let file = open_session_event_log_for_read(&entry.path())?;
+            let file = open_session_event_log_for_read(&journal)?;
             anyhow::ensure!(
                 file.metadata()?.len() <= MAX_SESSION_EVENT_LINE_BYTES as u64,
                 "import choice exceeds the size limit"
@@ -566,11 +557,57 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Runs on every store open, so the settled case must stay cheap: one
+    /// query and one `stat`. The directory pass (hundreds of microseconds with
+    /// a few hundred chats) is skipped while the folder is unchanged since a
+    /// pass that found nothing to recover and those snapshots are all still
+    /// indexed. Only a log whose session row or mapping is missing does further
+    /// work.
     pub(super) fn recover_project_imports(&self) -> Result<()> {
+        let mut statement = self.conn.prepare(
+            "select i.session_id from project_imports i join sessions s on s.id = i.session_id",
+        )?;
+        let indexed = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(|id| id.ok().and_then(|id| Uuid::parse_str(&id).ok()))
+            .collect::<HashSet<_>>();
+        drop(statement);
+        // Read the clock before the folder: a change made after this `stat`
+        // must not share its timestamp, so a recent one is never trusted.
+        let now = std::time::SystemTime::now();
+        let modified = std::fs::metadata(&self.paths.sessions_dir)?
+            .modified()
+            .ok()
+            .filter(|modified| {
+                now.duration_since(*modified)
+                    .is_ok_and(|age| age >= SETTLED_FOLDER_MIN_AGE)
+            });
+        if let Some(modified) = modified {
+            let settled = settled_import_folders()
+                .get(&self.paths.sessions_dir)
+                .is_some_and(|settled| {
+                    settled.modified == modified
+                        && settled.snapshots.iter().all(|id| indexed.contains(id))
+                });
+            if settled {
+                return Ok(());
+            }
+        }
+        let mut snapshots = Vec::new();
+        let mut unindexed = false;
+        let mut journals = Vec::new();
         for entry in std::fs::read_dir(&self.paths.sessions_dir)? {
             let entry = entry?;
             let name = entry.file_name();
             let Some(name) = name.to_str() else { continue };
+            if let Some(operation_id) = name
+                .strip_prefix("import-choice-")
+                .and_then(|name| name.strip_suffix(".json"))
+                .and_then(|id| Uuid::parse_str(id).ok())
+            {
+                journals.push((operation_id, entry.path()));
+                continue;
+            }
             let Some(id) = name
                 .strip_prefix("import-")
                 .and_then(|name| name.strip_suffix(".jsonl"))
@@ -578,6 +615,11 @@ impl SessionStore {
             else {
                 continue;
             };
+            snapshots.push(id);
+            if indexed.contains(&id) {
+                continue;
+            }
+            unindexed = true;
             if let Some(session) = self.get_session(id)? {
                 if let Some(source) = session.import_source.as_ref() {
                     let indexed: bool = self.conn.query_row("select exists(select 1 from project_imports where provider_id = ?1 and source_session_id = ?2)", params![source.source_kind.provider_id(), source.source_session_id], |row| row.get(0))?;
@@ -654,8 +696,45 @@ impl SessionStore {
                 eprintln!("could not recover imported conversation {id}: {error}");
             }
         }
-        self.recover_pending_import_metadata()
+        let settled = !unindexed && journals.is_empty();
+        self.recover_pending_import_metadata(journals)?;
+        let mut folders = settled_import_folders();
+        match modified.filter(|_| settled) {
+            Some(modified) => {
+                folders.insert(
+                    self.paths.sessions_dir.clone(),
+                    SettledImportFolder {
+                        modified,
+                        snapshots,
+                    },
+                );
+            }
+            None => {
+                folders.remove(&self.paths.sessions_dir);
+            }
+        }
+        Ok(())
     }
+}
+
+/// Coarse filesystems stamp a folder in whole seconds, so only a folder this
+/// old is known to show any later change in its modification time.
+const SETTLED_FOLDER_MIN_AGE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// A sessions folder whose last directory pass found nothing to recover.
+struct SettledImportFolder {
+    modified: std::time::SystemTime,
+    snapshots: Vec<Uuid>,
+}
+
+fn settled_import_folders() -> std::sync::MutexGuard<'static, HashMap<PathBuf, SettledImportFolder>>
+{
+    static FOLDERS: std::sync::OnceLock<std::sync::Mutex<HashMap<PathBuf, SettledImportFolder>>> =
+        std::sync::OnceLock::new();
+    FOLDERS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn write_import_event(file: &mut File, event: &SessionEvent) -> Result<()> {
@@ -1194,6 +1273,58 @@ mod tests {
             .get_provider_session_binding(session.id, "openai")
             .unwrap()
             .is_none());
+    }
+
+    /// Date the sessions folder back far enough for its time to be trusted.
+    fn settle_folder(paths: &GyroPaths, age: std::time::Duration) {
+        File::open(&paths.sessions_dir)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - age)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_settled_sessions_folder_still_recovers_lost_mappings_and_new_snapshots() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("gyro"));
+        let id = SessionStore::open(paths.clone())
+            .unwrap()
+            .import_project_session(import(temp.path(), SourceKind::Codex))
+            .unwrap()
+            .session
+            .id;
+        settle_folder(&paths, std::time::Duration::from_secs(3600));
+        // This pass finds nothing to recover, so later opens skip the folder.
+        let store = SessionStore::open(paths.clone()).unwrap();
+        assert!(settled_import_folders().contains_key(&paths.sessions_dir));
+        // A lost mapping leaves the folder untouched.
+        store
+            .conn
+            .execute("delete from project_imports", [])
+            .unwrap();
+        drop(store);
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let mapped: String = store
+            .conn
+            .query_row("select session_id from project_imports", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(mapped, id.to_string());
+        // A snapshot left by a failed publication changes the folder, and an
+        // old enough change is still a different time.
+        store.conn.execute_batch("create trigger fail_import_publication before insert on project_imports begin select raise(abort, 'simulated publication failure'); end;").unwrap();
+        assert!(store
+            .import_project_session(import(temp.path(), SourceKind::ClaudeCode))
+            .is_err());
+        store
+            .conn
+            .execute_batch("drop trigger fail_import_publication;")
+            .unwrap();
+        drop(store);
+        settle_folder(&paths, std::time::Duration::from_secs(1800));
+        let recovered = SessionStore::open(paths).unwrap();
+        assert_eq!(recovered.list_sessions().unwrap().len(), 2);
     }
 
     #[test]
