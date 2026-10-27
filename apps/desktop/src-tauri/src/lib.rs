@@ -28488,7 +28488,7 @@ while True:
                 "GYRO_QUESTIONS:",
                 "2–4 options",
                 "end the turn and wait",
-                "Call gyro_tool_catalog",
+                "Use gyro_tool_catalog",
             ] {
                 assert!(opening.contains(opening_only), "{provider} lost {opening_only}");
                 assert!(
