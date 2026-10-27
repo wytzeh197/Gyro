@@ -129,26 +129,45 @@ pub(super) fn bound_model_search_results(
     results: Vec<WorkspaceSearchResult>,
     max_bytes: usize,
 ) -> anyhow::Result<(Vec<serde_json::Value>, bool)> {
-    let mut results = results
+    let results = results
         .into_iter()
         .map(model_search_preview)
         .collect::<anyhow::Result<Vec<_>>>()?;
     let original_count = results.len();
-    let (mut low, mut high) = (0, original_count);
-    while low < high {
-        let mid = low + (high - low).div_ceil(2);
-        let data = serde_json::to_value(&results[..mid])?;
-        if serde_json::to_vec(&data)?.len() <= max_bytes {
-            low = mid;
-        } else {
-            high = mid - 1;
-        }
+    // Encode each match once. A compact JSON array is `[` + items joined by
+    // `,` + `]`, so the longest fitting prefix is a running sum — not a fresh
+    // serialization of the whole prefix at every binary-search step.
+    let mut item_lengths = Vec::with_capacity(original_count);
+    for result in &results {
+        item_lengths.push(serde_json::to_vec(result)?.len());
     }
-    if low == 0 && original_count > 0 {
+    let keep = longest_json_array_prefix(&item_lengths, max_bytes);
+    if keep == 0 && original_count > 0 {
         anyhow::bail!("A Workspace search match exceeds maxBytes; narrow the query or increase the byte budget");
     }
-    results.truncate(low);
-    Ok((results, low < original_count))
+    let mut results = results;
+    results.truncate(keep);
+    Ok((results, keep < original_count))
+}
+
+/// How many leading items fit in a compact JSON array of at most `max_bytes`.
+fn longest_json_array_prefix(item_lengths: &[usize], max_bytes: usize) -> usize {
+    let mut used = 2usize; // `[]`
+    let mut keep = 0usize;
+    for (index, size) in item_lengths.iter().copied().enumerate() {
+        let Some(with_item) = used.checked_add(size) else {
+            break;
+        };
+        let Some(next) = with_item.checked_add(usize::from(index > 0)) else {
+            break;
+        };
+        if next > max_bytes {
+            break;
+        }
+        used = next;
+        keep = index + 1;
+    }
+    keep
 }
 
 fn model_search_preview(result: WorkspaceSearchResult) -> anyhow::Result<serde_json::Value> {
@@ -227,44 +246,111 @@ struct RgRange {
 
 // Ripgrep reports byte offsets; the editor and JavaScript use UTF-16 columns.
 fn search_range(line: &str, start: usize, end: usize) -> Option<WorkspaceSearchRange> {
-    if start > end {
-        return None;
-    }
-    Some(WorkspaceSearchRange {
-        start_column: line.get(..start)?.encode_utf16().count() + 1,
-        end_column: line.get(..end)?.encode_utf16().count() + 1,
-    })
+    columns_for_byte_spans(line, &[(start, end)])
+        .into_iter()
+        .next()
 }
 
 pub(super) fn literal_search_ranges(line: &str, query: &str) -> Vec<WorkspaceSearchRange> {
     if query.is_empty() {
         return Vec::new();
     }
-    line.match_indices(query)
-        .filter_map(|(offset, matched)| search_range(line, offset, offset + matched.len()))
-        .collect()
+    let spans = line
+        .match_indices(query)
+        .map(|(offset, matched)| (offset, offset + matched.len()))
+        .collect::<Vec<_>>();
+    columns_for_byte_spans(line, &spans)
+}
+
+/// Map byte spans to 1-based UTF-16 columns in one forward pass.
+///
+/// Counting `line[..offset].encode_utf16()` once per match walks the same
+/// prefix again for every hit. A long line with a hit every few bytes made
+/// result parsing quadratic. Spans that are inverted, past the end, or not on
+/// a char boundary are skipped, matching the old per-span `get` check.
+fn columns_for_byte_spans(line: &str, spans: &[(usize, usize)]) -> Vec<WorkspaceSearchRange> {
+    let mut ranges = Vec::with_capacity(spans.len());
+    let mut units = 0usize;
+    let mut cursor = 0usize;
+    let mut chars = line.char_indices();
+    let mut pending = chars.next();
+    for &(start, end) in spans {
+        if start > end || end > line.len() || start < cursor {
+            if start < cursor && start <= end && end <= line.len() {
+                units = 0;
+                cursor = 0;
+                chars = line.char_indices();
+                pending = chars.next();
+            } else {
+                continue;
+            }
+        }
+        let Some(start_column) =
+            column_at(start, &mut units, &mut cursor, &mut chars, &mut pending)
+        else {
+            continue;
+        };
+        let Some(end_column) = column_at(end, &mut units, &mut cursor, &mut chars, &mut pending)
+        else {
+            continue;
+        };
+        ranges.push(WorkspaceSearchRange {
+            start_column,
+            end_column,
+        });
+    }
+    ranges
+}
+
+/// UTF-16 column (1-based) of `target`, advancing the cursor. `None` when
+/// `target` is not a char boundary at or after the cursor.
+fn column_at(
+    target: usize,
+    units: &mut usize,
+    cursor: &mut usize,
+    chars: &mut std::str::CharIndices<'_>,
+    pending: &mut Option<(usize, char)>,
+) -> Option<usize> {
+    if target < *cursor {
+        return None;
+    }
+    while *cursor < target {
+        let (index, character) = pending.take()?;
+        let next = index + character.len_utf8();
+        if target < next {
+            // Landed inside a character. Put it back so a later span can
+            // still be measured from this boundary.
+            *pending = Some((index, character));
+            return None;
+        }
+        *units += character.len_utf16();
+        *cursor = next;
+        *pending = chars.next();
+    }
+    Some(*units + 1)
 }
 
 pub(super) fn parse_rg_output(output: &str, max_results: usize) -> Vec<WorkspaceSearchResult> {
     output
         .lines()
         .filter_map(|record| {
-            let record: serde_json::Value = serde_json::from_str(record).ok()?;
+            let mut record: serde_json::Value = serde_json::from_str(record).ok()?;
             if record.get("type")?.as_str()? != "match" {
                 return None;
             }
-            let data: RgMatch = serde_json::from_value(record.get("data")?.clone()).ok()?;
+            let data: RgMatch = serde_json::from_value(record.get_mut("data")?.take()).ok()?;
             let line = data
                 .lines
                 .text
                 .strip_suffix('\n')
                 .unwrap_or(&data.lines.text);
             let line = line.strip_suffix('\r').unwrap_or(line);
-            let ranges = data
+            let spans = data
                 .submatches
                 .iter()
-                .filter_map(|range| search_range(line, range.start, range.end))
-                .collect();
+                .map(|range| (range.start, range.end))
+                .collect::<Vec<_>>();
+            let ranges = columns_for_byte_spans(line, &spans);
             Some(WorkspaceSearchResult {
                 path: data
                     .path
@@ -394,6 +480,65 @@ mod tests {
         assert!(limited);
         assert!(!bounded.is_empty());
         assert!(serde_json::to_vec(&bounded).unwrap().len() <= 1024);
+    }
+
+    #[test]
+    fn search_budget_keeps_the_longest_prefix_that_fits() {
+        let inputs: Vec<_> = (0..30)
+            .map(|index| WorkspaceSearchResult {
+                path: format!("f{index}.txt"),
+                line_number: index + 1,
+                line: "x".repeat(40 + index),
+                ranges: vec![WorkspaceSearchRange {
+                    start_column: 1,
+                    end_column: 2,
+                }],
+            })
+            .collect();
+        let previews = inputs
+            .iter()
+            .cloned()
+            .map(model_search_preview)
+            .collect::<anyhow::Result<Vec<_>>>()
+            .unwrap();
+        let budget = 900usize;
+        let mut expected = 0usize;
+        for count in 0..=previews.len() {
+            if serde_json::to_vec(&previews[..count]).unwrap().len() <= budget {
+                expected = count;
+            } else {
+                break;
+            }
+        }
+        assert!(expected > 0 && expected < previews.len());
+        let (bounded, limited) = bound_model_search_results(inputs, budget).unwrap();
+        assert!(limited);
+        assert_eq!(bounded.len(), expected);
+        assert_eq!(
+            serde_json::to_vec(&bounded).unwrap().len(),
+            serde_json::to_vec(&previews[..expected]).unwrap().len()
+        );
+    }
+
+    #[test]
+    fn many_literal_matches_keep_utf16_columns_after_a_wide_character() {
+        let line = format!("🦀{}", " needle".repeat(200));
+        let ranges = literal_search_ranges(&line, "needle");
+        assert_eq!(ranges.len(), 200);
+        // 🦀 is two UTF-16 units and the following space is the third.
+        assert_eq!(ranges[0].start_column, 4);
+        assert_eq!(ranges[0].end_column, 10);
+        for pair in ranges.windows(2) {
+            assert!(pair[1].start_column > pair[0].start_column);
+            assert_eq!(pair[1].start_column - pair[0].start_column, 7);
+            assert_eq!(pair[0].end_column - pair[0].start_column, 6);
+        }
+        assert!(search_range("🦀", 1, 2).is_none());
+        assert_eq!(
+            search_range("🦀", 0, 4).unwrap().end_column,
+            3,
+            "a single wide character still occupies two UTF-16 columns"
+        );
     }
 
     #[test]
