@@ -936,6 +936,32 @@
   padding: 0 calc(11px * var(--gyro-ui-scale, 1));
 }
 
+/* The sliding indicator is the selected segment, so it carries the raised
+   thumb rather than the generic track wash. */
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-segmented
+  > .gyro-selection-indicator {
+  background: var(--gyro-segment-active);
+  box-shadow:
+    0 1px 2px var(--gyro-shadow),
+    0 0 0 0.5px var(--gyro-premium-hairline);
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-segmented
+  > button:not(.is-active) {
+  color: var(--gyro-muted);
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-segmented
+  > button:not(.is-active):hover {
+  color: var(--gyro-text);
+}
+
 :root[data-theme]
   .gyro-settings-surface
   :is(.gyro-secondary-button, .gyro-danger-button) {
@@ -999,7 +1025,8 @@
   border: 0;
   border-bottom: 1px solid var(--gyro-border-soft);
   border-radius: 0;
-  background: color-mix(in srgb, var(--gyro-pane) 92%, transparent);
+  /* The surface paints --gyro-app; a pane tint here read as a stray band. */
+  background: color-mix(in srgb, var(--gyro-app) 92%, transparent);
   backdrop-filter: blur(10px);
   text-align: left;
 }
@@ -1666,8 +1693,21 @@
    group. One 4px-based scale now sets the page's whole vertical rhythm:
    title block 32px to the first group, 32px between groups, 14px from a
    label to its card, and 7px from a row title to its detail. */
+/* The header rule sits between the title block and the first group, not
+   flush on top of the group label. */
 :root[data-theme] .gyro-settings-surface .gyro-settings-section > header {
-  padding: 0 0 calc(32px * var(--gyro-ui-scale, 1));
+  margin-bottom: calc(28px * var(--gyro-ui-scale, 1));
+  padding: 0 0 calc(24px * var(--gyro-ui-scale, 1));
+}
+
+/* Appearance's sticky scope bar already draws that rule. */
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-section:has(.gyro-appearance-scope)
+  > header {
+  margin-bottom: 0;
+  padding-bottom: calc(12px * var(--gyro-ui-scale, 1));
+  border-bottom: 0;
 }
 
 :root[data-theme] .gyro-settings-surface .gyro-settings-section-body {

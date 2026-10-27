@@ -187,6 +187,13 @@
 :root[data-theme] .gyro-settings-switch > span {
   box-shadow: 0 1px 2px color-mix(in srgb, var(--gyro-shadow) 40%, transparent);
 }
+:root[data-theme] .gyro-settings-switch:not(.is-on) {
+  background: var(--gyro-switch-off-track);
+  border-color: var(--gyro-switch-off-rim);
+}
+:root[data-theme] .gyro-settings-switch:not(.is-on) > span {
+  background: var(--gyro-switch-off-thumb);
+}
 :root[data-theme] .gyro-settings-switch.is-on {
   border-color: color-mix(in srgb, var(--gyro-accent) 80%, var(--gyro-text));
 }

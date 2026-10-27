@@ -92,6 +92,11 @@
   --gyro-segment-bg: var(--gyro-sidebar);
   --gyro-segment-active: #323232;
   --gyro-segment-active-text: var(--gyro-text);
+  /* An off switch keeps a quiet track and a muted thumb on graphite; light
+     mode restates both as a pale track with a white thumb. */
+  --gyro-switch-off-track: var(--gyro-premium-control);
+  --gyro-switch-off-thumb: var(--gyro-muted);
+  --gyro-switch-off-rim: var(--gyro-border-strong);
   /* The System preference thumbnail must show both palettes at once. */
   --gyro-theme-preview-dark-canvas: #141414;
   --gyro-theme-preview-dark-content: #383838;
@@ -863,7 +868,9 @@
   --gyro-border-strong: #898989;
   --gyro-text: #252525;
   --gyro-muted: #626262;
-  --gyro-faint: #686868;
+  /* Lighter than muted so meta text keeps a step of hierarchy, while staying
+     above 4.5:1 on the app canvas. */
+  --gyro-faint: #707070;
   --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 82%, #10203b 18%);
   --gyro-accent-strong: color-mix(
     in srgb,
@@ -918,6 +925,9 @@
   --gyro-segment-bg: #e5e5e5;
   --gyro-segment-active: var(--gyro-surface);
   --gyro-segment-active-text: var(--gyro-text);
+  --gyro-switch-off-track: #e3e3e3;
+  --gyro-switch-off-thumb: #ffffff;
+  --gyro-switch-off-rim: #cfcfcf;
   --gyro-shadow: rgba(24, 24, 24, 0.08);
   --gyro-heavy-shadow: rgba(24, 24, 24, 0.16);
   --gyro-focus-ring: var(--gyro-accent);
