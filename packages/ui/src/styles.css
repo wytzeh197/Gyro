@@ -30326,19 +30326,31 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-muted);
 }
 
-/* Workspace activity rail is 44px; keep the restore control clear of traffic lights. */
+/* Workspace with its view panel hidden: the activity rail stays, and the
+   toggle and surface switch keep the pixels the windowbar gave them (toggle at
+   90px, switch 8px after it), so neither moves under the pointer. The editor
+   tab strip then starts clear of the switch. */
 .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
-  .gyro-sidebar-restore-cluster {
-  padding-left: 49px;
+  > .gyro-sidebar-restore-cluster {
+  align-items: center;
+  gap: 8px;
+  padding-left: 90px;
+  padding-top: 0;
+}
+
+.gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
+  > .gyro-sidebar-restore-cluster
+  > .gyro-titlebar-switch {
+  flex: none;
+  pointer-events: auto;
+  width: calc(80px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
   .gyro-workspace-route.is-code
-  .gyro-editor-tabs,
-.gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
-  .gyro-workspace-route.is-code
-  .gyro-editor-contextbar {
-  padding-left: 48px;
+  .gyro-editor-tabs {
+  min-height: 48px;
+  padding-left: 174px;
 }
 
 :root[data-theme="light"] .gyro-sidebar-restore-button {
@@ -30385,30 +30397,6 @@ button.gyro-account-menu-row:hover,
   .gyro-sidebar-window-actions
   .gyro-sidebar-toggle-button:hover {
   background: transparent;
-}
-
-/* Workspace code: show-sidebar lives in the main column (after the activity rail). */
-.gyro-main.has-sidebar-restore {
-  position: relative;
-}
-
-.gyro-sidebar-restore-button.is-in-main {
-  left: 12px;
-  position: absolute;
-  top: 10px;
-  z-index: 40;
-}
-
-.gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
-  .gyro-workspace-route.is-code
-  .gyro-editor-tabs {
-  padding-left: 44px;
-}
-
-.gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
-  .gyro-workspace-route.is-code
-  .gyro-editor-contextbar {
-  padding-left: 44px;
 }
 
 /* ---- Browser focus layout mode ---- */

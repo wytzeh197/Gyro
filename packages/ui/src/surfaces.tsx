@@ -1389,9 +1389,10 @@ function WorkspaceActivityRail({
   isVisible,
   isSidebarHidden,
   isSidebarCollapsible = true,
+  onHideSidebar,
   onOpenSettings,
   onSelectView,
-  onToggleSidebar,
+  onShowSidebar,
 }: {
   activeView: IdeViewId;
   badges?: Partial<Record<IdeViewId, ActivityRailBadge>>;
@@ -1400,9 +1401,10 @@ function WorkspaceActivityRail({
   isSidebarHidden: boolean;
   /** When false, re-clicking the active view does not hide the sidebar. */
   isSidebarCollapsible?: boolean;
+  onHideSidebar: () => void;
   onOpenSettings?: () => void;
   onSelectView?: (view: IdeViewId) => void;
-  onToggleSidebar: () => void;
+  onShowSidebar: () => void;
 }) {
   const renderView = (view: (typeof workspaceViewContainers)[number]) => {
     const Icon = workspaceShellIcons[view.icon];
@@ -1424,7 +1426,7 @@ function WorkspaceActivityRail({
       <button
         aria-label={railLabel}
         aria-pressed={isActive && !isSidebarHidden}
-        className={isActive ? "is-active" : ""}
+        className={isActive && !isSidebarHidden ? "is-active" : ""}
         disabled={isDisabled}
         key={view.id}
         onClick={() => {
@@ -1434,12 +1436,13 @@ function WorkspaceActivityRail({
           }
           if (isActive && !isSidebarHidden) {
             if (isSidebarCollapsible) {
-              onToggleSidebar();
+              onHideSidebar();
             }
             return;
           }
-          if (isSidebarHidden && isSidebarCollapsible) {
-            onToggleSidebar();
+          // Every view lives in the one panel, so any of them reopens it.
+          if (isSidebarHidden) {
+            onShowSidebar();
           }
           onSelectView?.(view.id);
         }}
@@ -1478,6 +1481,39 @@ function WorkspaceActivityRail({
         {secondaryViews.map(renderView)}
       </div>
     </nav>
+  );
+}
+
+/** Sessions / Workspace switch. The hidden-sidebar restore cluster renders it
+    too, so Workspace keeps the switch on the same pixel with its panel hidden. */
+function PrimarySurfaceSwitch({
+  isIdeSidebar,
+  onSelectSessions,
+  onSelectWorkspace,
+}: {
+  isIdeSidebar: boolean;
+  onSelectSessions: () => void;
+  onSelectWorkspace: () => void;
+}) {
+  return (
+    <SelectionTrack
+      label="Primary surfaces"
+      className="gyro-titlebar-switch"
+      value={isIdeSidebar ? "workspace" : "sessions"}
+    >
+      <SidebarModeRow
+        icon={<MessageSquare size={15} strokeWidth={1.5} />}
+        label="Sessions"
+        isActive={!isIdeSidebar}
+        onClick={onSelectSessions}
+      />
+      <SidebarModeRow
+        icon={<CodeXml size={15} strokeWidth={1.5} />}
+        label="Workspace"
+        isActive={isIdeSidebar}
+        onClick={onSelectWorkspace}
+      />
+    </SelectionTrack>
   );
 }
 
@@ -1790,36 +1826,24 @@ export function AppChrome({
   const compactNavigationId = useId();
   const compactNavigationButtonRef = useRef<HTMLButtonElement>(null);
   const compactSidebarRef = useRef<HTMLElement>(null);
-  // Workspace (code) always keeps the sidebar. Hide/show only exists on
-  // Sessions and other non-IDE shells — the restore control never landed
-  // cleanly under the traffic lights in Workspace.
-  const isSidebarHidden = isIdeSurface ? false : localSidebarHidden;
+  // Workspace (code) hides only its view panel: the activity rail stays, and
+  // any rail view brings the panel back. That choice is a saved preference,
+  // kept apart from the Sessions sidebar so hiding one never hides the other.
+  const isSidebarHidden = isIdeSurface
+    ? Boolean(workspaceSidebarHidden)
+    : localSidebarHidden;
   const setIsSidebarHidden = useCallback(
     (next: boolean | ((current: boolean) => boolean)) => {
-      if (isIdeSurface) {
-        // Ignore hide attempts while Workspace code is active.
-        setLocalSidebarHidden(false);
-        onWorkspaceSidebarHiddenChange?.(false);
-        return;
-      }
       const resolved =
         typeof next === "function" ? next(isSidebarHidden) : next;
+      if (isIdeSurface) {
+        onWorkspaceSidebarHiddenChange?.(resolved);
+        return;
+      }
       setLocalSidebarHidden(resolved);
     },
     [isIdeSurface, isSidebarHidden, onWorkspaceSidebarHiddenChange],
   );
-
-  useEffect(() => {
-    if (!isIdeSurface) {
-      return;
-    }
-    // Entering Workspace with a leftover hidden preference would leave the
-    // shell with no explorer — force visible.
-    setLocalSidebarHidden(false);
-    if (workspaceSidebarHidden) {
-      onWorkspaceSidebarHiddenChange?.(false);
-    }
-  }, [isIdeSurface, onWorkspaceSidebarHiddenChange, workspaceSidebarHidden]);
   const [settingsQuery, setSettingsQuery] = useState("");
   const [isSettingsSearchFocused, setIsSettingsSearchFocused] = useState(false);
   const [selectedSettingsResultIndex, setSelectedSettingsResultIndex] =
@@ -2283,7 +2307,7 @@ export function AppChrome({
         badges={sourceControlRailBadge(ide?.sourceControl)}
         hasWorkspace={Boolean(workspacePath)}
         isSidebarCollapsible={false}
-        isSidebarHidden={false}
+        isSidebarHidden={isSidebarHidden}
         isVisible={isIdeSurface}
         onOpenSettings={() => {
           if (onOpenSettingsSection) {
@@ -2292,8 +2316,9 @@ export function AppChrome({
           }
           onOpenSettings();
         }}
+        onHideSidebar={() => setIsSidebarHidden(true)}
         onSelectView={onSelectIdeView}
-        onToggleSidebar={() => undefined}
+        onShowSidebar={() => setIsSidebarHidden(false)}
       />
       {isSidebarHidden && !isCompactNavigationOpen ? (
         <div className="gyro-sidebar-restore-cluster">
@@ -2321,6 +2346,14 @@ export function AppChrome({
               </button>
             ) : null}
           </div>
+          {/* Workspace hides only its view panel; the surface switch stays. */}
+          {isIdeSurface ? (
+            <PrimarySurfaceSwitch
+              isIdeSidebar
+              onSelectSessions={onSelectSessions}
+              onSelectWorkspace={() => onSelectWorkspaceLayout("code")}
+            />
+          ) : null}
           <WorkspacePreparationControl
             controlRef={workspacePreparationRef}
             isOpen={isWorkspacePreparationOpen}
@@ -2510,7 +2543,6 @@ export function AppChrome({
               activeWorkspaceLayout={activeWorkspaceLayout}
               commandProfiles={commandProfiles}
               files={files}
-              canHideSidebar={!isIdeSurface}
               ide={ide}
               isChatsCollapsed={isChatsCollapsed}
               onAddTerminalPane={onAddTerminalPane}
@@ -3837,7 +3869,6 @@ function WorkspaceSidebarContent({
   projectSettings,
   onToggleChatsCollapsed,
   onToggleSidebar,
-  canHideSidebar = true,
   renderAiChat,
 }: {
   renderAiChat?: () => ReactNode;
@@ -3955,8 +3986,6 @@ function WorkspaceSidebarContent({
   projectSettings?: SidebarProjectSettings;
   onToggleChatsCollapsed?: () => void;
   onToggleSidebar: () => void;
-  /** When false, the hide control is omitted (Workspace code layout). */
-  canHideSidebar?: boolean;
 }) {
   // CLI sessions belong to the terminal surface. Explicitly imported projects
   // remain navigable even when their original folder is temporary.
@@ -4790,48 +4819,24 @@ function WorkspaceSidebarContent({
         : null}
       <div className="gyro-sidebar-persistent-header">
         <div className="gyro-sidebar-windowbar" aria-label="Window navigation">
-          {/* Workspace keeps its sidebar, so it has no toggle, but the slot
-              stays as an empty spacer: dropping it pulled the surface switch
-              36px left, out from under the pointer that had just clicked it. */}
-          {canHideSidebar ? (
-            <div className="gyro-sidebar-window-actions">
-              <button
-                aria-label="Hide sidebar"
-                title="Hide sidebar"
-                className="gyro-sidebar-toggle-button"
-                onClick={onToggleSidebar}
-                type="button"
-              >
-                <PanelLeft size={16} strokeWidth={1.5} />
-              </button>
-            </div>
-          ) : (
-            <span
-              aria-hidden="true"
-              className="gyro-sidebar-window-actions is-placeholder"
-            />
-          )}
-          <SelectionTrack
-            label="Primary surfaces"
-            className="gyro-titlebar-switch"
-            value={isIdeSidebar ? "workspace" : "sessions"}
-          >
-            <SidebarModeRow
-              icon={<MessageSquare size={15} strokeWidth={1.5} />}
-              label="Sessions"
-              isActive={isSessionsSidebar}
-              onClick={onSelectSessions}
-            />
-            <SidebarModeRow
-              icon={<CodeXml size={15} strokeWidth={1.5} />}
-              label="Workspace"
-              isActive={
-                activeDestination === "workspace" &&
-                activeWorkspaceLayout === "code"
-              }
-              onClick={() => onSelectWorkspaceLayout("code")}
-            />
-          </SelectionTrack>
+          {/* Both surfaces carry the toggle in the same slot, so the surface
+              switch never moves out from under the pointer that clicked it. */}
+          <div className="gyro-sidebar-window-actions">
+            <button
+              aria-label="Hide sidebar"
+              title="Hide sidebar"
+              className="gyro-sidebar-toggle-button"
+              onClick={onToggleSidebar}
+              type="button"
+            >
+              <PanelLeft size={16} strokeWidth={1.5} />
+            </button>
+          </div>
+          <PrimarySurfaceSwitch
+            isIdeSidebar={isIdeSidebar}
+            onSelectSessions={onSelectSessions}
+            onSelectWorkspace={() => onSelectWorkspaceLayout("code")}
+          />
           <div
             aria-hidden="true"
             className="gyro-sidebar-titlebar-drag-region"
