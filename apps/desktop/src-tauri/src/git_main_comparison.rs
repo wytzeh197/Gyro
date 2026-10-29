@@ -26,8 +26,22 @@ pub(crate) fn git_main_comparison_base(repo_root: &Path, deadline: Instant) -> O
     None
 }
 
+/// Where the checkout forked from `base`. Commits that landed on main after
+/// the fork are not this branch's changes; diffing against main's tip showed
+/// each of them reversed, as thousands of lines this branch never touched.
+fn git_fork_point(workspace: &Path, base: &str, deadline: Instant) -> Option<String> {
+    let mut command = git_command();
+    command
+        .arg("-C")
+        .arg(workspace)
+        .args(["merge-base", base, "HEAD"]);
+    let output = git_read::run(&command, deadline, 1024).ok()?;
+    (output.succeeded() && !output.stdout_truncated).then(|| output.stdout.trim().to_owned())
+}
+
 /// `workspace` is the directory paths are reported relative to, like the
-/// `untracked` files; the base is resolved once, within `deadline`.
+/// `untracked` files; the base is resolved once, within `deadline`, and the
+/// diff runs from where the checkout forked from it.
 pub(crate) fn git_main_comparison(
     workspace: &Path,
     untracked: &[SourceControlFile],
@@ -35,7 +49,8 @@ pub(crate) fn git_main_comparison(
     partial: bool,
     deadline: Instant,
 ) -> Option<MainComparisonStats> {
-    let base = git_main_comparison_base(workspace, deadline)?;
+    let main = git_main_comparison_base(workspace, deadline)?;
+    let base = git_fork_point(workspace, &main, deadline).unwrap_or(main);
     let mut command = git_command();
     command
         .arg("-C")
@@ -148,6 +163,29 @@ mod tests {
         let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
         let comparison = status.compared_to_main.unwrap();
         assert_eq!((comparison.additions, comparison.deletions), (0, 0));
+    }
+
+    #[test]
+    fn source_control_main_comparison_ignores_main_commits_after_the_fork() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        std::fs::write(repo.path().join("file.txt"), "base\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "base"]);
+        run_git(repo.path(), &["checkout", "-b", "feature"]);
+        std::fs::write(repo.path().join("file.txt"), "base\nfeature\n").unwrap();
+        run_git(repo.path(), &["commit", "-am", "feature"]);
+        run_git(repo.path(), &["checkout", "main"]);
+        std::fs::write(repo.path().join("later.txt"), "one\ntwo\nthree\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "later on main"]);
+        run_git(repo.path(), &["checkout", "feature"]);
+        std::fs::write(repo.path().join("file 2.txt"), "base\nfeature\n").unwrap();
+        let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        let comparison = status.compared_to_main.unwrap();
+        assert_eq!((comparison.additions, comparison.deletions), (1, 0));
+        assert!(!comparison.files.iter().any(|file| file.path == "later.txt"));
+        assert_eq!(status.additions, 0);
     }
 
     fn init_git_repo(repo: &Path) {

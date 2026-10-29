@@ -548,6 +548,14 @@ pub(super) fn apply_git_diff_stats(
         if metadata.is_dir() {
             continue;
         }
+        match git_line_counts::is_sync_duplicate_before(&path, deadline) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(_) => {
+                status.stats_partial = true;
+                continue;
+            }
+        }
         let additions = match git_line_counts::untracked_lines_before(&path, deadline) {
             Ok(lines) => lines,
             Err(_) => {

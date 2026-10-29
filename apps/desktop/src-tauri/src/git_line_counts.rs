@@ -127,12 +127,8 @@ fn count_untracked_lines(path: &Path, deadline: Option<Instant>) -> io::Result<u
     }
     let used = CLOCK.fetch_add(1, Ordering::Relaxed);
     let mut entries = cache();
-    if entries.len() >= CACHE_CAPACITY && !entries.contains_key(path) {
-        let mut stamps: Vec<u64> = entries.values().map(|entry| entry.used).collect();
-        let midpoint = stamps.len() / 2;
-        let (_, cutoff, _) = stamps.select_nth_unstable(midpoint);
-        let cutoff = *cutoff;
-        entries.retain(|_, entry| entry.used >= cutoff);
+    if !entries.contains_key(path) {
+        evict_cold_half(&mut entries, |entry| entry.used);
     }
     entries.insert(
         path.to_path_buf(),
@@ -143,6 +139,120 @@ fn count_untracked_lines(path: &Path, deadline: Option<Instant>) -> io::Result<u
         },
     );
     Ok(count)
+}
+
+fn evict_cold_half<V>(entries: &mut HashMap<PathBuf, V>, used: impl Fn(&V) -> u64) {
+    if entries.len() < CACHE_CAPACITY {
+        return;
+    }
+    let mut stamps: Vec<u64> = entries.values().map(&used).collect();
+    let midpoint = stamps.len() / 2;
+    let (_, cutoff, _) = stamps.select_nth_unstable(midpoint);
+    let cutoff = *cutoff;
+    entries.retain(|_, entry| used(entry) >= cutoff);
+}
+
+/// The file a Finder or iCloud conflict copy was made from: `name 2.ext`
+/// sits next to `name.ext`, `Makefile 3` next to `Makefile`.
+fn sync_duplicate_original(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?.to_str()?;
+    let (stem, extension) = match name.rfind('.') {
+        Some(dot) if dot > 0 => name.split_at(dot),
+        _ => (name, ""),
+    };
+    let (base, copy) = stem.rsplit_once(' ')?;
+    if base.is_empty() || copy.is_empty() || !copy.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(path.with_file_name(format!("{base}{extension}")))
+}
+
+struct DuplicateEntry {
+    fingerprints: (Fingerprint, Fingerprint),
+    duplicate: bool,
+    used: u64,
+}
+
+static DUPLICATES: OnceLock<Mutex<HashMap<PathBuf, DuplicateEntry>>> = OnceLock::new();
+
+fn duplicates() -> MutexGuard<'static, HashMap<PathBuf, DuplicateEntry>> {
+    DUPLICATES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Whether an untracked file is a byte-identical Finder or iCloud conflict
+/// copy of its neighbour. Syncing a repository through iCloud can duplicate
+/// thousands of files at once; counting those copies as new lines inflated the
+/// totals by hundreds of thousands, by a different amount on every refresh as
+/// the deadline cut the count short.
+pub fn is_sync_duplicate_before(path: &Path, deadline: Instant) -> io::Result<bool> {
+    let Some(original) = sync_duplicate_original(path) else {
+        return Ok(false);
+    };
+    let copy_metadata = fs::symlink_metadata(path)?;
+    let Ok(original_metadata) = fs::symlink_metadata(&original) else {
+        return Ok(false);
+    };
+    if !copy_metadata.is_file()
+        || !original_metadata.is_file()
+        || copy_metadata.len() != original_metadata.len()
+    {
+        return Ok(false);
+    }
+    let fingerprints = (
+        fingerprint(&copy_metadata)?,
+        fingerprint(&original_metadata)?,
+    );
+    if let Some(entry) = duplicates().get_mut(path) {
+        if entry.fingerprints == fingerprints {
+            entry.used = CLOCK.fetch_add(1, Ordering::Relaxed);
+            return Ok(entry.duplicate);
+        }
+    }
+    let duplicate = same_contents(path, &original, Some(deadline))?;
+    if fingerprints
+        != (
+            fingerprint(&fs::symlink_metadata(path)?)?,
+            fingerprint(&fs::symlink_metadata(&original)?)?,
+        )
+    {
+        return Err(io::Error::other("File changed while comparing"));
+    }
+    let used = CLOCK.fetch_add(1, Ordering::Relaxed);
+    let mut entries = duplicates();
+    if !entries.contains_key(path) {
+        evict_cold_half(&mut entries, |entry| entry.used);
+    }
+    entries.insert(
+        path.to_path_buf(),
+        DuplicateEntry {
+            fingerprints,
+            duplicate,
+            used,
+        },
+    );
+    Ok(duplicate)
+}
+
+fn same_contents(left: &Path, right: &Path, deadline: Option<Instant>) -> io::Result<bool> {
+    let mut left = fs::File::open(left)?;
+    let mut right = fs::File::open(right)?;
+    let mut left_buffer = [0u8; 64 * 1024];
+    let mut right_buffer = [0u8; 64 * 1024];
+    loop {
+        check_deadline(deadline)?;
+        let read = left.read(&mut left_buffer)?;
+        if read == 0 {
+            return Ok(right.read(&mut right_buffer[..1])? == 0);
+        }
+        if right.read_exact(&mut right_buffer[..read]).is_err()
+            || left_buffer[..read] != right_buffer[..read]
+        {
+            return Ok(false);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -171,6 +281,38 @@ mod tests {
         assert_eq!(untracked_lines(&path).unwrap(), 1);
         let error = untracked_lines_before(&path, Instant::now()).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn identical_conflict_copies_are_sync_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let deadline = Instant::now() + std::time::Duration::from_secs(10);
+        let write = |name: &str, contents: &str| {
+            let path = dir.path().join(name);
+            fs::write(&path, contents).unwrap();
+            path
+        };
+        write("main.rs", "fn main() {}\n");
+        write("Makefile", "all:\n");
+        write(".gitignore", "target\n");
+        write("schema.test.json", "{}\n");
+        let copy = write("main 2.rs", "fn main() {}\n");
+        assert!(is_sync_duplicate_before(&copy, deadline).unwrap());
+        assert!(is_sync_duplicate_before(&write("Makefile 3", "all:\n"), deadline).unwrap());
+        assert!(is_sync_duplicate_before(&write(".gitignore 2", "target\n"), deadline).unwrap());
+        assert!(is_sync_duplicate_before(&write("schema.test 2.json", "{}\n"), deadline).unwrap());
+        // Same size, different bytes: an edited copy is real new work.
+        fs::write(&copy, "fn main() {]\n").unwrap();
+        assert!(!is_sync_duplicate_before(&copy, deadline).unwrap());
+        assert!(
+            !is_sync_duplicate_before(&write("lib 2.rs", "pub fn x() {}\n"), deadline).unwrap()
+        );
+        assert!(
+            !is_sync_duplicate_before(&write("main v2.rs", "fn main() {}\n"), deadline).unwrap()
+        );
+        assert!(
+            !is_sync_duplicate_before(&write("main 2b.rs", "fn main() {}\n"), deadline).unwrap()
+        );
     }
 
     #[test]
