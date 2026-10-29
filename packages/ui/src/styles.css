@@ -30329,13 +30329,15 @@ button.gyro-account-menu-row:hover,
 /* Workspace with its view panel hidden: the activity rail stays, and the
    toggle and surface switch keep the pixels the windowbar gave them (toggle at
    90px, switch 8px after it), so neither moves under the pointer. The editor
-   tab strip then starts clear of the switch. */
+   tab row grows to the windowbar's 48px so both sit inside it, and its tabs
+   start clear of the switch. */
 .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
   > .gyro-sidebar-restore-cluster {
   align-items: center;
   gap: 8px;
-  padding-left: 90px;
-  padding-top: 0;
+  /* The windowbar's 2px top padding and 1px bottom border, so both controls
+     centre on the same line instead of rising half a pixel. */
+  padding: 2px 0 1px 90px;
 }
 
 .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
@@ -30346,10 +30348,17 @@ button.gyro-account-menu-row:hover,
   width: calc(80px * var(--gyro-ui-scale, 1));
 }
 
+/* The pane's grid row, the strip, and its tabs all read this height; a
+   min-height on the strip alone overflowed the 28px row, and the editor body
+   painted over its lower part, under the toggle and switch. */
+.gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
+  .gyro-workspace-route.is-code {
+  --gyro-ide-tab-height: 48px;
+}
+
 .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
   .gyro-workspace-route.is-code
   .gyro-editor-tabs {
-  min-height: 48px;
   padding-left: 174px;
 }
 
