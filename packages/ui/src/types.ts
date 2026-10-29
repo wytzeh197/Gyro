@@ -130,6 +130,7 @@ export type CapabilityId =
   | "workspace-move-path"
   | "workspace-duplicate-path"
   | "workspace-undo-path"
+  | "workspace-open-folder"
   | "workspace-run-task"
   | "workspace-run-test"
   | "workspace-read-output"

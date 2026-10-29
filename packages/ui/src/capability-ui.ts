@@ -88,6 +88,7 @@ export const CAPABILITY_UI = {
   "workspace-move-path": { label: "Move path", row: "file" },
   "workspace-duplicate-path": { label: "Duplicate path", row: "file" },
   "workspace-undo-path": { label: "Undo path", row: "tool" },
+  "workspace-open-folder": { label: "Open folder", row: "tool" },
   "workspace-run-task": { label: "Run task", row: "command" },
   "workspace-run-test": { label: "Run tests", row: "command" },
   "workspace-read-output": { label: "Read output", row: "tool" },

@@ -870,6 +870,8 @@ export function App() {
   // user changes surface or follow preference.
   const modelFollowRef = useRef(workbench.preferences.modelFollow);
   modelFollowRef.current = workbench.preferences.modelFollow;
+  // Assigned once the workspace handlers exist, further down this component.
+  const openWorkspaceFolderRef = useRef<(path: string) => Promise<void>>();
   const activeWorkspaceLayoutRef = useRef(workbench.activeWorkspaceLayout);
   activeWorkspaceLayoutRef.current = workbench.activeWorkspaceLayout;
   const [sessionEventsById, setSessionEventsById] = useState<
@@ -3412,6 +3414,18 @@ export function App() {
           });
           if (shouldFollow) {
             dispatchWorkbench({ type: "open-tool-panel", tab: "diff" });
+          }
+        }
+        if (payload.resource.kind === "workspace") {
+          const folder = stringFromRecord(
+            recordFromUnknown(payload.data),
+            "path",
+          );
+          // The user asked this chat to open the folder and approved the call.
+          // If they have since moved to another chat, opening a project would
+          // pull them out of it, so the call only reports what it validated.
+          if (folder && isActiveModelWorkspace) {
+            void openWorkspaceFolderRef.current?.(folder);
           }
         }
       },
@@ -7046,6 +7060,24 @@ export function App() {
     [notify, prepareWorkspace, refreshIdeServices],
   );
 
+  // A folder opened without a picker, by the model at the user's request, goes
+  // through the same trust and activation steps as one picked in the dialog.
+  const openWorkspaceFolder = useCallback(
+    async (selected: string) => {
+      const trustPath = normalizedWorkspaceTrustPath(selected);
+      if (!(trustPath in workbench.preferences.workspaceTrust)) {
+        dispatchWorkbench({
+          type: "set-workspace-trust",
+          path: selected,
+          decision: "restricted",
+        });
+      }
+      await activateWorkspacePath(selected);
+    },
+    [activateWorkspacePath, workbench.preferences.workspaceTrust],
+  );
+  openWorkspaceFolderRef.current = openWorkspaceFolder;
+
   const openWorkspace = useCallback(async (): Promise<string | undefined> => {
     if (!isTauriRuntime()) {
       await activateWorkspacePath(PREVIEW_WORKSPACE_PATH);
@@ -7060,15 +7092,7 @@ export function App() {
       if (typeof selected !== "string") {
         return undefined;
       }
-      const trustPath = normalizedWorkspaceTrustPath(selected);
-      if (!(trustPath in workbench.preferences.workspaceTrust)) {
-        dispatchWorkbench({
-          type: "set-workspace-trust",
-          path: selected,
-          decision: "restricted",
-        });
-      }
-      await activateWorkspacePath(selected);
+      await openWorkspaceFolder(selected);
       return selected;
     } catch {
       notify(
@@ -7078,7 +7102,7 @@ export function App() {
       );
       return undefined;
     }
-  }, [activateWorkspacePath, notify, workbench.preferences.workspaceTrust]);
+  }, [activateWorkspacePath, notify, openWorkspaceFolder]);
 
   const addWorkspaceFolder = useCallback(async (explicitPath?: string) => {
     if (!activeWorkspaceRoot) {

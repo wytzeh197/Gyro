@@ -198,6 +198,7 @@ mod workspace_capability_list;
 mod workspace_capability_read;
 mod workspace_edit_capability;
 mod workspace_mutations;
+mod workspace_open_capability;
 mod workspace_path_capability;
 mod workspace_path_history;
 #[cfg(test)]
@@ -6253,6 +6254,7 @@ fn provider_context_message_with_capabilities_for_turn(
                 "Gyro does not attach the user's open editor file, tab list, selection, or unsaved buffer to the turn. Work from the message and its attachments, and read files with the Workspace tools when you need them.".into(),
             );
             stable.push("A reply may end with a link: [label](https://example.com) renders blue and clickable, and a bare https:// URL becomes a link too. A click opens it in Gyro's Browser panel and a ⌘/Ctrl-click opens the device's default browser, so offer the link instead of describing a URL in prose.".into());
+            stable.push("When the user asks to open or switch to a local folder, call gyro_workspace_open_folder with its absolute path instead of telling them to use Open workspace. It opens a fresh chat in that folder; this chat's own workspace does not change.".into());
         }
         if !turn.resumed {
             stable.push(
@@ -21457,6 +21459,10 @@ fn capability_grant_scope(
             let origin = url.origin().ascii_serialization();
             Ok(("origin".into(), origin))
         }
+        CapabilityId::WorkspaceOpenFolder => Ok((
+            "folder".into(),
+            capability_argument_string(arguments, "path")?.to_string(),
+        )),
         CapabilityId::TerminalOpen => {
             let value = serde_json::json!({
                 "program": capability_argument_string(arguments, "program")?,
@@ -22191,6 +22197,7 @@ fn execute_provider_capability(
         | CapabilityId::WorkspaceUndoPath => {
             workspace_path_capability::execute(app, bound, request)?
         }
+        CapabilityId::WorkspaceOpenFolder => workspace_open_capability::execute(request)?,
         CapabilityId::WorkspaceGitLog
         | CapabilityId::WorkspaceGitShow
         | CapabilityId::WorkspaceGitBlame => git_history_capability::execute(app, bound, request)?,
@@ -23874,6 +23881,7 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
         .or_else(|| lsp_capability::schema(id))
         .or_else(|| workspace_edit_capability::schema(id))
         .or_else(|| workspace_path_capability::schema(id))
+        .or_else(|| workspace_open_capability::schema(id))
         .or_else(|| git_history_capability::schema(id))
         .or_else(|| web_fetch_capability::schema(id))
         .or_else(|| browser_viewport::schema(id))
