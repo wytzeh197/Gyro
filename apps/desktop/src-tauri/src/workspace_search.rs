@@ -75,7 +75,12 @@ pub(super) fn run_scoped_workspace_rg_search(
             cancellation.cancel();
         }
     })?;
-    let results = parse_rg_output(&output.stdout, max_results);
+    let results = results_from_search(
+        &mut progress,
+        &output.stdout,
+        output.stdout_truncated,
+        max_results,
+    );
     if output.succeeded() || output.exit_code() == Some(1) {
         return Ok(WorkspaceSearchScan {
             results,
@@ -107,21 +112,64 @@ pub(super) fn confine_search_directory(root: &Path, path: &str) -> anyhow::Resul
 #[derive(Default)]
 struct SearchOutputProgress {
     pending: String,
-    matches: usize,
+    results: Vec<WorkspaceSearchResult>,
 }
 
 impl SearchOutputProgress {
     fn push(&mut self, chunk: &str, max_results: usize) -> bool {
-        if self.matches >= max_results {
+        if self.results.len() >= max_results {
             return true;
         }
         self.pending.push_str(chunk);
         if let Some(last_newline) = self.pending.rfind('\n') {
             let remainder = self.pending.split_off(last_newline + 1);
             let complete = std::mem::replace(&mut self.pending, remainder);
-            self.matches += parse_rg_output(&complete, max_results - self.matches).len();
+            self.ingest_lines(&complete, max_results);
         }
-        self.matches >= max_results
+        self.results.len() >= max_results
+    }
+
+    fn ingest_lines(&mut self, complete: &str, max_results: usize) {
+        for record in complete.lines() {
+            if self.results.len() >= max_results {
+                break;
+            }
+            if let Some(result) = parse_rg_record(record) {
+                self.results.push(result);
+            }
+        }
+    }
+
+    /// Parse a final record that the process wrote without a trailing newline.
+    fn finish(&mut self, max_results: usize) -> Vec<WorkspaceSearchResult> {
+        if self.results.len() < max_results && !self.pending.is_empty() {
+            if let Some(result) = parse_rg_record(&self.pending) {
+                self.results.push(result);
+            }
+        }
+        self.pending.clear();
+        self.results.truncate(max_results);
+        std::mem::take(&mut self.results)
+    }
+}
+
+/// Results for one search.
+///
+/// The callback sees each stdout chunk before it is stored. A chunk that does
+/// not fit the output cap is only partly stored (`stdout_truncated`), so those
+/// results have to be read from the retained text. Otherwise the chunk stream
+/// is the retained stdout, and parsing it again would repeat the JSON and
+/// column work.
+fn results_from_search(
+    progress: &mut SearchOutputProgress,
+    stdout: &str,
+    stdout_truncated: bool,
+    max_results: usize,
+) -> Vec<WorkspaceSearchResult> {
+    if stdout_truncated {
+        parse_rg_output(stdout, max_results)
+    } else {
+        progress.finish(max_results)
     }
 }
 
@@ -330,41 +378,52 @@ fn column_at(
     Some(*units + 1)
 }
 
+fn parse_rg_record(record: &str) -> Option<WorkspaceSearchResult> {
+    let record = record.trim_end_matches(['\r', ' ', '\t']);
+    if record.is_empty() {
+        return None;
+    }
+    let mut record: serde_json::Value = serde_json::from_str(record).ok()?;
+    if record.get("type")?.as_str()? != "match" {
+        return None;
+    }
+    let data: RgMatch = serde_json::from_value(record.get_mut("data")?.take()).ok()?;
+    let line = data
+        .lines
+        .text
+        .strip_suffix('\n')
+        .unwrap_or(&data.lines.text);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    let spans = data
+        .submatches
+        .iter()
+        .map(|range| (range.start, range.end))
+        .collect::<Vec<_>>();
+    let ranges = columns_for_byte_spans(line, &spans);
+    Some(WorkspaceSearchResult {
+        path: data
+            .path
+            .text
+            .strip_prefix("./")
+            .unwrap_or(&data.path.text)
+            .to_owned(),
+        line_number: data.line_number,
+        line: line.to_owned(),
+        ranges,
+    })
+}
+
 pub(super) fn parse_rg_output(output: &str, max_results: usize) -> Vec<WorkspaceSearchResult> {
-    output
-        .lines()
-        .filter_map(|record| {
-            let mut record: serde_json::Value = serde_json::from_str(record).ok()?;
-            if record.get("type")?.as_str()? != "match" {
-                return None;
-            }
-            let data: RgMatch = serde_json::from_value(record.get_mut("data")?.take()).ok()?;
-            let line = data
-                .lines
-                .text
-                .strip_suffix('\n')
-                .unwrap_or(&data.lines.text);
-            let line = line.strip_suffix('\r').unwrap_or(line);
-            let spans = data
-                .submatches
-                .iter()
-                .map(|range| (range.start, range.end))
-                .collect::<Vec<_>>();
-            let ranges = columns_for_byte_spans(line, &spans);
-            Some(WorkspaceSearchResult {
-                path: data
-                    .path
-                    .text
-                    .strip_prefix("./")
-                    .unwrap_or(&data.path.text)
-                    .to_owned(),
-                line_number: data.line_number,
-                line: line.to_owned(),
-                ranges,
-            })
-        })
-        .take(max_results)
-        .collect()
+    let mut results = Vec::new();
+    for record in output.lines() {
+        if results.len() == max_results {
+            break;
+        }
+        if let Some(result) = parse_rg_record(record) {
+            results.push(result);
+        }
+    }
+    results
 }
 
 #[cfg(test)]
@@ -431,7 +490,70 @@ mod tests {
         assert!(!progress.push(&record[..split], 2));
         assert!(!progress.push(&format!("{}\n", &record[split..]), 2));
         assert!(progress.push(&format!("{record}\n"), 2));
-        assert_eq!(progress.matches, 2);
+        assert_eq!(progress.results.len(), 2);
+    }
+
+    #[test]
+    fn streamed_records_match_one_parse_of_the_same_stdout() {
+        let record = serde_json::json!({
+            "type": "match",
+            "data": {
+                "path": {"text": "./café.txt"},
+                "lines": {"text": "é 🦀 needle\n"},
+                "line_number": 3,
+                "submatches": [{"start": 8, "end": 14}]
+            }
+        })
+        .to_string();
+        let stdout = format!(
+            "{{\"type\":\"begin\"}}\r\n{{\"type\":\"match\"}}\n{record}\nnot json\n\n{record}"
+        );
+        let mut progress = SearchOutputProgress::default();
+        let mut offset = 0;
+        while offset < stdout.len() {
+            let mut end = (offset + 17).min(stdout.len());
+            while end < stdout.len() && !stdout.is_char_boundary(end) {
+                end += 1;
+            }
+            assert!(!progress.push(&stdout[offset..end], 10));
+            offset = end;
+        }
+        let streamed = results_from_search(&mut progress, &stdout, false, 10);
+        assert_eq!(
+            serde_json::to_value(&streamed).unwrap(),
+            serde_json::to_value(&parse_rg_output(&stdout, 10)).unwrap()
+        );
+        assert_eq!(streamed.len(), 2);
+        assert_eq!(streamed[0].path, "café.txt");
+        assert_eq!(streamed[0].line, "é 🦀 needle");
+        let mut capped = SearchOutputProgress::default();
+        capped.push(&stdout, 1);
+        let capped = results_from_search(&mut capped, &stdout, false, 1);
+        assert_eq!(
+            serde_json::to_value(&capped).unwrap(),
+            serde_json::to_value(&parse_rg_output(&stdout, 1)).unwrap()
+        );
+    }
+
+    #[test]
+    fn truncated_stdout_is_parsed_from_the_retained_text() {
+        let record = serde_json::json!({"type":"match","data":{
+            "path":{"text":"file.txt"},"lines":{"text":"needle\n"},"line_number":1,
+            "submatches":[{"start":0,"end":6}]
+        }})
+        .to_string();
+        let stdout = format!("{record}\n");
+        let mut progress = SearchOutputProgress::default();
+        assert!(!progress.push(&stdout, 10));
+        assert!(!progress.push(&stdout, 10));
+        assert_eq!(progress.results.len(), 2);
+        // The stream saw a second match that the capped stdout no longer holds.
+        let retained = results_from_search(&mut progress, &stdout, true, 10);
+        assert_eq!(retained.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&retained).unwrap(),
+            serde_json::to_value(&parse_rg_output(&stdout, 10)).unwrap()
+        );
     }
 
     #[test]
