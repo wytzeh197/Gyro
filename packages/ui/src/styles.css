@@ -27980,14 +27980,17 @@ button.gyro-account-menu-row:hover,
 }
 
 /* Cover the gap under the card, and dissolve the transcript above it, so a
-   line cannot be read through the dock. The empty hero stays clear. */
+   line cannot be read through the composer. The scrim ends at the card's top
+   edge (`--gyro-composer-solid-height`, measured from the card to the dock's
+   bottom), so the changes pill and queued messages float over the transcript
+   instead of cutting it off above them. The empty hero stays clear. */
 :root[data-theme]
   .gyro-chat-surface.is-thread
   .gyro-chat-thread-canvas
   > .gyro-chat-composer-dock {
   --gyro-composer-scrim: var(--gyro-pane);
   --gyro-composer-dock-fade: 64px;
-  background: var(--gyro-composer-scrim);
+  background: transparent;
   padding-bottom: 10px;
 }
 
@@ -28007,7 +28010,7 @@ button.gyro-account-menu-row:hover,
   z-index: 0;
   left: 0;
   right: 0;
-  bottom: 100%;
+  bottom: var(--gyro-composer-solid-height, 100%);
   height: var(--gyro-composer-dock-fade);
   background: linear-gradient(
     to bottom,
@@ -28017,12 +28020,38 @@ button.gyro-account-menu-row:hover,
   pointer-events: none;
 }
 
+/* The solid part of the scrim: only the card and the gap beneath it. Until the
+   first measurement lands it spans the whole dock, as the dock once did. */
+:root[data-theme]
+  .gyro-chat-surface.is-thread
+  .gyro-chat-thread-canvas
+  > .gyro-chat-composer-dock::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--gyro-composer-solid-height, 100%);
+  background: var(--gyro-composer-scrim);
+  pointer-events: none;
+}
+
 :root[data-theme]
   .gyro-chat-surface.is-thread
   .gyro-chat-thread-canvas
   > .gyro-chat-composer-dock
   > .gyro-composer-shell {
   position: relative;
+  z-index: 1;
+}
+
+/* Everything stacked above the card rides over the scrim's fade, not under it. */
+:root[data-theme]
+  .gyro-chat-surface.is-thread
+  .gyro-chat-thread-canvas
+  > .gyro-chat-composer-dock
+  > :where(:not(.gyro-chat-jump-to-bottom)) {
   z-index: 1;
 }
 
