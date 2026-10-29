@@ -33,7 +33,7 @@
 
 .gyro-question-dock-head h3 {
   flex: 1 1 auto;
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-chrome);
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.4;
@@ -52,7 +52,7 @@
 .gyro-question-dock-count {
   color: var(--gyro-muted);
   flex: none;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   font-variant-numeric: tabular-nums;
   padding: 0 2px;
   white-space: nowrap;
@@ -80,7 +80,7 @@
 /* A close control in a card's corner reads as a circle, which no corner
    radius can mismatch. */
 .gyro-question-dock-close {
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
 }
 
 .gyro-question-dock-pager > button:hover:not(:disabled),
@@ -114,7 +114,7 @@
   cursor: pointer;
   display: grid;
   font: inherit;
-  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-support);
   gap: 10px;
   grid-template-columns: 20px minmax(0, 1fr) 14px;
   line-height: 1.45;
@@ -150,9 +150,9 @@
   color: var(--gyro-muted);
   display: inline-flex;
   font-family: inherit;
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   font-variant-numeric: tabular-nums;
-  font-weight: 550;
+  font-weight: 500;
   height: 20px;
   justify-content: center;
   transition:
@@ -184,23 +184,23 @@
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  font-weight: 550;
+  font-weight: 500;
   gap: 4px 8px;
 }
 
 .gyro-question-option small {
   color: var(--gyro-muted);
-  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   line-height: 1.45;
 }
 
 .gyro-question-option-badge {
   background: color-mix(in srgb, var(--gyro-success) 13%, transparent);
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
   color: var(--gyro-success);
-  font-size: calc(10.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-tiny);
   font-style: normal;
-  font-weight: 550;
+  font-weight: 500;
   letter-spacing: 0.01em;
   line-height: 1.6;
   padding: 0 7px;
@@ -232,7 +232,7 @@
 }
 
 .gyro-question-dock strong {
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .gyro-question-dock-other {
@@ -269,7 +269,7 @@
   color: var(--gyro-text);
   flex: 1 1 auto;
   font: inherit;
-  font-size: calc(13.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-support);
   height: 28px;
   min-width: 0;
   outline: none;
@@ -288,8 +288,8 @@
   cursor: pointer;
   flex: none;
   font: inherit;
-  font-size: calc(12.5px * var(--gyro-ui-scale, 1));
-  font-weight: 550;
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
   height: 28px;
   padding: 0 10px;
   white-space: nowrap;
@@ -306,7 +306,7 @@
   align-items: center;
   background: var(--gyro-text);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
   color: var(--gyro-app);
   cursor: pointer;
   display: inline-flex;
@@ -328,7 +328,7 @@
 
 .gyro-question-dock-note {
   color: var(--gyro-muted);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   margin: 8px 8px 0;
   overflow-wrap: anywhere;
 }

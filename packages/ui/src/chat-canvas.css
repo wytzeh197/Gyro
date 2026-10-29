@@ -62,7 +62,7 @@
 }
 
 .gyro-canvas-draft-status {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
 }
 
 .gyro-canvas :is(button, select, input) {
@@ -72,7 +72,7 @@
   background: var(--gyro-pane);
   color: var(--gyro-text);
   font: inherit;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   padding: 4px 8px;
 }
 .gyro-canvas button {

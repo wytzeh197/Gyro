@@ -3,7 +3,7 @@
   border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   background: var(--gyro-surface);
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-support);
   margin: 8px 0;
   min-width: 0;
 }
@@ -56,7 +56,7 @@
   overflow-wrap: anywhere;
 }
 .gyro-workflow .gyro-workflow-heading strong {
-  font-weight: 550;
+  font-weight: 500;
   color: var(--gyro-text);
 }
 :root[data-theme] .gyro-workflow .gyro-workflow-steps button {
@@ -67,7 +67,7 @@
 .gyro-workflow-status,
 .gyro-workflow-steps small {
   color: var(--gyro-muted);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
 }
 .gyro-workflow-steps small.is-alert {
   color: var(--gyro-danger);
@@ -111,8 +111,8 @@
   overflow-wrap: anywhere;
 }
 .gyro-workflow-steps strong {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 450;
+  font-size: var(--gyro-font-micro);
+  font-weight: 400;
 }
 .gyro-workflow button {
   transition: none;
@@ -148,7 +148,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: var(--gyro-font-mono);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   line-height: 1.5;
   margin: 8px 0 0;
   padding: var(--gyro-space-group);
@@ -160,7 +160,7 @@
 .gyro-workflow-notice,
 .gyro-workflow-body p {
   margin: 0;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   line-height: 1.5;
   color: var(--gyro-muted);
 }

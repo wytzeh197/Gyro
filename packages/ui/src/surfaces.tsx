@@ -14442,7 +14442,7 @@ function WorkspaceSettingsEditor({
           <div className="gyro-workspace-settings-list">
             <label>
               <span>
-                <strong>Files: Exclude</strong>
+                <strong>Hidden files</strong>
                 <small>Comma-separated globs hidden from Explorer.</small>
               </span>
               <SettingsDraftInput
@@ -14461,7 +14461,7 @@ function WorkspaceSettingsEditor({
             </label>
             <label>
               <span>
-                <strong>Search: Exclude</strong>
+                <strong>Excluded from search</strong>
                 <small>
                   Comma-separated globs skipped by workspace search.
                 </small>
@@ -14482,7 +14482,7 @@ function WorkspaceSettingsEditor({
             </label>
             <label>
               <span>
-                <strong>Search: Maximum Results</strong>
+                <strong>Max search results</strong>
                 <small>Caps results between 10 and 1,000.</small>
               </span>
               <SettingsDraftInput
@@ -14505,12 +14505,12 @@ function WorkspaceSettingsEditor({
             </label>
             <label>
               <span>
-                <strong>Editor: Minimap</strong>
+                <strong>Minimap</strong>
                 <small>
                   Shows a compact document overview beside the editor.
                 </small>
               </span>
-              <select
+              <SettingsSelect
                 onChange={(event) =>
                   update({
                     ...settings,
@@ -14534,7 +14534,7 @@ function WorkspaceSettingsEditor({
                 </option>
                 <option value="on">On</option>
                 <option value="off">Off</option>
-              </select>
+              </SettingsSelect>
             </label>
           </div>
           {scope !== "user" ? (
@@ -29710,19 +29710,24 @@ function ChatRunChangeSummary({
           <strong>
             Edited {files.length} {fileLabel}
           </strong>
-          <small>
-            <FileChangeCountBadges counts={totals} />
-            {keptCount > 0 ? (
-              <em className="is-kept">
-                {keptCount} of {files.length} kept
-              </em>
-            ) : null}
-          </small>
+          {/* One file already shows its counts on its row. */}
+          {files.length > 1 || keptCount > 0 ? (
+            <small>
+              {files.length > 1 ? (
+                <FileChangeCountBadges counts={totals} />
+              ) : null}
+              {keptCount > 0 ? (
+                <em className="is-kept">
+                  {keptCount} of {files.length} kept
+                </em>
+              ) : null}
+            </small>
+          ) : null}
         </div>
         <span className="gyro-change-summary-actions">
           {onUndo ? (
             <button onClick={onUndo} type="button" className="is-undo">
-              Undo <RotateCcw aria-hidden="true" size={13} />
+              <RotateCcw aria-hidden="true" size={13} /> Undo
             </button>
           ) : null}
           {onReview || canExpandDiff ? (
@@ -29768,7 +29773,7 @@ function ChatRunChangeSummary({
             );
             const stats = (
               <small>
-                <FileChangeCountBadges counts={file} />
+                <FileChangeCountBadges counts={file} showUnknown={false} />
               </small>
             );
 
@@ -30284,7 +30289,7 @@ function AssistantResponse({
         >
           <Copy size={15} />
         </button>
-        {tokenReading ? (
+        {tokenReading?.available ? (
           <span className="gyro-message-token-count" title={tokenReading.title}>
             {tokenReading.label}
           </span>
@@ -30560,7 +30565,7 @@ function CouncilResponseCard({
         >
           <Copy size={15} />
         </button>
-        {tokenReading ? (
+        {tokenReading?.available ? (
           <span className="gyro-message-token-count" title={tokenReading.title}>
             {tokenReading.label}
           </span>

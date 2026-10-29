@@ -111,7 +111,7 @@
 .gyro-import-recovery strong {
   color: var(--gyro-text);
   font-size: var(--gyro-font-support);
-  font-weight: 560;
+  font-weight: 600;
   line-height: 1.4;
 }
 
@@ -532,7 +532,7 @@
 }
 .gyro-import-callout-copy strong {
   font-size: var(--gyro-font-support);
-  font-weight: 530;
+  font-weight: 500;
   line-height: 1.45;
 }
 .gyro-import-callout-copy > span {

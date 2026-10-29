@@ -17,22 +17,22 @@
 }
 .gyro-connected-provider-copy h2 {
   margin: 0;
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-chrome);
   font-weight: 600;
   line-height: 1.4;
 }
 .gyro-connected-provider-copy > div > span {
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
   padding: 3px 9px;
   color: var(--gyro-muted);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   white-space: nowrap;
 }
 .gyro-connected-provider-copy p {
   margin: 6px 0 0;
   color: var(--gyro-muted);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   line-height: 1.5;
 }
 .gyro-connected-provider-list {
@@ -91,7 +91,7 @@
 .gyro-provider-allowance-ring .gyro-provider-logo {
   width: calc(30px * var(--gyro-ui-scale, 1));
   height: calc(30px * var(--gyro-ui-scale, 1));
-  font-size: 22px;
+  font-size: var(--gyro-font-heading);
 }
 .gyro-provider-allowance-ring .gyro-provider-logo svg {
   width: calc(30px * var(--gyro-ui-scale, 1));
@@ -99,14 +99,14 @@
 }
 .gyro-provider-allowance-label {
   color: var(--gyro-text);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   line-height: 1.4;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
 .gyro-provider-allowance > small {
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-tiny);
   color: var(--gyro-muted);
 }
 .gyro-provider-allowance-tooltip {
@@ -124,7 +124,7 @@
   padding: 8px 10px;
   background: var(--gyro-pane);
   box-shadow: 0 5px 18px #0003;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   line-height: 1.5;
   pointer-events: none;
 }

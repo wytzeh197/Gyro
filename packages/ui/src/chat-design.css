@@ -105,7 +105,7 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-user-message-meta {
   color: var(--gyro-faint);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   /* In flow, not absolute: an out-of-flow footer overlapped the run header's
      Continue chip below it and, in other containers, the prompt text itself. */
   justify-self: end;
@@ -157,7 +157,7 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-run-header {
   min-height: 26px;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   color: var(--gyro-muted);
 }
 
@@ -219,13 +219,13 @@
   .gyro-run-row-label {
   color: var(--gyro-text);
   font-size: var(--gyro-chat-font-work);
-  font-weight: 450;
+  font-weight: 400;
 }
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-run-row-detail {
   color: var(--gyro-muted);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
 }
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
@@ -529,7 +529,7 @@
   .gyro-chat-run-change-summary.is-complete
   > header
   strong {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   font-weight: 500;
 }
 
@@ -545,7 +545,7 @@
 }
 
 :root[data-theme] .gyro-chat-surface .gyro-keep-alive-text strong {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   font-weight: 500;
 }
 
@@ -636,7 +636,7 @@
   .gyro-composer-bar
   :is(.gyro-composer-chip, .gyro-composer-tool) {
   min-height: calc(28px * var(--gyro-ui-scale, 1));
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   transition:
     background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
     opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
@@ -783,7 +783,7 @@
   .gyro-chat-run
   .gyro-response-body
   :is(h2, h3) {
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-chrome);
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.45;
@@ -847,7 +847,7 @@
 .gyro-run-path-undo {
   background: transparent;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
   color: var(--gyro-text);
   cursor: pointer;
   flex: none;
@@ -927,7 +927,7 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   :is(.gyro-composer-chip, .gyro-composer-tool) {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
 }
 
 /* Icon tools and the labeled chips in this bar are round. A chip with
@@ -936,7 +936,7 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   .gyro-composer-chip {
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
 }
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
@@ -944,7 +944,7 @@
   .gyro-composer-tool {
   aspect-ratio: 1;
   align-self: center;
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
   box-sizing: border-box;
   flex: 0 0 var(--gyro-composer-action-size);
   height: var(--gyro-composer-action-size);
@@ -970,7 +970,7 @@
   .gyro-send-button {
   align-self: center;
   aspect-ratio: 1;
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
   box-shadow: none;
   box-sizing: border-box;
   display: grid;
@@ -989,7 +989,7 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   .gyro-send-button.is-stop {
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
 }
 
 .gyro-send-button > svg {
@@ -1070,8 +1070,8 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-artifact-heading
   strong {
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
-  font-weight: 550;
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
   letter-spacing: 0;
 }
 
@@ -1083,8 +1083,8 @@
     .gyro-chat-artifact-files small,
     .gyro-chat-artifact-checks small
   ) {
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
-  font-weight: 450;
+  font-size: var(--gyro-font-caption);
+  font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
 }
@@ -1094,7 +1094,7 @@
   .gyro-chat-message-queue
   article
   p {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   line-height: 1.45;
 }
 
@@ -1119,8 +1119,8 @@
 
 :root[data-theme] .gyro-chat-environment-popover > header > strong {
   color: var(--gyro-text);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 550;
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
 }
 
 :root[data-theme]

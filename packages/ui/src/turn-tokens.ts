@@ -31,7 +31,13 @@ export type TurnTokens = {
   accounting?: UsageAccounting;
 };
 
-export type TurnTokenReading = { label: string; title: string };
+// `available` is false when the label only says usage is unknown; chat hides
+// those rather than printing a placeholder under every answer.
+export type TurnTokenReading = {
+  label: string;
+  title: string;
+  available: boolean;
+};
 const countKeys = [
   "inputTokens",
   "cachedInputTokens",
@@ -387,6 +393,7 @@ export function turnTokenReadingForResponse(
     return {
       label: turnTokensLabel(turnTokens) + cache,
       title: turnTokensDetail(turnTokens),
+      available: true,
     };
   }
   // Only a typed request observation can establish a lower bound. Old context
@@ -395,14 +402,17 @@ export function turnTokenReadingForResponse(
     return {
       label: turnTokensLabel(lastRequestTokens),
       title: turnTokensDetail(lastRequestTokens),
+      available: !unavailable(lastRequestTokens),
     };
   }
   if (turnTokens)
     return {
       label: turnTokensLabel(turnTokens),
       title: turnTokensDetail(turnTokens),
+      available: false,
     };
   return {
+    available: false,
     label: "Usage unavailable",
     title:
       "No reliable token usage was recorded for this turn. Visible text alone cannot account for context, tools, images, or reasoning.",

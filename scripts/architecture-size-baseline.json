@@ -1,6 +1,6 @@
 {
   "apps/desktop/src/App.tsx": 20329,
   "apps/desktop/src-tauri/src/lib.rs": 31217,
-  "packages/ui/src/styles.css": 43272,
+  "packages/ui/src/styles.css": 42464,
   "packages/ui/src/surfaces.tsx": 29926
 }

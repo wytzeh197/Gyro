@@ -5,7 +5,7 @@
   color: var(--gyro-muted);
   cursor: pointer;
   display: flex;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   gap: 8px;
   margin: 10px 2px 0;
 }

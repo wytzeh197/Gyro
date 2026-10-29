@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,7 +15,7 @@ function read(path) {
   return readFileSync(resolve(repoRoot, path), "utf8");
 }
 
-const styles = [
+const styleFiles = [
   "styles-foundation.css",
   "styles.css",
   "chat-design.css",
@@ -28,9 +28,22 @@ const styles = [
   "navigation-design.css",
   "detail-design.css",
   "scheduled-work.css",
-]
-  .map((file) => read(`packages/ui/src/${file}`))
-  .join("\n");
+].map((file) => ({
+  path: `packages/ui/src/${file}`,
+  source: read(`packages/ui/src/${file}`),
+}));
+const styles = styleFiles.map(({ source }) => source).join("\n");
+
+// Line n of the joined `styles` text, as the file and line it came from.
+function styleLocation(n) {
+  let first = 1;
+  for (const { path, source } of styleFiles) {
+    const lines = source.split("\n").length;
+    if (n < first + lines) return `${path}:${n - first + 1}`;
+    first += lines;
+  }
+  return `styles:${n}`;
+}
 const monaco = read("apps/desktop/src/monaco-editor.ts");
 const earlyShell = read("apps/desktop/src/early-shell.css");
 
@@ -104,7 +117,9 @@ const allowedGradient = [
   // Theme picker thumbnails use solid tokens to preview hierarchy; these are
   // content samples, not decorative surface washes.
   /linear-gradient\(var\(--gyro-(?:surface-raised|border-strong|theme-preview-(?:dark|light)-(?:canvas|content))\) 0 0\)/,
-  /linear-gradient\(\s*90deg,\s*var\(--gyro-theme-preview-dark-canvas\)/,
+  /linear-gradient\(\s*90deg,\s*var\(--gyro-theme-preview-dark-canvas\)/,  // The thread composer's scrim fades messages out above the dock; it covers
+  // content with the canvas colour rather than tinting a surface.
+  /transparent 0%,\s*var\(--gyro-composer-scrim\)/,
 ];
 
 const styleLines = styles.split("\n");
@@ -126,20 +141,86 @@ for (const { line, n } of gradientLines) {
     /^\.gyro-effort-slider-popover\[data-max-effort="true"\]\s+\.gyro-effort-slider-(?:fill|track::after)$/.test(
       selector,
     );
-  // Waiting-state title fades mask text beneath their pills; this does
-  // not paint a gradient onto a UI surface.
-  const isAwaitingTitleMask =
-    line.trim().startsWith("mask-image:") &&
-    selector.replace(/\s+/g, " ") ===
-      ":root[data-theme] .gyro-sidebar .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question) .gyro-sidebar-thread-title";
+  // Masks fade text or content out at an edge; they never paint a gradient
+  // onto a UI surface.
+  const isMask = /^(?:-webkit-)?mask-image:/.test(line.trim());
   const allowed =
     isEffortIndicator ||
-    isAwaitingTitleMask ||
+    isMask ||
     allowedGradient.some((pattern) => pattern.test(window));
   expect(
     allowed,
-    `Decorative gradient at packages/ui/src/styles.css:${n} is not on the content allowlist: ${line.trim()}`,
+    `Decorative gradient at ${styleLocation(n)} is not on the content allowlist: ${line.trim()}`,
   );
+}
+
+// Design-drift budget. Every Gyro stylesheet is counted, so moving rules
+// between files cannot hide them. A count may fall but never rise: lower
+// scripts/ui-token-budget.json with --update-budget once a cleanup lands.
+const budgetPath = resolve(repoRoot, "scripts/ui-token-budget.json");
+const uiDirectory = resolve(repoRoot, "packages/ui/src");
+const allStyles = readdirSync(uiDirectory)
+  .filter((file) => file.endsWith(".css"))
+  .sort()
+  .map((file) => readFileSync(resolve(uiDirectory, file), "utf8"))
+  .join("\n")
+  .replace(/\/\*[\s\S]*?\*\//g, "");
+const declarations = [
+  ...allStyles.matchAll(/([a-z-]+)\s*:\s*([^;{}]+?)\s*(?=;|\})/g),
+].map(([, property, value]) => ({
+  property,
+  value: value.replace(/\s*!important$/, "").replace(/\s+/g, " "),
+}));
+const literalDeclarations = declarations.filter(
+  ({ property }) => !property.startsWith("--"),
+);
+const distinct = (property) =>
+  new Set(
+    literalDeclarations
+      .filter((declaration) => declaration.property === property)
+      .map(({ value }) => value),
+  ).size;
+const count = (pattern) =>
+  literalDeclarations.filter(({ value }) => pattern.test(value)).length;
+const measured = {
+  important: (allStyles.match(/!important/g) ?? []).length,
+  lightThemeSelectors: (allStyles.match(/\[data-theme="light"\]/g) ?? [])
+    .length,
+  hexLiterals: count(/#[0-9a-f]{3,8}\b/i),
+  rgbLiterals: count(/\brgba?\(\s*\d/),
+  tokenLiteralFallbacks: (
+    allStyles.match(
+      /var\(--gyro-[a-z0-9-]+,\s*(?:#|rgb|\d[\d.]*(?:px|%|r?em|m?s)\b)/g,
+    ) ?? []
+  ).length,
+  pillRadiusLiterals: count(/^9{3,}px$/),
+  fontSizeValues: distinct("font-size"),
+  fontWeightValues: distinct("font-weight"),
+  radiusValues: distinct("border-radius"),
+  zIndexValues: distinct("z-index"),
+  letterSpacingValues: distinct("letter-spacing"),
+};
+if (process.argv.includes("--update-budget")) {
+  writeFileSync(budgetPath, `${JSON.stringify(measured, null, 2)}\n`);
+  console.log(`check-ui-tokens: budget written to ${budgetPath}`);
+} else {
+  const budget = existsSync(budgetPath)
+    ? JSON.parse(readFileSync(budgetPath, "utf8"))
+    : {};
+  for (const [metric, value] of Object.entries(measured)) {
+    const ceiling = budget[metric];
+    expect(
+      ceiling !== undefined && value <= ceiling,
+      ceiling === undefined
+        ? `Design budget has no entry for ${metric} (${value}); run with --update-budget.`
+        : `Design budget ${metric} rose from ${ceiling} to ${value}; use the existing token instead of a new literal or override.`,
+    );
+    if (ceiling !== undefined && value < ceiling) {
+      console.log(
+        `check-ui-tokens: ${metric} fell from ${ceiling} to ${value}; lower the budget with --update-budget.`,
+      );
+    }
+  }
 }
 
 if (failures.length > 0) {

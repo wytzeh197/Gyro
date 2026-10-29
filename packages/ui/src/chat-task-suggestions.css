@@ -37,7 +37,7 @@
 .gyro-task-suggestion-text strong {
   color: var(--gyro-text);
   font-size: var(--gyro-chat-font-body, 14px);
-  font-weight: 560;
+  font-weight: 600;
   line-height: 1.4;
 }
 
@@ -160,7 +160,7 @@
   appearance: none;
   background: var(--gyro-text);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
   color: var(--gyro-surface);
   cursor: pointer;
   display: inline-flex;
@@ -289,7 +289,7 @@
 
 .gyro-start-task-main {
   flex: 1;
-  font-size: 13px;
+  font-size: var(--gyro-font-support);
   font-weight: 400;
   gap: 8px;
   min-height: 28px;

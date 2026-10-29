@@ -68,7 +68,7 @@
   padding: 12px var(--gyro-space-group);
 }
 .gyro-chat-file-placeholder-note {
-  font-size: var(--gyro-font-micro, 11px);
+  font-size: var(--gyro-font-micro);
   letter-spacing: 0.01em;
 }
 .gyro-chat-file-caption {
@@ -134,7 +134,7 @@
   display: none;
 }
 .gyro-chat-file-card.is-thumbnail .gyro-chat-file-caption strong {
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
 }
 .gyro-chat-file-overlay {
   align-items: center;

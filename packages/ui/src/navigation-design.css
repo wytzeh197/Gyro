@@ -70,7 +70,7 @@
   padding: 2px 3px;
   border: 1px solid
     color-mix(in srgb, var(--gyro-session-waiting-color) 22%, transparent);
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
   background: color-mix(
     in srgb,
     var(--gyro-session-waiting-color) 16%,
@@ -78,7 +78,7 @@
   );
   color: var(--gyro-session-waiting-color);
   opacity: 1;
-  font-size: 11px;
+  font-size: var(--gyro-font-caption);
   font-weight: 500;
   line-height: 1.2;
   z-index: 2;
@@ -91,7 +91,7 @@
 :root[data-theme] .gyro-sidebar .gyro-session-time.is-question {
   padding-inline: 8px;
   border-color: transparent;
-  font-size: 12px;
+  font-size: var(--gyro-font-micro);
 }
 
 :root[data-theme] .gyro-session-time:is(.is-approval, .is-question) > span {
@@ -219,7 +219,7 @@
 }
 
 :root[data-theme] .gyro-command-palette.is-global-search kbd {
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   font-weight: 500;
   border-radius: var(--gyro-radius-xs);
 }
@@ -240,7 +240,7 @@
   white-space: normal;
   overflow-wrap: anywhere;
   line-height: 1.25;
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-support);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -324,7 +324,7 @@
   border-radius: var(--gyro-radius-sm);
   box-shadow: none;
   color: var(--gyro-sidebar-text);
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-support);
   font-weight: 400;
   letter-spacing: -0.005em;
   line-height: calc(18px * var(--gyro-ui-scale, 1));
@@ -428,7 +428,7 @@
   .gyro-sidebar
   :is(.gyro-sidebar-small-title, .gyro-sidebar-time-group, .gyro-nav-label) {
   color: var(--gyro-faint);
-  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   font-weight: 500;
   letter-spacing: 0;
   line-height: calc(16px * var(--gyro-ui-scale, 1));
@@ -443,7 +443,7 @@
 :root[data-theme] .gyro-sidebar .gyro-session-time,
 :root[data-theme] .gyro-sidebar .gyro-sidebar-shortcut {
   color: var(--gyro-faint);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   font-weight: 400;
 }
 

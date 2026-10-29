@@ -4,7 +4,7 @@
   border: 1px solid var(--border-color, #8884);
   border-radius: 8px;
   color: inherit;
-  font-size: 12px;
+  font-size: var(--gyro-font-micro);
 }
 .gyro-efficiency-details summary {
   cursor: pointer;
@@ -45,7 +45,7 @@
 }
 .gyro-efficiency-price-entry > summary {
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--gyro-font-support);
   color: var(--gyro-text);
 }
 .gyro-efficiency-details {

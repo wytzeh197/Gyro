@@ -4590,7 +4590,8 @@ expect(
     appSource.includes("sendingSessionIdsRef.current.has(turn.sessionId)") &&
     // Composer/transcript gutters follow the pane, not the window width.
     styleSource.includes("padding: 10px clamp(24px, 8%, 120px) 16px") &&
-    styleSource.includes("padding: 18px clamp(24px, 8%, 120px) 22px") &&
+    // The transcript's live gutter is the shared chat column in chat-design.css.
+    chatDesignSource.includes("clamp(20px, 4%, 64px)") &&
     // Backend reliability: ACP wall clock is 24h; chat CLIs ignore stdout silence.
     tauriSource.includes("PROVIDER_CHAT_MAX_RUNTIME_SECS") &&
     tauriSource.includes(
@@ -6466,7 +6467,7 @@ expect(
     styleSource.includes("display: inline-flex") &&
     styleSource.includes("justify-content: center") &&
     styleSource.includes("grid-template-columns: none") &&
-    styleSource.includes("border-radius: 999px") &&
+    styleSource.includes("border-radius: var(--gyro-radius-pill)") &&
     styleSource.includes("min-height: 30px") &&
     styleSource.includes(".gyro-sidebar-update-label") &&
     !styleSource.includes(".gyro-sidebar-update-indicator") &&
@@ -8080,7 +8081,7 @@ expect(
   surfaceSource.includes('value={isIdeSidebar ? "workspace" : "sessions"}') &&
     styleSource.includes(".gyro-titlebar-switch-option.is-active") &&
     styleSource.includes("justify-content: center") &&
-    styleSource.includes("font-weight: 450") &&
+    styleSource.includes("font-weight: 400") &&
     styleSource.includes("font-weight: 500") &&
     styleSource.includes("line-height: calc(16px * var(--gyro-ui-scale, 1))") &&
     styleSource.includes("transition: transform var(--gyro-premium-motion)") &&
@@ -8093,7 +8094,7 @@ expect(
     styleSource.includes(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
-    styleSource.includes("--gyro-premium-radius-md: 6px") &&
+    styleSource.includes("--gyro-radius-md: 6px") &&
     styleSource.includes(
       "--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))",
     ) &&

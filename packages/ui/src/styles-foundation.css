@@ -146,19 +146,14 @@
   /* Supporting UI uses restrained corners: crisp controls, lightly rounded
      cards and menus. The composer and workspace seams keep their softer
      geometry so the main surfaces remain distinct from utility chrome. */
-  --gyro-premium-radius-xs: 3px;
-  --gyro-premium-radius-sm: 4px;
-  --gyro-premium-radius-md: 6px;
-  --gyro-premium-radius-lg: 8px;
-  --gyro-premium-radius-xl: 10px;
-  --gyro-premium-radius-composer: 18px;
+  --gyro-radius-xs: 3px;
+  --gyro-radius-sm: 4px;
+  --gyro-radius-md: 6px;
+  --gyro-radius-lg: 8px;
+  --gyro-radius-xl: 10px;
+  --gyro-radius-composer: 18px;
+  --gyro-radius-pill: 999px;
   --gyro-seam-radius: 12px;
-  --gyro-radius-xs: var(--gyro-premium-radius-xs);
-  --gyro-radius-sm: var(--gyro-premium-radius-sm);
-  --gyro-radius-md: var(--gyro-premium-radius-md);
-  --gyro-radius-lg: var(--gyro-premium-radius-lg);
-  --gyro-radius-xl: var(--gyro-premium-radius-xl);
-  --gyro-radius-composer: var(--gyro-premium-radius-composer);
   /* Motion ladder. Fast is a state flip, motion is a control settling, slow is
      a surface arriving. Everything shares one ease. */
   --gyro-premium-motion-fast: calc(80ms * var(--gyro-motion-factor, 1));
@@ -170,6 +165,11 @@
     -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --gyro-font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
   --gyro-mono: var(--gyro-font-mono);
+  /* Type ladder, smallest first: tiny 10, caption 11, micro 12, support 13,
+     chrome and body 14, lead 16, heading 22. Chat re-scopes body to its own
+     reading size, so fixed 14px chrome uses chrome rather than body. */
+  --gyro-font-tiny: calc(10px * var(--gyro-ui-scale, 1));
+  --gyro-font-caption: calc(11px * var(--gyro-ui-scale, 1));
   --gyro-font-micro: calc(12px * var(--gyro-ui-scale, 1));
   --gyro-font-chrome: calc(14px * var(--gyro-ui-scale, 1));
   --gyro-font-support: calc(13px * var(--gyro-ui-scale, 1));
@@ -398,8 +398,8 @@
 
 .gyro-composer-attachment.is-image strong {
   color: rgba(255, 255, 255, 0.92);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 550;
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
 }
 
 .gyro-composer-attachment.is-image small {
@@ -409,7 +409,7 @@
 .gyro-composer-attachment.is-image button {
   align-items: center;
   background: rgba(248, 248, 246, 0.96);
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
   color: #18191c;
   display: inline-flex;
   height: 18px;
@@ -437,7 +437,7 @@
 .gyro-composer-attachment small,
 .gyro-transcript-attachment small {
   color: var(--gyro-text-muted, #9299a3);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
 }
 
 .gyro-composer-attachment button,
@@ -474,7 +474,7 @@
   color: var(--gyro-muted, #b3b3b3);
   display: flex;
   flex-wrap: wrap;
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   gap: 8px;
   padding: 8px 12px 6px;
 }
@@ -494,7 +494,7 @@
 .gyro-council-preflight-cost {
   color: var(--gyro-faint, #8b8b8b);
   flex-basis: 100%;
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-tiny);
 }
 
 /* Why runs are stopped, or which budget is about to stop them. */
@@ -527,13 +527,13 @@
 }
 
 .gyro-composer-safety-notice strong {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 650;
+  font-size: var(--gyro-font-micro);
+  font-weight: 600;
 }
 
 .gyro-composer-safety-notice small {
   color: var(--gyro-muted, #b3b3b3);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   line-height: 1.35;
 }
 
@@ -544,7 +544,7 @@
   color: var(--gyro-text, #f0f0f0);
   flex: none;
   font: inherit;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   margin-left: auto;
   padding: 4px 10px;
 }
@@ -570,13 +570,13 @@
 }
 
 .gyro-composer-cost-confirm strong {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 650;
+  font-size: var(--gyro-font-micro);
+  font-weight: 600;
 }
 
 .gyro-composer-cost-confirm small {
   color: var(--gyro-muted, #b3b3b3);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   line-height: 1.35;
 }
 
@@ -587,7 +587,7 @@
   color: var(--gyro-muted, #b3b3b3);
   flex: none;
   font: inherit;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   margin-left: auto;
   padding: 4px 10px;
 }
@@ -603,9 +603,9 @@
 
 .gyro-council-preflight-chip {
   background: color-mix(in srgb, var(--gyro-accent, #7aa7ff) 12%, transparent);
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
   color: var(--gyro-text, #f0f0f0);
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-tiny);
   padding: 2px 8px;
 }
 
@@ -631,15 +631,15 @@
 }
 
 .gyro-council-title-row strong {
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-support);
   font-weight: 600;
 }
 
 .gyro-council-status {
   border: 1px solid var(--gyro-border, #303030);
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
   color: var(--gyro-muted, #b3b3b3);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   padding: 2px 8px;
   text-transform: lowercase;
 }
@@ -669,16 +669,16 @@
 }
 
 .gyro-council-badge {
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
   background: var(--gyro-accent-soft, rgba(122, 167, 255, 0.12));
   color: var(--gyro-accent, #7aa7ff);
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-tiny);
   padding: 2px 8px;
 }
 
 .gyro-council-meta {
   color: var(--gyro-muted, #b3b3b3);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   margin: 0;
 }
 
@@ -688,7 +688,7 @@
     color-mix(in srgb, var(--gyro-accent, #7aa7ff) 28%, transparent);
   border-radius: var(--gyro-radius-md);
   color: var(--gyro-text, #f0f0f0);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   margin: 0;
   padding: 8px 10px;
 }
@@ -737,14 +737,14 @@
 
 .gyro-council-seat-label {
   flex: 1;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 560;
+  font-size: var(--gyro-font-micro);
+  font-weight: 600;
 }
 
 .gyro-council-seat-status,
 .gyro-council-seat-latency {
   color: var(--gyro-muted, #b3b3b3);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
 }
 
 .gyro-council-seat-header svg.is-open {
@@ -763,7 +763,7 @@
   border-radius: var(--gyro-radius-md);
   color: var(--gyro-code-text, #e6e6e6);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   line-height: 1.45;
   margin: 0;
   max-height: 280px;
@@ -787,7 +787,7 @@
   border-radius: var(--gyro-radius-md);
   color: var(--gyro-text, #f0f0f0);
   cursor: pointer;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   padding: 6px 10px;
 }
 
@@ -850,7 +850,7 @@
 }
 
 .gyro-use-again {
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   margin-top: 5px;
 }
 
@@ -1071,7 +1071,7 @@ button {
 .gyro-app-shell {
   background: var(--gyro-app);
   display: grid;
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-chrome);
   grid-template-columns: 240px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
@@ -1115,14 +1115,14 @@ button {
 }
 
 .gyro-brand strong {
-  font-size: calc(14px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-chrome);
   letter-spacing: 0;
   line-height: 1.2;
 }
 
 .gyro-brand span {
   color: var(--gyro-faint);
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-tiny);
   margin-top: 1px;
 }
 

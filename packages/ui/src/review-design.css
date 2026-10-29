@@ -1,7 +1,7 @@
 .gyro-comparison-review em.is-added,
 .gyro-comparison-review em.is-removed {
   font-style: normal;
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   font-variant-numeric: tabular-nums;
 }
 .gyro-comparison-review em.is-added {
@@ -56,7 +56,7 @@
   padding: 4px 12px;
   border: 0;
   color: var(--gyro-muted);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
 }
 .gyro-comparison-review .gyro-diff-tree {
   overflow: auto;
@@ -90,12 +90,12 @@
   gap: 2px;
 }
 .gyro-review-file-name > strong {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 550;
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
 }
 .gyro-review-file-name > span {
   color: var(--gyro-muted);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
 }
 .gyro-review-file-name > strong,
 .gyro-review-file-name > span {
@@ -162,7 +162,7 @@
   flex-wrap: wrap;
   padding: 8px var(--gyro-space-card);
   border-bottom: 1px solid var(--gyro-border-soft);
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
 }
 .gyro-comparison-review .gyro-diff-review-toolbar button {
   min-height: max(28px, calc(28px * var(--gyro-ui-scale, 1)));
@@ -181,12 +181,12 @@
   min-width: 0;
 }
 .gyro-comparison-review .gyro-diff-review-toolbar strong {
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-support);
   min-width: 0;
   overflow-wrap: anywhere;
 }
 .gyro-comparison-review .gyro-diff-review-toolbar span {
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
 }
 .gyro-comparison-review .gyro-diff-review-toolbar > div > span {
   overflow: hidden;
@@ -227,7 +227,7 @@
 .gyro-plain-diff .gyro-plain-diff-hunk .gyro-diff-line {
   grid-template-columns: 42px 42px 20px minmax(0, 1fr);
   padding: 0 12px 0 0;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   line-height: 1.8;
   border-left: 2px solid transparent;
 }
@@ -236,7 +236,7 @@
 }
 .gyro-plain-diff .gyro-diff-line > .gyro-review-line-number {
   color: var(--gyro-muted);
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-tiny);
   font-variant-numeric: tabular-nums;
 }
 .gyro-plain-diff .gyro-diff-line > code {
