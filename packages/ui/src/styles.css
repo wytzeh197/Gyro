@@ -7,6 +7,7 @@
 @import "./ui-upgrade.css";
 @import "./cli-view.css";
 @import "./window-material.css";
+@import "./first-run-tour.css";
 
 .gyro-surface-row {
   align-items: center;
@@ -40119,6 +40120,89 @@ textarea:focus-visible,
 }
 .gyro-model-rail-empty button.is-primary:hover {
   background: color-mix(in srgb, var(--gyro-model-rail-accent) 88%, black);
+}
+.gyro-model-rail-empty .gyro-model-rail-signin-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: none;
+  color: var(--gyro-text);
+}
+.gyro-model-rail-signin-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.gyro-model-rail-empty .gyro-model-rail-signin-code,
+.gyro-model-rail-empty .gyro-model-rail-signin-command {
+  gap: 8px;
+  height: auto;
+  border-radius: var(--gyro-radius-md);
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  color: var(--gyro-muted);
+}
+.gyro-model-rail-signin-code {
+  padding: 6px 12px;
+}
+.gyro-model-rail-signin-code code {
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-mono, ui-monospace, monospace);
+  font-size: calc(17px * var(--gyro-ui-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.gyro-model-rail-signin-command {
+  max-width: 100%;
+  padding: 5px 10px;
+}
+.gyro-model-rail-signin-command code {
+  overflow: hidden;
+  font-family: var(--gyro-font-mono, ui-monospace, monospace);
+  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-model-rail-signin-paste {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  max-width: 240px;
+}
+.gyro-model-rail-signin-paste input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: calc(12px * var(--gyro-ui-scale, 1));
+}
+.gyro-model-rail-signin-paste input:focus-visible {
+  outline: 1.9px solid var(--gyro-model-rail-accent);
+  outline-offset: -1.9px;
+}
+.gyro-model-rail-signin-paste button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.gyro-model-rail-signin-links {
+  display: flex;
+  gap: 4px;
+}
+.gyro-model-rail-empty .gyro-model-rail-signin-links button {
+  height: 24px;
+  padding: 0 8px;
+  border-color: transparent;
+  color: var(--gyro-faint);
+  font-size: calc(11.5px * var(--gyro-ui-scale, 1));
+  font-weight: 400;
+}
+.gyro-model-rail-empty .gyro-model-rail-signin-links button:hover {
+  color: var(--gyro-text);
 }
 
 /*

@@ -25,9 +25,20 @@ import {
 import { confirmAction, setConfirmActionHandler } from "@gyro-dev/ui";
 import { ManagedDiffEditor } from "./managed-diff-editor";
 import {
+  type CliInstallPlanReport,
+  providerCliName,
+  providerInstallProfile,
   providerLoginProfile,
   providerLoginCommandText,
 } from "./provider-login-profile";
+import { parseProviderLoginProgress } from "./provider-login-progress";
+import { ProviderSignInContext } from "@gyro-dev/ui";
+import { FirstRunTour } from "@gyro-dev/ui";
+import {
+  useInlineSignInRunner,
+  useProviderSignIn,
+  useProviderSignInActions,
+} from "./use-provider-sign-in";
 import { useSubagents } from "./use-subagents";
 import {
   readBoundedLocalStorage,
@@ -126,7 +137,10 @@ import { useGoogleModels } from "./use-google-models";
 import { persistAutoCompactPercent } from "./auto-compaction";
 import { useUsageActions } from "./usage-actions";
 import { useProviderApiKeys } from "./provider-api-keys";
-import { useProviderConnectionGuard } from "./provider-connection-guard";
+import {
+  useProviderConnectionGuard,
+  type ProviderConnectionOptions,
+} from "./provider-connection-guard";
 import { isComposerCliUpdating } from "./cli-update-scope";
 import {
   providerHealthDetailsFromCheck,
@@ -688,6 +702,12 @@ const PROVIDER_AUTH_POLL_ATTEMPTS = 40;
 // runs a browser login someone has to complete by hand, and giving up early
 // means dropping the message that was waiting on it.
 const PROVIDER_SIGN_IN_POLL_ATTEMPTS = 100;
+// The model popover shows the sign-in link as soon as the CLI prints it, so an
+// inline sign-in reads its terminal quickly for the first few seconds.
+const PROVIDER_SIGN_IN_FAST_POLL_MS = 500;
+const PROVIDER_SIGN_IN_FAST_POLL_ATTEMPTS = 12;
+// npm installs of a provider CLI finish in well under five minutes.
+const PROVIDER_INSTALL_POLL_ATTEMPTS = 600;
 const MAX_CHAT_MESSAGE_CHARS = 24_000;
 const MAX_CHAT_IMAGES_PER_MESSAGE = 10;
 const MAX_CHAT_VIDEOS_PER_MESSAGE = 2;
@@ -8739,10 +8759,21 @@ export function App() {
     [setProviderAuthStatus],
   );
 
+  const providerSignIn = useProviderSignIn({
+    dispatchWorkbench,
+    terminalOutputRevisionRef,
+  });
+  const {
+    patch: patchProviderSignIn,
+    dismissPane: dismissProviderSignInPane,
+    panesRef: providerSignInPanesRef,
+    isCancelled: isProviderSignInCancelled,
+  } = providerSignIn;
+
   const runProviderConnection = useCallback(
     async (
       providerId: ProviderId,
-      options?: { forceLogin?: boolean; importedSessionId?: string },
+      options?: ProviderConnectionOptions,
     ): Promise<boolean> => {
       const provider = providersForConfig(config).find(
         (item) => item.id === providerId,
@@ -8756,18 +8787,160 @@ export function App() {
       const forceLogin = Boolean(
         options?.forceLogin || providerSignInRejectionsRef.current[providerId],
       );
+      // An inline sign-in reports to the model popover, which stays open
+      // beside the chat; only the outcome is worth a notification.
+      const inline = Boolean(options?.inline);
+      const cliName = providerCliName(providerId, providerLabel);
+      const signInCancelled = () =>
+        inline && isProviderSignInCancelled(providerId);
       dispatchWorkbench({
         type: "set-provider-status",
         providerId,
         status: "checking",
       });
-      notify(
-        "provider",
-        providerId === "openai"
-          ? "Checking Codex sign-in"
-          : "Connecting provider",
-        providerLabel,
-      );
+      if (!inline) {
+        notify(
+          "provider",
+          providerId === "openai"
+            ? "Checking Codex sign-in"
+            : "Connecting provider",
+          providerLabel,
+        );
+      }
+
+      // Mirror a background pane into the workbench, so "Show details" opens a
+      // terminal that already holds everything the CLI printed.
+      const readSignInPane = async (paneId: string) => {
+        const progress = await invoke<TerminalPaneSnapshot>(
+          "read_terminal_output",
+          {
+            paneId,
+            knownOutputRevision: terminalOutputRevisionRef.current[paneId],
+          },
+        ).catch(() => undefined);
+        if (!progress) return undefined;
+        terminalOutputRevisionRef.current[paneId] = progress.outputRevision;
+        dispatchWorkbench({
+          type: "sync-terminal-pane-snapshot",
+          paneId,
+          event:
+            progress.exitCode === null || progress.exitCode === undefined
+              ? progress.status
+              : `${progress.status} (${progress.exitCode})`,
+          output: progress.output ?? "",
+          status: terminalStatusFromSnapshot(progress.status),
+          hasForegroundJob: progress.hasForegroundJob ?? undefined,
+        });
+        if (progress.output) setTerminalOutput(progress.output);
+        return progress;
+      };
+      const startBackgroundPane = async (
+        paneId: string,
+        profile: CommandProfile,
+      ) => {
+        providerSignInPanesRef.current[providerId] = paneId;
+        dispatchWorkbench({
+          type: "upsert-background-terminal-pane",
+          pane: createTerminalPane(
+            paneId,
+            profile,
+            "running",
+            workspaceRunMetadata(
+              "local",
+              profile.displayName,
+              activeSession?.workspacePath ?? workspacePath,
+            ),
+          ),
+        });
+        const snapshot = await invoke<TerminalPaneSnapshot>(
+          "create_terminal_pane",
+          {
+            request: {
+              args: profile.args,
+              command: profile.command,
+              paneId,
+              title: profile.displayName,
+              workspacePath: undefined,
+              workspaceMode: "local",
+              workingDirectory: "Home",
+              providerAuthSessionId: importedSessionId,
+              // Wide enough that a sign-in URL never hard-wraps.
+              cols: 400,
+            },
+          },
+        );
+        terminalOutputRevisionRef.current[paneId] = snapshot.outputRevision;
+        return snapshot;
+      };
+
+      // The backend picks an install Gyro can run and then find: the
+      // provider's installer or npm, falling back to a per-user npm prefix
+      // when the global one is root-owned or outside Gyro's search path.
+      const fetchInstallPlan = () =>
+        invoke<CliInstallPlanReport>("provider_cli_install_plan_command", {
+          providerId,
+        }).catch(() => undefined);
+      const reportNotInstalled = async (message: string) => {
+        const report = await fetchInstallPlan();
+        patchProviderSignIn(providerId, {
+          phase: "not-installed",
+          installCommand: report?.plan?.displayCommand,
+          message:
+            report?.plan || !report?.message
+              ? message
+              : `${message} ${report.message}`,
+        });
+      };
+
+      if (inline && options?.install && isTauriRuntime()) {
+        const plan = (await fetchInstallPlan())?.plan;
+        if (!plan) {
+          await reportNotInstalled(
+            `${providerLabel} needs ${cliName}, which isn't installed yet.`,
+          );
+          return false;
+        }
+        const installProfile = providerInstallProfile(providerId, plan);
+        patchProviderSignIn(providerId, {
+          phase: "installing",
+          installCommand: undefined,
+          message: undefined,
+        });
+        const installPaneId = `provider-${providerId}-install-${Date.now()}`;
+        let exitCode: number | null | undefined;
+        try {
+          exitCode = (await startBackgroundPane(installPaneId, installProfile))
+            .exitCode;
+          for (
+            let attempt = 0;
+            attempt < PROVIDER_INSTALL_POLL_ATTEMPTS &&
+            (exitCode === null || exitCode === undefined);
+            attempt += 1
+          ) {
+            await waitFor(PROVIDER_SIGN_IN_FAST_POLL_MS);
+            if (signInCancelled()) return false;
+            exitCode = (await readSignInPane(installPaneId))?.exitCode;
+          }
+        } catch (error) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `Couldn't start the install: ${String(error)}`,
+          });
+          return false;
+        }
+        if (exitCode !== 0) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message:
+              exitCode === null || exitCode === undefined
+                ? `Installing ${cliName} is taking too long.`
+                : `Installing ${cliName} failed (exit ${exitCode}).`,
+          });
+          return false;
+        }
+        dismissProviderSignInPane(providerId);
+        patchProviderSignIn(providerId, { phase: "starting" });
+      }
 
       if (isTauriRuntime()) {
         try {
@@ -8786,6 +8959,24 @@ export function App() {
             check.output,
             check,
           );
+          if (signInCancelled()) return false;
+          if (inline && check.runtimeStatus === "not-installed") {
+            if (options?.install || providerId === "ollama") {
+              patchProviderSignIn(providerId, {
+                phase: "not-installed",
+                installCommand: undefined,
+                message:
+                  providerId === "ollama"
+                    ? "Ollama isn't running. Install and start it, then try again."
+                    : `${cliName} installed, but Gyro can't find it yet. Restart Gyro, then try again.`,
+              });
+            } else {
+              await reportNotInstalled(
+                `${providerLabel} needs ${cliName}, which isn't installed yet.`,
+              );
+            }
+            return false;
+          }
           if (provider?.authMode === "env") {
             notify(
               result.connectionStatus === "connected" ? "provider" : "approval",
@@ -8876,6 +9067,12 @@ export function App() {
       }
 
       if (provider?.authMode === "env") {
+        if (inline) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `Set ${provider.apiKeyRef ?? "an API key"} outside Gyro, then try again.`,
+          });
+        }
         notify(
           "approval",
           "Provider env setup needed",
@@ -8896,22 +9093,24 @@ export function App() {
       const profile = providerLoginProfile(providerId);
       const commandText = providerLoginCommandText(profile);
       const paneId = `provider-${providerId}-login-${Date.now()}`;
-      const pane = createTerminalPane(
-        paneId,
-        profile,
-        "running",
-        workspaceRunMetadata(
-          "local",
-          profile.displayName,
-          activeSession?.workspacePath ?? workspacePath,
-        ),
-      );
-      dispatchWorkbench({
-        type: "select-workspace-layout",
-        layout: "terminal-grid",
-      });
-      dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
-      dispatchWorkbench({ type: "add-terminal-pane", pane });
+      if (!inline) {
+        const pane = createTerminalPane(
+          paneId,
+          profile,
+          "running",
+          workspaceRunMetadata(
+            "local",
+            profile.displayName,
+            activeSession?.workspacePath ?? workspacePath,
+          ),
+        );
+        dispatchWorkbench({
+          type: "select-workspace-layout",
+          layout: "terminal-grid",
+        });
+        dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
+        dispatchWorkbench({ type: "add-terminal-pane", pane });
+      }
       setTerminalOutput(`Starting ${providerLabel} sign-in: ${commandText}`);
 
       if (!isTauriRuntime()) {
@@ -8920,22 +9119,39 @@ export function App() {
         return true;
       }
 
+      // What the popover shows comes from what the CLI printed. A device code
+      // page is opened once on the person's behalf, since those CLIs don't.
+      let openedDevicePage = false;
+      const showSignInProgress = (output?: string | null) => {
+        if (!inline || !output) return;
+        const progress = parseProviderLoginProgress(output);
+        patchProviderSignIn(providerId, {
+          phase: "waiting",
+          ...(progress.url ? { url: progress.url } : {}),
+          ...(progress.deviceCode ? { deviceCode: progress.deviceCode } : {}),
+          ...(progress.acceptsCode ? { acceptsCode: true } : {}),
+        });
+        if (progress.deviceCode && progress.url && !openedDevicePage) {
+          openedDevicePage = true;
+          void openUrl(progress.url).catch(() => undefined);
+        }
+      };
+
       try {
-        const snapshot = await invoke<TerminalPaneSnapshot>(
-          "create_terminal_pane",
-          {
-            request: {
-              args: profile.args,
-              command: profile.command,
-              paneId,
-              title: profile.displayName,
-              workspacePath: undefined,
-              workspaceMode: "local",
-              workingDirectory: "Home",
-              providerAuthSessionId: importedSessionId,
-            },
-          },
-        );
+        const snapshot = inline
+          ? await startBackgroundPane(paneId, profile)
+          : await invoke<TerminalPaneSnapshot>("create_terminal_pane", {
+              request: {
+                args: profile.args,
+                command: profile.command,
+                paneId,
+                title: profile.displayName,
+                workspacePath: undefined,
+                workspaceMode: "local",
+                workingDirectory: "Home",
+                providerAuthSessionId: importedSessionId,
+              },
+            });
         dispatchWorkbench({
           type: "sync-terminal-pane-snapshot",
           paneId: snapshot.paneId,
@@ -8953,11 +9169,16 @@ export function App() {
         terminalOutputRevisionRef.current[snapshot.paneId] =
           snapshot.outputRevision;
         setTerminalOutput(snapshot.output ?? "");
-        notify(
-          "provider",
-          "Finish provider sign-in",
-          `Complete ${commandText}. Gyro will connect automatically.`,
-        );
+        if (inline) {
+          patchProviderSignIn(providerId, { phase: "waiting" });
+          showSignInProgress(snapshot.output);
+        } else {
+          notify(
+            "provider",
+            "Finish provider sign-in",
+            `Complete ${commandText}. Gyro will connect automatically.`,
+          );
+        }
 
         // Shared post-login watcher for every CLI provider (OpenAI, Anthropic,
         // Kimi, xAI, Gemini, Cursor, OpenCode). A successful login process exit
@@ -8970,6 +9191,13 @@ export function App() {
         ) => {
           clearProviderSignInRejection(providerId);
           setProviderAuthStatus(providerId, "connected");
+          // The popover now lists the models; the login terminal has done its
+          // job. A health-confirmed login may still be idling at its prompt.
+          if (inline) {
+            dismissProviderSignInPane(providerId, {
+              stop: source === "health",
+            });
+          }
           if (source === "login-exit") {
             // Credentials just landed, so a cached answer is stale.
             const verified = await invoke<ProviderHealthCheck>(
@@ -8992,7 +9220,9 @@ export function App() {
               : "Provider verified",
             providerId === "openai" && source === "health"
               ? "OpenAI is available through your local ChatGPT/Codex login."
-              : providerLabel,
+              : inline && provider?.models.length
+                ? `${providerLabel} · ${provider.models.length} ${provider.models.length === 1 ? "model" : "models"} ready`
+                : providerLabel,
           );
           return true as const;
         };
@@ -9004,32 +9234,25 @@ export function App() {
           PROVIDER_SIGN_IN_POLL_ATTEMPTS,
         );
         for (let attempt = 0; attempt < loginPollAttempts; attempt += 1) {
-          await waitFor(PROVIDER_AUTH_POLL_INTERVAL_MS);
+          await waitFor(
+            inline && attempt < PROVIDER_SIGN_IN_FAST_POLL_ATTEMPTS
+              ? PROVIDER_SIGN_IN_FAST_POLL_MS
+              : PROVIDER_AUTH_POLL_INTERVAL_MS,
+          );
+          if (signInCancelled()) return false;
 
-          const progress = await invoke<TerminalPaneSnapshot>(
-            "read_terminal_output",
-            {
-              paneId,
-              knownOutputRevision: terminalOutputRevisionRef.current[paneId],
-            },
-          ).catch(() => undefined);
+          const progress = await readSignInPane(paneId);
           if (progress) {
-            terminalOutputRevisionRef.current[paneId] = progress.outputRevision;
-            dispatchWorkbench({
-              type: "sync-terminal-pane-snapshot",
-              paneId,
-              event:
-                progress.exitCode === null || progress.exitCode === undefined
-                  ? progress.status
-                  : `${progress.status} (${progress.exitCode})`,
-              output: progress.output ?? "",
-              status: terminalStatusFromSnapshot(progress.status),
-              hasForegroundJob: progress.hasForegroundJob ?? undefined,
-            });
-            if (progress.output) setTerminalOutput(progress.output);
+            showSignInProgress(progress.output);
             if (progress.exitCode !== null && progress.exitCode !== undefined) {
               if (progress.exitCode === 0) {
                 return completeProviderLogin("login-exit");
+              }
+              if (inline) {
+                patchProviderSignIn(providerId, {
+                  phase: "failed",
+                  message: `${providerLabel} sign-in didn't finish (exit ${progress.exitCode}).`,
+                });
               }
               notify(
                 "approval",
@@ -9074,6 +9297,12 @@ export function App() {
           }
         }
 
+        if (inline) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `${providerLabel} sign-in timed out. Try again when you're ready.`,
+          });
+        }
         notify(
           "approval",
           "Provider sign-in still pending",
@@ -9092,6 +9321,19 @@ export function App() {
         const output = String(error);
         setTerminalOutput(output);
         recordProviderHealthOutput(providerId, output);
+        if (inline) {
+          const missing = /not found|no such file|cannot find/i.test(output);
+          if (missing) {
+            await reportNotInstalled(
+              `${providerLabel} needs ${cliName}, which isn't installed yet.`,
+            );
+            return false;
+          }
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `${providerLabel} sign-in couldn't start.`,
+          });
+        }
         notify("command-failed", `${providerLabel} login failed`, output);
         return false;
       }
@@ -9100,7 +9342,11 @@ export function App() {
       activeSession?.workspacePath,
       clearProviderSignInRejection,
       config,
+      dismissProviderSignInPane,
       notify,
+      isProviderSignInCancelled,
+      patchProviderSignIn,
+      providerSignInPanesRef,
       recordProviderHealthOutput,
       setProviderAuthStatus,
       workbench.workspaceMode,
@@ -9108,9 +9354,24 @@ export function App() {
     ],
   );
 
-  const { connectProvider, connectingProviderIds } = useProviderConnectionGuard(
+  const runProviderConnectionInline = useInlineSignInRunner(
+    providerSignIn,
     runProviderConnection,
   );
+  const { connectProvider, connectingProviderIds } = useProviderConnectionGuard(
+    runProviderConnectionInline,
+  );
+  const openProviderSettings = useCallback(
+    () => openSettingsSection("providers"),
+    [openSettingsSection],
+  );
+  const providerSignInState = useProviderSignInActions(providerSignIn, {
+    connectProvider,
+    dispatchWorkbench,
+    isProviderId,
+    notify,
+    openProviderSettings,
+  });
 
   const recordModelSelection = useCallback(
     (
@@ -10051,12 +10312,10 @@ export function App() {
           const session = sessionsRef.current.find(
             (session) => session.id === draftKey,
           );
-          connectProvider(
-            providerId,
-            session?.importSource
-              ? { importedSessionId: session.id }
-              : undefined,
-          );
+          connectProvider(providerId, {
+            inline: true,
+            importedSessionId: session?.importSource ? session.id : undefined,
+          });
         }
         return;
       }
@@ -19009,6 +19268,7 @@ export function App() {
   );
   return (
     <ChatRetryContext.Provider value={chatAutoRetry}>
+    <ProviderSignInContext.Provider value={providerSignInState}>
       <WorkspacePathUndoContext.Provider value={workspacePathUndoValue}>
       <ChatFileActionsContext.Provider value={chatFileActions}>
         <TerminalAttachmentActionsContext.Provider
@@ -19034,11 +19294,28 @@ export function App() {
           >
             <AppearanceContext.Provider value={appearance}>
               {appChrome}
+              <FirstRunTour
+                destination={activeDestination}
+                providerConfigured={workbench.providerStatuses.some(
+                  (provider) => provider.connectionStatus === "connected",
+                )}
+                onNavigate={(destination) =>
+                  dispatchWorkbench({ type: "select-destination", destination })
+                }
+                onOpenSettings={(section) => {
+                  dispatchWorkbench({
+                    type: "select-destination",
+                    destination: "settings",
+                  });
+                  dispatchWorkbench({ type: "set-settings-section", section });
+                }}
+              />
             </AppearanceContext.Provider>
           </ComposerContextCandidates.Provider>
         </TerminalAttachmentActionsContext.Provider>
       </ChatFileActionsContext.Provider>
       </WorkspacePathUndoContext.Provider>
+    </ProviderSignInContext.Provider>
     </ChatRetryContext.Provider>
   );
 }

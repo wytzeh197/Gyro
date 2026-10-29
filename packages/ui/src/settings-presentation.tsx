@@ -11,16 +11,19 @@ export function SettingsSection({
   title,
   description,
   children,
+  dataTour,
 }: {
   icon: IconComponent;
   title: string;
   description: string;
   children: ReactNode;
+  dataTour?: string;
 }) {
   return (
     <section
       className="gyro-settings-section"
       data-setting-key={settingsSearchKey(title)}
+      data-tour={dataTour}
       tabIndex={-1}
     >
       <header>

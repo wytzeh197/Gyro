@@ -759,6 +759,12 @@ export {
 
 export { ChatRun } from "./chat-run-view";
 export { ChatRetryContext } from "./chat-retry-context";
+export { ProviderSignInContext } from "./provider-sign-in-context";
+export type {
+  ProviderSignIn,
+  ProviderSignInPhase,
+  ProviderSignInState,
+} from "./provider-sign-in-context";
 export { WorkspacePathUndoContext } from "./workspace-path-undo";
 export type {
   WorkspacePathUndoOffer,
@@ -823,3 +829,8 @@ export {
 } from "./workspace-rename";
 
 export { currentChatDrag } from "./chat-session-drag";
+
+export {
+  FirstRunTour,
+  type FirstRunTourProps,
+} from "./first-run-tour-overlay";

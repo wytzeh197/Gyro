@@ -7,6 +7,7 @@ mod api_compatibility;
 pub mod automations;
 pub mod capabilities;
 mod chat_http;
+pub mod cli_install;
 pub mod cli_path;
 pub mod cli_updates;
 pub mod config;
@@ -72,6 +73,10 @@ pub use capabilities::{
     ProjectCapabilityPolicy, ProviderCapabilitySupport, WorkspaceContextSnapshot,
     CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, MAX_CAPABILITY_RESULT_BYTES,
     PROVIDER_CAPABILITY_IPC_SCHEMA_V1, PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1,
+};
+pub use cli_install::{
+    provider_cli_install_plan, CliInstallMethod, CliInstallPlan, CliInstallPlanReport,
+    CliInstallUnavailable,
 };
 pub use cli_path::{augmented_gui_path, user_cli_paths};
 pub use cli_updates::{

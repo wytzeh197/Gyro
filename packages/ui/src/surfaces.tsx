@@ -4817,7 +4817,7 @@ function WorkspaceSidebarContent({
             document.body,
           )
         : null}
-      <div className="gyro-sidebar-persistent-header">
+      <div className="gyro-sidebar-persistent-header" data-tour="sidebar.ide">
         <div className="gyro-sidebar-windowbar" aria-label="Window navigation">
           {/* Both surfaces carry the toggle in the same slot, so the surface
               switch never moves out from under the pointer that clicked it. */}
@@ -11435,6 +11435,7 @@ function ChatSurfaceControls({
         <button
           aria-label={isDockOpen ? "Hide companion" : "Show companion"}
           aria-pressed={isDockOpen}
+          data-tour="panel.launcher"
           className={["gyro-chat-surface-button", isDockOpen ? "is-active" : ""]
             .filter(Boolean)
             .join(" ")}
@@ -12524,7 +12525,7 @@ function ChatCompanionDock({
         title="Resize companion. Use Left and Right Arrow keys to adjust."
         type="button"
       />
-      <header className="gyro-chat-companion-tabs">
+      <header className="gyro-chat-companion-tabs" data-tour="panel.tabs">
         <div
           className="gyro-chat-companion-tab-list"
           role="tablist"
@@ -13190,6 +13191,7 @@ function ChatContextSection({
             aria-haspopup="menu"
             aria-label={`${name}: ${label}`}
             className={`gyro-composer-chip gyro-context-summary-item is-${popover}`}
+            data-tour={popover === "project" ? "composer.project" : undefined}
             key={popover}
             onClick={() => {
               setActivePopover((current) =>
@@ -23188,6 +23190,7 @@ export function SettingsSurface({
 
         {activeSection === "providers" || activeSection === "usage-limits" ? (
           <SettingsSection
+            dataTour="settings.providers"
             icon={Gauge}
             title="Models, Accounts & Limits"
             description="Connect accounts, choose models, and set local guardrails for spend and runs."
@@ -27408,6 +27411,7 @@ function Composer({
           )
         : null}
       <textarea
+        data-tour="composer.input"
         ref={composerTextareaRef}
         aria-label={
           isGoalComposerActive

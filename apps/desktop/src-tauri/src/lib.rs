@@ -95,7 +95,7 @@ use gyro_core::user_cli_paths;
 use gyro_core::{
     apply_cli_updates, apply_provider_mutation_transaction_with_cancellation, barrier_decision,
     begin_provider_mutation_transaction, build_summary_prompt, build_synthesizer_user_prompt,
-    check_cli_updates, council_run_dir, create_worktree, decide_mutation_proposal,
+    check_cli_updates, provider_cli_install_plan, CliInstallPlanReport, council_run_dir, create_worktree, decide_mutation_proposal,
     discover_ollama_models, fallback_summary, file_review_content_hash, final_run_status,
     ipc::{
         acknowledgement_for, request_desktop_provider_approval,
@@ -11681,6 +11681,16 @@ async fn check_cli_updates_command() -> Result<CliUpdateCheckReport, String> {
         .await
         .map_err(|error| format!("cli update check worker failed: {error}"))?
         .map_err(to_string)
+}
+
+/// How to install a missing provider CLI so the sign-in that follows finds it.
+#[tauri::command]
+async fn provider_cli_install_plan_command(
+    provider_id: String,
+) -> Result<CliInstallPlanReport, String> {
+    tauri::async_runtime::spawn_blocking(move || provider_cli_install_plan(&provider_id))
+        .await
+        .map_err(|error| format!("cli install plan worker failed: {error}"))
 }
 
 /// Apply updates for specific provider CLIs, or every pending offer when empty.
@@ -24423,6 +24433,7 @@ pub fn run() {
             provider_api_keys::list_custom_provider_models,
             check_cli_updates_command,
             apply_cli_updates_command,
+            provider_cli_install_plan_command,
             system_access::check_system_access,
             system_access::open_system_access_settings,
             dictation_access::request_dictation_access,

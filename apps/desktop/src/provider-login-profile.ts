@@ -68,3 +68,46 @@ export function providerLoginProfile(providerId: ProviderId): CommandProfile {
 export function providerLoginCommandText(profile: CommandProfile) {
   return [profile.command, ...profile.args].join(" ");
 }
+
+/** `provider_cli_install_plan_command`: how this machine can install a CLI. */
+export type CliInstallPlanReport = {
+  plan?: {
+    providerId: string;
+    program: string;
+    command: string;
+    args: string[];
+    displayCommand: string;
+    method: "npm-global" | "npm-user-prefix" | "installer";
+  } | null;
+  unavailable?: "unsupported" | "needsNode" | null;
+  message?: string | null;
+};
+
+export function providerInstallProfile(
+  providerId: ProviderId,
+  plan: NonNullable<CliInstallPlanReport["plan"]>,
+): CommandProfile {
+  const login = providerLoginProfile(providerId);
+  return {
+    args: plan.args,
+    command: plan.command,
+    displayName: login.displayName.replace(/Login$/, "Install"),
+    id: `${providerId}-install`,
+    workingDirectory: null,
+  };
+}
+
+const PROVIDER_CLI_NAMES: Partial<Record<ProviderId, string>> = {
+  anthropic: "Claude Code",
+  cursor: "Cursor Agent",
+  gemini: "Gemini CLI",
+  kimi: "Kimi CLI",
+  openai: "Codex",
+  opencode: "OpenCode",
+  xai: "Grok CLI",
+};
+
+/** What people call the CLI a provider signs in through. */
+export function providerCliName(providerId: ProviderId, providerLabel: string) {
+  return PROVIDER_CLI_NAMES[providerId] ?? `the ${providerLabel} CLI`;
+}

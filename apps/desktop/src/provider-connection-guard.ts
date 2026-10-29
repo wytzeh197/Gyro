@@ -1,9 +1,18 @@
 import { useCallback, useRef, useState } from "react";
 import type { ProviderId } from "@gyro-dev/ui";
 
+export type ProviderConnectionOptions = {
+  forceLogin?: boolean;
+  importedSessionId?: string;
+  /** Run the login out of sight and report progress to the model popover. */
+  inline?: boolean;
+  /** Install the provider CLI before signing in (inline only). */
+  install?: boolean;
+};
+
 export type ProviderConnectionRunner = (
   providerId: ProviderId,
-  options?: { forceLogin?: boolean; importedSessionId?: string },
+  options?: ProviderConnectionOptions,
 ) => Promise<boolean>;
 
 /**
@@ -21,7 +30,7 @@ export function useProviderConnectionGuard(
   const connectProvider = useCallback(
     async (
       providerId: ProviderId,
-      options?: { forceLogin?: boolean; importedSessionId?: string },
+      options?: ProviderConnectionOptions,
     ): Promise<boolean> => {
       if (inFlight.current.has(providerId)) return false;
       inFlight.current.add(providerId);
