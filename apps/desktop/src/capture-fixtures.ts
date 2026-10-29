@@ -1627,6 +1627,16 @@ const invoke: Invoke = (command, args) => {
       diagnosticsOptIn: false,
     };
   }
+  // Every fixture root exists; without an answer root health reads `null`
+  // and the whole app falls to its error boundary.
+  if (command === "inspect_workspace_folders") {
+    const paths = Array.isArray(args?.paths) ? args.paths : [];
+    return paths.map((path) => ({
+      path: String(path),
+      canonicalPath: String(path),
+      status: "ok",
+    }));
+  }
   if (command in responses) return responses[command];
   if (emptyArray.has(command)) return [];
   if (command === "read_terminal_output") {
