@@ -33262,7 +33262,7 @@ while True:
             .any(|file| file.path == "huge.txt" && file.additions == 1));
         let comparison = status.compared_to_main.unwrap();
         assert!(!comparison.partial);
-        assert_eq!((comparison.additions, comparison.deletions), (2, 0));
+        assert_eq!((comparison.additions, comparison.deletions), (1, 0));
     }
 
     #[test]

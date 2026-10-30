@@ -26255,16 +26255,15 @@ button.gyro-account-menu-row:hover,
     padding-inline: 10px;
   }
 }
-/* Keep navigation aligned with the macOS controls. Native traffic lights are
-   14px dots at (16, 16); 90px of padding leaves a consistent gutter
-   from the cluster's trailing edge to the sidebar toggle. */
+/* Leave a clear gutter after the native window controls while keeping the
+   sidebar toggle and surface switch together as a compact navigation group. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
   box-sizing: border-box;
   height: 48px;
   margin-bottom: 0;
   min-height: 48px;
   padding-bottom: 2px;
-  padding-left: 90px;
+  padding-left: 86px;
 }
 
 .gyro-sidebar-windowbar.is-settings {
@@ -27262,14 +27261,11 @@ button.gyro-account-menu-row:hover,
     var(--gyro-premium-ease);
 }
 
-/* Workspace shifts the whole bar right by the 44px activity rail, so its own
-   inset gives that much back plus the Sessions gutter: 44 + 46 == 90, the
-   left inset the Sessions title bar uses. The surface switch then lands on the
-   same pixel in both surfaces instead of jogging as the user crosses between
-   them. */
+/* The 44px activity rail plus this inset matches the Sessions title bar, so
+   the switch stays in place when changing surfaces. */
 .gyro-app-shell.is-workspace-chrome-active .gyro-sidebar-windowbar {
   background: transparent;
-  padding-left: 46px;
+  padding-left: 42px;
 }
 
 @media (max-width: 1280px) and (min-width: 981px) {
@@ -39084,8 +39080,9 @@ textarea:focus-visible,
 /* Keep the surface selector compact beside the sidebar toggle, even when the
    Workspace sidebar is dragged wider than its default 224px. */
 .gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings) {
-  /* Center both control heights on the native traffic lights' visible line. */
+  /* Center the controls on the native traffic lights' visible line. */
   align-items: center;
+  gap: 4px;
   padding-top: 2px;
   padding-right: 10px;
   position: relative;
@@ -39093,7 +39090,7 @@ textarea:focus-visible,
 
 .gyro-titlebar-switch {
   flex: 1 1 auto;
-  max-width: calc(80px * var(--gyro-ui-scale, 1));
+  max-width: calc(72px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-titlebar-switch-option {

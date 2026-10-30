@@ -39,16 +39,9 @@ fn git_fork_point(workspace: &Path, base: &str, deadline: Instant) -> Option<Str
     (output.succeeded() && !output.stdout_truncated).then(|| output.stdout.trim().to_owned())
 }
 
-/// `workspace` is the directory paths are reported relative to, like the
-/// `untracked` files; the base is resolved once, within `deadline`, and the
-/// diff runs from where the checkout forked from it.
-pub(crate) fn git_main_comparison(
-    workspace: &Path,
-    untracked: &[SourceControlFile],
-    untracked_additions: usize,
-    partial: bool,
-    deadline: Instant,
-) -> Option<MainComparisonStats> {
+/// Compare tracked changes relative to the workspace with the fork from main.
+/// Untracked files remain in the working tree, but are not part of Git's diff.
+pub(crate) fn git_main_comparison(workspace: &Path, deadline: Instant) -> Option<MainComparisonStats> {
     let main = git_main_comparison_base(workspace, deadline)?;
     let base = git_fork_point(workspace, &main, deadline).unwrap_or(main);
     let mut command = git_command();
@@ -81,22 +74,15 @@ pub(crate) fn git_main_comparison(
         .collect();
     files.sort_by(|left, right| left.path.cmp(&right.path));
     let mut result = MainComparisonStats {
-        additions: untracked_additions,
+        additions: 0,
         deletions: 0,
-        partial: partial || parse_partial || output.stdout_truncated,
+        partial: parse_partial || output.stdout_truncated,
         files: Vec::new(),
     };
     for (additions, deletions) in stats.values() {
         result.additions = result.additions.saturating_add(*additions);
         result.deletions = result.deletions.saturating_add(*deletions);
     }
-    for file in untracked {
-        if stats.contains_key(&file.path) {
-            continue;
-        }
-        files.push(file.clone());
-    }
-    files.sort_by(|left, right| left.path.cmp(&right.path));
     result.files = files;
     Some(result)
 }
@@ -108,7 +94,7 @@ mod tests {
     use std::process::Command;
 
     #[test]
-    fn source_control_main_comparison_includes_committed_and_untracked_changes() {
+    fn source_control_main_comparison_includes_tracked_changes_but_excludes_untracked() {
         let repo = tempfile::tempdir().unwrap();
         init_git_repo(repo.path());
         std::fs::write(repo.path().join("file.txt"), "base\n").unwrap();
@@ -122,15 +108,18 @@ mod tests {
         let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
         assert_eq!(status.additions, 2);
         let comparison = status.compared_to_main.unwrap();
-        assert_eq!((comparison.additions, comparison.deletions), (3, 0));
+        assert_eq!((comparison.additions, comparison.deletions), (2, 0));
         assert!(!comparison.partial);
-        let paths: Vec<_> = comparison
-            .files
-            .iter()
-            .map(|file| file.path.as_str())
-            .collect();
-        assert!(paths.contains(&"file.txt"));
-        assert!(paths.contains(&"new.txt"));
+        assert!(comparison.files.iter().any(|file| file.path == "file.txt"));
+        assert!(!comparison.files.iter().any(|file| file.path == "new.txt"));
+        assert!(status.files.iter().any(|file| file.path == "new.txt"));
+
+        // A newly staged file is tracked by Git and belongs in the comparison.
+        run_git(repo.path(), &["add", "new.txt"]);
+        let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        let comparison = status.compared_to_main.unwrap();
+        assert_eq!((comparison.additions, comparison.deletions), (3, 0));
+        assert!(comparison.files.iter().any(|file| file.path == "new.txt"));
         run_git(repo.path(), &["branch", "-D", "main"]);
         let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
         assert!(status.compared_to_main.is_none());

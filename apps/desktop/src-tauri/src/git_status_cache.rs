@@ -527,7 +527,9 @@ pub(super) fn apply_git_diff_stats(
         status.deletions = status.deletions.saturating_add(*deletions);
     }
 
-    let mut untracked_additions = 0usize;
+    // Resolve the tracked comparison before counting untracked files, which can
+    // exhaust the shared deadline in large working trees.
+    status.compared_to_main = git_main_comparison::git_main_comparison(workspace, deadline);
     for file in &mut status.files {
         if let Some((additions, deletions)) = tracked.get(&file.path).or_else(|| {
             file.original_path
@@ -564,22 +566,8 @@ pub(super) fn apply_git_diff_stats(
             }
         };
         file.additions = additions;
-        untracked_additions = untracked_additions.saturating_add(additions);
         status.additions = status.additions.saturating_add(additions);
     }
-    let untracked: Vec<SourceControlFile> = status
-        .files
-        .iter()
-        .filter(|file| file.state == "untracked")
-        .cloned()
-        .collect();
-    status.compared_to_main = git_main_comparison::git_main_comparison(
-        workspace,
-        &untracked,
-        untracked_additions,
-        status.stats_partial,
-        deadline,
-    );
 }
 
 /// Background `diff --numstat` flags: verbatim NUL-terminated paths relative
@@ -914,7 +902,7 @@ mod tests {
             .map(|file| file.path.as_str())
             .collect();
         compared.sort();
-        assert_eq!(compared, ["lib.rs", "new file.rs"]);
+        assert_eq!(compared, ["lib.rs"]);
 
         // Same porcelain, new content: the stamp must see the workspace file.
         fs::write(root.join("app/lib.rs"), "one\ntwo\nthree\n").unwrap();
