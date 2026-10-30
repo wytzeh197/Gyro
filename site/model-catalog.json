@@ -1,6 +1,6 @@
 {
   "schema": "gyro.model-catalog.v1",
-  "revision": "2026-10-23.3",
+  "revision": "2026-10-30.1",
   "enabled": true,
   "rolloutPercentage": 100,
   "models": [
@@ -20,6 +20,17 @@
         "max",
         "ultra"
       ],
+      "defaultReasoningEffort": "low"
+    },
+    {
+      "providerId": "openai",
+      "id": "gpt-6.1-terra",
+      "displayName": "GPT-6.1 Terra",
+      "description": "Codex CLI. GPT-6.1 Terra Codex model.",
+      "minClientRevision": 2,
+      "insertBefore": "gpt-6-astra",
+      "contextWindowTokens": 500000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
       "defaultReasoningEffort": "low"
     },
     {
