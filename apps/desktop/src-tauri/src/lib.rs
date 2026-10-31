@@ -21265,6 +21265,45 @@ fn effective_capability_class(
     Ok(gyro_core::capability_descriptor(capability_id).class)
 }
 
+/// Models cannot list Workspace tasks, so an unknown id names the valid ones
+/// instead of leaving the model to guess again.
+fn unknown_workspace_task_message(
+    task_id: &str,
+    tasks: &[TaskDefinitionResult],
+    tests_only: bool,
+) -> String {
+    const MAX_LISTED_IDS_CHARS: usize = 2_000;
+    let kind = if tests_only { "test task" } else { "task" };
+    let candidates: Vec<&str> = tasks
+        .iter()
+        .filter(|task| !tests_only || task.group == "test")
+        .map(|task| task.id.as_str())
+        .collect();
+    if candidates.is_empty() {
+        return format!(
+            "no {kind} with id \"{task_id}\"; this Workspace has no discovered {kind}s"
+        );
+    }
+    let mut listed = String::new();
+    let mut shown = 0;
+    for id in &candidates {
+        let separator = if listed.is_empty() { "" } else { ", " };
+        if listed.len() + separator.len() + id.len() > MAX_LISTED_IDS_CHARS {
+            break;
+        }
+        listed.push_str(separator);
+        listed.push_str(id);
+        shown += 1;
+    }
+    let more = candidates.len() - shown;
+    let suffix = if more > 0 {
+        format!(" (and {more} more)")
+    } else {
+        String::new()
+    };
+    format!("no {kind} with id \"{task_id}\"; available ids: {listed}{suffix}")
+}
+
 fn capability_git_diff_path(arguments: &serde_json::Value) -> anyhow::Result<Option<String>> {
     let path = arguments
         .get("path")
@@ -22226,14 +22265,14 @@ fn execute_provider_capability(
             capability_output_budget::offset(arguments, "stderrOffset")?;
             let task_id = capability_argument_string(arguments, "taskId")?.to_string();
             let tasks = task_discover_impl(&workspace)?;
-            let task = tasks
-                .into_iter()
-                .find(|task| task.id == task_id)
-                .ok_or_else(|| anyhow::anyhow!("task is no longer present in the Workspace"))?;
             let is_test = request.capability_id == CapabilityId::WorkspaceRunTest;
-            if is_test && task.group != "test" {
-                anyhow::bail!("the requested task is not a discovered test task");
-            }
+            let Some(task) = tasks
+                .iter()
+                .find(|task| task.id == task_id && (!is_test || task.group == "test"))
+                .cloned()
+            else {
+                anyhow::bail!(unknown_workspace_task_message(&task_id, &tasks, is_test));
+            };
             let kind = if is_test { "test" } else { "task" };
             if arguments
                 .get("background")
@@ -22432,6 +22471,16 @@ fn execute_provider_capability(
             };
             if !cwd.is_dir() {
                 anyhow::bail!("terminal working directory is not a directory");
+            }
+            // The program runs without a shell, so a whole command line in
+            // `program` fails as an unknown executable. Say how to fix it.
+            if args.is_empty()
+                && program.trim().contains(char::is_whitespace)
+                && !cwd.join(&program).exists()
+            {
+                anyhow::bail!(
+                    "terminal program must be one executable, not a command line; pass arguments in args (program \"npm\", args [\"run\", \"dev\"]), or use program \"sh\" with args [\"-c\", \"<command>\"] for pipes, redirects, or &&"
+                );
             }
             let (resource_id, snapshot) = claim_model_terminal(
                 app,
@@ -23924,8 +23973,8 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
                 "type": "string",
                 "description": "Optional workspace-relative directory. Search stays inside this directory."
             },
-            "globs": { "type": "array", "items": { "type": "string" } },
-            "maxResults": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 50 },
+            "globs": { "type": "array", "items": { "type": "string" }, "description": "Optional ripgrep globs that filter files, such as [\"*.ts\", \"!*.test.ts\"]." },
+            "maxResults": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 50, "description": "Maximum matching lines to return." },
             "maxBytes": workspace_result_bytes_schema()
         }),
         CapabilityId::WorkspaceRead | CapabilityId::WorkspaceReadRange => serde_json::json!({
@@ -23934,10 +23983,10 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
                 "description": "Workspace-relative file path, or a spill:// address quoted by a prior preview."
             },
             "knownContentHash": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$", "description": "Omit unchanged text when rechecking evidence already read at this hash. Omit this argument to read new content or a new range." },
-            "line": { "type": "integer", "minimum": 1 },
-            "endLine": { "type": "integer", "minimum": 1 },
-            "column": { "type": "integer", "minimum": 1 },
-            "endColumn": { "type": "integer", "minimum": 1 },
+            "line": { "type": "integer", "minimum": 1, "description": "First line to read, 1-based. With no endLine, reads 200 lines." },
+            "endLine": { "type": "integer", "minimum": 1, "description": "Last line to read, 1-based and inclusive. At most 2,000 lines per call; the reply names where to continue." },
+            "column": { "type": "integer", "minimum": 1, "description": "First column on line, 1-based." },
+            "endColumn": { "type": "integer", "minimum": 1, "description": "Last column on endLine, 1-based." },
             "offset": {
                 "type": "integer",
                 "minimum": 0,
@@ -24019,7 +24068,7 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
                 "default": "gyro_",
                 "description": "Domain prefix such as gyro_browser_ or gyro_github_."
             },
-            "offset": { "type": "integer", "minimum": 0 }
+            "offset": { "type": "integer", "minimum": 0, "description": "Page start; pass nextOffset from the previous page." }
         }),
         _ => serde_json::json!({}),
     };
@@ -28227,14 +28276,38 @@ while True:
             "../../../../scripts/fixtures/model-metadata.json"
         ))
         .unwrap();
+        let published: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../site/model-catalog.json")).unwrap();
         for row in facts["models"].as_array().unwrap() {
             let provider = row[0].as_str().unwrap();
             let model = row[1].as_str().unwrap();
-            assert_eq!(
-                provider_model_context_window(provider, Some(model)),
-                row[2].as_u64(),
-                "{provider}/{model} context"
-            );
+            let window = provider_model_context_window(provider, Some(model));
+            // A model added through the remote catalog has no bundled facts;
+            // the installed catalog supplies them, so verify the entry instead.
+            let catalog_entry = published["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["providerId"] == provider && entry["id"] == model);
+            if let (None, Some(entry)) = (window, catalog_entry) {
+                assert_eq!(
+                    entry["contextWindowTokens"].as_u64(),
+                    row[2].as_u64(),
+                    "{provider}/{model} catalog context"
+                );
+                assert_eq!(
+                    entry["supportedReasoningEfforts"], row[3],
+                    "{provider}/{model} catalog efforts"
+                );
+                if let Some(default) = row.get(4) {
+                    assert_eq!(
+                        &entry["defaultReasoningEffort"], default,
+                        "{provider}/{model} catalog default effort"
+                    );
+                }
+                continue;
+            }
+            assert_eq!(window, row[2].as_u64(), "{provider}/{model} context");
             for effort in ["low", "medium", "high", "xhigh", "max", "ultra", "invalid"] {
                 let actual = match provider {
                     "openai" => codex_reasoning_effort_arg(Some(model), Some(effort)),
@@ -34112,10 +34185,13 @@ while True:
         let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
         assert_eq!(status.additions, 450);
         assert!(!status.stats_partial);
+        // Untracked files stay out of the main comparison; only the tracked
+        // binary change is listed, and it has no line counts.
         let comparison = status.compared_to_main.unwrap();
-        assert_eq!((comparison.additions, comparison.deletions), (450, 0));
+        assert_eq!((comparison.additions, comparison.deletions), (0, 0));
         assert!(!comparison.partial);
-        assert_eq!(comparison.files.len(), 451);
+        assert_eq!(comparison.files.len(), 1);
+        assert_eq!(comparison.files[0].path, "image.bin");
         let (_, malformed) = parse_git_numstat("invalid\t1\tfile.txt");
         assert!(malformed);
     }
@@ -34139,6 +34215,61 @@ while True:
             args,
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn every_tool_schema_is_consistent_and_scoped() {
+        for descriptor in gyro_core::CAPABILITY_DESCRIPTORS {
+            let name = descriptor.id.provider_tool_name();
+            let schema = desktop_capability_tool_schema(descriptor.id);
+            let properties = schema["properties"].as_object().unwrap();
+            for required in schema["required"].as_array().into_iter().flatten() {
+                let required = required.as_str().unwrap();
+                assert!(
+                    properties.contains_key(required),
+                    "{name} requires undeclared {required}"
+                );
+            }
+            for (parameter, property) in properties {
+                assert!(
+                    property.get("type").is_some() || property.get("enum").is_some(),
+                    "{name}.{parameter} has no type"
+                );
+            }
+            if name.starts_with("gyro_browser_") {
+                assert!(
+                    !properties.contains_key("rootId"),
+                    "{name} is not bound to a workspace root"
+                );
+            }
+        }
+        let diff = desktop_capability_tool_schema(CapabilityId::WorkspaceDiff);
+        assert!(!diff["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|required| required == "path"));
+    }
+
+    #[test]
+    fn unknown_workspace_task_lists_the_valid_ids() {
+        let task =
+            |id: &str, group: &str| suggested_task(id.into(), id.into(), "npm", Vec::new(), group);
+        let tasks = vec![task("package:build", "build"), task("package:test", "test")];
+        let message = unknown_workspace_task_message("build", &tasks, false);
+        assert!(message.contains("package:build, package:test"), "{message}");
+        let message = unknown_workspace_task_message("package:build", &tasks, true);
+        assert!(message.contains("available ids: package:test"), "{message}");
+        assert!(!message.contains("package:build,"), "{message}");
+        let many: Vec<_> = (0..240)
+            .map(|index| task(&format!("package:script-{index:03}"), "build"))
+            .collect();
+        let message = unknown_workspace_task_message("x", &many, false);
+        assert!(
+            message.len() < 2_200 && message.ends_with("more)"),
+            "{message}"
+        );
+        assert!(unknown_workspace_task_message("x", &[], true).contains("no discovered test tasks"));
     }
 }
 

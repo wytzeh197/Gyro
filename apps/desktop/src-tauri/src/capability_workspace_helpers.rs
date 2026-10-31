@@ -85,6 +85,7 @@ pub(super) fn capability_uses_workspace_root(id: CapabilityId) -> bool {
         CapabilityId::WorkspaceContext
             | CapabilityId::CodeModeDiscover
             | CapabilityId::CodeModeExecute
+            | CapabilityId::BrowserMouse
             | CapabilityId::BrowserOpen
             | CapabilityId::BrowserInspect
             | CapabilityId::BrowserReload

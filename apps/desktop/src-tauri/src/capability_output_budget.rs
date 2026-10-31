@@ -227,12 +227,12 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
             json!({"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":500,"default":50},"maxBytes":workspace_result_bytes_schema()})
         }
         CapabilityId::WorkspaceDiff => json!({
-            "path": { "type": "string" },
-            "staged": { "type": "boolean" },
+            "path": { "type": "string", "description": "One exact workspace-relative file or folder path. Omit to diff the whole workspace, which asks the user for approval." },
+            "staged": { "type": "boolean", "description": "Diff the staged index against HEAD instead of the working tree against the index." },
             "stdoutOffset": offset_schema(), "stderrOffset": offset_schema(), "maxBytes": workspace_result_bytes_schema()
         }),
         CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => json!({
-            "taskId": { "type": "string" },
+            "taskId": { "type": "string", "description": "Exact id of a discovered Workspace task, such as \"package:build\" or \"cargo:test\". An unknown id fails with the list of valid ids." },
             "maxBytes": workspace_result_bytes_schema(),
             "stdoutOffset": offset_schema(),
             "stderrOffset": offset_schema(),
@@ -242,9 +242,9 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
             }
         }),
         CapabilityId::TerminalOpen => json!({
-            "program": { "type": "string" },
-            "args": { "type": "array", "items": { "type": "string" } },
-            "cwd": { "type": "string" },
+            "program": { "type": "string", "description": "Executable name or path only, such as \"npm\" or \"cargo\". It runs directly without a shell, so put arguments in args. For pipes, redirects, or && use program \"sh\" with args [\"-c\", \"...\"]." },
+            "args": { "type": "array", "items": { "type": "string" }, "description": "Arguments passed to program, one per element, such as [\"run\", \"dev\"]." },
+            "cwd": { "type": "string", "description": "Workspace-relative working directory. Defaults to the workspace root." },
             "maxBytes": workspace_result_bytes_schema()
         }),
         CapabilityId::TerminalWait => json!({
@@ -287,7 +287,6 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
     };
     let required = match id {
         CapabilityId::GithubWorkflowLogs => vec!["runId"],
-        CapabilityId::WorkspaceDiff => vec!["path"],
         CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => vec!["taskId"],
         CapabilityId::TerminalOpen => vec!["program"],
         CapabilityId::TerminalWait => vec!["resourceId"],

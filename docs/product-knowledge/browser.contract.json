@@ -177,10 +177,6 @@
             "description": "Filename from a recent screenshot of this chat's browser",
             "type": "string"
           },
-          "rootId": {
-            "description": "Workspace root ID; required for multiple roots.",
-            "type": "string"
-          },
           "toX": {
             "description": "Required destination X for drag",
             "type": "number"
