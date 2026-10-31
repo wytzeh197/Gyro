@@ -764,12 +764,12 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceGitStatus,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Inspect Git status for the Gyro project.",
+        description: "List changed, staged, and untracked files in the workspace Git repository with the current branch. Use this instead of shelling out to git status.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceDiff,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Inspect a bounded Git diff for the Gyro project.",
+        description: "Read a bounded Git diff of the working tree, or of staged changes with staged: true. Pass path to diff one file or folder; omitting it diffs the whole workspace and asks the user for approval.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceGitLog,
@@ -834,12 +834,12 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTask,
         class: CapabilityClass::TerminalExecute,
-        description: "Run one discovered Workspace task with visible, attributed output. Pass background: true for a long-running task such as a dev server or watcher so it starts in this chat's terminal instead of holding the turn open. Background tasks still running when the turn ends are watched under the reply and relaunched if they exit without the user or model stopping them.",
+        description: "Run one discovered Workspace task, such as a package script, Cargo, or Make target, by its exact taskId, with visible, attributed output. An unknown taskId fails with the list of valid ids. Pass background: true for a long-running task such as a dev server or watcher so it starts in this chat's terminal instead of holding the turn open. Background tasks still running when the turn ends are watched under the reply and relaunched if they exit without the user or model stopping them.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTest,
         class: CapabilityClass::TerminalExecute,
-        description: "Run one discovered Workspace test task with visible, attributed output. Pass background: true for a watch-mode suite so it starts in this chat's terminal instead of holding the turn open.",
+        description: "Run one discovered Workspace test task by its exact taskId, with visible, attributed output. An unknown taskId fails with the list of valid test ids. Pass background: true for a watch-mode suite so it starts in this chat's terminal instead of holding the turn open.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadOutput,

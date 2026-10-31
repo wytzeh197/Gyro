@@ -415,16 +415,16 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
     let (properties, required) = match id {
         CapabilityId::WorkspaceProposeEdit => (
             json!({
-                "path": { "type": "string" },
-                "content": { "type": "string" },
-                "expectedHash": { "type": "string" }
-                ,"documentVersion": { "type": "string", "description": "Version returned by gyro_workspace_read_editor; reject if the live document changed." }
+                "path": { "type": "string", "description": "Workspace-relative file path. A missing file is created." },
+                "content": { "type": "string", "description": "Complete new file content, replacing the whole file." },
+                "expectedHash": { "type": "string", "description": "Required for an existing file: contentHash from a prior read, rejected if the file changed since. Omit for a new file." },
+                "documentVersion": { "type": "string", "description": "Version returned by gyro_workspace_read_editor; reject if the live document changed." }
             }),
             vec!["path", "content"],
         ),
         CapabilityId::WorkspaceEdit => (
             json!({
-                "path": { "type": "string" },
+                "path": { "type": "string", "description": "Workspace-relative path of an existing file." },
                 "oldString": {
                     "type": "string",
                     "description": "Exact text to replace, copied from the file including indentation. It must match exactly once unless replaceAll is true."
