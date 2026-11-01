@@ -146,6 +146,24 @@ try {
       ),
     "distinct same-name files",
   );
+  for (const pane of ["b", "a"]) {
+    await evaluate(`(() => {
+      const target = document.querySelector('[data-fixture-pane="${pane}"]');
+      const rect = target.getBoundingClientRect();
+      const transfer = new DataTransfer();
+      transfer.setData('public.file-url', 'file:///Users/test/Desktop/image%20one.png');
+      const options = {bubbles:true, cancelable:true, dataTransfer:transfer, clientX:rect.x+rect.width/2, clientY:rect.y+rect.height/2};
+      target.dispatchEvent(new DragEvent('dragover', options));
+      target.dispatchEvent(new DragEvent('drop', options));
+    })()`);
+    await until(
+      () =>
+        evaluate(
+          `document.querySelector('[role="status"]').textContent === 'File paths to Pane ${pane.toUpperCase()}: /Users/test/Desktop/image one.png'`,
+        ),
+      "file URL drop " + pane,
+    );
+  }
   const shot = await call("Page.captureScreenshot", { format: "png" });
   await writeFile(
     "/private/tmp/gyro-media-reliability-verified.png",
@@ -153,6 +171,55 @@ try {
   );
   console.log(
     "PASS: actual chat components; 6 theme/size arrow checks; repeated URL drops route to the correct pane; same-name file drops retain both images. Storage/provider sends are simulated; Finder gestures are not tested.",
+  );
+  await call("Page.navigate", { url: origin + "/image-preview-fixture.html" });
+  await until(
+    () =>
+      evaluate(
+        "document.querySelectorAll('[aria-label^=\"Retry preview\"]').length === 2 && !document.body.textContent.includes('Loading preview')",
+      ),
+    "failed previews",
+  );
+  await evaluate("document.querySelector('button').click()");
+  await evaluate(
+    "document.querySelectorAll('[aria-label^=\"Retry preview\"]').forEach(button => button.click())",
+  );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelectorAll('.gyro-chat-file-thumbnail img').length === 3 && [...document.querySelectorAll('.gyro-chat-file-thumbnail img')].every(img => img.complete && img.naturalWidth > 0)",
+      ),
+    "retry and stale URL recovery",
+  );
+  const reads = await evaluate(
+    "JSON.parse(document.documentElement.dataset.previewCalls)",
+  );
+  assert.equal(
+    reads.filter((read) => read === "a:/project-a:shots/image.png").length,
+    2,
+  );
+  assert.equal(
+    reads.filter((read) => read === "b:/project-b:shots/image.png").length,
+    2,
+  );
+  assert.ok(reads.includes("a:/project-a:shots/stale.png"));
+  await evaluate(
+    "document.querySelector('[aria-label=\"Preview Image b\"]').click()",
+  );
+  await until(
+    () =>
+      evaluate("document.querySelector('[role=dialog] img')?.naturalWidth > 0"),
+    "expanded preview",
+  );
+  await evaluate(
+    "document.querySelector('[aria-label=\"Close file preview\"]').click()",
+  );
+  assert.equal(
+    await evaluate("document.querySelectorAll('[role=dialog]').length"),
+    0,
+  );
+  console.log(
+    "PASS: production image cards retry failed reads, recover stale blob URLs, retain pane-specific scopes, and expand/close previews. Native reads are simulated.",
   );
 } finally {
   ws?.close();

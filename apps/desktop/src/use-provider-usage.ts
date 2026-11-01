@@ -97,7 +97,7 @@ export function useProviderUsage(options: {
         if (request !== providerUsageRequestRef.current[providerId]) return;
         setProviderUsageByProvider((current) => ({
           ...current,
-          [providerId]: providerUsageFromSnapshot(snapshot),
+          [providerId]: providerUsageFromSnapshot(snapshot, current[providerId]),
         }));
       } catch (error) {
         if (request !== providerUsageRequestRef.current[providerId]) return;
@@ -138,21 +138,11 @@ export function useProviderUsage(options: {
       if (!snapshot?.providerId) return;
       setProviderUsageByProvider((current) => {
         const previous = current[snapshot.providerId];
-        const previousMs = previous?.fetchedAt
-          ? Date.parse(previous.fetchedAt)
-          : Number.NaN;
-        const nextMs = Date.parse(snapshot.fetchedAt);
-        if (
-          previous?.status === "available" &&
-          !previous.stale &&
-          Number.isFinite(previousMs) &&
-          (!Number.isFinite(nextMs) || nextMs < previousMs)
-        ) {
-          return current;
-        }
+        const next = providerUsageFromSnapshot(snapshot, previous);
+        if (next === previous) return current;
         return {
           ...current,
-          [snapshot.providerId]: providerUsageFromSnapshot(snapshot),
+          [snapshot.providerId]: next,
         };
       });
     }).then((stop) => {

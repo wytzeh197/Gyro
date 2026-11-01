@@ -1,6 +1,6 @@
 import "./efficiency.css";
 import { EfficiencyRoutingSettings } from "./efficiency-routing-settings";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { GyroConfig, EfficiencyConfig, PriceSnapshot } from "./types";
 import {
   SettingsGroup,
@@ -14,12 +14,17 @@ export const DEFAULT_EFFICIENCY: EfficiencyConfig = {
   profile: "standard",
   parallelAgents: false,
   prices: [],
+  compactToolCatalog: false,
+  recoverableEvidence: false,
+  retainToolCatalog: false,
 };
 export function EfficiencySettings({
   config,
   onChange,
   onRoute,
+  contextControls, advancedControls, reminders,
 }: {
+  contextControls?: ReactNode; advancedControls?: ReactNode; reminders?: ReactNode;
   config: GyroConfig;
   onChange?: (value: EfficiencyConfig) => Promise<void>;
   onRoute?: (phase: string, escalate: boolean) => Promise<void>;
@@ -51,7 +56,9 @@ export function EfficiencySettings({
   }
   const disabled = busy || !onChange;
   return (
-    <SettingsGroup label="Context & experiments">
+    <>
+    {error ? <p className="gyro-settings-page-status" role="alert">{error}</p> : null}
+    <SettingsGroup id="context-handling" label="Context handling">
       <SettingsRow
         label="Context efficiency"
         detail="Enable validated context improvements. Experiments remain separate; model and reasoning choices stay yours."
@@ -63,6 +70,23 @@ export function EfficiencySettings({
           onChange={(enabled) => void save({ ...value, enabled })}
         />
       </SettingsRow>
+      {contextControls}
+    </SettingsGroup>
+    <SettingsGroup id="parallel-agents" label="Parallel agents">
+      <SettingsRow
+        label="Parallel agents"
+        detail="Allow additional agents when useful. Explicit task instructions still take precedence."
+      >
+        <SettingsSwitch
+          label="Parallel agents"
+          checked={value.parallelAgents}
+          disabled={disabled}
+          onChange={(parallelAgents) => void save({ ...value, parallelAgents })}
+        />
+      </SettingsRow>
+    </SettingsGroup>
+    {reminders}
+    <SettingsGroup id="advanced-efficiency" label="Advanced efficiency">
       <SettingsRow
         label="Efficiency experiments"
         detail="Try structured output, task checkpoints, retrieval and progress detection. Live task-cost evaluation is pending; experiments are off by default."
@@ -98,6 +122,42 @@ export function EfficiencySettings({
             </SettingsRow>
           ))
         : null}
+      {value.experimental ? (
+        <SettingsRow
+          label="Compact tool catalog"
+          detail="Experimental direct-provider tool discovery. Off by default; evaluate task quality and total cost before wider use."
+        >
+          <SettingsSwitch
+            label="Compact tool catalog"
+            checked={value.compactToolCatalog ?? false}
+            disabled={disabled || !value.enabled}
+            onChange={(compactToolCatalog) =>
+              void save({ ...value, compactToolCatalog })
+            }
+          />
+        </SettingsRow>
+      ) : null}
+      {value.experimental
+        ? (
+            [
+              ["recoverableEvidence", "Complete evidence recovery"],
+              ["retainToolCatalog", "Retain discovered tool schemas"],
+            ] as const
+          ).map(([key, label]) => (
+            <SettingsRow
+              key={key}
+              label={label}
+              detail="Experimental; off by default. Evaluate quality and total task cost independently."
+            >
+              <SettingsSwitch
+                label={label}
+                checked={value[key] ?? false}
+                disabled={disabled || !value.enabled}
+                onChange={(enabled) => void save({ ...value, [key]: enabled })}
+              />
+            </SettingsRow>
+          ))
+        : null}
       <SettingsRow
         label="Task profile"
         detail="Applies only when no reasoning effort is selected and the model supports it."
@@ -117,17 +177,6 @@ export function EfficiencySettings({
           <option value="standard">Standard</option>
           <option value="deep">Deep</option>
         </SettingsSelect>
-      </SettingsRow>
-      <SettingsRow
-        label="Parallel agents"
-        detail="Allow additional agents when useful. Explicit task instructions still take precedence."
-      >
-        <SettingsSwitch
-          label="Parallel agents"
-          checked={value.parallelAgents}
-          disabled={disabled}
-          onChange={(parallelAgents) => void save({ ...value, parallelAgents })}
-        />
       </SettingsRow>
       <EfficiencyRoutingSettings
         value={value}
@@ -238,6 +287,9 @@ export function EfficiencySettings({
         </form>
       </details>
       {error ? <p role="alert">{error}</p> : null}
+      {advancedControls}
     </SettingsGroup>
+
+    </>
   );
 }

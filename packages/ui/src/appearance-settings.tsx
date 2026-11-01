@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties, type SyntheticEvent } from "react";
 import { Check, RotateCcw } from "lucide-react";
 import type {
   InterfaceSize,
@@ -45,15 +45,22 @@ export function AppearanceSettings({
   saveStatus,
   onRetrySave,
 }: AppearanceSettingsProps) {
+  const [lastEditedSection, setLastEditedSection] = useState<string>();
+  const rememberEditedSection = (event: SyntheticEvent) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || target.closest("button[aria-expanded]")) return;
+    const section = target.closest<HTMLElement>("[data-settings-disclosure]")?.dataset.settingsDisclosure;
+    if (section) setLastEditedSection(section);
+  };
   return (
-    <div className="gyro-appearance-settings">
+    <div className="gyro-appearance-settings" onClickCapture={rememberEditedSection} onChangeCapture={rememberEditedSection}>
       <div className="gyro-appearance-scope">
         <span>Applies across Gyro</span>
         <span
           aria-live="polite"
           aria-atomic="true"
           className={`gyro-appearance-save-status${saveStatus === "error" ? " is-error" : ""}`}
-          role="status"
+          role={saveStatus === "error" ? "alert" : "status"}
         >
           {saveStatus === "saving"
             ? "Saving…"
@@ -70,7 +77,7 @@ export function AppearanceSettings({
         </span>
       </div>
       <SettingsGroup
-        label="Theme"
+        attention={saveStatus === "error" && lastEditedSection === "theme"} id="theme" label="Theme" summary={themeMode === "system" ? "Follows macOS" : `${themeMode === "dark" ? "Dark" : "Light"} theme`}
         description="Follow your Mac’s appearance or choose your own."
         actions={
           <AppearanceReset
@@ -118,7 +125,7 @@ export function AppearanceSettings({
         </div>
       </SettingsGroup>
       <SettingsGroup
-        label="Text & layout"
+        attention={saveStatus === "error" && lastEditedSection === "text-layout"} id="text-layout" label="Text & spacing" summary={`${interfaceSize.charAt(0).toUpperCase()+interfaceSize.slice(1)} size · ${density.charAt(0).toUpperCase()+density.slice(1)} spacing`}
         actions={
           <AppearanceReset
             label="Reset text & layout"
@@ -168,7 +175,7 @@ export function AppearanceSettings({
         </SettingsRow>
       </SettingsGroup>
       <SettingsGroup
-        label="Motion"
+        attention={saveStatus === "error" && lastEditedSection === "motion"} id="motion" label="Motion" summary={reduceMotion ? "Reduced motion" : `${motionSpeed.charAt(0).toUpperCase()+motionSpeed.slice(1)} speed`}
         actions={
           <AppearanceReset
             label="Reset motion"
@@ -200,7 +207,7 @@ export function AppearanceSettings({
         </SettingsRow>
       </SettingsGroup>
       <SettingsGroup
-        label="Colors"
+        attention={saveStatus === "error" && lastEditedSection === "colors"} id="colors" label="Accent colors" summary={`${mainColor} · ${secondaryColor}`}
         description="Choose colors for selection, actions, and supporting highlights."
         actions={
           <AppearanceReset

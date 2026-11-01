@@ -108,9 +108,8 @@ pub fn approve_for_me_keeps_escalations(provider_id: &str) -> bool {
 /// Antigravity no longer runs an ACP server: its official CLI takes the posture
 /// as ordinary launch flags (`--sandbox`, `--mode`,
 /// `--dangerously-skip-permissions`), so it has no ACP argv here.
-/// OpenCode has `--auto` and no sandbox,
-/// so Approve for me and Full access are the same native mode; deny rules in
-/// the user's OpenCode config still apply.
+/// OpenCode uses a per-process Gyro agent and always sends permission requests;
+/// the callback applies the selected posture without a native bypass flag.
 pub fn acp_permission_args(
     provider_id: &str,
     posture: ApprovalPosture,
@@ -140,10 +139,9 @@ pub fn acp_permission_args(
             ApprovalPosture::ApproveForMe => &["--sandbox", "enabled", "acp"],
             ApprovalPosture::FullAccess => &["--force", "--sandbox", "disabled", "acp"],
         },
-        "opencode" => match posture {
-            ApprovalPosture::Ask => &["acp"],
-            ApprovalPosture::ApproveForMe | ApprovalPosture::FullAccess => &["--auto", "acp"],
-        },
+        // The managed agent requests permission in every posture. Gyro answers
+        // these callbacks itself; --auto would bypass plan/edit constraints.
+        "opencode" => &["acp"],
         _ => return None,
     })
 }

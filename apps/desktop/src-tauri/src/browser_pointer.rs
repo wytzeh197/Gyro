@@ -95,7 +95,11 @@ pub(super) fn execute<R: Runtime>(
             return Err("drag destination needs user takeover in the Browser".into());
         }
     }
-    let background_only = session_browser::is_background_browser(app, session_id);
+    let snapshot = app
+        .state::<SessionBrowserManager>()
+        .get_snapshot(session_id)?
+        .ok_or("Browser closed before input")?;
+    let background_only = snapshot.background_only || !snapshot.visible;
     if !background_only {
         // Paint before dispatch too: a navigation can replace the document
         // before post-click feedback arrives. Protected targets were checked above.

@@ -25,6 +25,7 @@ const PERMANENT_RECOVERY_KINDS = new Set([
   "cli-contract",
   "capacity", // An output/tool budget, distinct from unavailable model capacity.
   "spend-ceiling",
+  "no-progress",
   "tool-budget",
   "partial-answer",
   "cancelled",

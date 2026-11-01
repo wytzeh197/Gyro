@@ -114,6 +114,11 @@ const INSTALL_SPECS: &[InstallSpec] = &[
         program: "cursor-agent",
         routes: &[Route::Installer("https://cursor.com/install")],
     },
+    InstallSpec {
+        provider_id: "antigravity",
+        program: "agy",
+        routes: &[Route::Installer("https://antigravity.google/cli/install.sh")],
+    },
 ];
 
 /// What the machine offers an install, gathered once so the choice is pure.
@@ -434,6 +439,10 @@ mod tests {
         environment.npm_available = false;
         let plan = plan_for("opencode", &environment).plan.expect("plan");
         assert_eq!(plan.method, CliInstallMethod::Installer);
+        let antigravity = plan_for("antigravity", &environment).plan.expect("Antigravity install plan");
+        assert_eq!(antigravity.program, "agy");
+        assert_eq!(antigravity.method, CliInstallMethod::Installer);
+        assert_eq!(antigravity.args, ["-c", "curl -fsSL https://antigravity.google/cli/install.sh | bash"]);
     }
 
     #[test]

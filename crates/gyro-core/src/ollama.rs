@@ -274,11 +274,31 @@ pub fn ollama_tool_chat_with_progress<F>(
 where
     F: FnMut(&str),
 {
+    ollama_tool_chat_with_updates(request, cancellation, on_delta, |_, _| {})
+}
+
+/// Stream measured request counts alongside text, using the allocated window.
+pub fn ollama_tool_chat_with_updates<F, U>(
+    request: OllamaToolChatRequest<'_>,
+    cancellation: &CancellationToken,
+    on_delta: F,
+    mut on_usage: U,
+) -> Result<OllamaChatResponse>
+where
+    F: FnMut(&str),
+    U: FnMut(UsageTokens, Option<u64>),
+{
     let mut window = request_context_window(&request)?;
     crate::provider_retry::stream_response(
         cancellation,
         |mut emit| loop {
-            match ollama_tool_chat_once(&request, window, cancellation, &mut emit) {
+            match ollama_tool_chat_once_with_updates(
+                &request,
+                window,
+                cancellation,
+                &mut emit,
+                &mut on_usage,
+            ) {
                 Err(error) if error.is::<OllamaContextOverflow>() => {
                     let can_grow = window
                         .zip(request.context_window_tokens)
@@ -305,15 +325,31 @@ where
     })
 }
 
+#[cfg(test)]
 fn ollama_tool_chat_once<F>(
     request: &OllamaToolChatRequest<'_>,
     window: Option<u64>,
     cancellation: &CancellationToken,
-    mut on_delta: F,
+    on_delta: F,
 ) -> Result<OllamaChatResponse>
 where
     F: FnMut(&str),
 {
+    ollama_tool_chat_once_with_updates(request, window, cancellation, on_delta, |_, _| {})
+}
+
+fn ollama_tool_chat_once_with_updates<F, U>(
+    request: &OllamaToolChatRequest<'_>,
+    window: Option<u64>,
+    cancellation: &CancellationToken,
+    mut on_delta: F,
+    mut on_usage: U,
+) -> Result<OllamaChatResponse>
+where
+    F: FnMut(&str),
+    U: FnMut(UsageTokens, Option<u64>),
+{
+    let mut last_live_usage = None;
     if cancellation.is_cancelled() {
         return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
     }
@@ -413,6 +449,18 @@ where
                 None,
                 None,
             )));
+        }
+        if input_tokens.is_some() || output_tokens.is_some() {
+            let mut tokens =
+                UsageTokens::measured(input_tokens, cached_input_tokens, output_tokens, None, None)
+                    .partial(crate::usage::UsageReason::ProviderIncomplete);
+            if usage_regressed {
+                tokens = regressed_usage(tokens);
+            }
+            if last_live_usage != Some(tokens) {
+                last_live_usage = Some(tokens);
+                on_usage(tokens, window);
+            }
         }
         if let Some(error) = frame.error {
             if content.is_empty()

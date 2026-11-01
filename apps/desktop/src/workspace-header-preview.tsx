@@ -1,17 +1,35 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { IdeSurface, WorkspaceEditBar, createInitialWorkbenchState, type EditorTab } from "@gyro-dev/ui";
+import {
+  AppChrome,
+  IdeSurface,
+  WorkspaceEditBar,
+  createInitialWorkbenchState,
+  type EditorTab,
+} from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
 
 const paths = ["/fixture/project/main.ts", "/fixture/project/greeting.ts"];
 function Preview() {
   const [index, setIndex] = useState(-1);
   const [rename, setRename] = useState(false);
-  const [light, setLight] = useState(true);
+  const [light, setLight] = useState(
+    new URLSearchParams(location.search).get("theme") === "light",
+  );
+  const [hidden, setHidden] = useState(true);
   const [split, setSplit] = useState(false);
-  useEffect(() => { document.documentElement.dataset.theme = light ? "light" : "dark"; }, [light]);
+  useEffect(() => {
+    document.documentElement.dataset.theme = light ? "light" : "dark";
+  }, [light]);
   const activePath = paths[index];
-  const tabs: EditorTab[] = index < 0 ? [] : paths.map(path => ({ path, title: path.split("/").pop()!, dirty: false }));
+  const tabs: EditorTab[] =
+    index < 0
+      ? []
+      : paths.map((path) => ({
+          path,
+          title: path.split("/").pop()!,
+          dirty: false,
+        }));
   return (
     <main className="header-preview">
       <style>{`
@@ -20,6 +38,11 @@ function Preview() {
         .header-preview > header { display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--gyro-border);font-size:12px; }
         .header-preview > header strong { margin-right:auto; }
         .header-preview > header button { border:1px solid var(--gyro-border);border-radius:6px;background:var(--gyro-pane);color:inherit;font:inherit;padding:6px 10px; }
+        .header-preview > .gyro-app-shell { min-height:0;height:100%;position:relative; }
+        .header-preview .gyro-workspace-route { height:100%; }
+        .header-preview .gyro-sidebar-restore-cluster { position:absolute;left:calc(-1 * var(--gyro-workspace-activity-rail-width)); }
+        .header-preview .gyro-main { height:100%;min-height:0; }
+        .header-preview .gyro-workspace-activity-rail { min-height:0; }
         .header-preview > section { min-height:0;height:100%; }
         .header-preview *, .header-preview *::before, .header-preview *::after { animation:none !important;transition:none !important; }
         .header-preview footer { padding:10px 16px;border-top:1px solid var(--gyro-border);font-size:12px;color:var(--gyro-muted); }
@@ -27,28 +50,122 @@ function Preview() {
       `}</style>
       <header>
         <strong>Workspace header · actual components / fixture data</strong>
-        <button onClick={() => { setIndex(-1); setRename(false); }}>Empty workspace</button>
+        <button
+          onClick={() => {
+            setIndex(-1);
+            setRename(false);
+          }}
+        >
+          Empty workspace
+        </button>
         <button onClick={() => setIndex(0)}>Open main.ts</button>
         <button onClick={() => setIndex(1)}>Jump to greeting.ts</button>
-        <button onClick={() => setSplit(!split)}>{split ? "Single group" : "Split groups"}</button>
-        <button onClick={() => setRename(!rename)}>Toggle rename changes</button>
-        <button onClick={() => setLight(!light)}>{light ? "Dark theme" : "Light theme"}</button>
+        <button onClick={() => setSplit(!split)}>
+          {split ? "Single group" : "Split groups"}
+        </button>
+        <button onClick={() => setRename(!rename)}>
+          Toggle rename changes
+        </button>
+        <button onClick={() => setLight(!light)}>
+          {light ? "Dark theme" : "Light theme"}
+        </button>
       </header>
-      <section className="gyro-workspace-route is-code" style={{ gridTemplateRows:"minmax(0,1fr)" }}>
-        <div className="gyro-workspace-primary">
-          <WorkspaceEditBar paths={rename ? paths : []} canUndo={rename} busy={false} onUndo={() => setRename(false)} onSaveAll={() => setRename(false)} onOpenFile={path => setIndex(paths.indexOf(path))} />
-          <IdeSurface
-            workspacePath="/fixture/project" files={[]} selectedPath={activePath}
-            editorTabs={tabs} activePaneTab="terminal" terminalOutput="" showEmbeddedPanel={false}
-            ide={split ? { ...createInitialWorkbenchState().ide, layout:{ ...createInitialWorkbenchState().ide.layout, activeGroupId:"main", splitDirection:"right", groups:[{ id:"main",title:"Main",activePath,tabs,panes:[] },{ id:"second",title:"Second",activePath:paths[0],tabs:tabs.slice(0,1),panes:[] }] } } : undefined}
-            editorNavigation={{ canBack:index > 0,canForward:index === 0,onBack:() => setIndex(0),onForward:() => setIndex(1) }}
-            onSelectFile={path => setIndex(paths.indexOf(path))} onPaneTabChange={() => undefined}
-            renderEditor={({ path }) => <pre aria-label="Fixture code">{path?.endsWith("greeting.ts") ? 'export function greet(name: string) {\n  return `Hello, ${name}`;\n}\n' : 'import { greet } from "./greeting";\n\nconsole.log(greet("Workspace"));\n'}</pre>}
-          />
-        </div>
-      </section>
-      <footer aria-live="polite">{index < 0 ? "Empty workspace · no navigation row" : `Current fixture location: ${paths[index]}`} · editor text and history are local fixtures</footer>
+      <AppChrome
+        sessions={[]}
+        commandProfiles={[]}
+        savedProjects={[]}
+        activeDestination="workspace"
+        activeWorkspaceLayout="code"
+        workspacePath="/fixture/project"
+        workspaceSidebarHidden={hidden}
+        onWorkspaceSidebarHiddenChange={setHidden}
+        onSelectSession={() => {}}
+        onSelectWorkspaceLayout={() => {}}
+        onSelectDestination={() => {}}
+        onOpenToolPanel={() => {}}
+        onOpenSettings={() => {}}
+        onOpenCommandPalette={() => {}}
+        onCreateSession={() => {}}
+        onCreateCliSession={() => {}}
+        onSelectSessions={() => {}}
+        onOpenWorkspace={() => {}}
+      >
+        <section
+          className="gyro-workspace-route is-code"
+          style={{ gridTemplateRows: "minmax(0,1fr)" }}
+        >
+          <div className="gyro-workspace-primary">
+            <WorkspaceEditBar
+              paths={rename ? paths : []}
+              canUndo={rename}
+              busy={false}
+              onUndo={() => setRename(false)}
+              onSaveAll={() => setRename(false)}
+              onOpenFile={(path) => setIndex(paths.indexOf(path))}
+            />
+            <IdeSurface
+              workspacePath="/fixture/project"
+              files={[]}
+              selectedPath={activePath}
+              editorTabs={tabs}
+              activePaneTab="terminal"
+              terminalOutput=""
+              showEmbeddedPanel={false}
+              ide={
+                split
+                  ? {
+                      ...createInitialWorkbenchState().ide,
+                      layout: {
+                        ...createInitialWorkbenchState().ide.layout,
+                        activeGroupId: "main",
+                        splitDirection: "right",
+                        groups: [
+                          {
+                            id: "main",
+                            title: "Main",
+                            activePath,
+                            tabs,
+                            panes: [],
+                          },
+                          {
+                            id: "second",
+                            title: "Second",
+                            activePath: paths[0],
+                            tabs: tabs.slice(0, 1),
+                            panes: [],
+                          },
+                        ],
+                      },
+                    }
+                  : undefined
+              }
+              editorNavigation={{
+                canBack: index > 0,
+                canForward: index === 0,
+                onBack: () => setIndex(0),
+                onForward: () => setIndex(1),
+              }}
+              onSelectFile={(path) => setIndex(paths.indexOf(path))}
+              onPaneTabChange={() => undefined}
+              renderEditor={({ path }) => (
+                <pre aria-label="Fixture code">
+                  {path?.endsWith("greeting.ts")
+                    ? "export function greet(name: string) {\n  return `Hello, ${name}`;\n}\n"
+                    : 'import { greet } from "./greeting";\n\nconsole.log(greet("Workspace"));\n'}
+                </pre>
+              )}
+            />
+          </div>
+        </section>
+      </AppChrome>
+      <footer aria-live="polite">
+        {index < 0
+          ? "Empty workspace · no navigation row"
+          : `Current fixture location: ${paths[index]}`}{" "}
+        · editor text and history are local fixtures
+      </footer>
     </main>
   );
 }
-if (import.meta.env.DEV) createRoot(document.getElementById("root")!).render(<Preview />);
+if (import.meta.env.DEV)
+  createRoot(document.getElementById("root")!).render(<Preview />);

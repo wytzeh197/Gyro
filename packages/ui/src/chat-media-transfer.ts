@@ -2,6 +2,8 @@
 type MediaTransfer = Pick<DataTransfer, "types"> &
   Partial<Pick<DataTransfer, "files" | "items" | "getData">>;
 
+const CHAT_MEDIA_PATH = /\.(?:png|jpe?g|webp|mp4|m4v|mov|webm)$/i;
+
 /** Whether a drag is carrying files rather than text or a page element.
  *
  * Gating a drop on the `Files` type alone loses every drag whose source does
@@ -28,7 +30,32 @@ export function isMediaDrag(transfer: MediaTransfer | null | undefined) {
     return true;
   }
   if (types.some((type) => /^image\//i.test(type))) return true;
-  return types.includes("text/uri-list");
+  return types.includes("text/uri-list") || types.includes("public.file-url");
+}
+
+/** Capture the transfer while its data store is open and keep its destination
+ * callbacks fixed, even if a pane changes while an image URL downloads. */
+export function deliverChatMediaDrop(
+  transfer: MediaTransfer,
+  attach: (files: File[]) => void,
+  reportError: (message: string) => void,
+  attachPaths?: (paths: string[]) => void,
+) {
+  const files = chatMediaFiles(transfer);
+  if (files.length) {
+    attach(files);
+    return;
+  }
+  const paths = droppedFileUrls(transfer).filter((path) =>
+    CHAT_MEDIA_PATH.test(path),
+  );
+  if (paths.length && attachPaths) {
+    attachPaths(paths);
+    return;
+  }
+  void chatMediaFilesFromDrop(transfer).then(attach, (error) =>
+    reportError(String(error)),
+  );
 }
 
 /** `file://` URLs a Finder drop put on the pasteboard. Other text is ignored. */
@@ -107,6 +134,11 @@ export function workspaceDropFromTransfer(
   const sawDirectory = dropSawDirectory(transfer);
   if (!sawDirectory && chatMediaFiles(transfer).length > 0) return undefined;
   const paths = droppedFileUrls(transfer);
+  // The window's folder listener runs before the chat listeners. A Finder
+  // image represented only by its URL must reach the destination chat.
+  if (!sawDirectory && paths.some((path) => CHAT_MEDIA_PATH.test(path))) {
+    return undefined;
+  }
   if (!sawDirectory && paths.length === 0) return undefined;
   return { paths };
 }
@@ -125,14 +157,38 @@ export function setOpenDroppedWorkspaceHandler(
 function installDroppedWorkspaceListener() {
   if (droppedWorkspaceListenerInstalled || typeof window === "undefined") return;
   droppedWorkspaceListenerInstalled = true;
+  const root =
+    typeof document === "undefined" ? undefined : document.documentElement;
+  const endMediaDrag = () => {
+    if (root) delete root.dataset.gyroMediaDrag;
+  };
+  // WebKit decides whether a drop is allowed from the `dragenter` of every
+  // element the pointer enters, not only from `dragover`. Releasing just after
+  // crossing into an element outside a chat surface (composer chrome, a gutter,
+  // the titlebar) left that enter uncancelled, so macOS refused the drop with
+  // no event at all. Accept media drags on both events, everywhere.
+  const acceptMediaDrag = (event: DragEvent) => {
+    if (!isMediaDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    // An iframe (a Canvas preview in the chat) is its own document and takes
+    // the drag away from this one; let the pointer pass through while dragging.
+    if (root) root.dataset.gyroMediaDrag = "";
+  };
+  window.addEventListener("dragenter", acceptMediaDrag, true);
+  window.addEventListener("dragover", acceptMediaDrag, true);
   window.addEventListener(
-    "dragover",
+    "dragleave",
     (event) => {
-      if (!isMediaDrag(event.dataTransfer)) return;
-      event.preventDefault();
+      // Only leaving the window ends the drag; WebKit's spurious null-target
+      // leaves are re-armed by the next dragover.
+      if (!event.relatedTarget) endMediaDrag();
     },
     true,
   );
+  // Registered before the drop listener below, which can stop propagation.
+  window.addEventListener("drop", endMediaDrag, true);
+  window.addEventListener("dragend", endMediaDrag, true);
   window.addEventListener(
     "drop",
     (event) => {

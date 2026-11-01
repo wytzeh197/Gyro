@@ -1,0 +1,113 @@
+{
+  "schema": "gyro.efficiency-repo-validation.v1",
+  "evidence": "offline-reference-and-mutation-checks",
+  "nodeVersion": "26.0.0",
+  "manifestSha256": "193fc23125659d149b8f3d049ac384e463f0e96d7b590d0615fd59130f6224fe",
+  "sourceHead": "e5d3c64ad000d6b76f9dcf275f86d2c4e3fdbd23",
+  "frozenSourceCount": 6,
+  "providerCalls": 0,
+  "measuredSavings": null,
+  "observedCompaction": null,
+  "observedSpillRecovery": null,
+  "tasks": [
+    {
+      "taskId": "gyro-retry-terminal-guards",
+      "repositorySnapshot": "sha256:8f04732ba3db383220dad37e93625e4fba7efa9dd6aee14afbcb2dca99922230",
+      "turns": 1,
+      "publicSmokePassed": true,
+      "baseline": {
+        "tests": 9,
+        "passed": 6,
+        "failed": 3
+      },
+      "reference": {
+        "tests": 9,
+        "passed": 9,
+        "failed": 0
+      },
+      "controls": [
+        {
+          "name": "disable-all-retries",
+          "expectedFailure": "transient pre-work failures remain eligible",
+          "rejected": true
+        },
+        {
+          "name": "restore-only-one-terminal-kind",
+          "expectedFailure": "terminal tool-budget overrides transient-looking error text",
+          "rejected": true
+        }
+      ]
+    },
+    {
+      "taskId": "gyro-usage-confidence",
+      "repositorySnapshot": "sha256:8e1ab58095144c1abb16b785396a8f464c4ba3df804415f51a38cdb1a6831d0f",
+      "turns": 1,
+      "publicSmokePassed": true,
+      "baseline": {
+        "tests": 9,
+        "passed": 4,
+        "failed": 5
+      },
+      "reference": {
+        "tests": 9,
+        "passed": 9,
+        "failed": 0
+      },
+      "controls": [
+        {
+          "name": "repair-only-turn-display",
+          "expectedFailure": "mixed session uses only the reported subtotal as a lower bound",
+          "rejected": true
+        },
+        {
+          "name": "repair-only-session-display",
+          "expectedFailure": "estimated turn counts are never presented as provider usage",
+          "rejected": true
+        },
+        {
+          "name": "hide-all-turn-counts",
+          "expectedFailure": "complete turns stay exact and request or partial readings are lower bounds",
+          "rejected": true
+        }
+      ]
+    },
+    {
+      "taskId": "gyro-search-session-recovery",
+      "repositorySnapshot": "sha256:6a0d16a3b535b2d8d5ec4f5129aec26c3722d9aa9999e11e5524f0f9684f8c42",
+      "turns": 6,
+      "publicSmokePassed": true,
+      "baseline": {
+        "tests": 7,
+        "passed": 3,
+        "failed": 4
+      },
+      "reference": {
+        "tests": 7,
+        "passed": 7,
+        "failed": 0
+      },
+      "controls": [
+        {
+          "name": "completion-order-results",
+          "expectedFailure": "fast roots publish early but final results use workspace order and one global cap",
+          "rejected": true
+        },
+        {
+          "name": "stale-query-results",
+          "expectedFailure": "superseded successful queries cannot publish stale results",
+          "rejected": true
+        },
+        {
+          "name": "swallow-current-query-errors",
+          "expectedFailure": "a root failure waits for successful roots and identifies every failing path",
+          "rejected": true
+        },
+        {
+          "name": "wrong-capture-recovery",
+          "expectedFailure": "early evidence is recovered accurately at the final checkpoint",
+          "rejected": true
+        }
+      ]
+    }
+  ]
+}

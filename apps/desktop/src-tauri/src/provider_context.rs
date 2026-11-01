@@ -500,6 +500,16 @@ pub(super) fn occupancy_from_request(
     accounted: &gyro_core::usage::UsageTokens,
     model_context_window: Option<u64>,
 ) -> Option<ProviderContextUsage> {
+    let accounting = accounted.effective_accounting();
+    if !accounting.known.input
+        || matches!(
+            accounting.coverage,
+            gyro_core::usage::UsageCoverage::Estimated
+                | gyro_core::usage::UsageCoverage::Unavailable
+        )
+    {
+        return None;
+    }
     let input_tokens = input_tokens?;
     let known = accounted
         .accounting
@@ -1215,6 +1225,22 @@ mod tests {
         assert_eq!(usage.model_context_window, None);
         assert!(!usage.estimated);
         assert!(occupancy_from_request(None, Some(20), &accounted, Some(128_000)).is_none());
+    }
+
+    #[test]
+    fn live_occupancy_accepts_partial_measurements_but_rejects_estimates_and_conflicts() {
+        let partial = gyro_core::usage::UsageTokens::measured(Some(100), None, None, None, None);
+        assert_eq!(
+            occupancy_from_request(Some(100), None, &partial, Some(1000))
+                .unwrap()
+                .input_tokens,
+            Some(100)
+        );
+        let estimated = gyro_core::usage::UsageTokens::estimated(400, 40);
+        assert!(occupancy_from_request(Some(100), Some(10), &estimated, None).is_none());
+        let inconsistent =
+            gyro_core::usage::UsageTokens::measured(Some(100), None, Some(10), None, Some(5));
+        assert!(occupancy_from_request(Some(100), Some(10), &inconsistent, None).is_none());
     }
 
     #[test]

@@ -2,6 +2,9 @@
 //! contiguous provider-stream delivery counter.
 use super::*;
 
+#[cfg(test)]
+mod benchmarks;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct TimelinePosition {
@@ -16,9 +19,9 @@ impl TimelinePosition {
     }
 }
 
-#[derive(Clone)]
 struct CommentaryTimeline {
     label: String,
+    label_utf16_len: usize,
     segments: Vec<serde_json::Value>,
 }
 
@@ -98,48 +101,52 @@ impl ProviderTimeline {
     ) -> (TimelinePosition, Option<serde_json::Value>) {
         let key = format!("activity:{}", activity.id);
         let intervened = self.last_item_key.as_deref() != Some(key.as_str());
-        let previous = self.commentary.get(&key).cloned();
         let position = self.observe(Some(&key), None);
         if activity.kind != "commentary" {
             return (position, None);
         }
-        let mut segments = previous
-            .as_ref()
-            .map(|value| value.segments.clone())
-            .unwrap_or_default();
-        if let Some(previous) = previous {
-            if activity.label != previous.label
-                && intervened
-                && activity.label.starts_with(&previous.label)
-            {
+        // Move the accumulated state; only the outgoing snapshot needs a copy.
+        let mut state = if let Some(mut previous) = self.commentary.remove(&key) {
+            let extends = activity.label.starts_with(&previous.label);
+            if activity.label != previous.label && intervened && extends {
                 let continuation = self.next_position();
-                segments.push(serde_json::json!({
-                    "start": previous.label.encode_utf16().count(),
+                previous.segments.push(serde_json::json!({
+                    "start": previous.label_utf16_len,
                     "timelineOrder": continuation.timeline_order,
                     "createdAt": continuation.timeline_created_at,
                 }));
                 self.last_item_key = Some(key.clone());
                 self.text_boundary = true;
-            } else if !activity.label.starts_with(&previous.label) {
+            } else if !extends {
                 // Replacements invalidate text offsets. Never reuse stale marks.
-                segments.clear();
+                previous.segments.clear();
             }
-        }
-        if segments.is_empty() {
-            segments.push(serde_json::json!({
+            if extends {
+                let suffix = &activity.label[previous.label.len()..];
+                previous.label_utf16_len += suffix.encode_utf16().count();
+                previous.label.push_str(suffix);
+            } else {
+                previous.label.clone_from(&activity.label);
+                previous.label_utf16_len = activity.label.encode_utf16().count();
+            }
+            previous
+        } else {
+            CommentaryTimeline {
+                label: activity.label.clone(),
+                label_utf16_len: activity.label.encode_utf16().count(),
+                segments: Vec::new(),
+            }
+        };
+        if state.segments.is_empty() {
+            state.segments.push(serde_json::json!({
                 "start": 0,
                 "timelineOrder": position.timeline_order,
                 "createdAt": position.timeline_created_at,
             }));
         }
-        self.commentary.insert(
-            key,
-            CommentaryTimeline {
-                label: activity.label.clone(),
-                segments: segments.clone(),
-            },
-        );
-        (position, Some(serde_json::Value::Array(segments)))
+        let segments = serde_json::Value::Array(state.segments.clone());
+        self.commentary.insert(key, state);
+        (position, Some(segments))
     }
 
     /// Match recorded stream blocks against the cleaned saved reply. Byte
@@ -147,6 +154,7 @@ impl ProviderTimeline {
     fn response_segments(&self, message: &str) -> Option<serde_json::Value> {
         let mut segments = Vec::new();
         let mut cursor = 0;
+        let mut utf16_cursor = 0;
         for (index, (start, position)) in self.blocks.iter().enumerate() {
             let end = self
                 .blocks
@@ -166,12 +174,14 @@ impl ProviderTimeline {
                 return None;
             }
             let start = cursor + found;
-            cursor = start + block.len();
+            utf16_cursor += message[cursor..start].encode_utf16().count();
             segments.push(serde_json::json!({
-                "start": message[..start].encode_utf16().count(),
+                "start": utf16_cursor,
                 "timelineOrder": position.timeline_order,
                 "createdAt": position.timeline_created_at,
             }));
+            cursor = start + block.len();
+            utf16_cursor += block.encode_utf16().count();
         }
         if segments.len() < 2 || !message.get(cursor..)?.trim().is_empty() {
             return None;
@@ -307,6 +317,59 @@ mod tests {
             note: None,
             status: "done".into(),
         }
+    }
+
+    #[test]
+    fn commentary_replacement_resets_marks_and_cached_unicode_length() {
+        let mut timeline = ProviderTimeline::default();
+        let (first, _) = timeline.activity(&commentary("Old 🦀"));
+        timeline.observe(Some("tool:first"), None);
+        timeline.activity(&commentary("Old 🦀 plus more"));
+        let (_, reset) = timeline.activity(&commentary("New café 👩‍💻"));
+        let reset = reset.unwrap();
+        assert_eq!(reset.as_array().unwrap().len(), 1);
+        assert_eq!(reset[0]["start"], 0);
+        assert_eq!(reset[0]["timelineOrder"], first.timeline_order);
+
+        let tool = timeline.observe(Some("tool:second"), None);
+        let (_, marks) = timeline.activity(&commentary("New café 👩‍💻 ready"));
+        let marks = marks.unwrap();
+        assert_eq!(marks[1]["start"], "New café 👩‍💻".encode_utf16().count());
+        assert!(marks[1]["timelineOrder"].as_u64().unwrap() > tool.timeline_order);
+        timeline.activity(&commentary(""));
+        timeline.observe(Some("tool:third"), None);
+        timeline.activity(&commentary("🦀"));
+        let state = &timeline.commentary["activity:commentary"];
+        assert_eq!(state.label_utf16_len, 2);
+        assert_eq!(state.label_utf16_len, state.label.encode_utf16().count());
+    }
+
+    #[test]
+    fn response_offsets_match_full_unicode_prefixes_across_empty_blocks() {
+        let mut timeline = ProviderTimeline::default();
+        let mut message = String::new();
+        let mut expected = Vec::new();
+        for index in 0..40 {
+            timeline.observe(Some(&format!("tool:{index}")), None);
+            if index % 3 == 0 {
+                timeline.observe(None, Some(" \n\t"));
+                timeline.observe(Some(&format!("tool:empty:{index}")), None);
+            }
+            let block = format!("Block {index}: café 👩‍💻 🦀");
+            message.push_str("\n\u{2003}");
+            expected.push(message.encode_utf16().count());
+            message.push_str(&block);
+            timeline.observe(None, Some(&format!("\n{block}\n")));
+        }
+        expected[0] = 0;
+        let actual = timeline.response_segments(&message).unwrap();
+        let offsets = actual
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|mark| mark["start"].as_u64().unwrap() as usize)
+            .collect::<Vec<_>>();
+        assert_eq!(offsets, expected);
     }
 
     #[test]

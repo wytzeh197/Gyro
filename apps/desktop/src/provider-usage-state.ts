@@ -10,7 +10,19 @@ export type ProviderUsageSnapshot = {
 
 export function providerUsageFromSnapshot(
   snapshot: ProviderUsageSnapshot,
+  previous?: ProviderUsageState,
 ): ProviderUsageState {
+  // Poll replies and pushed readings share one ordering rule. A request can
+  // finish after a newer push, including while recovering from an error.
+  const previousMs = Date.parse(previous?.fetchedAt ?? "");
+  const nextMs = Date.parse(snapshot.fetchedAt);
+  if (
+    previous &&
+    Number.isFinite(previousMs) &&
+    (!Number.isFinite(nextMs) || nextMs < previousMs)
+  ) {
+    return previous;
+  }
   const hasWindows = snapshot.windows.length > 0;
   return {
     providerId: snapshot.providerId,
@@ -24,7 +36,7 @@ export function providerUsageFromSnapshot(
         ? undefined
         : snapshot.providerId === "openai"
           ? "Codex did not report an active rolling usage window."
-          : "No usage recorded yet for this provider. Send a message to start the ledger."),
+          : "The provider has not reported plan limits for this account."),
   };
 }
 

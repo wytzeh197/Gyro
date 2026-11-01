@@ -63,7 +63,7 @@ export function DesktopNotificationSettings({
 }: DesktopNotificationSettingsProps) {
   return (
     <SettingsGroup
-      label="macOS notifications"
+      id="macos-notifications" label="macOS notifications"
       description="Choose what needs your attention while work runs in the background."
     >
       <SettingsRow label="Notifications" detail={permissionDetail(permission)}>
@@ -73,6 +73,7 @@ export function DesktopNotificationSettings({
           onChange={(enabled) => onChange?.({ enabled })}
         />
       </SettingsRow>
+      <SettingsRow label="Show chat and project names" detail="Turn off for generic notifications that keep names private on your lock screen."><SettingsSwitch label="Show chat and project names in notifications" checked={preferences.showNames !== false} onChange={showNames => onChange?.({ showNames })}/></SettingsRow>
       {KINDS.map((kind) => (
         <SettingsRow key={kind.key} label={kind.label} detail={kind.detail}>
           <SettingsSwitch
@@ -94,7 +95,7 @@ export function DesktopNotificationSettings({
           type="button"
         >
           <Bell aria-hidden="true" size={13} />
-          {isTesting ? "Sending..." : "Send test"}
+          {isTesting ? "Sending…" : "Send test"}
         </button>
       </SettingsRow>
     </SettingsGroup>

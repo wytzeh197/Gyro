@@ -124,6 +124,40 @@ try {
       "document.querySelector('[aria-label=\"Efficiency experiments\"]').getAttribute('aria-checked') === 'true'",
     ),
   );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('[aria-label=\"Compact tool catalog\"]').getAttribute('aria-checked')",
+    ),
+    "false",
+  );
+  for (const label of [
+    "Complete evidence recovery",
+    "Retain discovered tool schemas",
+  ]) {
+    const selector = `[aria-label="${label}"]`;
+    assert.equal(
+      await evaluate(
+        `document.querySelector(${JSON.stringify(selector)}).getAttribute('aria-checked')`,
+      ),
+      "false",
+    );
+    await evaluate(
+      `document.querySelector(${JSON.stringify(selector)}).click()`,
+    );
+    await until(() =>
+      evaluate(
+        `document.querySelector(${JSON.stringify(selector)}).getAttribute('aria-checked') === 'true'`,
+      ),
+    );
+  }
+  await evaluate(
+    "document.querySelector('[aria-label=\"Compact tool catalog\"]').click()",
+  );
+  await until(() =>
+    evaluate(
+      "document.querySelector('[aria-label=\"Compact tool catalog\"]').getAttribute('aria-checked') === 'true'",
+    ),
+  );
   await evaluate(
     "document.querySelector('[aria-label=\"Task profile\"]').value='deep'; document.querySelector('[aria-label=\"Task profile\"]').dispatchEvent(new Event('change',{bubbles:true}))",
   );
@@ -138,6 +172,38 @@ try {
   await evaluate(
     "document.querySelector('.gyro-efficiency-details').open=true",
   );
+  const details = await evaluate(
+    "document.querySelector('.gyro-efficiency-details').innerText",
+  );
+  assert.match(details, /Generation attempts this turn: 3/);
+  assert.match(
+    details.replace(/[,.]/g, ""),
+    /Newly retired context this turn: 2048 bytes/,
+  );
+  assert.match(
+    details.replace(/[,.]/g, ""),
+    /Provider-reported cache reads this turn: 1000 tokens/,
+  );
+  assert.match(details, /Workspace reads: 2/);
+  assert.match(details, /Evidence recoveries: 3/);
+  assert.match(details, /Rediscoveries after compaction: 1/);
+  await evaluate(
+    "document.querySelectorAll('.gyro-efficiency-details')[1].open=true",
+  );
+  const legacy = await evaluate(
+    "document.querySelectorAll('.gyro-efficiency-details')[1].innerText",
+  );
+  assert.match(
+    legacy,
+    /Generation attempts inside the provider are unavailable/,
+  );
+  assert.match(legacy, /Newly retired context for this turn is unavailable/);
+  assert.match(
+    legacy,
+    /Provider cache-read coverage for this turn is unavailable or incomplete/,
+  );
+  assert.match(legacy, /Retirement coverage: unavailable/);
+  assert.match(legacy, /Efficiency event counts unavailable for this turn/);
   assert.equal(await evaluate("document.body.scrollWidth <= innerWidth"), true);
   const screenshot = await call("Page.captureScreenshot", {
     format: "png",

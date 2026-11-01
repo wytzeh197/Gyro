@@ -23,10 +23,9 @@ export function SettingsSection({
     <section
       className="gyro-settings-section"
       data-setting-key={settingsSearchKey(title)}
-      data-tour={dataTour}
       tabIndex={-1}
     >
-      <header>
+      <header data-tour={dataTour}>
         <div>
           <p className="gyro-settings-eyebrow">Settings</p>
           <h1>

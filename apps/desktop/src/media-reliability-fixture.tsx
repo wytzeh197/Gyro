@@ -244,6 +244,9 @@ function Fixture() {
                 onAttachMediaFiles={(files) => {
                   void attach(pane, files);
                 }}
+                onAttachMediaPaths={(paths) => {
+                  setStatus(`File paths to Pane ${pane.toUpperCase()}: ${paths.join(", ")}`);
+                }}
                 onMediaDropError={setStatus}
                 onRemoveAttachment={(id) =>
                   setAttachments((current) => ({

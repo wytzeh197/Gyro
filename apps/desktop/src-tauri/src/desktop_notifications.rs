@@ -100,6 +100,14 @@ pub(crate) fn request_native_permission(app: &tauri::AppHandle) -> PermissionSta
         .unwrap_or(PermissionState::Denied)
 }
 
+fn private_notification_content(kind: NoticeKind) -> (&'static str, &'static str) {
+    match kind {
+        NoticeKind::Approval => ("Gyro needs approval", "Open Gyro to review the request."),
+        NoticeKind::Finished => ("Gyro finished", "Open Gyro to review the result."),
+        NoticeKind::Failed => ("Gyro needs attention", "Open Gyro to review the problem."),
+    }
+}
+
 /// Checks the preferences and focus here, then asks macOS and shows the
 /// notice on a thread of its own: the caller may be the main thread, and a
 /// first notice can wait on the permission prompt.
@@ -114,8 +122,13 @@ fn deliver(
     if !kind_allowed(&preferences, kind) || !app_is_in_background(app) {
         return;
     }
+    let (title, body) = if preferences.show_names {
+        (title.to_string(), body)
+    } else {
+        let (title, body) = private_notification_content(kind);
+        (title.to_string(), body.to_string())
+    };
     let app = app.clone();
-    let title = title.to_string();
     std::thread::spawn(move || {
         if notification_permission_allows_delivery(request_native_permission(&app)) {
             show(&app, title, body, on_click);
@@ -445,6 +458,26 @@ fn open_menu_bar_target(app: &tauri::AppHandle, kind: &str, id: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_previews_never_contain_names_or_paths() {
+        for kind in [
+            NoticeKind::Approval,
+            NoticeKind::Finished,
+            NoticeKind::Failed,
+        ] {
+            let (title, body) = private_notification_content(kind);
+            assert!(title.starts_with("Gyro"));
+            assert!(body.starts_with("Open Gyro"));
+            assert!(!body.contains('/'));
+        }
+        let old: DesktopNotificationPreferences =
+            serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert!(old.show_names);
+        let private: DesktopNotificationPreferences =
+            serde_json::from_str(r#"{"showNames":false}"#).unwrap();
+        assert!(!private.show_names);
+    }
 
     fn outcome(status: &str, title: &str) -> MenuBarOutcome {
         MenuBarOutcome {

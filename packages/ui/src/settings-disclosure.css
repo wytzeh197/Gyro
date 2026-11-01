@@ -1,0 +1,203 @@
+:root[data-theme] .gyro-settings-surface .gyro-settings-section-body {
+  gap: 0;
+}
+:root[data-theme] .gyro-settings-disclosure-group {
+  min-width: 0;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+  background: var(--gyro-settings-card);
+  margin-bottom: 0;
+}
+:root[data-theme]
+  .gyro-settings-disclosure-group
+  + .gyro-settings-disclosure-group {
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+:root[data-theme]
+  .gyro-settings-disclosure-group:has(+ .gyro-settings-disclosure-group) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.gyro-settings-disclosure-heading {
+  --gyro-disclosure-inline: 22px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: inherit;
+}
+.gyro-settings-disclosure-group.is-open > .gyro-settings-disclosure-heading {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.gyro-settings-disclosure-heading > h2 {
+  margin: 0;
+  min-width: 0;
+  flex: 1;
+  border-radius: inherit;
+}
+.gyro-settings-disclosure-heading > h2 > button {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  min-height: calc(76px * var(--gyro-ui-scale, 1));
+  padding: 18px var(--gyro-disclosure-inline);
+  /* Room for the chevron, which sits in a fixed trailing column. */
+  padding-right: calc(var(--gyro-disclosure-inline) + 28px);
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--gyro-text);
+  text-align: left;
+  cursor: pointer;
+}
+.gyro-settings-disclosure-heading > h2 > button > svg {
+  flex: none;
+  color: var(--gyro-muted);
+}
+.gyro-settings-disclosure-heading > h2 > button > span {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+}
+.gyro-settings-disclosure-heading strong {
+  font-size: var(--gyro-font-support);
+  font-weight: 600;
+}
+.gyro-settings-disclosure-heading small {
+  font-size: var(--gyro-font-micro);
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--gyro-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-settings-disclosure-heading button:hover {
+  background: color-mix(in srgb, var(--gyro-text) 3%, transparent);
+}
+.gyro-settings-disclosure-heading button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -3px;
+}
+.gyro-settings-disclosure-heading > h2 > button > svg.gyro-settings-disclosure-chevron {
+  position: absolute;
+  top: 50%;
+  right: var(--gyro-disclosure-inline);
+  z-index: 1;
+  margin-top: -8px;
+  transform: rotate(-90deg);
+  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+.gyro-settings-disclosure-heading:has(> .gyro-settings-disclosure-actions)
+  > h2
+  > button {
+  padding-right: 12px;
+}
+.is-open
+  > .gyro-settings-disclosure-heading
+  > h2
+  > button
+  > svg.gyro-settings-disclosure-chevron {
+  transform: none;
+}
+.gyro-settings-disclosure-actions {
+  flex: none;
+  padding-right: calc(var(--gyro-disclosure-inline) + 28px);
+}
+.gyro-settings-disclosure-body {
+  padding: 0 20px 16px 56px;
+  min-width: 0;
+}
+.gyro-settings-disclosure-body[hidden] {
+  display: none !important;
+}
+:root[data-theme] .gyro-settings-disclosure-body > .gyro-settings-group-rows {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+:root[data-theme] .gyro-settings-disclosure-body .gyro-settings-row {
+  padding-inline: 0;
+}
+.gyro-settings-disclosure-body > .gyro-settings-group {
+  margin: 8px 0;
+}
+.gyro-settings-disclosure-body > p {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  line-height: 1.5;
+}
+.gyro-settings-disclosure-body .gyro-settings-disclosure-heading {
+  --gyro-disclosure-inline: 12px;
+}
+.gyro-settings-disclosure-body .gyro-settings-disclosure-body {
+  padding-left: 20px;
+}
+:root[data-density="compact"] .gyro-settings-disclosure-heading > h2 > button {
+  min-height: calc(64px * var(--gyro-ui-scale, 1));
+  padding-block: 12px;
+}
+.gyro-settings-page-status {
+  padding: 12px 16px;
+  margin: 0 0 20px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  line-height: 1.5;
+}
+.gyro-settings-page-status[role="alert"] {
+  color: var(--gyro-danger);
+}
+@container gyro-settings (max-width: 600px) {
+  .gyro-settings-disclosure-body {
+    padding-left: 20px;
+  }
+  .gyro-settings-disclosure-heading {
+    --gyro-disclosure-inline: 16px;
+  }
+  .gyro-settings-disclosure-heading > h2 > button {
+    gap: 12px;
+  }
+  .gyro-settings-disclosure-heading small {
+    white-space: normal;
+  }
+}
+.gyro-settings-transfer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+}
+.gyro-settings-transfer-actions label {
+  position: relative;
+  cursor: pointer;
+}
+.gyro-settings-transfer-actions input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  cursor: pointer;
+}
+.gyro-settings-transfer-actions label:focus-within {
+  outline: 2px solid var(--gyro-focus-ring);
+}
+.gyro-settings-import-preview dl > div {
+  border-bottom: 1px solid var(--gyro-border-soft);
+  padding: 8px 0;
+}
+.gyro-settings-import-preview dd {
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+  color: var(--gyro-muted);
+}
+.gyro-settings-import-preview button + button {
+  margin-left: 8px;
+}

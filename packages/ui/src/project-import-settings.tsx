@@ -369,7 +369,7 @@ export function ProjectImportSettings({
 
   return (
     <div className="gyro-project-import-settings">
-      <SettingsGroup label="Import from">
+      <SettingsGroup id="import-sources" label="Import sources">
         {loadingSources && (
           <div className="gyro-import-loading" role="status">
             <LoaderCircle aria-hidden="true" size={15} />
@@ -498,33 +498,11 @@ export function ProjectImportSettings({
               {job.error}
             </p>
           )}
-          {job.results.length > 0 && (
-            <details className="gyro-import-job-results" open={!running}>
-              <summary>
-                {running
-                  ? "Completed chats"
-                  : "View imported chats and details"}{" "}
-                ({job.results.length})
-              </summary>
-              {job.results.map((result) => (
-                <ResultRow
-                  key={result.candidateId}
-                  result={result}
-                  workspaceAvailable={
-                    scan?.candidates.find(
-                      (candidate) => candidate.id === result.candidateId,
-                    )?.workspaceAvailable ?? true
-                  }
-                  onOpenSession={onOpenSession}
-                  onLocateFolder={onLocateFolder}
-                />
-              ))}
-            </details>
-          )}
         </section>
       )}
+      {!scan ? <SettingsGroup id="review-selection" label="Review selection" summary="No scan yet"><p>Scan the selected sources to review projects and chats before importing.</p></SettingsGroup> : null}
       {scan && (
-        <SettingsGroup label="Projects">
+        <SettingsGroup id="review-selection" label="Review selection">
           <div className="gyro-import-projects-toolbar">
             <label className="gyro-import-search">
               <Search aria-hidden="true" size={15} />
@@ -739,6 +717,26 @@ export function ProjectImportSettings({
           </div>
         </SettingsGroup>
       )}
+      <SettingsGroup id="import-results" label="Import results" summary={job ? `${job.results.length} results` : "No imports yet"}>
+        {job?.results.length ? (
+            <div className="gyro-import-job-results">
+              {job.results.map((result) => (
+                <ResultRow
+                  key={result.candidateId}
+                  result={result}
+                  workspaceAvailable={
+                    scan?.candidates.find(
+                      (candidate) => candidate.id === result.candidateId,
+                    )?.workspaceAvailable ?? true
+                  }
+                  onOpenSession={onOpenSession}
+                  onLocateFolder={onLocateFolder}
+                />
+              ))}
+            </div>
+        ) : <p>Results appear after you import selected chats.</p>}
+      </SettingsGroup>
+
     </div>
   );
 }

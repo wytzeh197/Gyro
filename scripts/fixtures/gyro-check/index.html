@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en" data-fixture-mode="working">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  />
+  <title>Gyro Check · synthetic to-do fixture</title>
+  <style>
+    body {
+      font: 15px system-ui;
+      max-width: 540px;
+      margin: 64px auto;
+      padding: 24px;
+      color: #24272c;
+      background: #f6f6f4;
+    }
+    form {
+      display: flex;
+      gap: 8px;
+    }
+    input,
+    button {
+      font: inherit;
+      padding: 10px;
+    }
+    input {
+      flex: 1;
+      min-width: 0;
+    }
+    #error {
+      min-height: 24px;
+      color: #a6382b;
+    }
+    li {
+      padding: 8px;
+    }
+    small {
+      color: #666;
+    }
+  </style>
+  <h1>One small task</h1>
+  <p>Add a to-do item and reject an empty title.</p>
+  <form>
+    <input aria-label="To-do title" placeholder="What needs doing?" /><button>
+      Add item
+    </button>
+  </form>
+  <p id="error" role="alert"></p>
+  <ul aria-label="To-do items"></ul>
+  <small
+    >Synthetic data in memory. Restarting this fixture clears every item.</small
+  >
+  <script type="module">
+    const form = document.querySelector("form"),
+      input = document.querySelector("input"),
+      list = document.querySelector("ul"),
+      error = document.querySelector("#error");
+    async function render() {
+      const response = await fetch("/todos");
+      list.replaceChildren(
+        ...(await response.json()).map((item) => {
+          const li = document.createElement("li");
+          li.textContent = item.title || "(empty title)";
+          return li;
+        }),
+      );
+    }
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (document.documentElement.dataset.fixtureMode === "broken-form")
+        return;
+      error.textContent = "";
+      try {
+        const response = await fetch("/todos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: input.value }),
+        });
+        const body = await response.json();
+        if (!response.ok) error.textContent = body.error;
+        else {
+          input.value = "";
+          await render();
+        }
+      } catch {
+        error.textContent = "The fixture server is unavailable.";
+      }
+    });
+    await render();
+  </script>
+</html>
