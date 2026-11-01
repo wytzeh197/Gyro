@@ -8,7 +8,6 @@ export function terminalDefaultProfiles(): CommandProfile[] {
     { id: "codex", displayName: "Codex CLI", command: "codex", args: [], providerId: "openai" },
     { id: "kimi-code", displayName: "Kimi Code", command: "kimi", args: [], providerId: "kimi" },
     { id: "grok-build", displayName: "Grok Build", command: "grok", args: [], providerId: "xai" },
-    { id: "gemini-cli", displayName: "Gemini CLI", command: "gemini", args: [], providerId: "gemini" },
     { id: "ollama", displayName: "Ollama (local)", command: "ollama", args: ["run"], providerId: "ollama" },
     { id: "cursor", displayName: "Cursor", command: "cursor-agent", args: [], providerId: "cursor" },
     { id: "opencode", displayName: "OpenCode", command: "opencode", args: [], providerId: "opencode" },
@@ -17,14 +16,16 @@ export function terminalDefaultProfiles(): CommandProfile[] {
 
 const aliases: Record<string, string> = {
   claude: "claude-code", kimi: "kimi-code", grok: "grok-build",
-  gemini: "gemini-cli", "cursor-agent": "cursor",
+  "cursor-agent": "cursor",
 };
 
 export function terminalLaunchProfiles(
   saved: CommandProfile[], providers: ModelProviderConfig[], statuses: ProviderStatus[],
 ): CommandProfile[] {
   const defaults = terminalDefaultProfiles();
-  const profiles = [...saved];
+  const profiles = saved.filter((profile) =>
+    profile.providerId !== "gemini" && !["gemini", "gemini-cli"].includes(profile.id),
+  );
   for (const entry of defaults) {
     if (!profiles.some((profile) => (aliases[profile.id] ?? profile.id) === entry.id)) profiles.push(entry);
   }

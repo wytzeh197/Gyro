@@ -1,0 +1,93 @@
+{
+  "recordedLayoutCases": 250,
+  "cases": [
+    {
+      "file": "settings-matrix.json",
+      "cases": 156,
+      "states": [
+        "General",
+        "Appearance",
+        "Keyboard",
+        "Usage Limits",
+        "Providers",
+        "CLI Profiles",
+        "Permissions",
+        "Editor & Search",
+        "Tools & Contributions",
+        "Import projects",
+        "Updates",
+        "Advanced",
+        "Help"
+      ],
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    {
+      "file": "core-matrix.json",
+      "cases": 60,
+      "states": [
+        "Chat",
+        "Automations",
+        "Automation setup",
+        "Workspace",
+        "Welcome"
+      ],
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    {
+      "file": "import-states.json",
+      "cases": 10,
+      "states": [
+        "loading",
+        "scanning",
+        "error",
+        "running",
+        "completed"
+      ],
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    {
+      "file": "updater-states.json",
+      "cases": 18,
+      "states": [
+        "current",
+        "checking",
+        "available",
+        "downloading",
+        "ready",
+        "installing",
+        "failed",
+        "development",
+        "unavailable"
+      ],
+      "themes": [
+        "dark",
+        "light"
+      ]
+    },
+    {
+      "file": "first-paint-states.json",
+      "cases": 6,
+      "states": [
+        "loading",
+        "startup-error",
+        "render-error"
+      ],
+      "themes": [
+        "dark",
+        "light"
+      ]
+    }
+  ],
+  "reducedMotionCombinations": 12,
+  "geometryFailures": 0,
+  "evidenceKind": "Real frontend components rendered with development fixture data; not native provider verification"
+}

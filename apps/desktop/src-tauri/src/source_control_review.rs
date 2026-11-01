@@ -1,14 +1,20 @@
 use super::{
-    assert_workspace_path, bounded_command_error, git_command, git_main_comparison_base,
-    git_repo_root, run_bounded_command, workspace_root,
+    assert_workspace_path, bounded_command_error, git_command, git_main_comparison_base, git_read,
+    workspace_root,
 };
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path, time::Duration};
+use std::{
+    fs,
+    path::Path,
+    time::{Duration, Instant},
+};
 
 const MAX_REVIEW_BYTES: usize = 2 * 1024 * 1024;
 const PLAIN_DIFF_BYTE_LIMIT: usize = 512 * 1024;
 const PLAIN_DIFF_LINE_LIMIT: usize = 8000;
 const MAX_UNIFIED_BYTES: usize = 512 * 1024;
+/// One budget for every Git read a single review makes.
+const REVIEW_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,20 +44,14 @@ pub async fn git_review_content(request: ReviewRequest) -> Result<ReviewContent,
         .map_err(|error| error.to_string())
 }
 
-fn git(root: &Path, args: &[&str], limit: usize) -> anyhow::Result<String> {
+fn git(root: &Path, args: &[&str], limit: usize, deadline: Instant) -> anyhow::Result<String> {
     let mut command = git_command();
     command
         .arg("--literal-pathspecs")
         .arg("-C")
         .arg(root)
         .args(args);
-    let output = run_bounded_command(
-        &command,
-        Duration::from_secs(15),
-        Some(Duration::from_secs(10)),
-        limit,
-        64 * 1024,
-    )?;
+    let output = git_read::run(&command, deadline, limit)?;
     if !output.succeeded() || output.stdout_truncated {
         return Err(bounded_command_error("Could not load Git review", &output));
     }
@@ -60,22 +60,40 @@ fn git(root: &Path, args: &[&str], limit: usize) -> anyhow::Result<String> {
 
 // Resolve a blob first: a missing side is normal for added/deleted files, but
 // a Git failure must never masquerade as an empty file.
-fn blob(root: &Path, path: &str, head: bool) -> anyhow::Result<Option<String>> {
+fn blob(root: &Path, path: &str, head: bool, deadline: Instant) -> anyhow::Result<Option<String>> {
     let listing = if head {
-        if git(root, &["rev-parse", "--verify", "--quiet", "HEAD"], 1024).is_err() {
+        if git(
+            root,
+            &["rev-parse", "--verify", "--quiet", "HEAD"],
+            1024,
+            deadline,
+        )
+        .is_err()
+        {
             // An unborn repository has no HEAD, while a broken existing ref is an error.
-            let branch = git(root, &["symbolic-ref", "HEAD"], 1024)?;
+            let branch = git(root, &["symbolic-ref", "HEAD"], 1024, deadline)?;
             let refs = git(
                 root,
                 &["for-each-ref", "--format=%(refname)", branch.trim()],
                 4096,
+                deadline,
             )?;
             anyhow::ensure!(refs.trim().is_empty(), "Could not read HEAD");
             return Ok(None);
         }
-        git(root, &["ls-tree", "-z", "HEAD", "--", path], 16 * 1024)?
+        git(
+            root,
+            &["ls-tree", "-z", "HEAD", "--", path],
+            16 * 1024,
+            deadline,
+        )?
     } else {
-        git(root, &["ls-files", "--stage", "-z", "--", path], 16 * 1024)?
+        git(
+            root,
+            &["ls-files", "--stage", "-z", "--", path],
+            16 * 1024,
+            deadline,
+        )?
     };
     let Some(entry) = listing.split('\0').find(|entry| !entry.is_empty()) else {
         return Ok(None);
@@ -102,12 +120,19 @@ fn blob(root: &Path, path: &str, head: bool) -> anyhow::Result<Option<String>> {
         );
     }
     let oid = if head { fields[2] } else { fields[1] };
-    let size: usize = git(root, &["cat-file", "-s", oid], 1024)?.trim().parse()?;
+    let size: usize = git(root, &["cat-file", "-s", oid], 1024, deadline)?
+        .trim()
+        .parse()?;
     anyhow::ensure!(
         size <= MAX_REVIEW_BYTES,
         "This file exceeds the 2 MB text review limit."
     );
-    let content = git(root, &["cat-file", "blob", oid], MAX_REVIEW_BYTES + 1)?;
+    let content = git(
+        root,
+        &["cat-file", "blob", oid],
+        MAX_REVIEW_BYTES + 1,
+        deadline,
+    )?;
     anyhow::ensure!(
         !content.contains('\0') && !content.contains('\u{fffd}'),
         "Binary files cannot be displayed as a text diff."
@@ -115,8 +140,18 @@ fn blob(root: &Path, path: &str, head: bool) -> anyhow::Result<Option<String>> {
     Ok(Some(content))
 }
 
-fn blob_from_commit(root: &Path, commit: &str, path: &str) -> anyhow::Result<Option<String>> {
-    let listing = git(root, &["ls-tree", "-z", commit, "--", path], 16 * 1024)?;
+fn blob_from_commit(
+    root: &Path,
+    commit: &str,
+    path: &str,
+    deadline: Instant,
+) -> anyhow::Result<Option<String>> {
+    let listing = git(
+        root,
+        &["ls-tree", "-z", commit, "--", path],
+        16 * 1024,
+        deadline,
+    )?;
     let Some(entry) = listing.split('\0').find(|entry| !entry.is_empty()) else {
         return Ok(None);
     };
@@ -136,12 +171,19 @@ fn blob_from_commit(root: &Path, commit: &str, path: &str) -> anyhow::Result<Opt
         "Symbolic links cannot be displayed as a text diff."
     );
     let oid = fields[2];
-    let size: usize = git(root, &["cat-file", "-s", oid], 1024)?.trim().parse()?;
+    let size: usize = git(root, &["cat-file", "-s", oid], 1024, deadline)?
+        .trim()
+        .parse()?;
     anyhow::ensure!(
         size <= MAX_REVIEW_BYTES,
         "This file exceeds the 2 MB text review limit."
     );
-    let content = git(root, &["cat-file", "blob", oid], MAX_REVIEW_BYTES + 1)?;
+    let content = git(
+        root,
+        &["cat-file", "blob", oid],
+        MAX_REVIEW_BYTES + 1,
+        deadline,
+    )?;
     anyhow::ensure!(
         !content.contains('\0') && !content.contains('\u{fffd}'),
         "Binary files cannot be displayed as a text diff."
@@ -200,11 +242,14 @@ fn read_worktree_file(file: &Path) -> anyhow::Result<String> {
     }
 }
 
+/// `base` is the resolved main commit for a branch comparison.
 fn git_unified_diff(
     repo: &Path,
     path: &str,
     original_path: &str,
     kind: &str,
+    base: Option<&str>,
+    deadline: Instant,
 ) -> anyhow::Result<Option<String>> {
     let mut args: Vec<String> = vec![
         "diff".into(),
@@ -216,10 +261,10 @@ fn git_unified_diff(
     match kind {
         "index" => args.push("--cached".into()),
         "branch" => {
-            let Some(base) = git_main_comparison_base(repo) else {
+            let Some(base) = base else {
                 return Ok(None);
             };
-            args.push(base);
+            args.push(base.into());
         }
         _ => {}
     }
@@ -229,7 +274,7 @@ fn git_unified_diff(
         args.push(original_path.into());
     }
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    match git(repo, &arg_refs, MAX_UNIFIED_BYTES + 1) {
+    match git(repo, &arg_refs, MAX_UNIFIED_BYTES + 1, deadline) {
         Ok(output) => {
             let unified = truncate_unified_diff(output);
             Ok((!unified.trim().is_empty()).then_some(unified))
@@ -282,8 +327,10 @@ fn synthetic_unified(path: &str, original: &str, modified: &str) -> String {
 }
 
 fn review_content(request: &ReviewRequest) -> anyhow::Result<ReviewContent> {
+    let deadline = Instant::now() + REVIEW_TIMEOUT;
     let workspace = workspace_root(&request.workspace_path)?;
-    let repo = git_repo_root(&workspace).ok_or_else(|| anyhow::anyhow!("Not a Git repository"))?;
+    let repo = git_read::repo_root(&workspace, deadline)?
+        .ok_or_else(|| anyhow::anyhow!("Not a Git repository"))?;
     let file = assert_workspace_path(&workspace, &request.path)?;
     let original_file = assert_workspace_path(
         &workspace,
@@ -298,6 +345,12 @@ fn review_content(request: &ReviewRequest) -> anyhow::Result<ReviewContent> {
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("Invalid original path"))?;
     let kind = comparison_kind(request);
+    // Resolved once for both sides and the unified diff.
+    let base = if kind == "branch" {
+        git_main_comparison_base(&repo, deadline)
+    } else {
+        None
+    };
     let result = (|| -> anyhow::Result<(String, String)> {
         if fs::symlink_metadata(workspace.join(&request.path))
             .is_ok_and(|metadata| metadata.is_symlink())
@@ -305,26 +358,28 @@ fn review_content(request: &ReviewRequest) -> anyhow::Result<ReviewContent> {
             anyhow::bail!("Symbolic links cannot be displayed as a text diff.");
         }
         if kind == "branch" {
-            let base = git_main_comparison_base(&repo)
+            let base = base
+                .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("Could not resolve main for this comparison."))?;
-            let original = blob_from_commit(&repo, &base, original_path)?.unwrap_or_default();
+            let original =
+                blob_from_commit(&repo, base, original_path, deadline)?.unwrap_or_default();
             let modified = read_worktree_file(&file)?;
             return Ok((original, modified));
         }
         let original = if kind == "index" {
-            blob(&repo, original_path, true)?
+            blob(&repo, original_path, true, deadline)?
         } else {
             // A staged rename can also have unstaged edits: the index already
             // uses the destination name in that case.
-            match blob(&repo, path, false)? {
+            match blob(&repo, path, false, deadline)? {
                 Some(content) => Some(content),
-                None if original_path != path => blob(&repo, original_path, false)?,
+                None if original_path != path => blob(&repo, original_path, false, deadline)?,
                 None => None,
             }
         }
         .unwrap_or_default();
         let modified = if kind == "index" {
-            blob(&repo, path, false)?.unwrap_or_default()
+            blob(&repo, path, false, deadline)?.unwrap_or_default()
         } else {
             read_worktree_file(&file)?
         };
@@ -332,9 +387,12 @@ fn review_content(request: &ReviewRequest) -> anyhow::Result<ReviewContent> {
     })();
     match result {
         Ok((original, modified)) => {
-            let unified = git_unified_diff(&repo, path, original_path, kind)?.or_else(|| {
-                (original != modified).then(|| synthetic_unified(path, &original, &modified))
-            });
+            let unified =
+                git_unified_diff(&repo, path, original_path, kind, base.as_deref(), deadline)?
+                    .or_else(|| {
+                        (original != modified)
+                            .then(|| synthetic_unified(path, &original, &modified))
+                    });
             if too_large_for_editor(&original, &modified) {
                 return Ok(ReviewContent {
                     original: String::new(),
@@ -352,9 +410,10 @@ fn review_content(request: &ReviewRequest) -> anyhow::Result<ReviewContent> {
         }
         Err(error) => {
             let message = error.to_string();
-            let unified = git_unified_diff(&repo, path, original_path, kind)
-                .ok()
-                .flatten();
+            let unified =
+                git_unified_diff(&repo, path, original_path, kind, base.as_deref(), deadline)
+                    .ok()
+                    .flatten();
             if unified.as_ref().is_some_and(|diff| !diff.trim().is_empty()) {
                 return Ok(ReviewContent {
                     original: String::new(),
@@ -388,7 +447,7 @@ pub struct HistoryEntry {
     parents: Vec<String>,
 }
 
-pub fn history(root: &Path) -> anyhow::Result<Vec<HistoryEntry>> {
+pub fn history(root: &Path, deadline: Instant) -> anyhow::Result<Vec<HistoryEntry>> {
     let output = git(
         root,
         &[
@@ -398,6 +457,7 @@ pub fn history(root: &Path) -> anyhow::Result<Vec<HistoryEntry>> {
             "--format=%H%x00%h%x00%s%x00%an%x00%ar%x00%D%x00%P",
         ],
         128 * 1024,
+        deadline,
     )?;
     let fields: Vec<_> = output.split('\0').collect();
     Ok(fields
@@ -420,6 +480,11 @@ pub fn history(root: &Path) -> anyhow::Result<Vec<HistoryEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Test setup and assertions run each Git command on its own budget.
+    fn git(root: &Path, args: &[&str], limit: usize) -> anyhow::Result<String> {
+        super::git(root, args, limit, Instant::now() + REVIEW_TIMEOUT)
+    }
 
     fn repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -472,7 +537,7 @@ mod tests {
             ),
             ("index\n", "worktree\n", None)
         );
-        let log = history(root).unwrap();
+        let log = history(root, Instant::now() + REVIEW_TIMEOUT).unwrap();
         assert_eq!(log.len(), 1);
         assert_eq!(log[0].subject, "Original");
         assert_eq!(log[0].author, "Review Test");

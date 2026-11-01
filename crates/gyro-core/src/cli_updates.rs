@@ -684,7 +684,7 @@ fn run_cli_capture(program: &str, args: &[&str], timeout: Duration) -> Result<St
     run_cli_capture_with_path(program, args, timeout, &augmented_gui_path())
 }
 
-fn run_cli_capture_with_path(
+pub(crate) fn run_cli_capture_with_path(
     program: &str,
     args: &[&str],
     timeout: Duration,

@@ -1,14 +1,14 @@
 use super::{
-    git_command, parse_git_numstat, run_bounded_command, MainComparisonStats, SourceControlFile,
+    git_command, git_read, parse_git_numstat, MainComparisonStats, SourceControlFile,
+    GIT_NUMSTAT_ARGS,
 };
 use std::path::Path;
-use std::time::Duration;
-
-const MAX_COMPARISON_FILES: usize = 400;
+use std::time::Instant;
 
 // Prefer the fetched remote main; a local main may lag behind many releases.
-// Local-only repositories retain their existing comparison behavior.
-pub(crate) fn git_main_comparison_base(repo_root: &Path) -> Option<String> {
+// Local-only repositories retain their existing comparison behavior. Both
+// candidates share the caller's deadline.
+pub(crate) fn git_main_comparison_base(repo_root: &Path, deadline: Instant) -> Option<String> {
     for reference in ["refs/remotes/origin/main", "refs/heads/main"] {
         let mut command = git_command();
         command.arg("-C").arg(repo_root).args([
@@ -16,13 +16,7 @@ pub(crate) fn git_main_comparison_base(repo_root: &Path) -> Option<String> {
             "--verify",
             &format!("{reference}^{{commit}}"),
         ]);
-        let Ok(output) = run_bounded_command(
-            &command,
-            Duration::from_secs(5),
-            Some(Duration::from_secs(5)),
-            1024,
-            1024,
-        ) else {
+        let Ok(output) = git_read::run(&command, deadline, 1024) else {
             continue;
         };
         if output.succeeded() && !output.stdout_truncated {
@@ -32,26 +26,31 @@ pub(crate) fn git_main_comparison_base(repo_root: &Path) -> Option<String> {
     None
 }
 
-pub(crate) fn git_main_comparison(
-    repo_root: &Path,
-    untracked: &[SourceControlFile],
-    untracked_additions: usize,
-    partial: bool,
-) -> Option<MainComparisonStats> {
-    let base = git_main_comparison_base(repo_root)?;
+/// Where the checkout forked from `base`. Commits that landed on main after
+/// the fork are not this branch's changes; diffing against main's tip showed
+/// each of them reversed, as thousands of lines this branch never touched.
+fn git_fork_point(workspace: &Path, base: &str, deadline: Instant) -> Option<String> {
     let mut command = git_command();
     command
         .arg("-C")
-        .arg(repo_root)
-        .args(["diff", "--numstat", "--no-renames", &base, "--"]);
-    let output = run_bounded_command(
-        &command,
-        Duration::from_secs(15),
-        Some(Duration::from_secs(10)),
-        4 * 1024 * 1024,
-        64 * 1024,
-    )
-    .ok()?;
+        .arg(workspace)
+        .args(["merge-base", base, "HEAD"]);
+    let output = git_read::run(&command, deadline, 1024).ok()?;
+    (output.succeeded() && !output.stdout_truncated).then(|| output.stdout.trim().to_owned())
+}
+
+/// Compare tracked changes relative to the workspace with the fork from main.
+/// Untracked files remain in the working tree, but are not part of Git's diff.
+pub(crate) fn git_main_comparison(workspace: &Path, deadline: Instant) -> Option<MainComparisonStats> {
+    let main = git_main_comparison_base(workspace, deadline)?;
+    let base = git_fork_point(workspace, &main, deadline).unwrap_or(main);
+    let mut command = git_command();
+    command
+        .arg("-C")
+        .arg(workspace)
+        .args(GIT_NUMSTAT_ARGS)
+        .args([base.as_str(), "--"]);
+    let output = git_read::run(&command, deadline, 4 * 1024 * 1024).ok()?;
     if !output.succeeded() {
         return None;
     }
@@ -75,24 +74,14 @@ pub(crate) fn git_main_comparison(
         .collect();
     files.sort_by(|left, right| left.path.cmp(&right.path));
     let mut result = MainComparisonStats {
-        additions: untracked_additions,
+        additions: 0,
         deletions: 0,
-        partial: partial || parse_partial || output.stdout_truncated,
+        partial: parse_partial || output.stdout_truncated,
         files: Vec::new(),
     };
     for (additions, deletions) in stats.values() {
         result.additions = result.additions.saturating_add(*additions);
         result.deletions = result.deletions.saturating_add(*deletions);
-    }
-    for file in untracked {
-        if files.iter().any(|existing| existing.path == file.path) {
-            continue;
-        }
-        files.push(file.clone());
-    }
-    if files.len() > MAX_COMPARISON_FILES {
-        files.truncate(MAX_COMPARISON_FILES);
-        result.partial = true;
     }
     result.files = files;
     Some(result)
@@ -105,7 +94,7 @@ mod tests {
     use std::process::Command;
 
     #[test]
-    fn source_control_main_comparison_includes_committed_and_untracked_changes() {
+    fn source_control_main_comparison_includes_tracked_changes_but_excludes_untracked() {
         let repo = tempfile::tempdir().unwrap();
         init_git_repo(repo.path());
         std::fs::write(repo.path().join("file.txt"), "base\n").unwrap();
@@ -119,15 +108,18 @@ mod tests {
         let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
         assert_eq!(status.additions, 2);
         let comparison = status.compared_to_main.unwrap();
-        assert_eq!((comparison.additions, comparison.deletions), (3, 0));
+        assert_eq!((comparison.additions, comparison.deletions), (2, 0));
         assert!(!comparison.partial);
-        let paths: Vec<_> = comparison
-            .files
-            .iter()
-            .map(|file| file.path.as_str())
-            .collect();
-        assert!(paths.contains(&"file.txt"));
-        assert!(paths.contains(&"new.txt"));
+        assert!(comparison.files.iter().any(|file| file.path == "file.txt"));
+        assert!(!comparison.files.iter().any(|file| file.path == "new.txt"));
+        assert!(status.files.iter().any(|file| file.path == "new.txt"));
+
+        // A newly staged file is tracked by Git and belongs in the comparison.
+        run_git(repo.path(), &["add", "new.txt"]);
+        let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        let comparison = status.compared_to_main.unwrap();
+        assert_eq!((comparison.additions, comparison.deletions), (3, 0));
+        assert!(comparison.files.iter().any(|file| file.path == "new.txt"));
         run_git(repo.path(), &["branch", "-D", "main"]);
         let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
         assert!(status.compared_to_main.is_none());
@@ -160,6 +152,29 @@ mod tests {
         let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
         let comparison = status.compared_to_main.unwrap();
         assert_eq!((comparison.additions, comparison.deletions), (0, 0));
+    }
+
+    #[test]
+    fn source_control_main_comparison_ignores_main_commits_after_the_fork() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        std::fs::write(repo.path().join("file.txt"), "base\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "base"]);
+        run_git(repo.path(), &["checkout", "-b", "feature"]);
+        std::fs::write(repo.path().join("file.txt"), "base\nfeature\n").unwrap();
+        run_git(repo.path(), &["commit", "-am", "feature"]);
+        run_git(repo.path(), &["checkout", "main"]);
+        std::fs::write(repo.path().join("later.txt"), "one\ntwo\nthree\n").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "later on main"]);
+        run_git(repo.path(), &["checkout", "feature"]);
+        std::fs::write(repo.path().join("file 2.txt"), "base\nfeature\n").unwrap();
+        let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
+        let comparison = status.compared_to_main.unwrap();
+        assert_eq!((comparison.additions, comparison.deletions), (1, 0));
+        assert!(!comparison.files.iter().any(|file| file.path == "later.txt"));
+        assert_eq!(status.additions, 0);
     }
 
     fn init_git_repo(repo: &Path) {

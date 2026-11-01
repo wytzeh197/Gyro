@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { syncNativeAppearance } from "./native-appearance";
 import {
   applyAppearancePreferences,
   interfaceScales,
@@ -22,6 +23,9 @@ export function storedThemeMode(value: unknown): ThemeMode | undefined {
 }
 export function useWorkbenchAppearance(preferences: WorkbenchPreferences) {
   const themePreference = preferences.theme;
+  useEffect(() => {
+    syncNativeAppearance(themePreference);
+  }, [themePreference]);
   const [systemThemeValue, setSystemThemeValue] =
     useState<ResolvedTheme>(systemTheme);
   const resolvedTheme: ResolvedTheme =
@@ -73,7 +77,7 @@ export function useWorkbenchAppearance(preferences: WorkbenchPreferences) {
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute(
         "content",
-        resolvedTheme === "light" ? "#f7f9fc" : "#181818",
+        resolvedTheme === "light" ? "#f7f7f7" : "#181818",
       );
     try {
       window.localStorage.setItem(THEME_STORAGE_KEY, themePreference);

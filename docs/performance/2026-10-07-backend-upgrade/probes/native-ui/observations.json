@@ -1,0 +1,248 @@
+{
+  "recordedAt": "2026-10-08T11:19:27.007631+00:00",
+  "source": "Computer Use observations plus isolated store transcript and timing diagnostics",
+  "project": "/private/tmp/gyro-backend-ui-2026-10-08/project",
+  "checks": [
+    {
+      "check": "draft across Sessions and Workspace",
+      "result": "passed"
+    },
+    {
+      "check": "draft after full quit/relaunch with persistent webview opt-in",
+      "result": "passed"
+    },
+    {
+      "check": "native README editing and save",
+      "result": "passed",
+      "bytesAfterSave": 169
+    },
+    {
+      "check": "workspace before first chat after restart",
+      "result": "failed before fix",
+      "detail": "Workspace root was never restored; editor state alone cannot select a root."
+    },
+    {
+      "check": "fresh GPT-5.6 Sol Medium response while switching away",
+      "result": "passed",
+      "assistantCount": 1,
+      "exactResponse": true,
+      "retryCount": 0,
+      "toolEvents": 0
+    },
+    {
+      "check": "fixed startup without a chat",
+      "result": "passed",
+      "sessionCount": 0,
+      "observed": "Project picker restored fixture path; Workspace restored selected README, 169-byte content, and Source Control +3/-0; Restricted Mode stayed active."
+    },
+    {
+      "check": "native Git diff",
+      "result": "passed",
+      "observed": "Working Tree diff shows the same README addition without approving or applying a provider edit."
+    },
+    {
+      "check": "native terminal lifecycle",
+      "result": "passed",
+      "observed": "Created Shell, entered fixture folder, printed GYRO_TERMINAL_OK, exited, observed done, closed pane, observed No terminal panes."
+    },
+    {
+      "check": "native search",
+      "result": "passed",
+      "observed": "Native saved addition returned one matching line in README.md at line 6."
+    },
+    {
+      "check": "native light and dark appearance",
+      "result": "passed for inspected states",
+      "observed": "Workspace/editor/diff/search/terminal states inspected in both appearances; restored fixture System theme. No frame-rate or reduced-motion runtime claim."
+    },
+    {
+      "check": "complete JS reliability rerun",
+      "result": "passed after storage extraction",
+      "guards": 78,
+      "retainedFailure": "First run failed App architecture ceiling by ten lines; unchanged bounded UI storage helpers were extracted and full suite passed."
+    },
+    {
+      "check": "actual native resume after full quit/relaunch",
+      "result": "backend passed; transient UI failure observed",
+      "resumed": true,
+      "exactResponse": "marigold",
+      "retryCount": 0,
+      "assistantResponsesForTurn": 1,
+      "observed": "UI initially showed Interrupted and Retry despite durable success; it later reconciled to the correct final answer. Retry was not clicked.",
+      "fix": "Terminal response commits at ordinary priority before sending cleanup; completion also retains the expanded history window. Revalidation pending."
+    },
+    {
+      "check": "native completion after terminal-priority fix",
+      "result": "passed in first post-send observation",
+      "turnId": "671e5b07-22af-450a-8dd3-095c80e0fc08",
+      "assistantResponsesForTurn": 1,
+      "resumed": true,
+      "retryCount": 0,
+      "exactResponse": "marigold",
+      "observed": "Worked for 5s and correct Final response, with no Interrupted/Retry in the captured post-send state. Previous turns remained visible.",
+      "metrics": [
+        {
+          "file": "frontend-d9de2b25-269f-43c1-a78a-d2c3ad8fc599.json",
+          "value": {
+            "turnId": "671e5b07-22af-450a-8dd3-095c80e0fc08",
+            "sendToInvokeMs": 155.0,
+            "sendToReceivedMs": 4178.0,
+            "receivedToPaintMs": 154.0,
+            "sendToSettledMs": null
+          }
+        },
+        {
+          "file": "frontend-481789a1-0a33-48ed-9eb8-f472db7c9e53.json",
+          "value": {
+            "turnId": "671e5b07-22af-450a-8dd3-095c80e0fc08",
+            "sendToInvokeMs": 155.0,
+            "sendToReceivedMs": 4178.0,
+            "receivedToPaintMs": 154.0,
+            "sendToSettledMs": 4715.0
+          }
+        },
+        {
+          "file": "backend-ca90784d-0806-4523-8d77-a1dda9550cd8.json",
+          "value": {
+            "schema": "gyro.timing.v1",
+            "traceId": "ca90784d-0806-4523-8d77-a1dda9550cd8",
+            "turnId": "671e5b07-22af-450a-8dd3-095c80e0fc08",
+            "sessionId": "a0d636d4-f995-4cca-8c30-2fef52ba365f",
+            "points": [
+              {
+                "stage": "backend-received",
+                "elapsedMs": 0.008042,
+                "attempt": 0,
+                "toolIndex": null
+              },
+              {
+                "stage": "workspace-start",
+                "elapsedMs": 3.5662089999999997,
+                "attempt": 0,
+                "toolIndex": null
+              },
+              {
+                "stage": "workspace-ready",
+                "elapsedMs": 57.534792,
+                "attempt": 0,
+                "toolIndex": null
+              },
+              {
+                "stage": "attempt-start",
+                "elapsedMs": 76.46908400000001,
+                "attempt": 1,
+                "toolIndex": null
+              },
+              {
+                "stage": "process-start",
+                "elapsedMs": 120.41279200000001,
+                "attempt": 1,
+                "toolIndex": null
+              },
+              {
+                "stage": "process-spawned",
+                "elapsedMs": 123.885959,
+                "attempt": 1,
+                "toolIndex": null
+              },
+              {
+                "stage": "protocol-ready",
+                "elapsedMs": 1342.34925,
+                "attempt": 1,
+                "toolIndex": null
+              },
+              {
+                "stage": "prompt-sent",
+                "elapsedMs": 1343.874625,
+                "attempt": 1,
+                "toolIndex": null
+              },
+              {
+                "stage": "first-activity",
+                "elapsedMs": 4018.9177919999997,
+                "attempt": 1,
+                "toolIndex": null
+              },
+              {
+                "stage": "provider-complete",
+                "elapsedMs": 4496.981959000001,
+                "attempt": 1,
+                "toolIndex": null
+              },
+              {
+                "stage": "complete",
+                "elapsedMs": 4531.599,
+                "attempt": 1,
+                "toolIndex": null
+              }
+            ],
+            "outcome": "completed",
+            "truncated": false,
+            "providerRequests": {
+              "requests": 0,
+              "completed": 0,
+              "rejected": 0,
+              "retries": 0,
+              "tokens": {
+                "inputTokens": 26943,
+                "cachedInputTokens": 25984,
+                "outputTokens": 7,
+                "reasoningOutputTokens": 0,
+                "totalTokens": 26950,
+                "measured": true
+              },
+              "unmeasuredContent": false,
+              "providerAttempts": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "check": "native workspace-scoped Git status",
+      "result": "passed",
+      "observed": "Owning fixture project shows +3/-0, README change and fixture commit. Standalone chat shows no borrowed counts/history and disabled Git actions."
+    },
+    {
+      "check": "native explicit folder selection from standalone chat",
+      "result": "passed",
+      "observed": "Chose exact fixture folder; root stayed active while switching Search and Source Control. Correct scoped status populated after detailed read."
+    },
+    {
+      "check": "rendered native viewport inspection",
+      "result": "passed for sampled states",
+      "imageGeometry": {
+        "format": "jpeg",
+        "width": 861,
+        "height": 622
+      },
+      "observed": "Inspected owning workspace/editor, new composer and existing transcript at minimum window size, then restored default window size. This is rendered evidence, not frame-rate measurement."
+    },
+    {
+      "check": "current desktop library suite",
+      "result": "passed",
+      "passed": 509,
+      "ignored": 5
+    },
+    {
+      "check": "current reliability and static workbench checks",
+      "result": "passed",
+      "guards": 78,
+      "workbenchLimit": "The workbench script checks source/reducers and declares viewport targets; it does not render screenshot coverage."
+    },
+    {
+      "check": "native Git preparation/failure/recovery and late navigation",
+      "result": "passed",
+      "evidence": "preparation-final-verification.json",
+      "changedFiles": 1000
+    }
+  ],
+  "limits": [
+    "No before/after native latency comparison.",
+    "793 ms receive-to-frame value was collected while Workspace was visible and cannot establish visible chat paint. Later visible samples recorded 45\u2013154 ms frame opportunities; they are current-run evidence, not before/after latency.",
+    "Ephemeral test webview resets are expected; restart check used GYRO_TEST_PERSIST_UI=1.",
+    "Live reload reset in the earlier dev URL run is inconclusive; subsequent run uses embedded assets.",
+    "OS Reduce Motion runtime branch and continuous frame-rate measurement remain unverified."
+  ],
+  "updatedAt": "2026-10-08T13:22:08.618913+00:00"
+}

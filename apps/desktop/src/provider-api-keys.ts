@@ -4,11 +4,14 @@ import {
   providersForConfig,
   providerSupportsApiKey,
   CUSTOM_PROVIDER_PREFIX,
+  getProviderCatalogEntry,
+  isCustomProviderId,
   type CustomProviderDraft,
   type CustomProviderId,
   type GyroConfig,
   type ModelProviderConfig,
   type NotificationKind,
+  type ProviderId,
 } from "@gyro-dev/ui";
 
 /**
@@ -41,7 +44,10 @@ export function useProviderApiKeys(
   notify: (kind: NotificationKind, title: string, detail: string) => void,
   testProvider: (providerId: string) => Promise<void>,
   /** Persists a whole config object; App owns the optimistic state update. */
-  persistConfig: (config: GyroConfig) => Promise<unknown>,
+  persistConfig: (
+    config: GyroConfig,
+    options?: { notifySuccess?: boolean },
+  ) => Promise<unknown>,
 ) {
   const [providerApiKeyConfigured, setProviderApiKeyConfigured] = useState<
     Partial<Record<string, boolean>>
@@ -66,7 +72,7 @@ export function useProviderApiKeys(
                 [provider.id]: status.configured,
               }));
           } catch {
-            // Leave status unknown when Keychain is unavailable.
+            // Leave status unknown when the saved key cannot be read.
           }
         }),
     );
@@ -97,6 +103,27 @@ export function useProviderApiKeys(
           ...current,
           [providerId]: status.configured,
         }));
+        // An HTTPS provider has no CLI login. A saved key is what connects it,
+        // including DeepSeek, Mistral, OpenRouter, and a custom endpoint.
+        if (value !== undefined && status.configured) {
+          const saved = providersForConfig(config).find(
+            (provider) => provider.id === providerId,
+          );
+          if (saved?.authMode === "env" && saved.authStatus !== "connected") {
+            await persistConfig(
+              {
+                ...config,
+                selectedProviderId: providerId as ProviderId,
+                modelProviders: providersForConfig(config).map((provider) =>
+                  provider.id === providerId
+                    ? { ...provider, enabled: true, authStatus: "connected" }
+                    : provider,
+                ),
+              },
+              { notifySuccess: false },
+            );
+          }
+        }
         notify(
           "provider",
           status.configured ? "API key saved" : "API key removed",
@@ -108,21 +135,21 @@ export function useProviderApiKeys(
         notify(
           "command-failed",
           "Could not update API key",
-          "Check Keychain access and try again.",
+          "The key could not be saved on this Mac. Try again.",
         );
         return false;
       } finally {
         setSavingProviderApiKeyId(undefined);
       }
     },
-    [native, notify, testProvider],
+    [config, native, notify, persistConfig, testProvider],
   );
 
   /**
    * Add a user-defined endpoint.
    *
    * The config entry is what makes the provider exist; the key is a separate
-   * Keychain write, so a failed key save still leaves a usable provider the
+   * file on this Mac, so a failed key save still leaves a usable provider the
    * user can add a key to. `custom:` is the prefix the Rust side routes to the
    * HTTPS runner, and `enabled` is required for a run to be allowed at all.
    */
@@ -212,13 +239,106 @@ export function useProviderApiKeys(
         notify("command-failed", "Could not remove provider", providerId);
         return false;
       }
-      // The entry is gone either way, so a Keychain failure is reported by the
+      // The entry is gone either way, so a credential-file failure is reported by the
       // key path itself rather than blocking the removal.
       await updateProviderApiKey(providerId);
       notify("provider", "Custom provider removed", providerId);
       return true;
     },
     [config, native, notify, persistConfig, updateProviderApiKey],
+  );
+
+  const removeProvider = useCallback(
+    async (providerId: string) => {
+      if (isCustomProviderId(providerId)) return removeCustomProvider(providerId);
+      if (!native) {
+        notify(
+          "command-failed",
+          "Provider unavailable",
+          "Open the desktop app to remove a provider.",
+        );
+        return false;
+      }
+      const catalog = getProviderCatalogEntry(providerId as ProviderId);
+      const name = catalog?.displayName ?? providerId;
+      try {
+        await persistConfig({
+          ...config,
+          removedProviderIds: [
+            ...new Set([...(config.removedProviderIds ?? []), providerId]),
+          ],
+          selectedProviderId:
+            config.selectedProviderId === providerId
+              ? undefined
+              : config.selectedProviderId,
+          modelProviders: config.modelProviders.map((provider) =>
+            provider.id === providerId
+              ? { ...provider, enabled: false, authStatus: "not-connected" }
+              : provider,
+          ),
+        });
+      } catch {
+        notify("command-failed", "Could not remove provider", name);
+        return false;
+      }
+      if (providerSupportsApiKey(providerId)) {
+        await updateProviderApiKey(providerId);
+      }
+      const cli = catalog?.capabilities.executionKind === "codex-cli"
+        || catalog?.capabilities.executionKind === "claude-code"
+        || catalog?.capabilities.executionKind === "kimi-acp"
+        || catalog?.capabilities.executionKind === "acp-cli";
+      notify(
+        "provider",
+        "Removed from Gyro",
+        cli
+          ? `${name}. The CLI on this Mac stays signed in.`
+          : providerId === "ollama"
+            ? `${name}. The app on this Mac stays installed.`
+            : providerSupportsApiKey(providerId)
+              ? `${name}. Its stored API key was deleted.`
+              : name,
+      );
+      return true;
+    },
+    [
+      config,
+      native,
+      notify,
+      persistConfig,
+      removeCustomProvider,
+      updateProviderApiKey,
+    ],
+  );
+
+  const restoreProvider = useCallback(
+    async (providerId: string) => {
+      if (!native) {
+        notify(
+          "command-failed",
+          "Provider unavailable",
+          "Open the desktop app to restore a provider.",
+        );
+        return false;
+      }
+      const name =
+        getProviderCatalogEntry(providerId as ProviderId)?.displayName ??
+        providerId;
+      try {
+        await persistConfig({
+          ...config,
+          removedProviderIds: (config.removedProviderIds ?? []).filter(
+            (id) => id !== providerId,
+          ),
+        });
+      } catch {
+        notify("command-failed", "Could not restore provider", name);
+        return false;
+      }
+      notify("provider", "Provider restored", name);
+      return true;
+    },
+    [config, native, notify, persistConfig],
   );
 
   /**
@@ -230,7 +350,7 @@ export function useProviderApiKeys(
   const fetchCustomProviderModels = useCallback(
     async (baseUrl: string, apiKey?: string) => {
       const result = await invoke<{
-        models: { id: string; displayName: string }[];
+        models: { id: string; displayName: string; contextWindowTokens?: number }[];
       }>("list_custom_provider_models", {
         baseUrl,
         apiKey: apiKey?.trim() ? apiKey.trim() : undefined,
@@ -249,6 +369,8 @@ export function useProviderApiKeys(
     },
     onAddCustomProvider: addCustomProvider,
     onRemoveCustomProvider: removeCustomProvider,
+    onRemoveProvider: removeProvider,
+    onRestoreProvider: restoreProvider,
     onFetchCustomProviderModels: fetchCustomProviderModels,
   };
 }

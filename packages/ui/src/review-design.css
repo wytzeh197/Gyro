@@ -1,7 +1,7 @@
 .gyro-comparison-review em.is-added,
 .gyro-comparison-review em.is-removed {
   font-style: normal;
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
   font-variant-numeric: tabular-nums;
 }
 .gyro-comparison-review em.is-added {
@@ -56,7 +56,7 @@
   padding: 4px 12px;
   border: 0;
   color: var(--gyro-muted);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
 }
 .gyro-comparison-review .gyro-diff-tree {
   overflow: auto;
@@ -68,7 +68,7 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 42px;
+  min-height: calc(38px * var(--gyro-ui-scale, 1));
   padding: 5px 8px;
   border: 1px solid transparent;
   border-radius: var(--gyro-radius-sm);
@@ -90,12 +90,12 @@
   gap: 2px;
 }
 .gyro-review-file-name > strong {
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
-  font-weight: 550;
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
 }
 .gyro-review-file-name > span {
   color: var(--gyro-muted);
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
 }
 .gyro-review-file-name > strong,
 .gyro-review-file-name > span {
@@ -121,12 +121,37 @@
   flex-wrap: wrap;
   gap: 6px;
 }
-.gyro-comparison-main > .gyro-comparison-diff-pane {
+.gyro-comparison-review .gyro-comparison-diff-pane {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   min-width: 0;
   overflow: hidden;
+}
+.gyro-comparison-diff-pane > .gyro-diff-empty-state {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.gyro-recorded-diff-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 100%;
+}
+.gyro-recorded-diff-controls > select {
+  min-width: 0;
+  max-width: 100%;
+  min-height: max(28px, calc(28px * var(--gyro-ui-scale, 1)));
+  font: inherit;
+  color: var(--gyro-text);
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  padding: 4px 6px;
 }
 .gyro-comparison-review .gyro-diff-review-toolbar {
   flex: 0 0 auto;
@@ -134,17 +159,34 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
+  flex-wrap: wrap;
+  padding: 8px var(--gyro-space-card);
   border-bottom: 1px solid var(--gyro-border-soft);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-comparison-review .gyro-diff-review-toolbar button {
+  min-height: max(28px, calc(28px * var(--gyro-ui-scale, 1)));
+  padding: 4px 8px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  cursor: pointer;
+}
+.gyro-comparison-review .gyro-diff-review-toolbar button:not(:disabled):hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
 }
 .gyro-comparison-review .gyro-diff-review-toolbar > div {
   min-width: 0;
 }
 .gyro-comparison-review .gyro-diff-review-toolbar strong {
-  font-size: calc(13px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-support);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .gyro-comparison-review .gyro-diff-review-toolbar span {
-  font-size: calc(11px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-caption);
 }
 .gyro-comparison-review .gyro-diff-review-toolbar > div > span {
   overflow: hidden;
@@ -167,6 +209,9 @@
   padding: 4px 12px;
   border-bottom: 1px solid var(--gyro-border-soft);
 }
+.gyro-plain-diff > .gyro-plain-diff-notice {
+  flex: 0 0 auto;
+}
 .gyro-plain-diff > .gyro-plain-diff-hunks {
   flex: 1 1 0;
   min-height: 0;
@@ -182,7 +227,7 @@
 .gyro-plain-diff .gyro-plain-diff-hunk .gyro-diff-line {
   grid-template-columns: 42px 42px 20px minmax(0, 1fr);
   padding: 0 12px 0 0;
-  font-size: calc(12px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
   line-height: 1.8;
   border-left: 2px solid transparent;
 }
@@ -191,7 +236,7 @@
 }
 .gyro-plain-diff .gyro-diff-line > .gyro-review-line-number {
   color: var(--gyro-muted);
-  font-size: calc(10px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-tiny);
   font-variant-numeric: tabular-nums;
 }
 .gyro-plain-diff .gyro-diff-line > code {
@@ -241,7 +286,7 @@
   color: var(--gyro-accent);
   background: color-mix(in srgb, var(--gyro-accent) 10%, transparent);
 }
-.gyro-comparison-review button:focus-visible {
-  outline: 2px solid var(--gyro-accent);
+.gyro-comparison-review :is(button, select):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
   outline-offset: -2px;
 }

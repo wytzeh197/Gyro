@@ -1,0 +1,26 @@
+{
+  "home": [
+    {
+      "id": "terminal-tab-pane-1791447099693-84c8s",
+      "selected": "true",
+      "tabIndex": 0
+    },
+    {
+      "id": "terminal-tab-pane-1791447114311-t71pk",
+      "selected": "false",
+      "tabIndex": -1
+    }
+  ],
+  "end": [
+    {
+      "id": "terminal-tab-pane-1791447099693-84c8s",
+      "selected": "false",
+      "tabIndex": -1
+    },
+    {
+      "id": "terminal-tab-pane-1791447114311-t71pk",
+      "selected": "true",
+      "tabIndex": 0
+    }
+  ]
+}

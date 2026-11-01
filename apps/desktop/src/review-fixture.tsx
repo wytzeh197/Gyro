@@ -4,6 +4,10 @@ import { createRoot } from "react-dom/client";
 import {
   DiffReviewSurface,
   GitComparisonReview,
+  ChatSurface,
+  applyAppearancePreferences,
+  type ChatSidePanelId,
+  type SessionEvent,
   type DiffReview,
 } from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
@@ -44,8 +48,25 @@ const files: DiffReview["files"] = [
   },
 ];
 const params = new URLSearchParams(location.search);
-document.documentElement.dataset.theme =
-  params.get("theme") === "light" ? "light" : "dark";
+const previewTheme = params.get("theme") === "light" ? "light" : "dark";
+document.documentElement.dataset.theme = previewTheme;
+document.documentElement.dataset.density =
+  params.get("density") === "compact" ? "compact" : "comfortable";
+applyAppearancePreferences(
+  document.documentElement,
+  {
+    interfaceSize:
+      params.get("size") === "large"
+        ? "large"
+        : params.get("size") === "small"
+          ? "small"
+          : "default",
+    mainColor: "#0874df",
+    secondaryColor: "#8b6fcb",
+    motionSpeed: "default",
+  },
+  previewTheme,
+);
 const comparisonFiles = [
   { path: "apps/desktop/src-tauri/src/lib.rs", additions: 3, deletions: 3 },
   {
@@ -86,8 +107,132 @@ const loadDiff = async (file: { path: string }) => ({
         " // Model support is checked before sending.",
       ].join("\n"),
 });
+const recordedFiles = comparisonFiles.map((file) => ({
+  ...file,
+  patches: params.has("no-patches")
+    ? []
+    : Array.from({ length: params.has("many-edits") ? 8 : 2 }, (_, index) =>
+        [
+          `@@ -1,3 +1,3 @@ Recorded edit ${index + 1}`,
+          ` // ${file.path}`,
+          `-const revision = ${index};`,
+          `+const revision = ${index + 1};`,
+          " // Recorded from this turn, not the current working tree.",
+        ].join("\n"),
+      ),
+}));
 function Fixture() {
   const [selectedPath, select] = useState("src/chat.ts");
+  const [layout, setLayout] = useState("");
+  const [chatPanel, setChatPanel] = useState<ChatSidePanelId | undefined>(
+    "review",
+  );
+  if (params.get("mode") === "chat") {
+    const base = {
+      sessionId: "review-chat",
+      turnId: "recorded-turn",
+      createdAt: params.has("running") ? new Date(Date.now() - 25_000).toISOString() : "2026-10-07T12:00:00Z",
+      payload: {},
+    };
+    const events: SessionEvent[] = [
+      {
+        ...base,
+        id: "user",
+        kind: "user-message",
+        message: "Update the image support check.",
+      },
+      {
+        ...base,
+        id: "file",
+        kind: "system-event",
+        message: "Edited lib.rs",
+        payload: {
+          kind: "provider-activity",
+          activityKind: "file",
+          status: "done",
+          path: recordedFiles[0]!.path,
+          additions: 3,
+          deletions: 3,
+        },
+      },
+      {
+        ...base,
+        id: "receipt",
+        kind: "system-event",
+        message: "Applied edit",
+        payload: {
+          schema: "gyro.mutation.v1",
+          status: "applied",
+          fileChanges: [
+            {
+              path: recordedFiles[0]!.path,
+              patch: recordedFiles[0]!.patches[0],
+            },
+          ],
+        },
+      },
+      {
+        ...base,
+        id: "answer",
+        kind: "assistant-message",
+        message: "Updated the image support check.",
+      },
+    ];
+    return (
+      <div
+        style={{
+          height: "100vh",
+          width: Number(params.get("width")) || "100%",
+          maxWidth: "100%",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <nav
+          aria-label="Fixture controls"
+          style={{ flexShrink: 0, minHeight: 46, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, padding: 8 }}
+        >
+          <span>
+            Review layout fixture · {params.has("running") ? "Editing in progress" : "Completed turn"}
+          </span>
+          <button onClick={() => {
+            document.querySelector(".gyro-chat-companion")?.getAnimations().forEach((animation) => animation.finish());
+            window.setTimeout(() => {
+              const card = document.querySelector(".gyro-composer-shell")?.getBoundingClientRect();
+              const pane = document.querySelector(".gyro-chat-thread-canvas")?.getBoundingClientRect();
+              setLayout(card && pane ? `Composer ${Math.round(card.width)}px · Chat ${Math.round(pane.width)}px · ${card.left >= pane.left && card.right <= pane.right ? "Fits chat" : "Overflow"}` : "Layout unavailable");
+            }, 50);
+          }}>
+            Settle layout
+          </button>
+          <output>{layout}</output>
+          <button
+            onClick={() => setChatPanel(chatPanel ? undefined : "review")}
+          >
+            {chatPanel ? "Hide review" : "Open review"}
+          </button>
+        </nav>
+        <ChatSurface
+          config={{
+            commandProfiles: [],
+            modelProviders: [],
+            requireCommandApproval: true,
+            requireFileEditApproval: true,
+            telemetryEnabled: false,
+          }}
+          onSend={() => {}}
+          shellReady
+          isTiled={params.has("tiled")}
+          isComposerSending={params.has("running")}
+          events={params.has("running") ? events.slice(0, -1) : events}
+          activeChatPanel={chatPanel}
+          onSelectChatPanel={setChatPanel}
+          onLoadComparisonDiff={loadDiff}
+          onLoadChangeDiff={async (path) => (await loadDiff({ path })).unified}
+        />
+      </div>
+    );
+  }
   return (
     <div
       className="gyro-chat-companion-content"
@@ -126,7 +271,7 @@ function Fixture() {
         ) : (
           <GitComparisonReview
             scope={{ kind: "turn", turnId: "fixture" }}
-            turnFiles={params.has("empty") ? [] : comparisonFiles}
+            turnFiles={params.has("empty") ? [] : recordedFiles}
             onLoadDiff={loadDiff}
           />
         )}

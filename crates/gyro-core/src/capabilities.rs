@@ -16,7 +16,11 @@ pub const MAX_CAPABILITY_SUMMARY_CHARS: usize = 4_000;
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CapabilityId {
+    CodeModeDiscover,
+    CodeModeExecute,
     WorkspaceContext,
+    WorkspaceOutline,
+    TaskCheckpoint,
     WorkspaceCheck,
     WorkspaceList,
     WorkspaceSearch,
@@ -34,6 +38,10 @@ pub enum CapabilityId {
     WorkspaceCreatePath,
     WorkspaceRenamePath,
     WorkspaceDeletePath,
+    WorkspaceMovePath,
+    WorkspaceDuplicatePath,
+    WorkspaceUndoPath,
+    WorkspaceOpenFolder,
     WorkspaceRunTask,
     WorkspaceRunTest,
     WorkspaceReadOutput,
@@ -41,6 +49,7 @@ pub enum CapabilityId {
     CodeReferences,
     CodeHover,
     CodeSymbols,
+    CodeFormat,
     IdeReveal,
     IdeOpenPanel,
     TerminalOpen,
@@ -51,6 +60,7 @@ pub enum CapabilityId {
     BrowserInspect,
     BrowserReload,
     BrowserScreenshot,
+    BrowserViewport,
     BrowserNavigate,
     BrowserBack,
     BrowserForward,
@@ -68,18 +78,27 @@ pub enum CapabilityId {
     MemoryRead,
     MemoryWrite,
     ResearchRun,
+    AgentSpawn,
+    AgentWait,
+    AgentSend,
+    AgentStop,
     GithubPullRequests,
     GithubWorkflowRuns,
     GithubWorkflowLogs,
     GithubCreatePullRequest,
     GithubRerunWorkflow,
     GithubPush,
+    ToolCatalog,
 }
 
 impl CapabilityId {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::CodeModeDiscover => "codemode.discover",
+            Self::CodeModeExecute => "codemode.execute",
             Self::WorkspaceContext => "workspace.context",
+            Self::WorkspaceOutline => "workspace.outline",
+            Self::TaskCheckpoint => "task.checkpoint",
             Self::WorkspaceCheck => "workspace.check",
             Self::WorkspaceList => "workspace.list",
             Self::WorkspaceSearch => "workspace.search",
@@ -97,6 +116,10 @@ impl CapabilityId {
             Self::WorkspaceCreatePath => "workspace.create",
             Self::WorkspaceRenamePath => "workspace.rename",
             Self::WorkspaceDeletePath => "workspace.delete",
+            Self::WorkspaceMovePath => "workspace.move",
+            Self::WorkspaceDuplicatePath => "workspace.duplicate",
+            Self::WorkspaceUndoPath => "workspace.undo",
+            Self::WorkspaceOpenFolder => "workspace.open_folder",
             Self::WorkspaceRunTask => "workspace.run_task",
             Self::WorkspaceRunTest => "workspace.run_test",
             Self::WorkspaceReadOutput => "workspace.read_output",
@@ -104,6 +127,7 @@ impl CapabilityId {
             Self::CodeReferences => "code.references",
             Self::CodeHover => "code.hover",
             Self::CodeSymbols => "code.symbols",
+            Self::CodeFormat => "code.format",
             Self::IdeReveal => "ide.reveal",
             Self::IdeOpenPanel => "ide.open_panel",
             Self::TerminalOpen => "terminal.open",
@@ -114,6 +138,7 @@ impl CapabilityId {
             Self::BrowserInspect => "browser.inspect",
             Self::BrowserReload => "browser.reload",
             Self::BrowserScreenshot => "browser.screenshot",
+            Self::BrowserViewport => "browser.viewport",
             Self::BrowserNavigate => "browser.navigate",
             Self::BrowserBack => "browser.back",
             Self::BrowserForward => "browser.forward",
@@ -131,18 +156,27 @@ impl CapabilityId {
             Self::MemoryRead => "memory.read",
             Self::MemoryWrite => "memory.write",
             Self::ResearchRun => "research.run",
+            Self::AgentSpawn => "agent.spawn",
+            Self::AgentWait => "agent.wait",
+            Self::AgentSend => "agent.send",
+            Self::AgentStop => "agent.stop",
             Self::GithubPullRequests => "github.pull_requests",
             Self::GithubWorkflowRuns => "github.workflow_runs",
             Self::GithubWorkflowLogs => "github.workflow_logs",
             Self::GithubCreatePullRequest => "github.create_pull_request",
             Self::GithubRerunWorkflow => "github.rerun_workflow",
             Self::GithubPush => "github.push",
+            Self::ToolCatalog => "tool.catalog",
         }
     }
 
     pub fn provider_tool_name(self) -> &'static str {
         match self {
+            Self::CodeModeDiscover => "gyro_code_mode_discover",
+            Self::CodeModeExecute => "gyro_code_mode_execute",
             Self::WorkspaceContext => "gyro_workspace_get_context",
+            Self::WorkspaceOutline => "gyro_workspace_outline",
+            Self::TaskCheckpoint => "gyro_task_checkpoint",
             Self::WorkspaceCheck => "gyro_workspace_check",
             Self::WorkspaceList => "gyro_workspace_list",
             Self::WorkspaceSearch => "gyro_workspace_search",
@@ -160,6 +194,10 @@ impl CapabilityId {
             Self::WorkspaceCreatePath => "gyro_workspace_create",
             Self::WorkspaceRenamePath => "gyro_workspace_rename",
             Self::WorkspaceDeletePath => "gyro_workspace_delete",
+            Self::WorkspaceMovePath => "gyro_workspace_move",
+            Self::WorkspaceDuplicatePath => "gyro_workspace_duplicate",
+            Self::WorkspaceUndoPath => "gyro_workspace_undo",
+            Self::WorkspaceOpenFolder => "gyro_workspace_open_folder",
             Self::WorkspaceRunTask => "gyro_workspace_run_task",
             Self::WorkspaceRunTest => "gyro_workspace_run_test",
             Self::WorkspaceReadOutput => "gyro_workspace_read_output",
@@ -167,6 +205,7 @@ impl CapabilityId {
             Self::CodeReferences => "gyro_code_references",
             Self::CodeHover => "gyro_code_hover",
             Self::CodeSymbols => "gyro_code_symbols",
+            Self::CodeFormat => "gyro_code_format",
             Self::IdeReveal => "gyro_ide_reveal",
             Self::IdeOpenPanel => "gyro_ide_open_panel",
             Self::TerminalOpen => "gyro_terminal_open",
@@ -177,6 +216,7 @@ impl CapabilityId {
             Self::BrowserInspect => "gyro_browser_inspect",
             Self::BrowserReload => "gyro_browser_reload",
             Self::BrowserScreenshot => "gyro_browser_screenshot",
+            Self::BrowserViewport => "gyro_browser_set_viewport",
             Self::BrowserNavigate => "gyro_browser_navigate",
             Self::BrowserBack => "gyro_browser_back",
             Self::BrowserForward => "gyro_browser_forward",
@@ -194,12 +234,17 @@ impl CapabilityId {
             Self::MemoryRead => "gyro_memory_read",
             Self::MemoryWrite => "gyro_memory_write",
             Self::ResearchRun => "gyro_research",
+            Self::AgentSpawn => "gyro_agent_spawn",
+            Self::AgentWait => "gyro_agent_wait",
+            Self::AgentSend => "gyro_agent_send",
+            Self::AgentStop => "gyro_agent_stop",
             Self::GithubPullRequests => "gyro_github_pull_requests",
             Self::GithubWorkflowRuns => "gyro_github_workflow_runs",
             Self::GithubWorkflowLogs => "gyro_github_workflow_logs",
             Self::GithubCreatePullRequest => "gyro_github_create_pull_request",
             Self::GithubRerunWorkflow => "gyro_github_rerun_workflow",
             Self::GithubPush => "gyro_github_push",
+            Self::ToolCatalog => "gyro_tool_catalog",
         }
     }
 
@@ -224,6 +269,9 @@ pub enum CapabilityClass {
     WorkspaceSensitiveRead,
     /// Lifecycle changes inside the workspace: create, rename or move, delete.
     WorkspaceWrite,
+    /// Switching Gyro to a folder outside the chat's own workspace, so the
+    /// user can start a chat there.
+    WorkspaceOpen,
     /// Starting another model run: a research sub-agent, which spends tokens.
     AgentRun,
     IdeReveal,
@@ -308,8 +356,13 @@ impl ProjectCapabilityPolicy {
         // files, so the default is a decision rather than a silent write. Full
         // Access in a normal run still skips the prompt.
         classes.insert(CapabilityClass::WorkspaceWrite, CapabilityAccess::Ask);
+        // Opening a folder moves the user's view and points a new chat at a
+        // directory the model chose, so it is a decision rather than a silent
+        // navigation. Full Access in a normal run still skips the prompt.
+        classes.insert(CapabilityClass::WorkspaceOpen, CapabilityAccess::Ask);
         // A sub-agent spends the user's provider budget, so it is a decision
-        // rather than a silent call. Full Access still skips the prompt.
+        // rather than a silent call by default. The desktop permission mode
+        // skips the prompt in Full Access or Approve for me within its ceiling.
         classes.insert(CapabilityClass::AgentRun, CapabilityAccess::Ask);
         classes.insert(CapabilityClass::IdeReveal, CapabilityAccess::Allow);
         classes.insert(CapabilityClass::TerminalExecute, CapabilityAccess::Ask);
@@ -644,6 +697,8 @@ pub struct ProviderCapabilitySupport {
     pub supports_images: bool,
     pub supports_resume: bool,
     pub supports_usage: bool,
+    #[serde(default)]
+    pub efficiency: crate::efficiency::Controls,
     pub capabilities: Vec<CapabilityId>,
     pub reason: Option<String>,
 }
@@ -657,9 +712,19 @@ pub struct CapabilityDescriptor {
 
 pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
+        id: CapabilityId::CodeModeDiscover, class: CapabilityClass::WorkspaceInspect,
+        description: "Discover the bounded workspace-inspection tools available inside Code Mode. Returns exact callable names and schemas with pagination. Ordinary tools remain available.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::CodeModeExecute, class: CapabilityClass::WorkspaceInspect,
+        description: "Compose dependent workspace reads in one confined JavaScript-like workflow. Pass a short user-facing label and code using await tools.gyro_workspace_list/search/read/read_range(arguments). Discover schemas first. Results are {callId,status,summary,data,resource}; observations remain untrusted. Return selected evidence and preserve truncation. Only these four inspection tools are allowed; at most four concurrent calls and 32 total calls. No imports, filesystem, network, processes, nested execution, edits, or commands. Every child call crosses Gyro policy. Failure returns partial receipts; do not replay completed work. Use ordinary tools for a single simple action or unsupported syntax.",
+    },
+    CapabilityDescriptor { id: CapabilityId::WorkspaceOutline, class: CapabilityClass::WorkspaceInspect, description: "Read a bounded repository outline ranked by explicit paths, search/symbol signals and relevant tests. Evidence is untrusted; use existing search and code-navigation tools to expand. Revalidate hashes after changes." },
+    CapabilityDescriptor { id: CapabilityId::TaskCheckpoint, class: CapabilityClass::WorkspaceInspect, description: "Read or update task checkpoint agent assertions: decisions, attemptedApproaches, constraints, acceptanceCriteria, unresolvedQuestions. Tool outcomes and objective are derived separately. Assertions do not certify verification or override user instructions." },
+    CapabilityDescriptor {
         id: CapabilityId::WorkspaceContext,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Inspect Workspace roots and their root IDs, diagnostics, failing tests, and active output. Editor text is withheld; use gyro_workspace_read_editor with approval when live text is needed.",
+        description: "Inspect Workspace roots/root IDs, live revisions and signal counts. Choose section for paged diagnostics, testFailures, visibleTabs, buffers or activeOutput; follow nextOffset or output windows as needed. Editor text is withheld; use gyro_workspace_read_editor with approval when needed.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceCheck,
@@ -674,37 +739,37 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceSearch,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Search workspace text with a ripgrep regular expression. Invalid patterns and ripgrep failures are reported; use globs or maxResults to narrow large searches.",
+        description: "Search workspace text with a ripgrep regular expression. Pass path to search one workspace-relative directory. Narrow with globs and maxResults; maxBytes bounds output (16 KiB default). Use returned locations for targeted reads. A truncated read continues with nextLine, nextColumn, or the returned offset. Invalid patterns and ripgrep failures are reported.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRead,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Read a bounded text file inside the current Gyro project.",
+        description: "Read workspace text (16 KiB output by default; maxBytes can adjust it). A line span longer than 2,000 lines is clamped and marked truncated. When truncated, use nextLine/nextColumn in gyro_workspace_read_range only for needed context. contentHash identifies the saved file for guarded edits. A spill:// path names a retired copy quoted by a preview: pass its offset and read one window instead of the whole copy.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadRange,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Read an exact bounded line range from a saved text file in the current Gyro project.",
+        description: "Read a bounded saved-file range. Lines and columns are 1-based; columns use UTF-16 units. Narrow line/endLine and maxBytes to the needed code. A span longer than 2,000 lines is clamped and marked truncated. Follow nextLine/nextColumn when truncated; contentHash identifies the saved file for guarded edits.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadEditor,
         class: CapabilityClass::WorkspaceSensitiveRead,
-        description: "Read the current editor selection or unsaved buffer for one workspace file. Gyro asks the user to approve this live-text disclosure every time; pass path and optionally selectionOnly.",
+        description: "Read the current editor selection or an open buffer. The bridge holds the active buffer and every dirty buffer whose full text fits. Gyro asks the user to approve this live-text disclosure every time; pass path and optionally selectionOnly. If the file has no held editor text, read the saved file with gyro_workspace_read_range.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceDiagnostics,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Read current diagnostics for the Gyro project.",
+        description: "Read bounded pages of current project diagnostics with live revision metadata. Follow nextOffset with offset; use limit/maxBytes to size needed evidence.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceGitStatus,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Inspect Git status for the Gyro project.",
+        description: "List changed, staged, and untracked files in the workspace Git repository with the current branch. Use this instead of shelling out to git status.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceDiff,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Inspect a bounded Git diff for the Gyro project.",
+        description: "Read a bounded Git diff of the working tree, or of staged changes with staged: true. Pass path to diff one file or folder; omitting it diffs the whole workspace and asks the user for approval.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceGitLog,
@@ -744,17 +809,37 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceDeletePath,
         class: CapabilityClass::WorkspaceWrite,
-        description: "Delete one file or one empty directory inside the Gyro project. A file must be deleted against the hash it was read at, and a directory must already be empty, so a bulk delete is never one call.",
+        description: "Delete one file or directory inside the Gyro project by moving it to the Trash, where the user can still recover it. A file may be deleted against the hash it was read at. Undo with gyro_workspace_undo restores the entry from the Trash.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceMovePath,
+        class: CapabilityClass::WorkspaceWrite,
+        description: "Move one file or directory inside the Gyro project to a new path, renaming it as a side effect. An existing destination is refused, so nothing is overwritten. Returns the updated path and the editor paths that moved with it.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceDuplicatePath,
+        class: CapabilityClass::WorkspaceWrite,
+        description: "Copy one file or directory beside itself with a free name such as `notes copy.md`, returning the new path. Nothing is overwritten. Undo with gyro_workspace_undo removes the duplicate.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceUndoPath,
+        class: CapabilityClass::WorkspaceWrite,
+        description: "Undo the last create, rename, move or Trash operation in this workspace, from the explorer or from a model. A trashed entry is restored from the Trash. Returns what changed, or that there was nothing left to undo.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceOpenFolder,
+        class: CapabilityClass::WorkspaceOpen,
+        description: "Switch Gyro to a local folder the user named by absolute path (a leading ~/ is expanded), such as when they ask to open their website checkout from a chat that has no folder. Gyro opens the folder as a project with a fresh chat bound to it. This chat's own workspace does not change, so tools here keep using the current workspace. Use only when the user asks to open or switch folders. Returns the resolved path, folder name, and Git branch when there is one.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTask,
         class: CapabilityClass::TerminalExecute,
-        description: "Run one discovered Workspace task with visible, attributed output. Pass background: true for a long-running task such as a dev server or watcher so it starts in this chat's terminal instead of holding the turn open. Background tasks still running when the turn ends are watched under the reply and relaunched if they exit without the user or model stopping them.",
+        description: "Run one discovered Workspace task, such as a package script, Cargo, or Make target, by its exact taskId, with visible, attributed output. An unknown taskId fails with the list of valid ids. Pass background: true for a long-running task such as a dev server or watcher so it starts in this chat's terminal instead of holding the turn open. Background tasks still running when the turn ends are watched under the reply and relaunched if they exit without the user or model stopping them.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTest,
         class: CapabilityClass::TerminalExecute,
-        description: "Run one discovered Workspace test task with visible, attributed output. Pass background: true for a watch-mode suite so it starts in this chat's terminal instead of holding the turn open.",
+        description: "Run one discovered Workspace test task by its exact taskId, with visible, attributed output. An unknown taskId fails with the list of valid test ids. Pass background: true for a watch-mode suite so it starts in this chat's terminal instead of holding the turn open.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadOutput,
@@ -780,6 +865,11 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         id: CapabilityId::CodeSymbols,
         class: CapabilityClass::WorkspaceInspect,
         description: "List the symbols a workspace source file declares, using the workspace language server. Returns status indexing with retryAfterMs while a cold language server is still warming up; retry shortly instead of concluding the file is empty.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::CodeFormat,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Format a workspace source file with the workspace language server and return the resulting text edits (range plus newText) and the fully formatted text, without writing anything. Pass tabSize and insertSpaces to match the file's style. Returns status indexing with retryAfterMs while a cold language server is still warming up.",
     },
     CapabilityDescriptor {
         id: CapabilityId::IdeReveal,
@@ -814,7 +904,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::BrowserOpen,
         class: CapabilityClass::BrowserNavigate,
-        description: "Open a URL in this chat's app-owned Gyro Browser rail. Use this—not OS-level computer control—when the user asks for Gyro's in-app or embedded browser. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
+        description: "Open a URL in this chat's app-owned Gyro Browser, in the background by default. Prefer gyro_web_fetch for reading or summarizing a link; use the browser when rendered content, interaction, or visual evidence is needed. Set reveal: true only when the user explicitly asks to see the page or a required manual handoff such as sign-in needs it. Keep implementation checks, interactions, and screenshots in the background. Use this—not OS-level computer control—when the user asks for Gyro's in-app or embedded browser. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserInspect,
@@ -829,12 +919,17 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::BrowserScreenshot,
         class: CapabilityClass::BrowserInspect,
-        description: "Capture a screenshot of this chat's open browser page.",
+        description: "Capture the full-resolution viewport of this chat's open browser page. Optional device selects responsive, desktop, tablet, or mobile layout before capture; omit it to preserve the current viewport.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::BrowserViewport,
+        class: CapabilityClass::BrowserInspect,
+        description: "Set this chat's Browser layout viewport without navigating. Auto uses Desktop fit for local app previews and responsive layout for ordinary sites. Desktop, tablet and mobile retain fixed CSS dimensions while the page scales to fit a narrow panel; responsive follows the panel. Optional width and height customize a fixed viewport. Re-observe after changing it; mouse coordinates remain CSS pixels and screenshots retain full viewport resolution.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserNavigate,
         class: CapabilityClass::BrowserNavigate,
-        description: "Navigate this chat's open browser to a URL. Same origin gate as browser.open.",
+        description: "Navigate this chat's open browser to a URL without revealing a hidden Browser panel by default. Set reveal: true only when the user explicitly asks to see the page or a required manual handoff needs it. Keep implementation checks, interactions, and screenshots in the background. Same origin gate as browser.open.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserBack,
@@ -892,9 +987,29 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         description: "Read recent redacted network request summaries captured from this chat's open browser.",
     },
     CapabilityDescriptor {
+        id: CapabilityId::AgentSpawn,
+        class: CapabilityClass::AgentRun,
+        description: "Launch a named parallel sub-agent for a self-contained task. It inherits this chat's model, workspace, and permissions. Assign clear file ownership when implementing in the shared workspace. Returns an agentId immediately. Plan-mode children are read-only. Only the parent may delegate; use gyro_agent_wait to collect results before finishing.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::AgentWait,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Read status or wait up to 60 seconds for this chat's agents. Reuse returned revisions in knownRevisions to omit unchanged reports. maxBytes bounds output; omit an agent's known revision to retrieve its summary again. timeoutMs: 0 reads immediately. Wait again while required agents run.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::AgentSend,
+        class: CapabilityClass::AgentRun,
+        description: "Send a follow-up task to an agent owned by this chat. Running agents receive it after their current task finishes; settled agents start a new turn. Settings and permission ceilings remain inherited.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::AgentStop,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Stop one of this chat's sub-agents and discard its queued tasks. The parent and siblings keep running; already-applied edits remain in the workspace.",
+    },
+    CapabilityDescriptor {
         id: CapabilityId::ResearchRun,
         class: CapabilityClass::AgentRun,
-        description: "Start one read-only research sub-agent in a fresh context and return only its final report. Use it to investigate a self-contained question whose answer needs many reads, so the searching stays out of this chat. The sub-agent can search, read, navigate code, and read git history; it cannot write, run commands, browse, or fetch the web, and it cannot start another sub-agent. It costs provider tokens, so ask a question you actually need answered, and it does not know anything this chat has not written into the question.",
+        description: "Start one research sub-agent in a fresh context and return only its final report. It inherits this chat's permissions and approval setting, including Full Access; Plan-mode children remain read-only. Use it to investigate a self-contained question whose answer needs many reads, so the searching stays out of this chat. It cannot start another sub-agent. It costs provider tokens and knows only what this chat writes into the question.",
     },
     CapabilityDescriptor {
         id: CapabilityId::MemoryRead,
@@ -909,7 +1024,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WebFetch,
         class: CapabilityClass::BrowserNavigate,
-        description: "Read one http(s) URL as text without opening the browser rail. Egress is gated per origin exactly like browser navigation. Responses are bounded and secret-redacted; HTML arrives as source rather than rendered, and a non-text content type is refused.",
+        description: "Read one http(s) URL as text without opening the browser rail. Prefer this for reading or summarizing articles, announcements, documentation, and other links when rendered content or interaction is unnecessary. Use the browser if fetching fails or needed content requires rendering. Egress is gated per origin exactly like browser navigation. Responses are bounded and secret-redacted; HTML arrives as source rather than rendered, and a non-text content type is refused.",
     },
     CapabilityDescriptor {
         id: CapabilityId::GithubStatus,
@@ -919,17 +1034,17 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::GithubPullRequests,
         class: CapabilityClass::GithubInspect,
-        description: "List open pull requests for this project with their check status.",
+        description: "List bounded pages of open pull requests with check status. Follow nextOffset using offset; sourceLimit/sourceMayHaveMore describe the bounded GitHub source.",
     },
     CapabilityDescriptor {
         id: CapabilityId::GithubWorkflowRuns,
         class: CapabilityClass::GithubInspect,
-        description: "List recent GitHub Actions workflow runs for this project, optionally filtered to one branch.",
+        description: "List bounded pages of recent Actions runs, optionally filtered by branch. Follow nextOffset using offset; sourceLimit/sourceMayHaveMore describe the bounded GitHub source.",
     },
     CapabilityDescriptor {
         id: CapabilityId::GithubWorkflowLogs,
         class: CapabilityClass::GithubInspect,
-        description: "Read bounded logs for one GitHub Actions run, defaulting to only the failed steps.",
+        description: "Read paged logs for an Actions run (failed steps by default). The initial page shows the tail; pass offset from logsWindow.previousOffset or nextOffset to read more.",
     },
     CapabilityDescriptor {
         id: CapabilityId::GithubCreatePullRequest,
@@ -946,12 +1061,18 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         class: CapabilityClass::GithubWrite,
         description: "Push the current branch to its remote. Publishes local commits to GitHub.",
     },
+    CapabilityDescriptor {
+        id: CapabilityId::ToolCatalog,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Return one page of full Gyro tool schemas. Pass a domain prefix such as gyro_browser_ or gyro_github_, and offset for the next page.",
+    },
 ];
 
-pub const ALL_CAPABILITY_CLASSES: [CapabilityClass; 11] = [
+pub const ALL_CAPABILITY_CLASSES: [CapabilityClass; 12] = [
     CapabilityClass::WorkspaceInspect,
     CapabilityClass::WorkspaceSensitiveRead,
     CapabilityClass::WorkspaceWrite,
+    CapabilityClass::WorkspaceOpen,
     CapabilityClass::AgentRun,
     CapabilityClass::IdeReveal,
     CapabilityClass::TerminalExecute,
@@ -1003,9 +1124,10 @@ pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySuppo
         ),
         supports_approvals: custom
             || descriptor.is_some_and(|provider| provider.supports_approvals),
-        supports_images: descriptor.is_some_and(|provider| provider.supports_images),
+        supports_images: crate::provider_registry::provider_accepts_images(provider_id),
         supports_resume: custom || descriptor.is_some_and(|provider| provider.supports_resume),
         supports_usage: descriptor.is_some_and(|provider| provider.supports_usage),
+        efficiency: crate::efficiency::controls(provider_id),
         capabilities: if available {
             CAPABILITY_DESCRIPTORS.iter().map(|item| item.id).collect()
         } else {
@@ -1032,6 +1154,12 @@ pub fn capability_advertised_for_mode(id: CapabilityId, mode: CapabilityRunMode)
     match mode {
         CapabilityRunMode::Council => false,
         CapabilityRunMode::Plan => {
+            if matches!(
+                id,
+                CapabilityId::AgentSpawn | CapabilityId::AgentSend | CapabilityId::ResearchRun
+            ) {
+                return true;
+            }
             // Both edit tools are classified as workspace inspection, so the
             // class alone would advertise them in Plan mode.
             !matches!(
@@ -1098,16 +1226,33 @@ pub fn capability_path_is_sensitive(path: &str) -> bool {
         || matches!(
             file_name,
             "id_rsa"
+                | "id_ecdsa"
+                | "id_dsa"
                 | "id_ed25519"
+                | "id_ecdsa_sk"
+                | "id_ed25519_sk"
                 | "credentials"
                 | "credentials.json"
+                | "credentials.toml"
                 | "secrets.json"
+                | "secrets.yaml"
+                | "secrets.yml"
                 | ".npmrc"
                 | ".pypirc"
                 | ".netrc"
+                | ".pgpass"
+                | ".git-credentials"
+                | ".claude.json"
         )
         || file_name.ends_with(".pem")
         || file_name.ends_with(".key")
+        || file_name.ends_with(".p12")
+        || file_name.ends_with(".pfx")
+        || file_name.ends_with(".keystore")
+        // The git directory itself (its hooks run code, its config can rewrite
+        // remotes and fsmonitor commands), not only the files beneath it.
+        || normalized == ".git"
+        || normalized.ends_with("/.git")
         || normalized.starts_with(".git/")
         || normalized.contains("/.git/")
         // Covers credential stores whose file names give nothing away, which
@@ -1136,6 +1281,16 @@ pub fn validate_capability_result_data(value: Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_input_is_advertised_for_custom_endpoints_and_vision_providers() {
+        assert!(provider_capability_support("cursor").supports_images);
+        assert!(provider_capability_support("opencode").supports_images);
+        assert!(provider_capability_support("mistral").supports_images);
+        assert!(provider_capability_support("openrouter").supports_images);
+        assert!(provider_capability_support("custom:gateway").supports_images);
+        assert!(!provider_capability_support("ollama").supports_images);
+    }
 
     #[test]
     fn provider_tool_names_round_trip() {
@@ -1320,8 +1475,10 @@ mod tests {
         // Reading memory is inspection; writing it is writing.
         assert!(plan.contains(&CapabilityId::MemoryRead));
         assert!(!plan.contains(&CapabilityId::MemoryWrite));
-        // A sub-agent spends tokens and needs tools, so Plan never offers it.
-        assert!(!plan.contains(&CapabilityId::ResearchRun));
+        assert!(plan.contains(&CapabilityId::ToolCatalog));
+        // Plan advertises delegation; the broker enforces read-only child runs.
+        assert!(plan.contains(&CapabilityId::ResearchRun));
+        assert!(plan.contains(&CapabilityId::AgentSpawn));
         assert!(!plan.contains(&CapabilityId::GithubPush));
         assert_eq!(
             advertised_capability_descriptors(CapabilityRunMode::Normal).count(),
@@ -1346,6 +1503,9 @@ mod tests {
             CapabilityId::WorkspaceCreatePath,
             CapabilityId::WorkspaceRenamePath,
             CapabilityId::WorkspaceDeletePath,
+            CapabilityId::WorkspaceMovePath,
+            CapabilityId::WorkspaceDuplicatePath,
+            CapabilityId::WorkspaceUndoPath,
         ] {
             assert!(
                 !capability_advertised_for_mode(id, CapabilityRunMode::Plan),
@@ -1356,6 +1516,41 @@ mod tests {
                 CapabilityRunMode::Normal
             ));
         }
+    }
+
+    #[test]
+    fn opening_a_folder_is_a_decision_and_never_a_plan_tool() {
+        let policy = ProjectCapabilityPolicy::defaults("/tmp/project");
+        assert_eq!(
+            policy.access_for(CapabilityClass::WorkspaceOpen),
+            CapabilityAccess::Ask
+        );
+        assert_eq!(
+            capability_descriptor(CapabilityId::WorkspaceOpenFolder).class,
+            CapabilityClass::WorkspaceOpen
+        );
+        assert_eq!(
+            CapabilityId::from_provider_tool_name("gyro_workspace_open_folder"),
+            Some(CapabilityId::WorkspaceOpenFolder)
+        );
+        assert!(!capability_advertised_for_mode(
+            CapabilityId::WorkspaceOpenFolder,
+            CapabilityRunMode::Plan
+        ));
+        assert!(capability_advertised_for_mode(
+            CapabilityId::WorkspaceOpenFolder,
+            CapabilityRunMode::Normal
+        ));
+        // A policy saved before this class existed is old, not malformed.
+        let mut saved = policy.clone();
+        saved.classes.remove(&CapabilityClass::WorkspaceOpen);
+        assert!(saved.validate().is_err());
+        assert_eq!(
+            saved
+                .with_missing_classes_defaulted()
+                .access_for(CapabilityClass::WorkspaceOpen),
+            CapabilityAccess::Ask
+        );
     }
 
     #[test]
@@ -1399,6 +1594,16 @@ mod tests {
         assert!(capability_path_is_sensitive(".config/gh/hosts.yml"));
         assert!(capability_path_is_sensitive(".ssh/config"));
         assert!(capability_path_is_sensitive("config/private.pem"));
+        assert!(capability_path_is_sensitive("deploy/server.p12"));
+        assert!(capability_path_is_sensitive("keys/id_ecdsa"));
+        assert!(capability_path_is_sensitive(".git"));
+        assert!(capability_path_is_sensitive("vendor/module/.git"));
+        assert!(capability_path_is_sensitive(".git-credentials"));
+        assert!(capability_path_is_sensitive(".cargo/credentials.toml"));
+        assert!(capability_path_is_sensitive(".codex/auth.json"));
+        assert!(capability_path_is_sensitive("config/secrets.yaml"));
         assert!(!capability_path_is_sensitive("src/main.rs"));
+        assert!(!capability_path_is_sensitive("src/git/commit.rs"));
+        assert!(!capability_path_is_sensitive("docs/main.git"));
     }
 }

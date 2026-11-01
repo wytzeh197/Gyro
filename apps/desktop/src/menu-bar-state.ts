@@ -1,5 +1,7 @@
 import type {
   Automation,
+  DesktopNotificationPreferences,
+  MenuBarApproval,
   MenuBarJob,
   MenuBarOutcome,
   MenuBarSnapshot,
@@ -11,6 +13,7 @@ import type {
 type MenuBarStateInput = {
   automations: Automation[];
   finishedOutcomes?: MenuBarOutcome[];
+  notifications: DesktopNotificationPreferences;
   outcome?: MenuBarOutcome;
   reduceMotion: boolean;
   sendingSessionIds: string[];
@@ -61,6 +64,33 @@ function chatJobStatus(events: SessionEvent[]): MenuBarJob["status"] {
   return "running";
 }
 
+const APPROVAL_SUMMARY_LIMIT = 120;
+
+/** The pending provider approval the latest turn is blocked on, if any.
+    Capability approvals are left out: they need the turn context the chat
+    view resolves them with, so the popover only offers to open those. */
+function pendingApproval(events: SessionEvent[]): MenuBarApproval | undefined {
+  const lastEvent = latestTurnEvents(events).at(-1);
+  if (lastEvent?.kind !== "approval-requested") return undefined;
+  const payload = recordFromUnknown(lastEvent.payload);
+  if (stringFromRecord(payload, "kind") !== "provider-tool-approval") {
+    return undefined;
+  }
+  if (stringFromRecord(payload, "status") !== "pending") return undefined;
+  const id = stringFromRecord(payload, "approvalId");
+  if (!id) return undefined;
+  const approvalType = stringFromRecord(payload, "approvalType") ?? "tool";
+  const summary = (
+    stringFromRecord(payload, "command") ??
+    stringFromRecord(payload, "reason") ??
+    lastEvent.message
+  )
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, APPROVAL_SUMMARY_LIMIT);
+  return { id, approvalType, summary };
+}
+
 function chatJobDetail(events: SessionEvent[], session: Session) {
   const lastEvent = latestTurnEvents(events).at(-1);
   if (lastEvent?.message.trim()) return lastEvent.message.trim();
@@ -99,6 +129,7 @@ export function deriveMenuBarJobs({
     if (!session) continue;
     const events = sessionEventsById[sessionId] ?? [];
     const status = chatJobStatus(events);
+    const approval = status === "waiting" ? pendingApproval(events) : undefined;
     jobs.push({
       id: `chat:${sessionId}`,
       kind: "chat",
@@ -112,6 +143,7 @@ export function deriveMenuBarJobs({
       providerLabel: session.providerLabel,
       modelId: session.modelId,
       modelLabel: session.modelLabel,
+      ...(approval ? { approval } : {}),
     });
   }
 
@@ -161,10 +193,14 @@ export function deriveMenuBarJobs({
     });
   }
 
+  // Anything waiting on the user leads, so an approval is never hidden under
+  // the "+N more" row; within each group the newest job comes first.
   return jobs.sort(
     (first, second) =>
+      Number(second.status === "waiting") -
+        Number(first.status === "waiting") ||
       new Date(second.startedAt).getTime() -
-      new Date(first.startedAt).getTime(),
+        new Date(first.startedAt).getTime(),
   );
 }
 
@@ -289,5 +325,6 @@ export function deriveMenuBarSnapshot(
     recentOutcome: input.outcome,
     theme: input.theme,
     reduceMotion: input.reduceMotion,
+    notifications: input.notifications,
   };
 }

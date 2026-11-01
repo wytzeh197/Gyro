@@ -1,3 +1,5 @@
+import { retiredModelReplacement } from "./model-retirements.ts";
+import { getLiveModelContext, liveModelContextTokens } from "./live-model-context.ts";
 import type {
   GyroConfig,
   ModelProviderConfig,
@@ -19,9 +21,14 @@ export const LEGACY_OPENAI_REASONING_EFFORTS: ReasoningEffort[] = [
   "xhigh",
 ];
 
-export const GPT_56_REASONING_EFFORTS: ReasoningEffort[] = [
+/** Both Luna generations support max, but not Codex automatic delegation. */
+export const GPT_LUNA_REASONING_EFFORTS: ReasoningEffort[] = [
   ...LEGACY_OPENAI_REASONING_EFFORTS,
   "max",
+];
+
+export const GPT_56_REASONING_EFFORTS: ReasoningEffort[] = [
+  ...GPT_LUNA_REASONING_EFFORTS,
   "ultra",
 ];
 
@@ -36,7 +43,7 @@ export const CLAUDE_REASONING_EFFORTS: ReasoningEffort[] = [
  *
  * The CLI's flag parser accepts more words than this, but each model publishes
  * its own selectable set and rejects the rest at turn time. This is the set
- * shared by Grok 4.5 and earlier models; Grok 4.6 and 4.7 add xhigh below.
+ * for Grok 4.5; Grok 4.6 and 4.7 expose xhigh below.
  */
 export const GROK_REASONING_EFFORTS: ReasoningEffort[] = [
   "low",
@@ -44,7 +51,7 @@ export const GROK_REASONING_EFFORTS: ReasoningEffort[] = [
   "high",
 ];
 
-/** Grok 4.6 and Grok 4.7 add xhigh to the levels supported by earlier models. */
+/** Grok 4.6 and 4.7 expose xhigh. Grok 4.5 stops at high. Fast is a mode, not a model. */
 export const GROK_46_REASONING_EFFORTS: ReasoningEffort[] = [
   ...GROK_REASONING_EFFORTS,
   "xhigh",
@@ -65,26 +72,21 @@ export const DEEPSEEK_REASONING_EFFORTS: ReasoningEffort[] = [
   "max",
 ];
 
-/**
- * The effort levels OpenRouter normalizes across the models it routes to.
- *
- * OpenRouter takes `reasoning_effort` on any model whose `supported_parameters`
- * lists it and translates the value for the upstream vendor, so one ramp covers
- * every routed model that reasons at all. A routed model that does not reason
- * gets no effort in the catalog rather than a dial that does nothing.
- */
+/** Full positive effort ramp; routed models below use their published subset. */
 export const OPENROUTER_REASONING_EFFORTS: ReasoningEffort[] = [
   "low",
   "medium",
   "high",
+  "xhigh",
+  "max",
 ];
 
 /**
- * The thinking effort levels Kimi K3 accepts.
+ * The thinking effort levels Kimi K3 and K3.1 accept.
  *
- * The Kimi Code service provisions k3 with `support_efforts` of low, high,
- * and max (default high); any other value is rejected at turn time and the
- * session falls back to the model default.
+ * Kimi Code provisions these models with `support_efforts` of low, high, and
+ * max. K3 defaults to high. K3.1 Pro defaults to max, and thinking cannot be
+ * turned off. Any other value is rejected at turn time.
  */
 export const KIMI_K3_REASONING_EFFORTS: ReasoningEffort[] = [
   "low",
@@ -106,20 +108,35 @@ export function isCustomProviderId(providerId: string) {
   return providerId.startsWith(CUSTOM_PROVIDER_PREFIX);
 }
 
-/** Providers that can authenticate with a pasted API key stored in Keychain. */
+/**
+ * Launch ids for Fast mode. They stay valid at turn time and stay out of the picker.
+ * Grok 4.7 Fast is Grok 4.7 with Fast on, which rewrites to this id.
+ */
+const PICKER_HIDDEN_MODELS: Record<string, readonly string[]> = {
+  xai: ["grok-4.7-build-fast"],
+};
+
+export function isPickerHiddenModel(providerId: string, modelId: string) {
+  return (
+    PICKER_HIDDEN_MODELS[providerId]?.includes(modelId.trim().toLowerCase()) ??
+    false
+  );
+}
+
+/** Providers that can authenticate with a pasted API key kept on this Mac. */
 export function providerSupportsApiKey(providerId: string) {
   return (
     providerId === "openai" ||
     providerId === "anthropic" ||
     providerId === "xai" ||
-    providerId === "gemini" ||
+    providerId === "antigravity" ||
     providerId === "kimi" ||
     providerId === "cursor" ||
     providerId === "deepseek" ||
     providerId === "mistral" ||
     providerId === "openrouter" ||
     // A custom endpoint has no vendor environment variable to name, so its key
-    // lives in the Keychain alone and only the HTTPS runner reads it.
+    // lives in the private store on this Mac and only the HTTPS runner reads it.
     isCustomProviderId(providerId)
   );
 }
@@ -132,7 +149,7 @@ export function providerApiKeyEnvName(providerId: string) {
       return "ANTHROPIC_API_KEY";
     case "xai":
       return "XAI_API_KEY";
-    case "gemini":
+    case "antigravity":
       return "GEMINI_API_KEY";
     case "kimi":
       return "MOONSHOT_API_KEY";
@@ -160,7 +177,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     baseUrl: null,
     defaultModelId: "gpt-5.6-sol",
     selectedModelId: "gpt-5.6-sol",
-    selectedReasoningEffort: "medium",
+    selectedReasoningEffort: "low",
     capabilities: {
       executionKind: "codex-cli",
       executable: true,
@@ -172,9 +189,22 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     },
     models: [
       {
+        id: "gpt-6.1-sol",
+        displayName: "GPT-6.1 Sol",
+        description:
+          "Codex CLI. Near-Astra performance for coding and professional work.",
+        // Signed-in Codex serves 500K (475K after its 95% reserve). The API
+        // maximum is 1.05M. A logged-out `codex debug models` prints the
+        // bundled 272K stub and is not this baseline.
+        contextWindowTokens: 500_000,
+        defaultReasoningEffort: "low",
+        supportedReasoningEfforts: GPT_56_REASONING_EFFORTS,
+      },
+      {
         id: "gpt-6-astra",
         displayName: "GPT-6 Astra",
-        description: "Complex reasoning, coding, and long-running work.",
+        description:
+          "Codex CLI. Complex reasoning, coding, and long-running work. OpenRouter's API row serves 1.05M.",
         // Codex CLI's default window; the API offers a different limit.
         contextWindowTokens: 272_000,
         defaultReasoningEffort: "medium",
@@ -183,16 +213,18 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "gpt-5.6-sol",
         displayName: "GPT-5.6 Sol",
-        description: "Frontier model for complex professional work.",
+        description:
+          "Codex CLI. Frontier model for complex professional work.",
         // What Codex serves; the API window is larger.
         contextWindowTokens: 272_000,
-        defaultReasoningEffort: "medium",
+        defaultReasoningEffort: "low",
         supportedReasoningEfforts: GPT_56_REASONING_EFFORTS,
       },
       {
         id: "gpt-5.6-terra",
         displayName: "GPT-5.6 Terra",
-        description: "Balances intelligence and cost for everyday work.",
+        description:
+          "Codex CLI. Balances intelligence and cost for everyday work.",
         // What Codex serves; the API window is larger.
         contextWindowTokens: 272_000,
         defaultReasoningEffort: "medium",
@@ -201,35 +233,20 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "gpt-5.6-luna",
         displayName: "GPT-5.6 Luna",
-        description: "Fast, cost-sensitive model for lighter workloads.",
+        description:
+          "Codex CLI. Fast, cost-sensitive model for lighter workloads.",
         // What Codex serves; the API window is larger.
         contextWindowTokens: 272_000,
         defaultReasoningEffort: "medium",
-        supportedReasoningEfforts: GPT_56_REASONING_EFFORTS,
+        supportedReasoningEfforts: GPT_LUNA_REASONING_EFFORTS,
       },
       {
         id: "gpt-5.5",
         displayName: "GPT-5.5",
-        description: "Flagship model for complex reasoning and coding.",
+        description:
+          "Codex CLI. Flagship model for complex reasoning and coding.",
         // What Codex serves; the API window is larger.
         contextWindowTokens: 272_000,
-        defaultReasoningEffort: "medium",
-        supportedReasoningEfforts: LEGACY_OPENAI_REASONING_EFFORTS,
-      },
-      {
-        id: "gpt-5.4",
-        displayName: "GPT-5.4",
-        description: "Balanced coding model with lower cost.",
-        // What Codex serves; the API window is larger.
-        contextWindowTokens: 272_000,
-        defaultReasoningEffort: "medium",
-        supportedReasoningEfforts: LEGACY_OPENAI_REASONING_EFFORTS,
-      },
-      {
-        id: "gpt-5.4-mini",
-        displayName: "GPT-5.4 mini",
-        description: "Lower-latency model for lighter agent work.",
-        contextWindowTokens: 400_000,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: LEGACY_OPENAI_REASONING_EFFORTS,
       },
@@ -262,7 +279,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "claude-fable-5-1",
         displayName: "Claude Fable 5.1",
-        description: "Demanding reasoning and long-running agentic work.",
+        description:
+          "Claude Code. Demanding reasoning and long-running agentic work.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
@@ -270,7 +288,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "claude-fable-5",
         displayName: "Claude Fable 5",
-        description: "Previous-generation Fable model for complex work.",
+        description:
+          "Claude Code. Previous-generation Fable model for complex work.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
@@ -279,34 +298,44 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "claude-opus-5",
         displayName: "Claude Opus 5",
         description:
-          "Frontier model for complex agentic coding and long-horizon work.",
-        contextWindowTokens: 1_000_000,
+          "Claude Code. Frontier model for complex agentic coding and long-horizon work. OpenRouter's API row also serves 1M.",
+        // Claude Code runs bare Opus ids at 200K. The catalog's -1m rows
+        // select the 1M window.
+        contextWindowTokens: 200_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
       {
         id: "claude-opus-4-8",
         displayName: "Claude Opus 4.8",
-        description: "Strong model for complex agentic coding.",
-        contextWindowTokens: 1_000_000,
+        description: "Claude Code. Strong model for complex agentic coding.",
+        contextWindowTokens: 200_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
       {
         id: "claude-sonnet-5",
         displayName: "Claude Sonnet 5",
-        description: "Best speed and intelligence balance.",
+        description:
+          "Claude Code. Best speed and intelligence balance. OpenRouter's API row also serves 1M.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
       {
+        id: "claude-haiku-5-5",
+        displayName: "Claude Haiku 5.5",
+        description:
+          "Claude Code. Fast model for lighter coding and high-volume tasks.",
+        contextWindowTokens: 1_000_000,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
+      },
+      {
         id: "claude-haiku-4-5",
         displayName: "Claude Haiku 4.5",
-        description: "Fastest option for lighter work.",
+        description: "Claude Code. Fastest option for lighter work.",
         contextWindowTokens: 200_000,
-        defaultReasoningEffort: "high",
-        supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
     ],
     effort: "high",
@@ -336,13 +365,32 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     },
     models: [
       {
+        id: "k3.1-pro",
+        displayName: "Kimi K3.1 Pro",
+        description:
+          "Kimi Code. Flagship of the K3.1 series. Up to 1M context on Pro and Allegretto; Plus and Moderato stay at 262,144. Thinking is required.",
+        // Plus and Moderato are capped at 262,144. Pro and Allegretto receive
+        // 1,048,576. A session's runtime-reported window takes precedence.
+        contextWindowTokens: 262_144,
+        defaultReasoningEffort: "max",
+        supportedReasoningEfforts: KIMI_K3_REASONING_EFFORTS,
+      },
+      {
+        id: "k3.1-pro-highspeed",
+        displayName: "Kimi K3.1 Pro Highspeed",
+        description:
+          "Kimi Code. The same K3.1 Pro model, about 2-3x faster. Pro and Allegretto only, with a 1,048,576 context window.",
+        contextWindowTokens: 1_048_576,
+        defaultReasoningEffort: "max",
+        supportedReasoningEfforts: KIMI_K3_REASONING_EFFORTS,
+      },
+      {
         id: "k3",
         displayName: "Kimi K3",
         description:
-          "Kimi's flagship model for long-horizon coding and knowledge work.",
-        // Every model Kimi Code defines caps at 256K, K3 included. Claiming a
-        // megatoken window made the composer meter measure against a window the
-        // run never had, and disagree with the one `/usage` reported back.
+          "Kimi Code. Previous flagship coding model. Up to 1M context on eligible plans. The OpenRouter API row is a separate 1,048,576.",
+        // Plus and Moderato are capped at 262,144. Pro and Allegretto receive
+        // 1,048,576. A session's runtime-reported window takes precedence.
         contextWindowTokens: 262_144,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: KIMI_K3_REASONING_EFFORTS,
@@ -377,8 +425,10 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "grok-4.7",
         displayName: "Grok 4.7",
         description:
-          "xAI's frontier model for coding, agentic tasks, and knowledge work.",
-        contextWindowTokens: 500_000,
+          "Grok Build CLI model for coding, agentic tasks, and knowledge work.",
+        // Grok Build's served context_window (grok 1.0.67, 2026-10-23).
+        // 500K is the optional larger window, not the one the product shows.
+        contextWindowTokens: 256_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: GROK_46_REASONING_EFFORTS,
       },
@@ -386,8 +436,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "grok-4.6",
         displayName: "Grok 4.6",
         description:
-          "Previous xAI frontier model for coding, agentic tasks, and knowledge work.",
-        contextWindowTokens: 500_000,
+          "Previous Grok Build CLI model for coding and knowledge work.",
+        contextWindowTokens: 256_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: GROK_46_REASONING_EFFORTS,
       },
@@ -395,15 +445,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "grok-4.5",
         displayName: "Grok 4.5",
         description: "xAI's coding-capable model through Grok Build.",
-        contextWindowTokens: 500_000,
-        defaultReasoningEffort: "high",
-        supportedReasoningEfforts: GROK_REASONING_EFFORTS,
-      },
-      {
-        id: "grok-4.3",
-        displayName: "Grok 4.3",
-        description: "General xAI model for chat and reasoning.",
-        contextWindowTokens: 131_072,
+        contextWindowTokens: 256_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: GROK_REASONING_EFFORTS,
       },
@@ -412,36 +454,33 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     allowedTools: ["files", "terminal", "diff"],
   },
   {
-    id: "gemini",
-    displayName: "Gemini",
-    apiKeyRef: "provider-cli:gemini",
+    id: "antigravity",
+    displayName: "Google Antigravity",
+    apiKeyRef: "provider-cli:antigravity",
     enabled: false,
-    authMode: "cli",
+    authMode: "env",
     authStatus: "not-connected",
     baseUrl: null,
-    defaultModelId: "gemini-default",
-    selectedModelId: "gemini-default",
+    defaultModelId: "antigravity-default",
+    selectedModelId: "antigravity-default",
     capabilities: {
       executionKind: "acp-cli",
       executable: true,
       supportsApprovals: true,
       supportsImages: true,
       supportsResume: true,
-      // No plan-window API; spend is the local ledger only (not fake 5h/weekly).
       supportsUsage: false,
-      visibility: "standard",
+      visibility: "experimental",
     },
     models: [
       {
-        id: "gemini-default",
-        displayName: "Gemini",
-        description:
-          "Uses Gemini credentials from the local environment or Google-owned tooling.",
-        contextWindowTokens: 1_000_000,
+        id: "antigravity-default",
+        displayName: "Automatic",
+        description: "Uses the model configured in Google Antigravity. Connect to discover available models.",
       },
     ],
     effort: "medium",
-    allowedTools: ["files", "terminal", "diff"],
+    allowedTools: ["files", "terminal", "diff", "browser"],
   },
   {
     id: "cursor",
@@ -457,7 +496,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       executionKind: "acp-cli",
       executable: true,
       supportsApprovals: true,
-      supportsImages: false,
+      supportsImages: true,
       supportsResume: true,
       supportsUsage: false,
       visibility: "standard",
@@ -486,7 +525,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       executionKind: "acp-cli",
       executable: true,
       supportsApprovals: true,
-      supportsImages: false,
+      supportsImages: true,
       supportsResume: true,
       supportsUsage: false,
       visibility: "standard",
@@ -531,7 +570,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "deepseek-flash",
         displayName: "DeepSeek V4.1 Flash",
-        description: "Fast general coding model, and the cheaper of the two.",
+        description:
+          "DeepSeek API. Fast general coding model, and the cheaper of the two. OpenRouter serves 1,048,576 on a separate route.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: DEEPSEEK_REASONING_EFFORTS,
@@ -539,7 +579,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "deepseek-v4-pro",
         displayName: "DeepSeek V4 Pro",
-        description: "Deeper reasoning for harder problems, at a higher price.",
+        description:
+          "DeepSeek API. Deeper reasoning for harder problems, at a higher price.",
         contextWindowTokens: 1_000_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: DEEPSEEK_REASONING_EFFORTS,
@@ -562,7 +603,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       executionKind: "openai-compatible-api",
       executable: true,
       supportsApprovals: true,
-      supportsImages: false,
+      supportsImages: true,
       supportsResume: true,
       supportsUsage: false,
       visibility: "experimental",
@@ -576,25 +617,28 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "mistral-medium-latest",
         displayName: "Mistral Medium 3.5",
-        description: "Frontier-class model tuned for agentic and coding work.",
+        description:
+          "Mistral API. Frontier-class model tuned for agentic and coding work.",
         contextWindowTokens: 256_000,
       },
       {
         id: "mistral-large-latest",
         displayName: "Mistral Large 3",
-        description: "Open-weight flagship for general multimodal work.",
+        description:
+          "Mistral API. Open-weight flagship for general multimodal work.",
         contextWindowTokens: 256_000,
       },
       {
         id: "mistral-small-latest",
         displayName: "Mistral Small 4",
-        description: "Cheapest of the three, and the fastest to first token.",
+        description:
+          "Mistral API. Cheapest of the three, and the fastest to first token.",
         contextWindowTokens: 256_000,
       },
       {
         id: "codestral-latest",
         displayName: "Codestral",
-        description: "Tuned for code completion and editing.",
+        description: "Mistral API. Tuned for code completion and editing.",
         contextWindowTokens: 128_000,
       },
     ],
@@ -618,7 +662,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       executionKind: "openai-compatible-api",
       executable: true,
       supportsApprovals: true,
-      supportsImages: false,
+      supportsImages: true,
       supportsResume: true,
       supportsUsage: false,
       visibility: "experimental",
@@ -627,23 +671,26 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "anthropic/claude-sonnet-5",
         displayName: "Claude Sonnet 5",
-        description: "Strong general coding model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. Strong general coding model. Claude Code also serves 1M on its own connection.",
         contextWindowTokens: 1_000_000,
-        defaultReasoningEffort: "medium",
+        defaultReasoningEffort: "high",
         supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
       },
       {
         id: "anthropic/claude-opus-5",
         displayName: "Claude Opus 5",
-        description: "Anthropic's frontier model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. Anthropic's frontier model. Claude Code also serves 1M on its own connection.",
         contextWindowTokens: 1_000_000,
-        defaultReasoningEffort: "medium",
+        defaultReasoningEffort: "high",
         supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
       },
       {
         id: "openai/gpt-6-astra",
         displayName: "GPT-6 Astra",
-        description: "OpenAI's frontier model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. OpenAI's frontier model. Codex CLI serves 272K on its own connection.",
         contextWindowTokens: 1_050_000,
         defaultReasoningEffort: "medium",
         supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
@@ -651,64 +698,77 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "google/gemini-3.8-flash",
         displayName: "Gemini 3.8 Flash",
-        description: "Long-context reasoning, routed by OpenRouter.",
+        description: "OpenRouter API. Long-context reasoning.",
         contextWindowTokens: 1_048_576,
         defaultReasoningEffort: "medium",
-        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+        supportedReasoningEfforts: ["low", "medium", "high"],
       },
       {
         id: "x-ai/grok-4.7",
         displayName: "Grok 4.7",
-        description: "xAI's frontier model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. Serves 500K, separate from the Grok Build CLI's 256K.",
         contextWindowTokens: 500_000,
-        defaultReasoningEffort: "medium",
-        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
       },
       {
         id: "x-ai/grok-4.6",
         displayName: "Grok 4.6",
-        description: "xAI's coding model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. Serves 500K, separate from the Grok Build CLI's 256K.",
         contextWindowTokens: 500_000,
-        defaultReasoningEffort: "medium",
-        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
       },
       {
         id: "deepseek/deepseek-v4.1-flash",
         displayName: "DeepSeek V4.1 Flash",
-        description: "Low-cost general model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. Low-cost general model. DeepSeek's own API serves 1M.",
         contextWindowTokens: 1_048_576,
-        defaultReasoningEffort: "medium",
-        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+        defaultReasoningEffort: "high",
+        supportedReasoningEfforts: ["low", "high", "max"],
+      },
+      {
+        id: "moonshotai/kimi-k3.1-pro",
+        displayName: "Kimi K3.1 Pro",
+        description:
+          "OpenRouter API. Flagship open-weight model with a 1,048,576 context. Kimi Code's offline baseline for this model is 262,144.",
+        contextWindowTokens: 1_048_576,
+        defaultReasoningEffort: "max",
+        supportedReasoningEfforts: ["low", "high", "max"],
       },
       {
         id: "moonshotai/kimi-k3",
         displayName: "Kimi K3",
-        description: "Open-weights agentic model, routed by OpenRouter.",
+        description:
+          "OpenRouter API. Open-weights agentic model. Kimi Code's offline baseline is 262,144.",
         contextWindowTokens: 1_048_576,
-        defaultReasoningEffort: "medium",
-        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+        defaultReasoningEffort: "max",
+        supportedReasoningEfforts: ["low", "high", "max"],
       },
       {
         id: "z-ai/glm-5.3",
         displayName: "GLM 5.3",
-        description: "Open-weights coding model, routed by OpenRouter.",
-        contextWindowTokens: 1_310_720,
-        defaultReasoningEffort: "medium",
-        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+        description: "OpenRouter API. Open-weights coding model.",
+        contextWindowTokens: 1_048_576,
+        defaultReasoningEffort: "max",
+        supportedReasoningEfforts: ["low", "high", "max"],
       },
       {
         id: "qwen/qwen3.8-max-0902",
         displayName: "Qwen3.8 Max",
-        description: "Qwen's frontier model, routed by OpenRouter.",
+        description: "OpenRouter API. Qwen's frontier model.",
         contextWindowTokens: 1_000_000,
-        defaultReasoningEffort: "medium",
-        supportedReasoningEfforts: OPENROUTER_REASONING_EFFORTS,
+        defaultReasoningEffort: "xhigh",
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
       },
       {
         id: "meta-llama/llama-3.3-70b-instruct",
         displayName: "Llama 3.3 70B",
         // The one model here that does not reason, so it carries no effort.
-        description: "Open-weights general model, routed by OpenRouter.",
+        description: "OpenRouter API. Open-weights general model.",
         contextWindowTokens: 131_072,
       },
     ],
@@ -891,6 +951,13 @@ export function selectedReasoningEffort(provider: ModelProviderConfig) {
   return model?.defaultReasoningEffort ?? supported[0];
 }
 
+export function reasoningEffortLabel(effort: ReasoningEffort) {
+  if (effort === "xhigh") {
+    return "XHigh";
+  }
+  return `${effort.charAt(0).toUpperCase()}${effort.slice(1)}`;
+}
+
 /** Health probes observe provider state; they do not represent logout actions. */
 export function providerAuthStatusAfterHealth(
   current: ProviderAuthStatus,
@@ -994,8 +1061,17 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
 
   const catalogProviders = providerCatalog.map((catalogProvider) => {
     const savedProvider = savedProviders.get(catalogProvider.id);
+    const liveModels = new Map(
+      (savedProvider?.models ?? []).map((model) => [model.id, model]),
+    );
     const retainedModels = (savedProvider?.models ?? []).filter(
-      (model) => !model.catalogManaged,
+      (model) =>
+        !model.catalogManaged &&
+        !retiredModelReplacement(
+          catalogProvider.id,
+          model.id,
+          savedProvider?.authMode === "env",
+        ),
     );
     const savedModels = new Map(
       retainedModels.map((model) => [model.id, model]),
@@ -1004,14 +1080,38 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
       catalogProvider.models.map((model) => model.id),
     );
     const models = [
-      ...catalogProvider.models.map((model) => ({
+      ...catalogProvider.models
+        .filter((model) => !isPickerHiddenModel(catalogProvider.id, model.id))
+        .map((model) => ({
         ...model,
         ...(model.catalogManaged ? {} : savedModels.get(model.id)),
-        contextWindowTokens: model.contextWindowTokens,
+        contextWindowTokens: liveModelContextTokens(
+          { liveContextWindow: getLiveModelContext(
+            catalogProvider.id, model.id, savedProvider?.baseUrl ?? catalogProvider.baseUrl,
+          ) ?? liveModels.get(model.id)?.liveContextWindow },
+          Date.now(), savedProvider?.baseUrl ?? catalogProvider.baseUrl ?? null,
+        ) ?? model.contextWindowTokens,
+        liveContextWindow: getLiveModelContext(
+          catalogProvider.id, model.id, savedProvider?.baseUrl ?? catalogProvider.baseUrl,
+        ) ?? liveModels.get(model.id)?.liveContextWindow,
         defaultReasoningEffort: model.defaultReasoningEffort,
         supportedReasoningEfforts: model.supportedReasoningEfforts,
       })),
-      ...retainedModels.filter((model) => !catalogModelIds.has(model.id)),
+      ...retainedModels
+        .filter(
+          (model) =>
+            !catalogModelIds.has(model.id) &&
+            !isPickerHiddenModel(catalogProvider.id, model.id),
+        )
+        .map((model) => {
+        const baseUrl = savedProvider?.baseUrl ?? catalogProvider.baseUrl ?? null;
+        const liveContextWindow = getLiveModelContext(catalogProvider.id, model.id, baseUrl) ?? model.liveContextWindow;
+        return {
+          ...model, liveContextWindow,
+          contextWindowTokens: liveModelContextTokens({ liveContextWindow }, Date.now(), baseUrl)
+            ?? (model.liveContextWindow ? undefined : model.contextWindowTokens),
+        };
+      }),
     ];
     const defaultModelId =
       savedProvider?.defaultModelId &&
@@ -1072,11 +1172,15 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
   // drop it and it would never reach the picker, the API-key section, or the
   // model list. Append those straight from config.
   const catalogIds = new Set(providerCatalog.map((provider) => provider.id));
+  // Retired built-ins must not return as user-defined endpoints on old installs.
   const customProviders = config.modelProviders
-    .filter((provider) => !catalogIds.has(provider.id))
+    .filter((provider) => provider.id !== "gemini" && !catalogIds.has(provider.id))
     .map(customProviderForConfig);
 
-  return [...catalogProviders, ...customProviders];
+  const removed = new Set(config.removedProviderIds ?? []);
+  return [...catalogProviders, ...customProviders].filter(
+    (provider) => !removed.has(provider.id),
+  );
 }
 
 /**
@@ -1089,11 +1193,17 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
 function customProviderForConfig(
   provider: ModelProviderConfig,
 ): ModelProviderConfig {
-  const models: ProviderModel[] = (provider.modelIds ?? []).map((id) => ({
-    id,
-    displayName: id,
-    description: "Model served by this endpoint.",
-  }));
+  const models: ProviderModel[] = (provider.modelIds ?? []).map((id) => {
+    const saved = provider.models?.find((model) => model.id === id);
+    const liveContextWindow = getLiveModelContext(provider.id, id, provider.baseUrl) ?? saved?.liveContextWindow;
+    return {
+      id,
+      displayName: id,
+      description: "Model served by this endpoint.",
+      liveContextWindow,
+      contextWindowTokens: liveModelContextTokens({ liveContextWindow }, Date.now(), provider.baseUrl ?? null),
+    };
+  });
   const defaultModelId =
     provider.defaultModelId &&
     models.some((model) => model.id === provider.defaultModelId)
@@ -1108,7 +1218,7 @@ function customProviderForConfig(
       executionKind: "openai-compatible-api",
       executable: true,
       supportsApprovals: true,
-      supportsImages: false,
+      supportsImages: true,
       supportsResume: true,
       supportsUsage: false,
       visibility: "experimental",
@@ -1126,13 +1236,16 @@ export function normalizedConfig(config: GyroConfig): GyroConfig {
   // provider in catalog order so a restored installation can start a new chat
   // with the default model it already configured. The native config migration
   // makes the same choice, and future saves preserve it.
+  const requestedProviderId = config.selectedProviderId === "gemini"
+    ? "antigravity"
+    : config.selectedProviderId;
   const selectedProviderId =
-    isProviderId(config.selectedProviderId) &&
+    isProviderId(requestedProviderId) &&
     providers.some(
       (provider) =>
-        provider.id === config.selectedProviderId && provider.enabled,
+        provider.id === requestedProviderId && provider.enabled,
     )
-      ? config.selectedProviderId
+      ? requestedProviderId
       : providers.find((provider) => provider.enabled)?.id;
   return {
     ...config,
@@ -1145,6 +1258,9 @@ export function normalizedConfig(config: GyroConfig): GyroConfig {
     accountSession: config.accountSession ?? { signedIn: false },
     selectedProviderId,
     modelProviders: providers,
+    commandProfiles: (config.commandProfiles ?? []).filter((profile) =>
+      profile.providerId !== "gemini" && !["gemini", "gemini-cli"].includes(profile.id),
+    ),
   };
 }
 

@@ -3,6 +3,7 @@ use super::*;
 pub(super) fn is_transient_provider_error(error: &str) -> bool {
     let normalized = error.to_ascii_lowercase();
     if is_provider_cancellation(error)
+        || error.contains(provider_retry_recovery::CAPACITY_RETRY_EXHAUSTED)
         || is_stale_resume_error(error)
         || gyro_core::is_workspace_unavailable_error(error)
         || is_hopeless_provider_timeout(error)
@@ -30,6 +31,7 @@ pub(super) fn is_transient_provider_error(error: &str) -> bool {
         || normalized.contains("timed out")
         || normalized.contains("timeout")
         || normalized.contains("temporarily unavailable")
+        || is_model_capacity_error(error)
         || normalized.contains("try again")
         || normalized.contains("network is unreachable")
         || normalized.contains("could not resolve host")
@@ -41,6 +43,31 @@ pub(super) fn is_transient_provider_error(error: &str) -> bool {
         ]
         .iter()
         .any(|status| normalized.contains(status))
+}
+
+pub(super) fn is_model_capacity_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    (normalized.contains("model is at capacity")
+        || normalized.contains("model at capacity")
+        || normalized.contains("model is temporarily at capacity")
+        || normalized.contains("overloaded_error")
+        || normalized.contains("model is overloaded"))
+        && ![
+            "size limit",
+            "tool-call limit",
+            "output exceeded",
+            "http 401",
+            "http 403",
+            "unauthorized",
+            "authentication",
+            "insufficient_quota",
+            "http 402",
+            "status 402",
+            "payment required",
+            "balance exhausted",
+        ]
+        .iter()
+        .any(|cause| normalized.contains(cause))
 }
 
 fn is_hopeless_provider_timeout(error: &str) -> bool {
@@ -220,11 +247,33 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
     // Checked next: a stop is not a failure, and every branch below reads it
     // as one. The ceiling case in particular must not be offered a plain retry,
     // which would run into the same ceiling and stop in the same place.
+    // A declined tool ends the provider turn. That is not the person pressing
+    // Stop, and it must not be offered as a generic crash retry.
+    if normalized.contains("tool permission was declined") {
+        return (
+            "permission-declined",
+            "A tool was declined, so the provider ended the turn. Send again to continue.",
+        );
+    }
+    // The same stop without a decline behind it. The runner already asked the
+    // session once to carry on, so this is the agent's final word on the turn;
+    // the reply above it is saved and nothing here was a crash.
+    if normalized.contains("ended the turn without finishing") {
+        return (
+            "turn-stopped",
+            "The provider stopped its own turn. Send again to continue from here.",
+        );
+    }
     if error.contains(PROVIDER_STOP_MARKER) {
         return if normalized.contains("per-call ceiling") {
             (
                 "spend-ceiling",
                 "Gyro stopped this turn at its per-call token ceiling. Ask for a smaller piece of the work, or raise `usageGuard.maxTokensPerCall` in config.json.",
+            )
+        } else if normalized.contains("rolling token budget") {
+            (
+                "spend-ceiling",
+                "This provider's token budget is spent. Wait for its rolling window to free up, or adjust the provider budget in usage settings.",
             )
         } else {
             ("stopped", "You stopped this turn. Send again to continue.")
@@ -266,6 +315,24 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
             "The provider CLI's own configuration asks for an environment variable that is not set. Fix that CLI config or pick a different profile; retrying will not help.",
         );
     }
+    if normalized.contains("organization has disabled claude subscription access") {
+        return (
+            "provider-config",
+            "Ask your organization administrator to enable Claude Code subscription access, or explicitly configure API-key access in Settings > Providers.",
+        );
+    }
+    if normalized.contains("macos keychain") {
+        // Skip a second copy when the reader already told the person to
+        // unlock and send again. A bare Keychain refusal still needs it.
+        return (
+            "provider-config",
+            if normalized.contains("unlock your mac") {
+                ""
+            } else {
+                "Unlock your Mac and allow Gyro to read the saved credential, then send again."
+            },
+        );
+    }
     if normalized.contains("offline")
         || normalized.contains("network is unreachable")
         || normalized.contains("connection refused")
@@ -305,6 +372,21 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
             "Reconnect this provider, then retry the message.",
         );
     }
+    // Model availability is temporary and distinct from the output/tool
+    // capacity branch below. Keep the recovery structured so the UI does not
+    // have to interpret a provider's urgent wording as an action requirement.
+    if error.contains(provider_retry_recovery::CAPACITY_RETRY_EXHAUSTED) {
+        return (
+            "model-capacity-exhausted",
+            "Your work is saved. Retry when you are ready to continue.",
+        );
+    }
+    if is_model_capacity_error(error) {
+        return (
+            "model-capacity",
+            "Your conversation is saved. You can retry or choose another model.",
+        );
+    }
     if normalized.contains("http 429")
         || normalized.contains("rate limit")
         || normalized.contains("too many requests")
@@ -339,7 +421,19 @@ pub(super) fn validate_tool_call(
         return Err("Tool arguments must be a JSON object. Correct the arguments and try again. No action was executed.".into());
     }
     validate_compatibility_schema_value(arguments, &desktop_capability_tool_schema(id), "arguments")
-        .map_err(|error| format!("Invalid Gyro tool arguments: {error}. Correct the arguments and try again. No action was executed."))?;
+        .map_err(|error| {
+            let catalog = if provider_tool_batch::inline_tool_schema(id) {
+                String::new()
+            } else {
+                format!(
+                    " Call gyro_tool_catalog with prefix {} for the full schema.",
+                    provider_tool_batch::catalog_prefix(id)
+                )
+            };
+            format!(
+                "Invalid Gyro tool arguments: {error}.{catalog} Correct the arguments and try again. No action was executed."
+            )
+        })?;
     Ok(id)
 }
 
@@ -419,6 +513,59 @@ mod recovery_tests {
         let error = "Missing environment variable: `DEEPSEEK_API_KEY`.";
         assert_eq!(provider_failure_recovery(error).0, "provider-config");
         assert!(!is_transient_provider_error(error));
+    }
+
+    #[test]
+    fn model_availability_is_distinct_from_a_turn_output_budget() {
+        for error in [
+            "Selected model is at capacity. Please try a different model.",
+            "The model is temporarily at capacity.",
+            "API error: overloaded_error",
+        ] {
+            let (kind, message) = provider_failure_recovery(error);
+            assert_eq!(kind, "model-capacity");
+            assert!(message.contains("conversation is saved"));
+            assert!(is_transient_provider_error(error));
+        }
+        for permanent in [
+            "HTTP 401: model is at capacity",
+            "HTTP 403: model is at capacity",
+            "HTTP 402: model is at capacity",
+            "authentication failed: model is at capacity",
+            "output exceeded its size limit: model is at capacity",
+        ] {
+            assert!(!is_model_capacity_error(permanent));
+            assert!(!is_transient_provider_error(permanent));
+        }
+        assert_eq!(
+            provider_failure_recovery("output exceeded its size limit").0,
+            "capacity"
+        );
+        assert_eq!(
+            provider_failure_recovery("HTTP 402: model is at capacity").0,
+            "plan-exhausted"
+        );
+        assert_eq!(
+            provider_failure_recovery("HTTP 401: model is at capacity").0,
+            "authentication"
+        );
+    }
+
+    #[test]
+    fn access_restrictions_get_actionable_recovery_without_automatic_retry() {
+        let refusal = gyro_core::provider_stream::CLAUDE_SUBSCRIPTION_ACCESS_DETAIL;
+        assert_eq!(provider_failure_recovery(refusal).0, "provider-config");
+        assert!(!is_transient_provider_error(refusal));
+        let keychain = "Gyro could not read the saved credential from macOS Keychain without user interaction.";
+        assert!(provider_failure_recovery(keychain).1.contains("Unlock"));
+        assert!(!is_transient_provider_error(keychain));
+        let already_actionable = "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.";
+        assert_eq!(
+            provider_failure_recovery(already_actionable).0,
+            "provider-config"
+        );
+        assert_eq!(provider_failure_recovery(already_actionable).1, "");
+        assert!(!is_transient_provider_error(already_actionable));
     }
 
     #[test]

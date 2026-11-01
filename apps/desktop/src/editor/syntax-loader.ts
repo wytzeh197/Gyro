@@ -9,7 +9,7 @@ export type SyntaxProvider = (
   definition: LanguageDefinition,
 ) => Promise<string | undefined>;
 
-// One promise per grammar, including failures. A failing provider never blocks editing.
+// Share concurrent loads and successful grammars; failed loads can be retried.
 export function createSyntaxLoader(
   providers: Partial<
     Record<LanguageDefinition["syntax"]["type"], SyntaxProvider>
@@ -41,6 +41,10 @@ export function createSyntaxLoader(
             "Highlighting could not be loaded. Plain text remains available.",
         }));
       pending.set(key, result);
+      void result.then((loaded) => {
+        if (!loaded.available && pending.get(key) === result)
+          pending.delete(key);
+      });
     }
     return result;
   };

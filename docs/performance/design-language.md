@@ -13,13 +13,22 @@ composer, companion panel, and the right-hand tools rail.
 - Align conversation prose and idle prompts left. Keep the readable conversation
   width near 760px. The surrounding workspace can widen without stretching prose.
 - Use `--gyro-app`, `--gyro-sidebar`, and `--gyro-pane` for the three surfaces.
-  Use soft borders between regions; avoid floating-card shadows in the conversation.
+  Use soft borders between regions. A light-mode request card may carry a
+  one-pixel shadow; the conversation itself does not float.
+- The page language sits on that structure. A request is one soft card. The
+  answer is open type at 1.65 line height. Work ("Thought", "Exploring") is a
+  faint label, and changed-line counts are tabular numbers. In a thread the
+  composer is one pill: field, controls, and context share its surface, split
+  by a hairline. On the start screen the context row stays under the pill. The
+  selected sidebar row is a quiet pill at 7% text mix, weight 500. Dark mode
+  keeps graphite; light mode keeps porcelain.
 - Use a 4px spacing rhythm: 8px within controls, 12–16px within compact groups,
   24–32px between request, work, and result. Shared radius tokens distinguish small
   controls, grouped content, and the composer. Controls use consistent 28–32px
   compact heights, with explicit accessible labels.
-- Blue indicates selection, focus, or the primary action. Additions remain green;
-  deletions remain red. Verification and failure include words and symbols.
+- Blue indicates focus or the primary action. Sidebar selection is the neutral
+  pill above, not an accent fill. Additions remain green; deletions remain red.
+  Verification and failure include words and symbols.
 
 ### Workspace panel rules
 
@@ -95,10 +104,12 @@ The shared component gained optional status-label and thinking-indicator props,
 whose defaults preserve production rendering.
 
 The approved main chat and composer treatment is now applied to the desktop UI
-through `packages/ui/src/chat-design.css`. It retains the existing provider,
-approval, attachment, queue, review, and Stop controls and event handling. The
-sidebar and companion retain their existing appearance. This adoption changes
-presentation only; the study's simulated state labels and results remain isolated.
+through `packages/ui/src/chat-design.css`, with the page-language finish in
+`packages/ui/src/styles.css`. It retains the existing provider, approval,
+attachment, queue, review, and Stop controls and event handling. Sidebar and
+companion keep their structure; selection and tab chrome follow the page
+language. This adoption changes presentation only; the study's simulated state
+labels and results remain isolated.
 
 Native checkout screenshots in `../screenshots/chat-design/` use an isolated
 sample conversation, not a measured provider run. Type checking, focused chat,

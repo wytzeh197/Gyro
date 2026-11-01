@@ -8,7 +8,7 @@ Gyro supplies shared product knowledge through its provider context builder. Thi
 - `browser.contract.json`: generated reference for a normal turn with tools and images. Runtime contracts are generated from the same command descriptors and input schemas used by the tool broker, filtered by the current capability profile. The reference file is not an authorization grant.
 - `apps/desktop/src-tauri/src/browser_knowledge.rs`: contract generation, example workflow, context rendering and drift checks.
 
-The context builder supplies a compact overview on ordinary turns. Explicit browser requests and Browser attachments include the full guide and current contract. Ollama uses discovered tool and vision capabilities; other adapters use their configured capability declarations. Council has no callable tools. The broker remains authoritative for run mode, origin grants, ownership, cancellation and protected actions.
+The context builder supplies a compact overview on opening turns. Explicit browser requests and Browser attachments include the full guide and current contract. Other resumed turns receive a short background-browsing reminder that replaces earlier instructions to reveal visual previews. Ollama uses discovered tool and vision capabilities; other adapters use their configured capability declarations. Council has no callable tools. The broker remains authoritative for run mode, origin grants, ownership, cancellation and protected actions.
 
 Add future product topics as separate guides with matching generated contracts. Avoid injecting the entire product manual into every turn. Do not copy tool schemas into prose or add provider/model-specific versions of the browser guide.
 

@@ -10,14 +10,16 @@
 use crate::{
     add_ide_protocol_message_bytes, command_with_gui_path, read_workspace_file_with_limit,
     to_string, workspace_root, MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE,
-    MAX_WORKSPACE_FILE_EDIT_BYTES,
+    MAX_IDE_PROTOCOL_RESPONSE_BYTES, MAX_WORKSPACE_FILE_EDIT_BYTES,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Stdio};
-use std::sync::{mpsc, Arc, Mutex};
+use std::process::{ChildStdin, ChildStdout, Stdio};
+use std::sync::{mpsc, Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -29,6 +31,12 @@ const MAX_OPEN_LSP_DOCUMENTS: usize = 64;
 const LSP_FILE_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const LSP_REQUEST_TIMEOUT_MESSAGE: &str = "language server request timed out";
 const LSP_INDEXING_RETRY_AFTER_MS: u64 = 2000;
+/// Server messages that arrived while a request was waiting but did not fit
+/// in that request's reply wait here for the editor's next `$/gyro/poll`.
+/// Oldest entries are dropped first: a later publishDiagnostics for a file
+/// supersedes an earlier one.
+const MAX_LSP_BACKLOG_MESSAGES: usize = 256;
+const MAX_LSP_BACKLOG_BYTES: usize = 8 * 1024 * 1024;
 
 /// Extension → (language id, command) pairs the capabilities may start. The
 /// editor keeps the UI copy of this table in
@@ -110,6 +118,10 @@ pub enum LspFileRequest {
         line: u64,
         column: u64,
     },
+    Formatting {
+        tab_size: u32,
+        insert_spaces: bool,
+    },
     DocumentSymbol,
 }
 
@@ -119,6 +131,7 @@ impl LspFileRequest {
             Self::Definition { .. } => "definitionProvider",
             Self::References { .. } => "referencesProvider",
             Self::Hover { .. } => "hoverProvider",
+            Self::Formatting { .. } => "documentFormattingProvider",
             Self::DocumentSymbol => "documentSymbolProvider",
         }
     }
@@ -128,6 +141,7 @@ impl LspFileRequest {
             Self::Definition { .. } => "definition",
             Self::References { .. } => "references",
             Self::Hover { .. } => "hover",
+            Self::Formatting { .. } => "formatting",
             Self::DocumentSymbol => "document symbols",
         }
     }
@@ -137,6 +151,7 @@ impl LspFileRequest {
             Self::Definition { .. } => "textDocument/definition",
             Self::References { .. } => "textDocument/references",
             Self::Hover { .. } => "textDocument/hover",
+            Self::Formatting { .. } => "textDocument/formatting",
             Self::DocumentSymbol => "textDocument/documentSymbol",
         }
     }
@@ -172,22 +187,80 @@ pub(crate) struct LspSessionResult {
     command: String,
     status: String,
     message: String,
+    capabilities: serde_json::Value,
+    position_encoding: String,
 }
+
+/// `(root, language id, command)`: the identity of one managed server.
+type LanguageServerKey = (PathBuf, String, String);
+type LanguageServerStartGates = Mutex<HashMap<LanguageServerKey, Arc<Mutex<()>>>>;
 
 #[derive(Clone, Default)]
 pub struct LanguageServerManager {
     processes: Arc<Mutex<HashMap<String, Arc<Mutex<LanguageServerProcess>>>>>,
+    /// One gate per key that is being acquired, so concurrent acquires for
+    /// the same server wait for a single spawn instead of each starting one.
+    starting: Arc<LanguageServerStartGates>,
+}
+
+/// A caller's place in the per-key start queue. Dropping it retires the
+/// gate once nobody else holds or waits on it.
+struct LanguageServerStartGate<'a> {
+    gates: &'a LanguageServerStartGates,
+    key: LanguageServerKey,
+    gate: Arc<Mutex<()>>,
+}
+
+impl<'a> LanguageServerStartGate<'a> {
+    fn enter(gates: &'a LanguageServerStartGates, key: LanguageServerKey) -> anyhow::Result<Self> {
+        let gate = gates
+            .lock()
+            .map_err(|_| anyhow::anyhow!("language server start lock poisoned"))?
+            .entry(key.clone())
+            .or_default()
+            .clone();
+        Ok(Self { gates, key, gate })
+    }
+}
+
+impl Drop for LanguageServerStartGate<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut gates) = self.gates.lock() {
+            // The map's reference plus ours: nobody else is queued. Clones are
+            // only taken under this lock, so the count cannot race upward.
+            if Arc::strong_count(&self.gate) <= 2 {
+                gates.remove(&self.key);
+            }
+        }
+    }
+}
+
+/// What the server was last told about an open document.
+struct LspDocumentState {
+    version: i64,
+    /// Hash of the complete text last sent to the server. An incremental
+    /// editor change leaves this unknown; disk-only requests must then fail
+    /// rather than replace a snapshot owned by the editor.
+    content_hash: Option<u64>,
+    /// The editor opened this document itself; the model path must not
+    /// close it on eviction.
+    editor_open: bool,
 }
 
 struct LanguageServerProcess {
-    child: Child,
+    child: gyro_core::process_guard::GuardedChild,
     stdin: ChildStdin,
     messages: mpsc::Receiver<Result<serde_json::Value, String>>,
     next_request_id: u64,
     semantic_tokens: serde_json::Value,
     capabilities: serde_json::Value,
+    /// Documents the model path opened, oldest first, for eviction.
     open_documents: VecDeque<String>,
-    open_document_set: HashSet<String>,
+    /// Every document the server currently has open, from either path.
+    documents: HashMap<String, LspDocumentState>,
+    /// Server messages awaiting the next poll, with their encoded sizes.
+    backlog: VecDeque<(serde_json::Value, usize)>,
+    backlog_bytes: usize,
     root: PathBuf,
     language_id: String,
     command: String,
@@ -196,6 +269,34 @@ struct LanguageServerProcess {
     /// timing out and sends no readiness notification, so an empty answer
     /// from a server that has never produced a result is "still loading".
     answered_nonempty: bool,
+}
+
+impl LanguageServerProcess {
+    fn new(
+        child: gyro_core::process_guard::GuardedChild,
+        stdin: ChildStdin,
+        messages: mpsc::Receiver<Result<serde_json::Value, String>>,
+        root: &Path,
+        language_id: &str,
+        command: &str,
+    ) -> Self {
+        Self {
+            child,
+            stdin,
+            messages,
+            next_request_id: 2,
+            semantic_tokens: serde_json::Value::Null,
+            capabilities: serde_json::Value::Null,
+            open_documents: VecDeque::new(),
+            documents: HashMap::new(),
+            backlog: VecDeque::new(),
+            backlog_bytes: 0,
+            root: root.to_path_buf(),
+            language_id: language_id.to_string(),
+            command: command.to_string(),
+            answered_nonempty: false,
+        }
+    }
 }
 
 impl Drop for LanguageServerProcess {
@@ -246,12 +347,30 @@ impl LanguageServerManager {
             anyhow::bail!("language server command is not allowed for this language");
         }
         let (server_id, message) = self.acquire(&root, &request.language_id, &command_text)?;
+        let process = self
+            .processes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?
+            .get(&server_id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("language server stopped during initialization"))?;
+        let capabilities = {
+            let mut process = process
+                .lock()
+                .map_err(|_| anyhow::anyhow!("language server process lock poisoned"))?;
+            if let Some(status) = process.child.try_wait()? {
+                anyhow::bail!("language server exited with {status}");
+            }
+            process.capabilities.clone()
+        };
         Ok(LspSessionResult {
             server_id,
             language_id: request.language_id,
             command: command_text,
             status: "ready".into(),
             message,
+            capabilities,
+            position_encoding: "utf-16".into(),
         })
     }
 
@@ -277,6 +396,33 @@ impl LanguageServerManager {
         {
             args.push("--stdio".into());
         }
+
+        self.acquire_with(root, language_id, command_text, || {
+            start_language_server_process(root, language_id, command_text, command_name, args)
+        })
+    }
+
+    /// The reuse-or-start core of [`Self::acquire`], with the process start
+    /// injected. Concurrent acquires for one key — parallel model navigation
+    /// calls, or the model racing the editor — queue on a per-key gate, so
+    /// exactly one of them runs `start` and the rest find its server. The
+    /// manager map is never locked across spawn and initialize.
+    fn acquire_with(
+        &self,
+        root: &Path,
+        language_id: &str,
+        command_text: &str,
+        start: impl FnOnce() -> anyhow::Result<(LanguageServerProcess, String)>,
+    ) -> anyhow::Result<(String, String)> {
+        let gate = LanguageServerStartGate::enter(
+            &self.starting,
+            (
+                root.to_path_buf(),
+                language_id.to_string(),
+                command_text.to_string(),
+            ),
+        )?;
+        let _start_turn = gate.gate.lock().unwrap_or_else(PoisonError::into_inner);
 
         let existing_processes = {
             let processes = self
@@ -319,112 +465,20 @@ impl LanguageServerManager {
             anyhow::bail!("language server process limit reached; stop a server first");
         }
 
-        let mut command = command_with_gui_path(command_name);
-        command
-            .args(args)
-            .current_dir(root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        let mut child = command.spawn().map_err(|error| {
-            anyhow::anyhow!("failed to start language server {command_name}: {error}")
-        })?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("language server stdin unavailable"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("language server stdout unavailable"))?;
-        let mut process = LanguageServerProcess {
-            child,
-            stdin,
-            messages: spawn_lsp_message_reader(stdout),
-            next_request_id: 2,
-            semantic_tokens: serde_json::Value::Null,
-            capabilities: serde_json::Value::Null,
-            open_documents: VecDeque::new(),
-            open_document_set: HashSet::new(),
-            root: root.to_path_buf(),
-            language_id: language_id.to_string(),
-            command: command_text.to_string(),
-            answered_nonempty: false,
-        };
-        let root_uri = workspace_file_uri(root);
-        write_lsp_message(
-            &mut process.stdin,
-            &serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "processId": std::process::id(),
-                    "clientInfo": { "name": "Gyro", "version": env!("CARGO_PKG_VERSION") },
-                    "rootUri": root_uri,
-                    "workspaceFolders": [{ "uri": root_uri, "name": root.file_name().and_then(|name| name.to_str()).unwrap_or("workspace") }],
-                    "capabilities": {
-                        "workspace": { "workspaceFolders": true, "configuration": true },
-                        "textDocument": {
-                            "publishDiagnostics": { "relatedInformation": true },
-                            "completion": { "completionItem": { "snippetSupport": true } },
-                            "hover": { "contentFormat": ["markdown", "plaintext"] },
-                            "definition": { "linkSupport": true },
-                            "semanticTokens": {
-                                "requests": { "full": true },
-                                "tokenTypes": ["namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment", "string", "number", "regexp", "operator", "decorator"],
-                                "tokenModifiers": ["declaration", "definition", "readonly", "static", "deprecated", "abstract", "async", "modification", "documentation", "defaultLibrary"],
-                                "formats": ["relative"], "overlappingTokenSupport": false, "multilineTokenSupport": false
-                            }
-                        }
-                    }
-                }
-            }),
-        )?;
-        let (initialize_response, startup_messages) =
-            receive_lsp_response(&mut process, 1, Duration::from_secs(12))?;
-        if let Some(error) = initialize_response.get("error") {
-            anyhow::bail!("language server initialize failed: {error}");
-        }
-        write_lsp_message(
-            &mut process.stdin,
-            &serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "initialized",
-                "params": {}
-            }),
-        )?;
-        process.semantic_tokens = initialize_response
-            .pointer("/result/capabilities/semanticTokensProvider")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        process.capabilities = initialize_response
-            .pointer("/result/capabilities")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        let capability_count = initialize_response
-            .pointer("/result/capabilities")
-            .and_then(|value| value.as_object())
-            .map(|value| value.len())
-            .unwrap_or(0);
+        let (process, message) = start()?;
         let server_id = format!("{language_id}:{}", Uuid::new_v4());
         let mut processes = self
             .processes
             .lock()
             .map_err(|_| anyhow::anyhow!("language server manager lock poisoned"))?;
         if processes.len() >= MAX_LANGUAGE_SERVER_PROCESSES {
-            let _ = process.child.kill();
-            let _ = process.child.wait();
+            drop(processes);
+            // Dropping the process kills and reaps it.
+            drop(process);
             anyhow::bail!("language server process limit reached; stop a server first");
         }
         processes.insert(server_id.clone(), Arc::new(Mutex::new(process)));
-        Ok((
-            server_id,
-            format!(
-                "Initialized with {capability_count} capabilities and {} startup messages",
-                startup_messages.len()
-            ),
-        ))
+        Ok((server_id, message))
     }
 
     /// Answer one semantic query for a workspace file the model named.
@@ -492,6 +546,13 @@ impl LanguageServerManager {
                 "textDocument": { "uri": uri },
                 "position": position_params(&lines, line, column, relative_path)?,
                 "context": { "includeDeclaration": include_declaration },
+            }),
+            LspFileRequest::Formatting {
+                tab_size,
+                insert_spaces,
+            } => serde_json::json!({
+                "textDocument": { "uri": uri },
+                "options": { "tabSize": tab_size, "insertSpaces": insert_spaces },
             }),
             LspFileRequest::DocumentSymbol => serde_json::json!({
                 "textDocument": { "uri": uri },
@@ -587,19 +648,31 @@ impl LanguageServerManager {
         }
 
         if lsp_method_is_notification(&request.method) {
-            write_lsp_message(
-                &mut process.stdin,
-                &serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "method": request.method,
-                    "params": request.params,
-                }),
-            )?;
+            if let Some((method, params)) =
+                normalize_editor_document_notification(&process, &request.method, &request.params)?
+            {
+                write_lsp_message(
+                    &mut process.stdin,
+                    &serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": method,
+                        "params": params,
+                    }),
+                )?;
+                observe_editor_document_notification(&mut process, &method, &params);
+            }
+            let document_version = request
+                .params
+                .pointer("/textDocument/uri")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|uri| process.documents.get(uri))
+                .map(|document| document.version);
             let messages = drain_lsp_messages(&mut process)?;
             return Ok(serde_json::json!({
                 "serverId": request.server_id,
                 "status": "sent",
                 "messages": messages,
+                "documentVersion": document_version,
             }));
         }
 
@@ -649,8 +722,9 @@ impl LanguageServerManager {
             .map_err(|_| anyhow::anyhow!("language server process lock poisoned"))?;
         // Close every document we opened so a long-lived server does not keep
         // analysis state for files this app no longer tracks.
-        let open_documents = process.open_documents.drain(..).collect::<Vec<_>>();
-        process.open_document_set.clear();
+        let open_documents = process.documents.keys().cloned().collect::<Vec<_>>();
+        process.open_documents.clear();
+        process.documents.clear();
         for uri in open_documents {
             let _ = write_lsp_message(
                 &mut process.stdin,
@@ -686,7 +760,115 @@ impl LanguageServerManager {
     }
 }
 
-/// Send `textDocument/didOpen` the first time a document is touched, and
+/// Spawn and initialize one language server. The returned process is killed
+/// and reaped on drop, so an initialize failure cannot leak it.
+fn start_language_server_process(
+    root: &Path,
+    language_id: &str,
+    command_text: &str,
+    command_name: &str,
+    args: Vec<String>,
+) -> anyhow::Result<(LanguageServerProcess, String)> {
+    let mut command = command_with_gui_path(command_name);
+    command
+        .args(args)
+        .current_dir(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = gyro_core::process_guard::spawn_service(&mut command).map_err(|error| {
+        anyhow::anyhow!("failed to start language server {command_name}: {error}")
+    })?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("language server stdin unavailable"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("language server stdout unavailable"))?;
+    let mut process = LanguageServerProcess::new(
+        child,
+        stdin,
+        spawn_lsp_message_reader(stdout),
+        root,
+        language_id,
+        command_text,
+    );
+    let root_uri = workspace_file_uri(root);
+    write_lsp_message(
+        &mut process.stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "processId": std::process::id(),
+                "clientInfo": { "name": "Gyro", "version": env!("CARGO_PKG_VERSION") },
+                "rootUri": root_uri,
+                "workspaceFolders": [{ "uri": root_uri, "name": root.file_name().and_then(|name| name.to_str()).unwrap_or("workspace") }],
+                "capabilities": {
+                    "general": { "positionEncodings": ["utf-16"] },
+                    "workspace": {
+                        "workspaceFolders": true, "configuration": true,
+                        "workspaceEdit": { "documentChanges": true }
+                    },
+                    "textDocument": {
+                        "publishDiagnostics": { "relatedInformation": true },
+                        "completion": { "completionItem": { "snippetSupport": true } },
+                        "hover": { "contentFormat": ["markdown", "plaintext"] },
+                        "definition": { "linkSupport": true },
+                        "rename": { "prepareSupport": true },
+                        "semanticTokens": {
+                            "requests": { "full": true },
+                            "tokenTypes": ["namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment", "string", "number", "regexp", "operator", "decorator"],
+                            "tokenModifiers": ["declaration", "definition", "readonly", "static", "deprecated", "abstract", "async", "modification", "documentation", "defaultLibrary"],
+                            "formats": ["relative"], "overlappingTokenSupport": false, "multilineTokenSupport": false
+                        }
+                    }
+                }
+            }
+        }),
+    )?;
+    let (initialize_response, startup_messages) =
+        receive_lsp_response(&mut process, 1, Duration::from_secs(12))?;
+    if let Some(error) = initialize_response.get("error") {
+        anyhow::bail!("language server initialize failed: {error}");
+    }
+    write_lsp_message(
+        &mut process.stdin,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "initialized",
+            "params": {}
+        }),
+    )?;
+    process.semantic_tokens = initialize_response
+        .pointer("/result/capabilities/semanticTokensProvider")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    process.capabilities = initialize_response
+        .pointer("/result/capabilities")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    assert_utf16_position_encoding(&process.capabilities)?;
+    let capability_count = initialize_response
+        .pointer("/result/capabilities")
+        .and_then(|value| value.as_object())
+        .map(|value| value.len())
+        .unwrap_or(0);
+    Ok((
+        process,
+        format!(
+            "Initialized with {capability_count} capabilities and {} startup messages",
+            startup_messages.len()
+        ),
+    ))
+}
+
+/// Send `textDocument/didOpen` the first time a document is touched, a
+/// full-text `didChange` whenever its on-disk content has moved since the
+/// server last saw it (the agent edits files between navigation calls), and
 /// `didClose` when the registry evicts one. The editor's own bookkeeping is
 /// renderer-only, so this registry is what makes model requests answerable
 /// for files the user never opened.
@@ -695,14 +877,48 @@ fn ensure_document_open(
     uri: &str,
     text: &str,
 ) -> anyhow::Result<()> {
-    if process.open_document_set.contains(uri) {
+    let content_hash = lsp_document_hash(text);
+    if let Some(document) = process.documents.get_mut(uri) {
+        if document.content_hash == Some(content_hash) {
+            return Ok(());
+        }
+        if document.editor_open {
+            anyhow::bail!(
+                "file has unsaved or unsynchronized editor changes; save or close it before disk-based code navigation"
+            );
+        }
+        let version = document
+            .version
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("language server document version exhausted"))?;
+        write_lsp_message(
+            &mut process.stdin,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didChange",
+                "params": {
+                    "textDocument": { "uri": uri, "version": version },
+                    "contentChanges": [{ "text": text }],
+                }
+            }),
+        )?;
+        document.version = version;
+        document.content_hash = Some(content_hash);
         return Ok(());
     }
     while process.open_documents.len() >= MAX_OPEN_LSP_DOCUMENTS {
         let Some(evicted) = process.open_documents.pop_front() else {
             break;
         };
-        process.open_document_set.remove(&evicted);
+        // A document the editor also has open stays open for the editor.
+        if process
+            .documents
+            .get(&evicted)
+            .is_some_and(|document| document.editor_open)
+        {
+            continue;
+        }
+        process.documents.remove(&evicted);
         let _ = write_lsp_message(
             &mut process.stdin,
             &serde_json::json!({
@@ -728,8 +944,165 @@ fn ensure_document_open(
         }),
     )?;
     process.open_documents.push_back(uri.to_owned());
-    process.open_document_set.insert(uri.to_owned());
+    process.documents.insert(
+        uri.to_owned(),
+        LspDocumentState {
+            version: 1,
+            content_hash: Some(content_hash),
+            editor_open: false,
+        },
+    );
     Ok(())
+}
+
+/// An editor may take ownership of a document the model already opened.
+/// Send a full change in that case instead of a second didOpen, and return
+/// the actual version to the renderer so it can continue the same sequence.
+fn normalize_editor_document_notification(
+    process: &LanguageServerProcess,
+    method: &str,
+    params: &serde_json::Value,
+) -> anyhow::Result<Option<(String, serde_json::Value)>> {
+    if method != "textDocument/didOpen" && method != "textDocument/didChange" {
+        return Ok(Some((method.to_string(), params.clone())));
+    }
+    let uri = params
+        .pointer("/textDocument/uri")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("editor document URI is required"))?;
+    let version = params
+        .pointer("/textDocument/version")
+        .and_then(serde_json::Value::as_i64)
+        .filter(|version| *version >= 0)
+        .ok_or_else(|| anyhow::anyhow!("editor document version must be a nonnegative integer"))?;
+    let existing = process.documents.get(uri);
+    if method == "textDocument/didOpen" {
+        anyhow::ensure!(
+            params
+                .pointer("/textDocument/text")
+                .and_then(serde_json::Value::as_str)
+                .is_some(),
+            "editor document text is required"
+        );
+    }
+    if method == "textDocument/didChange" {
+        anyhow::ensure!(
+            params
+                .get("contentChanges")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|changes| changes.iter().all(|change| change
+                    .get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some())),
+            "editor document content changes require text"
+        );
+        let document = existing
+            .ok_or_else(|| anyhow::anyhow!("editor document must be opened before changes"))?;
+        if document.editor_open && version <= document.version {
+            let hash = editor_document_content_hash(method, params);
+            if hash.is_some() && hash == document.content_hash {
+                return Ok(None);
+            }
+            anyhow::bail!("editor document change is stale; synchronize the current version first");
+        }
+    }
+    let actual_version = match existing {
+        Some(document) => version.max(
+            document
+                .version
+                .checked_add(1)
+                .ok_or_else(|| anyhow::anyhow!("language server document version exhausted"))?,
+        ),
+        None => version,
+    };
+    if method == "textDocument/didOpen" && existing.is_some() {
+        let text = params
+            .pointer("/textDocument/text")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("editor document text is required"))?;
+        return Ok(Some((
+            "textDocument/didChange".into(),
+            serde_json::json!({
+                "textDocument": { "uri": uri, "version": actual_version },
+                "contentChanges": [{ "text": text }],
+            }),
+        )));
+    }
+    let mut params = params.clone();
+    params["textDocument"]["version"] = actual_version.into();
+    Ok(Some((method.to_string(), params)))
+}
+
+fn editor_document_content_hash(method: &str, params: &serde_json::Value) -> Option<u64> {
+    if method == "textDocument/didOpen" {
+        return params
+            .pointer("/textDocument/text")
+            .and_then(serde_json::Value::as_str)
+            .map(lsp_document_hash);
+    }
+    let changes = params.get("contentChanges")?.as_array()?;
+    // Incremental changes cannot prove that the server's complete snapshot
+    // matches disk without retaining another full copy of every document.
+    if changes.iter().any(|change| change.get("range").is_some()) {
+        return None;
+    }
+    changes.last()?.get("text")?.as_str().map(lsp_document_hash)
+}
+
+/// The editor drives its own `didOpen`/`didChange`/`didClose` through
+/// [`LanguageServerManager::request`]. Track them so the model path neither
+/// re-opens a document the server already has, nor closes one under the
+/// editor. Disk-only requests can reuse a matching editor snapshot, but must
+/// never replace the editor's text with disk content.
+fn observe_editor_document_notification(
+    process: &mut LanguageServerProcess,
+    method: &str,
+    params: &serde_json::Value,
+) {
+    let Some(uri) = params
+        .pointer("/textDocument/uri")
+        .and_then(|value| value.as_str())
+    else {
+        return;
+    };
+    let version = params
+        .pointer("/textDocument/version")
+        .and_then(|value| value.as_i64())
+        .unwrap_or(0);
+    match method {
+        "textDocument/didOpen" => {
+            let document =
+                process
+                    .documents
+                    .entry(uri.to_owned())
+                    .or_insert_with(|| LspDocumentState {
+                        version,
+                        content_hash: editor_document_content_hash(method, params),
+                        editor_open: true,
+                    });
+            document.version = document.version.max(version);
+            document.content_hash = editor_document_content_hash(method, params);
+            document.editor_open = true;
+        }
+        "textDocument/didChange" => {
+            if let Some(document) = process.documents.get_mut(uri) {
+                document.version = document.version.max(version);
+                document.content_hash = editor_document_content_hash(method, params);
+                document.editor_open = true;
+            }
+        }
+        "textDocument/didClose" => {
+            process.documents.remove(uri);
+            process.open_documents.retain(|open| open != uri);
+        }
+        _ => {}
+    }
+}
+
+fn lsp_document_hash(text: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn lsp_feature_supported(capabilities: &serde_json::Value, feature: &str) -> bool {
@@ -738,6 +1111,19 @@ fn lsp_feature_supported(capabilities: &serde_json::Value, feature: &str) -> boo
         Some(serde_json::Value::Object(_)) => true,
         _ => false,
     }
+}
+
+fn assert_utf16_position_encoding(capabilities: &serde_json::Value) -> anyhow::Result<()> {
+    // LSP 3.17 defaults to UTF-16 when a server omits positionEncoding. Gyro
+    // advertises only that encoding because both Monaco and tool conversion
+    // already use UTF-16 units.
+    if let Some(encoding) = capabilities.get("positionEncoding") {
+        anyhow::ensure!(
+            encoding.as_str() == Some("utf-16"),
+            "language server selected unsupported position encoding: {encoding}"
+        );
+    }
+    Ok(())
 }
 
 fn position_params(
@@ -904,15 +1290,52 @@ fn receive_lsp_response(
                 }
             })?
             .map_err(anyhow::Error::msg)?;
-        if message.get("id").and_then(|value| value.as_u64()) == Some(request_id) {
+        // A server-to-client request can reuse our numeric id; only a message
+        // without a method is the response.
+        if message.get("method").is_none()
+            && message.get("id").and_then(|value| value.as_u64()) == Some(request_id)
+        {
             return Ok((message, messages));
         }
         handle_lsp_server_message(process, &message)?;
-        if messages.len() >= MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE {
-            anyhow::bail!("language server produced too many messages before its response");
+        // Notifications (a rust-analyzer diagnostics burst), server requests,
+        // and replies to other ids do not fail this request. The first ones
+        // ride back with the response; the rest wait, bounded, for the next
+        // poll. The wait itself is bounded by the deadline above.
+        let size = lsp_message_size(&message);
+        if process.backlog.is_empty()
+            && messages.len() < MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE
+            && message_bytes.saturating_add(size) <= MAX_IDE_PROTOCOL_RESPONSE_BYTES
+        {
+            message_bytes += size;
+            messages.push(message);
+        } else {
+            push_lsp_backlog(process, message, size);
         }
-        add_ide_protocol_message_bytes(&mut message_bytes, &message)?;
-        messages.push(message);
+    }
+}
+
+fn lsp_message_size(message: &serde_json::Value) -> usize {
+    serde_json::to_vec(message)
+        .map(|bytes| bytes.len())
+        .unwrap_or(0)
+}
+
+/// Keep a server message for the next poll, dropping the oldest ones past
+/// the backlog's count and byte bounds.
+fn push_lsp_backlog(process: &mut LanguageServerProcess, message: serde_json::Value, size: usize) {
+    if size > MAX_LSP_BACKLOG_BYTES {
+        return;
+    }
+    process.backlog.push_back((message, size));
+    process.backlog_bytes = process.backlog_bytes.saturating_add(size);
+    while process.backlog.len() > MAX_LSP_BACKLOG_MESSAGES
+        || process.backlog_bytes > MAX_LSP_BACKLOG_BYTES
+    {
+        let Some((_, dropped)) = process.backlog.pop_front() else {
+            break;
+        };
+        process.backlog_bytes = process.backlog_bytes.saturating_sub(dropped);
     }
 }
 
@@ -922,14 +1345,21 @@ fn drain_lsp_messages(
     let mut messages = Vec::new();
     let mut message_bytes = 0usize;
     for _ in 0..MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE {
-        let message = match process.messages.try_recv() {
-            Ok(message) => message.map_err(anyhow::Error::msg)?,
-            Err(mpsc::TryRecvError::Empty) => break,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                anyhow::bail!("language server output disconnected")
-            }
+        // Messages held back while a request waited come first, in order.
+        let message = if let Some((message, size)) = process.backlog.pop_front() {
+            process.backlog_bytes = process.backlog_bytes.saturating_sub(size);
+            message
+        } else {
+            let message = match process.messages.try_recv() {
+                Ok(message) => message.map_err(anyhow::Error::msg)?,
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    anyhow::bail!("language server output disconnected")
+                }
+            };
+            handle_lsp_server_message(process, &message)?;
+            message
         };
-        handle_lsp_server_message(process, &message)?;
         add_ide_protocol_message_bytes(&mut message_bytes, &message)?;
         messages.push(message);
     }
@@ -1110,6 +1540,24 @@ mod tests {
     }
 
     #[test]
+    fn position_encoding_accepts_only_explicit_or_default_utf16() {
+        assert_utf16_position_encoding(&serde_json::json!({})).unwrap();
+        assert_utf16_position_encoding(&serde_json::json!({ "positionEncoding": "utf-16" }))
+            .unwrap();
+        for encoding in [
+            serde_json::json!("utf-8"),
+            serde_json::json!("utf-32"),
+            serde_json::Value::Null,
+        ] {
+            let error = assert_utf16_position_encoding(
+                &serde_json::json!({ "positionEncoding": encoding }),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("unsupported position encoding"));
+        }
+    }
+
+    #[test]
     fn language_server_manager_initializes_rust_analyzer_when_available() {
         if command_with_gui_path("rust-analyzer")
             .arg("--version")
@@ -1139,6 +1587,8 @@ mod tests {
 
         assert_eq!(session.status, "ready");
         assert!(session.message.contains("capabilities"));
+        assert_eq!(session.position_encoding, "utf-16");
+        assert!(session.capabilities.is_object());
         assert_eq!(
             manager.stop(&session.server_id).unwrap()["status"],
             "stopped"
@@ -1202,6 +1652,471 @@ mod tests {
         for server_id in manager.server_ids() {
             manager.stop(&server_id).unwrap();
         }
+    }
+
+    #[test]
+    fn real_rust_server_navigates_and_renames_across_files() {
+        if command_with_gui_path("rust-analyzer")
+            .arg("--version")
+            .output()
+            .map(|output| !output.status.success())
+            .unwrap_or(true)
+        {
+            return;
+        }
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"workspace-rename-check\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        let source = "mod helper;\npub fn caller() -> u32 { helper::increment(1) }\n";
+        let helper = "pub fn increment(value: u32) -> u32 { value + 1 }\n";
+        std::fs::write(root.join("src/lib.rs"), source).unwrap();
+        std::fs::write(root.join("src/helper.rs"), helper).unwrap();
+        let manager = LanguageServerManager::default();
+        let file = root.join("src/lib.rs");
+        let helper_uri = workspace_file_uri(&root.join("src/helper.rs"));
+        let source_uri = workspace_file_uri(&file);
+        let column = source.lines().nth(1).unwrap().find("increment").unwrap() as u64 + 1;
+        let wait_for_result = |request| {
+            let deadline = Instant::now() + Duration::from_secs(120);
+            loop {
+                match manager
+                    .request_for_file(&root, "src/lib.rs", &file, request)
+                    .unwrap()
+                {
+                    LspFileOutcome::Result(result) => break result,
+                    LspFileOutcome::Indexing { retry_after_ms } => {
+                        assert!(
+                            Instant::now() < deadline,
+                            "rust-analyzer did not finish indexing"
+                        );
+                        std::thread::sleep(Duration::from_millis(retry_after_ms.min(1_000)));
+                    }
+                }
+            }
+        };
+        let definition = wait_for_result(LspFileRequest::Definition { line: 2, column });
+        assert!(definition.to_string().contains(&helper_uri), "{definition}");
+        let references = wait_for_result(LspFileRequest::References {
+            line: 2,
+            column,
+            include_declaration: true,
+        });
+        assert!(references.to_string().contains(&helper_uri), "{references}");
+        assert!(references.to_string().contains(&source_uri), "{references}");
+        let session = manager
+            .start(LspStartRequest {
+                workspace_path: root.to_string_lossy().into_owned(),
+                language_id: "rust".into(),
+                command: "rust-analyzer".into(),
+            })
+            .unwrap();
+        assert!(lsp_feature_supported(
+            &session.capabilities,
+            "renameProvider"
+        ));
+        manager
+            .request(LspRequestPayload {
+                server_id: session.server_id.clone(),
+                method: "textDocument/didOpen".into(),
+                params: serde_json::json!({
+                    "textDocument": { "uri": helper_uri, "languageId": "rust", "version": 1, "text": helper },
+                }),
+            })
+            .unwrap();
+        let response = manager
+            .request(LspRequestPayload {
+                server_id: session.server_id.clone(),
+                method: "textDocument/rename".into(),
+                params: serde_json::json!({
+                    "textDocument": { "uri": helper_uri },
+                    "position": { "line": 0, "character": 7 },
+                    "newName": "increase",
+                }),
+            })
+            .unwrap();
+        assert_eq!(response["status"], "ok", "{response}");
+        let edit = &response["result"];
+        assert!(edit.to_string().contains(&helper_uri), "{edit}");
+        assert!(edit.to_string().contains(&source_uri), "{edit}");
+        assert!(edit.to_string().contains("increase"), "{edit}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/helper.rs")).unwrap(),
+            helper
+        );
+        assert_eq!(
+            manager.stop(&session.server_id).unwrap()["status"],
+            "stopped"
+        );
+    }
+
+    /// A stand-in server: `cat` echoes whatever Gyro writes to its stdin, and
+    /// the incoming message channel is fed by the test.
+    fn fake_language_server(
+        root: &Path,
+        stdout: Stdio,
+    ) -> (
+        LanguageServerProcess,
+        Option<ChildStdout>,
+        mpsc::SyncSender<Result<serde_json::Value, String>>,
+    ) {
+        let mut command = std::process::Command::new("/bin/cat");
+        command
+            .stdin(Stdio::piped())
+            .stdout(stdout)
+            .stderr(Stdio::null());
+        let mut child = gyro_core::process_guard::spawn_service(&mut command).unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let echoed = child.stdout.take();
+        let (sender, receiver) = mpsc::sync_channel(1024);
+        let process =
+            LanguageServerProcess::new(child, stdin, receiver, root, "rust", "rust-analyzer");
+        (process, echoed, sender)
+    }
+
+    #[test]
+    fn concurrent_acquires_for_one_server_key_start_a_single_process() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().to_path_buf();
+        let manager = LanguageServerManager::default();
+        let starts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let barrier = Arc::new(std::sync::Barrier::new(4));
+
+        let workers = (0..4)
+            .map(|_| {
+                let manager = manager.clone();
+                let root = root.clone();
+                let starts = starts.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    manager
+                        .acquire_with(&root, "rust", "rust-analyzer", || {
+                            starts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            // Spawn + initialize takes a while for real servers.
+                            std::thread::sleep(Duration::from_millis(150));
+                            let (process, _, _) = fake_language_server(&root, Stdio::null());
+                            Ok((process, "started".into()))
+                        })
+                        .unwrap()
+                        .0
+                })
+            })
+            .collect::<Vec<_>>();
+        let server_ids = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(server_ids.iter().all(|id| id == &server_ids[0]));
+        assert_eq!(manager.server_ids(), vec![server_ids[0].clone()]);
+        assert!(manager.starting.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn reused_server_start_returns_its_initialized_capabilities() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        let manager = LanguageServerManager::default();
+        let capabilities = serde_json::json!({
+            "definitionProvider": true,
+            "renameProvider": { "prepareProvider": true },
+            "documentFormattingProvider": false,
+            "positionEncoding": "utf-16",
+        });
+        let (server_id, _) = manager
+            .acquire_with(&root, "rust", "rust-analyzer", || {
+                let (mut process, _, _) = fake_language_server(&root, Stdio::null());
+                process.capabilities = capabilities.clone();
+                Ok((process, "initialized".into()))
+            })
+            .unwrap();
+        let session = manager
+            .start(LspStartRequest {
+                workspace_path: root.to_string_lossy().into_owned(),
+                language_id: "rust".into(),
+                command: "rust-analyzer".into(),
+            })
+            .unwrap();
+
+        assert_eq!(session.server_id, server_id);
+        assert_eq!(session.capabilities, capabilities);
+        assert_eq!(session.position_encoding, "utf-16");
+        let serialized = serde_json::to_value(session).unwrap();
+        assert_eq!(serialized["capabilities"], capabilities);
+        assert_eq!(serialized["positionEncoding"], "utf-16");
+    }
+
+    #[test]
+    fn editor_takeover_uses_a_monotonic_full_change_and_rejects_stale_text() {
+        let workspace = tempfile::tempdir().unwrap();
+        let (mut process, echoed, sender) = fake_language_server(workspace.path(), Stdio::piped());
+        let mut echoed = BufReader::new(echoed.unwrap());
+        let uri = "file:///workspace/src/lib.rs";
+        ensure_document_open(&mut process, uri, "pub fn disk() {}\n").unwrap();
+        ensure_document_open(&mut process, uri, "pub fn disk_updated() {}\n").unwrap();
+        let manager = LanguageServerManager::default();
+        manager
+            .processes
+            .lock()
+            .unwrap()
+            .insert("test".into(), Arc::new(Mutex::new(process)));
+        let response = manager
+            .request(LspRequestPayload {
+                server_id: "test".into(),
+                method: "textDocument/didOpen".into(),
+                params: serde_json::json!({
+                    "textDocument": { "uri": uri, "version": 1, "text": "pub fn editor() {}\n" },
+                }),
+            })
+            .unwrap();
+
+        assert_eq!(response["documentVersion"], 3);
+        assert_eq!(
+            read_lsp_message(&mut echoed).unwrap()["method"],
+            "textDocument/didOpen"
+        );
+        assert_eq!(
+            read_lsp_message(&mut echoed).unwrap()["method"],
+            "textDocument/didChange"
+        );
+        let takeover = read_lsp_message(&mut echoed).unwrap();
+        assert_eq!(takeover["method"], "textDocument/didChange");
+        assert_eq!(takeover["params"]["textDocument"]["version"], 3);
+        assert_eq!(
+            takeover["params"]["contentChanges"][0]["text"],
+            "pub fn editor() {}\n"
+        );
+
+        let stale = manager.request(LspRequestPayload {
+            server_id: "test".into(),
+            method: "textDocument/didChange".into(),
+            params: serde_json::json!({
+                "textDocument": { "uri": uri, "version": 2 },
+                "contentChanges": [{ "text": "pub fn stale() {}\n" }],
+            }),
+        });
+        assert!(stale.unwrap_err().to_string().contains("stale"));
+        let response = manager
+            .request(LspRequestPayload {
+                server_id: "test".into(),
+                method: "textDocument/didChange".into(),
+                params: serde_json::json!({
+                    "textDocument": { "uri": uri, "version": 4 },
+                    "contentChanges": [{ "text": "pub fn current() {}\n" }],
+                }),
+            })
+            .unwrap();
+        assert_eq!(response["documentVersion"], 4);
+        let current = read_lsp_message(&mut echoed).unwrap();
+        // No frame was emitted for the stale change.
+        assert_eq!(current["params"]["textDocument"]["version"], 4);
+        assert_eq!(
+            current["params"]["contentChanges"][0]["text"],
+            "pub fn current() {}\n"
+        );
+        drop(sender);
+    }
+
+    #[test]
+    fn model_requests_resync_documents_that_changed_on_disk() {
+        let workspace = tempfile::tempdir().unwrap();
+        let (mut process, echoed, _sender) = fake_language_server(workspace.path(), Stdio::piped());
+        let mut echoed = BufReader::new(echoed.unwrap());
+        let uri = "file:///workspace/src/lib.rs";
+
+        ensure_document_open(&mut process, uri, "pub fn before() {}\n").unwrap();
+        ensure_document_open(&mut process, uri, "pub fn before() {}\n").unwrap();
+        ensure_document_open(&mut process, uri, "pub fn after() {}\n").unwrap();
+
+        let opened = read_lsp_message(&mut echoed).unwrap();
+        assert_eq!(opened["method"], "textDocument/didOpen");
+        assert_eq!(opened["params"]["textDocument"]["version"], 1);
+        // Unchanged content sends nothing, so the next frame is the change.
+        let changed = read_lsp_message(&mut echoed).unwrap();
+        assert_eq!(changed["method"], "textDocument/didChange");
+        assert_eq!(changed["params"]["textDocument"]["uri"], uri);
+        assert_eq!(changed["params"]["textDocument"]["version"], 2);
+        assert_eq!(
+            changed["params"]["contentChanges"][0]["text"],
+            "pub fn after() {}\n"
+        );
+
+        // The editor now owns an unsaved snapshot. A disk-only model query
+        // must not replace it or reason using mismatched disk coordinates.
+        observe_editor_document_notification(
+            &mut process,
+            "textDocument/didChange",
+            &serde_json::json!({
+                "textDocument": { "uri": uri, "version": 1_700_000_000_000_i64 },
+                "contentChanges": [{ "text": "pub fn unsaved() {}\n" }],
+            }),
+        );
+        let error = ensure_document_open(&mut process, uri, "pub fn after() {}\n").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("unsaved or unsynchronized editor changes"));
+        assert_eq!(process.documents[uri].version, 1_700_000_000_000_i64);
+        assert_eq!(
+            process.documents[uri].content_hash,
+            Some(lsp_document_hash("pub fn unsaved() {}\n"))
+        );
+        // The matching snapshot is reusable and also emits no change.
+        ensure_document_open(&mut process, uri, "pub fn unsaved() {}\n").unwrap();
+        write_lsp_message(
+            &mut process.stdin,
+            &serde_json::json!({ "method": "test/sentinel" }),
+        )
+        .unwrap();
+        assert_eq!(
+            read_lsp_message(&mut echoed).unwrap()["method"],
+            "test/sentinel"
+        );
+    }
+
+    #[test]
+    fn editor_owned_documents_are_preserved_until_close_and_never_evicted() {
+        let workspace = tempfile::tempdir().unwrap();
+        let (mut process, echoed, _sender) = fake_language_server(workspace.path(), Stdio::piped());
+        let mut echoed = BufReader::new(echoed.unwrap());
+        let editor_uri = "file:///workspace/src/editor.rs";
+        observe_editor_document_notification(
+            &mut process,
+            "textDocument/didOpen",
+            &serde_json::json!({
+                "textDocument": {
+                    "uri": editor_uri,
+                    "languageId": "rust",
+                    "version": 1,
+                    "text": "pub fn buffer() {}\n",
+                }
+            }),
+        );
+
+        ensure_document_open(&mut process, editor_uri, "pub fn buffer() {}\n").unwrap();
+        assert!(ensure_document_open(&mut process, editor_uri, "pub fn disk() {}\n").is_err());
+
+        // A document the model opened and the editor then opened too is
+        // skipped by eviction; plain model documents are evicted oldest first.
+        let shared_uri = "file:///workspace/src/shared.rs";
+        ensure_document_open(&mut process, shared_uri, "pub fn shared() {}\n").unwrap();
+        observe_editor_document_notification(
+            &mut process,
+            "textDocument/didOpen",
+            &serde_json::json!({ "textDocument": { "uri": shared_uri, "version": 1 } }),
+        );
+        for index in 0..=MAX_OPEN_LSP_DOCUMENTS {
+            let uri = format!("file:///workspace/src/model_{index}.rs");
+            ensure_document_open(&mut process, &uri, "pub fn model() {}\n").unwrap();
+        }
+        assert!(process.documents.contains_key(editor_uri));
+        assert!(process.documents.contains_key(shared_uri));
+        assert!(!process
+            .documents
+            .contains_key("file:///workspace/src/model_0.rs"));
+        assert!(process
+            .documents
+            .contains_key("file:///workspace/src/model_1.rs"));
+
+        observe_editor_document_notification(
+            &mut process,
+            "textDocument/didClose",
+            &serde_json::json!({ "textDocument": { "uri": editor_uri } }),
+        );
+        ensure_document_open(&mut process, editor_uri, "pub fn disk() {}\n").unwrap();
+        assert!(!process.documents[editor_uri].editor_open);
+        assert_eq!(
+            process.documents[editor_uri].content_hash,
+            Some(lsp_document_hash("pub fn disk() {}\n"))
+        );
+        // The first actual frame remains the model's shared document open:
+        // reading/rejecting an editor snapshot did not emit any protocol edit.
+        assert_eq!(
+            read_lsp_message(&mut echoed).unwrap()["params"]["textDocument"]["uri"],
+            shared_uri
+        );
+    }
+
+    #[test]
+    fn incremental_editor_changes_never_trigger_disk_resynchronization() {
+        let workspace = tempfile::tempdir().unwrap();
+        let (mut process, _, _sender) = fake_language_server(workspace.path(), Stdio::null());
+        let uri = "file:///workspace/src/lib.rs";
+        ensure_document_open(&mut process, uri, "pub fn disk() {}\n").unwrap();
+        observe_editor_document_notification(
+            &mut process,
+            "textDocument/didChange",
+            &serde_json::json!({
+                "textDocument": { "uri": uri, "version": 2 },
+                "contentChanges": [{
+                    "range": { "start": { "line": 0, "character": 7 }, "end": { "line": 0, "character": 11 } },
+                    "text": "edited",
+                }],
+            }),
+        );
+        let error = ensure_document_open(&mut process, uri, "pub fn disk() {}\n").unwrap_err();
+        assert!(error.to_string().contains("unsynchronized editor changes"));
+        assert_eq!(process.documents[uri].version, 2);
+        assert!(process.documents[uri].editor_open);
+        assert!(process.documents[uri].content_hash.is_none());
+    }
+
+    #[test]
+    fn notification_bursts_before_a_response_do_not_fail_the_request() {
+        let workspace = tempfile::tempdir().unwrap();
+        let (mut process, _, sender) = fake_language_server(workspace.path(), Stdio::null());
+        let diagnostics = |index: usize| {
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/publishDiagnostics",
+                "params": { "uri": format!("file:///workspace/src/{index}.rs"), "diagnostics": [] },
+            })
+        };
+        let burst = 400;
+        for index in 0..burst {
+            sender.send(Ok(diagnostics(index))).unwrap();
+        }
+        // A reply to some other request does not end the wait either.
+        sender
+            .send(Ok(
+                serde_json::json!({ "jsonrpc": "2.0", "id": 3, "result": null }),
+            ))
+            .unwrap();
+        sender
+            .send(Ok(
+                serde_json::json!({ "jsonrpc": "2.0", "id": 7, "result": [1] }),
+            ))
+            .unwrap();
+
+        let (response, messages) =
+            receive_lsp_response(&mut process, 7, Duration::from_secs(5)).unwrap();
+
+        assert_eq!(response["result"], serde_json::json!([1]));
+        assert_eq!(messages.len(), MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE);
+        assert_eq!(messages[0], diagnostics(0));
+        // The overflow waits, bounded and in order, for the editor's poll;
+        // the oldest of it is dropped first.
+        let mut polled = Vec::new();
+        loop {
+            let batch = drain_lsp_messages(&mut process).unwrap();
+            if batch.is_empty() {
+                break;
+            }
+            polled.extend(batch);
+        }
+        assert_eq!(polled.len(), MAX_LSP_BACKLOG_MESSAGES);
+        assert_eq!(
+            polled.last().unwrap(),
+            &serde_json::json!({ "jsonrpc": "2.0", "id": 3, "result": null })
+        );
+        assert_eq!(polled[polled.len() - 2], diagnostics(burst - 1));
+        assert_eq!(process.backlog_bytes, 0);
     }
 
     #[test]

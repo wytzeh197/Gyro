@@ -1,0 +1,25 @@
+{
+  "recordedAt": "2026-10-08T11:10:51.725681+00:00",
+  "build": "cargo build --offline -p gyro-desktop --features tauri/custom-protocol",
+  "frontendURL": "tauri://localhost",
+  "fixtureRoot": "/private/tmp/gyro-backend-ui-2026-10-08",
+  "persistentUIOptIn": "GYRO_TEST_PERSIST_UI=1",
+  "hashes": {
+    "target/debug/gyro-desktop": "ab1b440ec7980327f30956f581400bb9ca5798f09336e08dfc62b2d4c00e1fe5",
+    "apps/desktop/dist/index.html": "7b14a434874eaa5635bd970ae9f177d814cb4f888ac44ec1aa6e23adc1d15de3",
+    "apps/desktop/src/App.tsx": "98aeb82cc9e581510288de4fc5c455dfae7706cfa88f4735b7b342598d2cbbcc",
+    "apps/desktop/src-tauri/src/lib.rs": "79142ff732c5e27d5fd304c4203b9bc8093b3ea434e76f6104a4148aeaeccc6b",
+    "apps/desktop/src/ui-storage.ts": "08b72992d71b4deb53a18f406c8e9545f6f052b2e05821a73567da02a01d0cbd",
+    "apps/desktop/src/turn-timing.ts": "16fcb4532637650615cc1828582abf003b514be20d14162eb36776157d3ce0a2",
+    "apps/desktop/src/source-control-scope.ts": "57ded43b2f30e5b49b0b1b97d1b0a533fa43c1a0abb9aefaf9bd2cd2da2f94fb",
+    "apps/desktop/src-tauri/src/git_status_cache.rs": "ba3d1ae4e3bf7b0d42d12ce91f2bbd408ceb1ddfdb75d7a0c25fde4ae25ae2df",
+    "packages/ui/src/types.ts": "67179f128dd7a21cb4972399469337c540d09aaafb8b6aee277d09dcde741032"
+  },
+  "bundleExecutableHash": "e5659d3ee8aa5177546d7d69f32037c5e4441f365a64d189e6c4b2e96dce6b08",
+  "bundleNote": "Copied the compiled executable into a temporary app with unique bundle identity, then ad-hoc signed; signing changes executable bytes.",
+  "updatedAt": "2026-10-08T12:10:40.173315+00:00",
+  "workspaceRestartTestStore": "/private/tmp/gyro-backend-ui-2026-10-08/ui-store-root-check",
+  "resumeTestStore": "/private/tmp/gyro-backend-ui-2026-10-08/ui-store",
+  "includesTerminalResponsePriorityFix": true,
+  "includesWorkspaceGitOwnerAndChatGridSelectionFix": true
+}

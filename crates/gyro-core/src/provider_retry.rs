@@ -31,6 +31,116 @@ const DELAYS: [Duration; 3] = [
     Duration::from_secs(3),
 ];
 
+/// The retry ladder every provider connection shares — CLI launches and HTTPS
+/// exchanges alike — so one provider's budget is not a different product
+/// behaviour from another's.
+pub fn transient_retry_delays() -> &'static [Duration] {
+    &DELAYS
+}
+
+/// The delay before retry `index`, jittered so parallel sessions that failed at
+/// the same instant do not respawn in lockstep against one shared quota.
+pub fn transient_retry_delay(index: usize) -> Option<Duration> {
+    DELAYS.get(index).copied().map(jitter)
+}
+
+/// A cooldown the provider stated in its own words.
+///
+/// The HTTPS runner reads a `Retry-After` header; a provider CLI reports the
+/// same instruction as error text ("rate limit reached … retry after 12
+/// seconds"). Only a bounded wait is honored — a longer one stays an actionable
+/// rate-limit error rather than a hidden hang, exactly as [`retry_delay`]
+/// treats a long header.
+pub fn retry_after_hint(error: &str) -> Option<Duration> {
+    match parse_retry_after_hint(error) {
+        RetryAfterHint::Delay(delay) => Some(delay),
+        RetryAfterHint::Absent | RetryAfterHint::Unusable => None,
+    }
+}
+
+/// Resolve an automatic retry without replacing a provider's long or
+/// unsupported cooldown with our shorter fallback. `None` leaves the original
+/// provider error actionable instead of restarting before its stated deadline.
+pub fn retry_delay_with_hint(error: &str, fallback: Duration) -> Option<Duration> {
+    match parse_retry_after_hint(error) {
+        RetryAfterHint::Delay(delay) => Some(delay),
+        RetryAfterHint::Absent => Some(fallback),
+        RetryAfterHint::Unusable => None,
+    }
+}
+
+enum RetryAfterHint {
+    Absent,
+    Delay(Duration),
+    Unusable,
+}
+
+fn parse_retry_after_hint(error: &str) -> RetryAfterHint {
+    const MAX_HINT: Duration = Duration::from_secs(30);
+    let normalized = error.to_ascii_lowercase();
+    for marker in ["retry-after:", "retry after ", "retry in ", "try again in "] {
+        let Some((_, rest)) = normalized.split_once(marker) else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let digits: String = rest
+            .chars()
+            .take_while(|character| character.is_ascii_digit())
+            .collect();
+        let Ok(whole) = digits.parse::<u64>() else {
+            return RetryAfterHint::Unusable;
+        };
+        let after = &rest[digits.len()..];
+        let (fraction, unit) = if let Some(rest) = after
+            .strip_prefix('.')
+            .filter(|rest| rest.starts_with(|character: char| character.is_ascii_digit()))
+        {
+            let count = rest.bytes().take_while(u8::is_ascii_digit).count();
+            (&rest[..count], rest[count..].trim_start())
+        } else {
+            ("", after.trim_start())
+        };
+        // "retry after 3 attempts" counts attempts, not seconds.
+        if unit.starts_with("attempt") || unit.starts_with("try") || unit.starts_with("time") {
+            continue;
+        }
+        let unit_end = unit
+            .char_indices()
+            .find(|(_, character)| !character.is_alphabetic())
+            .map_or(unit.len(), |(index, _)| index);
+        let unit_millis: u128 = match &unit[..unit_end] {
+            "" | "s" | "sec" | "secs" | "second" | "seconds" => 1_000,
+            "ms" | "millisecond" | "milliseconds" => 1,
+            "m" | "min" | "mins" | "minute" | "minutes" => 60_000,
+            "h" | "hr" | "hrs" | "hour" | "hours" => 3_600_000,
+            _ => return RetryAfterHint::Unusable,
+        };
+        // Compound durations are not part of this grammar. Do not mistake
+        // "1s500ms" for one second and retry before the actual cooldown.
+        let tail = unit[unit_end..].trim_start();
+        if tail.starts_with(|character: char| character.is_ascii_digit())
+            || tail
+                .strip_prefix('.')
+                .is_some_and(|tail| tail.starts_with(|character: char| character.is_ascii_digit()))
+        {
+            return RetryAfterHint::Unusable;
+        }
+        // Integer arithmetic preserves milliseconds and fractions of minutes.
+        // Round up discarded precision and fractional milliseconds; provider
+        // text must never overflow a worker or shorten its own cooldown.
+        let precision = fraction.len().min(9);
+        let mut numerator = fraction[..precision].parse::<u32>().unwrap_or_default() as u128;
+        numerator += u128::from(fraction[precision..].bytes().any(|digit| digit != b'0'));
+        let scale = 10_u128.pow(precision as u32);
+        let millis = u128::from(whole) * unit_millis + (numerator * unit_millis).div_ceil(scale);
+        if millis > MAX_HINT.as_millis() {
+            return RetryAfterHint::Unusable;
+        }
+        return RetryAfterHint::Delay(Duration::from_millis(millis as u64));
+    }
+    RetryAfterHint::Absent
+}
+
 // The transport and stream layers share three retries. Nested retry loops
 // previously allowed up to twelve HTTP sends for one generation.
 thread_local! { static REMAINING: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) }; }
@@ -163,6 +273,107 @@ mod tests {
                 .unwrap(),
         )
     }
+    #[test]
+    fn shared_ladder_is_jittered_within_its_step_and_bounded() {
+        let delays = transient_retry_delays();
+        for (index, base) in delays.iter().enumerate() {
+            let delay = transient_retry_delay(index).unwrap();
+            assert!(delay >= *base && delay <= *base + *base / 4, "{delay:?}");
+        }
+        assert_eq!(transient_retry_delay(delays.len()), None);
+    }
+
+    #[test]
+    fn reads_a_stated_cooldown_and_ignores_a_hint_that_is_not_one() {
+        for (error, expected) in [
+            (
+                "429 rate limited; retry after 12 seconds",
+                Some(Duration::from_secs(12)),
+            ),
+            ("Retry-After: 5", Some(Duration::from_secs(5))),
+            (
+                "usage limit reached, try again in 2s",
+                Some(Duration::from_secs(2)),
+            ),
+            ("rate limited; retry in 90s", None),
+            ("retry after 1 min", None),
+            ("retry after 3 attempts", None),
+            ("connection reset by peer", None),
+        ] {
+            assert_eq!(retry_after_hint(error), expected, "{error}");
+        }
+    }
+
+    #[test]
+    fn cooldown_milliseconds_and_fractional_units_are_respected() {
+        for (error, expected) in [
+            ("HTTP 429: retry in 500ms", Some(Duration::from_millis(500))),
+            (
+                "HTTP 429: retry in 500.5 milliseconds",
+                Some(Duration::from_millis(501)),
+            ),
+            (
+                "HTTP 429: retry in 1.5 seconds",
+                Some(Duration::from_millis(1500)),
+            ),
+            (
+                "HTTP 429: retry in 0.25 minutes",
+                Some(Duration::from_secs(15)),
+            ),
+            ("HTTP 429: retry in 0.5 min", Some(Duration::from_secs(30))),
+            (
+                "HTTP 429: retry in 2 seconds.",
+                Some(Duration::from_secs(2)),
+            ),
+            ("HTTP 429: retry after 2.", Some(Duration::from_secs(2))),
+            (
+                "HTTP 429: retry in 500ms. Please try again.",
+                Some(Duration::from_millis(500)),
+            ),
+            (
+                "HTTP 429: retry in 0.0000000001 seconds",
+                Some(Duration::from_millis(1)),
+            ),
+        ] {
+            assert_eq!(retry_after_hint(error), expected, "{error}");
+        }
+    }
+
+    #[test]
+    fn cooldown_extreme_values_do_not_overflow() {
+        for error in [
+            "HTTP 429: retry after 18446744073709551615.1 seconds",
+            "HTTP 429: retry after 18446744073709551615 minutes",
+            "HTTP 429: retry after 18446744073709551616 seconds",
+        ] {
+            assert_eq!(retry_after_hint(error), None, "{error}");
+        }
+    }
+
+    #[test]
+    fn cooldown_retry_decision_distinguishes_missing_and_unusable_hints() {
+        let fallback = Duration::from_millis(400);
+        for error in ["connection reset", "HTTP 429: retry after 3 attempts"] {
+            assert_eq!(retry_delay_with_hint(error, fallback), Some(fallback));
+        }
+        for error in [
+            "HTTP 429: retry after 90 seconds",
+            "HTTP 429: retry after 1hr",
+            "HTTP 429: retry after 2 days",
+            "HTTP 429: retry after 2 unknown_units",
+            "HTTP 429: retry after 1s500ms",
+            "HTTP 429: retry after tomorrow",
+            "HTTP 429: retry after 30.0000000001 seconds",
+            "HTTP 429: retry after 18446744073709551616 seconds",
+        ] {
+            assert_eq!(retry_delay_with_hint(error, fallback), None, "{error}");
+        }
+        assert_eq!(
+            retry_delay_with_hint("HTTP 429: retry in 500ms", fallback),
+            Some(Duration::from_millis(500))
+        );
+    }
+
     #[test]
     fn recovers_transient_exchange_without_replaying_caller() {
         let mut requests = 0;

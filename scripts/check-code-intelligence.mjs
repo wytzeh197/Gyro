@@ -20,6 +20,7 @@ const tools = [
   ["CodeReferences", "code.references", "gyro_code_references"],
   ["CodeHover", "code.hover", "gyro_code_hover"],
   ["CodeSymbols", "code.symbols", "gyro_code_symbols"],
+  ["CodeFormat", "code.format", "gyro_code_format"],
 ];
 
 for (const [variant, id, tool] of tools) {

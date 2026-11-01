@@ -134,6 +134,49 @@ pub(crate) fn post(
     idle: Duration,
     local: bool,
 ) -> Result<Response, ureq::Error> {
+    post_inner(url, key, payload, cancellation, idle, local, None)
+}
+
+pub(crate) fn post_with_deadline(
+    url: &url::Url,
+    payload: &Value,
+    cancellation: &CancellationToken,
+    deadline: Duration,
+) -> Result<Response, ureq::Error> {
+    post_inner(
+        url,
+        "",
+        payload,
+        cancellation,
+        deadline,
+        true,
+        Some(deadline),
+    )
+}
+
+pub(crate) fn get(
+    url: &url::Url,
+    cancellation: &CancellationToken,
+    deadline: Duration,
+) -> Result<Response, ureq::Error> {
+    let request = client(true)
+        .get(url.as_str())
+        .header("Accept", "application/json")
+        .header("Accept-Encoding", "identity")
+        .header("User-Agent", concat!("gyro/", env!("CARGO_PKG_VERSION")))
+        .timeout(deadline);
+    send(request, cancellation, deadline)
+}
+
+fn post_inner(
+    url: &url::Url,
+    key: &str,
+    payload: &Value,
+    cancellation: &CancellationToken,
+    idle: Duration,
+    local: bool,
+    deadline: Option<Duration>,
+) -> Result<Response, ureq::Error> {
     let mut request = client(local)
         .post(url.as_str())
         .header("Accept", "text/event-stream")
@@ -143,7 +186,20 @@ pub(crate) fn post(
     if !key.is_empty() {
         request = request.bearer_auth(key);
     }
-    let response = wait(cancellation, idle, request.send())?;
+    if let Some(deadline) = deadline {
+        request = request.timeout(deadline);
+    }
+    send(request, cancellation, idle)
+}
+
+fn send(
+    request: reqwest::RequestBuilder,
+    cancellation: &CancellationToken,
+    idle: Duration,
+) -> Result<Response, ureq::Error> {
+    // A total reqwest timeout creates Tokio timers when send is constructed.
+    // Construct it inside the shared runtime, including discovery requests.
+    let response = wait(cancellation, idle, async move { request.send().await })?;
     let mut response = Response {
         response,
         cancellation: cancellation.clone(),

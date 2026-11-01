@@ -1,6 +1,7 @@
 /// Overlay traffic-light origin matching `tauri.conf.json` and the sidebar
-/// titlebar CSS. Native 14px controls at this inset share the 48px chat
-/// header's centreline with the 28px window-navigation buttons.
+/// titlebar CSS. A native 14px control draws its circle a couple of px below
+/// the frame origin, so y=16 put the visible dots on the 48px window bar's
+/// centreline (y=24). y=17 sits them 1px below that line, as requested.
 const MAIN_TRAFFIC_LIGHT_X: f64 = 16.0;
 const MAIN_TRAFFIC_LIGHT_Y: f64 = 17.0;
 
@@ -15,6 +16,7 @@ pub(crate) fn apply_macos_traffic_light_position<R: tauri::Runtime>(
     match window.ns_window() {
         Ok(ptr) if !ptr.is_null() => unsafe {
             inset_macos_traffic_lights(ptr, MAIN_TRAFFIC_LIGHT_X, MAIN_TRAFFIC_LIGHT_Y);
+            pin_macos_window_scroll(ptr);
             observe_macos_titlebar_relayout(ptr);
         },
         Ok(_) => {}
@@ -64,6 +66,7 @@ unsafe fn observe_macos_titlebar_relayout(ns_window: *mut std::ffi::c_void) {
         };
         let ptr = objc2::rc::Retained::as_ptr(&window) as *mut std::ffi::c_void;
         inset_macos_traffic_lights(ptr, MAIN_TRAFFIC_LIGHT_X, MAIN_TRAFFIC_LIGHT_Y);
+        pin_macos_window_scroll(ptr);
     });
     let center = NSNotificationCenter::defaultCenter();
     let queue = NSOperationQueue::mainQueue();
@@ -87,6 +90,40 @@ unsafe fn observe_macos_titlebar_relayout(ns_window: *mut std::ffi::c_void) {
         );
         // The main window lives for the whole process (close only hides it).
         std::mem::forget(token);
+    }
+}
+
+/// WKWebView's scroll view rubber-bands the whole window, including the
+/// title bar. Lists inside the page keep their own scrollers.
+#[cfg(target_os = "macos")]
+unsafe fn pin_macos_window_scroll(ns_window: *mut std::ffi::c_void) {
+    use objc2_app_kit::NSWindow;
+
+    let window = &*ns_window.cast::<NSWindow>();
+    let Some(content) = window.contentView() else {
+        return;
+    };
+    pin_scroll_elasticity(&content, 0);
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn pin_scroll_elasticity(view: &objc2_app_kit::NSView, depth: u8) {
+    use objc2_app_kit::{NSScrollElasticity, NSScrollView};
+
+    if depth > 8 {
+        return;
+    }
+    if let Some(scroll) = view.downcast_ref::<NSScrollView>() {
+        scroll.setVerticalScrollElasticity(NSScrollElasticity::None);
+        scroll.setHorizontalScrollElasticity(NSScrollElasticity::None);
+        return;
+    }
+    let subviews = view.subviews();
+    let mut index = 0;
+    let count = subviews.count();
+    while index < count {
+        pin_scroll_elasticity(&subviews.objectAtIndex(index), depth + 1);
+        index += 1;
     }
 }
 

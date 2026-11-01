@@ -5,7 +5,9 @@ import {
   stripHiddenControlMarkers,
   structuredCommentaryBlocks,
 } from "./chat-commentary.ts";
-import type { SessionEvent } from "./types.ts";
+import type { ProviderId, SessionEvent } from "./types.ts";
+import { isProviderId } from "./provider-catalog.ts";
+import { groupWorkflowEvents } from "./code-mode.ts";
 
 export type InterleavedChatTimelineItem =
   | { kind: "event"; event: SessionEvent }
@@ -26,6 +28,37 @@ export function isModelSwitchEvent(event: SessionEvent) {
     !Array.isArray(payload) &&
     (payload as Record<string, unknown>).kind === "model-switch"
   );
+}
+
+const MODEL_LOGO_FAMILIES: ReadonlyArray<readonly [RegExp, ProviderId]> = [
+  [
+    /(?:^|\/)(?:gpt[- .]|chatgpt[- .]|o\d(?:[- .]|$)|codex(?:[- .]|$))/i,
+    "openai",
+  ],
+  [/(?:^|\/)claude(?:[- .]|$)/i, "anthropic"],
+  [/(?:^|\/)grok(?:[- .]|$)/i, "xai"],
+  [/(?:^|\/)gemini(?:[- .]|$)/i, "gemini"],
+  [/(?:^|\/)kimi(?:[- .]|$)/i, "kimi"],
+  [/(?:^|\/)deepseek(?:[- .]|$)/i, "deepseek"],
+  [
+    /(?:^|\/)(?:mistral|magistral|devstral|codestral|ministral|mixtral)(?:[- .]|$)/i,
+    "mistral",
+  ],
+];
+
+/** Prefer the model's own mark when it runs through a gateway or local runtime. */
+export function modelSwitchLogoProvider(
+  providerId: unknown,
+  modelId: unknown,
+): ProviderId | undefined {
+  if (typeof modelId === "string") {
+    const family = MODEL_LOGO_FAMILIES.find(([pattern]) => pattern.test(modelId));
+    if (family) return family[1];
+  }
+  // Gemini remains a valid identity in older saved transcripts.
+  return providerId === "gemini" || isProviderId(providerId)
+    ? providerId
+    : undefined;
 }
 
 /** Place durable model changes at their timestamp, between chat turns. */
@@ -424,9 +457,9 @@ function isBlankMessage(item: InterleavedChatTimelineItem) {
 export function interleavedChatTimelineItems(events: SessionEvent[]) {
   const items: InterleavedChatTimelineItem[] = [];
   const fileEvents: SessionEvent[] = [];
-  for (const event of orderedChatTimelineEvents(
+  for (const event of groupWorkflowEvents(orderedChatTimelineEvents(
     expandAssistantMessageSegments(events),
-  )) {
+  ))) {
     const activityKind = providerActivityKind(event);
     if (activityKind === "file") {
       fileEvents.push(event);

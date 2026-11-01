@@ -1,4 +1,5 @@
-import { ChevronRight, FileCode2 } from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import { workspaceFileBadge } from "./workspace-file-icons";
 import "./workspace-search-results.css";
 import { useMemo, useState } from "react";
 import type { WorkspaceSearchResult } from "./types";
@@ -68,6 +69,8 @@ export function WorkspaceSearchResults({
         const slash = path.lastIndexOf("/");
         const name = path.slice(slash + 1);
         const directory = slash >= 0 ? path.slice(0, slash) : "";
+        const badge = workspaceFileBadge(path);
+        const FileIcon = badge.icon;
         return (
           <section className="gyro-workspace-search-file" key={path}>
             <div className="gyro-workspace-search-file-heading">
@@ -97,7 +100,12 @@ export function WorkspaceSearchResults({
                   size={13}
                   className={collapsed ? "" : "is-expanded"}
                 />
-                <FileCode2 size={14} />
+                <FileIcon
+                  aria-hidden="true"
+                  className="gyro-workspace-search-file-icon"
+                  data-file-tone={badge.tone}
+                  size={14}
+                />
                 <strong>{name}</strong>
                 <small>{directory}</small>
                 <span

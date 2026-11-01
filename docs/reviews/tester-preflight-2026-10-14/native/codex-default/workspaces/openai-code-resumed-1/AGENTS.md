@@ -1,0 +1,1 @@
+Work only in this workspace. Complete the requested change with minimal tools. Preserve unrelated files. Do not use network access, install dependencies, commit, push, or delegate. Verify code edits with node --test. Keep your final response brief.

@@ -1,0 +1,68 @@
+[
+  {
+    "theme": "dark",
+    "state": "loading",
+    "font": "-apple-system, \"system-ui\", \"Segoe UI\", sans-serif",
+    "overflow": false,
+    "text": "Gyro\nNew Session\nSearch\nStarting Gyro…\nWhat should we work on?\nDescribe a task or attach images\nChoose model",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "theme": "dark",
+    "state": "startup-error",
+    "font": "-apple-system, \"system-ui\", \"Segoe UI\", sans-serif",
+    "overflow": false,
+    "text": "Gyro couldn’t load.\n\nReload the window to try again.\n\nReload Gyro",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "theme": "dark",
+    "state": "render-error",
+    "font": "-apple-system, \"system-ui\", \"Segoe UI\", sans-serif",
+    "overflow": false,
+    "text": "Gyro hit a rendering error.\n\nReload the window to try again.\n\nReload Gyro",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "theme": "light",
+    "state": "loading",
+    "font": "-apple-system, \"system-ui\", \"Segoe UI\", sans-serif",
+    "overflow": false,
+    "text": "Gyro\nNew Session\nSearch\nStarting Gyro…\nWhat should we work on?\nDescribe a task or attach images\nChoose model",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "theme": "light",
+    "state": "startup-error",
+    "font": "-apple-system, \"system-ui\", \"Segoe UI\", sans-serif",
+    "overflow": false,
+    "text": "Gyro couldn’t load.\n\nReload the window to try again.\n\nReload Gyro",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "theme": "light",
+    "state": "render-error",
+    "font": "-apple-system, \"system-ui\", \"Segoe UI\", sans-serif",
+    "overflow": false,
+    "text": "Gyro hit a rendering error.\n\nReload the window to try again.\n\nReload Gyro",
+    "viewport": [
+      860,
+      620
+    ]
+  }
+]

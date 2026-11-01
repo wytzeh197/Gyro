@@ -1,4 +1,28 @@
 import assert from "node:assert/strict";
+import { remainingUsage } from "../packages/ui/src/usage-remaining.ts";
+
+for (const [used, expected, label] of [
+  [0, 100, "100%"],
+  [46, 54, "54%"],
+  [100, 0, "0%"],
+  [105, 0, "0%"],
+  [-5, 100, "100%"],
+  [99.6, 0.4, "<1%"],
+  [0.4, 99.6, ">99%"],
+]) {
+  const left = remainingUsage(used);
+  assert.ok(Math.abs(left.percent - expected) < 1e-9);
+  assert.equal(left.percentLabel, label);
+}
+for (const unknown of [undefined, NaN, Infinity]) {
+  assert.equal(remainingUsage(unknown).percent, undefined);
+  assert.equal(remainingUsage(unknown).percentLabel, "—");
+}
+assert.deepEqual(remainingUsage(undefined, true), {
+  percent: 0,
+  percentLabel: "0%",
+});
+assert.deepEqual(remainingUsage(25, true), { percent: 0, percentLabel: "0%" });
 import {
   providerUsageFromSnapshot,
   providerUsageAfterError,
@@ -7,8 +31,10 @@ import {
 import {
   composerContextUsageForModel,
   composerLimitWindows,
+  contextOccupancyEpoch,
   estimateComposerContextUsage,
   formatLimitReset,
+  holdContextOccupancyPeak,
   providerResetSummary,
 } from "../packages/ui/src/context-usage.ts";
 
@@ -30,9 +56,75 @@ const estimated = estimateComposerContextUsage([], "x".repeat(1_600), {
   contextWindowTokens: 400_000,
 });
 assert.equal(estimated.source, "estimated");
-assert.equal(estimated.usedLabel, "400");
+assert.equal(estimated.usedTokens, 0);
+assert.equal(estimated.usedLabel, "0");
 assert.equal(estimated.windowLabel, "400K");
-assert.equal(estimated.percentLabel, "<1%");
+assert.equal(estimated.percentLabel, "0%");
+assert.equal(estimated.remainingPercentLabel, "100%");
+assert.match(estimated.detail, /has not reported window occupancy/);
+assert.equal(
+  composerContextUsageForModel(estimated, {
+    providerId: "openai",
+    modelId: "gpt-5.4-mini",
+    contextWindowTokens: 500_000,
+  }).contextWindowTokens,
+  500_000,
+  "A catalog update replaces an unreported baseline even for the same model",
+);
+
+for (const providerId of ["cursor", "opencode", "custom:unknown"]) {
+  const unknown = estimateComposerContextUsage([], "x".repeat(1_600), {
+    providerId,
+    modelId: `${providerId}-default`,
+  });
+  assert.equal(unknown.usedTokens, 0);
+  assert.equal(unknown.windowLabel, "Unknown");
+  assert.equal(unknown.percentLabel, "—");
+  assert.equal(unknown.remainingLabel, "Unknown");
+  assert.equal(unknown.remainingPercent, undefined);
+  assert.equal(unknown.remainingPercentLabel, "—");
+  assert.match(unknown.label, /context window unknown/);
+}
+
+// Malformed or contradictory token readings must never be labeled measured.
+for (const invalid of [
+  { inputTokens: -1 },
+  { inputTokens: 1.5 },
+  { inputTokens: NaN },
+  { inputTokens: Number.MAX_SAFE_INTEGER + 1 },
+  { inputTokens: 10, outputTokens: -1 },
+  { inputTokens: 10, outputTokens: 5, totalTokens: 999 },
+  { inputTokens: 10, outputTokens: 5, totalTokens: 0 },
+  { inputTokens: 10, modelContextWindow: Infinity },
+]) {
+  const reading = estimateComposerContextUsage(
+    [
+      event("invalid", "assistant-message", "", {
+        providerId: "openai",
+        modelId: "fixture",
+        contextUsage: invalid,
+      }),
+    ],
+    "",
+    { providerId: "openai", modelId: "fixture", contextWindowTokens: 1000 },
+  );
+  assert.equal(reading.source, "estimated");
+  assert.equal(reading.usedTokens, 0);
+  assert.equal(reading.contextWindowTokens, 1000);
+}
+const pureProvider = estimateComposerContextUsage(
+  [
+    event("pure", "assistant-message", "", {
+      providerId: "openai",
+      modelId: "fixture",
+      contextUsage: { inputTokens: 120, outputTokens: 20, totalTokens: 140 },
+    }),
+  ],
+  "",
+  { providerId: "openai", modelId: "fixture", contextWindowTokens: 1000 },
+);
+assert.equal(pureProvider.source, "reported");
+assert.equal(pureProvider.usedTokens, 140);
 
 const events = [
   event("1", "assistant-message", "old model", {
@@ -64,12 +156,120 @@ const reported = estimateComposerContextUsage(events, "z".repeat(400), {
   modelLabel: "GPT-5.6 Sol",
   contextWindowTokens: 1_050_000,
 });
-assert.equal(reported.source, "reported");
+assert.equal(
+  reported.source,
+  "reported",
+  "A newer draft does not turn a provider measurement into an estimate",
+);
+assert.equal(reported.usedTokens, 12_000);
 assert.equal(reported.usedLabel, "12K");
-// The window is the selected model's, not the one some earlier turn recorded.
-assert.equal(reported.windowLabel, "1.05M");
-assert.equal(reported.percentLabel, "1%");
-assert.match(reported.detail, /newer thread content and this draft/);
+
+const trafficEstimate = estimateComposerContextUsage(
+  [
+    event("traffic", "system-event", "", {
+      kind: "provider-context-usage",
+      providerId: "xai",
+      modelId: "grok-4.7",
+      contextWindowSource: "catalog",
+      contextUsage: {
+        inputTokens: 120_000,
+        totalTokens: 120_000,
+        estimated: true,
+        modelContextWindow: 500_000,
+      },
+    }),
+  ],
+  "",
+  {
+    providerId: "xai",
+    modelId: "grok-4.7",
+    modelLabel: "Grok 4.7",
+    contextWindowTokens: 500_000,
+  },
+);
+assert.equal(
+  trafficEstimate.source,
+  "estimated",
+  "A traffic lower bound is not occupancy",
+);
+assert.equal(trafficEstimate.usedTokens, 0);
+assert.match(trafficEstimate.detail, /has not reported window occupancy/);
+assert.doesNotMatch(trafficEstimate.detail, /tool traffic/);
+// A matching runtime window wins over the API/catalog maximum.
+assert.equal(reported.windowLabel, "100K");
+assert.equal(reported.percentLabel, "12%");
+assert.equal(reported.remainingPercentLabel, "88%");
+assert.match(reported.label, /12K of 100K tokens used \(12% used\)/);
+assert.match(reported.detail, /reported by the provider/);
+assert.equal(
+  composerContextUsageForModel(reported, {
+    providerId: "openai",
+    modelId: "gpt-5.6-sol",
+    modelLabel: "GPT-5.6 Sol",
+    contextWindowTokens: 1_050_000,
+  }),
+  reported,
+  "Opening the picker on the same model preserves its runtime window",
+);
+
+for (const [providerId, modelId, window] of [
+  ["openai", "gpt-6.1-sol", 500_000],
+  ["xai", "grok-4.7", 256_000],
+  ["antigravity", "antigravity-default", 0],
+  ["openrouter", "z-ai/glm-5.3", 1_048_576],
+]) {
+  assert.equal(
+    estimateComposerContextUsage([], "", { providerId, modelId })
+      .contextWindowTokens,
+    window,
+  );
+}
+
+assert.equal(
+  estimateComposerContextUsage([], "", {
+    providerId: "gemini",
+    modelId: "gemini-default",
+  }).contextWindowTokens,
+  0,
+  "A retired provider must not advertise a guessed context allocation",
+);
+
+// A provisioned Kimi plan and a local Ollama allocation can differ from the
+// offline catalog, in either direction. Counts must use the actual window.
+for (const [providerId, modelId, catalog, runtime] of [
+  ["kimi", "k3", 262_144, 1_048_576],
+  ["ollama", "local-model", 131_072, 4_096],
+]) {
+  const actual = estimateComposerContextUsage(
+    [
+      event("runtime", "assistant-message", "", {
+        providerId,
+        modelId,
+        contextUsage: { inputTokens: 1_024, modelContextWindow: runtime },
+      }),
+    ],
+    "",
+    { providerId, modelId, contextWindowTokens: catalog },
+  );
+  assert.equal(actual.contextWindowTokens, runtime);
+  assert.equal(
+    composerContextUsageForModel(actual, {
+      providerId,
+      modelId,
+      contextWindowTokens: catalog,
+    }).contextWindowTokens,
+    runtime,
+  );
+  // An identical model ID served by a different provider must use its own window.
+  assert.equal(
+    composerContextUsageForModel(actual, {
+      providerId: "custom:other",
+      modelId,
+      contextWindowTokens: 32_768,
+    }).contextWindowTokens,
+    32_768,
+  );
+}
 
 // A model with no window of its own in the catalog still measures against the
 // window the provider reported for it.
@@ -93,7 +293,107 @@ const switchedModel = estimateComposerContextUsage(events, "", {
 assert.equal(switchedModel.source, "reported");
 assert.equal(switchedModel.usedLabel, "12K");
 assert.equal(switchedModel.windowLabel, "400K");
-assert.match(switchedModel.detail, /ran on gpt-5\.6-sol/);
+assert.match(switchedModel.detail, /reported by the provider/);
+assert.doesNotMatch(switchedModel.detail, /ran on/);
+
+// The same count stays visible on a provider that did not produce it.
+const otherProvider = estimateComposerContextUsage(events, "", {
+  providerId: "xai",
+  modelId: "grok-4.7",
+  modelLabel: "Grok 4.7",
+  contextWindowTokens: 500_000,
+});
+assert.equal(otherProvider.source, "reported");
+assert.equal(otherProvider.usedTokens, switchedModel.usedTokens);
+assert.equal(otherProvider.windowLabel, "500K");
+assert.match(otherProvider.detail, /reported by the provider/);
+
+const smallerModel = estimateComposerContextUsage(events, "", {
+  providerId: "custom:smaller",
+  modelId: "small-model",
+  contextWindowTokens: 4_096,
+});
+assert.equal(
+  smallerModel.usedTokens,
+  switchedModel.usedTokens,
+  "Selecting a smaller model must preserve the observed conversation occupancy",
+);
+assert.equal(smallerModel.percent, 100);
+assert.equal(smallerModel.remainingPercent, 0);
+assert.equal(smallerModel.source, "reported");
+
+const liveContext = {
+  ...event("live-context", "system-event", "", {
+    kind: "provider-context-usage",
+    providerId: "openai",
+    modelId: "fixture",
+    contextUsage: {
+      inputTokens: 120,
+      outputTokens: 20,
+      totalTokens: 140,
+      modelContextWindow: 1000,
+    },
+  }),
+  turnId: "live-turn",
+};
+const finalResponse = {
+  ...event("final-context", "assistant-message", "", {
+    kind: "provider-response",
+    providerId: "openai",
+    modelId: "fixture",
+  }),
+  turnId: "live-turn",
+};
+for (const contextUsage of [
+  undefined,
+  { modelContextWindow: 1000 },
+  { inputTokens: 1.5 },
+  { inputTokens: 2_000, totalTokens: 2_000, modelContextWindow: 1000 },
+]) {
+  const retained = estimateComposerContextUsage(
+    [
+      liveContext,
+      {
+        ...finalResponse,
+        payload: { ...finalResponse.payload, contextUsage },
+      },
+    ],
+    "",
+    { providerId: "openai", modelId: "fixture", contextWindowTokens: 1000 },
+  );
+  assert.equal(
+    retained.usedTokens,
+    140,
+    "A response without usable occupancy cannot erase the provider's stream observation",
+  );
+  assert.equal(retained.source, "reported");
+}
+const finalContext = {
+  ...finalResponse,
+  payload: {
+    ...finalResponse.payload,
+    contextUsage: {
+      inputTokens: 160,
+      outputTokens: 20,
+      totalTokens: 180,
+      modelContextWindow: 1000,
+    },
+  },
+};
+for (const ordered of [
+  [liveContext, finalContext],
+  [finalContext, liveContext],
+]) {
+  assert.equal(
+    estimateComposerContextUsage(ordered, "", {
+      providerId: "openai",
+      modelId: "fixture",
+      contextWindowTokens: 1000,
+    }).usedTokens,
+    180,
+    "A final context observation supersedes a stale live checkpoint in either array order",
+  );
+}
 
 const clamped = estimateComposerContextUsage(
   [
@@ -112,12 +412,13 @@ const clamped = estimateComposerContextUsage(
 );
 assert.equal(clamped.percent, 100);
 assert.equal(clamped.remainingLabel, "0");
+assert.equal(clamped.remainingPercent, 0);
+assert.equal(clamped.remainingPercentLabel, "0%");
 
 // A turn total is not what the window holds. Claude Code's closing frame sums
 // every request the turn made, which read as "1.18M of 200K · 0 remaining"
 // against a window six times smaller. A reading the window cannot hold is
-// dropped and the thread estimate stands in, so sessions recorded before the
-// fix stop reporting it too.
+// dropped. Sessions recorded before the fix stop reporting it too.
 const billingTotal = estimateComposerContextUsage(
   [
     event("9", "assistant-message", "z".repeat(2_000), {
@@ -140,11 +441,12 @@ const billingTotal = estimateComposerContextUsage(
 );
 assert.equal(billingTotal.source, "estimated");
 assert.equal(billingTotal.windowLabel, "200K");
-assert.equal(billingTotal.usedLabel, "500");
+assert.equal(billingTotal.usedTokens, 0);
+assert.equal(billingTotal.usedLabel, "0");
 assert.equal(billingTotal.remainingLabel, "200K");
 
-// A local checkpoint replaces the old provider thread. Its saved text still
-// occupies context, and the stale pre-compaction reading must not win.
+// A local checkpoint replaces the old provider thread. The stale
+// pre-compaction reading must not win, and the digest is not a token count.
 const checkpoint = estimateComposerContextUsage(
   [
     event("a", "assistant-message", "old", {
@@ -168,8 +470,7 @@ const checkpoint = estimateComposerContextUsage(
   { providerId: "anthropic", modelId: "claude-opus-5" },
 );
 assert.equal(checkpoint.source, "estimated");
-assert.ok(checkpoint.usedTokens >= 1_000);
-assert.ok(checkpoint.usedTokens < 2_000);
+assert.equal(checkpoint.usedTokens, 0);
 
 // A nearly untouched 1M window must not report more headroom than the window
 // holds. Rounding the remainder to the nearest thousand reads "1000K", a unit
@@ -201,8 +502,7 @@ assert.equal(nearlyEmpty.remainingLabel, "1M");
 assert.equal(nearlyEmpty.percentLabel, "<1%");
 
 // Providers that report no token counts still publish the window Gyro resolved
-// for their model. The meter has to size itself from that record and keep
-// estimating the usage, rather than fall back to a default window.
+// for their model. The meter keeps that window and does not invent a usage.
 const windowOnly = estimateComposerContextUsage(
   [
     event("7", "assistant-message", "hello", {
@@ -217,20 +517,21 @@ const windowOnly = estimateComposerContextUsage(
 );
 assert.equal(windowOnly.source, "estimated");
 assert.equal(windowOnly.windowLabel, "131K");
-assert.equal(windowOnly.usedLabel, "1K");
+assert.equal(windowOnly.usedTokens, 0);
+assert.equal(windowOnly.usedLabel, "0");
 
 const grok46Fallback = estimateComposerContextUsage([], "hello", {
   providerId: "xai",
   modelId: "grok-4.6",
   modelLabel: "Grok 4.6",
 });
-assert.equal(grok46Fallback.windowLabel, "500K");
+assert.equal(grok46Fallback.windowLabel, "256K");
 const grok47Fallback = estimateComposerContextUsage([], "hello", {
   providerId: "xai",
   modelId: "grok-4.7",
   modelLabel: "Grok 4.7",
 });
-assert.equal(grok47Fallback.windowLabel, "500K");
+assert.equal(grok47Fallback.windowLabel, "256K");
 
 // Browsing another model must rescale the same occupancy against that
 // model's window immediately, rather than keep the previous model's remaining.
@@ -257,7 +558,7 @@ assert.equal(
     providerId: "xai",
     modelId: "grok-4.6",
     modelLabel: "Grok 4.6",
-    contextWindowTokens: 500_000,
+    contextWindowTokens: 256_000,
   }),
   grok46Fallback,
 );
@@ -358,6 +659,8 @@ const merged = composerLimitWindows(
 );
 assert.equal(merged[0].id, "five-hour");
 assert.equal(merged[0].percent, 84);
+assert.equal(merged[0].remainingPercent, 16);
+assert.equal(merged[0].remainingPercentLabel, "16%");
 assert.equal(merged[0].severity, "warning");
 assert.equal(merged.length, 1);
 
@@ -555,9 +858,19 @@ const expired = composerLimitWindows(
   [],
   now + 3_600_001,
 );
+// Past their reset the windows are unmeasured, not gone and not empty: the
+// plan still meters them, and the composer waits for the next live reading.
 assert.deepEqual(
-  expired.map((window) => window.percent),
-  [],
+  expired.map((window) => [
+    window.id,
+    window.remainingPercentLabel,
+    window.status,
+    window.resetsLabel,
+  ]),
+  [
+    ["five-hour", "\u2014", "unknown", undefined],
+    ["weekly", "\u2014", "unknown", undefined],
+  ],
 );
 const newWindow = composerLimitWindows(
   separateWindows,
@@ -646,7 +959,11 @@ for (const mode of ["normal", "plan", "goal", "council"]) {
     activityDetail: "x".repeat(400),
     activityStatus: "done",
   });
-  assert.ok(estimateComposerContextUsage(live, "", model).usedTokens > 12_100);
+  assert.equal(
+    estimateComposerContextUsage(live, "", model).usedTokens,
+    12_100,
+    "activity text is not occupancy",
+  );
   applyProviderChatStreamDeltas(ref, set, [
     { ...frame, phase: "delta", sequence: 3, textDelta: "y".repeat(400) },
   ]);
@@ -659,13 +976,13 @@ for (const mode of ["normal", "plan", "goal", "council"]) {
     estimateComposerContextUsage(live, "", model).usedTokens,
     15_100,
   );
-  // Growing an existing assistant row must count only text after the reading.
+  // Text that arrives after a reading is not occupancy.
   applyProviderChatStreamDeltas(ref, set, [
     { ...frame, phase: "delta", sequence: 5, textDelta: "z".repeat(400) },
   ]);
   assert.equal(
     estimateComposerContextUsage(live, "", model).usedTokens,
-    15_200,
+    15_100,
   );
   assert.equal(
     live.filter((item) => item.payload?.kind === "provider-context-usage")
@@ -698,8 +1015,127 @@ const toolOnly = [
     detail: "x".repeat(4_000),
   }),
 ];
-assert.ok(
-  estimateComposerContextUsage(toolOnly, "", { providerId: "xai" })
-    .usedTokens >= 1_000,
+assert.equal(
+  estimateComposerContextUsage(toolOnly, "", { providerId: "xai" }).usedTokens,
+  0,
 );
 console.log("Live context stream checks passed.");
+
+// A resend abandons the attempt that was running, so the newest reading is
+// smaller than the one before it even though the chat itself is unchanged.
+// The meter holds the peak so the bar never reads as history going missing,
+// which is the same rule for every provider and model because it only
+// compares reported numbers.
+const peakModel = {
+  providerId: "deepseek",
+  modelId: "deepseek-v4.1",
+  modelLabel: "DeepSeek V4.1",
+  contextWindowTokens: 1_048_576,
+};
+const chatStart = [event("1", "user-message", "why did the meter drop?")];
+const epoch = contextOccupancyEpoch(chatStart);
+const measured = (id, tokens) =>
+  event(id, "assistant-message", "", {
+    providerId: peakModel.providerId,
+    modelId: peakModel.modelId,
+    contextUsage: {
+      inputTokens: tokens,
+      outputTokens: 0,
+      totalTokens: tokens,
+    },
+  });
+const longAttempt = estimateComposerContextUsage(
+  [...chatStart, measured("long", 100_000)],
+  "",
+  peakModel,
+);
+const afterResend = estimateComposerContextUsage(
+  [...chatStart, measured("short", 8_000)],
+  "",
+  peakModel,
+);
+assert.ok(
+  afterResend.usedTokens < longAttempt.usedTokens,
+  "a resend re-bases the raw reading on the smaller prompt",
+);
+const firstReading = holdContextOccupancyPeak(undefined, longAttempt, epoch);
+assert.equal(firstReading.usage.usedTokens, longAttempt.usedTokens);
+const heldReading = holdContextOccupancyPeak(
+  firstReading.peak,
+  afterResend,
+  epoch,
+);
+assert.equal(
+  heldReading.usage.usedTokens,
+  longAttempt.usedTokens,
+  "the meter keeps the peak a resend abandoned",
+);
+assert.equal(heldReading.usage.percent, longAttempt.percent);
+assert.match(heldReading.usage.detail, /highest occupancy this chat has reached/);
+// The same epoch across a fresh attempt: a second resend cannot walk it back.
+assert.equal(
+  holdContextOccupancyPeak(
+    holdContextOccupancyPeak(heldReading.peak, afterResend, epoch).peak,
+    afterResend,
+    epoch,
+  ).usage.usedTokens,
+  longAttempt.usedTokens,
+);
+
+// A compaction really does release the thread, so the peak starts over.
+const compacted = event("9", "system-event", "Compacted context", {
+  kind: "provider-activity",
+  activityKind: "context",
+  activityId: "context-compaction-1",
+  status: "done",
+});
+const releasedEpoch = contextOccupancyEpoch([...chatStart, compacted]);
+assert.notEqual(releasedEpoch, epoch);
+assert.equal(
+  holdContextOccupancyPeak(heldReading.peak, afterResend, releasedEpoch).usage
+    .usedTokens,
+  afterResend.usedTokens,
+);
+
+// Every other activity row leaves the epoch alone, for every provider.
+const toolRow = event("8", "system-event", "Read chat-run.ts", {
+  kind: "provider-activity",
+  activityKind: "tools",
+  activityId: "tool-1",
+  status: "done",
+});
+assert.equal(contextOccupancyEpoch([...chatStart, toolRow]), epoch);
+assert.equal(
+  contextOccupancyEpoch([
+    ...chatStart.map((item) => ({ ...item, sessionId: "session-2" })),
+  ]) === epoch,
+  false,
+  "another chat never inherits this peak",
+);
+
+// A peak that does not fit the selected window must not claim it is full.
+const smallWindow = {
+  ...peakModel,
+  modelId: "small",
+  modelLabel: "Small",
+  contextWindowTokens: 64_000,
+};
+const smallReading = estimateComposerContextUsage(
+  [...chatStart, measured("small", 8_000)],
+  "",
+  smallWindow,
+);
+const narrowed = holdContextOccupancyPeak(
+  heldReading.peak,
+  smallReading,
+  epoch,
+);
+assert.equal(narrowed.usage.usedTokens, smallReading.usedTokens);
+assert.ok(narrowed.usage.percent < 100);
+
+// Selecting the large model again restores the peak the chat reached.
+assert.equal(
+  holdContextOccupancyPeak(narrowed.peak, afterResend, epoch).usage.usedTokens,
+  longAttempt.usedTokens,
+);
+console.log("Context peak checks passed.");

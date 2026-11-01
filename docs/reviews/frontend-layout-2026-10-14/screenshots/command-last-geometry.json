@@ -1,0 +1,17 @@
+{
+  "focused": "Message Gyro",
+  "list": {
+    "bottom": 267.984375,
+    "scrollTop": 470.5263366699219,
+    "top": 47.15625
+  },
+  "menu": {
+    "bottom": 304.765625,
+    "top": 10.15625
+  },
+  "selected": {
+    "bottom": 267.484375,
+    "text": "/diffShow diff",
+    "top": 230.34375
+  }
+}

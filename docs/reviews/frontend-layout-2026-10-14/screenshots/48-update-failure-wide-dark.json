@@ -1,0 +1,373 @@
+{
+  "bodyWidth": 1440,
+  "controls": [
+    {
+      "className": "",
+      "label": "Simulate save failure",
+      "rect": {
+        "bottom": 25,
+        "height": 13,
+        "right": 551.75,
+        "width": 13,
+        "x": 538.75,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "Simulate Reduce Motion",
+      "rect": {
+        "bottom": 25,
+        "height": 13,
+        "right": 703.171875,
+        "width": 13,
+        "x": 690.171875,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "Up to date",
+      "rect": {
+        "bottom": 29,
+        "height": 21,
+        "right": 881.421875,
+        "width": 75.40625,
+        "x": 806.015625,
+        "y": 8
+      }
+    },
+    {
+      "className": "",
+      "label": "Checking",
+      "rect": {
+        "bottom": 29,
+        "height": 21,
+        "right": 960.4375,
+        "width": 69.015625,
+        "x": 891.421875,
+        "y": 8
+      }
+    },
+    {
+      "className": "",
+      "label": "Update available",
+      "rect": {
+        "bottom": 29,
+        "height": 21,
+        "right": 1080.265625,
+        "width": 109.828125,
+        "x": 970.4375,
+        "y": 8
+      }
+    },
+    {
+      "className": "",
+      "label": "Downloading",
+      "rect": {
+        "bottom": 29,
+        "height": 21,
+        "right": 1179.53125,
+        "width": 89.265625,
+        "x": 1090.265625,
+        "y": 8
+      }
+    },
+    {
+      "className": "",
+      "label": "Ready to install",
+      "rect": {
+        "bottom": 29,
+        "height": 21,
+        "right": 1291.921875,
+        "width": 102.390625,
+        "x": 1189.53125,
+        "y": 8
+      }
+    },
+    {
+      "className": "",
+      "label": "Installing",
+      "rect": {
+        "bottom": 29,
+        "height": 21,
+        "right": 1368.6875,
+        "width": 66.765625,
+        "x": 1301.921875,
+        "y": 8
+      }
+    },
+    {
+      "className": "",
+      "label": "Failed",
+      "rect": {
+        "bottom": 29,
+        "height": 21,
+        "right": 1428,
+        "width": 49.3125,
+        "x": 1378.6875,
+        "y": 8
+      }
+    },
+    {
+      "className": "",
+      "label": "Development",
+      "rect": {
+        "bottom": 60,
+        "height": 21,
+        "right": 102.703125,
+        "width": 90.703125,
+        "x": 12,
+        "y": 39
+      }
+    },
+    {
+      "className": "",
+      "label": "No updater",
+      "rect": {
+        "bottom": 60,
+        "height": 21,
+        "right": 192.09375,
+        "width": 79.390625,
+        "x": 112.703125,
+        "y": 39
+      }
+    },
+    {
+      "className": "gyro-sidebar-toggle-button",
+      "label": "Hide sidebar",
+      "rect": {
+        "bottom": 105,
+        "height": 26,
+        "right": 120,
+        "width": 28,
+        "x": 92,
+        "y": 79
+      }
+    },
+    {
+      "className": "gyro-settings-back-button has-label",
+      "label": "Back to fixture",
+      "rect": {
+        "bottom": 155,
+        "height": 34,
+        "right": 124.578125,
+        "width": 106.578125,
+        "x": 18,
+        "y": 121
+      }
+    },
+    {
+      "className": "",
+      "label": "Search settings",
+      "rect": {
+        "bottom": 197,
+        "height": 30,
+        "right": 224,
+        "width": 171,
+        "x": 53,
+        "y": 167
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "General",
+      "rect": {
+        "bottom": 266,
+        "height": 28,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 238
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Appearance",
+      "rect": {
+        "bottom": 297,
+        "height": 28,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 269
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Keyboard Shortcuts",
+      "rect": {
+        "bottom": 328,
+        "height": 28,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 300
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Usage & Limits",
+      "rect": {
+        "bottom": 387,
+        "height": 28,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 359
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Models & Accounts",
+      "rect": {
+        "bottom": 418,
+        "height": 28,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 390
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "CLI Profiles",
+      "rect": {
+        "bottom": 449,
+        "height": 28,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 421
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Permissions",
+      "rect": {
+        "bottom": 480,
+        "height": 28,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 452
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Workspace",
+      "rect": {
+        "bottom": 539,
+        "height": 28,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 511
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Tools",
+      "rect": {
+        "bottom": 570,
+        "height": 28,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 542
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Import projects",
+      "rect": {
+        "bottom": 601,
+        "height": 28,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 573
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-active is-settings-page",
+      "label": "Updates",
+      "rect": {
+        "bottom": 660,
+        "height": 28,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 632
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Advanced",
+      "rect": {
+        "bottom": 691,
+        "height": 28,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 663
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Help",
+      "rect": {
+        "bottom": 722,
+        "height": 28,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 694
+      }
+    },
+    {
+      "className": "gyro-primary-button gyro-update-card-primary",
+      "label": "Try update again",
+      "rect": {
+        "bottom": 273.953125,
+        "height": 28,
+        "right": 1026.984375,
+        "width": 129.890625,
+        "x": 897.09375,
+        "y": 245.953125
+      }
+    },
+    {
+      "className": "gyro-secondary-button",
+      "label": "Check for updates",
+      "rect": {
+        "bottom": 273.953125,
+        "height": 28,
+        "right": 1193.5,
+        "width": 158.515625,
+        "x": 1034.984375,
+        "y": 245.953125
+      }
+    },
+    {
+      "className": "gyro-settings-switch is-on",
+      "label": "Automatic update checks",
+      "rect": {
+        "bottom": 564.578125,
+        "height": 24,
+        "right": 1199.5,
+        "width": 42,
+        "x": 1157.5,
+        "y": 540.578125
+      }
+    }
+  ],
+  "htmlWidth": 1440,
+  "overlaps": [],
+  "popovers": [],
+  "theme": "dark",
+  "viewport": {
+    "height": 900,
+    "width": 1440
+  }
+}

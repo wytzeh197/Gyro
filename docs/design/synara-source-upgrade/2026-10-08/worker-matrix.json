@@ -1,0 +1,686 @@
+[
+  {
+    "state": "running",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "small",
+    "status": "1 needs attention · 1 running",
+    "strip": {
+      "bottom": 449.015625,
+      "height": 29,
+      "left": 40,
+      "right": 820,
+      "top": 420.015625,
+      "width": 780,
+      "x": 40,
+      "y": 420.015625
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "waiting-expanded",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "small",
+    "status": "1 needs approval · 1 needs attention",
+    "strip": {
+      "bottom": 449.015625,
+      "height": 112.5625,
+      "left": 40,
+      "right": 820,
+      "top": 336.453125,
+      "width": 780,
+      "x": 40,
+      "y": 336.453125
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "completed-expanded",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "small",
+    "status": "1 needs attention",
+    "strip": {
+      "bottom": 449.015625,
+      "height": 112.5625,
+      "left": 40,
+      "right": 820,
+      "top": 336.453125,
+      "width": 780,
+      "x": 40,
+      "y": 336.453125
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "running",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "default",
+    "status": "1 needs attention · 1 running",
+    "strip": {
+      "bottom": 448,
+      "height": 29,
+      "left": 40,
+      "right": 820,
+      "top": 419,
+      "width": 780,
+      "x": 40,
+      "y": 419
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "waiting-expanded",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "default",
+    "status": "1 needs approval · 1 needs attention",
+    "strip": {
+      "bottom": 448,
+      "height": 121,
+      "left": 40,
+      "right": 820,
+      "top": 327,
+      "width": 780,
+      "x": 40,
+      "y": 327
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "completed-expanded",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "default",
+    "status": "1 needs attention",
+    "strip": {
+      "bottom": 448,
+      "height": 121,
+      "left": 40,
+      "right": 820,
+      "top": 327,
+      "width": 780,
+      "x": 40,
+      "y": 327
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "running",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "large",
+    "status": "1 needs attention · 1 running",
+    "strip": {
+      "bottom": 440.328125,
+      "height": 33.1875,
+      "left": 40,
+      "right": 820,
+      "top": 407.140625,
+      "width": 780,
+      "x": 40,
+      "y": 407.140625
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "waiting-expanded",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "large",
+    "status": "1 needs approval · 1 needs attention",
+    "strip": {
+      "bottom": 440.328125,
+      "height": 137.75,
+      "left": 40,
+      "right": 820,
+      "top": 302.578125,
+      "width": 780,
+      "x": 40,
+      "y": 302.578125
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "completed-expanded",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "large",
+    "status": "1 needs attention",
+    "strip": {
+      "bottom": 440.328125,
+      "height": 137.75,
+      "left": 40,
+      "right": 820,
+      "top": 302.578125,
+      "width": 780,
+      "x": 40,
+      "y": 302.578125
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "running",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "small",
+    "status": "1 needs attention · 1 running",
+    "strip": {
+      "bottom": 449.015625,
+      "height": 29,
+      "left": 40,
+      "right": 820,
+      "top": 420.015625,
+      "width": 780,
+      "x": 40,
+      "y": 420.015625
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "waiting-expanded",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "small",
+    "status": "1 needs approval · 1 needs attention",
+    "strip": {
+      "bottom": 449.015625,
+      "height": 112.5625,
+      "left": 40,
+      "right": 820,
+      "top": 336.453125,
+      "width": 780,
+      "x": 40,
+      "y": 336.453125
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "completed-expanded",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "small",
+    "status": "1 needs attention",
+    "strip": {
+      "bottom": 449.015625,
+      "height": 112.5625,
+      "left": 40,
+      "right": 820,
+      "top": 336.453125,
+      "width": 780,
+      "x": 40,
+      "y": 336.453125
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "running",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "default",
+    "status": "1 needs attention · 1 running",
+    "strip": {
+      "bottom": 448,
+      "height": 29,
+      "left": 40,
+      "right": 820,
+      "top": 419,
+      "width": 780,
+      "x": 40,
+      "y": 419
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "waiting-expanded",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "default",
+    "status": "1 needs approval · 1 needs attention",
+    "strip": {
+      "bottom": 448,
+      "height": 121,
+      "left": 40,
+      "right": 820,
+      "top": 327,
+      "width": 780,
+      "x": 40,
+      "y": 327
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "completed-expanded",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "default",
+    "status": "1 needs attention",
+    "strip": {
+      "bottom": 448,
+      "height": 121,
+      "left": 40,
+      "right": 820,
+      "top": 327,
+      "width": 780,
+      "x": 40,
+      "y": 327
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "running",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "large",
+    "status": "1 needs attention · 1 running",
+    "strip": {
+      "bottom": 440.328125,
+      "height": 33.1875,
+      "left": 40,
+      "right": 820,
+      "top": 407.140625,
+      "width": 780,
+      "x": 40,
+      "y": 407.140625
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "waiting-expanded",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "large",
+    "status": "1 needs approval · 1 needs attention",
+    "strip": {
+      "bottom": 440.328125,
+      "height": 137.75,
+      "left": 40,
+      "right": 820,
+      "top": 302.578125,
+      "width": 780,
+      "x": 40,
+      "y": 302.578125
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "completed-expanded",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "large",
+    "status": "1 needs attention",
+    "strip": {
+      "bottom": 440.328125,
+      "height": 137.75,
+      "left": 40,
+      "right": 820,
+      "top": 302.578125,
+      "width": 780,
+      "x": 40,
+      "y": 302.578125
+    },
+    "theme": "dark"
+  },
+  {
+    "state": "running",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "small",
+    "status": "1 needs attention · 1 running",
+    "strip": {
+      "bottom": 449.015625,
+      "height": 29,
+      "left": 40,
+      "right": 820,
+      "top": 420.015625,
+      "width": 780,
+      "x": 40,
+      "y": 420.015625
+    },
+    "theme": "light"
+  },
+  {
+    "state": "waiting-expanded",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "small",
+    "status": "1 needs approval · 1 needs attention",
+    "strip": {
+      "bottom": 449.015625,
+      "height": 112.5625,
+      "left": 40,
+      "right": 820,
+      "top": 336.453125,
+      "width": 780,
+      "x": 40,
+      "y": 336.453125
+    },
+    "theme": "light"
+  },
+  {
+    "state": "completed-expanded",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "small",
+    "status": "1 needs attention",
+    "strip": {
+      "bottom": 449.015625,
+      "height": 112.5625,
+      "left": 40,
+      "right": 820,
+      "top": 336.453125,
+      "width": 780,
+      "x": 40,
+      "y": 336.453125
+    },
+    "theme": "light"
+  },
+  {
+    "state": "running",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "default",
+    "status": "1 needs attention · 1 running",
+    "strip": {
+      "bottom": 448,
+      "height": 29,
+      "left": 40,
+      "right": 820,
+      "top": 419,
+      "width": 780,
+      "x": 40,
+      "y": 419
+    },
+    "theme": "light"
+  },
+  {
+    "state": "waiting-expanded",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "default",
+    "status": "1 needs approval · 1 needs attention",
+    "strip": {
+      "bottom": 448,
+      "height": 121,
+      "left": 40,
+      "right": 820,
+      "top": 327,
+      "width": 780,
+      "x": 40,
+      "y": 327
+    },
+    "theme": "light"
+  },
+  {
+    "state": "completed-expanded",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "default",
+    "status": "1 needs attention",
+    "strip": {
+      "bottom": 448,
+      "height": 121,
+      "left": 40,
+      "right": 820,
+      "top": 327,
+      "width": 780,
+      "x": 40,
+      "y": 327
+    },
+    "theme": "light"
+  },
+  {
+    "state": "running",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "large",
+    "status": "1 needs attention · 1 running",
+    "strip": {
+      "bottom": 440.328125,
+      "height": 33.1875,
+      "left": 40,
+      "right": 820,
+      "top": 407.140625,
+      "width": 780,
+      "x": 40,
+      "y": 407.140625
+    },
+    "theme": "light"
+  },
+  {
+    "state": "waiting-expanded",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "large",
+    "status": "1 needs approval · 1 needs attention",
+    "strip": {
+      "bottom": 440.328125,
+      "height": 137.75,
+      "left": 40,
+      "right": 820,
+      "top": 302.578125,
+      "width": 780,
+      "x": 40,
+      "y": 302.578125
+    },
+    "theme": "light"
+  },
+  {
+    "state": "completed-expanded",
+    "density": "compact",
+    "outside": [],
+    "overflow": false,
+    "size": "large",
+    "status": "1 needs attention",
+    "strip": {
+      "bottom": 440.328125,
+      "height": 137.75,
+      "left": 40,
+      "right": 820,
+      "top": 302.578125,
+      "width": 780,
+      "x": 40,
+      "y": 302.578125
+    },
+    "theme": "light"
+  },
+  {
+    "state": "running",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "small",
+    "status": "1 needs attention · 1 running",
+    "strip": {
+      "bottom": 449.015625,
+      "height": 29,
+      "left": 40,
+      "right": 820,
+      "top": 420.015625,
+      "width": 780,
+      "x": 40,
+      "y": 420.015625
+    },
+    "theme": "light"
+  },
+  {
+    "state": "waiting-expanded",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "small",
+    "status": "1 needs approval · 1 needs attention",
+    "strip": {
+      "bottom": 449.015625,
+      "height": 112.5625,
+      "left": 40,
+      "right": 820,
+      "top": 336.453125,
+      "width": 780,
+      "x": 40,
+      "y": 336.453125
+    },
+    "theme": "light"
+  },
+  {
+    "state": "completed-expanded",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "small",
+    "status": "1 needs attention",
+    "strip": {
+      "bottom": 449.015625,
+      "height": 112.5625,
+      "left": 40,
+      "right": 820,
+      "top": 336.453125,
+      "width": 780,
+      "x": 40,
+      "y": 336.453125
+    },
+    "theme": "light"
+  },
+  {
+    "state": "running",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "default",
+    "status": "1 needs attention · 1 running",
+    "strip": {
+      "bottom": 448,
+      "height": 29,
+      "left": 40,
+      "right": 820,
+      "top": 419,
+      "width": 780,
+      "x": 40,
+      "y": 419
+    },
+    "theme": "light"
+  },
+  {
+    "state": "waiting-expanded",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "default",
+    "status": "1 needs approval · 1 needs attention",
+    "strip": {
+      "bottom": 448,
+      "height": 121,
+      "left": 40,
+      "right": 820,
+      "top": 327,
+      "width": 780,
+      "x": 40,
+      "y": 327
+    },
+    "theme": "light"
+  },
+  {
+    "state": "completed-expanded",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "default",
+    "status": "1 needs attention",
+    "strip": {
+      "bottom": 448,
+      "height": 121,
+      "left": 40,
+      "right": 820,
+      "top": 327,
+      "width": 780,
+      "x": 40,
+      "y": 327
+    },
+    "theme": "light"
+  },
+  {
+    "state": "running",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "large",
+    "status": "1 needs attention · 1 running",
+    "strip": {
+      "bottom": 440.328125,
+      "height": 33.1875,
+      "left": 40,
+      "right": 820,
+      "top": 407.140625,
+      "width": 780,
+      "x": 40,
+      "y": 407.140625
+    },
+    "theme": "light"
+  },
+  {
+    "state": "waiting-expanded",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "large",
+    "status": "1 needs approval · 1 needs attention",
+    "strip": {
+      "bottom": 440.328125,
+      "height": 137.75,
+      "left": 40,
+      "right": 820,
+      "top": 302.578125,
+      "width": 780,
+      "x": 40,
+      "y": 302.578125
+    },
+    "theme": "light"
+  },
+  {
+    "state": "completed-expanded",
+    "density": "comfortable",
+    "outside": [],
+    "overflow": false,
+    "size": "large",
+    "status": "1 needs attention",
+    "strip": {
+      "bottom": 440.328125,
+      "height": 137.75,
+      "left": 40,
+      "right": 820,
+      "top": 302.578125,
+      "width": 780,
+      "x": 40,
+      "y": 302.578125
+    },
+    "theme": "light"
+  }
+]

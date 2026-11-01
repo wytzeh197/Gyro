@@ -1,5 +1,105 @@
-import { workspaceEditorOptions } from "./editor-presentation";
-import { useWorkbenchAppearance, storedThemeMode, THEME_STORAGE_KEY } from "./use-workbench-appearance";
+import { flushSync } from "react-dom";
+import {
+  MonacoEditorPane,
+  type WorkspaceNavigationSource,
+} from "./editor/workspace-code-editor";
+import { canonicalFileUri, filePathFromUri } from "./editor/document-uri";
+import { useLanguageSessions } from "./editor/use-language-sessions";
+import {
+  useWorkspaceRename,
+  editorBufferFromFile,
+} from "./editor/use-workspace-rename";
+import {
+  recoverWorkspaceBuffers,
+  hasEditRecovery,
+  writeEditRecovery,
+} from "./editor/edit-recovery";
+import {
+  WorkspaceRenameDialog,
+  WorkspaceEditBar,
+  askTextValue,
+  browserConfirm,
+  validateWorkspaceEntryName,
+  workspaceEntryName,
+} from "@gyro-dev/ui";
+import { confirmAction, setConfirmActionHandler } from "@gyro-dev/ui";
+import { ManagedDiffEditor } from "./managed-diff-editor";
+import {
+  type CliInstallPlanReport,
+  providerCliName,
+  providerInstallProfile,
+  providerLoginProfile,
+  providerLoginCommandText,
+} from "./provider-login-profile";
+import { parseProviderLoginProgress } from "./provider-login-progress";
+import { ProviderSignInContext } from "@gyro-dev/ui";
+import { FirstRunTour } from "@gyro-dev/ui";
+import {
+  useInlineSignInRunner,
+  useProviderSignIn,
+  useProviderSignInActions,
+} from "./use-provider-sign-in";
+import { useSubagents } from "./use-subagents";
+import {
+  readBoundedLocalStorage,
+  readStoredAppearance,
+  safeSetLocalStorage,
+  saveAppearancePreferences,
+} from "./ui-storage";
+import {
+  parseSystemAccessSnapshot,
+  SYSTEM_ACCESS_STATUS_STORAGE_KEY,
+} from "./system-access-state";
+import { useAppearanceSaveFeedback } from "./use-appearance-save-feedback";
+import { useSessionBrowserEvents, changeSessionBrowserViewport } from "./use-session-browser-events";
+import type { BrowserViewportMode } from "@gyro-dev/ui";
+import {
+  sourceControlForWorkspace,
+  useScopedIdeState,
+} from "./source-control-scope";
+import { sessionApprovalCounts, sessionQuestionCounts } from "@gyro-dev/ui";
+import { fastModeConfigFromAction } from "@gyro-dev/ui";
+import { useProjectImport } from "./use-project-import";
+import { useTaskHandoff } from "./use-task-handoff";
+import { useChatAutoRetry } from "./use-chat-auto-retry";
+import { applyNativeProviderRetryStatus } from "./provider-retry-stream";
+import {
+  createChatRetryDispatcher,
+  isChatRetryCurrent,
+} from "./chat-retry-dispatch";
+import {
+  ChatRetryContext,
+  WorkspacePathUndoContext,
+  type WorkspacePathUndoOffer,
+} from "@gyro-dev/ui";
+import {
+  compareSessionEventsForHistory,
+  mergeSessionHistoryPages,
+} from "./session-event-order";
+import {
+  createPreviewSession,
+  createPreviewWorkspaceFileContent,
+  createTauriThreadSession,
+  newSessionModelFromConfig,
+  normalizeSessionTitleInput,
+  previewFiles,
+  selectedSessionModelFromConfig,
+  sessionModelSelectionFromSession,
+  workspaceRunMetadata,
+} from "./session-creation";
+import {
+  useWorkbenchAppearance,
+  storedThemeMode,
+  THEME_STORAGE_KEY,
+} from "./use-workbench-appearance";
+import {
+  createIdeEvidenceScheduler,
+  type IdeEvidenceScheduler,
+} from "./ide-evidence-push";
+import {
+  workspaceContextRelativePath,
+  workspaceContextWithLiveEditor,
+} from "./workspace-context-bridge";
 import {
   turnIdFromSessionEvent,
   chatModeEventMessage,
@@ -20,17 +120,28 @@ import {
   useDerivedSessionContext,
   useSessionContextEvents,
 } from "./use-session-context-events";
-import { ComposerContextCandidates } from "@gyro-dev/ui";
 import {
+  ChatFileActionsContext,
+  ComposerContextCandidates,
+} from "@gyro-dev/ui";
+import {
+  isSplitChatLayout,
+  registerExternalLinkOpener,
   restoreCompanionPanes,
   PullRequestForm,
   type PullRequestDraft,
 } from "@gyro-dev/ui";
 import { restoreModelCatalog, useModelCatalog } from "./use-model-catalog";
+import { useLiveModelContext } from "./use-live-model-context";
+import { useGoogleModels } from "./use-google-models";
 import { persistAutoCompactPercent } from "./auto-compaction";
 import { useUsageActions } from "./usage-actions";
 import { useProviderApiKeys } from "./provider-api-keys";
-import { useProviderConnectionGuard } from "./provider-connection-guard";
+import {
+  useProviderConnectionGuard,
+  type ProviderConnectionOptions,
+} from "./provider-connection-guard";
+import { isComposerCliUpdating } from "./cli-update-scope";
 import {
   providerHealthDetailsFromCheck,
   providerHealthRequest,
@@ -65,10 +176,13 @@ import {
   visibleSessionsForProjects,
 } from "./session-listing";
 import * as turnTiming from "./turn-timing";
+import { useMeasuredWorkbenchReducer } from "./use-measured-workbench";
 import { terminalLaunchProfiles } from "@gyro-dev/ui";
 import {
   pendingMediaAttachment,
   settlePendingMedia,
+  withMediaUploadTimeout,
+  queueMediaUpload,
   trackPendingMedia,
   withoutPendingMedia,
 } from "./pending-media-attachments";
@@ -80,8 +194,21 @@ import {
   useTerminalAttachmentController,
 } from "./terminal-attachment";
 import { isTauriRuntime } from "./tauri-runtime";
-import { decodeSemanticTokens, semanticLegend } from "./editor/semantic-tokens";
+import {
+  admitWorkspaceFile,
+  admitWorkspaceFolders,
+  useWorkspaceRootHealth,
+  useWorkspaceRootRecovery,
+  workspaceRootRejectionNotice,
+} from "./use-workspace-roots";
+import {
+  sameSessionEvents,
+  useCoalescedByKey,
+  useDebouncedPersist,
+} from "./responsiveness";
 import { BranchNameDialog } from "./branch-name-dialog";
+import { QuitConfirmDialog } from "./quit-confirm-dialog";
+import { useQuitConfirmation } from "./use-quit-confirmation";
 import {
   chatAttachmentKindForPath,
   chatAttachmentPickerFilters,
@@ -89,13 +216,17 @@ import {
   isSupportedChatVideoPath,
   type ChatAttachmentPickerKind,
 } from "./chat-attachment-picker";
-import { resolveLanguage, editorFilePolicy } from "@gyro-dev/ui";
-import { useSyntax } from "./editor/use-syntax";
+import {
+  resolveLanguage,
+  editorFilePolicy,
+  setOpenDroppedWorkspaceHandler,
+} from "@gyro-dev/ui";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import type { OnMount } from "@monaco-editor/react";
+import { confirm as nativeConfirm } from "@tauri-apps/plugin-dialog";
+
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import "@xterm/xterm/css/xterm.css";
 import {
   AppChrome,
@@ -118,7 +249,6 @@ import {
   ModelStandardPromptOverlay,
   ProjectRemoveConfirmOverlay,
   providerNeedsSignIn,
-  ProvidersSurface,
   SettingsSurface,
   TerminalTerminateConfirmOverlay,
   ToolsSurface,
@@ -134,6 +264,7 @@ import {
   createInitialChatCompanionState,
   createInitialChatGridState,
   createInitialWorkbenchState,
+  applyLaunchView,
   type WorkbenchAction,
   discardedSideChatSessionIds,
   isChatCompanionTabId,
@@ -142,6 +273,7 @@ import {
   withoutSideChatSessions,
   createNotification,
   createTerminalPane,
+  isTransientWorkspacePath,
   isUserSelectedWorkspacePath,
   defaultCommandProfiles,
   getProviderModel,
@@ -156,6 +288,8 @@ import {
   workspaceFilesForRoot,
   workspaceRelativeFilePath,
   workspaceRootForPath,
+  formatExplorerAskListing,
+  planWorkspaceMove,
   workspacePathExcluded,
   normalizedConfig,
   COUNCIL_COMING_SOON,
@@ -183,7 +317,6 @@ import {
   sanitizeStoredChatGridState,
   selectedReasoningEffort,
   serializeGyroWorkspaceFile,
-  workbenchReducer,
   type AppDestination,
   type Automation,
   type BrowserPreviewCapture,
@@ -209,6 +342,7 @@ import {
   type SideChatState,
   type ChatSidePanelId,
   type CliLaunchPreset,
+  type LaunchView,
   type CommandProfile,
   type DebugSessionState,
   type EditorBuffer,
@@ -225,7 +359,6 @@ import {
   type IdeAiToolCall,
   type IdeAssistantAction,
   type IdeAssistantRequest,
-  type LanguageServerState,
   type MenuBarOutcome,
   type MenuBarSnapshot,
   type OutputChannel,
@@ -241,12 +374,10 @@ import {
   type SessionUsageTotals,
   type UsageSafetySnapshot,
   type ProviderLedgerSummary,
-  type ProviderHandoff,
   type ProviderChatStreamEvent,
   type ProviderResumeCursor,
   type ReasoningEffort,
   type ResolvedTheme,
-  type ProviderSession,
   type ProblemDiagnostic,
   type Session,
   type SessionEvent,
@@ -291,6 +422,7 @@ import {
 } from "@gyro-dev/ui";
 import {
   lazy,
+  memo,
   startTransition,
   Suspense,
   useCallback,
@@ -302,6 +434,7 @@ import {
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
   applyProviderChatStreamPresentation,
@@ -309,7 +442,7 @@ import {
   settleOpenProviderActivitiesForTurn,
   isProviderStatusEvent,
   limitSessionEventsForUi,
-  MAX_CHAT_EVENT_HOLD_COUNT,
+  limitOptimisticSessionEvents,
   MAX_CHAT_EVENT_RENDER_COUNT,
   mergePersistedAndOptimisticEvents,
   mergeLiveCapabilityEvent,
@@ -332,7 +465,6 @@ import {
 } from "./menu-bar-state";
 import { useUnreadCompletedChats } from "./unread-completed-chats";
 
-const MonacoEditor = lazy(() => import("./monaco-editor"));
 const SourceControlDiffEditor = lazy(
   () => import("./source-control-diff-editor"),
 );
@@ -380,14 +512,6 @@ type TerminalPaneSnapshot = {
   rows: number;
   governedSessionId?: string | null;
   governedProviderId?: string | null;
-};
-
-type LspSessionResult = {
-  serverId: string;
-  languageId: string;
-  command: string;
-  status: string;
-  message: string;
 };
 
 type LspBridgeResponse = {
@@ -459,6 +583,8 @@ type ChatTurnContextSnapshot = {
   preserveDraft?: boolean;
   turnId?: string;
   retryTurnId?: string;
+  /** Cancel a retry that is still preparing when Stop or a new send wins. */
+  retryDispatchGuard?: () => boolean;
 };
 
 type QueuedChatMessage = {
@@ -562,7 +688,7 @@ const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
 const CHAT_DRAFT_MODES_STORAGE_KEY = "gyro.chat-draft-modes-v1";
 const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
 const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
-/** Set once the first launch has asked macOS for its folder grants. */
+/** Record the first automatic request before macOS opens a permission sheet. */
 const SYSTEM_ACCESS_PROMPTED_STORAGE_KEY = "gyro.system-access-prompted-v1";
 const MODEL_STANDARD_PROMPT_THRESHOLD = 3;
 const MODEL_STANDARD_PROMPT_SNOOZE_SELECTIONS = 3;
@@ -576,6 +702,12 @@ const PROVIDER_AUTH_POLL_ATTEMPTS = 40;
 // runs a browser login someone has to complete by hand, and giving up early
 // means dropping the message that was waiting on it.
 const PROVIDER_SIGN_IN_POLL_ATTEMPTS = 100;
+// The model popover shows the sign-in link as soon as the CLI prints it, so an
+// inline sign-in reads its terminal quickly for the first few seconds.
+const PROVIDER_SIGN_IN_FAST_POLL_MS = 500;
+const PROVIDER_SIGN_IN_FAST_POLL_ATTEMPTS = 12;
+// npm installs of a provider CLI finish in well under five minutes.
+const PROVIDER_INSTALL_POLL_ATTEMPTS = 600;
 const MAX_CHAT_MESSAGE_CHARS = 24_000;
 const MAX_CHAT_IMAGES_PER_MESSAGE = 10;
 const MAX_CHAT_VIDEOS_PER_MESSAGE = 2;
@@ -588,6 +720,7 @@ const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
 // The draft key for a chat with no session yet. Shared with the UI package so
 // a drop and the composer holding it always name the same draft.
 const PROVIDER_STREAM_FLUSH_MS = 80;
+
 const WORKBENCH_PERSIST_DEBOUNCE_MS = 500;
 const WORKBENCH_PERSIST_IDLE_TIMEOUT_MS = 1_500;
 const TERMINAL_POLL_INTERVAL_MS = 1_000;
@@ -633,75 +766,6 @@ const ACTIVE_TURN_IDLE_MS = 5 * 60 * 1000;
 
 function modelUsageKey(providerId: ProviderId, modelId: string) {
   return `${providerId}:${modelId}`;
-}
-
-function providerLoginProfile(providerId: ProviderId): CommandProfile {
-  if (providerId === "anthropic") {
-    return {
-      args: ["auth", "login"],
-      command: "claude",
-      displayName: "Anthropic Login",
-      id: "anthropic-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "cursor") {
-    return {
-      args: ["login"],
-      command: "cursor-agent",
-      displayName: "Cursor Login",
-      id: "cursor-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "opencode") {
-    return {
-      args: ["auth", "login"],
-      command: "opencode",
-      displayName: "OpenCode Login",
-      id: "opencode-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "kimi") {
-    return {
-      args: ["login"],
-      command: "kimi",
-      displayName: "Kimi Login",
-      id: "kimi-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "xai") {
-    return {
-      args: ["login"],
-      command: "grok",
-      displayName: "xAI Login",
-      id: "xai-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "gemini") {
-    return {
-      args: [],
-      command: "gemini",
-      displayName: "Gemini Login",
-      id: "gemini-login",
-      workingDirectory: null,
-    };
-  }
-
-  return {
-    args: ["login", "--device-auth"],
-    command: "codex",
-    displayName: "OpenAI Login",
-    id: "openai-login",
-    workingDirectory: null,
-  };
-}
-
-function providerLoginCommandText(profile: CommandProfile) {
-  return [profile.command, ...profile.args].join(" ");
 }
 
 /**
@@ -805,15 +869,19 @@ type BrowserOwner = {
 };
 
 export function App() {
-  const [workbench, dispatchWorkbench] = useReducer(
-    workbenchReducer,
-    undefined,
+  const quitConfirmation = useQuitConfirmation();
+  const [workbench, dispatchWorkbench] = useMeasuredWorkbenchReducer(
     loadInitialWorkbenchState,
   );
-  const { resolvedTheme, reduceMotion, appearance } = useWorkbenchAppearance(workbench.preferences);
+  const { appearanceSaveStatus, onAppearancePersisted, retryAppearanceSave } =
+    useAppearanceSaveFeedback(workbench.preferences);
+  const { resolvedTheme, reduceMotion, appearance } = useWorkbenchAppearance(
+    workbench.preferences,
+  );
   const [sessions, setSessions] = useState<Session[]>([]);
   // Session persistence and title updates must not interrupt live tool events.
   const sessionsRef = useRef(sessions);
+  const sessionsLoadedRef = useRef(false);
   sessionsRef.current = sessions;
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const activeSessionIdRef = useRef(activeSessionId);
@@ -822,6 +890,8 @@ export function App() {
   // user changes surface or follow preference.
   const modelFollowRef = useRef(workbench.preferences.modelFollow);
   modelFollowRef.current = workbench.preferences.modelFollow;
+  // Assigned once the workspace handlers exist, further down this component.
+  const openWorkspaceFolderRef = useRef<(path: string) => Promise<void>>();
   const activeWorkspaceLayoutRef = useRef(workbench.activeWorkspaceLayout);
   activeWorkspaceLayoutRef.current = workbench.activeWorkspaceLayout;
   const [sessionEventsById, setSessionEventsById] = useState<
@@ -842,22 +912,31 @@ export function App() {
     useState<Record<string, ChatBrowserResource>>({});
   const [capabilityResourceDataByCallId, setCapabilityResourceDataByCallId] =
     useState<Record<string, unknown>>({});
-  const [chatGrid, dispatchChatGrid] = useReducer(
+  const [chatGrid, reduceChatGrid] = useReducer(
     chatGridReducer,
     undefined,
     loadChatGridState,
+  );
+  const chatGridRef = useRef(chatGrid);
+  chatGridRef.current = chatGrid;
+  // Keep acceptance and queued layout updates on the same state, including
+  // multiple drops dispatched before React commits another render.
+  const dispatchChatGrid = useCallback(
+    (action: Parameters<typeof chatGridReducer>[1]) => {
+      const current = chatGridRef.current;
+      const next = chatGridReducer(current, action);
+      if (next === current) return false;
+      chatGridRef.current = next;
+      reduceChatGrid(action);
+      return true;
+    },
+    [],
   );
   const events = activeSessionId
     ? (sessionEventsById[activeSessionId] ?? [])
     : [];
   const limitEventsForSession = useCallback(
-    (sessionId: string, events: SessionEvent[]) =>
-      limitSessionEventsForUi(
-        events,
-        expandedHistorySessionsRef.current.has(sessionId)
-          ? MAX_CHAT_EVENT_HOLD_COUNT
-          : MAX_CHAT_EVENT_RENDER_COUNT,
-      ),
+    (_sessionId: string, events: SessionEvent[]) => events,
     [],
   );
   const setEventsForSession = useCallback(
@@ -882,14 +961,27 @@ export function App() {
     [setEventsForSession],
   );
   const eventsRef = useRef<SessionEvent[]>([]);
+  const sessionEventsByIdRef = useRef(sessionEventsById);
+  sessionEventsByIdRef.current = sessionEventsById;
   const optimisticEventsRef = useRef(new Map<string, SessionEvent[]>());
-  const [workspacePath, setWorkspacePath] = useState<string>();
+  const [workspacePath, setWorkspacePath] = useState<string | undefined>(
+    loadInitialWorkspacePath,
+  );
   const [branchCatalog, setBranchCatalog] = useState<GitBranchCatalog>();
   const [isBranchLoading, setIsBranchLoading] = useState(false);
   /** A push or pull is in flight, so the sync control stays a single press. */
   const [sourceControlSyncing, setSourceControlSyncing] = useState(false);
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>();
+  const selectedFileRef = useRef(selectedFile);
+  selectedFileRef.current = selectedFile;
+  const editorBuffersRef = useRef(workbench.ide.buffers);
+  editorBuffersRef.current = workbench.ide.buffers;
+  const navigationRequestRef = useRef(0);
+  const [navigationHistory, setNavigationHistory] = useState<{
+    entries: WorkspaceNavigationSource[];
+    index: number;
+  }>({ entries: [], index: -1 });
   const [languageOverrides, setLanguageOverrides] = useState<
     Record<string, string>
   >({});
@@ -918,6 +1010,15 @@ export function App() {
   >(() => loadChatDraftModes());
   const chatDraftModesRef = useRef(chatDraftModes);
   const chatDraftModeRevisionsRef = useRef<Record<string, number>>({});
+  /**
+   * Goal mode is a selection, not a one-shot editor: it outlives the message
+   * that sets the goal, so the chip stays with the chat until removed.
+   */
+  const [chatDraftGoalModes, setChatDraftGoalModes] = useState<
+    Record<string, boolean>
+  >({});
+  /** Draft key whose Goal mode should follow a newly started goal chat. */
+  const goalModeCarryRef = useRef<string>();
   /** Per-draft model picks so split-screen new chats don't share the global model. */
   const [chatDraftModels, setChatDraftModels] = useState<
     Record<string, SessionModelSelection>
@@ -925,6 +1026,8 @@ export function App() {
   const [chatAttachments, setChatAttachments] = useState<
     Record<string, ChatAttachment[]>
   >(() => loadChatAttachments());
+  const chatAttachmentsRef = useRef(chatAttachments);
+  chatAttachmentsRef.current = chatAttachments;
   const [chatMessageQueues, setChatMessageQueues] = useState<
     Record<string, QueuedChatMessage[]>
   >({});
@@ -948,9 +1051,14 @@ export function App() {
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermissionState>("prompt");
   const [isTestingNotification, setIsTestingNotification] = useState(false);
-  const [systemAccess, setSystemAccess] = useState<SystemAccessScope[]>([]);
+  const [systemAccess, setSystemAccess] = useState<SystemAccessScope[]>(() =>
+    parseSystemAccessSnapshot(
+      readBoundedLocalStorage(SYSTEM_ACCESS_STATUS_STORAGE_KEY, 16_000),
+    ),
+  );
   const [isCheckingSystemAccess, setIsCheckingSystemAccess] = useState(false);
   const systemAccessBootstrapRef = useRef(false);
+  const systemAccessCheckRef = useRef<Promise<SystemAccessScope[]> | null>(null);
   // What each chat has spent, read from Gyro's usage ledger. Unlike the
   // provider quota windows above, this covers every provider, including the
   // ones whose CLIs report no token counts at all.
@@ -1003,6 +1111,14 @@ export function App() {
     useState<SavedProject>();
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
   const sendingSessionIdsRef = useRef(new Set<string>());
+  const approvalCountsBySessionId = useMemo(
+    () => sessionApprovalCounts(sessions, sessionEventsById),
+    [sessions, sessionEventsById],
+  );
+  const questionCountsBySessionId = useMemo(
+    () => sessionQuestionCounts(sessions, sessionEventsById, sendingSessionIds),
+    [sessions, sessionEventsById, sendingSessionIds],
+  );
   const queuedDeliveryNotBeforeRef = useRef(new Map<string, number>());
   const {
     unreadCompletedSessionIds,
@@ -1023,6 +1139,25 @@ export function App() {
   const queuedChatDispatchMessageIdsRef = useRef(new Map<string, string>());
   const persistedChatTurnIdsRef = useRef(new Set<string>());
   const [queueRetryTick, setQueueRetryTick] = useState(0);
+  const retryProviderStatusRef = useRef<(event: SessionEvent) => void>(
+    () => {},
+  );
+  const retryDispatchRef = useRef(createChatRetryDispatcher());
+  useEffect(() => () => retryDispatchRef.current.cancelAll(), []);
+  const chatAutoRetry = useChatAutoRetry({
+    enabled: isTauriRuntime(),
+    eventsBySessionId: sessionEventsById,
+    sendingSessionIds,
+    queueVersion: chatMessageQueues,
+    pauseVersion: queueRetryTick,
+    blockedSessionIds: () =>
+      new Set([
+        ...sendingSessionIdsRef.current,
+        ...stoppedChatSessionsRef.current,
+        ...queuedChatDispatchesRef.current,
+      ]),
+    onRetry: (event) => retryProviderStatusRef.current(event),
+  });
   const pendingPaneSendRef = useRef<{
     paneId: string;
     message: string;
@@ -1129,7 +1264,8 @@ export function App() {
   const [loadingEarlierSessionIds, setLoadingEarlierSessionIds] = useState<
     string[]
   >([]);
-  const expandedHistorySessionsRef = useRef(new Set<string>());
+  const completeHistorySessionsRef = useRef(new Set<string>());
+  const historyRevisionsRef = useRef<Record<string, string | undefined>>({});
   const toolPanelHeight = workbench.preferences.workspacePanelHeight;
   const [isStartingFirstTurn, setIsStartingFirstTurn] = useState(false);
   // Chat UI paints immediately; non-essential actions stay gated until the
@@ -1137,6 +1273,8 @@ export function App() {
   const [isShellOptimizing, setIsShellOptimizing] = useState(() =>
     isTauriRuntime(),
   );
+  const refreshModelContexts = useLiveModelContext(config, setConfig, isShellOptimizing);
+  const refreshGoogleModels = useGoogleModels(config, setConfig, isShellOptimizing);
   const suppressSessionAutoSelectRef = useRef(true);
   // Sessions whose chat pane the user closed.
   //
@@ -1151,8 +1289,6 @@ export function App() {
   const refreshedFileActivityKeysRef = useRef(new Set<string>());
   const lastNonSettingsDestinationRef = useRef<AppDestination>("workspace");
   const initialTerminalRestoreModeRef = useRef(workbench.workspaceMode);
-  const languageServerIdsRef = useRef<Record<string, string>>({});
-  const languageServerOpenedDocsRef = useRef(new Set<string>());
   // Providers that rejected the sign-in Gyro sent with, mirrored into a ref so
   // the stream and health callbacks read the live set without re-subscribing.
   // The writers below update it eagerly: a sign-in and the health check that
@@ -1282,7 +1418,7 @@ export function App() {
     workbench.activePaneTab === "browser" &&
     workbench.isToolPanelOpen &&
     Boolean(activeWorkspaceRoot);
-  const workspaceRoots = useMemo(() => {
+  const configuredWorkspaceRoots = useMemo(() => {
     const configured = workspaceFolderPaths(
       activeWorkspaceRoot,
       workbench.preferences.workspaceFolders,
@@ -1307,10 +1443,18 @@ export function App() {
     workbench.preferences.workspaceFolders,
     workbench.preferences.projectDetails,
   ]);
+  // Unavailable roots stay configured but leave the session, Explorer, and agent.
+  const workspaceRootHealth = useWorkspaceRootHealth(
+    configuredWorkspaceRoots,
+    activeWorkspaceRoot,
+    dispatchWorkbench,
+  );
+  const workspaceRoots = workspaceRootHealth.roots;
   const workspaceActionRoot =
     workspaceRootForPath(workspaceRoots, selectedWorkspaceRoot) ??
     workspaceRootForPath(workspaceRoots, selectedFile) ??
     activeWorkspaceRoot;
+  const scopedIde = useScopedIdeState(workbench.ide, workspaceActionRoot);
   useEffect(() => {
     const identity = activeSession?.workspaceIdentity;
     const active = identity?.roots.find(
@@ -1372,6 +1516,14 @@ export function App() {
   useEffect(() => {
     dispatchCompanion({ type: "focus-pane", paneId: companionFocusPaneId });
   }, [companionFocusPaneId]);
+  // Model "follow" reports arrive through a long-lived listener; it reads the
+  // split through this ref so a browser the model drives stays on the backend
+  // instead of covering the transcript of a tiled pane.
+  const isSplitChatViewRef = useRef(false);
+  isSplitChatViewRef.current = isSplitChatLayout({
+    occupiedPaneCount: (activeChatLayout?.slots ?? []).filter(Boolean).length,
+    hasMaximizedPane: Boolean(chatGrid.maximizedPaneId),
+  });
   useModelBrowserReveal({
     activeSessionId,
     dispatch: dispatchWorkbench,
@@ -1681,10 +1833,20 @@ export function App() {
     },
     [openCompanionTab, soloEnvironment],
   );
+  const sessionForPane = (paneId: string) => {
+    const pane = displayedChatLayout.slots.find(
+      (slot) => slot?.paneId === paneId,
+    );
+    return pane?.kind === "session" ? pane.sessionId : undefined;
+  };
   const companionSurfaceProps = (paneId: string) => ({
     dailyPaceWarning: workbench.preferences.dailyPaceWarning,
     providerLedgerById,
     sideChat: sideChatFor(paneId),
+    subagents: subagentController.forPane(
+      paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId),
+      paneId,
+    ),
     companionTabs: chatCompanionPane(companion, paneId).openTabs,
     companionWidth: companion.dockWidth,
     browserCompanionWidth: companion.browserDockWidth,
@@ -1842,6 +2004,31 @@ export function App() {
   // The chip describes the next message. Historical mode events describe
   // submitted turns and must never select a mode for an unsent draft.
   const selectedDraftMode = chatDraftModes[activeDraftKey] ?? "normal";
+  // A goal outlives the message that set it: a chat with a goal starts with
+  // Goal mode selected, and a dismissal stays off for that draft. The editor
+  // itself also reads as selected, so opening Goal always shows the chip.
+  const activeGoalMode =
+    isGoalComposerActive ||
+    (chatDraftGoalModes[activeDraftKey] ?? Boolean(activeSessionGoal?.text));
+  const closeGoalComposer = useCallback(() => {
+    setIsGoalComposerActive(false);
+    // Saving or starting a goal selects Goal mode again, even if the user had
+    // dismissed it earlier; the goal is what the chat is now working toward.
+    // A draft has no chat key yet, so its new session picks the mode up from
+    // the goal itself rather than leaving a stale entry on the draft.
+    if (activeDraftKey === NEW_CHAT_DRAFT_KEY) return;
+    setChatDraftGoalModes((current) => ({
+      ...current,
+      [activeDraftKey]: true,
+    }));
+  }, [activeDraftKey]);
+  const dismissGoalComposer = useCallback(() => {
+    setIsGoalComposerActive(false);
+    setChatDraftGoalModes((current) => ({
+      ...current,
+      [activeDraftKey]: false,
+    }));
+  }, [activeDraftKey]);
   const activeChatMode =
     COUNCIL_COMING_SOON && selectedDraftMode === "council"
       ? "normal"
@@ -1853,6 +2040,16 @@ export function App() {
     : [];
   useEffect(() => {
     setIsGoalComposerActive(false);
+    // Starting a goal creates its chat a moment later. Carry the selection
+    // onto that chat so the chip never blinks off while its first events load.
+    const carriedDraftKey = goalModeCarryRef.current;
+    if (!activeSessionId || !carriedDraftKey) return;
+    goalModeCarryRef.current = undefined;
+    setChatDraftGoalModes((current) => {
+      const next = { ...current, [activeSessionId]: true };
+      delete next[carriedDraftKey];
+      return next;
+    });
   }, [activeSessionId]);
   const derivedActiveTurn = useMemo(
     () =>
@@ -1890,6 +2087,7 @@ export function App() {
     );
   }, [pinnedSessionIds, removedProjectPaths, sessions]);
   useEffect(() => {
+    if (!sessionsLoadedRef.current) return;
     const sessionById = new Map(
       sessions.map((session) => [session.id, session]),
     );
@@ -2074,9 +2272,14 @@ export function App() {
             persistedRoots.some((path, index) => path !== workspaceRoots[index])
           ) {
             dispatchWorkbench({
-              type: "set-workspace-folders",
+              type: "canonicalize-workspace-folders",
               workspacePath: updated.workspacePath,
-              paths: persistedRoots.slice(1),
+              replacements: Object.fromEntries(
+                workspaceRoots.map((root, index) => [
+                  root,
+                  persistedRoots[index] ?? root,
+                ]),
+              ),
             });
             const active = updated.workspaceIdentity?.roots.find(
               (root) => root.id === updated.workspaceIdentity?.activeRootId,
@@ -2194,7 +2397,7 @@ export function App() {
   useEffect(() => {
     if (
       activeDestination !== "settings" ||
-      workbench.preferences.lastSettingsSection !== "permissions" ||
+      workbench.preferences.lastSettingsSection !== "general" ||
       !isTauriRuntime()
     ) {
       return undefined;
@@ -2231,23 +2434,33 @@ export function App() {
     }
   }, [isTestingNotification, notify]);
   /**
-   * Resolves Gyro's macOS folder grants. On an undetermined scope the read
-   * inside `check_system_access` is what makes macOS show its permission sheet,
-   * so the first call of the app's life is also the one that asks.
+   * Reading an undetermined scope can open a native permission sheet.
+   * Only first launch or an explicit recheck requests access; Settings
+   * restores the saved display snapshot without touching protected folders.
    */
-  const checkSystemAccess = useCallback(async () => {
-    if (!isTauriRuntime()) return [] as SystemAccessScope[];
+  const checkSystemAccess = useCallback(() => {
+    if (!isTauriRuntime()) return Promise.resolve([] as SystemAccessScope[]);
+    if (systemAccessCheckRef.current) return systemAccessCheckRef.current;
     setIsCheckingSystemAccess(true);
-    try {
-      const scopes = await invoke<SystemAccessScope[]>("check_system_access");
-      setSystemAccess(scopes);
-      return scopes;
-    } catch (error) {
-      notify("command-failed", "Could not check macOS access", String(error));
-      return [] as SystemAccessScope[];
-    } finally {
-      setIsCheckingSystemAccess(false);
-    }
+    const pending = invoke<SystemAccessScope[]>("check_system_access")
+      .then((scopes) => {
+        safeSetLocalStorage(
+          SYSTEM_ACCESS_STATUS_STORAGE_KEY,
+          JSON.stringify(scopes),
+        );
+        setSystemAccess(scopes);
+        return scopes;
+      })
+      .catch((error) => {
+        notify("command-failed", "Could not check macOS access", String(error));
+        return [] as SystemAccessScope[];
+      })
+      .finally(() => {
+        systemAccessCheckRef.current = null;
+        setIsCheckingSystemAccess(false);
+      });
+    systemAccessCheckRef.current = pending;
+    return pending;
   }, [notify]);
   const openSystemAccessSettings = useCallback(
     async (scope: SystemAccessScopeId) => {
@@ -2278,8 +2491,10 @@ export function App() {
       });
       return undefined;
     }
+    // Record the attempt before opening a native sheet, including denial,
+    // interruption, or a reload while the decision is still pending.
+    safeSetLocalStorage(SYSTEM_ACCESS_PROMPTED_STORAGE_KEY, "true");
     void checkSystemAccess().then((scopes) => {
-      safeSetLocalStorage(SYSTEM_ACCESS_PROMPTED_STORAGE_KEY, "true");
       dispatchWorkbench({
         type: "complete-onboarding-step",
         step: "system-access",
@@ -2296,21 +2511,6 @@ export function App() {
     });
     return undefined;
   }, [checkSystemAccess, notify]);
-  useEffect(() => {
-    if (
-      activeDestination !== "settings" ||
-      workbench.preferences.lastSettingsSection !== "permissions" ||
-      !isTauriRuntime()
-    ) {
-      return undefined;
-    }
-    void checkSystemAccess();
-    return undefined;
-  }, [
-    activeDestination,
-    checkSystemAccess,
-    workbench.preferences.lastSettingsSection,
-  ]);
   const { providerUsageByProvider, refreshProviderUsage } = useProviderUsage({
     notify,
     backgroundUsageProviderIds,
@@ -2321,7 +2521,7 @@ export function App() {
   useEffect(() => {
     if (
       activeDestination !== "settings" ||
-      workbench.preferences.lastSettingsSection !== "usage-limits" ||
+      workbench.preferences.lastSettingsSection !== "providers" ||
       !selectedUsageProviderId
     ) {
       return undefined;
@@ -2401,6 +2601,7 @@ export function App() {
       deriveMenuBarSnapshot({
         automations: workbench.automations,
         finishedOutcomes: finishedMenuBarOutcomes,
+        notifications: workbench.preferences.desktopNotifications,
         outcome: menuBarOutcome,
         reduceMotion,
         sendingSessionIds,
@@ -2416,6 +2617,7 @@ export function App() {
       sessionEventsById,
       sessions,
       workbench.automations,
+      workbench.preferences.desktopNotifications,
       resolvedTheme,
     ],
   );
@@ -2458,8 +2660,14 @@ export function App() {
     }
   }, [latestMenuBarOutcome]);
 
+  // The snapshot memo recomputes on every stream flush; only cross IPC when
+  // what the menu bar shows actually changed.
+  const lastMenuBarSnapshotRef = useRef("");
   useEffect(() => {
     if (!isTauriRuntime()) return;
+    const serialized = JSON.stringify(menuBarSnapshot);
+    if (serialized === lastMenuBarSnapshotRef.current) return;
+    lastMenuBarSnapshotRef.current = serialized;
     void invoke("set_menu_bar_snapshot", { snapshot: menuBarSnapshot }).catch(
       () => undefined,
     );
@@ -2482,9 +2690,7 @@ export function App() {
   const selectedTerminalSourceControl = selectedTerminalPane
     ? terminalSourceControlByPane[selectedTerminalPane.id]
     : undefined;
-  useEffect(() => {
-    safeSetLocalStorage(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(chatDrafts));
-  }, [chatDrafts]);
+  useDebouncedPersist(chatDrafts, persistChatDrafts);
   useEffect(() => {
     safeSetLocalStorage(
       CHAT_DRAFT_MODES_STORAGE_KEY,
@@ -2634,6 +2840,7 @@ export function App() {
 
   const refreshSessions = useCallback(async () => {
     if (!isTauriRuntime()) {
+      sessionsLoadedRef.current = true;
       setSessions([]);
       return;
     }
@@ -2646,6 +2853,7 @@ export function App() {
         nextSessions,
         removedProjectPaths,
       );
+      sessionsLoadedRef.current = true;
       setSessions(nextSessions);
       setActiveSessionId((current) => {
         if (current || suppressSessionAutoSelectRef.current) {
@@ -2661,75 +2869,153 @@ export function App() {
         (current) => current ?? nextVisibleSessions[0]?.workspacePath,
       );
     } catch {
-      setSessions([]);
+      // A failed read cannot invalidate durable sessions or their open panes.
     }
   }, [removedProjectPaths]);
 
-  const refreshEvents = useCallback(
+  const readSessionEvents = useCallback(
     async (sessionId: string) => {
       const requestId = (sessionEventsRequestRef.current[sessionId] ?? 0) + 1;
       sessionEventsRequestRef.current[sessionId] = requestId;
       if (!isTauriRuntime()) {
-        setEventsForSession(
-          sessionId,
-          limitEventsForSession(
-            sessionId,
-            optimisticEventsRef.current.get(sessionId) ?? [],
+        setEventsForSession(sessionId, (current) =>
+          mergePersistedAndOptimisticEvents(
+            current,
+            optimisticEventsRef.current.get(sessionId),
           ),
         );
         return;
       }
+      let fullHistory = !completeHistorySessionsRef.current.has(sessionId) ||
+        !sessionEventsByIdRef.current[sessionId]?.length;
       try {
-        const page = await invoke<{
+        type HistoryPage = {
           events: SessionEvent[];
           contextEvents: SessionEvent[];
           hasMoreBefore: boolean;
-        }>("read_session_events", {
+          revision?: string | null;
+          unchanged?: boolean;
+        };
+        let page = await invoke<HistoryPage>("read_session_events", {
           sessionId,
+          fullHistory,
+          knownRevision: fullHistory
+            ? undefined
+            : historyRevisionsRef.current[sessionId],
         });
+        if (sessionEventsRequestRef.current[sessionId] !== requestId) return;
+        // A sleeping/backgrounded chat may have advanced beyond the refresh
+        // window. Recover the entire gap instead of silently losing its middle.
+        const knownIds = new Set(
+          !fullHistory && page.hasMoreBefore
+            ? (sessionEventsByIdRef.current[sessionId] ?? []).map(
+                (event) => event.id,
+              )
+            : [],
+        );
+        if (
+          !fullHistory &&
+          page.hasMoreBefore &&
+          !page.events.some(
+            (event) => event.kind !== "session-created" && knownIds.has(event.id),
+          )
+        ) {
+          fullHistory = true;
+          page = await invoke<HistoryPage>("read_session_events", {
+            sessionId,
+            fullHistory: true,
+          });
+        }
+        // Older desktop runtimes may ignore fullHistory while the frontend
+        // updates. Walk their bounded pages automatically until nothing remains.
+        let cursor = page.events.find(
+          (event) => event.kind !== "session-created",
+        );
+        while (fullHistory && page.hasMoreBefore) {
+          if (sessionEventsRequestRef.current[sessionId] !== requestId) return;
+          if (!cursor) throw new Error("Chat history returned no earlier cursor");
+          const earlier = await invoke<HistoryPage>("read_session_events", {
+            sessionId,
+            beforeEventId: cursor.id,
+            limit: MAX_CHAT_EVENT_RENDER_COUNT,
+          });
+          const nextCursor = earlier.events.find(
+            (event) => event.kind !== "session-created",
+          );
+          if (
+            earlier.hasMoreBefore &&
+            (!nextCursor || nextCursor.id === cursor.id)
+          )
+            throw new Error("Chat history pagination made no progress");
+          page = {
+            ...page,
+            events: mergeSessionHistoryPages(earlier.events, page.events),
+            hasMoreBefore: earlier.hasMoreBefore,
+          };
+          cursor = nextCursor;
+        }
         if (sessionEventsRequestRef.current[sessionId] === requestId) {
-          // Streaming can continue while the persisted transcript is loading.
-          // Read the buffer after the await so late chunks are never overwritten
-          // by the older transcript snapshot.
+          historyRevisionsRef.current[sessionId] = page.revision ?? undefined;
+          if (!page.hasMoreBefore)
+            completeHistorySessionsRef.current.add(sessionId);
+          // Streaming can continue during the read; use the latest buffer.
           const latestOptimisticEvents =
             optimisticEventsRef.current.get(sessionId);
-          // Fresh open always starts from the recent window; expanded history
-          // only grows via load-earlier.
-          expandedHistorySessionsRef.current.delete(sessionId);
-          replaceSessionContextEvents(sessionId, page.contextEvents);
-          setHasMoreBeforeBySession((current) => ({
-            ...current,
-            [sessionId]: page.hasMoreBefore,
-          }));
-          setEventsForSession(sessionId, (current) =>
-            limitEventsForSession(
-              sessionId,
-              preserveDeliveredResponses(
-                markInactiveCapabilityResources(
-                  mergePersistedAndOptimisticEvents(
-                    page.events,
-                    latestOptimisticEvents,
-                  ),
-                  liveCapabilityResourceIdsRef.current,
-                ),
-                current,
-              ),
-            ),
+          if (!page.unchanged)
+            replaceSessionContextEvents(sessionId, page.contextEvents);
+          const hasMoreBefore =
+            !completeHistorySessionsRef.current.has(sessionId) &&
+            page.hasMoreBefore;
+          setHasMoreBeforeBySession((current) =>
+            current[sessionId] === hasMoreBefore
+              ? current
+              : { ...current, [sessionId]: hasMoreBefore },
           );
+          setEventsForSession(sessionId, (current) => {
+            const next = preserveDeliveredResponses(
+              markInactiveCapabilityResources(
+                mergePersistedAndOptimisticEvents(
+                  mergeSessionHistoryPages(current, page.events),
+                  latestOptimisticEvents,
+                ),
+                liveCapabilityResourceIdsRef.current,
+              ),
+              current,
+            );
+            // Unchanged reads retain the array and avoid another chat render.
+            return sameSessionEvents(current, next) ? current : next;
+          });
         }
-      } catch {
+      } catch (error) {
         if (sessionEventsRequestRef.current[sessionId] === requestId) {
           const optimisticEvents = optimisticEventsRef.current.get(sessionId);
-          if (optimisticEvents && optimisticEvents.length > 0) {
-            setEventsForSession(
-              sessionId,
-              limitEventsForSession(sessionId, optimisticEvents),
+          if (optimisticEvents?.length) {
+            setEventsForSession(sessionId, (current) =>
+              mergePersistedAndOptimisticEvents(current, optimisticEvents),
             );
           }
+          if (fullHistory)
+            notify(
+              "command-failed",
+              "Could not load chat history",
+              String(error),
+            );
         }
       }
     },
-    [limitEventsForSession, replaceSessionContextEvents, setEventsForSession],
+    [notify, replaceSessionContextEvents, setEventsForSession],
+  );
+  const refreshEvents = useCoalescedByKey(readSessionEvents);
+  const openAgentPanel = useCallback(
+    (paneId: string) => {
+      closeLegacyRail();
+      setPaneLegacyPanelByPaneId((current) => ({
+        ...current,
+        [paneId]: undefined,
+      }));
+      openCompanionTab("agents", paneId);
+    },
+    [closeLegacyRail, openCompanionTab],
   );
 
   const loadEarlierEvents = useCallback(
@@ -2760,7 +3046,6 @@ export function App() {
           beforeEventId: cursor.id,
           limit: MAX_CHAT_EVENT_RENDER_COUNT,
         });
-        expandedHistorySessionsRef.current.add(sessionId);
         setHasMoreBeforeBySession((current) => ({
           ...current,
           [sessionId]: page.hasMoreBefore,
@@ -2776,10 +3061,7 @@ export function App() {
             }
           }
           const merged = Array.from(byId.values()).sort(
-            (first, second) =>
-              new Date(first.createdAt).getTime() -
-                new Date(second.createdAt).getTime() ||
-              first.id.localeCompare(second.id),
+            compareSessionEventsForHistory,
           );
           return limitEventsForSession(sessionId, merged);
         });
@@ -2803,6 +3085,23 @@ export function App() {
       setEventsForSession,
     ],
   );
+
+  const subagentController = useSubagents({
+    parentIds: [
+      activeSessionId,
+      ...displayedChatLayout.slots.flatMap((pane) =>
+        pane?.kind === "session" ? [pane.sessionId] : [],
+      ),
+    ].filter((id): id is string => Boolean(id)),
+    eventsBySessionId: sessionEventsById,
+    readEvents: readSessionEvents,
+    openPanel: openAgentPanel,
+    closePanel: (paneId) =>
+      dispatchCompanion({ type: "close-tab", tab: "agents", paneId }),
+    hasMoreBeforeBySession,
+    loadingEarlierSessionIds,
+    loadEarlier: loadEarlierEvents,
+  });
 
   useEffect(() => {
     const layout = chatGrid.activeProjectKey
@@ -2858,8 +3157,10 @@ export function App() {
         );
       optimisticEventsRef.current.set(
         capabilityEvent.sessionId,
-        mergeEvent(
-          optimisticEventsRef.current.get(capabilityEvent.sessionId) ?? [],
+        limitOptimisticSessionEvents(
+          mergeEvent(
+            optimisticEventsRef.current.get(capabilityEvent.sessionId) ?? [],
+          ),
         ),
       );
       setEventsForSession(capabilityEvent.sessionId, (current) =>
@@ -3048,7 +3349,10 @@ export function App() {
               label: payload.resource.label,
               paneTab: panel,
             });
-            if (shouldFollow) {
+            if (
+              shouldFollow &&
+              !(panel === "browser" && isSplitChatViewRef.current)
+            ) {
               dispatchWorkbench({ type: "open-tool-panel", tab: panel });
             }
           } else {
@@ -3132,6 +3436,18 @@ export function App() {
             dispatchWorkbench({ type: "open-tool-panel", tab: "diff" });
           }
         }
+        if (payload.resource.kind === "workspace") {
+          const folder = stringFromRecord(
+            recordFromUnknown(payload.data),
+            "path",
+          );
+          // The user asked this chat to open the folder and approved the call.
+          // If they have since moved to another chat, opening a project would
+          // pull them out of it, so the call only reports what it validated.
+          if (folder && isActiveModelWorkspace) {
+            void openWorkspaceFolderRef.current?.(folder);
+          }
+        }
       },
     ).then((unlisten) => {
       if (!isMounted) unlisten();
@@ -3190,7 +3506,9 @@ export function App() {
         streamEvent.phase === "completed" ||
         streamEvent.phase === "failed" ||
         streamEvent.phase === "cancelled" ||
-        streamEvent.phase === "heartbeat"
+        streamEvent.phase === "heartbeat" ||
+        streamEvent.phase === "retry-wait" ||
+        streamEvent.phase === "retry-started"
       ) {
         flushProviderStreamBatches();
         applyProviderChatStreamEvent(
@@ -3217,6 +3535,7 @@ export function App() {
       }
       if (
         streamEvent.phase === "context-usage" ||
+        streamEvent.phase === "turn-tokens" ||
         streamEvent.phase === "activity"
       ) {
         flushProviderStreamBatches();
@@ -3265,7 +3584,10 @@ export function App() {
     ],
   );
 
-  turnTiming.useTurnTiming(events);
+  turnTiming.useTurnTiming(
+    events,
+    activeDestination === "workspace" && activeWorkspaceLayout === "thread",
+  );
 
   const queueProviderChatStreamEvent = turnTiming.useProviderStreamTiming(
     providerStreamOrderRef,
@@ -3321,7 +3643,9 @@ export function App() {
         );
       optimisticEventsRef.current.set(
         sessionId,
-        mergeEvent(optimisticEventsRef.current.get(sessionId) ?? []),
+        limitOptimisticSessionEvents(
+          mergeEvent(optimisticEventsRef.current.get(sessionId) ?? []),
+        ),
       );
       setEventsForSession(sessionId, (current) => mergeEvent(current));
     }).then((unlisten) => {
@@ -3383,21 +3707,97 @@ export function App() {
       }
       optimisticEventsRef.current.set(
         sessionId,
-        mergeProviderResponseEvents(
-          optimisticEventsRef.current.get(sessionId) ?? [],
-          responseEvents,
+        limitOptimisticSessionEvents(
+          mergeProviderResponseEvents(
+            optimisticEventsRef.current.get(sessionId) ?? [],
+            responseEvents,
+          ),
         ),
       );
-      startTransition(() => {
-        setEventsForSession(sessionId, (current) => {
-          return limitSessionEventsForUi(
-            mergeProviderResponseEvents(current, responseEvents),
-          );
-        });
-      });
+      // Commit the terminal response before the sending flag clears. Deferring
+      // it can briefly expose an old running status as an interrupted turn.
+      setEventsForSession(sessionId, (current) =>
+        mergeProviderResponseEvents(current, responseEvents),
+      );
     },
     [setEventsForSession],
   );
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    const owners = new Map<string, { owner: string; ownsSending: boolean }>();
+    void listen<{
+      sessionId: string;
+      owner?: string;
+      event?: SessionEvent;
+      userEvent?: SessionEvent;
+      response?: ProviderChatResponse;
+      finished?: boolean;
+    }>("gyro://goal-run-event", ({ payload }) => {
+      if (disposed) return;
+      const { sessionId, owner, event, userEvent, response, finished } = payload;
+      if (finished) {
+        const current = owners.get(sessionId);
+        if (owner && current?.owner === owner) {
+          owners.delete(sessionId);
+          // Composer invokes clear their own flag after applying the final
+          // response. Only recovered background runs are owned by this listener.
+          if (current.ownsSending) setSessionSending(sessionId, false);
+        }
+        return;
+      }
+      const run = recordFromUnknown(recordFromUnknown(event?.payload)?.run);
+      if (owner && (run?.status === "running" || run?.status === "queued")) {
+        const current = owners.get(sessionId);
+        owners.set(sessionId, {
+          owner,
+          ownsSending:
+            current?.owner === owner
+              ? current.ownsSending
+              : !sendingSessionIdsRef.current.has(sessionId),
+        });
+        setSessionSending(sessionId, true);
+      } else if (
+        owner &&
+        owners.has(sessionId) &&
+        owners.get(sessionId)?.owner !== owner
+      ) {
+        return;
+      }
+      flushProviderStreamBatches();
+      if (response) applyProviderChatResponse(sessionId, response);
+      const additions = [userEvent, event].filter((item): item is SessionEvent =>
+        Boolean(item),
+      );
+      if (additions.length) {
+        const merge = (items: SessionEvent[]) =>
+          limitSessionEventsForUi(
+            mergePersistedAndOptimisticEvents(items, additions),
+          );
+        optimisticEventsRef.current.set(
+          sessionId,
+          limitOptimisticSessionEvents(
+            merge(optimisticEventsRef.current.get(sessionId) ?? []),
+          ),
+        );
+        setEventsForSession(sessionId, merge);
+      }
+    }).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [
+    applyProviderChatResponse,
+    flushProviderStreamBatches,
+    setEventsForSession,
+    setSessionSending,
+  ]);
 
   const applyCouncilChatResponse = useCallback(
     (sessionId: string, response?: CouncilChatInvokeResponse) => {
@@ -3640,8 +4040,8 @@ export function App() {
       dispatchWorkbench({ type: "close-tool-panel" });
       return;
     }
-    openToolPanel(workbench.activePaneTab);
-  }, [openToolPanel, workbench.activePaneTab, workbench.isToolPanelOpen]);
+    openToolPanel("terminal");
+  }, [openToolPanel, workbench.isToolPanelOpen]);
 
   const openSettingsSection = useCallback(
     (section: SettingsSectionId) => {
@@ -3663,10 +4063,10 @@ export function App() {
   );
 
   const refreshIdeSourceControl = useCallback(function refresh(root?: string) {
+    ideSourceControlRootRef.current = root;
     if (!root) {
       return;
     }
-    ideSourceControlRootRef.current = root;
     if (ideSourceControlInFlightRef.current.has(root)) {
       ideSourceControlQueuedRef.current.add(root);
       return;
@@ -3676,6 +4076,7 @@ export function App() {
         type: "ide-set-source-control",
         sourceControl: {
           provider: "git",
+          workspacePath: root,
           available: true,
           branch: "preview",
           ahead: 0,
@@ -3708,6 +4109,7 @@ export function App() {
           type: "ide-set-source-control",
           sourceControl: {
             provider: "git",
+            workspacePath: root,
             available: false,
             ahead: 0,
             behind: 0,
@@ -3989,9 +4391,9 @@ export function App() {
         return;
       }
       if (
-        !window.confirm(
+        !(await confirmAction(
           `Remove the worktree for ${branch}? The branch and chat history will be kept.`,
-        )
+        ))
       ) {
         return;
       }
@@ -4384,7 +4786,7 @@ export function App() {
       );
       return;
     }
-    const unstaged = workbench.ide.sourceControl.files.filter(
+    const unstaged = scopedIde.sourceControl.files.filter(
       (file) => !file.staged,
     );
     if (unstaged.length === 0) {
@@ -4409,7 +4811,7 @@ export function App() {
   }, [
     notify,
     refreshIdeSourceControl,
-    workbench.ide.sourceControl.files,
+    scopedIde.sourceControl.files,
     workbench.preferences.workspaceTrust,
     workspaceActionRoot,
   ]);
@@ -4506,7 +4908,7 @@ export function App() {
         ? workspaceContextWithLiveEditor(
             workspaceContextSnapshot,
             selectedFile,
-            workbench.ide.buffers[selectedFile ?? ""],
+            workbench.ide.buffers,
             workbench.ide.selection,
             workbench.ide.tabs.map((tab) => tab.path),
           )
@@ -4520,20 +4922,34 @@ export function App() {
     ],
   );
 
+  // The snapshot is rebuilt on editor changes. It lists every open tab and
+  // holds unsaved text that fits in the evidence limit, so pushes are
+  // coalesced. The first change of a burst goes out at once, sustained
+  // editing is throttled to one update a second, and the last change lands
+  // shortly after typing pauses. Sending a turn still awaits its own push,
+  // so a turn never reads stale editor text.
+  const ideEvidenceScheduler = useMemo<IdeEvidenceScheduler<WorkspaceContextSnapshot>>(
+    () =>
+      createIdeEvidenceScheduler<WorkspaceContextSnapshot>((evidence) => {
+        void invoke("update_capability_ide_evidence", {
+          request: {
+            workspacePath: evidence.workspaceKey,
+            diagnostics: evidence.diagnostics ?? [],
+            context: evidence,
+          },
+        }).catch(() => {
+          // A background evidence refresh must not produce an unhandled
+          // rejection. Sending a turn awaits this same update and exposes any
+          // persistent error.
+        });
+      }),
+    [],
+  );
+
   useEffect(() => {
-    const root = liveEditorEvidence?.workspaceKey;
-    if (!root || !isTauriRuntime()) return;
-    void invoke("update_capability_ide_evidence", {
-      request: {
-        workspacePath: root,
-        diagnostics: liveEditorEvidence?.diagnostics ?? [],
-        context: liveEditorEvidence,
-      },
-    }).catch(() => {
-      // A background evidence refresh must not produce an unhandled rejection.
-      // Sending a turn awaits this same update and exposes any persistent error.
-    });
-  }, [liveEditorEvidence]);
+    if (!liveEditorEvidence || !isTauriRuntime()) return;
+    ideEvidenceScheduler.schedule(liveEditorEvidence);
+  }, [ideEvidenceScheduler, liveEditorEvidence]);
 
   const refreshTerminalSourceControl = useCallback(
     async (paneId: string) => {
@@ -4782,27 +5198,32 @@ export function App() {
           lastRunAt: new Date().toISOString(),
         });
         if (task.group === "test" && testStatus) {
-          const currentChildren =
-            workbench.ide.testTree.find(
-              (item) => item.id === "workspace-test-results",
-            )?.children ?? [];
+          // Update the run test in place. Replacing the tree with only the
+          // tests that ran hid every other discovered test after one run.
+          const suite = workbench.ide.testTree[0];
+          const children = suite?.children ?? [];
           const result = {
             id: task.id,
             label: task.label,
             status: testStatus,
           } as const;
+          const nextChildren = children.some((item) => item.id === task.id)
+            ? children.map((item) => (item.id === task.id ? result : item))
+            : [...children, result];
           dispatchWorkbench({
             type: "ide-set-test-tree",
             tests: [
               {
-                id: "workspace-test-results",
-                label: "Workspace tests",
-                status: testStatus,
-                children: [
-                  ...currentChildren.filter((item) => item.id !== task.id),
-                  result,
-                ],
+                id: suite?.id ?? "workspace-tests",
+                label: suite?.label ?? "Workspace tests",
+                status: nextChildren.some((item) => item.status === "failed")
+                  ? "failed"
+                  : nextChildren.some((item) => item.status === "running")
+                    ? "running"
+                    : testStatus,
+                children: nextChildren,
               },
+              ...workbench.ide.testTree.slice(1),
             ],
           });
         }
@@ -5234,17 +5655,31 @@ export function App() {
   }, [refreshWorkspaceTree, workspaceRoots.length]);
 
   const createWorkspacePath = useCallback(
-    async (kind: "file" | "directory", parentPath?: string) => {
+    async (
+      kind: "file" | "directory",
+      parentPath?: string,
+      namedPath?: string,
+    ) => {
       const root =
         workspaceRootForPath(workspaceRoots, parentPath) ?? workspaceRoots[0];
       if (!root) {
         notify("command-failed", "Create blocked", "Open a workspace first");
         return;
       }
-      const entered = window.prompt(
-        kind === "directory" ? "New folder path" : "New file path",
-        parentPath ? `${parentPath}/` : "",
-      );
+      /* The Explorer's inline row already names the entry, so skip the dialog. */
+      const entered =
+        namedPath ??
+        (await askTextValue({
+          title: kind === "directory" ? "New folder" : "New file",
+          label: kind === "directory" ? "Folder name" : "File name",
+          message: parentPath
+            ? `Inside ${parentPath}`
+            : "Inside the workspace root",
+          initialValue: parentPath ? `${parentPath}/` : "",
+          confirmLabel: "Create",
+          validate: (value) =>
+            validateWorkspaceEntryName(workspaceEntryName(value)),
+        }));
       const enteredPath = entered?.trim();
       if (!enteredPath) {
         return;
@@ -5302,8 +5737,28 @@ export function App() {
     [notify, refreshWorkspaceTree, workspaceRoots],
   );
 
+  /* The macOS WebView has no JavaScript dialog support, so confirmations go
+     through the native dialog plugin. Without this every `window.confirm` in
+     this file returned false and the guarded action silently did nothing. */
+  useEffect(() => {
+    setConfirmActionHandler(async (message) => {
+      if (!isTauriRuntime()) {
+        return browserConfirm(message);
+      }
+      try {
+        return await nativeConfirm(message, {
+          title: "Gyro",
+          kind: "warning",
+        });
+      } catch {
+        return false;
+      }
+    });
+    return () => setConfirmActionHandler(undefined);
+  }, []);
+
   const renameWorkspacePath = useCallback(
-    async (fromPath: string) => {
+    async (fromPath: string, nextName: string) => {
       const root = workspaceRootForPath(workspaceRoots, fromPath);
       if (!root || !fromPath) {
         return;
@@ -5320,8 +5775,8 @@ export function App() {
         .map((tab) => tab.path)
         .filter((path) => editorPathMatches(path, fromPath));
       if (
-        affectedEditorPaths.some(
-          (path) => workbench.ide.buffers[path]?.status === "dirty",
+        affectedEditorPaths.some((path) =>
+          editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
         )
       ) {
         notify(
@@ -5331,9 +5786,16 @@ export function App() {
         );
         return;
       }
-      const entered = window.prompt("Rename workspace path", fromPath);
-      const toPath = entered?.trim()
-        ? absoluteWorkspaceFilePath(root, entered.trim())
+      /* The Explorer collects the new name in its own inline row. Rename must
+         never depend on window.prompt: WKWebView returns null for it, so every
+         rename on macOS used to cancel itself with no feedback. Only the
+         basename changes, so the entry stays in its current folder. */
+      const requestedName = nextName.trim();
+      const fromPathParent = fromPath.includes("/")
+        ? fromPath.slice(0, fromPath.lastIndexOf("/"))
+        : "";
+      const toPath = requestedName
+        ? absoluteWorkspaceFilePath(root, `${fromPathParent}/${requestedName}`)
         : undefined;
       if (!toPath || toPath === fromPath) {
         return;
@@ -5380,6 +5842,86 @@ export function App() {
     ],
   );
 
+  /* A model, a second window or a script can rename or delete a file this
+     editor has open. The explorer's own commands announce themselves on the
+     same event, so one listener follows every mutation, whoever made it. */
+  type WorkspacePathChange = {
+    action: "created" | "renamed" | "moved" | "deleted";
+    path: string;
+    destination?: string;
+    kind?: string;
+    origin: "ui" | "model";
+  };
+
+  const workspacePathChanged = useRef<(change: WorkspacePathChange) => void>(
+    () => {},
+  );
+  useEffect(() => {
+    workspacePathChanged.current = (change) => {
+      if (change.action === "deleted") {
+        dispatchWorkbench({ type: "ide-delete-path", path: change.path });
+        disposeEditorModels([change.path]);
+        if (selectedFile && editorPathMatches(selectedFile, change.path)) {
+          setSelectedFile(undefined);
+        }
+        return;
+      }
+      if (change.action === "created" || !change.destination) {
+        return;
+      }
+      dispatchWorkbench({
+        type: "ide-rename-path",
+        fromPath: change.path,
+        toPath: change.destination,
+      });
+      disposeEditorModels([change.path, change.destination]);
+      if (selectedFile && editorPathMatches(selectedFile, change.path)) {
+        setSelectedFile(
+          renameEditorPath(selectedFile, change.path, change.destination),
+        );
+      }
+    };
+  });
+
+  const [workspacePathUndo, setWorkspacePathUndo] =
+    useState<WorkspacePathUndoOffer | null>(null);
+  const refreshWorkspacePathUndo = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      setWorkspacePathUndo(null);
+      return;
+    }
+    try {
+      setWorkspacePathUndo(
+        await invoke<WorkspacePathUndoOffer | null>("peek_workspace_path_undo"),
+      );
+    } catch {
+      setWorkspacePathUndo(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void refreshWorkspacePathUndo();
+    void listen<WorkspacePathChange>(
+      "gyro://workspace-paths-changed",
+      (event) => {
+        workspacePathChanged.current(event.payload);
+        void refreshWorkspacePathUndo();
+      },
+    ).then((unlisten) => {
+      if (disposed) {
+        unlisten();
+        return;
+      }
+      stop = unlisten;
+    });
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, [refreshWorkspacePathUndo]);
+
   const deleteWorkspacePath = useCallback(
     async (path: string) => {
       const root = workspaceRootForPath(workspaceRoots, path);
@@ -5399,8 +5941,8 @@ export function App() {
         .filter((tabPath) => editorPathMatches(tabPath, path));
       const buffer = workbench.ide.buffers[path];
       if (
-        affectedEditorPaths.some(
-          (editorPath) => workbench.ide.buffers[editorPath]?.status === "dirty",
+        affectedEditorPaths.some((editorPath) =>
+          editorBufferHasUnsavedChanges(workbench.ide.buffers[editorPath]),
         )
       ) {
         notify(
@@ -5410,7 +5952,9 @@ export function App() {
         );
         return;
       }
-      if (!window.confirm(`Delete ${path}? This cannot be undone in Gyro.`)) {
+      if (
+        !(await confirmAction(`Move ${path} to the Trash?`))
+      ) {
         return;
       }
       if (!isTauriRuntime()) {
@@ -5451,9 +5995,176 @@ export function App() {
     ],
   );
 
+  const moveWorkspacePath = useCallback(
+    async (fromPath: string, destinationDirectory: string) => {
+      const plan = planWorkspaceMove(
+        workspaceRoots,
+        fromPath,
+        destinationDirectory,
+      );
+      if (plan.kind === "noop") return;
+      if (plan.kind === "blocked") {
+        notify("command-failed", "Move blocked", plan.reason);
+        return;
+      }
+      const affectedEditorPaths = workbench.ide.tabs
+        .map((tab) => tab.path)
+        .filter((path) => editorPathMatches(path, plan.fromPath));
+      if (
+        affectedEditorPaths.some((path) =>
+          editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
+        )
+      ) {
+        notify(
+          "command-failed",
+          "Move blocked",
+          "Save or revert the file first",
+        );
+        return;
+      }
+      const name = plan.toPath.slice(plan.toPath.lastIndexOf("/") + 1);
+      if (isTauriRuntime()) {
+        try {
+          await invoke("stat_workspace_file", {
+            workspacePath: plan.root,
+            path: plan.toPath,
+          });
+          await confirmAction(
+            `${name} already exists in that folder, so the move was not applied.`,
+          );
+          return;
+        } catch {
+          // The destination name is free. stat_workspace_file throws when the
+          // path is missing, which is the only case rename will accept.
+        }
+      }
+      try {
+        await invoke("rename_workspace_path", {
+          request: {
+            workspacePath: plan.root,
+            fromPath: plan.fromPath,
+            toPath: plan.toPath,
+          },
+        });
+        await refreshWorkspaceTree();
+      } catch (error) {
+        notify("command-failed", "Move failed", String(error));
+        return;
+      }
+      dispatchWorkbench({
+        type: "ide-rename-path",
+        fromPath: plan.fromPath,
+        toPath: plan.toPath,
+      });
+      disposeEditorModels(affectedEditorPaths);
+      if (selectedFile && editorPathMatches(selectedFile, plan.fromPath)) {
+        setSelectedFile(
+          renameEditorPath(selectedFile, plan.fromPath, plan.toPath),
+        );
+      }
+      notify("tests-passed", "Moved", `${plan.fromPath} → ${plan.toPath}`);
+    },
+    [
+      notify,
+      refreshWorkspaceTree,
+      selectedFile,
+      workbench.ide.buffers,
+      workbench.ide.tabs,
+      workspaceRoots,
+    ],
+  );
+
+  const duplicateWorkspacePath = useCallback(
+    async (path: string) => {
+      if (!path) return;
+      const root = workspaceRootForPath(workspaceRoots, path);
+      if (!root) return;
+      try {
+        const created = await invoke<{ path: string }>("duplicate_workspace_path", {
+          request: { workspacePath: root, path },
+        });
+        await refreshWorkspaceTree();
+        notify("tests-passed", "Duplicated", created.path);
+      } catch (error) {
+        notify("command-failed", "Duplicate failed", String(error));
+      }
+    },
+    [notify, refreshWorkspaceTree, workspaceRoots],
+  );
+
+  const revealWorkspacePath = useCallback(
+    async (path: string) => {
+      if (!path) return;
+      const root = workspaceRootForPath(workspaceRoots, path);
+      if (!root) return;
+      try {
+        // Explorer paths are already absolute. Joining the root again points
+        // Finder at a path that does not exist.
+        await revealItemInDir(absoluteWorkspaceFilePath(root, path));
+      } catch (error) {
+        notify("command-failed", "Reveal failed", String(error));
+      }
+    },
+    [notify, workspaceRoots],
+  );
+
+  const undoWorkspacePathChange = useCallback(async () => {
+    try {
+      const undone = await invoke<boolean>("undo_workspace_path");
+      await refreshWorkspacePathUndo();
+      if (!undone) {
+        notify("command-failed", "Nothing to undo", "No path change is pending");
+        return;
+      }
+      await refreshWorkspaceTree();
+    } catch (error) {
+      notify("command-failed", "Undo failed", String(error));
+    }
+  }, [notify, refreshWorkspacePathUndo, refreshWorkspaceTree]);
+
+  const redoWorkspacePathChange = useCallback(async () => {
+    try {
+      const redone = await invoke<boolean>("redo_workspace_path");
+      await refreshWorkspacePathUndo();
+      if (!redone) {
+        notify("command-failed", "Nothing to redo", "No path change is pending");
+        return;
+      }
+      await refreshWorkspaceTree();
+    } catch (error) {
+      notify("command-failed", "Redo failed", String(error));
+    }
+  }, [notify, refreshWorkspacePathUndo, refreshWorkspaceTree]);
+
+  // ⌘Z / ⇧⌘Z for file operations. Monaco and text fields keep their own undo
+  // stacks; the workspace journal only takes over when focus is elsewhere.
+  useEffect(() => {
+    const onUndoKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest(
+          "input, textarea, [contenteditable='true'], .monaco-editor",
+        )
+      ) {
+        return;
+      }
+      event.preventDefault();
+      if (event.shiftKey) {
+        void redoWorkspacePathChange();
+      } else {
+        void undoWorkspacePathChange();
+      }
+    };
+    window.addEventListener("keydown", onUndoKey);
+    return () => window.removeEventListener("keydown", onUndoKey);
+  }, [redoWorkspacePathChange, undoWorkspacePathChange]);
+
   const openSourceControlDiffForRoot = useCallback(
     async (root: string, path: string, staged: boolean) => {
-      const file = workbench.ide.sourceControl.files.find(
+      const file = scopedIde.sourceControl.files.find(
         (file) => file.path === path && file.staged === staged,
       );
       const reviewPath = `gyro-diff:${encodeURIComponent(root)}:${staged ? "index" : "worktree"}:${encodeURIComponent(path)}`;
@@ -5475,7 +6186,7 @@ export function App() {
       setSelectedFile(reviewPath);
       dispatchWorkbench({ type: "close-tool-panel" });
     },
-    [workbench.ide.sourceControl.files],
+    [scopedIde.sourceControl.files],
   );
 
   const openSourceControlDiff = useCallback(
@@ -5503,7 +6214,7 @@ export function App() {
       const relativePath = normalizedPath.startsWith(`${normalizedRoot}/`)
         ? normalizedPath.slice(normalizedRoot.length + 1)
         : normalizedPath;
-      const file = workbench.ide.sourceControl.files.find((item) => {
+      const file = scopedIde.sourceControl.files.find((item) => {
         const candidate = item.path.replaceAll("\\", "/");
         return candidate === normalizedPath || candidate === relativePath;
       });
@@ -5539,7 +6250,7 @@ export function App() {
     [
       activeSession?.workspacePath,
       workspacePath,
-      workbench.ide.sourceControl.files,
+      scopedIde.sourceControl.files,
     ],
   );
 
@@ -5693,15 +6404,22 @@ export function App() {
       });
       dispatchWorkbench({ type: "ide-select-view", view: "source-control" });
       dispatchWorkbench({ type: "select-workspace-layout", layout: "code" });
-      if (file && selectedTerminalSourceControl.repoRoot) {
-        void openSourceControlDiffForRoot(
-          selectedTerminalSourceControl.repoRoot,
-          file.path,
-          file.staged,
-        );
+      // Status paths are relative to the folder it was read for, not the repo.
+      const root =
+        selectedTerminalPane?.workingDirectory ??
+        activeSession?.workspacePath ??
+        workspacePath;
+      if (file && root) {
+        void openSourceControlDiffForRoot(root, file.path, file.staged);
       }
     },
-    [openSourceControlDiffForRoot, selectedTerminalSourceControl],
+    [
+      activeSession?.workspacePath,
+      openSourceControlDiffForRoot,
+      selectedTerminalPane?.workingDirectory,
+      selectedTerminalSourceControl,
+      workspacePath,
+    ],
   );
 
   const commitSourceControl = useCallback(
@@ -5723,15 +6441,15 @@ export function App() {
         return;
       }
       try {
-        const hasStaged = workbench.ide.sourceControl.files.some(
+        const hasStaged = scopedIde.sourceControl.files.some(
           (file) => file.staged,
         );
-        const hasUnstaged = workbench.ide.sourceControl.files.some(
+        const hasUnstaged = scopedIde.sourceControl.files.some(
           (file) => !file.staged,
         );
         // VS Code-style "Commit All": stage remaining changes when nothing is staged.
         if (!hasStaged && hasUnstaged) {
-          for (const file of workbench.ide.sourceControl.files.filter(
+          for (const file of scopedIde.sourceControl.files.filter(
             (item) => !item.staged,
           )) {
             await invoke<SourceControlState>("git_stage", {
@@ -5777,7 +6495,7 @@ export function App() {
       refreshIdeServices,
       refreshIdeSourceControl,
       refreshWorkspaceBranches,
-      workbench.ide.sourceControl.files,
+      scopedIde.sourceControl.files,
       workbench.preferences.workspaceTrust,
       workspaceActionRoot,
     ],
@@ -5804,7 +6522,7 @@ export function App() {
       );
       return;
     }
-    const publishing = !workbench.ide.sourceControl.upstream;
+    const publishing = !scopedIde.sourceControl.upstream;
     setSourceControlSyncing(true);
     try {
       const result = await invoke<GitSyncResult>("git_push", {
@@ -5848,7 +6566,7 @@ export function App() {
     notify,
     refreshIdeSourceControl,
     refreshWorkspaceBranches,
-    workbench.ide.sourceControl.upstream,
+    scopedIde.sourceControl.upstream,
     workbench.preferences.workspaceTrust,
     workspaceActionRoot,
   ]);
@@ -5953,9 +6671,6 @@ export function App() {
   // reports a status, but Workspace can be opened with no active chat, and
   // without this the panel keeps the empty default and claims Git is not ready.
   useEffect(() => {
-    if (!workspaceActionRoot) {
-      return;
-    }
     refreshIdeSourceControl(workspaceActionRoot);
   }, [refreshIdeSourceControl, workspaceActionRoot]);
 
@@ -5974,7 +6689,7 @@ export function App() {
     remoteCheckMessage,
   } = useRemoteCheck({
     root: workspaceActionRoot,
-    sourceControl: workbench.ide.sourceControl,
+    sourceControl: scopedIde.sourceControl,
     visible: isSourceControlVisible,
     trusted: workspaceActionRoot
       ? isWorkspaceTrusted(
@@ -5995,6 +6710,7 @@ export function App() {
     }
     refreshIdeSourceControl(workspaceActionRoot);
     const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       refreshIdeSourceControl(workspaceActionRoot);
     }, 5_000);
     return () => window.clearInterval(timer);
@@ -6006,6 +6722,7 @@ export function App() {
     void refreshGithub(workspaceActionRoot);
     const timer = window.setInterval(
       () => {
+        if (document.visibilityState !== "visible") return;
         void refreshGithub(workspaceActionRoot);
       },
       hasActiveGithubRun ? 15_000 : 60_000,
@@ -6152,6 +6869,22 @@ export function App() {
     [notify],
   );
 
+  // Reply links open in Gyro Browser by default; a ⌘/Ctrl-click hands the URL
+  // to the device's own browser through this registration, so reply surfaces
+  // need no extra callback of their own.
+  useEffect(() => {
+    registerExternalLinkOpener((url) => {
+      if (isTauriRuntime()) {
+        void openUrl(url).catch((error) =>
+          notify("command-failed", "Could not open link", String(error)),
+        );
+        return;
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+    });
+    return () => registerExternalLinkOpener();
+  }, [notify]);
+
   /**
    * Run one of the diff-review git actions for real.
    *
@@ -6177,7 +6910,7 @@ export function App() {
         return;
       }
 
-      const sourceControl = workbench.ide.sourceControl;
+      const sourceControl = scopedIde.sourceControl;
       const branch = sourceControl.branch;
       dispatchWorkbench({ type: "start-git-review-action", actionId });
 
@@ -6293,7 +7026,7 @@ export function App() {
       requestBranchName,
       requestPullRequest,
       workbench.diffReview.commitMessage,
-      workbench.ide.sourceControl,
+      scopedIde.sourceControl,
       workbench.preferences.workspaceTrust,
       workspaceActionRoot,
     ],
@@ -6313,7 +7046,14 @@ export function App() {
           .filter(Boolean)
           .slice(0, MAX_RECENT_PROJECTS),
       );
+      // An explicit folder choice must survive an unrelated turn's session refresh.
+      suppressSessionAutoSelectRef.current = true;
+      activeSessionIdRef.current = undefined;
       setActiveSessionId(undefined);
+      dispatchChatGrid({
+        type: "activate-project",
+        projectKey: chatProjectKey(selected),
+      });
       setSelectedWorkspaceRoot(selected);
       if (!isTauriRuntime()) {
         setWorkspacePath(selected);
@@ -6334,10 +7074,29 @@ export function App() {
         step: "workspace",
       });
       notify("terminal", notificationTitle, workspaceName(selected));
-      await prepareWorkspace(selected);
+      // Selection completes now; slow preparation must not defer caller navigation.
+      void prepareWorkspace(selected);
     },
     [notify, prepareWorkspace, refreshIdeServices],
   );
+
+  // A folder opened without a picker, by the model at the user's request, goes
+  // through the same trust and activation steps as one picked in the dialog.
+  const openWorkspaceFolder = useCallback(
+    async (selected: string) => {
+      const trustPath = normalizedWorkspaceTrustPath(selected);
+      if (!(trustPath in workbench.preferences.workspaceTrust)) {
+        dispatchWorkbench({
+          type: "set-workspace-trust",
+          path: selected,
+          decision: "restricted",
+        });
+      }
+      await activateWorkspacePath(selected);
+    },
+    [activateWorkspacePath, workbench.preferences.workspaceTrust],
+  );
+  openWorkspaceFolderRef.current = openWorkspaceFolder;
 
   const openWorkspace = useCallback(async (): Promise<string | undefined> => {
     if (!isTauriRuntime()) {
@@ -6353,15 +7112,7 @@ export function App() {
       if (typeof selected !== "string") {
         return undefined;
       }
-      const trustPath = normalizedWorkspaceTrustPath(selected);
-      if (!(trustPath in workbench.preferences.workspaceTrust)) {
-        dispatchWorkbench({
-          type: "set-workspace-trust",
-          path: selected,
-          decision: "restricted",
-        });
-      }
-      await activateWorkspacePath(selected);
+      await openWorkspaceFolder(selected);
       return selected;
     } catch {
       notify(
@@ -6371,19 +7122,19 @@ export function App() {
       );
       return undefined;
     }
-  }, [activateWorkspacePath, notify, workbench.preferences.workspaceTrust]);
+  }, [activateWorkspacePath, notify, openWorkspaceFolder]);
 
-  const addWorkspaceFolder = useCallback(async () => {
+  const addWorkspaceFolder = useCallback(async (explicitPath?: string) => {
     if (!activeWorkspaceRoot) {
       await openWorkspace();
       return;
     }
-    let selected: string | null = null;
-    if (!isTauriRuntime()) {
+    let selected: string | null = explicitPath ?? null;
+    if (!selected && !isTauriRuntime()) {
       selected = workspaceRoots.includes("/preview/Components")
         ? "/preview/Documentation"
         : "/preview/Components";
-    } else {
+    } else if (!selected) {
       const chosen = await open({
         directory: true,
         multiple: false,
@@ -6392,15 +7143,22 @@ export function App() {
       selected = typeof chosen === "string" ? chosen : null;
     }
     if (!selected) return;
-    const normalizedSelected = normalizeProjectPath(selected);
-    if (
-      workspaceRoots.some(
-        (root) => normalizeProjectPath(root) === normalizedSelected,
-      )
-    ) {
-      notify("command-failed", "Folder already added", workspaceName(selected));
+    const admission = await admitWorkspaceFolders(
+      configuredWorkspaceRoots,
+      [selected],
+      workbench.preferences.projectDetails?.[activeWorkspaceRoot]
+        ?.allowNestedFolders,
+    ).catch((error: unknown) => {
+      notify("command-failed", "Folder could not be added", String(error));
+      return undefined;
+    });
+    const rejection =
+      admission && workspaceRootRejectionNotice(admission.issues);
+    if (!admission?.accepted[0]) {
+      if (rejection) notify("command-failed", ...rejection);
       return;
     }
+    selected = admission.accepted[0];
     dispatchWorkbench({
       type: "add-workspace-folder",
       workspacePath: activeWorkspaceRoot,
@@ -6447,11 +7205,67 @@ export function App() {
     setSelectedWorkspaceRoot(selected);
   }, [
     activeWorkspaceRoot,
+    configuredWorkspaceRoots,
     notify,
     openWorkspace,
+    workbench.preferences.projectDetails,
     workbench.preferences.workspaceTrust,
     workspaceRoots,
   ]);
+
+  const openDroppedWorkspaceFolders = useCallback(
+    async (paths: string[], onExplorer: boolean) => {
+      if (!isTauriRuntime()) return;
+      if (paths.length === 0) {
+        notify(
+          "command-failed",
+          "Could not open that folder",
+          "The drop did not include a folder path.",
+        );
+        return;
+      }
+      const directories: string[] = [];
+      for (const path of paths) {
+        try {
+          const kind = await invoke<string>("classify_dropped_path", { path });
+          if (kind === "directory") directories.push(path);
+        } catch {
+          // A missing path is not a workspace.
+        }
+      }
+      // A file drop stays on the attachment path. This command only opens
+      // directories, and only after the transfer was not an image or video.
+      const selected = directories[0];
+      if (!selected) return;
+      if (workspaceRoots.length > 0 && onExplorer) {
+        await addWorkspaceFolder(selected);
+        return;
+      }
+      const trustPath = normalizedWorkspaceTrustPath(selected);
+      if (!(trustPath in workbench.preferences.workspaceTrust)) {
+        dispatchWorkbench({
+          type: "set-workspace-trust",
+          path: selected,
+          decision: "restricted",
+        });
+      }
+      await activateWorkspacePath(selected, "Workspace opened");
+    },
+    [
+      activateWorkspacePath,
+      addWorkspaceFolder,
+      notify,
+      workbench.preferences.workspaceTrust,
+      workspaceRoots.length,
+    ],
+  );
+
+  useEffect(() => {
+    setOpenDroppedWorkspaceHandler((paths, onExplorer) => {
+      void openDroppedWorkspaceFolders(paths, onExplorer);
+    });
+    return () => setOpenDroppedWorkspaceHandler(undefined);
+  }, [openDroppedWorkspaceFolders]);
 
   const removeWorkspaceFolder = useCallback(
     (path: string) => {
@@ -6505,6 +7319,22 @@ export function App() {
     ],
   );
 
+  const workspaceRootIssues = useWorkspaceRootRecovery({
+    activateWorkspacePath,
+    configured: configuredWorkspaceRoots,
+    dispatch: dispatchWorkbench,
+    health: workspaceRootHealth,
+    notify,
+    pickFolder: async (title) => {
+      if (!isTauriRuntime()) return "/preview/Components";
+      const chosen = await open({ directory: true, multiple: false, title });
+      return typeof chosen === "string" ? chosen : null;
+    },
+    preferences: workbench.preferences,
+    removeFolder: removeWorkspaceFolder,
+    workspacePath: activeWorkspaceRoot,
+  });
+
   const openWorkspaceConfiguration = useCallback(async () => {
     try {
       let filePath: string;
@@ -6538,14 +7368,21 @@ export function App() {
         );
         content = file.content;
       }
-      const workspaceFile = parseGyroWorkspaceFile(content, filePath);
-      const primary = workspaceFile.folders[0]?.path;
+      const parsedFile = parseGyroWorkspaceFile(content, filePath);
+      const primary = parsedFile.folders[0]?.path;
       if (!primary)
         throw new Error("Workspace file does not contain a primary folder");
+      // Every folder goes through the same policy as an Explorer add.
+      const { workspaceFile, extraFolders, rejection } =
+        await admitWorkspaceFile(
+          parsedFile,
+          workbench.preferences.projectDetails?.[primary]?.allowNestedFolders,
+        );
+      if (rejection) notify("command-failed", ...rejection);
       dispatchWorkbench({
         type: "set-workspace-folders",
         workspacePath: primary,
-        paths: workspaceFile.folders.slice(1).map((folder) => folder.path),
+        paths: extraFolders,
       });
       dispatchWorkbench({
         type: "set-workspace-settings",
@@ -6578,7 +7415,12 @@ export function App() {
         String(error),
       );
     }
-  }, [activateWorkspacePath, notify, workbench.preferences.workspaceTrust]);
+  }, [
+    activateWorkspacePath,
+    notify,
+    workbench.preferences.projectDetails,
+    workbench.preferences.workspaceTrust,
+  ]);
 
   const saveWorkspaceConfiguration = useCallback(async () => {
     if (workspaceRoots.length === 0) {
@@ -6824,6 +7666,57 @@ export function App() {
     workspacePath,
   ]);
 
+  /**
+   * A prompt typed before any folder was open is still the message the user
+   * means to send. Choosing a folder starts a chat under a new draft key, so
+   * the composer would re-bind to an empty draft and the prompt and its images
+   * would look discarded. Carry that unsent draft onto the chat the folder
+   * starts; an existing draft for the target chat always wins.
+   */
+  const carryFolderlessDraft = useCallback((targetDraftKey: string) => {
+    // Only a project draft (`new:<project>`) can receive the prompt. A session
+    // id names a live chat whose composer belongs to that conversation, and
+    // `NEW_CHAT_DRAFT_KEY` is the folderless composer itself.
+    if (!targetDraftKey.startsWith("new:")) return;
+    const sources = [
+      NEW_CHAT_DRAFT_KEY,
+      `new:${chatProjectKey()}`,
+    ].filter((key) => key !== targetDraftKey);
+    setChatDrafts((current) => {
+      if (current[targetDraftKey]?.trim()) return current;
+      const source = sources.find((key) => current[key]?.trim());
+      const carried = source ? current[source] : undefined;
+      if (!source || !carried) return current;
+      return { ...current, [source]: "", [targetDraftKey]: carried };
+    });
+    setChatAttachments((current) => {
+      if ((current[targetDraftKey]?.length ?? 0) > 0) return current;
+      const source = sources.find((key) => (current[key]?.length ?? 0) > 0);
+      const carried = source ? current[source] : undefined;
+      if (!source || !carried || carried.length === 0) return current;
+      return { ...current, [source]: [], [targetDraftKey]: carried };
+    });
+  }, []);
+
+  // Whichever handler binds the composer to a project's draft — starting a
+  // chat for a chosen folder, or restoring a layout — the prompt typed with no
+  // folder open follows it, so picking a folder never looks like discarding it.
+  // Only a real switch away from the folderless draft carries: a restored
+  // layout must not inherit a prompt left over from an earlier session.
+  const previousDraftKeyRef = useRef(activeDraftKey);
+  useEffect(() => {
+    const previous = previousDraftKeyRef.current;
+    previousDraftKeyRef.current = activeDraftKey;
+    if (previous === activeDraftKey) return;
+    if (
+      previous !== NEW_CHAT_DRAFT_KEY &&
+      previous !== `new:${chatProjectKey()}`
+    ) {
+      return;
+    }
+    carryFolderlessDraft(activeDraftKey);
+  }, [activeDraftKey, carryFolderlessDraft]);
+
   const startNewChat = useCallback(
     (options: { keepLayout?: boolean; workspacePath?: string } = {}) => {
       suppressSessionAutoSelectRef.current = true;
@@ -6833,6 +7726,10 @@ export function App() {
           : options.workspacePath;
       const projectKey = chatProjectKey(projectPath);
       const draftKey = `new:${projectKey}`;
+      // Picking a folder moves the composer to this project's draft. Carry a
+      // prompt (and its images) typed while no folder was open so the message
+      // the user already wrote is not silently discarded.
+      carryFolderlessDraft(draftKey);
       // A project has one unsent draft; if it is already open in a pane, focus
       // it there rather than opening it twice. A new
       // pane gets an id of its own: a sent draft keeps its pane id, so a
@@ -6877,7 +7774,7 @@ export function App() {
       }
       dispatchWorkbench({ type: "close-tool-panel" });
     },
-    [activeSession?.workspacePath, chatGrid.layouts, workspacePath],
+    [activeSession?.workspacePath, carryFolderlessDraft, chatGrid.layouts, workspacePath],
   );
 
   /**
@@ -7243,7 +8140,14 @@ export function App() {
       if (!session) {
         return;
       }
-      const nextTitle = window.prompt("Rename chat", session.title)?.trim();
+      const nextTitle = (
+        await askTextValue({
+          title: "Rename chat",
+          label: "Chat name",
+          initialValue: session.title,
+          confirmLabel: "Rename",
+        })
+      )?.trim();
       if (!nextTitle || nextTitle === session.title) {
         return;
       }
@@ -7307,6 +8211,8 @@ export function App() {
         delete next[sessionId];
         return next;
       });
+      completeHistorySessionsRef.current.delete(sessionId);
+      delete historyRevisionsRef.current[sessionId];
       forgetSessionContextEvents(sessionId);
       setPinnedSessionIds((current) =>
         current.filter((id) => id !== sessionId),
@@ -7407,6 +8313,10 @@ export function App() {
         ),
       ),
     );
+    for (const sessionId of projectSessionIds) {
+      completeHistorySessionsRef.current.delete(sessionId);
+      delete historyRevisionsRef.current[sessionId];
+    }
     forgetManySessionContextEvents(projectSessionIds);
 
     if (
@@ -7669,10 +8579,12 @@ export function App() {
                 multiple: false,
                 title: "Open terminal in folder",
               })
-            : window.prompt(
-                "Open terminal in folder",
-                workspaceActionRoot ?? "",
-              );
+            : await askTextValue({
+                title: "Open terminal in folder",
+                label: "Folder path",
+                initialValue: workspaceActionRoot ?? "",
+                confirmLabel: "Open",
+              });
           if (typeof selected !== "string" || !selected.trim()) return;
           folderPath = selected;
         }
@@ -7847,15 +8759,27 @@ export function App() {
     [setProviderAuthStatus],
   );
 
+  const providerSignIn = useProviderSignIn({
+    dispatchWorkbench,
+    terminalOutputRevisionRef,
+  });
+  const {
+    patch: patchProviderSignIn,
+    dismissPane: dismissProviderSignInPane,
+    panesRef: providerSignInPanesRef,
+    isCancelled: isProviderSignInCancelled,
+  } = providerSignIn;
+
   const runProviderConnection = useCallback(
     async (
       providerId: ProviderId,
-      options?: { forceLogin?: boolean },
+      options?: ProviderConnectionOptions,
     ): Promise<boolean> => {
       const provider = providersForConfig(config).find(
         (item) => item.id === providerId,
       );
       const providerLabel = provider?.displayName ?? providerId;
+      const importedSessionId = options?.importedSessionId;
       // A provider that rejected the last send needs the login flow whoever
       // asked for the connection: its status command still reports a stored
       // sign-in, so believing that answer would return someone to the failure
@@ -7863,18 +8787,160 @@ export function App() {
       const forceLogin = Boolean(
         options?.forceLogin || providerSignInRejectionsRef.current[providerId],
       );
+      // An inline sign-in reports to the model popover, which stays open
+      // beside the chat; only the outcome is worth a notification.
+      const inline = Boolean(options?.inline);
+      const cliName = providerCliName(providerId, providerLabel);
+      const signInCancelled = () =>
+        inline && isProviderSignInCancelled(providerId);
       dispatchWorkbench({
         type: "set-provider-status",
         providerId,
         status: "checking",
       });
-      notify(
-        "provider",
-        providerId === "openai"
-          ? "Checking Codex sign-in"
-          : "Connecting provider",
-        providerLabel,
-      );
+      if (!inline) {
+        notify(
+          "provider",
+          providerId === "openai"
+            ? "Checking Codex sign-in"
+            : "Connecting provider",
+          providerLabel,
+        );
+      }
+
+      // Mirror a background pane into the workbench, so "Show details" opens a
+      // terminal that already holds everything the CLI printed.
+      const readSignInPane = async (paneId: string) => {
+        const progress = await invoke<TerminalPaneSnapshot>(
+          "read_terminal_output",
+          {
+            paneId,
+            knownOutputRevision: terminalOutputRevisionRef.current[paneId],
+          },
+        ).catch(() => undefined);
+        if (!progress) return undefined;
+        terminalOutputRevisionRef.current[paneId] = progress.outputRevision;
+        dispatchWorkbench({
+          type: "sync-terminal-pane-snapshot",
+          paneId,
+          event:
+            progress.exitCode === null || progress.exitCode === undefined
+              ? progress.status
+              : `${progress.status} (${progress.exitCode})`,
+          output: progress.output ?? "",
+          status: terminalStatusFromSnapshot(progress.status),
+          hasForegroundJob: progress.hasForegroundJob ?? undefined,
+        });
+        if (progress.output) setTerminalOutput(progress.output);
+        return progress;
+      };
+      const startBackgroundPane = async (
+        paneId: string,
+        profile: CommandProfile,
+      ) => {
+        providerSignInPanesRef.current[providerId] = paneId;
+        dispatchWorkbench({
+          type: "upsert-background-terminal-pane",
+          pane: createTerminalPane(
+            paneId,
+            profile,
+            "running",
+            workspaceRunMetadata(
+              "local",
+              profile.displayName,
+              activeSession?.workspacePath ?? workspacePath,
+            ),
+          ),
+        });
+        const snapshot = await invoke<TerminalPaneSnapshot>(
+          "create_terminal_pane",
+          {
+            request: {
+              args: profile.args,
+              command: profile.command,
+              paneId,
+              title: profile.displayName,
+              workspacePath: undefined,
+              workspaceMode: "local",
+              workingDirectory: "Home",
+              providerAuthSessionId: importedSessionId,
+              // Wide enough that a sign-in URL never hard-wraps.
+              cols: 400,
+            },
+          },
+        );
+        terminalOutputRevisionRef.current[paneId] = snapshot.outputRevision;
+        return snapshot;
+      };
+
+      // The backend picks an install Gyro can run and then find: the
+      // provider's installer or npm, falling back to a per-user npm prefix
+      // when the global one is root-owned or outside Gyro's search path.
+      const fetchInstallPlan = () =>
+        invoke<CliInstallPlanReport>("provider_cli_install_plan_command", {
+          providerId,
+        }).catch(() => undefined);
+      const reportNotInstalled = async (message: string) => {
+        const report = await fetchInstallPlan();
+        patchProviderSignIn(providerId, {
+          phase: "not-installed",
+          installCommand: report?.plan?.displayCommand,
+          message:
+            report?.plan || !report?.message
+              ? message
+              : `${message} ${report.message}`,
+        });
+      };
+
+      if (inline && options?.install && isTauriRuntime()) {
+        const plan = (await fetchInstallPlan())?.plan;
+        if (!plan) {
+          await reportNotInstalled(
+            `${providerLabel} needs ${cliName}, which isn't installed yet.`,
+          );
+          return false;
+        }
+        const installProfile = providerInstallProfile(providerId, plan);
+        patchProviderSignIn(providerId, {
+          phase: "installing",
+          installCommand: undefined,
+          message: undefined,
+        });
+        const installPaneId = `provider-${providerId}-install-${Date.now()}`;
+        let exitCode: number | null | undefined;
+        try {
+          exitCode = (await startBackgroundPane(installPaneId, installProfile))
+            .exitCode;
+          for (
+            let attempt = 0;
+            attempt < PROVIDER_INSTALL_POLL_ATTEMPTS &&
+            (exitCode === null || exitCode === undefined);
+            attempt += 1
+          ) {
+            await waitFor(PROVIDER_SIGN_IN_FAST_POLL_MS);
+            if (signInCancelled()) return false;
+            exitCode = (await readSignInPane(installPaneId))?.exitCode;
+          }
+        } catch (error) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `Couldn't start the install: ${String(error)}`,
+          });
+          return false;
+        }
+        if (exitCode !== 0) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message:
+              exitCode === null || exitCode === undefined
+                ? `Installing ${cliName} is taking too long.`
+                : `Installing ${cliName} failed (exit ${exitCode}).`,
+          });
+          return false;
+        }
+        dismissProviderSignInPane(providerId);
+        patchProviderSignIn(providerId, { phase: "starting" });
+      }
 
       if (isTauriRuntime()) {
         try {
@@ -7882,6 +8948,7 @@ export function App() {
             "check_provider_health",
             {
               // Connect is a user action, so it probes for real.
+              importedSessionId,
               request: providerHealthRequest(provider, providerId, {
                 force: true,
               }),
@@ -7892,6 +8959,24 @@ export function App() {
             check.output,
             check,
           );
+          if (signInCancelled()) return false;
+          if (inline && check.runtimeStatus === "not-installed") {
+            if (options?.install || providerId === "ollama") {
+              patchProviderSignIn(providerId, {
+                phase: "not-installed",
+                installCommand: undefined,
+                message:
+                  providerId === "ollama"
+                    ? "Ollama isn't running. Install and start it, then try again."
+                    : `${cliName} installed, but Gyro can't find it yet. Restart Gyro, then try again.`,
+              });
+            } else {
+              await reportNotInstalled(
+                `${providerLabel} needs ${cliName}, which isn't installed yet.`,
+              );
+            }
+            return false;
+          }
           if (provider?.authMode === "env") {
             notify(
               result.connectionStatus === "connected" ? "provider" : "approval",
@@ -7982,6 +9067,12 @@ export function App() {
       }
 
       if (provider?.authMode === "env") {
+        if (inline) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `Set ${provider.apiKeyRef ?? "an API key"} outside Gyro, then try again.`,
+          });
+        }
         notify(
           "approval",
           "Provider env setup needed",
@@ -8002,22 +9093,24 @@ export function App() {
       const profile = providerLoginProfile(providerId);
       const commandText = providerLoginCommandText(profile);
       const paneId = `provider-${providerId}-login-${Date.now()}`;
-      const pane = createTerminalPane(
-        paneId,
-        profile,
-        "running",
-        workspaceRunMetadata(
-          "local",
-          profile.displayName,
-          activeSession?.workspacePath ?? workspacePath,
-        ),
-      );
-      dispatchWorkbench({
-        type: "select-workspace-layout",
-        layout: "terminal-grid",
-      });
-      dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
-      dispatchWorkbench({ type: "add-terminal-pane", pane });
+      if (!inline) {
+        const pane = createTerminalPane(
+          paneId,
+          profile,
+          "running",
+          workspaceRunMetadata(
+            "local",
+            profile.displayName,
+            activeSession?.workspacePath ?? workspacePath,
+          ),
+        );
+        dispatchWorkbench({
+          type: "select-workspace-layout",
+          layout: "terminal-grid",
+        });
+        dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
+        dispatchWorkbench({ type: "add-terminal-pane", pane });
+      }
       setTerminalOutput(`Starting ${providerLabel} sign-in: ${commandText}`);
 
       if (!isTauriRuntime()) {
@@ -8026,21 +9119,39 @@ export function App() {
         return true;
       }
 
+      // What the popover shows comes from what the CLI printed. A device code
+      // page is opened once on the person's behalf, since those CLIs don't.
+      let openedDevicePage = false;
+      const showSignInProgress = (output?: string | null) => {
+        if (!inline || !output) return;
+        const progress = parseProviderLoginProgress(output);
+        patchProviderSignIn(providerId, {
+          phase: "waiting",
+          ...(progress.url ? { url: progress.url } : {}),
+          ...(progress.deviceCode ? { deviceCode: progress.deviceCode } : {}),
+          ...(progress.acceptsCode ? { acceptsCode: true } : {}),
+        });
+        if (progress.deviceCode && progress.url && !openedDevicePage) {
+          openedDevicePage = true;
+          void openUrl(progress.url).catch(() => undefined);
+        }
+      };
+
       try {
-        const snapshot = await invoke<TerminalPaneSnapshot>(
-          "create_terminal_pane",
-          {
-            request: {
-              args: profile.args,
-              command: profile.command,
-              paneId,
-              title: profile.displayName,
-              workspacePath: undefined,
-              workspaceMode: "local",
-              workingDirectory: "Home",
-            },
-          },
-        );
+        const snapshot = inline
+          ? await startBackgroundPane(paneId, profile)
+          : await invoke<TerminalPaneSnapshot>("create_terminal_pane", {
+              request: {
+                args: profile.args,
+                command: profile.command,
+                paneId,
+                title: profile.displayName,
+                workspacePath: undefined,
+                workspaceMode: "local",
+                workingDirectory: "Home",
+                providerAuthSessionId: importedSessionId,
+              },
+            });
         dispatchWorkbench({
           type: "sync-terminal-pane-snapshot",
           paneId: snapshot.paneId,
@@ -8058,11 +9169,16 @@ export function App() {
         terminalOutputRevisionRef.current[snapshot.paneId] =
           snapshot.outputRevision;
         setTerminalOutput(snapshot.output ?? "");
-        notify(
-          "provider",
-          "Finish provider sign-in",
-          `Complete ${commandText}. Gyro will connect automatically.`,
-        );
+        if (inline) {
+          patchProviderSignIn(providerId, { phase: "waiting" });
+          showSignInProgress(snapshot.output);
+        } else {
+          notify(
+            "provider",
+            "Finish provider sign-in",
+            `Complete ${commandText}. Gyro will connect automatically.`,
+          );
+        }
 
         // Shared post-login watcher for every CLI provider (OpenAI, Anthropic,
         // Kimi, xAI, Gemini, Cursor, OpenCode). A successful login process exit
@@ -8075,11 +9191,19 @@ export function App() {
         ) => {
           clearProviderSignInRejection(providerId);
           setProviderAuthStatus(providerId, "connected");
+          // The popover now lists the models; the login terminal has done its
+          // job. A health-confirmed login may still be idling at its prompt.
+          if (inline) {
+            dismissProviderSignInPane(providerId, {
+              stop: source === "health",
+            });
+          }
           if (source === "login-exit") {
             // Credentials just landed, so a cached answer is stale.
             const verified = await invoke<ProviderHealthCheck>(
               "check_provider_health",
               {
+                importedSessionId,
                 request: providerHealthRequest(provider, providerId, {
                   force: true,
                 }),
@@ -8096,7 +9220,9 @@ export function App() {
               : "Provider verified",
             providerId === "openai" && source === "health"
               ? "OpenAI is available through your local ChatGPT/Codex login."
-              : providerLabel,
+              : inline && provider?.models.length
+                ? `${providerLabel} · ${provider.models.length} ${provider.models.length === 1 ? "model" : "models"} ready`
+                : providerLabel,
           );
           return true as const;
         };
@@ -8108,32 +9234,25 @@ export function App() {
           PROVIDER_SIGN_IN_POLL_ATTEMPTS,
         );
         for (let attempt = 0; attempt < loginPollAttempts; attempt += 1) {
-          await waitFor(PROVIDER_AUTH_POLL_INTERVAL_MS);
+          await waitFor(
+            inline && attempt < PROVIDER_SIGN_IN_FAST_POLL_ATTEMPTS
+              ? PROVIDER_SIGN_IN_FAST_POLL_MS
+              : PROVIDER_AUTH_POLL_INTERVAL_MS,
+          );
+          if (signInCancelled()) return false;
 
-          const progress = await invoke<TerminalPaneSnapshot>(
-            "read_terminal_output",
-            {
-              paneId,
-              knownOutputRevision: terminalOutputRevisionRef.current[paneId],
-            },
-          ).catch(() => undefined);
+          const progress = await readSignInPane(paneId);
           if (progress) {
-            terminalOutputRevisionRef.current[paneId] = progress.outputRevision;
-            dispatchWorkbench({
-              type: "sync-terminal-pane-snapshot",
-              paneId,
-              event:
-                progress.exitCode === null || progress.exitCode === undefined
-                  ? progress.status
-                  : `${progress.status} (${progress.exitCode})`,
-              output: progress.output ?? "",
-              status: terminalStatusFromSnapshot(progress.status),
-              hasForegroundJob: progress.hasForegroundJob ?? undefined,
-            });
-            if (progress.output) setTerminalOutput(progress.output);
+            showSignInProgress(progress.output);
             if (progress.exitCode !== null && progress.exitCode !== undefined) {
               if (progress.exitCode === 0) {
                 return completeProviderLogin("login-exit");
+              }
+              if (inline) {
+                patchProviderSignIn(providerId, {
+                  phase: "failed",
+                  message: `${providerLabel} sign-in didn't finish (exit ${progress.exitCode}).`,
+                });
               }
               notify(
                 "approval",
@@ -8155,6 +9274,7 @@ export function App() {
           const check = await invoke<ProviderHealthCheck>(
             "check_provider_health",
             {
+              importedSessionId,
               request: providerHealthRequest(provider, providerId),
             },
           ).catch((error) => ({
@@ -8177,6 +9297,12 @@ export function App() {
           }
         }
 
+        if (inline) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `${providerLabel} sign-in timed out. Try again when you're ready.`,
+          });
+        }
         notify(
           "approval",
           "Provider sign-in still pending",
@@ -8195,6 +9321,19 @@ export function App() {
         const output = String(error);
         setTerminalOutput(output);
         recordProviderHealthOutput(providerId, output);
+        if (inline) {
+          const missing = /not found|no such file|cannot find/i.test(output);
+          if (missing) {
+            await reportNotInstalled(
+              `${providerLabel} needs ${cliName}, which isn't installed yet.`,
+            );
+            return false;
+          }
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `${providerLabel} sign-in couldn't start.`,
+          });
+        }
         notify("command-failed", `${providerLabel} login failed`, output);
         return false;
       }
@@ -8203,7 +9342,11 @@ export function App() {
       activeSession?.workspacePath,
       clearProviderSignInRejection,
       config,
+      dismissProviderSignInPane,
       notify,
+      isProviderSignInCancelled,
+      patchProviderSignIn,
+      providerSignInPanesRef,
       recordProviderHealthOutput,
       setProviderAuthStatus,
       workbench.workspaceMode,
@@ -8211,9 +9354,24 @@ export function App() {
     ],
   );
 
-  const { connectProvider, connectingProviderIds } = useProviderConnectionGuard(
+  const runProviderConnectionInline = useInlineSignInRunner(
+    providerSignIn,
     runProviderConnection,
   );
+  const { connectProvider, connectingProviderIds } = useProviderConnectionGuard(
+    runProviderConnectionInline,
+  );
+  const openProviderSettings = useCallback(
+    () => openSettingsSection("providers"),
+    [openSettingsSection],
+  );
+  const providerSignInState = useProviderSignInActions(providerSignIn, {
+    connectProvider,
+    dispatchWorkbench,
+    isProviderId,
+    notify,
+    openProviderSettings,
+  });
 
   const recordModelSelection = useCallback(
     (
@@ -8688,6 +9846,95 @@ export function App() {
     [activeDraftKey, activeSessionId, chatAttachments, notify, workspacePath],
   );
 
+  /* Explorer "Ask Gyro" attaches the selection and leaves sending to Return.
+     A folder is a short listing, not a recursive copy of its files. */
+  const askWorkspacePath = useCallback(
+    async (path: string) => {
+      const root = workspaceRootForPath(workspaceRoots, path);
+      if (!root || !path) {
+        notify(
+          "command-failed",
+          "Ask Gyro blocked",
+          "Stay inside this workspace folder",
+        );
+        return false;
+      }
+      const entry = explorerFiles.find((file) => file.path === path);
+      const isDirectory =
+        entry?.kind === "directory" ||
+        entry?.isWorkspaceRoot === true ||
+        path === root;
+      try {
+        const attachment = isDirectory
+          ? await invoke<ChatAttachment>("prepare_chat_attachment", {
+              request: {
+                sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                path: "",
+                workspacePath: root,
+                kind: "ide-snapshot",
+                name: `${workspaceName(path)}.snapshot.txt`.slice(0, 255),
+                relativePath:
+                  path === root
+                    ? workspaceName(root)
+                    : relativeFilePath(path, root),
+                bytes: Array.from(
+                  new TextEncoder().encode(
+                    formatExplorerAskListing(
+                      workspaceName(path),
+                      await invoke<WorkspaceFile[]>("list_workspace_tree", {
+                        workspacePath: path,
+                        depth: 2,
+                      }),
+                    ),
+                  ),
+                ),
+              },
+            })
+          : await invoke<ChatAttachment>("prepare_chat_attachment", {
+              request: {
+                sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                path,
+                workspacePath: root,
+                kind: "workspace-file",
+              },
+            });
+        flushSync(() => {
+          setChatAttachments((current) => {
+            const draft = current[activeDraftKey] ?? [];
+            const alreadyAttached = draft.some(
+              (item) =>
+                item.path === attachment.path ||
+                (item.relativePath &&
+                  item.relativePath === attachment.relativePath &&
+                  item.name === attachment.name),
+            );
+            if (alreadyAttached) return current;
+            return {
+              ...current,
+              [activeDraftKey]: [...draft, attachment],
+            };
+          });
+        });
+        notify(
+          "terminal",
+          isDirectory ? "Folder attached" : "File attached",
+          "It is in the composer. Press Return when you want to send.",
+        );
+        return true;
+      } catch (error) {
+        notify("command-failed", "Could not attach", String(error));
+        return false;
+      }
+    },
+    [
+      activeDraftKey,
+      activeSessionId,
+      explorerFiles,
+      notify,
+      workspaceRoots,
+    ],
+  );
+
   const attachBrowserSnapshot = useCallback(async () => {
     if (!isTauriRuntime() || !activeSessionId) {
       notify(
@@ -8798,7 +10045,7 @@ export function App() {
       const attachmentWorkspacePath = target
         ? target.workspacePath
         : workspacePath;
-      const existing = chatAttachments[attachmentDraftKey] ?? [];
+      const existing = chatAttachmentsRef.current[attachmentDraftKey] ?? [];
       const remaining = {
         image: Math.max(
           0,
@@ -8832,8 +10079,15 @@ export function App() {
         const placeholder = pendingMediaAttachment(dropped, kind);
         queued.push({ dropped, kind, placeholder });
       }
-      // The chip lands with the drop; the upload fills it in behind it.
+      // Reserve synchronously so overlapping drops share the same limits.
       if (queued.length) {
+        chatAttachmentsRef.current = {
+          ...chatAttachmentsRef.current,
+          [attachmentDraftKey]: [
+            ...existing,
+            ...queued.map((item) => item.placeholder),
+          ],
+        };
         setChatAttachments((current) => ({
           ...current,
           [attachmentDraftKey]: [
@@ -8843,36 +10097,45 @@ export function App() {
         }));
       }
       const upload = async (dropped: File, kind: "image" | "video") => {
+        const cancellation = new AbortController();
         try {
-          const file =
-            kind === "image"
-              ? await sendableChatImage(dropped, MAX_CHAT_IMAGE_BYTES)
-              : dropped;
-          const name =
-            file.name ||
-            `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`;
-          const byteLimit =
-            kind === "video" ? MAX_CHAT_VIDEO_BYTES : MAX_CHAT_IMAGE_BYTES;
-          if (file.size > byteLimit) {
-            rejected.push(
-              `${name}: ${kind}s must be ${byteLimit / (1024 * 1024)} MB or smaller`,
-            );
-            return undefined;
-          }
-          const headers: Record<string, string> = {
-            "x-gyro-kind": kind,
-            "x-gyro-name": base64Utf8(name),
-            "x-gyro-session-id": attachmentSessionId ?? NEW_CHAT_DRAFT_KEY,
-          };
-          if (attachmentWorkspacePath) {
-            headers["x-gyro-workspace"] = base64Utf8(attachmentWorkspacePath);
-          }
-          const attachment = await invoke<ChatAttachment>(
-            "prepare_chat_media_upload",
-            new Uint8Array(await file.arrayBuffer()),
-            { headers },
+          return await withMediaUploadTimeout(
+            queueMediaUpload(async () => {
+              const file =
+                kind === "image"
+                  ? await sendableChatImage(dropped, MAX_CHAT_IMAGE_BYTES)
+                  : dropped;
+              const name =
+                file.name ||
+                `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`;
+              const byteLimit =
+                kind === "video" ? MAX_CHAT_VIDEO_BYTES : MAX_CHAT_IMAGE_BYTES;
+              if (file.size > byteLimit) {
+                rejected.push(
+                  `${name}: ${kind}s must be ${byteLimit / (1024 * 1024)} MB or smaller`,
+                );
+                return undefined;
+              }
+              const headers: Record<string, string> = {
+                "x-gyro-kind": kind,
+                "x-gyro-name": base64Utf8(name),
+                "x-gyro-session-id": attachmentSessionId ?? NEW_CHAT_DRAFT_KEY,
+              };
+              if (attachmentWorkspacePath) {
+                headers["x-gyro-workspace"] = base64Utf8(attachmentWorkspacePath);
+              }
+              const attachment = await invoke<ChatAttachment>(
+                "prepare_chat_media_upload",
+                new Uint8Array(await file.arrayBuffer()),
+                { headers },
+              );
+              return {
+                ...attachment,
+                previewUrl: convertFileSrc(attachment.path),
+              };
+            }, cancellation.signal),
+            () => cancellation.abort(),
           );
-          return { ...attachment, previewUrl: convertFileSrc(attachment.path) };
         } catch (error) {
           rejected.push(`${dropped.name || kind}: ${String(error)}`);
           return undefined;
@@ -8962,6 +10225,7 @@ export function App() {
           action.startsWith("select-provider:") ||
           action.startsWith("select-provider-model:") ||
           action.startsWith("select-provider-effort:") ||
+          action.startsWith("set-provider-fast-mode:") ||
           action.startsWith("set-workspace-mode:") ||
           action.startsWith("refresh-provider-usage:");
         if (!allowedWhileOptimizing) {
@@ -9045,7 +10309,13 @@ export function App() {
       if (action.startsWith("connect-provider:")) {
         const providerId = action.replace("connect-provider:", "");
         if (isProviderId(providerId)) {
-          connectProvider(providerId);
+          const session = sessionsRef.current.find(
+            (session) => session.id === draftKey,
+          );
+          connectProvider(providerId, {
+            inline: true,
+            importedSessionId: session?.importSource ? session.id : undefined,
+          });
         }
         return;
       }
@@ -9076,24 +10346,43 @@ export function App() {
         return;
       }
 
+      if (action.startsWith("set-provider-fast-mode:")) {
+        const nextConfig = fastModeConfigFromAction(configRef.current, action);
+        if (nextConfig) {
+          void persistConfig(nextConfig, { notifySuccess: false });
+        }
+        return;
+      }
+
       if (action.startsWith("refresh-provider-models:")) {
         const providerId = action.replace("refresh-provider-models:", "");
         if (isProviderId(providerId)) {
           const provider = providersForConfig(config).find(
             (item) => item.id === providerId,
           );
-          void persistConfig({
-            ...config,
-            selectedProviderId: providerId,
-            modelProviders: providersForConfig(config),
+          if (providerId === "antigravity") {
+            void refreshGoogleModels(providerId, true).then((discovery) => {
+              notify(
+                discovery ? "provider" : "command-failed",
+                discovery ? "Google models refreshed" : "Model discovery failed",
+                discovery
+                  ? `${provider?.displayName ?? providerId}: ${discovery.models.length} models reported by the connected agent.`
+                  : "Check the provider installation and credentials, then try again.",
+              );
+            });
+            return;
+          }
+          void refreshModelContexts(providerId, true).then((windows) => {
+            const live = windows.filter((window) =>
+              window.contextWindowTokens && window.source !== "catalog" && window.source !== "unknown",
+            ).length;
+            notify(
+              "provider", "Context limits refreshed",
+              provider
+                ? `${provider.displayName}: ${live} live model limit${live === 1 ? "" : "s"}; catalog limits remain available for other models.`
+                : "Model context limits refreshed.",
+            );
           });
-          notify(
-            "provider",
-            "Models refreshed",
-            provider
-              ? `${provider.displayName} is using the seeded model catalog.`
-              : "Seeded model catalog is current.",
-          );
         }
         return;
       }
@@ -9447,9 +10736,11 @@ export function App() {
           );
           optimisticEventsRef.current.set(
             activeSessionId,
-            mergePersistedAndOptimisticEvents(
-              optimisticEventsRef.current.get(activeSessionId) ?? [],
-              compactEvents,
+            limitOptimisticSessionEvents(
+              mergePersistedAndOptimisticEvents(
+                optimisticEventsRef.current.get(activeSessionId) ?? [],
+                compactEvents,
+              ),
             ),
           );
           setEventsForSession(activeSessionId, (current) =>
@@ -9537,6 +10828,8 @@ export function App() {
       persistConfig,
       refreshEvents,
       refreshIdeServices,
+      refreshModelContexts,
+      refreshGoogleModels,
       refreshProviderUsage,
       refreshSourceControl,
       removeWorkspaceWorktree,
@@ -9728,12 +11021,19 @@ export function App() {
       if (!pane) {
         return;
       }
-      const title = window.prompt("Rename terminal", pane.title)?.trim();
-      if (!title || title === pane.title) {
-        return;
-      }
-      dispatchWorkbench({ type: "rename-terminal-pane", paneId, title });
-      notify("terminal", "Terminal renamed", title);
+      void askTextValue({
+        title: "Rename terminal",
+        label: "Terminal name",
+        initialValue: pane.title,
+        confirmLabel: "Rename",
+      }).then((nextTitle) => {
+        const title = nextTitle?.trim();
+        if (!title || title === pane.title) {
+          return;
+        }
+        dispatchWorkbench({ type: "rename-terminal-pane", paneId, title });
+        notify("terminal", "Terminal renamed", title);
+      });
     },
     [notify, workbench.terminalPanes],
   );
@@ -9771,18 +11071,42 @@ export function App() {
       const message = normalizeChatMessage(overrideMessage ?? activeChatDraft);
       const draftAttachments =
         overrideContext?.attachments ?? activeChatAttachments;
+      const requestedSessionId = overrideContext?.sessionId ?? activeSessionId;
+      if (
+        requestedSessionId &&
+        message.length <= MAX_CHAT_MESSAGE_CHARS &&
+        (message || draftAttachments.length > 0)
+      ) {
+        chatAutoRetry.cancelSession(requestedSessionId);
+        if (
+          !overrideContext?.retryTurnId &&
+          !overrideContext?.retryDispatchGuard
+        ) {
+          retryDispatchRef.current.cancelSession(requestedSessionId);
+        }
+      }
+      if (overrideContext?.retryDispatchGuard?.() === false) return false;
       // An image dropped a moment ago may still be uploading.
-      const turnAttachments = draftAttachments.some((item) => item.pending)
-        ? await settlePendingMedia(draftAttachments)
-        : draftAttachments;
+      let turnAttachments = draftAttachments;
+      try {
+        if (draftAttachments.some((item) => item.pending)) {
+          turnAttachments = await settlePendingMedia(draftAttachments);
+        }
+      } catch (error) {
+        notify("command-failed", "Attachment upload failed", String(error));
+        return false;
+      }
+      if (overrideContext?.retryDispatchGuard?.() === false) return false;
       // Every mode carries the goal, Plan included: planning toward a stated
       // outcome is the case the goal exists for.
       const turnGoal =
         overrideContext && "goal" in overrideContext
           ? overrideContext.goal
           : activeSessionGoal;
-      const turnPlan = overrideContext?.plan ?? activeSessionPlan;
-      const requestedSessionId = overrideContext?.sessionId ?? activeSessionId;
+      const turnPlan =
+        overrideContext && "plan" in overrideContext
+          ? (overrideContext.plan ?? { title: "Plan", items: [] })
+          : activeSessionPlan;
       const previewSessionId =
         isTauriRuntime() && requestedSessionId?.startsWith("preview-")
           ? requestedSessionId
@@ -9821,10 +11145,15 @@ export function App() {
         config.requireFileEditApproval;
       const fullAccess =
         overrideContext?.fullAccess ?? Boolean(config.fullAccess);
+      // A chat belongs to the project of the pane it was typed in. The global
+      // workspace can move (Code layout, sidebar) while an already-focused
+      // draft keeps its own project, so never let it pick the project here.
       const chatWorkspacePath =
         overrideContext?.workspacePath ??
         targetSession?.workspacePath ??
-        workspacePath;
+        (!requestedSessionId && activeChatPane?.kind === "draft"
+          ? activeChatPane.workspacePath
+          : workspacePath);
       const turnWorkspaceContext =
         overrideContext?.workspaceContext ??
         (workspaceContextSnapshot &&
@@ -9882,6 +11211,10 @@ export function App() {
         targetSessionId &&
         sendingSessionIdsRef.current.has(targetSessionId)
       ) {
+        // Recovery keeps the original turn. The dispatch controller waits for
+        // a finishing invoke; it must never fall into the normal send queue.
+        if (overrideContext?.retryTurnId || overrideContext?.retryDispatchGuard)
+          return false;
         if (
           (chatMessageQueues[targetSessionId]?.length ?? 0) >=
           MAX_QUEUED_CHAT_MESSAGES_PER_SESSION
@@ -9970,11 +11303,35 @@ export function App() {
         void openWorkspace();
         return false;
       }
-      if (
-        !isCouncilTurn &&
-        !checkProviderReadiness("chat", sessionModel.providerId)
-      ) {
-        return false;
+      if (!isCouncilTurn) {
+        if (targetSession?.importSource && isTauriRuntime()) {
+          const check = await invoke<ProviderHealthCheck>(
+            "check_provider_health",
+            {
+              importedSessionId: targetSession.id,
+              request: providerHealthRequest(
+                selectedProvider,
+                sessionModel.providerId,
+              ),
+            },
+          ).catch(() => undefined);
+          if (
+            !check ||
+            recordProviderHealthOutput(
+              sessionModel.providerId!,
+              check.output,
+              check,
+            ).connectionStatus !== "connected"
+          ) {
+            notify(
+              "provider",
+              "Connect this chat's provider",
+              "Use Connect to sign in with this imported chat's provider data folder.",
+            );
+            return false;
+          }
+        } else if (!checkProviderReadiness("chat", sessionModel.providerId))
+          return false;
       }
       if (isCouncilTurn && COUNCIL_COMING_SOON) {
         notify(
@@ -10008,12 +11365,17 @@ export function App() {
       const turnId = retryTurnId ?? overrideContext?.turnId ?? createTurnId();
       if (!isCouncilTurn) turnTiming.beginTurnTiming(turnId);
       setTurnSourceControlBaselines((current) => {
+        if (
+          scopedIde.sourceControl.detailsLoaded === false ||
+          scopedIde.sourceControl.statsPartial
+        )
+          return current;
         if (current[turnId]) {
           return current;
         }
         return Object.fromEntries([
           ...Object.entries(current).slice(-49),
-          [turnId, sourceControlLineStats(workbench.ide.sourceControl)],
+          [turnId, sourceControlLineStats(scopedIde.sourceControl)],
         ]);
       });
       const isRetry = Boolean(targetSessionId && retryTurnId);
@@ -10074,7 +11436,10 @@ export function App() {
           );
         }
         let sendingSessionId = session.id;
-        optimisticEventsRef.current.set(session.id, optimisticEvents);
+        optimisticEventsRef.current.set(
+          session.id,
+          limitOptimisticSessionEvents(optimisticEvents),
+        );
         suppressSessionAutoSelectRef.current = false;
         setSessionSending(session.id, true);
         if (consumeSelectedMode) {
@@ -10159,7 +11524,10 @@ export function App() {
             persistedSession.id,
           );
           optimisticEventsRef.current.delete(session.id);
-          optimisticEventsRef.current.set(persistedSession.id, migratedEvents);
+          optimisticEventsRef.current.set(
+            persistedSession.id,
+            limitOptimisticSessionEvents(migratedEvents),
+          );
           setSessionEventsById((current) => {
             const next = { ...current };
             delete next[session.id];
@@ -10336,6 +11704,7 @@ export function App() {
               },
             });
           }
+          await configSaveQueueRef.current;
           persistedChatTurnIdsRef.current.add(turnId);
           if (isCouncilTurn && councilResolution) {
             const councilResponse = await invoke<CouncilChatInvokeResponse>(
@@ -10483,12 +11852,22 @@ export function App() {
       } else {
         await pendingModelSave(targetSessionId);
       }
+      await configSaveQueueRef.current;
+      // Preparation can await media, provider health and model saves. A new
+      // send or Stop may win meanwhile, or another sender may have started.
+      if (
+        overrideContext?.retryDispatchGuard?.() === false ||
+        (isRetry && sendingSessionIdsRef.current.has(targetSessionId))
+      )
+        return false;
       if (isRetry) {
         const resetEvents = (items: SessionEvent[]) =>
           resetStreamingAssistantForRetry(items, turnId);
         optimisticEventsRef.current.set(
           targetSessionId,
-          resetEvents(optimisticEventsRef.current.get(targetSessionId) ?? []),
+          limitOptimisticSessionEvents(
+            resetEvents(optimisticEventsRef.current.get(targetSessionId) ?? []),
+          ),
         );
         setEventsForSession(targetSessionId, (current) => resetEvents(current));
         updateOptimisticProviderStatus(
@@ -10501,9 +11880,11 @@ export function App() {
       } else {
         optimisticEventsRef.current.set(
           targetSessionId,
-          mergePersistedAndOptimisticEvents(
-            optimisticEventsRef.current.get(targetSessionId) ?? [],
-            optimisticEvents,
+          limitOptimisticSessionEvents(
+            mergePersistedAndOptimisticEvents(
+              optimisticEventsRef.current.get(targetSessionId) ?? [],
+              optimisticEvents,
+            ),
           ),
         );
       }
@@ -10702,6 +12083,7 @@ export function App() {
       activeSession?.workspacePath,
       activeSessionHasTranscriptEvents,
       activeDraftKey,
+      activeChatPane,
       activeChatAttachments,
       activeChatDraft,
       changeChatMode,
@@ -10713,8 +12095,10 @@ export function App() {
       applyProviderChatResponse,
       chatDraftModels,
       chatMessageQueues,
+      chatAutoRetry.cancelSession,
       refreshProviderUsage,
       checkProviderReadiness,
+      recordProviderHealthOutput,
       config,
       isShellOptimizing,
       isStartingFirstTurn,
@@ -10729,13 +12113,21 @@ export function App() {
       setSessionSending,
       setEventsForSession,
       updateSessionTitle,
-      workbench.ide.sourceControl,
+      scopedIde.sourceControl,
       liveEditorEvidence,
       workbench.providerStatuses,
       workbench.workspaceMode,
       workspacePath,
     ],
   );
+  // sendDraft changes with every draft and status update. A stable handler
+  // keeps the transcript memo (which lists onContinueChat) from rebuilding
+  // every turn on each render.
+  const sendDraftRef = useRef(sendDraft);
+  sendDraftRef.current = sendDraft;
+  const continueChat = useCallback(() => {
+    void sendDraftRef.current("Continue");
+  }, []);
 
   const handleCouncilAction = useCallback(
     async (action: CouncilActionRequest): Promise<string | void> => {
@@ -10885,14 +12277,18 @@ export function App() {
 
   const startNewGoalChat = useCallback(
     (goal: string) => {
-      // The goal composer keeps its own text, so the chat draft stays put.
+      // A new goal is the message already in the composer, same as Plan, so
+      // sending it consumes that draft instead of leaving a second copy. Only
+      // a fresh chat needs the selection carried; an existing chat picks it up
+      // from the goal it is about to gain.
+      if (!activeSessionId) goalModeCarryRef.current = activeDraftKey;
       void sendDraft(goal, {
         goal: { text: goal, status: "active" },
-        preserveDraft: true,
+        preserveDraft: false,
         consumeDraftMode: true,
       });
     },
-    [sendDraft],
+    [activeDraftKey, activeSessionId, sendDraft],
   );
 
   useEffect(() => {
@@ -10927,12 +12323,18 @@ export function App() {
       if (plan.items.length === 0 && !plan.content) {
         return false;
       }
+      // Approving lands in a fresh Normal-mode draft, whose model picker starts
+      // empty. Carry the model and effort the approval bar showed — the plan
+      // pane's own selection — so the run does not fall back to the global
+      // picker's defaults.
+      const planModel = chatDraftModels[target?.draftKey ?? activeDraftKey];
       return sendDraft("Implement the approved plan.", {
         goal: target ? target.goal : activeSessionGoal,
         mode: "normal",
         plan,
         preserveDraft: true,
         sessionId: target?.sessionId,
+        ...(planModel ? { sessionModel: planModel } : {}),
       });
     },
     [
@@ -10940,6 +12342,7 @@ export function App() {
       activeSessionGoal,
       activeSessionPlan,
       changeChatMode,
+      chatDraftModels,
       notify,
       sendDraft,
     ],
@@ -11126,12 +12529,31 @@ export function App() {
 
   const handleProviderStatusAction = useCallback(
     (action: string, event: SessionEvent) => {
+      if (action === "cancel-retry") {
+        chatAutoRetry.cancelSession(event.sessionId);
+        retryDispatchRef.current.cancelSession(event.sessionId);
+        stoppedChatSessionsRef.current.add(event.sessionId);
+        void invoke("stop_provider_chat", { sessionId: event.sessionId }).catch(
+          (error) => {
+            stoppedChatSessionsRef.current.delete(event.sessionId);
+            setQueueRetryTick((current) => current + 1);
+            notify("command-failed", "Could not cancel retry", String(error));
+          },
+        );
+        return;
+      }
+      if (action === "retry-send" || action === "reconnect-provider") {
+        chatAutoRetry.cancel(event.id);
+      }
       const payload = recordFromUnknown(event.payload);
       const providerId = stringFromRecord(payload, "providerId");
       const turnId = turnIdFromSessionEvent(event);
+      const eventSessionEvents =
+        sessionEventsById[event.sessionId] ?? eventsRef.current;
       const userEvent = turnId
-        ? eventsRef.current.find(
+        ? eventSessionEvents.find(
             (item) =>
+              item.sessionId === event.sessionId &&
               item.kind === "user-message" &&
               (turnIdFromSessionEvent(item) ?? item.id) === turnId,
           )
@@ -11145,12 +12567,12 @@ export function App() {
         const activity = capabilityActivityFromSessionEvent(event);
         if (!activity?.resource) return;
         if (activity.resource.kind === "chat") {
-          // A research sub-agent keeps its transcript in a chat of its own.
-          // That chat is not listed among the user's chats, so the call that
-          // ran it is what opens it — and the session list may not know about
-          // it yet.
-          const chatSessionId = activity.resource.id;
-          void refreshSessions().then(() => selectSession(chatSessionId));
+          const paneId =
+            displayedChatLayout.slots.find(
+              (pane) =>
+                pane?.kind === "session" && pane.sessionId === event.sessionId,
+            )?.paneId ?? SOLO_CHAT_PANE_ID;
+          subagentController.select(paneId, activity.resource.id);
           return;
         }
         selectSession(event.sessionId);
@@ -11307,7 +12729,8 @@ export function App() {
 
       const replayFailedTurn = () => {
         if (!userMessage) return;
-        if (turnId) {
+        const removeQueuedReplay = () => {
+          if (!turnId) return;
           setChatMessageQueues((current) => {
             const queued = current[event.sessionId] ?? [];
             const remaining = queued.filter(
@@ -11321,7 +12744,7 @@ export function App() {
             else delete next[event.sessionId];
             return next;
           });
-        }
+        };
         const userPayload = recordFromUnknown(userEvent?.payload);
         const attachments = Array.isArray(userPayload?.attachments)
           ? (userPayload.attachments as ChatAttachment[])
@@ -11330,7 +12753,9 @@ export function App() {
             : [];
         const goalRecord = recordFromUnknown(payload?.goal);
         const planRecord = recordFromUnknown(payload?.plan);
-        void sendDraft(userMessage, {
+        const retryContext: ChatTurnContextSnapshot = {
+          sessionId: event.sessionId,
+          preserveDraft: true,
           retryTurnId: turnId,
           mode:
             stringFromRecord(payload, "chatMode") === "plan"
@@ -11351,7 +12776,30 @@ export function App() {
             planRecord && Array.isArray(planRecord.items)
               ? (planRecord as unknown as SessionPlan)
               : undefined,
-        });
+        };
+        void retryDispatchRef.current
+          .dispatch(event.sessionId, turnId, {
+            isBusy: () =>
+              sendingSessionIdsRef.current.has(event.sessionId) ||
+              queuedChatDispatchesRef.current.has(event.sessionId),
+            isCurrent: () =>
+              isChatRetryCurrent(
+                sessionEventsByIdRef.current[event.sessionId] ?? [],
+                event,
+              ),
+            send: (retryDispatchGuard) => {
+              // A finishing queued delivery can reinsert its failed item. Drop
+              // that replay only after its dispatch cleanup has also settled.
+              removeQueuedReplay();
+              return sendDraftRef.current(userMessage, {
+                ...retryContext,
+                retryDispatchGuard,
+              });
+            },
+          })
+          .catch((error) =>
+            notify("command-failed", "Could not retry", String(error)),
+          );
       };
 
       if (action === "reconnect-provider" && isProviderId(providerId)) {
@@ -11363,11 +12811,12 @@ export function App() {
         const needsSignIn = providerNeedsSignIn(
           stringFromRecord(payload, "recoveryKind"),
         );
-        void connectProvider(providerId, { forceLogin: needsSignIn }).then(
-          (connected) => {
-            if (connected && needsSignIn) replayFailedTurn();
-          },
-        );
+        void connectProvider(providerId, {
+          forceLogin: needsSignIn,
+          importedSessionId: event.sessionId,
+        }).then((connected) => {
+          if (connected && needsSignIn) replayFailedTurn();
+        });
         return;
       }
 
@@ -11376,6 +12825,10 @@ export function App() {
       }
     },
     [
+      subagentController,
+      chatAutoRetry.cancel,
+      chatAutoRetry.cancelSession,
+      displayedChatLayout,
       browserResourcesBySessionId,
       capabilityResourceDataByCallId,
       connectProvider,
@@ -11383,22 +12836,113 @@ export function App() {
       refreshSessions,
       selectSession,
       sendDraft,
+      sessionEventsById,
       sessions,
     ],
   );
+
+  retryProviderStatusRef.current = (event) =>
+    handleProviderStatusAction("retry-send", event);
+
+  const projectImport = useProjectImport({
+    enabled:
+      activeDestination === "settings" &&
+      workbench.preferences.lastSettingsSection === "import-projects",
+    visibleSessions: sessions.filter(
+      (session) =>
+        session.id === activeSessionId ||
+        displayedChatLayout.slots.some(
+          (pane) => pane?.kind === "session" && pane.sessionId === session.id,
+        ),
+    ),
+    events,
+    refreshEvents,
+    onOpenSettings: () => openSettingsSection("import-projects"),
+    onImported: (paths) => {
+      setRemovedProjectPaths((current) =>
+        current.filter(
+          (path) =>
+            !paths.some(
+              (imported) =>
+                normalizeProjectPath(imported) === normalizeProjectPath(path),
+            ),
+        ),
+      );
+      setRecentProjectPaths((current) => [...new Set([...paths, ...current])]);
+      void refreshSessions();
+    },
+    onOpenSession: (id, path) => {
+      path =
+        sessions.find((session) => session.id === id)?.workspacePath ?? path;
+      setRemovedProjectPaths((current) =>
+        current.filter(
+          (removed) =>
+            normalizeProjectPath(removed) !== normalizeProjectPath(path),
+        ),
+      );
+      setRecentProjectPaths((current) => [...new Set([path, ...current])]);
+      selectSession(id);
+      setWorkspacePath(path);
+      dispatchWorkbench({
+        type: "select-destination",
+        destination: "workspace",
+      });
+    },
+    onSessionUpdated: (updated) => {
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === updated.id ? updated : session,
+        ),
+      );
+      if (updated.id === activeSessionId)
+        setWorkspacePath(updated.workspacePath);
+    },
+    onRetrySession: (id) => {
+      const failure = [...(sessionEventsById[id] ?? [])]
+        .reverse()
+        .find(
+          (event) =>
+            stringFromRecord(recordFromUnknown(event.payload), "status") ===
+              "failed" && turnIdFromSessionEvent(event),
+        );
+      if (failure) handleProviderStatusAction("retry-send", failure);
+      else
+        notify(
+          "terminal",
+          "Ready to retry",
+          "Send your message again to retry the original session.",
+        );
+    },
+  });
+  const taskHandoff = useTaskHandoff({
+    config,
+    sessions,
+    send: (message, context) => sendDraftRef.current(message, context),
+    refreshSessions,
+    selectSession,
+    notify,
+  });
 
   const handleMutationApprovalAction = useCallback(
     async (proposalId: string, decision: "approve" | "reject") => {
       if (!activeSessionId || !isTauriRuntime()) {
         return;
       }
+      const approvalEvent = Object.values(sessionEventsById)
+        .flat()
+        .find(
+          (event) =>
+            stringFromRecord(recordFromUnknown(event.payload), "proposalId") ===
+            proposalId,
+        );
+      const ownerSessionId = approvalEvent?.sessionId ?? activeSessionId;
       try {
         const result = await invoke<{
           proposal: { path: string; status: string };
         }>("resolve_file_mutation_proposal", {
           request: { proposalId, decision },
         });
-        await refreshEvents(activeSessionId);
+        await refreshEvents(ownerSessionId);
         if (result.proposal.status === "applied") {
           await refreshWorkspaceTree();
           refreshIdeSourceControl(
@@ -11420,7 +12964,7 @@ export function App() {
           "Could not resolve change",
           error instanceof Error ? error.message : String(error),
         );
-        await refreshEvents(activeSessionId);
+        await refreshEvents(ownerSessionId);
       }
     },
     [
@@ -11431,6 +12975,7 @@ export function App() {
       refreshIdeSourceControl,
       refreshWorkspaceTree,
       workspacePath,
+      sessionEventsById,
     ],
   );
 
@@ -11532,6 +13077,8 @@ export function App() {
       if (options?.pauseQueue !== false) {
         stoppedChatSessionsRef.current.add(sessionId);
       }
+      chatAutoRetry.cancelSession(sessionId);
+      retryDispatchRef.current.cancelSession(sessionId);
       void invoke("stop_provider_chat", { sessionId }).catch((error) => {
         if (options?.pauseQueue !== false) {
           stoppedChatSessionsRef.current.delete(sessionId);
@@ -11540,7 +13087,7 @@ export function App() {
         notify("command-failed", "Stop failed", String(error));
       });
     },
-    [notify],
+    [chatAutoRetry.cancelSession, notify],
   );
 
   const stopActiveChat = useCallback(() => {
@@ -11753,15 +13300,15 @@ export function App() {
   );
 
   const closeEditorTab = useCallback(
-    (path: string, groupId?: string) => {
+    async (path: string, groupId?: string) => {
       const groupsWithPath = workbench.ide.layout.groups.filter((group) =>
         group.tabs.some((tab) => tab.path === path),
       );
       const closesLastReference = !groupId || groupsWithPath.length <= 1;
       if (
         closesLastReference &&
-        workbench.ide.buffers[path]?.status === "dirty" &&
-        !window.confirm(`Discard unsaved changes in ${workspaceName(path)}?`)
+        editorBufferHasUnsavedChanges(workbench.ide.buffers[path]) &&
+        !(await confirmAction(`Discard unsaved changes in ${workspaceName(path)}?`))
       ) {
         return;
       }
@@ -11797,7 +13344,7 @@ export function App() {
   );
 
   const closeEditorGroup = useCallback(
-    (groupId: string) => {
+    async (groupId: string) => {
       const group = workbench.ide.layout.groups.find(
         (item) => item.id === groupId,
       );
@@ -11815,15 +13362,15 @@ export function App() {
         .filter(
           (path) =>
             !pathsStillOpen.has(path) &&
-            workbench.ide.buffers[path]?.status === "dirty",
+            editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
         );
       if (
         dirtyPaths.length > 0 &&
-        !window.confirm(
+        !(await confirmAction(
           dirtyPaths.length === 1
             ? `Discard unsaved changes in ${workspaceName(dirtyPaths[0] ?? "file")}?`
             : `Discard unsaved changes in ${dirtyPaths.length} files?`,
-        )
+        ))
       ) {
         return;
       }
@@ -11848,17 +13395,46 @@ export function App() {
     dispatchWorkbench({ type: "ide-pin-tab", path });
   }, []);
 
-  const updateEditorBuffer = useCallback((path: string, content: string) => {
-    dispatchWorkbench({ type: "ide-update-buffer", path, content });
-  }, []);
+  const updateEditorBuffer = useCallback(
+    (path: string, content: string) => {
+      const current = editorBuffersRef.current[path];
+      if (current) {
+        const next = {
+          ...editorBuffersRef.current,
+          [path]: {
+            ...current,
+            content,
+            status:
+              content === current.savedContent
+                ? ("ready" as const)
+                : ("dirty" as const),
+          },
+        };
+        editorBuffersRef.current = next;
+        if (hasEditRecovery()) {
+          try {
+            writeEditRecovery(next);
+          } catch (failure) {
+            notify(
+              "command-failed",
+              "Could not update edit recovery",
+              String(failure),
+            );
+          }
+        }
+      }
+      dispatchWorkbench({ type: "ide-update-buffer", path, content });
+    },
+    [notify],
+  );
 
   const saveEditorBuffer = useCallback(
     async (path: string) => {
-      const buffer = workbench.ide.buffers[path];
+      const buffer = editorBuffersRef.current[path];
       const root = workspaceRootForPath(workspaceRoots, path);
       if (!buffer || !root) {
         notify("command-failed", "Save blocked", "Open a workspace first");
-        return;
+        return false;
       }
       if (buffer.truncated) {
         notify(
@@ -11866,7 +13442,7 @@ export function App() {
           "Save blocked",
           "This is a truncated preview. The complete file must be loaded before saving.",
         );
-        return;
+        return false;
       }
       if (!isTauriRuntime()) {
         dispatchWorkbench({
@@ -11887,7 +13463,7 @@ export function App() {
           path,
           preview: true,
         });
-        return;
+        return true;
       }
       try {
         const saved = await invoke<WorkspaceFileContent>(
@@ -11901,6 +13477,31 @@ export function App() {
             } satisfies WorkspaceFileWriteRequest,
           },
         );
+        const live = editorBuffersRef.current[path] ?? buffer;
+        const next = {
+          ...editorBuffersRef.current,
+          [path]: {
+            ...live,
+            savedContent: saved.content,
+            contentHash: saved.contentHash,
+            status:
+              live.content === saved.content
+                ? ("saved" as const)
+                : ("dirty" as const),
+          },
+        };
+        editorBuffersRef.current = next;
+        if (hasEditRecovery()) {
+          try {
+            writeEditRecovery(next);
+          } catch (failure) {
+            notify(
+              "command-failed",
+              "Could not update edit recovery",
+              String(failure),
+            );
+          }
+        }
         dispatchWorkbench({
           type: "ide-mark-buffer-saved",
           path,
@@ -11908,12 +13509,14 @@ export function App() {
           contentHash: saved.contentHash,
           sizeBytes: saved.sizeBytes,
         });
-        setSelectedFileContent(saved);
+        if (selectedFileRef.current === path)
+          setSelectedFileContent({ ...saved, content: live.content });
         notify("tests-passed", "File saved", path);
         void appendEditorEvent("file-write-approved", `Saved ${path}`, {
           path,
           contentHash: saved.contentHash,
         });
+        return true;
       } catch (error) {
         const detail = String(error);
         dispatchWorkbench({
@@ -11930,10 +13533,179 @@ export function App() {
             error: detail,
           },
         );
+        return false;
       }
     },
     [appendEditorEvent, notify, workbench.ide.buffers, workspaceRoots],
   );
+
+  const languageSessions = useLanguageSessions({
+    roots: workspaceRoots,
+    buffers: workbench.ide.buffers,
+    languageOverrides,
+    trust: workbench.preferences.workspaceTrust,
+    onState: (server) =>
+      dispatchWorkbench({ type: "ide-set-language-server", server }),
+    onMessages: (messages, root) => {
+      const diagnostics = diagnosticsFromLspMessages(messages, root);
+      if (!diagnostics) return;
+      const publishedPaths = new Set(
+        (messages ?? []).flatMap((message) =>
+          isRecord(message) &&
+          message.method === "textDocument/publishDiagnostics" &&
+          isRecord(message.params) &&
+          typeof message.params.uri === "string"
+            ? [lspRelativePath(message.params.uri, root)]
+            : [],
+        ),
+      );
+      dispatchWorkbench({
+        type: "ide-set-diagnostics",
+        diagnostics: [
+          ...workbench.ide.diagnostics.filter(
+            (diagnostic) => !publishedPaths.has(diagnostic.path),
+          ),
+          ...diagnostics,
+        ],
+      });
+    },
+  });
+  const requestLanguageFeature = languageSessions.request;
+  const workspaceRename = useWorkspaceRename({
+    roots: workspaceRoots,
+    buffers: workbench.ide.buffers,
+    trust: workbench.preferences.workspaceTrust,
+    request: requestLanguageFeature,
+    version: languageSessions.version,
+    synchronize: languageSessions.synchronize,
+    isOpen: (path) => workbench.ide.tabs.some((tab) => tab.path === path),
+    capabilities: (path) => languageSessions.ready(path)?.capabilities,
+    read: async (path, root) =>
+      isTauriRuntime()
+        ? invoke<WorkspaceFileContent>("read_workspace_file_full", {
+            path,
+            workspacePath: root,
+          })
+        : createPreviewWorkspaceFileContent(path),
+    dispatch: dispatchWorkbench,
+    save: saveEditorBuffer,
+    notify: (message) =>
+      notify("command-failed", "Could not rename symbol", message),
+  });
+  const openWorkspaceLocation = useCallback(
+    async (
+      path: string,
+      lineNumber: number,
+      column: number,
+      source?: WorkspaceNavigationSource,
+      record = true,
+    ) => {
+      const token = ++navigationRequestRef.current;
+      try {
+        const normalized = filePathFromUri(canonicalFileUri(path));
+        const root = normalized
+          ? workspaceRootForPath(workspaceRoots, normalized)
+          : undefined;
+        if (!normalized || !root)
+          throw new Error("The target is outside the workspace folders.");
+        if (!editorBuffersRef.current[normalized]) {
+          const file = isTauriRuntime()
+            ? await invoke<WorkspaceFileContent>("read_workspace_file_full", {
+                path: normalized,
+                workspacePath: root,
+              })
+            : createPreviewWorkspaceFileContent(normalized);
+          if (file.truncated)
+            throw new Error("The target exceeds the editable file limit.");
+          if (navigationRequestRef.current !== token) return false;
+          const buffer =
+            editorBuffersRef.current[normalized] ?? editorBufferFromFile(file);
+          if (!editorBuffersRef.current[normalized]) {
+            editorBuffersRef.current = {
+              ...editorBuffersRef.current,
+              [normalized]: buffer,
+            };
+            dispatchWorkbench({
+              type: "ide-apply-buffer-batch",
+              updates: [{ path: normalized, buffer }],
+            });
+          }
+        }
+        if (navigationRequestRef.current !== token) return false;
+        if (
+          source &&
+          selectedFileRef.current &&
+          selectedFileRef.current !== source.path
+        )
+          return false;
+        if (record)
+          setNavigationHistory((history) => {
+            const entries = history.entries.slice(0, history.index + 1);
+            if (source) {
+              if (entries.length) entries[entries.length - 1] = source;
+              else entries.push(source);
+            }
+            entries.push({ path: normalized, lineNumber, column });
+            return {
+              entries: entries.slice(-100),
+              index: Math.min(entries.length - 1, 99),
+            };
+          });
+        openEditorLocation(normalized, lineNumber, column);
+        return true;
+      } catch (failure) {
+        notify(
+          "command-failed",
+          "Could not open code location",
+          String(failure),
+        );
+        return false;
+      }
+    },
+    [notify, openEditorLocation, workspaceRoots],
+  );
+  const navigateEditorHistory = useCallback(
+    async (direction: number) => {
+      const index = navigationHistory.index + direction;
+      const target = navigationHistory.entries[index];
+      if (!target) return;
+      if (
+        await openWorkspaceLocation(
+          target.path,
+          target.lineNumber,
+          target.column,
+          undefined,
+          false,
+        )
+      )
+        setNavigationHistory((history) => ({ ...history, index }));
+    },
+    [navigationHistory, openWorkspaceLocation],
+  );
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.ctrlKey &&
+        !event.metaKey &&
+        (event.code === "Minus" || event.key === "-") &&
+        !workspaceRename.draft
+      ) {
+        event.preventDefault();
+        void navigateEditorHistory(event.shiftKey ? 1 : -1);
+      }
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === "s" &&
+        !workspaceRename.draft
+      ) {
+        event.preventDefault();
+        void workspaceRename.saveAll();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [navigateEditorHistory, workspaceRename.draft, workspaceRename.saveAll]);
 
   const applyWorkspaceReplace = useCallback(
     async (
@@ -11944,8 +13716,8 @@ export function App() {
       const searchText = query.query;
       const uniquePaths = [...new Set(paths)];
       if (!searchText || uniquePaths.length === 0) return;
-      const dirtyPath = uniquePaths.find(
-        (path) => workbench.ide.buffers[path]?.status === "dirty",
+      const dirtyPath = uniquePaths.find((path) =>
+        editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
       );
       if (dirtyPath) {
         notify(
@@ -11971,9 +13743,9 @@ export function App() {
         return;
       }
       if (
-        !window.confirm(
+        !(await confirmAction(
           `Replace “${searchText}” in ${uniquePaths.length} selected file${uniquePaths.length === 1 ? "" : "s"}?`,
-        )
+        ))
       ) {
         return;
       }
@@ -12253,10 +14025,28 @@ export function App() {
 
   const changeGoal = useCallback(
     async (
-      action: "set" | "edit" | "complete" | "reopen" | "clear",
+      action:
+        "set" | "edit" | "complete" | "reopen" | "clear" | "pause" | "resume",
       value?: string,
     ) => {
       if (action !== "set" && !activeSessionGoal) return false;
+      if (action === "resume") {
+        return sendDraftRef.current(
+          "Continue the goal from its saved checkpoint.",
+        );
+      }
+      if (action === "pause") {
+        if (activeSessionId) stoppedChatSessionsRef.current.add(activeSessionId);
+        if (
+          activeSessionId &&
+          sendingSessionIdsRef.current.has(activeSessionId) &&
+          isTauriRuntime()
+        ) {
+          stopChatSession(activeSessionId);
+          return true;
+        }
+        return appendGoalEvent({ action: "pause" }, "Goal paused");
+      }
       const text =
         action === "set" || action === "edit"
           ? value?.trim()
@@ -12265,7 +14055,7 @@ export function App() {
       const status =
         action === "complete"
           ? "complete"
-          : action === "set" || action === "reopen"
+          : action === "set" || action === "reopen" || action === "edit"
             ? "active"
             : (activeSessionGoal?.status ?? "active");
       if (!activeSessionId) {
@@ -12287,6 +14077,7 @@ export function App() {
               action: "set",
               text,
               status,
+              runLimits: activeSessionGoal?.runLimits,
             };
       const message =
         action === "clear"
@@ -12302,7 +14093,7 @@ export function App() {
       // longer cancels the other — the composer shows both.
       return appendGoalEvent(payload, message);
     },
-    [activeSessionGoal, activeSessionId, appendGoalEvent],
+    [activeSessionGoal, activeSessionId, appendGoalEvent, stopChatSession],
   );
 
   const syncTerminalSnapshot = useCallback((snapshot: TerminalPaneSnapshot) => {
@@ -12986,11 +14777,16 @@ export function App() {
       sessionId: owner.sessionId,
       action,
     });
+  const handleBrowserDeviceChange = (mode: BrowserViewportMode, owner = activeBrowserOwner) =>
+    void changeSessionBrowserViewport(owner.sessionId, mode, Boolean(previewForBrowser(owner).url),
+      dispatchWorkbench, (error) => notify("command-failed", "Viewport change failed", String(error)));
   const browserNativeHost = isTauriRuntime();
   const browserOverlayOccluded =
+    quitConfirmation.requested ||
     isCommandPaletteOpen ||
     Boolean(modelStandardPrompt) ||
     Boolean(branchNameRequest) ||
+    Boolean(workspaceRename.draft) ||
     Boolean(projectRemoveCandidate) ||
     Boolean(terminalTerminateCandidate) ||
     Boolean(chatCloseCandidate);
@@ -13016,7 +14812,7 @@ export function App() {
           message: "Loading…",
           nativeHost: true,
         });
-        await invoke("session_browser_open", {
+        const opened = await invoke<{ viewport: { mode: BrowserViewportMode } }>("session_browser_open", {
           request: {
             sessionId: owner.sessionId,
             workspaceKey: owner.workspaceKey,
@@ -13025,6 +14821,15 @@ export function App() {
             visible: bounds != null,
           },
         });
+        const preview = previewForBrowser(owner);
+        if (preview.deviceOverride && opened.viewport.mode === "auto") {
+          await invoke("session_browser_set_viewport", {
+            sessionId: owner.sessionId,
+            request: { mode: preview.viewport?.mode ?? preview.device,
+              width: preview.viewport?.device === "responsive" ? undefined : preview.viewport?.width,
+              height: preview.viewport?.device === "responsive" ? undefined : preview.viewport?.height },
+          });
+        }
         return true;
       } catch (error) {
         notify("command-failed", "Browser open failed", String(error));
@@ -13038,7 +14843,7 @@ export function App() {
         return false;
       }
     },
-    [activeBrowserOwner, notify],
+    [activeBrowserOwner, notify, workbench.browserPreviewsBySession],
   );
 
   const [updateBrowserHostVisibility] = useState(() =>
@@ -13139,44 +14944,7 @@ export function App() {
     });
   }, []);
 
-  // The native child webview reports its document title asynchronously. Keep
-  // that small piece of browser state in the React shell so its selected tab
-  // identifies the actual page, just like an in-app browser should.
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    let unlisten: Promise<(() => void) | undefined> =
-      Promise.resolve(undefined);
-    try {
-      unlisten = listen<{
-        kind?: string;
-        sessionId: string;
-        title?: string;
-        url?: string;
-      }>("session-browser-event", (event) => {
-        if (event.payload.kind === "loaded" && event.payload.url) {
-          dispatchWorkbench({
-            type: "browser-session",
-            sessionId: event.payload.sessionId,
-            action: { type: "browser-loaded", url: event.payload.url },
-          });
-        } else if (
-          event.payload.kind === "title" &&
-          event.payload.title !== undefined
-        ) {
-          dispatchWorkbench({
-            type: "browser-session",
-            sessionId: event.payload.sessionId,
-            action: { type: "browser-title", title: event.payload.title },
-          });
-        }
-      });
-    } catch {
-      unlisten = Promise.resolve(undefined);
-    }
-    return () => {
-      void unlisten.then((dispose) => dispose?.());
-    };
-  }, []);
+  useSessionBrowserEvents(dispatchWorkbench);
 
   useEffect(() => {
     if (!isTauriRuntime() || !browserOverlayOccluded) return;
@@ -13657,6 +15425,42 @@ export function App() {
     [connectProvider],
   );
 
+  const installProvider = useCallback(
+    async (providerId: string) => {
+      if (!isProviderId(providerId)) {
+        return { installed: false, message: "Unknown provider." };
+      }
+      try {
+        const outcome = await invoke<{
+          installed: boolean;
+          output: string;
+          health?: ProviderHealthCheck | null;
+        }>("install_provider_cli", { providerId, confirm: true });
+        recordProviderHealthOutput(
+          providerId,
+          outcome.output,
+          outcome.health ?? undefined,
+        );
+        if (outcome.installed) {
+          signInProvider(providerId);
+        }
+        const tail = outcome.output.trim().split("\n").slice(-2).join(" ");
+        return {
+          installed: outcome.installed,
+          message: outcome.installed
+            ? ""
+            : tail || "The installer finished without a working binary.",
+        };
+      } catch (error) {
+        return {
+          installed: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    [recordProviderHealthOutput, signInProvider],
+  );
+
   const testProvider = useCallback(
     async (providerId: string) => {
       if (providerId === "ollama") {
@@ -13733,81 +15537,6 @@ export function App() {
     notify,
     testProvider,
     persistConfig, // lets the hook add or remove a custom provider
-  );
-
-  const queueProviderHandoff = useCallback(
-    ({
-      fromProviderId,
-      toProviderId,
-      contextSummary,
-    }: {
-      fromProviderId: string;
-      toProviderId: string;
-      contextSummary: string;
-    }) => {
-      if (!checkProviderReadiness("handoff", toProviderId)) {
-        return;
-      }
-      const providerConfigs = providersForConfig(config);
-      const fromLabel = providerLabelForId(
-        providerConfigs,
-        workbench.providerStatuses,
-        fromProviderId,
-      );
-      const toLabel = providerLabelForId(
-        providerConfigs,
-        workbench.providerStatuses,
-        toProviderId,
-      );
-      const toStatus = workbench.providerStatuses.find(
-        (provider) => provider.id === toProviderId,
-      );
-      const now = new Date().toISOString();
-      const sessionTitle = activeSession?.title ?? "Desktop session";
-      const providerSession: ProviderSession = {
-        id: `provider-session-${toProviderId}-${activeSessionId ?? "local"}`,
-        providerId: toProviderId,
-        displayName: toLabel,
-        status: "queued",
-        model: toStatus?.defaultModel ?? "Default",
-        sessionId: activeSessionId,
-        sessionTitle,
-        workspaceMode: activeSession?.workspaceMode ?? workbench.workspaceMode,
-        branch: activeSession?.branch ?? "main",
-        worktreeName: activeSession?.worktreeName,
-        lastEvent: `handoff queued from ${fromLabel}`,
-        createdAt: now,
-        updatedAt: now,
-      };
-      const handoff: ProviderHandoff = {
-        id: `handoff-${Date.now()}`,
-        fromProviderId,
-        fromLabel,
-        toProviderId,
-        toLabel,
-        status: "queued",
-        sessionId: activeSessionId,
-        sessionTitle,
-        contextSummary,
-        createdAt: now,
-        updatedAt: now,
-      };
-      dispatchWorkbench({
-        type: "queue-provider-handoff",
-        handoff,
-        session: providerSession,
-      });
-      notify("provider", "Handoff queued", `${fromLabel} to ${toLabel}`);
-    },
-    [
-      activeSession,
-      activeSessionId,
-      checkProviderReadiness,
-      config,
-      notify,
-      workbench.providerStatuses,
-      workbench.workspaceMode,
-    ],
   );
 
   const runCommandPaletteCommand = useCallback(
@@ -14107,9 +15836,10 @@ export function App() {
       schedulePersistedWorkbenchStateFlush(
         pendingWorkbenchPersistRef,
         workbenchPersistIdleRef,
+        onAppearancePersisted,
       );
     }, WORKBENCH_PERSIST_DEBOUNCE_MS);
-  }, [persistableWorkbench]);
+  }, [persistableWorkbench, onAppearancePersisted]);
 
   useEffect(
     () => () => {
@@ -14118,49 +15848,9 @@ export function App() {
         workbenchPersistTimerRef.current = undefined;
       }
       cancelPersistedWorkbenchStateFlush(workbenchPersistIdleRef);
-      flushPersistedWorkbenchState(pendingWorkbenchPersistRef);
+      flushPersistedWorkbenchState(pendingWorkbenchPersistRef, onAppearancePersisted);
     },
-    [],
-  );
-
-  const requestLanguageFeature = useCallback(
-    async (path: string, method: string, params: Record<string, unknown>) => {
-      const root = workspaceRootForPath(workspaceRoots, path);
-      const descriptor = languageServerDescriptorForPath(
-        path,
-        languageOverrides[path],
-      );
-      if (!root || !descriptor || !isTauriRuntime()) {
-        return undefined;
-      }
-      const stateId = `${root}:${descriptor.languageId}:${descriptor.command}`;
-      const serverId = languageServerIdsRef.current[stateId];
-      if (!serverId) {
-        return undefined;
-      }
-      const response = await invoke<LspBridgeResponse>("lsp_request", {
-        request: {
-          serverId,
-          method,
-          params: {
-            ...params,
-            textDocument: {
-              ...(isRecord(params.textDocument) ? params.textDocument : {}),
-              uri: workspaceFileUri(root, path),
-            },
-          },
-        },
-      });
-      const diagnostics = diagnosticsFromLspMessages(response.messages, root);
-      if (diagnostics) {
-        dispatchWorkbench({ type: "ide-set-diagnostics", diagnostics });
-      }
-      if (response.status === "error") {
-        throw new Error(JSON.stringify(response.error ?? "LSP request failed"));
-      }
-      return response.result;
-    },
-    [workspaceRoots, languageOverrides],
+    [onAppearancePersisted],
   );
 
   useEffect(() => {
@@ -14219,7 +15909,7 @@ export function App() {
         workbench.ide.activePath
       ) {
         event.preventDefault();
-        void saveEditorBuffer(workbench.ide.activePath);
+        if (!event.shiftKey) void saveEditorBuffer(workbench.ide.activePath);
       } else if (event.key.toLowerCase() === "p" && event.shiftKey) {
         event.preventDefault();
         openGlobalSearch("commands");
@@ -14306,6 +15996,13 @@ export function App() {
   useEffect(() => {
     if (!activeSession) {
       workspaceTreeRequestRef.current += 1;
+      if (
+        workspacePath &&
+        workspacePreparationPathRef.current !==
+          normalizeProjectPath(workspacePath)
+      ) {
+        void prepareWorkspace(workspacePath);
+      }
       return;
     }
     setWorkspacePath(activeSession.workspacePath);
@@ -14364,7 +16061,7 @@ export function App() {
     }
     setFiles([]);
     void prepareWorkspace(activeSession.workspacePath);
-  }, [activeSession, prepareWorkspace, refreshIdeServices]);
+  }, [activeSession, prepareWorkspace, refreshIdeServices, workspacePath]);
 
   useEffect(() => {
     if (!selectedFile || selectedFile.startsWith("gyro-diff:")) {
@@ -14375,7 +16072,7 @@ export function App() {
     }
 
     const existingBuffer = workbench.ide.buffers[selectedFile];
-    if (existingBuffer && existingBuffer.status === "dirty") {
+    if (existingBuffer && editorBufferHasUnsavedChanges(existingBuffer)) {
       setSelectedFileContent({
         path: selectedFile,
         content: existingBuffer.content,
@@ -14546,7 +16243,7 @@ export function App() {
         if (!stat.contentHash || stat.contentHash === buffer.contentHash) {
           return;
         }
-        if (buffer.status === "dirty") {
+        if (editorBufferHasUnsavedChanges(buffer)) {
           dispatchWorkbench({
             type: "ide-mark-buffer-error",
             path: selectedFile,
@@ -14650,251 +16347,6 @@ export function App() {
   ]);
 
   useEffect(() => {
-    const root = activeSession?.workspacePath ?? workspacePath;
-    const descriptor = selectedFile
-      ? languageServerDescriptorForPath(
-          selectedFile,
-          languageOverrides[selectedFile],
-        )
-      : undefined;
-    const fileBuffer = selectedFile
-      ? workbench.ide.buffers[selectedFile]
-      : undefined;
-    const filePolicy = editorFilePolicy(
-      selectedFile ?? "",
-      fileBuffer?.content ?? selectedFileContent?.content ?? "",
-      fileBuffer?.sizeBytes ?? selectedFileContent?.sizeBytes,
-      fileBuffer?.truncated ?? selectedFileContent?.truncated,
-    );
-    if (filePolicy.limited || filePolicy.binary) return;
-    if (
-      !root ||
-      !selectedFile ||
-      !descriptor ||
-      !isTauriRuntime() ||
-      !isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)
-    ) {
-      return;
-    }
-    let cancelled = false;
-    const stateId = `${root}:${descriptor.languageId}:${descriptor.command}`;
-    const startingState: LanguageServerState = {
-      id: stateId,
-      languageId: descriptor.languageId,
-      command: descriptor.command,
-      status: "starting",
-      activePath: selectedFile,
-      message: `Starting ${descriptor.command}`,
-    };
-    dispatchWorkbench({
-      type: "ide-set-language-server",
-      server: startingState,
-    });
-    void invoke<LspSessionResult>("lsp_start", {
-      request: {
-        workspacePath: root,
-        languageId: descriptor.languageId,
-        command: descriptor.command,
-      },
-    })
-      .then(async (session) => {
-        if (cancelled) {
-          return;
-        }
-        languageServerIdsRef.current[stateId] = session.serverId;
-        dispatchWorkbench({
-          type: "ide-set-language-server",
-          server: {
-            ...startingState,
-            serverId: session.serverId,
-            status: "ready",
-            message: session.message,
-          },
-        });
-        dispatchWorkbench({
-          type: "ide-upsert-output-channel",
-          channel: {
-            id: `lsp:${descriptor.languageId}`,
-            label: `${descriptor.languageId} language server`,
-            kind: "lsp",
-            lines: [session.message],
-            updatedAt: new Date().toISOString(),
-          },
-        });
-        const content =
-          workbench.ide.buffers[selectedFile]?.content ??
-          (selectedFileContent?.path === selectedFile
-            ? selectedFileContent.content
-            : "");
-        const uri = workspaceFileUri(root, selectedFile);
-        const documentKey = `${session.serverId}:${uri}`;
-        if (languageServerOpenedDocsRef.current.has(documentKey)) {
-          return;
-        }
-        languageServerOpenedDocsRef.current.add(documentKey);
-        const response = await invoke<LspBridgeResponse>("lsp_request", {
-          request: {
-            serverId: session.serverId,
-            method: "textDocument/didOpen",
-            params: {
-              textDocument: {
-                uri,
-                languageId: descriptor.languageId,
-                version: 1,
-                text: content,
-              },
-            },
-          },
-        });
-        const diagnostics = diagnosticsFromLspMessages(response.messages, root);
-        if (diagnostics) {
-          dispatchWorkbench({ type: "ide-set-diagnostics", diagnostics });
-        }
-        window.setTimeout(() => {
-          void invoke<LspBridgeResponse>("lsp_request", {
-            request: {
-              serverId: session.serverId,
-              method: "$/gyro/poll",
-              params: {},
-            },
-          })
-            .then((pollResponse) => {
-              const publishedDiagnostics = diagnosticsFromLspMessages(
-                pollResponse.messages,
-                root,
-              );
-              if (publishedDiagnostics) {
-                dispatchWorkbench({
-                  type: "ide-set-diagnostics",
-                  diagnostics: publishedDiagnostics,
-                });
-              }
-            })
-            .catch(() => undefined);
-        }, 350);
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-        const message = String(error);
-        dispatchWorkbench({
-          type: "ide-set-language-server",
-          server: {
-            ...startingState,
-            status: message.toLowerCase().includes("not found")
-              ? "not-installed"
-              : "error",
-            message,
-          },
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    languageOverrides,
-    selectedFile,
-    selectedFileContent?.contentHash,
-    workbench.preferences.workspaceTrust,
-    workspaceRoots,
-  ]);
-
-  useEffect(() => {
-    const root = workspaceRootForPath(workspaceRoots, selectedFile);
-    const descriptor = selectedFile
-      ? languageServerDescriptorForPath(
-          selectedFile,
-          languageOverrides[selectedFile],
-        )
-      : undefined;
-    const content = selectedFile
-      ? workbench.ide.buffers[selectedFile]?.content
-      : undefined;
-    const fileBuffer = selectedFile
-      ? workbench.ide.buffers[selectedFile]
-      : undefined;
-    const filePolicy = editorFilePolicy(
-      selectedFile ?? "",
-      fileBuffer?.content ?? selectedFileContent?.content ?? "",
-      fileBuffer?.sizeBytes ?? selectedFileContent?.sizeBytes,
-      fileBuffer?.truncated ?? selectedFileContent?.truncated,
-    );
-    if (filePolicy.limited || filePolicy.binary) return;
-    if (
-      !root ||
-      !selectedFile ||
-      !descriptor ||
-      content === undefined ||
-      !isTauriRuntime()
-    ) {
-      return;
-    }
-    const stateId = `${root}:${descriptor.languageId}:${descriptor.command}`;
-    const serverId = languageServerIdsRef.current[stateId];
-    if (!serverId) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      const uri = workspaceFileUri(root, selectedFile);
-      void invoke<LspBridgeResponse>("lsp_request", {
-        request: {
-          serverId,
-          method: "textDocument/didChange",
-          params: {
-            textDocument: { uri, version: Date.now() },
-            contentChanges: [{ text: content }],
-          },
-        },
-      })
-        .then((response) => {
-          const immediate = diagnosticsFromLspMessages(response.messages, root);
-          if (immediate) {
-            dispatchWorkbench({
-              type: "ide-set-diagnostics",
-              diagnostics: immediate,
-            });
-          }
-          window.setTimeout(() => {
-            void invoke<LspBridgeResponse>("lsp_request", {
-              request: { serverId, method: "$/gyro/poll", params: {} },
-            }).then((pollResponse) => {
-              const diagnostics = diagnosticsFromLspMessages(
-                pollResponse.messages,
-                root,
-              );
-              if (diagnostics) {
-                dispatchWorkbench({
-                  type: "ide-set-diagnostics",
-                  diagnostics,
-                });
-              }
-            });
-          }, 300);
-        })
-        .catch(() => undefined);
-    }, 450);
-    return () => window.clearTimeout(timer);
-  }, [
-    languageOverrides,
-    selectedFile,
-    selectedFile ? workbench.ide.buffers[selectedFile]?.content : undefined,
-    workspaceRoots,
-  ]);
-
-  useEffect(
-    () => () => {
-      if (!isTauriRuntime()) {
-        return;
-      }
-      for (const serverId of Object.values(languageServerIdsRef.current)) {
-        void invoke("lsp_stop", { serverId });
-      }
-    },
-    [],
-  );
-
-  useEffect(() => {
     if (!isTauriRuntime() || !terminalPanePollKey) {
       return;
     }
@@ -14908,6 +16360,9 @@ export function App() {
     }
 
     const interval = window.setInterval(() => {
+      // Output buffers in Rust while hidden; the visibility listener below
+      // catches up the moment the window returns.
+      if (document.visibilityState !== "visible") return;
       for (const paneId of paneIds) {
         void refreshTerminalPane(paneId);
       }
@@ -15219,7 +16674,7 @@ export function App() {
         terminalSourceControlLoadingPaneId === selectedTerminalPane?.id
       }
       height={isPrimary ? undefined : toolPanelHeight}
-      ide={workbench.ide}
+      ide={scopedIde}
       isPrimary={isPrimary}
       isLaunchingCliPreset={isLaunchingCliPreset}
       isResizable={!isPrimary}
@@ -15241,7 +16696,7 @@ export function App() {
       onAddTerminalPane={addTerminalPane}
       onBrowserBack={() => handleBrowserBack()}
       onBrowserDeviceChange={(device) =>
-        dispatchActiveBrowser({ type: "browser-device", device })
+        handleBrowserDeviceChange(device)
       }
       onBrowserForward={() => handleBrowserForward()}
       onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
@@ -15276,8 +16731,8 @@ export function App() {
           layout,
         })
       }
-      onOpenDiffInEditor={(path) => {
-        openEditorFile(path);
+      onOpenDiffInEditor={(path, lineNumber, column) => {
+        openEditorLocation(path, lineNumber, column);
         dispatchWorkbench({
           type: "select-workspace-layout",
           layout: "code",
@@ -15292,6 +16747,15 @@ export function App() {
         dispatchWorkbench({ type: "set-pane-tab", tab });
       }}
       onLaunchCliPreset={launchCliPreset}
+      onRunTestTask={(taskId) => {
+        const task = workbench.ide.taskDefinitions.find(
+          (item) => item.id === taskId,
+        );
+        if (task) void runIdeTask(task);
+      }}
+      onSelectOutputChannel={(channelId) =>
+        dispatchWorkbench({ type: "ide-select-output-channel", channelId })
+      }
       onProfileChange={setActiveProfileId}
       onRejectAllDiffs={() =>
         dispatchWorkbench({
@@ -15488,6 +16952,11 @@ export function App() {
   // Provider CLI updates (Claude, Codex, Grok, …) — separate from Gyro.app.
   const [cliUpdateOffers, setCliUpdateOffers] = useState<CliUpdateOffer[]>([]);
   const [cliUpdatePhase, setCliUpdatePhase] = useState<CliUpdatePhase>("idle");
+  // Snapshot the requested providers; offers and notice dismissal can change in flight.
+  const [cliUpdatingProviderIds, setCliUpdatingProviderIds] = useState<
+    readonly string[]
+  >([]);
+  const cliUpdatingProvidersRef = useRef<readonly string[]>([]);
   // Only an update (or a check) the user pressed can fail the notice; a
   // background check that times out keeps the last known offers silently.
   const [cliUpdateFailure, setCliUpdateFailure] = useState<{
@@ -15495,14 +16964,12 @@ export function App() {
     providerIds: string[];
   }>();
   const cliUpdateCheckingRef = useRef(false);
-  const cliUpdatePhaseRef = useRef(cliUpdatePhase);
-  cliUpdatePhaseRef.current = cliUpdatePhase;
   const checkCliUpdates = useCallback(
     async (userInitiated = false) => {
       if (!isTauriRuntime() || cliUpdateCheckingRef.current) {
         return;
       }
-      if (cliUpdatePhaseRef.current === "updating") {
+      if (cliUpdatingProvidersRef.current.length > 0) {
         return;
       }
       cliUpdateCheckingRef.current = true;
@@ -15542,19 +17009,24 @@ export function App() {
   );
 
   const applyCliUpdates = useCallback(async () => {
-    if (!isTauriRuntime() || cliUpdateOffers.length === 0) {
+    if (
+      !isTauriRuntime() ||
+      cliUpdateOffers.length === 0 ||
+      cliUpdatingProvidersRef.current.length > 0
+    ) {
       return;
     }
+    const providerIds = cliUpdateOffers.map((offer) => offer.providerId);
+    cliUpdatingProvidersRef.current = providerIds;
+    setCliUpdatingProviderIds(providerIds);
     setCliUpdatePhase("updating");
     setCliUpdateFailure(undefined);
     try {
-      const providerIds = cliUpdateOffers.map((offer) => offer.providerId);
       const results = await invoke<CliUpdateApplyResult[]>(
         "apply_cli_updates_command",
         { providerIds },
       );
       const failed = results.filter((result) => !result.ok);
-      setCliUpdatePhase("idle");
       if (failed.length > 0) {
         setCliUpdateFailure({
           message: failed
@@ -15582,15 +17054,18 @@ export function App() {
         setCliUpdateOffers([]);
         localStorage.removeItem("gyro.cli-updates.dismissed.v1");
       }
-      // Re-check so a partial failure still lists remaining updates.
-      void checkCliUpdates(false);
     } catch (error) {
-      setCliUpdatePhase("idle");
       setCliUpdateFailure({
         message: String(error),
-        providerIds: cliUpdateOffers.map((offer) => offer.providerId),
+        providerIds,
       });
       notify("command-failed", "CLI update failed", String(error));
+    } finally {
+      cliUpdatingProvidersRef.current = [];
+      setCliUpdatingProviderIds([]);
+      setCliUpdatePhase("idle");
+      // Re-check after releasing the in-flight guard, including partial failures.
+      void checkCliUpdates(false);
     }
   }, [checkCliUpdates, cliUpdateOffers, notify]);
 
@@ -15600,7 +17075,9 @@ export function App() {
       localStorage.setItem("gyro.cli-updates.dismissed.v1", key);
     }
     setCliUpdateOffers([]);
-    setCliUpdatePhase("idle");
+    setCliUpdatePhase(
+      cliUpdatingProvidersRef.current.length > 0 ? "updating" : "idle",
+    );
     setCliUpdateFailure(undefined);
   }, [cliUpdateOffers]);
 
@@ -15661,6 +17138,15 @@ export function App() {
     [updater],
   );
 
+  const activeComposerModel = activeSession
+    ? sessionModelSelectionFromSession(activeSession)
+    : chatDraftModels[activeDraftKey];
+  const activeComposerCliUpdating = isComposerCliUpdating(
+    cliUpdatingProviderIds,
+    activeComposerModel,
+    config.selectedProviderId,
+  );
+
   const renderChatPane = (
     pane: ChatPaneRef,
     options: {
@@ -15668,6 +17154,7 @@ export function App() {
       isTiled: boolean;
       onPaneDragEnd: () => void;
       onPaneDragStart: (event: ReactDragEvent<HTMLSpanElement>) => void;
+      onPanePointerDown: (event: ReactPointerEvent<HTMLSpanElement>) => void;
     },
   ) => {
     const paneSession =
@@ -15686,6 +17173,15 @@ export function App() {
         : undefined;
     const paneDraftKey =
       pane.kind === "session" ? pane.sessionId : pane.draftKey;
+    const paneComposerModel =
+      pane.kind === "session"
+        ? sessionModelSelectionFromSession(paneSession)
+        : chatDraftModels[paneDraftKey];
+    const paneComposerCliUpdating = isComposerCliUpdating(
+      cliUpdatingProviderIds,
+      paneComposerModel,
+      config.selectedProviderId,
+    );
     const panePlan = paneContext?.plan ?? pendingNewChatPlan;
     const paneGoal =
       pane.kind === "session" ? paneContext?.goal : pendingNewChatGoal;
@@ -15799,6 +17295,8 @@ export function App() {
     };
     return (
       <ChatSurface
+        {...projectImport.chatProps(paneSession)}
+        {...taskHandoff.chatProps(paneSession)}
         activeChatPanel={panePanel}
         paneKey={paneDraftKey}
         onSelectChatPanel={selectPanePanel}
@@ -15810,10 +17308,7 @@ export function App() {
         browserOverlayOccluded={browserOverlayOccluded || !isFocused}
         onBrowserBack={() => handleBrowserBack(paneBrowserOwner)}
         onBrowserDeviceChange={(device) =>
-          sendBrowserAction(paneBrowserOwner, {
-            type: "browser-device",
-            device,
-          })
+          handleBrowserDeviceChange(device, paneBrowserOwner)
         }
         onBrowserForward={() => handleBrowserForward(paneBrowserOwner)}
         onBrowserHostBoundsChange={(bounds) =>
@@ -15877,17 +17372,21 @@ export function App() {
         branchCatalog={branchCatalog}
         isEnvironmentRailOpen={panePanel === "environment"}
         isGoalComposerActive={isFocused && isGoalComposerActive}
+        isGoalModeActive={isFocused && activeGoalMode}
         isComposerSending={
           pane.kind === "session"
             ? sendingSessionIds.includes(pane.sessionId)
             : isFocused && isStartingFirstTurn
         }
-        isCliUpdating={cliUpdatePhase === "updating"}
+        isCliUpdating={paneComposerCliUpdating}
         shellReady={!isShellOptimizing}
         isBranchLoading={isBranchLoading}
         isToolPanelOpen={isFocused && workbench.isToolPanelOpen}
         isToolPanelAvailable={isBottomDrawerAvailable}
         isTiled={options.isTiled}
+        onPaneDragStart={options.onPaneDragStart}
+        onPaneDragEnd={options.onPaneDragEnd}
+        onPanePointerDown={options.onPanePointerDown}
         maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
         onAgentAction={(action) => notify("terminal", "Agent action", action)}
         canAttachEditorSnapshot={canAttachEditorSnapshot}
@@ -15982,11 +17481,12 @@ export function App() {
         onStartGoalChat={(goal) =>
           requestSend(goal, {
             goal: { text: goal, status: "active" },
-            preserveDraft: true,
+            preserveDraft: false,
             consumeDraftMode: true,
           })
         }
-        onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+        onCancelGoalComposer={dismissGoalComposer}
+        onCloseGoalComposer={closeGoalComposer}
         fileReview={
           // The summaries and the Keep both belong to the focused session, so a
           // background pane keeps the plain summary card rather than showing
@@ -16034,16 +17534,15 @@ export function App() {
           message: item.message,
         }))}
         savedProjects={savedProjects}
-        sessionModel={
-          pane.kind === "session"
-            ? sessionModelSelectionFromSession(paneSession)
-            : chatDraftModels[paneDraftKey]
-        }
+        sessionModel={paneComposerModel}
         sessionPlan={panePlan}
         sessionGoal={paneGoal}
         sessionSummary={paneSession?.summary}
         sessionTitle={paneSession?.title}
-        sourceControl={workbench.ide.sourceControl}
+        sourceControl={sourceControlForWorkspace(
+          workbench.ide.sourceControl,
+          pane.workspacePath,
+        )}
         terminalPanes={workbench.terminalPanes}
         turnSourceControlBaselines={turnSourceControlBaselines}
         worktreeName={paneSession?.worktreeName}
@@ -16053,32 +17552,126 @@ export function App() {
     );
   };
 
+  // Draft panes and the cold-launch start screen are not sessions. List
+  // them anyway so an unsent chat is visible before the first message.
+  // Abandoned placeholder sessions stay out of this list.
+  const sidebarDraftChats = useMemo(() => {
+    const drafts: Array<{
+      id: string;
+      title: string;
+      workspacePath: string;
+    }> = [];
+    const seen = new Set<string>();
+    for (const layout of Object.values(chatGrid.layouts)) {
+      for (const pane of layout.slots) {
+        if (pane?.kind !== "draft" || seen.has(pane.paneId)) continue;
+        seen.add(pane.paneId);
+        drafts.push({
+          id: pane.paneId,
+          title: "New chat",
+          workspacePath: pane.workspacePath,
+        });
+      }
+    }
+    const occupied = activeChatLayout?.slots.some(Boolean) ?? false;
+    if (!occupied && !activeSessionId) {
+      drafts.unshift({
+        id: `start:${currentChatProjectKey}`,
+        title: "New chat",
+        workspacePath: workspacePath ?? "",
+      });
+    }
+    return drafts;
+  }, [
+    activeChatLayout,
+    activeSessionId,
+    chatGrid.layouts,
+    currentChatProjectKey,
+    workspacePath,
+  ]);
+  const activeDraftChatId =
+    activeChatPane?.kind === "draft"
+      ? activeChatPane.paneId
+      : !activeChatLayout?.slots.some(Boolean) && !activeSessionId
+        ? `start:${currentChatProjectKey}`
+        : undefined;
+  const selectSidebarDraft = useCallback(
+    (draftId: string, options: { keepLayout?: boolean } = {}) => {
+      const showThread = () => {
+        dispatchWorkbench({ type: "set-chat-panel" });
+        if (!options.keepLayout) {
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "thread",
+          });
+        }
+      };
+      // The cold-launch row is the start screen itself. Focusing it must not
+      // run startNewChat, which resets the unsent composer.
+      if (draftId.startsWith("start:")) {
+        showThread();
+        return;
+      }
+      for (const layout of Object.values(chatGrid.layouts)) {
+        const pane = layout.slots.find(
+          (slot) => slot?.kind === "draft" && slot.paneId === draftId,
+        );
+        if (!pane) continue;
+        focusChatPane(pane);
+        showThread();
+        return;
+      }
+    },
+    [chatGrid.layouts, focusChatPane],
+  );
+
   // The workspace chat lives in the AI sidebar view — the same surface the
   // Sessions destination renders, at sidebar width.
   // Recent chats for the project the workspace is on, newest first, so the AI
   // view can switch chats without the Sessions sidebar.
   const workspaceChatSwitcher = {
-    chats: sessions
-      .filter(
-        (session) =>
-          chatProjectKey(session.workspacePath) ===
-          chatProjectKey(activeSession?.workspacePath ?? workspacePath),
-      )
-      .sort((first, second) => second.updatedAt.localeCompare(first.updatedAt))
-      .slice(0, 8)
-      .map((session) => ({
-        id: session.id,
-        title: session.title || "Untitled chat",
-        meta: session.branch,
-      })),
-    activeChatId: activeSessionId,
-    onSelect: (sessionId: string) =>
-      selectSession(sessionId, { keepLayout: true }),
+    chats: [
+      ...sidebarDraftChats
+        .filter(
+          (draft) =>
+            chatProjectKey(draft.workspacePath) ===
+            chatProjectKey(activeSession?.workspacePath ?? workspacePath),
+        )
+        .map((draft) => ({
+          id: draft.id,
+          title: draft.title || "New chat",
+        })),
+      ...sessions
+        .filter(
+          (session) =>
+            chatProjectKey(session.workspacePath) ===
+            chatProjectKey(activeSession?.workspacePath ?? workspacePath),
+        )
+        .sort((first, second) =>
+          second.updatedAt.localeCompare(first.updatedAt),
+        )
+        .slice(0, 8)
+        .map((session) => ({
+          id: session.id,
+          title: session.title || "Untitled chat",
+          meta: session.branch,
+        })),
+    ],
+    activeChatId: activeDraftChatId ?? activeSessionId,
+    onSelect: (chatId: string) => {
+      if (sidebarDraftChats.some((draft) => draft.id === chatId)) {
+        selectSidebarDraft(chatId, { keepLayout: true });
+        return;
+      }
+      selectSession(chatId, { keepLayout: true });
+    },
     onNewChat: () => startNewChat({ keepLayout: true }),
   };
 
   const renderWorkspaceChat = () => (
     <ChatSurface
+      {...projectImport.chatProps(activeSession)}
+      {...taskHandoff.chatProps(activeSession)}
       chatSwitcher={workspaceChatSwitcher}
       paneKey={activeDraftKey}
       activeChatPanel={activeChatPanel}
@@ -16091,7 +17684,7 @@ export function App() {
       browserOverlayOccluded={browserOverlayOccluded}
       onBrowserBack={() => handleBrowserBack()}
       onBrowserDeviceChange={(device) =>
-        dispatchActiveBrowser({ type: "browser-device", device })
+        handleBrowserDeviceChange(device)
       }
       onBrowserForward={() => handleBrowserForward()}
       onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
@@ -16150,8 +17743,9 @@ export function App() {
       branchCatalog={branchCatalog}
       isEnvironmentRailOpen={activeChatPanel === "environment"}
       isGoalComposerActive={isGoalComposerActive}
+      isGoalModeActive={activeGoalMode}
       isComposerSending={isActiveSessionSending}
-      isCliUpdating={cliUpdatePhase === "updating"}
+      isCliUpdating={activeComposerCliUpdating}
       shellReady={!isShellOptimizing}
       isBranchLoading={isBranchLoading}
       isToolPanelOpen={workbench.isToolPanelOpen}
@@ -16167,7 +17761,7 @@ export function App() {
       onRemoveAttachment={removeChatAttachment}
       onReusePrompt={updateActiveChatDraft}
       onStopChat={stopActiveChat}
-      onContinueChat={() => void sendDraft("Continue")}
+      onContinueChat={continueChat}
       onCouncilAction={handleCouncilAction}
       onOpenToolPanel={openToolPanel}
       onToggleToolPanel={toggleChatToolPanel}
@@ -16178,7 +17772,8 @@ export function App() {
       onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
       onGoalAction={changeGoal}
       onStartGoalChat={startNewGoalChat}
-      onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+      onCancelGoalComposer={dismissGoalComposer}
+      onCloseGoalComposer={closeGoalComposer}
       fileReview={fileReviewTools}
       onLoadChangeDiff={loadInlineChangeDiff}
       onLoadComparisonDiff={loadComparisonDiff}
@@ -16210,13 +17805,72 @@ export function App() {
       sessionGoal={activeSessionGoal}
       sessionSummary={activeSession?.summary}
       sessionTitle={activeSession?.title}
-      sourceControl={workbench.ide.sourceControl}
+      sourceControl={scopedIde.sourceControl}
       terminalPanes={workbench.terminalPanes}
       turnSourceControlBaselines={turnSourceControlBaselines}
       worktreeName={activeSession?.worktreeName}
       workspaceMode={workbench.workspaceMode}
       workspacePath={activeSession?.workspacePath ?? workspacePath}
     />
+  );
+
+  const chatFileActions = useMemo(
+    () => ({
+      preview: async (path: string, kind: "image" | "video" | "audio") => {
+        if (kind === "audio") return undefined;
+        const key = `${activeSessionId ?? "new"}:${kind}:${path}`;
+        let pending = chatFilePreviewCache.get(key);
+        if (!pending) {
+          pending = invoke<ChatAttachment>("prepare_chat_attachment", {
+            request: {
+              sessionId: activeSessionId ?? "new",
+              path,
+              workspacePath,
+              kind,
+            },
+          }).then((attachment) => convertFileSrc(attachment.path));
+          if (chatFilePreviewCache.size >= 64)
+            chatFilePreviewCache.delete(
+              chatFilePreviewCache.keys().next().value!,
+            );
+          chatFilePreviewCache.set(key, pending);
+          void pending.catch(() => chatFilePreviewCache.delete(key));
+        }
+        return pending;
+      },
+      open: (path: string) => {
+        void revealItemInDir(path).catch((error) =>
+          notify("command-failed", "Could not show the file", String(error)),
+        );
+      },
+      resolveCitedImage: async (request: {
+        target: string;
+        providerId?: string;
+        providerSessionId?: string;
+      }) => {
+        const workspace = activeSession?.workspacePath ?? workspacePath;
+        const key = `${activeSessionId ?? ""}:${request.providerId ?? ""}:${request.providerSessionId ?? ""}:${workspace ?? ""}:${request.target}`;
+        let pending = chatCitedImageCache.get(key);
+        if (!pending) {
+          pending = invoke<string | null>("resolve_cited_chat_image", {
+            request: {
+              target: request.target,
+              workspacePath: workspace,
+              providerId: request.providerId,
+              providerSessionId: request.providerSessionId,
+              sessionId: activeSessionId,
+            },
+          }).then((path) => path || undefined);
+          if (chatCitedImageCache.size >= 64) {
+            chatCitedImageCache.delete(chatCitedImageCache.keys().next().value!);
+          }
+          chatCitedImageCache.set(key, pending);
+          void pending.catch(() => chatCitedImageCache.delete(key));
+        }
+        return pending;
+      },
+    }),
+    [activeSession?.workspacePath, activeSessionId, workspacePath, notify],
   );
 
   const appChrome = (
@@ -16227,6 +17881,8 @@ export function App() {
       activeSessionId={sidebarActiveSessionId}
       sendingSessionIds={sendingSessionIds}
       completedSessionIds={unreadCompletedSessionIds}
+      approvalCountsBySessionId={approvalCountsBySessionId}
+      questionCountsBySessionId={questionCountsBySessionId}
       modelTerminalSessionIds={modelTerminalSessionIds}
       activeSettingsSection={workbench.preferences.lastSettingsSection}
       activeWorkspaceLayout={activeWorkspaceLayout}
@@ -16251,7 +17907,7 @@ export function App() {
       workspaceSidebarWidth={workbench.preferences.workspaceSidebarWidth}
       workspacePreparation={workspacePreparation}
       files={visibleWorkspaceFiles}
-      ide={workbench.ide}
+      ide={scopedIde}
       isChatsCollapsed={workbench.preferences.sidebarChatsCollapsed}
       isShellOptimizing={isShellOptimizing}
       notifications={workbench.notifications}
@@ -16274,6 +17930,7 @@ export function App() {
       onOpenWorkspace={openWorkspace}
       onAddWorkspaceFolder={addWorkspaceFolder}
       onRemoveWorkspaceFolder={removeWorkspaceFolder}
+      workspaceRootIssues={workspaceRootIssues}
       onSelectWorkspaceFolder={setSelectedWorkspaceRoot}
       onUpdateAction={runUpdateAction}
       onWorkspaceSidebarHiddenChange={(hidden) =>
@@ -16293,6 +17950,10 @@ export function App() {
       onCreateWorkspacePath={createWorkspacePath}
       onRenameWorkspacePath={renameWorkspacePath}
       onDeleteWorkspacePath={deleteWorkspacePath}
+      onMoveWorkspacePath={moveWorkspacePath}
+      onDuplicateWorkspacePath={duplicateWorkspacePath}
+      onRevealWorkspacePath={revealWorkspacePath}
+      onAskWorkspacePath={(path) => askWorkspacePath(path)}
       onOpenToolPanel={openToolPanel}
       onOpenSourceControlDiff={openSourceControlDiff}
       onCommitSourceControl={commitSourceControl}
@@ -16350,13 +18011,16 @@ export function App() {
           });
           return typeof chosen === "string" ? chosen : null;
         },
-        save: (path, name, pinned, folders, primaryFolder) => {
+        validateFolders: (path, folders, candidates, allowNested) =>
+          admitWorkspaceFolders([path, ...folders], candidates, allowNested),
+        save: (path, name, pinned, folders, primaryFolder, allowNested) => {
           dispatchWorkbench({
             type: "set-project-details",
             path,
             name,
             pinned,
             primaryFolder,
+            allowNestedFolders: allowNested,
           });
           dispatchWorkbench({
             type: "set-workspace-folders",
@@ -16394,6 +18058,9 @@ export function App() {
       openChatSessionIds={(activeChatLayout?.slots ?? []).flatMap((pane) =>
         pane?.kind === "session" ? [pane.sessionId] : [],
       )}
+      draftChats={sidebarDraftChats}
+      activeDraftId={activeDraftChatId}
+      onSelectDraftChat={selectSidebarDraft}
       savedProjects={savedProjects}
       selectedTerminalPaneId={workbench.selectedTerminalPaneId}
       sessions={visibleSessions}
@@ -16427,42 +18094,75 @@ export function App() {
                   const session = sessions.find(
                     (item) => item.id === sessionId,
                   );
-                  if (!session) return;
+                  if (!session) return false;
+                  // Resolve the real session's project; a native payload cannot
+                  // choose which saved layout gets edited.
                   const projectKey = chatProjectKey(session.workspacePath);
-                  if (
-                    sourceProjectKey &&
-                    sourceProjectKey !== displayedChatLayout.projectKey
-                  ) {
+                  if (chatProjectKey(sourceProjectKey) !== projectKey)
+                    return false;
+                  const switchingProject =
+                    projectKey !== displayedChatLayout.projectKey;
+                  const existingPane = chatGridRef.current.layouts[
+                    projectKey
+                  ]?.slots.find(
+                    (pane) =>
+                      pane?.kind === "session" && pane.sessionId === session.id,
+                  );
+                  const action = {
+                    type: "select-pane" as const,
+                    projectKey,
+                    mode:
+                      switchingProject && existingPane
+                        ? ("replace" as const)
+                        : ("drop" as const),
+                    // The old project's slot/arrangement has no meaning in the
+                    // destination. Focus its existing pane or append safely.
+                    slotIndex: switchingProject ? undefined : slotIndex,
+                    arrangement: switchingProject
+                      ? undefined
+                      : placement?.arrangement,
+                    insertPosition: switchingProject
+                      ? undefined
+                      : placement?.insertPosition,
+                    splitDirection: switchingProject
+                      ? undefined
+                      : placement?.splitDirection,
+                    pane: chatPaneForSession(session),
+                  };
+                  if (!dispatchChatGrid(action)) {
+                    if (switchingProject && !existingPane) {
+                      notify(
+                        "terminal",
+                        "Chat layout is full",
+                        "Close a chat in that project before adding another.",
+                      );
+                    }
+                    return false;
+                  }
+                  if (switchingProject) {
                     notify(
                       "terminal",
                       "Chat project switched",
                       workspaceName(session.workspacePath),
                     );
                   }
-                  dispatchChatGrid({
-                    type: "select-pane",
-                    projectKey,
-                    mode: "drop",
-                    slotIndex,
-                    arrangement: placement?.arrangement,
-                    insertPosition: placement?.insertPosition,
-                    splitDirection: placement?.splitDirection,
-                    pane: chatPaneForSession(session),
-                  });
                   activeSessionIdRef.current = session.id;
                   setActiveSessionId(session.id);
                   setWorkspacePath(session.workspacePath);
                   void refreshEvents(session.id);
+                  return true;
                 }}
                 onFocusPane={focusChatPane}
-                onMovePane={(paneId, slotIndex) =>
-                  dispatchChatGrid({
-                    type: "move-pane",
+                onMovePane={(paneId, slotIndex, placement) => {
+                  const action = {
+                    type: "move-pane" as const,
                     projectKey: displayedChatLayout.projectKey,
                     paneId,
                     slotIndex,
-                  })
-                }
+                    ...placement,
+                  };
+                  return dispatchChatGrid(action);
+                }}
                 onToggleMaximize={(paneId) =>
                   dispatchChatGrid({
                     type: "toggle-maximize-pane",
@@ -16473,6 +18173,8 @@ export function App() {
               >
                 {!activeChatLayout?.slots.some(Boolean) ? (
                   <ChatSurface
+                    {...projectImport.chatProps(activeSession)}
+                    {...taskHandoff.chatProps(activeSession)}
                     activeChatPanel={activeChatPanel}
                     paneKey={activeDraftKey}
                     onSelectChatPanel={selectSoloChatPanel}
@@ -16531,8 +18233,9 @@ export function App() {
                     branchCatalog={branchCatalog}
                     isEnvironmentRailOpen={activeChatPanel === "environment"}
                     isGoalComposerActive={isGoalComposerActive}
+                    isGoalModeActive={activeGoalMode}
                     isComposerSending={isActiveSessionSending}
-                    isCliUpdating={cliUpdatePhase === "updating"}
+                    isCliUpdating={activeComposerCliUpdating}
                     shellReady={!isShellOptimizing}
                     isBranchLoading={isBranchLoading}
                     isToolPanelOpen={workbench.isToolPanelOpen}
@@ -16555,7 +18258,7 @@ export function App() {
                     onRemoveAttachment={removeChatAttachment}
                     onReusePrompt={updateActiveChatDraft}
                     onStopChat={stopActiveChat}
-                    onContinueChat={() => void sendDraft("Continue")}
+                    onContinueChat={continueChat}
                     onCouncilAction={handleCouncilAction}
                     onOpenToolPanel={openToolPanel}
                     onToggleToolPanel={toggleChatToolPanel}
@@ -16568,7 +18271,8 @@ export function App() {
                     }
                     onGoalAction={changeGoal}
                     onStartGoalChat={startNewGoalChat}
-                    onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+                    onCancelGoalComposer={dismissGoalComposer}
+                    onCloseGoalComposer={closeGoalComposer}
                     fileReview={fileReviewTools}
                     onLoadChangeDiff={loadInlineChangeDiff}
                     onLoadComparisonDiff={loadComparisonDiff}
@@ -16602,7 +18306,7 @@ export function App() {
                     sessionGoal={activeSessionGoal}
                     sessionSummary={activeSession?.summary}
                     sessionTitle={activeSession?.title}
-                    sourceControl={workbench.ide.sourceControl}
+                    sourceControl={scopedIde.sourceControl}
                     terminalPanes={workbench.terminalPanes}
                     turnSourceControlBaselines={turnSourceControlBaselines}
                     worktreeName={activeSession?.worktreeName}
@@ -16622,7 +18326,24 @@ export function App() {
 
           {activeWorkspaceLayout === "code" ? (
             <section className="gyro-workspace-primary" aria-label="Workspace">
+              <WorkspaceEditBar
+                paths={workspaceRename.paths}
+                canUndo={workspaceRename.canUndo}
+                busy={workspaceRename.busy}
+                error={workspaceRename.error}
+                onUndo={workspaceRename.undo}
+                onSaveAll={() => void workspaceRename.saveAll()}
+                onOpenFile={openEditorFile}
+              />
               <IdeSurface
+                editorNavigation={{
+                  canBack: navigationHistory.index > 0,
+                  canForward:
+                    navigationHistory.index <
+                    navigationHistory.entries.length - 1,
+                  onBack: () => void navigateEditorHistory(-1),
+                  onForward: () => void navigateEditorHistory(1),
+                }}
                 activePaneTab={workbench.activePaneTab}
                 isToolPanelOpen={workbench.isToolPanelOpen}
                 browserPreview={browserPreview}
@@ -16635,13 +18356,24 @@ export function App() {
                 fileError={selectedFileError}
                 fileLoadState={selectedFileLoadState}
                 files={visibleWorkspaceFiles}
-                ide={workbench.ide}
+                ide={scopedIde}
                 effectiveMinimapEnabled={
                   effectiveWorkspaceSettings.editorMinimapEnabled
                 }
                 workspacePath={activeWorkspaceRoot}
                 workspaceTrusted={workspaceTrusted}
                 onOpenWorkspace={openWorkspace}
+                recentProjects={savedProjects}
+                onOpenRecentProject={(path) =>
+                  void activateWorkspacePath(path, "Project opened").catch(
+                    (error) =>
+                      notify(
+                        "command-failed",
+                        "Project unavailable",
+                        String(error),
+                      ),
+                  )
+                }
                 onTrustWorkspace={() => {
                   if (!workspaceActionRoot) return;
                   dispatchWorkbench({
@@ -16674,7 +18406,7 @@ export function App() {
                 onAddTerminalPane={addTerminalPane}
                 onBrowserBack={() => handleBrowserBack()}
                 onBrowserDeviceChange={(device) =>
-                  dispatchActiveBrowser({ type: "browser-device", device })
+                  handleBrowserDeviceChange(device)
                 }
                 onBrowserForward={() => handleBrowserForward()}
                 onBrowserNavigate={handleBrowserNavigate}
@@ -16802,7 +18534,7 @@ export function App() {
                                 : { ...previous, [key]: id },
                             );
                         }}
-                        refreshKey={workbench.ide.sourceControl.lastCheckedAt}
+                        refreshKey={scopedIde.sourceControl.lastCheckedAt}
                         languageOverride={
                           languageOverrides[
                             absoluteWorkspaceFilePath(
@@ -16830,12 +18562,10 @@ export function App() {
                       }
                       fileError={selectedFileError}
                       semanticReady={
-                        workbench.ide.languageServers?.find(
-                          (server) =>
-                            server.activePath === props.path &&
-                            server.status === "ready",
-                        )?.serverId
+                        languageSessions.ready(props.path)?.serverId
                       }
+                      onOpenLocation={openWorkspaceLocation}
+                      onRenameSymbol={workspaceRename.begin}
                       onLspRequest={requestLanguageFeature}
                       theme={resolvedTheme}
                     />
@@ -16849,25 +18579,12 @@ export function App() {
               never draws it: terminals, review and the browser live on the
               chat's own rail there. */}
           {activeWorkspaceLayout === "code" &&
-          Boolean(activeSession?.workspacePath ?? workspacePath) ? (
-            workbench.isToolPanelOpen ? (
-              renderWorkspaceToolPanel(false)
-            ) : (
-              <nav
-                aria-label="Workspace tools"
-                className="gyro-workspace-tool-launcher"
-              >
-                <button
-                  aria-label="Open the workspace panel"
-                  onClick={toggleChatToolPanel}
-                  title="Open the panel you used last (⌘J)"
-                  type="button"
-                >
-                  Panel
-                </button>
-              </nav>
-            )
-          ) : null}
+          Boolean(activeSession?.workspacePath ?? workspacePath)
+            ? // Closed, the panel costs no row: its toggle sits in the status bar.
+              workbench.isToolPanelOpen
+              ? renderWorkspaceToolPanel(false)
+              : null
+            : null}
           {activeWorkspaceLayout === "code" &&
           Boolean(activeSession?.workspacePath ?? workspacePath) ? (
             <IdeStatusBar
@@ -16904,11 +18621,29 @@ export function App() {
               fileContent={selectedFileContent}
               fileLoadState={selectedFileLoadState}
               groupCount={Math.max(workbench.ide.layout.groups.length, 1)}
-              ide={workbench.ide}
+              ide={scopedIde}
               isBranchLoading={isBranchLoading}
+              isPanelOpen={workbench.isToolPanelOpen}
+              onShowProblems={() =>
+                dispatchWorkbench({ type: "open-tool-panel", tab: "problems" })
+              }
+              onTogglePanel={toggleChatToolPanel}
+              onDragPanel={(height, phase) => {
+                // Past a short pull the panel snaps open at its minimum and
+                // then follows the pointer; letting go low puts it away.
+                if (height < (phase === "end" ? 96 : 48)) {
+                  dispatchWorkbench({ type: "close-tool-panel" });
+                  return;
+                }
+                dispatchWorkbench({
+                  type: "set-workspace-panel-height",
+                  height,
+                });
+                dispatchWorkbench({ type: "open-tool-panel" });
+              }}
               onCreateBranch={() =>
                 void createWorkspaceBranch(
-                  workbench.ide.sourceControl.branch ?? branchCatalog?.current,
+                  scopedIde.sourceControl.branch ?? branchCatalog?.current,
                 )
               }
               onSelectBranch={(branch) => void switchWorkspaceBranch(branch)}
@@ -16917,22 +18652,67 @@ export function App() {
           ) : null}
         </div>
       ) : null}
-      {activeDestination === "settings" ? (
+      {activeDestination === "settings" || activeDestination === "providers" ? (
         <SettingsSurface
-          activeSection={workbench.preferences.lastSettingsSection}
+          projectImport={projectImport.settingsProps}
+          activeSection={
+            activeDestination === "providers"
+              ? "providers"
+              : workbench.preferences.lastSettingsSection
+          }
           activeWorkspaceRoot={workspaceActionRoot}
           cliLaunchPreset={workbench.preferences.cliLaunchPreset}
           config={config}
           density={workbench.preferences.density}
           interfaceSize={workbench.preferences.interfaceSize}
           motionSpeed={workbench.preferences.motionSpeed}
+          launchView={workbench.preferences.launchView}
           reduceMotion={reduceMotion}
-          onInterfaceSizeChange={(interfaceSize) => dispatchWorkbench({ type: "set-interface-size", interfaceSize })}
-          onMotionSpeedChange={(motionSpeed) => dispatchWorkbench({ type: "set-motion-speed", motionSpeed })}
+          appearanceSaveStatus={appearanceSaveStatus}
+          onRetryAppearanceSave={() => {
+            retryAppearanceSave();
+            pendingWorkbenchPersistRef.current = persistableWorkbench;
+            flushPersistedWorkbenchState(pendingWorkbenchPersistRef, onAppearancePersisted);
+          }}
+          onInterfaceSizeChange={(interfaceSize) =>
+            dispatchWorkbench({ type: "set-interface-size", interfaceSize })
+          }
+          onMotionSpeedChange={(motionSpeed) =>
+            dispatchWorkbench({ type: "set-motion-speed", motionSpeed })
+          }
+          onLaunchViewChange={(view) =>
+            dispatchWorkbench({ type: "set-launch-view", view })
+          }
           mainColor={workbench.preferences.mainColor}
           secondaryColor={workbench.preferences.secondaryColor}
           showMenuBarIcon={workbench.preferences.showMenuBarIcon}
+          desktopNotifications={workbench.preferences.desktopNotifications}
+          onDesktopNotificationsChange={(notifications) =>
+            dispatchWorkbench({
+              type: "set-desktop-notifications",
+              notifications,
+            })
+          }
           onConfigChange={handleConfigChange}
+          onEfficiencyRoute={async (phase, escalate) => {
+            if (!activeSessionId)
+              throw new Error("Select a chat before applying a phase route.");
+            if (!isTauriRuntime())
+              throw new Error("Phase handoffs require the desktop app.");
+            await invoke("route_efficiency_phase", {
+              sessionId: activeSessionId,
+              phase,
+              escalate,
+            });
+            await refreshSessions();
+            await refreshEvents(activeSessionId);
+          }}
+          onEfficiencyChange={async (value) => {
+            const next = isTauriRuntime()
+              ? await invoke<typeof value>("set_efficiency_config", { value })
+              : value;
+            setConfig((current) => ({ ...current, efficiency: next }));
+          }}
           onCheckForUpdates={() => void checkForUpdatesWithFeedback()}
           onUpdateAction={runUpdateAction}
           onCliLaunchPresetChange={(preset: CliLaunchPreset) =>
@@ -16999,10 +18779,12 @@ export function App() {
           }}
           onSelectProviderDefaultModel={selectProviderDefaultModel}
           onSignInProvider={signInProvider}
+          onInstallProvider={installProvider}
           {...providerApiKeyProps}
           onTestProvider={testProvider}
           onToggleProvider={toggleProvider}
           providerStatuses={workbench.providerStatuses}
+          providerUsageByProvider={providerUsageByProvider}
           selectedUsageProviderId={selectedUsageProviderId}
           usageVisualization={workbench.preferences.usageVisualization}
           dailyPaceWarning={workbench.preferences.dailyPaceWarning}
@@ -17239,33 +19021,10 @@ export function App() {
           selectedAutomationId={workbench.selectedAutomationId}
         />
       ) : null}
-      {activeDestination === "providers" ? (
-        <ProvidersSurface
-          config={config}
-          onAddCustomProfile={() => {
-            const customProfile = {
-              id: `custom-${Date.now()}`,
-              displayName: "Custom Agent",
-              command: "./agent.sh",
-              args: [],
-              workingDirectory: "Workspace",
-            };
-            void persistConfig({
-              ...config,
-              commandProfiles: [...commandProfiles, customProfile],
-            });
-          }}
-          onQueueProviderHandoff={queueProviderHandoff}
-          {...providerApiKeyProps}
-          onTestProvider={testProvider}
-          onToggleProvider={toggleProvider}
-          providerHandoffs={workbench.providerHandoffs}
-          providerSessions={workbench.providerSessions}
-          providerStatuses={workbench.providerStatuses}
-        />
-      ) : null}
       {activeDestination === "onboarding" ? (
         <ChatSurface
+          {...projectImport.chatProps(activeSession)}
+          {...taskHandoff.chatProps(activeSession)}
           activeChatPanel={activeChatPanel}
           paneKey={activeDraftKey}
           onSelectChatPanel={selectSoloChatPanel}
@@ -17299,8 +19058,9 @@ export function App() {
           }
           isEnvironmentRailOpen={activeChatPanel === "environment"}
           isGoalComposerActive={isGoalComposerActive}
+          isGoalModeActive={activeGoalMode}
           isComposerSending={isActiveSessionSending}
-          isCliUpdating={cliUpdatePhase === "updating"}
+          isCliUpdating={activeComposerCliUpdating}
           shellReady={!isShellOptimizing}
           isBranchLoading={isBranchLoading}
           isToolPanelOpen={workbench.isToolPanelOpen}
@@ -17316,7 +19076,7 @@ export function App() {
           onRemoveAttachment={removeChatAttachment}
           onReusePrompt={updateActiveChatDraft}
           onStopChat={stopActiveChat}
-          onContinueChat={() => void sendDraft("Continue")}
+          onContinueChat={continueChat}
           onCouncilAction={handleCouncilAction}
           onOpenToolPanel={openToolPanel}
           onToggleToolPanel={toggleChatToolPanel}
@@ -17327,7 +19087,8 @@ export function App() {
           onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
           onGoalAction={changeGoal}
           onStartGoalChat={startNewGoalChat}
-          onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+          onCancelGoalComposer={dismissGoalComposer}
+          onCloseGoalComposer={closeGoalComposer}
           onEditQueuedMessage={editQueuedChatMessage}
           onRemoveQueuedMessage={removeQueuedChatMessage}
           onSteerQueuedMessage={steerQueuedChatMessage}
@@ -17357,9 +19118,44 @@ export function App() {
           savedProjects={savedProjects}
           sessionPlan={activeSessionPlan}
           sessionGoal={activeSessionGoal}
-          sourceControl={workbench.ide.sourceControl}
+          sourceControl={scopedIde.sourceControl}
           turnSourceControlBaselines={turnSourceControlBaselines}
           workspacePath={workspacePath}
+        />
+      ) : null}
+      {workspaceRename.draft ? (
+        <WorkspaceRenameDialog
+          name={workspaceRename.draft.name}
+          files={workspaceRename.draft.plan?.files}
+          busy={workspaceRename.draft.busy}
+          error={workspaceRename.draft.error}
+          onPreview={(name) => void workspaceRename.preview(name)}
+          onApply={() => void workspaceRename.apply()}
+          onCancel={workspaceRename.cancel}
+          renderDiff={(file) => (
+            <ManagedDiffEditor
+              height="100%"
+              original={file.before}
+              modified={file.after}
+              language={
+                resolveLanguage({ path: file.path }).syntax.type === "monaco"
+                  ? (
+                      resolveLanguage({ path: file.path }).syntax as {
+                        language: string;
+                      }
+                    ).language
+                  : "plaintext"
+              }
+              theme={resolvedTheme === "light" ? "gyro-light" : "gyro-dark"}
+              options={{
+                readOnly: true,
+                originalEditable: false,
+                minimap: { enabled: false },
+                automaticLayout: true,
+                renderSideBySide: false,
+              }}
+            />
+          )}
         />
       ) : null}
       {branchNameRequest ? (
@@ -17369,6 +19165,9 @@ export function App() {
           mode={branchNameRequest.mode}
           onFinish={finishBranchNameRequest}
         />
+      ) : null}
+      {quitConfirmation.requested ? (
+        <QuitConfirmDialog onResolve={quitConfirmation.resolve} />
       ) : null}
       {modelStandardPrompt ? (
         <ModelStandardPromptOverlay
@@ -17457,35 +19256,84 @@ export function App() {
       ) : null}
     </AppChrome>
   );
+  const workspacePathUndoValue = useMemo(
+    () => ({
+      offer: workspacePathUndo,
+      roots: workspaceRoots,
+      undo: () => {
+        void undoWorkspacePathChange();
+      },
+    }),
+    [undoWorkspacePathChange, workspacePathUndo, workspaceRoots],
+  );
   return (
-    <TerminalAttachmentActionsContext.Provider
-      value={terminalAttachmentActions}
-    >
-      <ComposerContextCandidates.Provider
-        value={[
-          ...visibleWorkspaceFiles
-            .filter((file) => file.kind === "file")
-            .map((file) => ({
-              path: file.path,
-              label: file.relativePath ?? file.path,
-              workspacePath: file.workspacePath,
-              kind: "file" as const,
-            })),
-          ...workbench.ide.tabs.map((tab) => ({
-            path: tab.path,
-            label: tab.path,
-            workspacePath: workspaceRootForPath(workspaceRoots, tab.path),
-            kind: "open-tab" as const,
-          })),
-        ]}
-      >
-        <AppearanceContext.Provider value={appearance}>{appChrome}</AppearanceContext.Provider>
-      </ComposerContextCandidates.Provider>
-    </TerminalAttachmentActionsContext.Provider>
+    <ChatRetryContext.Provider value={chatAutoRetry}>
+    <ProviderSignInContext.Provider value={providerSignInState}>
+      <WorkspacePathUndoContext.Provider value={workspacePathUndoValue}>
+      <ChatFileActionsContext.Provider value={chatFileActions}>
+        <TerminalAttachmentActionsContext.Provider
+          value={terminalAttachmentActions}
+        >
+          <ComposerContextCandidates.Provider
+            value={[
+              ...visibleWorkspaceFiles
+                .filter((file) => file.kind === "file")
+                .map((file) => ({
+                  path: file.path,
+                  label: file.relativePath ?? file.path,
+                  workspacePath: file.workspacePath,
+                  kind: "file" as const,
+                })),
+              ...workbench.ide.tabs.map((tab) => ({
+                path: tab.path,
+                label: tab.path,
+                workspacePath: workspaceRootForPath(workspaceRoots, tab.path),
+                kind: "open-tab" as const,
+              })),
+            ]}
+          >
+            <AppearanceContext.Provider value={appearance}>
+              {appChrome}
+              <FirstRunTour
+                destination={activeDestination}
+                providerConfigured={workbench.providerStatuses.some(
+                  (provider) => provider.connectionStatus === "connected",
+                )}
+                onNavigate={(destination) =>
+                  dispatchWorkbench({ type: "select-destination", destination })
+                }
+                onOpenSettings={(section) => {
+                  dispatchWorkbench({
+                    type: "select-destination",
+                    destination: "settings",
+                  });
+                  dispatchWorkbench({ type: "set-settings-section", section });
+                }}
+              />
+            </AppearanceContext.Provider>
+          </ComposerContextCandidates.Provider>
+        </TerminalAttachmentActionsContext.Provider>
+      </ChatFileActionsContext.Provider>
+      </WorkspacePathUndoContext.Provider>
+    </ProviderSignInContext.Provider>
+    </ChatRetryContext.Provider>
   );
 }
 
+const chatFilePreviewCache = new Map<string, Promise<string>>();
+const chatCitedImageCache = new Map<string, Promise<string | undefined>>();
+
 function loadInitialWorkbenchState(): WorkbenchState {
+  const stored = loadStoredWorkbenchState();
+  return applyLaunchView(
+    recoverWorkspaceBuffers({
+      ...stored,
+      preferences: { ...stored.preferences, ...readStoredAppearance() },
+    }),
+  );
+}
+
+function loadStoredWorkbenchState(): WorkbenchState {
   const base = createInitialWorkbenchState({
     tasks: Object.values(loadChatTaskMetadata()),
   });
@@ -18013,6 +19861,11 @@ function loadRemovedProjectPaths(): string[] {
   }
 }
 
+function loadInitialWorkspacePath(): string | undefined {
+  const removed = new Set(loadRemovedProjectPaths());
+  return loadRecentProjectPaths().find((path) => !removed.has(path));
+}
+
 function loadRecentProjectPaths(): string[] {
   const stored = readBoundedLocalStorage(
     RECENT_PROJECTS_STORAGE_KEY,
@@ -18047,38 +19900,28 @@ function chatPaneForSession(session: Session): ChatPaneRef {
   };
 }
 
-function readBoundedLocalStorage(key: string, maxChars: number) {
-  try {
-    const stored = window.localStorage.getItem(key);
-    if (!stored || stored.length > maxChars) {
-      return undefined;
-    }
-    return stored;
-  } catch {
-    return undefined;
-  }
+function persistChatDrafts(drafts: Record<string, string>) {
+  safeSetLocalStorage(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(drafts));
 }
 
-function safeSetLocalStorage(key: string, value: string) {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // Local storage can be unavailable or quota-limited in preview contexts.
-  }
-}
-
-function flushPersistedWorkbenchState(ref: { current?: WorkbenchState }) {
+function flushPersistedWorkbenchState(
+  ref: { current?: WorkbenchState },
+  onPersisted?: (preferences: WorkbenchState["preferences"], saved: boolean) => void,
+) {
   const pending = ref.current;
   if (!pending) {
     return;
   }
   ref.current = undefined;
+  const saved = saveAppearancePreferences(pending.preferences);
+  onPersisted?.(pending.preferences, saved);
   safeSetLocalStorage(WORKBENCH_STORAGE_KEY, JSON.stringify(pending));
 }
 
 function schedulePersistedWorkbenchStateFlush(
   pendingRef: { current?: WorkbenchState },
   idleRef: { current?: number },
+  onPersisted?: (preferences: WorkbenchState["preferences"], saved: boolean) => void,
 ) {
   if (idleRef.current !== undefined) {
     return;
@@ -18094,7 +19937,7 @@ function schedulePersistedWorkbenchStateFlush(
     idleRef.current = idleWindow.requestIdleCallback(
       () => {
         idleRef.current = undefined;
-        flushPersistedWorkbenchState(pendingRef);
+        flushPersistedWorkbenchState(pendingRef, onPersisted);
       },
       { timeout: WORKBENCH_PERSIST_IDLE_TIMEOUT_MS },
     );
@@ -18102,7 +19945,7 @@ function schedulePersistedWorkbenchStateFlush(
   }
   idleRef.current = window.setTimeout(() => {
     idleRef.current = undefined;
-    flushPersistedWorkbenchState(pendingRef);
+    flushPersistedWorkbenchState(pendingRef, onPersisted);
   }, 0);
 }
 
@@ -18189,31 +20032,54 @@ function normalizeChatMessage(value: string) {
   return value.replace(/\u0000/g, "").trim();
 }
 
-function normalizeSessionTitleInput(value: string) {
-  const normalized = value
-    .replace(/\u0000/g, "")
-    .replace(/[`*_#[\](){}<>|\\]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^[\s:;,.!?'"-]+|[\s:;,.!?'"-]+$/g, "");
-  if (!normalized) {
-    return undefined;
+// Same rules as `session_title_from_message` in the desktop backend.
+// Titles stay local so the selected model is not billed to name the chat.
+// Keep in step with `strip_list_marker` in the desktop backend. A marker on
+// its own ("1" from "1. …") carries no title words, so callers skip it.
+function stripTitleListMarker(text: string) {
+  let rest = text.trim();
+  for (;;) {
+    const trimmed = rest.replace(/^[#>]+\s*/, "").trimStart();
+    const bullet = /^[-*+•]\s+/.exec(trimmed);
+    if (bullet) {
+      rest = trimmed.slice(bullet[0].length);
+      continue;
+    }
+    const ordered = /^(\d+)([.):])?\s*/.exec(trimmed);
+    if (ordered) {
+      if (!ordered[2]) {
+        // A bare number left by the sentence split is still a marker.
+        if (trimmed.slice(ordered[0].length).trim() === "") {
+          return "";
+        }
+        return trimmed;
+      }
+      rest = trimmed.slice(ordered[0].length);
+      continue;
+    }
+    return trimmed;
   }
-  const chars = Array.from(normalized);
-  return chars.length > 80 ? `${chars.slice(0, 77).join("")}...` : normalized;
 }
 
 function sessionTitleFromMessage(message: string) {
-  const cleaned = normalizeChatMessage(message)
+  const base = normalizeChatMessage(message)
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/`([^`]+)`/g, "$1")
-    .replace(/^\/\w+\s+/, "")
-    .split(/[.!?\n]/)[0]
-    ?.replace(
-      /^(please\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+to\s+|i\s+need\s+to\s+|help\s+me\s+|let'?s\s+)/i,
-      "",
+    .replace(/^\/\w+\s+/, "");
+  // A numbered or bulleted opening ("1. …") must not become the title: the
+  // sentence split would otherwise keep only the marker itself.
+  const cleaned = base
+    .split(/[.!?\n]/)
+    .map(stripTitleListMarker)
+    .map((part) =>
+      part
+        .replace(
+          /^(please\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+to\s+|i\s+need\s+to\s+|help\s+me\s+|let'?s\s+)/i,
+          "",
+        )
+        .trim(),
     )
-    .trim();
+    .find((part) => /[a-z]/i.test(part));
   const words = (cleaned ?? "")
     .split(/\s+/)
     .filter(Boolean)
@@ -18240,7 +20106,15 @@ function shouldSuggestSessionTitle(
   return !hasTranscriptEvents;
 }
 
+// Keep in step with `is_generic_session_title` in the desktop backend. A
+// placeholder this list misses is treated as a real title, so the first turn
+// skips its rename and the chat keeps the placeholder forever.
 function isGenericSessionTitle(title: string) {
+  // A title with no letters is a marker or a placeholder ("1", "-"), never a
+  // name the user chose, so the model may still replace it.
+  if (!/[a-z]/i.test(title)) {
+    return true;
+  }
   return [
     "Desktop session",
     "New chat",
@@ -18249,6 +20123,10 @@ function isGenericSessionTitle(title: string) {
     "CLI workspace",
     "Worktree CLI workspace",
     "Agent workspace CLI",
+    "Provider session",
+    "Chat handoff",
+    "Gyro session",
+    "Untitled chat",
   ].includes(title.trim());
 }
 
@@ -18918,6 +20796,10 @@ function areWorkbenchTurnsEqual(
   );
 }
 
+function editorBufferHasUnsavedChanges(buffer: EditorBuffer | undefined) {
+  return Boolean(buffer && buffer.content !== buffer.savedContent);
+}
+
 function workspaceContentToEditorBuffer(
   content: WorkspaceFileContent,
 ): EditorBuffer {
@@ -19001,14 +20883,24 @@ function savedProjectsFromSessions(
   };
 
   upsertProject(currentWorkspacePath, undefined, { includeRemoved: true });
-  recentProjectPaths.forEach((path, index) =>
-    upsertProject(path, new Date(Date.now() - index).toISOString(), {
-      countSession: false,
-    }),
-  );
-  sessions.forEach((session) =>
-    upsertProject(session.workspacePath, session.updatedAt),
-  );
+  // Smoke tests and CLI probes run in system temp folders. They are not
+  // projects the user chose, so only the open workspace may surface one.
+  recentProjectPaths
+    .filter((path) => !isTransientWorkspacePath(path))
+    .forEach((path, index) =>
+      upsertProject(path, new Date(Date.now() - index).toISOString(), {
+        countSession: false,
+      }),
+    );
+  sessions
+    .filter(
+      (session) =>
+        session.origin !== "cli" &&
+        !isTransientWorkspacePath(session.workspacePath),
+    )
+    .forEach((session) =>
+      upsertProject(session.workspacePath, session.updatedAt),
+    );
 
   const currentPath = normalizeProjectPath(currentWorkspacePath);
   return [...projects.values()]
@@ -19051,62 +20943,6 @@ function relativeFilePath(path: string, parent: string) {
     : workspaceName(normalizedPath);
 }
 
-function workspaceContextRelativePath(path: string, root: string) {
-  const normalizedPath = path.replaceAll("\\", "/").replace(/^\.\//, "");
-  const normalizedRoot = root.replaceAll("\\", "/").replace(/\/+$/, "");
-  if (normalizedPath === normalizedRoot) return ".";
-  const prefix = `${normalizedRoot}/`;
-  return normalizedPath.startsWith(prefix)
-    ? normalizedPath.slice(prefix.length)
-    : normalizedPath;
-}
-
-function workspaceContextWithLiveEditor(
-  context: WorkspaceContextSnapshot,
-  activePath: string | undefined,
-  buffer: EditorBuffer | undefined,
-  selection: EditorSelection | undefined,
-  tabs: string[],
-): WorkspaceContextSnapshot {
-  const root = context.workspaceKey.replace(/\/+$/, "");
-  const belongsToRoot = (path: string) => path.startsWith(`${root}/`);
-  const visibleTabs = tabs
-    .filter(belongsToRoot)
-    .slice(0, 64)
-    .map((path) => workspaceContextRelativePath(path, root));
-  if (!activePath || !belongsToRoot(activePath) || !buffer) {
-    return { ...context, visibleTabs };
-  }
-  const path = workspaceContextRelativePath(activePath, root);
-  const maxText = 48_000;
-  const clipped = (value: string) => value.slice(0, maxText);
-  return {
-    ...context,
-    revision: Date.now(),
-    activePath: path,
-    visibleTabs,
-    selection:
-      selection?.path === activePath
-        ? {
-            ...selection,
-            path,
-            text: clipped(selection.text),
-            truncated: selection.text.length > maxText,
-          }
-        : undefined,
-    buffers: [
-      {
-        path,
-        dirty: buffer.content !== buffer.savedContent,
-        content: clipped(buffer.content),
-        truncated: buffer.content.length > maxText,
-        diskHash: buffer.contentHash,
-        documentVersion: buffer.updatedAt,
-      },
-    ],
-  };
-}
-
 function workspaceFailedTests(items: TestTreeItem[]): TestTreeItem[] {
   return items.flatMap((item) => [
     ...(item.status === "failed" ? [item] : []),
@@ -19142,567 +20978,6 @@ function disposeEditorModels(paths: string[]) {
     .catch(() => undefined);
 }
 
-function MonacoEditorPane({
-  buffer,
-  fileContent,
-  loadState,
-  minimapEnabled,
-  onChange,
-  onLspRequest,
-  onSelectionChange,
-  path,
-  revealTarget,
-  theme,
-  languageOverride,
-  semanticReady,
-  fileError,
-}: {
-  languageOverride?: string;
-  semanticReady?: string;
-  fileError?: string;
-  buffer?: EditorBuffer;
-  fileContent?: WorkspaceFileContent;
-  loadState: "idle" | "loading" | "ready" | "error";
-  minimapEnabled: boolean;
-  onChange: (value: string) => void;
-  onLspRequest?: (
-    path: string,
-    method: string,
-    params: Record<string, unknown>,
-  ) => Promise<unknown>;
-  onSelectionChange: (selection?: EditorSelection) => void;
-  path?: string;
-  revealTarget?: EditorRevealTarget;
-  theme: ResolvedTheme;
-}) {
-  const syntax = useSyntax(
-    path ?? "",
-    buffer?.content ?? fileContent?.content ?? "",
-    languageOverride,
-    buffer?.sizeBytes ?? fileContent?.sizeBytes,
-    buffer?.truncated ?? fileContent?.truncated,
-  );
-  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
-  const languageRegistrationsRef = useRef<Array<{ dispose: () => void }>>([]);
-  const hasMountedRef = useRef(false);
-  const [mounted, setMounted] = useState(false);
-  const revealEditorTarget = useCallback(
-    (editor: Parameters<OnMount>[0]) => {
-      if (!revealTarget || revealTarget.path !== path) {
-        return;
-      }
-      const position = {
-        lineNumber: revealTarget.lineNumber,
-        column: revealTarget.column,
-      };
-      editor.setPosition(position);
-      editor.revealPositionInCenter(position);
-      editor.focus();
-    },
-    [path, revealTarget],
-  );
-  useEffect(() => {
-    if (editorRef.current) {
-      revealEditorTarget(editorRef.current);
-    }
-  }, [revealEditorTarget, revealTarget?.nonce]);
-  useEffect(
-    () => () => {
-      languageRegistrationsRef.current.forEach((registration) =>
-        registration.dispose(),
-      );
-      languageRegistrationsRef.current = [];
-    },
-    [],
-  );
-
-  // @monaco-editor/react calls editor.updateOptions() whenever this object
-  // changes identity. A literal here re-configures the editor on every render,
-  // which on a keystroke means a full options + layout recompute.
-  const { scale, reduceMotion } = useAppearance();
-  const editorOptions = useMemo(
-    () => workspaceEditorOptions({ scale, reduceMotion, minimapEnabled, limited: syntax.policy.limited, readOnly: syntax.policy.readOnly }),
-    [minimapEnabled, syntax.policy.limited, syntax.policy.readOnly, scale, reduceMotion],
-  );
-
-  useEffect(() => {
-    if (!mounted) return;
-    let disposed = false;
-    void import("monaco-editor").then((monaco) => {
-      if (disposed) return;
-      languageRegistrationsRef.current.forEach((registration) =>
-        registration.dispose(),
-      );
-      languageRegistrationsRef.current = [];
-      if (
-        path &&
-        onLspRequest &&
-        !syntax.policy.limited &&
-        syntax.language !== "plaintext"
-      ) {
-        const language = syntax.language;
-        const completionRegistration =
-          monaco.languages.registerCompletionItemProvider(language, {
-            triggerCharacters: [".", '"', "'", "/", "<", ":"],
-            provideCompletionItems: async (model, position, context) => {
-              if (model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return { suggestions: [] };
-              try {
-                const result = await onLspRequest(
-                  path,
-                  "textDocument/completion",
-                  {
-                    position: {
-                      line: position.lineNumber - 1,
-                      character: position.column - 1,
-                    },
-                    context: {
-                      triggerKind: context.triggerKind,
-                      triggerCharacter: context.triggerCharacter,
-                    },
-                  },
-                );
-                const resultRecord = isRecord(result) ? result : undefined;
-                const items = Array.isArray(result)
-                  ? result
-                  : Array.isArray(resultRecord?.items)
-                    ? resultRecord.items
-                    : [];
-                const word = model.getWordUntilPosition(position);
-                const fallbackRange = new monaco.Range(
-                  position.lineNumber,
-                  word.startColumn,
-                  position.lineNumber,
-                  word.endColumn,
-                );
-                return {
-                  suggestions: items.flatMap((value) => {
-                    if (!isRecord(value)) {
-                      return [];
-                    }
-                    const label = completionLabel(value.label);
-                    if (!label) {
-                      return [];
-                    }
-                    const textEdit = isRecord(value.textEdit)
-                      ? value.textEdit
-                      : undefined;
-                    const rangeValue = textEdit?.range ?? value.range;
-                    const range =
-                      monacoRangeFromLsp(monaco, rangeValue) ?? fallbackRange;
-                    const insertText =
-                      typeof textEdit?.newText === "string"
-                        ? textEdit.newText
-                        : typeof value.insertText === "string"
-                          ? value.insertText
-                          : label;
-                    return [
-                      {
-                        label,
-                        detail:
-                          typeof value.detail === "string"
-                            ? value.detail
-                            : undefined,
-                        documentation: completionDocumentation(
-                          value.documentation,
-                        ),
-                        insertText,
-                        kind: monacoCompletionKind(monaco, value.kind),
-                        range,
-                      },
-                    ];
-                  }),
-                };
-              } catch {
-                return { suggestions: [] };
-              }
-            },
-          });
-        const hoverRegistration = monaco.languages.registerHoverProvider(
-          language,
-          {
-            provideHover: async (_model, position) => {
-              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return null;
-              try {
-                const result = await onLspRequest(path, "textDocument/hover", {
-                  position: {
-                    line: position.lineNumber - 1,
-                    character: position.column - 1,
-                  },
-                });
-                if (!isRecord(result)) {
-                  return null;
-                }
-                const markdown = lspMarkdown(result.contents);
-                if (!markdown) {
-                  return null;
-                }
-                return {
-                  contents: [{ value: markdown }],
-                  range: monacoRangeFromLsp(monaco, result.range),
-                };
-              } catch {
-                return null;
-              }
-            },
-          },
-        );
-        const definitionRegistration =
-          monaco.languages.registerDefinitionProvider(language, {
-            provideDefinition: async (_model, position) => {
-              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return null;
-              try {
-                const result = await onLspRequest(
-                  path,
-                  "textDocument/definition",
-                  {
-                    position: {
-                      line: position.lineNumber - 1,
-                      character: position.column - 1,
-                    },
-                  },
-                );
-                return monacoLocationsFromLsp(monaco, result);
-              } catch {
-                return [];
-              }
-            },
-          });
-        const referencesRegistration =
-          monaco.languages.registerReferenceProvider(language, {
-            provideReferences: async (_model, position) => {
-              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return null;
-              try {
-                const result = await onLspRequest(
-                  path,
-                  "textDocument/references",
-                  {
-                    position: {
-                      line: position.lineNumber - 1,
-                      character: position.column - 1,
-                    },
-                    context: { includeDeclaration: true },
-                  },
-                );
-                return monacoLocationsFromLsp(monaco, result);
-              } catch {
-                return [];
-              }
-            },
-          });
-        const renameRegistration = monaco.languages.registerRenameProvider(
-          language,
-          {
-            provideRenameEdits: async (_model, position, newName) => {
-              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return null;
-              try {
-                const result = await onLspRequest(path, "textDocument/rename", {
-                  position: {
-                    line: position.lineNumber - 1,
-                    character: position.column - 1,
-                  },
-                  newName,
-                });
-                return monacoWorkspaceEditFromLsp(monaco, result);
-              } catch (error) {
-                return {
-                  edits: [],
-                  rejectReason: String(error),
-                };
-              }
-            },
-          },
-        );
-        const semanticRegistration =
-          monaco.languages.registerDocumentSemanticTokensProvider(language, {
-            getLegend: () => semanticLegend,
-            provideDocumentSemanticTokens: async (model, _previous, token) => {
-              if (
-                !semanticReady ||
-                model.uri.toString() !== monaco.Uri.parse(path).toString() ||
-                token.isCancellationRequested
-              )
-                return null;
-              const version = model.getVersionId();
-              try {
-                const legend = await onLspRequest(
-                  path,
-                  "$/gyro/semanticTokensLegend",
-                  {},
-                );
-                if (
-                  !legend ||
-                  token.isCancellationRequested ||
-                  model.isDisposed() ||
-                  model.getVersionId() !== version
-                )
-                  return null;
-                await onLspRequest(path, "textDocument/didChange", {
-                  textDocument: { version: Date.now() },
-                  contentChanges: [{ text: model.getValue() }],
-                });
-                if (
-                  token.isCancellationRequested ||
-                  model.isDisposed() ||
-                  model.getVersionId() !== version
-                )
-                  return null;
-                const response = await onLspRequest(
-                  path,
-                  "textDocument/semanticTokens/full",
-                  {},
-                );
-                if (
-                  token.isCancellationRequested ||
-                  model.isDisposed() ||
-                  model.getVersionId() !== version
-                )
-                  return null;
-                const data = decodeSemanticTokens(
-                  response,
-                  legend,
-                  model.getLinesContent().map((line) => line.length),
-                );
-                return data ? { data } : null;
-              } catch {
-                return null;
-              }
-            },
-            releaseDocumentSemanticTokens: () => {},
-          });
-        languageRegistrationsRef.current = [
-          semanticRegistration,
-          completionRegistration,
-          hoverRegistration,
-          definitionRegistration,
-          referencesRegistration,
-          renameRegistration,
-        ];
-      }
-    });
-    return () => {
-      disposed = true;
-      languageRegistrationsRef.current.forEach((item) => item.dispose());
-      languageRegistrationsRef.current = [];
-    };
-  }, [
-    mounted,
-    path,
-    syntax.language,
-    syntax.policy.limited,
-    onLspRequest,
-    semanticReady,
-  ]);
-
-  const handleMount: OnMount = (editor, monaco) => {
-    editorRef.current = editor;
-    hasMountedRef.current = true;
-    setMounted(true);
-    void import("./monaco-editor").then(({ remeasureMonacoFonts }) =>
-      remeasureMonacoFonts(),
-    );
-    revealEditorTarget(editor);
-    editor.onDidChangeCursorSelection((event) => {
-      const model = editor.getModel();
-      if (!model) {
-        onSelectionChange(undefined);
-        return;
-      }
-      const text = model.getValueInRange(event.selection);
-      if (!text) {
-        onSelectionChange(undefined);
-        return;
-      }
-      onSelectionChange({
-        path: model.uri.path,
-        startLineNumber: event.selection.startLineNumber,
-        startColumn: event.selection.startColumn,
-        endLineNumber: event.selection.endLineNumber,
-        endColumn: event.selection.endColumn,
-        text,
-      });
-    });
-  };
-
-  if (!path) {
-    return <div className="gyro-code-empty">Select a workspace file.</div>;
-  }
-  // Only swap the placeholder in before the first mount. Doing it on every load
-  // tears the editor down and rebuilds it — including the font measurement —
-  // each time a tab is opened.
-  if (loadState === "loading" && !hasMountedRef.current) {
-    return <div className="gyro-code-empty">Loading file preview...</div>;
-  }
-
-  if (syntax.policy.binary || loadState === "error")
-    return (
-      <div className="gyro-code-empty" role="status">
-        {syntax.policy.reason ?? fileError ?? "This file cannot be displayed."}
-      </div>
-    );
-  return (
-    <div className="gyro-syntax-editor">
-      {syntax.notice && (
-        <div className="gyro-syntax-notice" role="status">
-          {syntax.notice}
-        </div>
-      )}
-      <Suspense
-        fallback={<div className="gyro-code-empty">Loading editor...</div>}
-      >
-        <MonacoEditor
-          height="100%"
-          keepCurrentModel
-          language={syntax.language}
-          onChange={(value) => onChange(value ?? "")}
-          onMount={handleMount}
-          options={editorOptions}
-          path={path}
-          theme={theme === "light" ? "gyro-light" : "gyro-dark"}
-          value={buffer?.content ?? fileContent?.content ?? ""}
-        />
-      </Suspense>
-    </div>
-  );
-}
-
-function monacoRangeFromLsp(monaco: Parameters<OnMount>[1], value: unknown) {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-  const start = isRecord(value.start) ? value.start : undefined;
-  const end = isRecord(value.end) ? value.end : undefined;
-  if (!start || !end) {
-    return undefined;
-  }
-  return new monaco.Range(
-    numberField(start, "line") + 1,
-    numberField(start, "character") + 1,
-    numberField(end, "line") + 1,
-    numberField(end, "character") + 1,
-  );
-}
-
-function monacoLocationsFromLsp(
-  monaco: Parameters<OnMount>[1],
-  value: unknown,
-) {
-  const locations = Array.isArray(value) ? value : value ? [value] : [];
-  return locations.flatMap((location) => {
-    if (!isRecord(location)) return [];
-    const uri =
-      typeof location.uri === "string"
-        ? location.uri
-        : typeof location.targetUri === "string"
-          ? location.targetUri
-          : undefined;
-    const range = monacoRangeFromLsp(
-      monaco,
-      location.range ?? location.targetSelectionRange ?? location.targetRange,
-    );
-    return uri && range ? [{ uri: monaco.Uri.parse(uri), range }] : [];
-  });
-}
-
-function monacoWorkspaceEditFromLsp(
-  monaco: Parameters<OnMount>[1],
-  value: unknown,
-) {
-  if (!isRecord(value) || !isRecord(value.changes)) return { edits: [] };
-  const edits = Object.entries(value.changes).flatMap(([uri, changes]) =>
-    Array.isArray(changes)
-      ? changes.flatMap((change) => {
-          if (!isRecord(change) || typeof change.newText !== "string")
-            return [];
-          const range = monacoRangeFromLsp(monaco, change.range);
-          return range
-            ? [
-                {
-                  resource: monaco.Uri.parse(uri),
-                  textEdit: { range, text: change.newText },
-                  versionId: undefined,
-                },
-              ]
-            : [];
-        })
-      : [],
-  );
-  return { edits };
-}
-
-function monacoCompletionKind(monaco: Parameters<OnMount>[1], value: unknown) {
-  const kinds = monaco.languages.CompletionItemKind;
-  switch (value) {
-    case 2:
-      return kinds.Method;
-    case 3:
-      return kinds.Function;
-    case 4:
-      return kinds.Constructor;
-    case 5:
-      return kinds.Field;
-    case 6:
-      return kinds.Variable;
-    case 7:
-      return kinds.Class;
-    case 8:
-      return kinds.Interface;
-    case 9:
-      return kinds.Module;
-    case 10:
-      return kinds.Property;
-    case 13:
-      return kinds.Enum;
-    case 14:
-      return kinds.Keyword;
-    case 15:
-      return kinds.Snippet;
-    case 21:
-      return kinds.Constant;
-    default:
-      return kinds.Text;
-  }
-}
-
-function completionLabel(value: unknown) {
-  if (typeof value === "string") {
-    return value;
-  }
-  return isRecord(value) && typeof value.label === "string"
-    ? value.label
-    : undefined;
-}
-
-function completionDocumentation(value: unknown) {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (isRecord(value) && typeof value.value === "string") {
-    return { value: value.value };
-  }
-  return undefined;
-}
-
-function lspMarkdown(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map(lspMarkdown).filter(Boolean).join("\n\n");
-  }
-  if (!isRecord(value)) {
-    return "";
-  }
-  if (typeof value.language === "string" && typeof value.value === "string") {
-    return `\`\`\`${value.language}\n${value.value}\n\`\`\``;
-  }
-  return typeof value.value === "string" ? value.value : "";
-}
-
 function createTurnId() {
   return globalThis.crypto?.randomUUID?.() ?? `turn-${Date.now()}`;
 }
@@ -19732,73 +21007,6 @@ function providerLabelForId(
   );
 }
 
-function selectedSessionModelFromConfig(config: GyroConfig) {
-  const provider = providersForConfig(config).find(
-    (item) => item.id === config.selectedProviderId,
-  );
-  const model = provider ? getProviderModel(provider) : undefined;
-  return {
-    providerId: provider?.id,
-    providerLabel: provider?.displayName,
-    modelId: model?.id ?? provider?.selectedModelId,
-    modelLabel: model?.displayName ?? provider?.selectedModelId,
-    reasoningEffort: provider ? selectedReasoningEffort(provider) : undefined,
-  };
-}
-
-/** Model fields stored on a session, for per-pane composer binding. */
-function sessionModelSelectionFromSession(
-  session?: Pick<
-    Session,
-    | "providerId"
-    | "providerLabel"
-    | "modelId"
-    | "modelLabel"
-    | "reasoningEffort"
-  > | null,
-): SessionModelSelection | undefined {
-  if (!session?.providerId && !session?.modelId && !session?.modelLabel) {
-    return undefined;
-  }
-  return {
-    providerId:
-      session.providerId && isProviderId(session.providerId)
-        ? session.providerId
-        : undefined,
-    providerLabel: session.providerLabel,
-    modelId: session.modelId,
-    modelLabel: session.modelLabel,
-    reasoningEffort: session.reasoningEffort,
-  };
-}
-
-/**
- * Model a brand-new session opens on.
- *
- * Deliberately reads the provider's configured default rather than
- * `selectedModelId`: the latter tracks whichever session was last active, so
- * without this a new chat would silently inherit the previous thread's model
- * and the Settings default would never take effect.
- */
-function newSessionModelFromConfig(config: GyroConfig) {
-  const provider = providersForConfig(config).find(
-    (item) => item.id === config.selectedProviderId,
-  );
-  if (!provider) {
-    return selectedSessionModelFromConfig(config);
-  }
-  const modelId = providerDefaultModelId(provider);
-  const model = getProviderModel(provider, modelId);
-  return {
-    providerId: provider.id,
-    providerLabel: provider.displayName,
-    modelId: model?.id ?? modelId,
-    modelLabel: model?.displayName ?? modelId,
-    reasoningEffort:
-      model?.defaultReasoningEffort ?? model?.supportedReasoningEfforts?.[0],
-  };
-}
-
 function approvalNotificationCopy(
   config: GyroConfig,
   mode: "auto" | "direct" | "gated",
@@ -19810,8 +21018,8 @@ function approvalNotificationCopy(
         ? "Kimi"
         : config.selectedProviderId === "xai"
           ? "Grok"
-          : config.selectedProviderId === "gemini"
-            ? "Gemini"
+          : config.selectedProviderId === "antigravity"
+            ? "Google Antigravity"
             : "Codex";
   if (mode === "gated") {
     return {
@@ -19861,123 +21069,6 @@ function createProviderHealthOutput(
     default:
       return `${provider.displayName}: health output inconclusive`;
   }
-}
-
-const previewFiles: WorkspaceFile[] = [
-  { path: "apps", kind: "directory", depth: 1 },
-  { path: "apps/desktop", kind: "directory", depth: 2 },
-  { path: "apps/desktop/src", kind: "directory", depth: 3 },
-  { path: "apps/desktop/src/App.tsx", kind: "file", depth: 4 },
-  { path: "apps/desktop/src-tauri", kind: "directory", depth: 3 },
-  { path: "apps/desktop/src-tauri/src", kind: "directory", depth: 4 },
-  {
-    path: "apps/desktop/src-tauri/src/lib.rs",
-    kind: "file",
-    depth: 5,
-  },
-  { path: "crates", kind: "directory", depth: 1 },
-  { path: "crates/gyro-core", kind: "directory", depth: 2 },
-  { path: "crates/gyro-core/src", kind: "directory", depth: 3 },
-  { path: "crates/gyro-core/src/sessions.rs", kind: "file", depth: 4 },
-  { path: "docs", kind: "directory", depth: 1 },
-  { path: "docs/architecture.md", kind: "file", depth: 2 },
-  { path: "packages", kind: "directory", depth: 1 },
-  { path: "packages/ui", kind: "directory", depth: 2 },
-  { path: "packages/ui/src", kind: "directory", depth: 3 },
-  { path: "packages/ui/src/styles.css", kind: "file", depth: 4 },
-  { path: "packages/ui/src/surfaces.tsx", kind: "file", depth: 4 },
-];
-
-function createPreviewWorkspaceFileContent(path: string): WorkspaceFileContent {
-  const content = `// ${path}
-// File preview is connected through the desktop workspace bridge.
-// Open the Tauri app with a local workspace to read real file contents.`;
-  return {
-    path,
-    content,
-    contentHash: `preview-${content.length}`,
-    truncated: false,
-    sizeBytes: new TextEncoder().encode(content).length,
-  };
-}
-
-function createPreviewSession(
-  layout: WorkspaceLayoutId,
-  mode: WorkbenchState["workspaceMode"] = "local",
-  model: Partial<
-    Pick<
-      Session,
-      | "modelId"
-      | "modelLabel"
-      | "providerId"
-      | "providerLabel"
-      | "reasoningEffort"
-    >
-  > = {},
-  workspacePath = "",
-  titleOverride?: string,
-  sessionId = `preview-${Date.now()}`,
-): Session {
-  const now = new Date().toISOString();
-  const metadata = workspaceRunMetadata(mode, layout);
-  const defaultTitle =
-    layout === "terminal-grid"
-      ? mode === "worktree"
-        ? "Agent workspace CLI"
-        : "CLI workspace"
-      : mode === "worktree"
-        ? "Agent workspace"
-        : "Desktop session";
-  return {
-    id: sessionId,
-    title: normalizeSessionTitleInput(titleOverride ?? "") ?? defaultTitle,
-    workspacePath,
-    origin: layout === "terminal-grid" ? "cli" : "desktop",
-    workspaceMode: metadata.workspaceMode,
-    branch: metadata.branch,
-    worktreeName: metadata.worktreeName,
-    providerId: model.providerId,
-    providerLabel: model.providerLabel,
-    modelId: model.modelId,
-    modelLabel: model.modelLabel,
-    reasoningEffort: model.reasoningEffort,
-    createdAt: now,
-    updatedAt: now,
-    eventsPath: "preview://events",
-  };
-}
-
-async function createTauriThreadSession(
-  workspacePath: string | undefined,
-  mode: WorkbenchState["workspaceMode"],
-  model: ReturnType<typeof selectedSessionModelFromConfig>,
-  titleOverride?: string,
-): Promise<Session> {
-  const workspace = workspacePath ?? "";
-  const shouldCreateWorktree = mode === "worktree" && workspace.length > 0;
-  const title =
-    normalizeSessionTitleInput(titleOverride ?? "") ??
-    (shouldCreateWorktree ? "Agent workspace" : "Desktop session");
-  const metadata = workspaceRunMetadata(
-    shouldCreateWorktree ? "worktree" : "local",
-    `${title}-${Date.now()}`,
-  );
-
-  if (shouldCreateWorktree) {
-    return invoke<Session>("create_worktree_session", {
-      branch: metadata.branch,
-      ...model,
-      title,
-      worktreeName: metadata.worktreeName,
-      workspacePath: workspace,
-    });
-  }
-
-  return invoke<Session>("create_desktop_session", {
-    ...model,
-    title,
-    workspacePath: workspace,
-  });
 }
 
 function createAutomationDraft(
@@ -20044,23 +21135,6 @@ function createPreviewAutomation(draft: AutomationDraft): Automation {
     runHistory: [],
     createdAt: now,
     updatedAt: now,
-  };
-}
-
-function workspaceRunMetadata(
-  mode: WorkbenchState["workspaceMode"],
-  label: string,
-  workingDirectory?: string,
-) {
-  if (mode === "local") {
-    return { workspaceMode: mode, branch: "main", workingDirectory };
-  }
-  const slug = slugify(label || "task");
-  return {
-    workspaceMode: mode,
-    branch: `gyro/${slug}`,
-    worktreeName: `gyro-${slug}`,
-    workingDirectory,
   };
 }
 
@@ -20193,6 +21267,21 @@ function applyProviderChatStreamEvent(
   // Heartbeats keep a quiet-but-alive run marked running and refresh the status
   // event's timestamp so the idle watchdog does not settle the turn early.
   if (
+    streamEvent.phase === "retry-wait" ||
+    streamEvent.phase === "retry-started"
+  ) {
+    const update = (items: SessionEvent[]) =>
+      applyNativeProviderRetryStatus(items, streamEvent);
+    optimisticEventsRef.current.set(
+      streamEvent.sessionId,
+      limitOptimisticSessionEvents(
+        update(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
+      ),
+    );
+    setEvents(update);
+    return;
+  }
+  if (
     streamEvent.phase === "started" ||
     streamEvent.phase === "completed" ||
     streamEvent.phase === "heartbeat"
@@ -20218,6 +21307,8 @@ function applyProviderChatStreamEvent(
       streamEvent.status ??
         (streamEvent.phase === "cancelled" ? "cancelled" : "failed"),
       streamEvent.error ?? undefined,
+      false,
+      streamEvent.recoveryKind ?? undefined,
     );
     return;
   }
@@ -20229,10 +21320,8 @@ function applyProviderChatStreamEvent(
     upsertStreamingAssistantEvent(items, streamEvent, turnId, textDelta);
   optimisticEventsRef.current.set(
     streamEvent.sessionId,
-    limitSessionEventsForUi(
-      updateEvents(
-        optimisticEventsRef.current.get(streamEvent.sessionId) ?? [],
-      ),
+    limitOptimisticSessionEvents(
+      updateEvents(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
     ),
   );
   setEvents((current) => {
@@ -20254,6 +21343,7 @@ function updateOptimisticProviderStatus(
   error?: string,
   /** Move createdAt forward so idle watches see the run is still alive. */
   touchTimestamp = false,
+  recoveryKind?: string,
 ) {
   const updateEvents = (items: SessionEvent[]) => {
     const targetIndex = items.findLastIndex(
@@ -20278,6 +21368,9 @@ function updateOptimisticProviderStatus(
       stringFromRecord(payload, "providerLabel") ?? "Provider";
     const now = new Date().toISOString();
     const previousStatus = stringFromRecord(payload, "status");
+    if (touchTimestamp && payload?.nativeRetry === true) {
+      return { ...event, createdAt: now };
+    }
     const previousStartedAt = stringFromRecord(payload, "startedAt");
     const isActiveStatus = ["queued", "running", "waiting"].includes(status);
     const wasActiveStatus =
@@ -20300,6 +21393,15 @@ function updateOptimisticProviderStatus(
       } as ModelProviderConfig),
       payload: {
         ...payload,
+        nativeRetry: undefined,
+        retryAt: undefined,
+        retryAttempt: undefined,
+        retryMaxAttempts: undefined,
+        recoveryKind:
+          recoveryKind ??
+          (isActiveStatus || status === "done"
+            ? undefined
+            : payload?.recoveryKind),
         completedAt: isActiveStatus ? undefined : now,
         durationMs:
           !isActiveStatus &&
@@ -20317,7 +21419,7 @@ function updateOptimisticProviderStatus(
   if (optimisticEvents) {
     optimisticEventsRef.current.set(
       sessionId,
-      limitSessionEventsForUi(updateEvents(optimisticEvents)),
+      limitOptimisticSessionEvents(updateEvents(optimisticEvents)),
     );
   }
   setEvents((current) => {

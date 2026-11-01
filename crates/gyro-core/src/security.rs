@@ -9,9 +9,9 @@ use std::{
     sync::OnceLock,
 };
 
-static REDACTION_PATTERNS: OnceLock<[Regex; 4]> = OnceLock::new();
+static REDACTION_PATTERNS: OnceLock<[Regex; 10]> = OnceLock::new();
 
-fn redaction_patterns() -> &'static [Regex; 4] {
+fn redaction_patterns() -> &'static [Regex; 10] {
     REDACTION_PATTERNS.get_or_init(|| {
         [
             Regex::new(r"sk-[A-Za-z0-9_-]{20,}").expect("valid redaction regex"),
@@ -20,6 +20,17 @@ fn redaction_patterns() -> &'static [Regex; 4] {
             Regex::new(r#"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['"]?[^'"\s]+"#)
                 .expect("valid redaction regex"),
             Regex::new(r"(?i)(authorization:\s*bearer\s+)[A-Za-z0-9._~+/=-]+")
+                .expect("valid redaction regex"),
+            // Token families that carry no `key=value` or JSON shape, so the
+            // generic patterns above never see them. They reach the model
+            // through tool output, previews, and error text.
+            Regex::new(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")
+                .expect("valid redaction regex"),
+            Regex::new(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b").expect("valid redaction regex"),
+            Regex::new(r"\bAIza[0-9A-Za-z_-]{35}\b").expect("valid redaction regex"),
+            Regex::new(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b").expect("valid redaction regex"),
+            Regex::new(r"\bxai-[A-Za-z0-9]{20,}\b").expect("valid redaction regex"),
+            Regex::new(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")
                 .expect("valid redaction regex"),
         ]
     })
@@ -47,6 +58,45 @@ pub fn assert_path_inside_workspace(workspace: &Path, candidate: &Path) -> Resul
     }
 
     Ok(candidate)
+}
+
+/// Resolve a workspace entry for lifecycle operations (delete, rename, stage,
+/// discard) without following the entry itself. Only the parent is
+/// canonicalized, so a symlink named `CLAUDE.md -> AGENTS.md` resolves to the
+/// link and never to its target. The workspace root itself is never an entry.
+pub fn assert_entry_inside_workspace(workspace: &Path, candidate: &Path) -> Result<PathBuf> {
+    let workspace = workspace
+        .canonicalize()
+        .with_context(|| format!("resolve workspace {}", workspace.display()))?;
+    reject_parent_components(candidate)?;
+
+    let candidate = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        workspace.join(candidate)
+    };
+    let file_name = candidate
+        .components()
+        .next_back()
+        .and_then(|component| match component {
+            Component::Normal(name) => Some(name.to_os_string()),
+            _ => None,
+        })
+        .ok_or_else(|| anyhow::anyhow!("path {} has no entry name", candidate.display()))?;
+    let parent = candidate
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("path {} has no parent", candidate.display()))?;
+    let entry = resolve_from_nearest_existing_ancestor(parent)?.join(file_name);
+
+    if !entry.starts_with(&workspace) || entry == workspace {
+        bail!(
+            "path {} is outside workspace {}",
+            entry.display(),
+            workspace.display()
+        );
+    }
+
+    Ok(entry)
 }
 
 fn reject_parent_components(path: &Path) -> Result<()> {
@@ -114,6 +164,41 @@ pub fn redact_secrets(input: &str) -> String {
     current.into_owned()
 }
 
+/// Mask secrets without moving the editor positions of the surrounding text.
+/// Workspace read continuations use UTF-16 columns, so a replacement must keep
+/// both line breaks and UTF-16 width even when the secret contains Unicode.
+pub fn redact_secrets_preserving_positions(input: &str) -> String {
+    let mut current = Cow::Borrowed(input);
+    for regex in redaction_patterns() {
+        if !regex.is_match(current.as_ref()) {
+            continue;
+        }
+        current = Cow::Owned(
+            regex
+                .replace_all(current.as_ref(), |caps: &regex::Captures<'_>| {
+                    let matched = caps.get(0).expect("redaction match").as_str();
+                    let prefix = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                    let mut masked = prefix.to_owned();
+                    for character in matched[prefix.len()..].chars() {
+                        if matches!(character, '\n' | '\r') {
+                            masked.push(character);
+                        } else if character.len_utf16() == 2 {
+                            // Keep surrogate pairs atomic: two ASCII masks
+                            // would permit a chunk to split within the source
+                            // character's two-column width.
+                            masked.push('🔒');
+                        } else {
+                            masked.push('*');
+                        }
+                    }
+                    masked
+                })
+                .into_owned(),
+        );
+    }
+    current.into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +225,63 @@ mod tests {
             redacted,
             r#"{"loggedIn":false,"token":"[REDACTED]","password":"[REDACTED]"}"#
         );
+    }
+
+    #[test]
+    fn redacts_provider_and_cloud_token_shapes() {
+        // Built at runtime so no literal credential-shaped string lives in the
+        // source tree.
+        let tokens = [
+            format!("ghp_{}", "a".repeat(36)),
+            format!("github_pat_{}", "b".repeat(22)),
+            format!("AKIA{}", "C".repeat(16)),
+            format!("AIza{}", "d".repeat(35)),
+            format!("xoxb-{}-{}", "1234567890", "abcdefghij"),
+            format!("xai-{}", "e".repeat(32)),
+            format!(
+                "eyJ{}.{}.{}",
+                "f".repeat(20),
+                "g".repeat(20),
+                "h".repeat(20)
+            ),
+        ];
+        for token in tokens {
+            let source = format!("value={token} end");
+            let redacted = redact_secrets(&source);
+            assert!(redacted.contains("[REDACTED]"), "{redacted}");
+            assert!(!redacted.contains(&token[..12]), "{redacted}");
+            assert!(redacted.ends_with(" end"), "{redacted}");
+            // The position-preserving mask keeps lines and UTF-16 length.
+            let masked = redact_secrets_preserving_positions(&source);
+            assert!(!masked.contains(&token[..12]), "{masked}");
+            assert_eq!(source.encode_utf16().count(), masked.encode_utf16().count());
+        }
+    }
+
+    #[test]
+    fn redaction_leaves_ordinary_identifiers_alone() {
+        for text in [
+            "AKIAsomething short",
+            "he said eyJ hi",
+            "xoxo hugs",
+            "prefix ghpx_1234567890",
+            "AIza short",
+        ] {
+            assert_eq!(redact_secrets(text), text, "{text}");
+        }
+    }
+
+    #[test]
+    fn workspace_redaction_preserves_utf16_columns_and_lines() {
+        let source = "before\n{\"token\":\"🦀hidden\nvalue\"} after\nOPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456";
+        let masked = redact_secrets_preserving_positions(source);
+        assert!(!masked.contains("hidden"));
+        assert!(!masked.contains("abcdefghijklmnopqrstuvwxyz"));
+        assert_eq!(source.encode_utf16().count(), masked.encode_utf16().count());
+        for (source, masked) in source.split('\n').zip(masked.split('\n')) {
+            assert_eq!(source.encode_utf16().count(), masked.encode_utf16().count());
+        }
+        assert_eq!(source.lines().count(), masked.lines().count());
     }
 
     #[test]
@@ -201,5 +343,35 @@ mod tests {
         let error =
             assert_path_inside_workspace(&workspace, Path::new("dangling/new.txt")).unwrap_err();
         assert!(error.to_string().contains("resolve path"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn entry_resolution_keeps_symlinks_as_links() {
+        use std::os::unix::fs::symlink;
+
+        let (_temp, workspace, outside) = test_workspace();
+        fs::write(workspace.join("AGENTS.md"), "keep").unwrap();
+        symlink("AGENTS.md", workspace.join("CLAUDE.md")).unwrap();
+        symlink(&outside, workspace.join("escape")).unwrap();
+        let root = workspace.canonicalize().unwrap();
+
+        let link = assert_entry_inside_workspace(&workspace, Path::new("CLAUDE.md")).unwrap();
+        assert_eq!(link, root.join("CLAUDE.md"));
+        // A link to a directory outside the workspace is itself an entry of it.
+        let escape = assert_entry_inside_workspace(&workspace, Path::new("escape")).unwrap();
+        assert_eq!(escape, root.join("escape"));
+        // Entries beneath that link still resolve outside and are refused.
+        let error =
+            assert_entry_inside_workspace(&workspace, Path::new("escape/file.txt")).unwrap_err();
+        assert!(error.to_string().contains("outside workspace"));
+    }
+
+    #[test]
+    fn entry_resolution_refuses_the_workspace_root() {
+        let (_temp, workspace, _outside) = test_workspace();
+        assert!(assert_entry_inside_workspace(&workspace, Path::new("")).is_err());
+        assert!(assert_entry_inside_workspace(&workspace, Path::new(".")).is_err());
+        assert!(assert_entry_inside_workspace(&workspace, &workspace).is_err());
     }
 }

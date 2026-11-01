@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,6 +56,67 @@ const homebrewFormula = readFileSync(
 
 const pubkey = config.plugins?.updater?.pubkey;
 const failures = [];
+
+// The DMG is the first thing a new user meets, and Tauri does not fail when
+// bundle.macOS.dmg is missing or its background is off-size: Finder simply
+// falls back to an auto-arranged, unstyled window. Catch that here, where it
+// costs seconds instead of a release.
+{
+  const dmg = config.bundle?.macOS?.dmg;
+  const backgroundPath = dmg?.background
+    ? resolve(dirname(configPath), dmg.background)
+    : undefined;
+  if (!dmg) {
+    failures.push(
+      "bundle.macOS.dmg is missing, so the DMG ships Finder's unstyled icon layout.",
+    );
+  } else if (!backgroundPath) {
+    failures.push("bundle.macOS.dmg.background is missing.");
+  } else if (!existsSync(backgroundPath)) {
+    failures.push(
+      `bundle.macOS.dmg.background points at ${dmg.background}, which does not exist. Run: swift scripts/render-dmg-background.swift`,
+    );
+  } else {
+    const header = readFileSync(backgroundPath).subarray(0, 24);
+    const isPng =
+      header.length === 24 &&
+      header.readUInt32BE(0) === 0x89504e47 &&
+      header.readUInt32BE(4) === 0x0d0a1a0a;
+    const width = isPng ? header.readUInt32BE(16) : 0;
+    const height = isPng ? header.readUInt32BE(20) : 0;
+    const windowWidth = dmg.windowSize?.width;
+    const windowHeight = dmg.windowSize?.height;
+    if (!isPng) {
+      failures.push(
+        "bundle.macOS.dmg.background must be a PNG; the DMG bundler cannot place an SVG.",
+      );
+    } else if (
+      width !== windowWidth * 2 ||
+      height !== windowHeight * 2
+    ) {
+      failures.push(
+        `bundle.macOS.dmg.background is ${width}×${height}, but a ${windowWidth}×${windowHeight} pt window needs ${windowWidth * 2}×${windowHeight * 2} at 2x. Run: swift scripts/render-dmg-background.swift`,
+      );
+    }
+    for (const key of ["appPosition", "applicationFolderPosition"]) {
+      const point = dmg[key];
+      if (
+        !point ||
+        !Number.isFinite(point.x) ||
+        !Number.isFinite(point.y) ||
+        point.x <= 0 ||
+        point.x >= windowWidth ||
+        point.y <= 0 ||
+        point.y >= windowHeight
+      ) {
+        failures.push(
+          `bundle.macOS.dmg.${key} is missing or outside the ${windowWidth}×${windowHeight} window; Finder would auto-arrange the icons.`,
+        );
+      }
+    }
+  }
+}
+
 const githubLatestEndpoint =
   "https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json";
 
@@ -74,9 +136,18 @@ if (config.bundle?.createUpdaterArtifacts !== true) {
   );
 }
 
+// The checked-in identity stays ad-hoc so local and alpha builds never need
+// Apple credentials; the release workflow exports APPLE_SIGNING_IDENTITY to
+// switch a build to Developer ID signing and notarization.
 if (config.bundle?.macOS?.signingIdentity !== "-") {
   failures.push(
-    'bundle.macOS.signingIdentity must be "-" for a complete ad-hoc macOS signature.',
+    'bundle.macOS.signingIdentity must stay "-"; Developer ID builds set APPLE_SIGNING_IDENTITY in the release workflow instead.',
+  );
+}
+
+if (config.bundle?.macOS?.hardenedRuntime === false) {
+  failures.push(
+    "bundle.macOS.hardenedRuntime must not be disabled; notarization requires the hardened runtime.",
   );
 }
 
@@ -104,6 +175,19 @@ const versions = new Map([
   ["Tauri config", config.version],
 ]);
 const expectedVersion = rootPackage.version;
+const isStableVersion = /^\d+\.\d+\.\d+$/.test(expectedVersion);
+const signingMode =
+  process.env.GYRO_MACOS_SIGNING || (isStableVersion ? "developer-id" : "adhoc");
+if (!["adhoc", "developer-id"].includes(signingMode)) {
+  failures.push(
+    `GYRO_MACOS_SIGNING must be adhoc or developer-id, not ${signingMode}.`,
+  );
+}
+if (isStableVersion && signingMode !== "developer-id") {
+  failures.push(
+    `Stable release ${expectedVersion} must be Developer ID signed and notarized.`,
+  );
+}
 const releaseNotesPath = resolve(
   repoRoot,
   `docs/releases/v${expectedVersion}.md`,
@@ -125,11 +209,21 @@ if (!existsSync(releaseNotesPath)) {
     "macOS 14+",
     "## Upgrade and rollback",
     "## CLI",
-    "not Apple-signed or notarized",
+    signingMode === "developer-id"
+      ? "notarized by Apple"
+      : "not Apple-signed or notarized",
   ]) {
     if (!releaseNotes.includes(marker)) {
       failures.push(`Versioned release notes are missing ${marker}.`);
     }
+  }
+  if (
+    signingMode === "developer-id" &&
+    releaseNotes.includes("not Apple-signed or notarized")
+  ) {
+    failures.push(
+      "Versioned release notes for a Developer ID build still say it is not Apple-signed or notarized.",
+    );
   }
 }
 const expectedTauriCliVersion = "2.11.4";
@@ -170,7 +264,30 @@ if (tag?.startsWith("v") && tag.slice(1) !== expectedVersion) {
 }
 
 for (const marker of [
-  "needs: macos",
+  "needs: [signing, macos]",
+  "needs: signing",
+  "GYRO_MACOS_SIGNING: ${{ needs.signing.outputs.mode }}",
+  "Resolve Developer ID or ad-hoc signing",
+  "Stable release $GITHUB_REF_NAME must be Developer ID signed and notarized",
+  "Import Developer ID certificate",
+  'KEYCHAIN_PATH="$RUNNER_TEMP/gyro-signing.keychain-db"',
+  "security set-key-partition-list",
+  "export APPLE_SIGNING_IDENTITY=",
+  "export APPLE_API_KEY_PATH=",
+  "Sign, notarize, and staple macOS DMG",
+  "codesign --force --timestamp",
+  "xcrun notarytool submit",
+  'if [ "$STATUS" != "Accepted" ]',
+  "xcrun notarytool info",
+  "submissions/",
+  'xcrun stapler staple "$DMG_PATH"',
+  '--signing "$GYRO_MACOS_SIGNING"',
+  '--team-id "$GYRO_APPLE_TEAM_ID"',
+  "--updater-archive",
+  "Remove signing keychain and notary key",
+  "if: always() && env.GYRO_MACOS_SIGNING == 'developer-id'",
+  'security delete-keychain "$GYRO_KEYCHAIN_PATH"',
+  '--signing "${{ needs.signing.outputs.mode }}"',
   "Verify pinned Tauri release toolchain",
   'tauri --version)" = "tauri-cli 2.11.4"',
   'GYRO_REQUIRE_RELEASE_SECRETS: "1"',
@@ -198,7 +315,7 @@ for (const marker of [
   '--target "${{ matrix.target }}"',
   '--checksums "$DMG_CHECKSUMS"',
   "sha256sum --check SHA256SUMS",
-  "Build GitHub-hosted alpha and sign updater archive",
+  "Build desktop app and sign updater archive",
   "--json isDraft --jq '.isDraft'",
   'if [ "$IS_DRAFT" != "true" ]',
   "Refusing to overwrite published release",
@@ -261,6 +378,17 @@ for (const marker of [
   '"TeamIdentifier=not set"',
   '"Sealed Resources version="',
   '"Developer ID"',
+  '"Authority=Developer ID Application: "',
+  "`TeamIdentifier=${signing.teamId}`",
+  '"Timestamp="',
+  "bundle signature does not enable the hardened runtime",
+  "com.apple.security.get-task-allow",
+  "validateStaple(appPath)",
+  "validateStaple(dmgPath)",
+  "staplerFailureIsTransient",
+  '"context:primary-signature"',
+  '"source=Notarized Developer ID"',
+  "verifyUpdaterArchive(archivePath, config, target, signing)",
   'plistValue(infoPlistPath, "CFBundleIdentifier")',
   'plistValue(infoPlistPath, "CFBundleVersion")',
   'plistValue(infoPlistPath, "CFBundleName")',
@@ -301,14 +429,23 @@ for (const marker of [
   }
 }
 
-if (
-  !updaterManifest.includes(
+for (const [marker, meaning] of [
+  [
     "Updater archives are signed; app bundles and DMGs are not Apple-signed or notarized.",
-  )
-) {
-  failures.push(
-    "Updater manifest must disclose the unsigned GitHub-hosted alpha status.",
-  );
+    "the ad-hoc alpha status",
+  ],
+  [
+    "Updater archives are signed; app bundles and DMGs are signed with Gyro's Developer ID and notarized by Apple.",
+    "the Developer ID status",
+  ],
+  [
+    "must be Developer ID signed and notarized",
+    "that stable releases refuse ad-hoc signing",
+  ],
+]) {
+  if (!updaterManifest.includes(marker)) {
+    failures.push(`Updater manifest must disclose ${meaning}.`);
+  }
 }
 
 for (const marker of [
@@ -336,19 +473,25 @@ for (const unsafeMarker of [
   }
 }
 
-for (const appleReleaseMarker of [
-  "APPLE_CERTIFICATE",
-  "APPLE_SIGNING_IDENTITY",
-  "APPLE_ID",
-  "APPLE_PASSWORD",
-  "APPLE_TEAM_ID",
-  "notarytool",
-]) {
-  if (releaseWorkflow.includes(appleReleaseMarker)) {
+// Notarization authenticates with an App Store Connect API key only; an
+// Apple ID password would be a personal credential in CI.
+for (const appleIdMarker of ["APPLE_ID", "APPLE_PASSWORD"]) {
+  if (releaseWorkflow.includes(appleIdMarker)) {
     failures.push(
-      `GitHub-hosted alpha workflow must not require Apple release marker ${appleReleaseMarker}.`,
+      `Release workflow must notarize with the App Store Connect API key, not ${appleIdMarker}.`,
     );
   }
+}
+
+// Apple secrets may only reach the steps that sign and notarize, never the
+// job-wide environment where every build script and test could read them.
+const macosJobHeader = releaseWorkflow.match(
+  /\n  macos:\n[\s\S]*?\n    steps:\n/,
+)?.[0];
+if (!macosJobHeader || /secrets\.APPLE_/.test(macosJobHeader)) {
+  failures.push(
+    "Release workflow must scope Apple secrets to individual signing steps, not the macOS job environment.",
+  );
 }
 
 if (process.env.GYRO_REQUIRE_RELEASE_SECRETS === "1") {
@@ -360,6 +503,139 @@ if (process.env.GYRO_REQUIRE_RELEASE_SECRETS === "1") {
       failures.push(`${variable} is missing from the release environment.`);
     }
   }
+}
+
+function dmgNotarizationStep(workflow) {
+  const start = workflow.indexOf("- name: Sign, notarize, and staple macOS DMG");
+  const end = workflow.indexOf("- name: Verify macOS DMG");
+  if (start === -1 || end <= start) return "";
+  return workflow.slice(start, end);
+}
+
+// Staple is legal only after an Accepted status. A dropped notarytool --wait
+// must re-query the submission id (including the id Apple leaves in the
+// notary URL) and must exit before stapler runs when that status is not
+// Accepted.
+function dmgNotarizationPolicyFailures(step) {
+  const found = [];
+  const acceptedAt = step.indexOf('if [ "$STATUS" != "Accepted" ]');
+  const requeryAt = step.indexOf("xcrun notarytool info");
+  const exitAt = acceptedAt === -1 ? -1 : step.indexOf("exit 1", acceptedAt);
+  const stapleAt = step.lastIndexOf('xcrun stapler staple "$DMG_PATH"');
+  if (!step.includes("xcrun notarytool submit")) {
+    found.push("DMG notarization must submit the disk image with notarytool.");
+  }
+  if (acceptedAt === -1) {
+    found.push("DMG notarization must stop unless status is Accepted.");
+  }
+  if (requeryAt === -1 || !step.includes("submissions/")) {
+    found.push(
+      "A missing notarytool --wait status must re-query the existing submission before stapling.",
+    );
+  }
+  if (stapleAt === -1) {
+    found.push("DMG notarization must staple the ticket.");
+  }
+  if (
+    acceptedAt === -1 ||
+    requeryAt === -1 ||
+    exitAt === -1 ||
+    stapleAt === -1 ||
+    !(acceptedAt < requeryAt && requeryAt < exitAt && exitAt < stapleAt)
+  ) {
+    found.push(
+      "DMG stapler must run only after notarization status is Accepted.",
+    );
+  }
+  return found;
+}
+
+function dmgNotarizationPolicyFixtureFailures() {
+  const good = [
+    "xcrun notarytool submit",
+    'if [ "$STATUS" != "Accepted" ]; then',
+    "submissions/",
+    "xcrun notarytool info",
+    "exit 1",
+    "fi",
+    'xcrun stapler staple "$DMG_PATH"',
+  ].join("\n");
+  const stapleBeforeAccepted = [
+    'xcrun stapler staple "$DMG_PATH"',
+    "xcrun notarytool submit",
+    'if [ "$STATUS" != "Accepted" ]; then',
+    "submissions/",
+    "xcrun notarytool info",
+    "exit 1",
+    "fi",
+  ].join("\n");
+  const noRequery = [
+    "xcrun notarytool submit",
+    'if [ "$STATUS" != "Accepted" ]; then',
+    "exit 1",
+    "fi",
+    'xcrun stapler staple "$DMG_PATH"',
+  ].join("\n");
+  const stapleThenExit = [
+    "xcrun notarytool submit",
+    'if [ "$STATUS" != "Accepted" ]; then',
+    "submissions/",
+    "xcrun notarytool info",
+    "fi",
+    'xcrun stapler staple "$DMG_PATH"',
+    "exit 1",
+  ].join("\n");
+  const cases = [
+    ["accepted workflow", good, []],
+    [
+      "staple before Accepted",
+      stapleBeforeAccepted,
+      ["DMG stapler must run only after notarization status is Accepted."],
+    ],
+    [
+      "missing re-query",
+      noRequery,
+      [
+        "A missing notarytool --wait status must re-query the existing submission before stapling.",
+        "DMG stapler must run only after notarization status is Accepted.",
+      ],
+    ],
+    [
+      "staple before the non-Accepted exit",
+      stapleThenExit,
+      ["DMG stapler must run only after notarization status is Accepted."],
+    ],
+  ];
+  const found = [];
+  for (const [name, step, expected] of cases) {
+    const actual = dmgNotarizationPolicyFailures(step);
+    if (actual.join("\n") !== expected.join("\n")) {
+      found.push(
+        `DMG notarization policy fixture ${name} returned ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}.`,
+      );
+    }
+  }
+  return found;
+}
+
+for (const failure of dmgNotarizationPolicyFailures(
+  dmgNotarizationStep(releaseWorkflow),
+)) {
+  failures.push(failure);
+}
+for (const failure of dmgNotarizationPolicyFixtureFailures()) {
+  failures.push(failure);
+}
+
+const dmgRetryTest = spawnSync(
+  process.execPath,
+  [resolve(repoRoot, "scripts/check-dmg-notarization-retry.mjs")],
+  { stdio: "inherit" },
+);
+if (dmgRetryTest.status !== 0) {
+  failures.push(
+    "DMG notarization retry test failed. The release workflow must re-query a dropped notarytool --wait and staple only after Accepted.",
+  );
 }
 
 if (failures.length > 0) {

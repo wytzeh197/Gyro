@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync, utimesSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -60,18 +60,131 @@ mkdirSync(applicationsDir, { recursive: true });
 rmSync(destinationApp, { recursive: true, force: true });
 cpSync(sourceApp, destinationApp, { recursive: true });
 
-if (process.env.GYRO_SKIP_LOCAL_CODESIGN !== "1") {
-  const sign = spawnSync(
+// A Developer ID bundle is already sealed and notarized; re-signing it ad-hoc
+// would discard that identity and its stapled ticket.
+function hasValidDeveloperIdSignature(appPath) {
+  const verify = spawnSync(
     "codesign",
-    ["--force", "--deep", "--sign", "-", destinationApp],
-    { stdio: "inherit" },
+    ["--verify", "--deep", "--strict", appPath],
+    { stdio: "ignore" },
   );
+  if (verify.status !== 0) return false;
+  const display = spawnSync("codesign", ["--display", "--verbose=2", appPath], {
+    encoding: "utf8",
+  });
+  return `${display.stdout ?? ""}${display.stderr ?? ""}`.includes(
+    "Authority=Developer ID Application: ",
+  );
+}
+
+/** Whether the copied bundle's code signature carries one entitlement key. */
+function embeddedEntitlement(appPath, key) {
+  const display = spawnSync(
+    "codesign",
+    ["--display", "--entitlements", ":-", appPath],
+    { encoding: "utf8" },
+  );
+  return `${display.stdout ?? ""}${display.stderr ?? ""}`.includes(key);
+}
+
+/**
+ * Pick a stable code-signing identity.
+ *
+ * The microphone grant is tied to the signature. An ad-hoc signature is a new
+ * identity on every build, so macOS asks again after each rebuild. Any real
+ * identity already on this machine is stable across rebuilds. Prefer a
+ * Developer ID that is already installed for releases, then a locally created
+ * dev identity, and only then ad-hoc.
+ */
+function resolveSigningIdentity() {
+  const explicit = process.env.GYRO_CODESIGN_IDENTITY;
+  if (explicit) return explicit;
+
+  const listed = spawnSync(
+    "security",
+    ["find-identity", "-p", "codesigning"],
+    { encoding: "utf8" },
+  );
+  const names = `${listed.stdout ?? ""}`
+    .split("\n")
+    .map((line) => line.match(/"([^"]+)"/)?.[1])
+    .filter(Boolean);
+
+  return (
+    names.find((name) => name.startsWith("Developer ID Application: ")) ??
+    names.find((name) => name === "Gyro Dev") ??
+    null
+  );
+}
+
+if (hasValidDeveloperIdSignature(destinationApp)) {
+  console.log("Keeping the existing Developer ID signature.");
+} else if (process.env.GYRO_SKIP_LOCAL_CODESIGN !== "1") {
+  // Match release builds, which always run with the hardened runtime. The
+  // hardened runtime gates audio input on the audio-input entitlement, so a
+  // signature without Entitlements.plist is denied the microphone before TCC
+  // can even show its sheet.
+  const entitlements = resolve(
+    repoRoot,
+    "apps/desktop/src-tauri/Entitlements.plist",
+  );
+  const signs = (signer) =>
+    spawnSync(
+      "codesign",
+      [
+        "--force",
+        "--deep",
+        "--options",
+        "runtime",
+        "--entitlements",
+        entitlements,
+        "--sign",
+        signer,
+        destinationApp,
+      ],
+      { stdio: "inherit" },
+    );
+
+  const identity = resolveSigningIdentity();
+  let sign = identity ? signs(identity) : null;
+  if (sign && sign.status !== 0) {
+    console.warn(
+      `Signing with "${identity}" failed; falling back to an ad-hoc signature.`,
+    );
+    sign = null;
+  }
+  if (!sign) {
+    if (!identity) {
+      console.log(
+        "No signing identity found, so this build is ad-hoc signed. macOS will ask for the microphone again after the next rebuild. Run scripts/setup-dev-signing.sh once to stop that.",
+      );
+    }
+    sign = signs("-");
+  }
 
   if (sign.status !== 0) {
     console.warn(
       "Ad-hoc signing failed; continuing with the copied local app bundle.",
     );
+  } else if (!embeddedEntitlement(destinationApp, "com.apple.security.device.audio-input")) {
+    console.error(
+      "The ad-hoc signature is missing com.apple.security.device.audio-input, so the hardened runtime blocks the microphone and macOS never shows a permission sheet.",
+    );
+    process.exit(1);
   }
+}
+
+// Re-register the replaced bundle so Finder and Dock refresh its icon.
+// Touch only the bundle directory; signed resources remain unchanged.
+const installedAt = new Date();
+utimesSync(destinationApp, installedAt, installedAt);
+const launchServices =
+  "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+const registration = spawnSync(launchServices, ["-f", destinationApp], {
+  stdio: "inherit",
+});
+if (registration.status !== 0) {
+  console.warn("macOS app registration could not be refreshed.");
 }
 
 const open = spawnSync("open", [destinationApp], { stdio: "inherit" });

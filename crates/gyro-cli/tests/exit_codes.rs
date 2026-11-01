@@ -7,7 +7,9 @@ use gyro_core::{
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde_json::Value;
 use std::fs;
+use std::io::Read;
 use std::io::{BufRead, BufReader, Write};
+use std::net::TcpListener;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -29,6 +31,7 @@ fn gyro_command(home: &Path, workspace: &Path) -> Command {
     command
         .current_dir(workspace)
         .env("HOME", home)
+        .env("GYRO_TEST_EMPTY_KEYCHAIN", "1")
         .env("XDG_DATA_HOME", home.join("data"))
         .env("XDG_CONFIG_HOME", home.join("config"));
     command
@@ -94,6 +97,151 @@ fn assert_failure(output: &Output, code: i32, category: &str) {
     assert_eq!(value["status"], "failed");
     assert_eq!(value["error"]["category"], category);
     assert_eq!(value["error"]["code"], code);
+}
+
+fn stalled_ollama(stage: &'static str) -> (String, mpsc::Receiver<()>, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (started, ready) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        for current in ["tags", "show", "chat"] {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(4)))
+                .unwrap();
+            let mut reader = BufReader::new(&mut stream);
+            let mut header = String::new();
+            reader.read_line(&mut header).unwrap();
+            assert!(header.contains(&format!("/api/{current} ")));
+            let mut length = 0;
+            loop {
+                header.clear();
+                reader.read_line(&mut header).unwrap();
+                if header == "\r\n" {
+                    break;
+                }
+                if let Some((name, value)) = header.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        length = value.trim().parse().unwrap();
+                    }
+                }
+            }
+            reader.read_exact(&mut vec![0; length]).unwrap();
+            if current == stage {
+                started.send(()).unwrap();
+                let mut byte = [0];
+                assert_eq!(
+                    reader.read(&mut byte).unwrap(),
+                    0,
+                    "the cancelled request must close"
+                );
+                break;
+            }
+            drop(reader);
+            let body = if current == "tags" {
+                r#"{"models":[{"name":"fixture"}]}"#
+            } else {
+                r#"{"model_info":{"fixture.context_length":16384},"capabilities":["completion"]}"#
+            };
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        }
+    });
+    (format!("http://{address}/api"), ready, worker)
+}
+
+fn ollama_fixture(home: &Path, endpoint: String) -> GyroPaths {
+    write_provider_config(home, Path::new("/bin/true"), false, "ollama");
+    let paths = GyroPaths::from_base_dir(data_base(home));
+    GyroConfig::update(&paths, |config| {
+        config
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == "ollama")
+            .unwrap()
+            .base_url = Some(endpoint);
+        Ok(())
+    })
+    .unwrap();
+    paths
+}
+
+fn assert_ollama_settled(paths: GyroPaths, status: &str) {
+    let store = SessionStore::open(paths).unwrap();
+    let session = store.latest_session().unwrap().unwrap();
+    let events = store.read_events(session.id).unwrap();
+    assert!(events.iter().any(|event| event.payload["status"] == status));
+    assert!(!events
+        .iter()
+        .any(|event| event.kind == gyro_core::SessionEventKind::AssistantMessage));
+}
+
+#[test]
+fn ollama_cli_deadline_covers_discovery_and_generation() {
+    for stage in ["tags", "show", "chat"] {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let workspace = root.path().join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let (endpoint, ready, server) = stalled_ollama(stage);
+        let paths = ollama_fixture(&home, endpoint);
+        let at = Instant::now();
+        let output = gyro_command(&home, &workspace)
+            .args([
+                "run",
+                "Reply briefly",
+                "--profile",
+                "test-provider",
+                "--model",
+                "fixture",
+                "--json",
+                "--no-open",
+                "--timeout-seconds",
+                "1",
+            ])
+            .output()
+            .unwrap();
+        ready.recv_timeout(Duration::from_secs(2)).unwrap();
+        server.join().unwrap();
+        assert!(at.elapsed() < Duration::from_secs(3));
+        assert_failure(&output, 5, "execution-failed");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("timed out after 1 seconds"));
+        assert_ollama_settled(paths, "failed");
+    }
+}
+
+#[test]
+fn ollama_cli_sigint_is_cancelled_instead_of_failed() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let workspace = root.path().join("workspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let (endpoint, ready, server) = stalled_ollama("chat");
+    let paths = ollama_fixture(&home, endpoint);
+    let child = gyro_command(&home, &workspace)
+        .args([
+            "run",
+            "Reply briefly",
+            "--profile",
+            "test-provider",
+            "--model",
+            "fixture",
+            "--json",
+            "--no-open",
+            "--timeout-seconds",
+            "30",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    ready.recv_timeout(Duration::from_secs(3)).unwrap();
+    let at = Instant::now();
+    assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGINT) }, 0);
+    let output = child.wait_with_output().unwrap();
+    server.join().unwrap();
+    assert!(at.elapsed() < Duration::from_secs(2));
+    assert_failure(&output, 130, "cancelled");
+    assert_ollama_settled(paths, "cancelled");
 }
 
 fn assert_success_json(output: &Output) -> Value {
@@ -213,6 +361,85 @@ exit 0"#,
 }
 
 #[test]
+#[cfg(target_os = "macos")]
+fn private_keychain_reader_rejects_external_pipe_invocation() {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::net::UnixStream;
+    use std::os::unix::process::CommandExt;
+    for spoof_channel in [false, true] {
+        let (_parent, channel) = UnixStream::pair().unwrap();
+        let source = channel.as_raw_fd();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_gyro"));
+        command
+            .arg("--gyro-keychain-read")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if spoof_channel {
+            unsafe {
+                command.pre_exec(move || {
+                    if libc::dup2(source, 3) < 0 || libc::fcntl(3, libc::F_SETFD, 0) < 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+        let mut child = command.spawn().unwrap();
+        let _ = child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(br#""private-reader-fixture-never-stored""#);
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+    }
+}
+
+#[test]
+fn real_binary_rejects_a_zero_exit_claude_subscription_refusal() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let workspace = temp.path().join("workspace");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&workspace).unwrap();
+    let provider = write_script(
+        temp.path(),
+        r#"printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access"}]}}' '{"type":"result","subtype":"success","is_error":false,"result":"Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access"}'
+exit 0"#,
+    );
+    write_provider_config(&home, &provider, false, "anthropic");
+    let output = gyro_command(&home, &workspace)
+        .args([
+            "run",
+            "--profile",
+            "test-provider",
+            "--no-open",
+            "--json",
+            "inspect",
+        ])
+        .output()
+        .unwrap();
+    assert_failure(&output, 3, "provider-unavailable");
+    let value: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert!(value["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("organization administrator"));
+    let paths = GyroPaths::from_base_dir(data_base(&home));
+    let store = SessionStore::open(paths).unwrap();
+    let session = store.latest_session().unwrap().unwrap();
+    let events = store.read_events(session.id).unwrap();
+    assert!(events
+        .iter()
+        .any(|event| event.payload["status"] == "failed"));
+    assert!(!events
+        .iter()
+        .any(|event| event.kind == gyro_core::SessionEventKind::AssistantMessage));
+}
+
+#[test]
 fn real_binary_surfaces_structured_claude_authentication_failures() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("home");
@@ -259,9 +486,9 @@ exit 1"#,
 }
 
 #[test]
-fn real_binary_runs_gemini_and_xai_through_the_shared_acp_adapter() {
+fn real_binary_runs_kimi_and_xai_through_the_shared_acp_adapter() {
     for (provider_id, auth_method, expected_cursor) in [
-        ("gemini", "oauth-personal", "gemini-acp-session"),
+        ("kimi", "login", "kimi-acp-session"),
         ("xai", "cached_token", "xai-acp-session"),
     ] {
         let temp = tempfile::tempdir().unwrap();
@@ -274,14 +501,17 @@ fn real_binary_runs_gemini_and_xai_through_the_shared_acp_adapter() {
             &format!(
                 r#"
 while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$line" in
-    *'"method":"initialize"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"authMethods":[{{"id":"{auth_method}"}}]}}}}' ;;
-    *'"method":"authenticate"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{}}}}' ;;
-    *'"method":"session/new"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"sessionId":"{provider_id}-session"}}}}' ;;
-    *'"method":"session/set_config_option"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{}}}}' ;;
+    *'"method":"initialize"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":'"$id"',"result":{{"authMethods":[{{"id":"{auth_method}"}}]}}}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":'"$id"',"result":{{}}}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{{"jsonrpc":"2.0","id":'"$id"',"result":{{"sessionId":"{provider_id}-session"}}}}' ;;
+    *'"method":"session/set_model"'*|*'"method":"session/set_config_option"'*|*'"method":"session/set_mode"'*)
+      printf '%s\n' '{{"jsonrpc":"2.0","id":'"$id"',"result":{{}}}}' ;;
     *'"method":"session/prompt"'*)
       printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"hello from {provider_id}"}}}}}}}}'
-      printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{"stopReason":"end_turn"}}}}' ;;
+      printf '%s\n' '{{"jsonrpc":"2.0","id":'"$id"',"result":{{"stopReason":"end_turn"}}}}' ;;
+    *) printf '%s\n' 'Unexpected ACP fixture request' >&2; exit 1 ;;
   esac
 done
 "#
@@ -326,6 +556,133 @@ done
             binding.resume_cursor_json["sessionId"],
             format!("{provider_id}-session")
         );
+    }
+}
+
+#[test]
+fn real_binary_retires_legacy_gemini_without_transferring_authentication() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let workspace = temp.path().join("workspace");
+    let marker = temp.path().join("provider-started");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&workspace).unwrap();
+    let provider = write_script(temp.path(), "touch \"$GYRO_TEST_MARKER\"");
+    write_provider_config(&home, &provider, false, "gemini");
+    let paths = GyroPaths::from_base_dir(data_base(&home));
+    let mut legacy: Value = serde_json::from_slice(&fs::read(&paths.config_path).unwrap()).unwrap();
+    legacy["selectedProviderId"] = "gemini".into();
+    legacy["modelProviders"][0]["defaultModelId"] = "gemini-default".into();
+    legacy["modelProviders"][0]["modelIds"] = serde_json::json!(["gemini-default"]);
+    fs::write(&paths.config_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
+    let shown = gyro_command(&home, &workspace)
+        .args(["config", "show", "--json"])
+        .output()
+        .unwrap();
+    assert!(shown.status.success());
+    let config: GyroConfig = serde_json::from_slice(&shown.stdout).unwrap();
+    assert!(!config
+        .model_providers
+        .iter()
+        .any(|provider| provider.id == "gemini"));
+    assert!(!config
+        .command_profiles
+        .iter()
+        .any(|profile| profile.id == "test-provider"));
+    assert_eq!(config.selected_provider_id, None);
+    let antigravity = config
+        .model_providers
+        .iter()
+        .find(|provider| provider.id == "antigravity")
+        .unwrap();
+    assert!(!antigravity.enabled);
+    assert_eq!(antigravity.api_key_ref, "provider-cli:antigravity");
+    assert_eq!(antigravity.default_model_id, None);
+    assert!(antigravity.model_ids.is_empty());
+
+    let blocked = gyro_command(&home, &workspace)
+        .env("GYRO_TEST_MARKER", &marker)
+        .args([
+            "run",
+            "--profile",
+            "test-provider",
+            "--no-open",
+            "--json",
+            "inspect",
+        ])
+        .output()
+        .unwrap();
+    assert_failure(&blocked, 2, "invalid-input");
+    assert!(!marker.exists());
+    let store = SessionStore::open(paths).unwrap();
+    assert!(store.latest_session().unwrap().is_none());
+}
+
+#[test]
+fn real_binary_preserves_acp_cancellation_and_refusal_for_every_acp_provider() {
+    for provider_id in ["kimi", "xai", "cursor", "opencode"] {
+        // An agent stopReason of cancelled ends the turn. A person stopping
+        // Gyro still cancels the shared token and exits 130.
+        for (reason, code, category, status) in [
+            ("cancelled", 5, "execution-failed", "failed"),
+            ("refusal", 5, "execution-failed", "failed"),
+        ] {
+            let root = PathBuf::from("/tmp").join(format!(
+                "gyro-acp-stop-{provider_id}-{reason}-{}",
+                uuid::Uuid::new_v4()
+            ));
+            let home = root.join("home");
+            let workspace = root.join("workspace");
+            fs::create_dir_all(&home).unwrap();
+            fs::create_dir_all(&workspace).unwrap();
+            let provider = write_script(
+                &root,
+                &format!(
+                    r#"
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{{"id":'"$id"',"result":{{"authMethods":[{{"id":"login"}}]}}}}' ;;
+    *'"method":"session/new"'*) printf '%s\n' '{{"id":'"$id"',"result":{{"sessionId":"stop-session"}}}}' ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' '{{"method":"session/update","params":{{"update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"Partial output"}}}}}}}}'
+      printf '%s\n' '{{"id":'"$id"',"result":{{"stopReason":"{reason}"}}}}' ;;
+    *) printf '%s\n' '{{"id":'"$id"',"result":{{}}}}' ;;
+  esac
+done
+"#
+                ),
+            );
+            write_provider_config(&home, &provider, false, provider_id);
+            let output = gyro_command(&home, &workspace)
+                .args([
+                    "run",
+                    "--profile",
+                    "test-provider",
+                    "--no-open",
+                    "--json",
+                    "say hello",
+                ])
+                .output()
+                .unwrap();
+            assert_failure(&output, code, category);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if reason == "cancelled" {
+                assert!(
+                    stderr.contains("ended the turn without finishing"),
+                    "{stderr}"
+                );
+            } else {
+                assert!(stderr.contains("refused to continue"), "{stderr}");
+            }
+            let store = SessionStore::open(GyroPaths::from_base_dir(data_base(&home))).unwrap();
+            let session = store.latest_session().unwrap().unwrap();
+            let events = store.read_events(session.id).unwrap();
+            assert!(events.iter().any(|event| event.payload["status"] == status));
+            assert!(!events.iter().any(|event| event.payload["status"] == "done"));
+            let _ = fs::remove_dir_all(root);
+        }
     }
 }
 
@@ -738,6 +1095,7 @@ exit 0"#,
     command.args(["run", "--profile", "test-provider", "--no-open", "inspect"]);
     command.cwd(&workspace);
     command.env("HOME", &home);
+    command.env("GYRO_TEST_EMPTY_KEYCHAIN", "1");
     command.env("XDG_DATA_HOME", home.join("data"));
     command.env("XDG_CONFIG_HOME", home.join("config"));
     command.env("GYRO_TEST_MARKER", &marker);

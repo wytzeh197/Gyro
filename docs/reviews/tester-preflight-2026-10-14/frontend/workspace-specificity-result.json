@@ -1,0 +1,61 @@
+{
+  "broken": {
+    "rows": "776px 37px",
+    "primary": {
+      "x": 0,
+      "y": 55,
+      "width": 1280,
+      "height": 813
+    },
+    "bar": {
+      "x": 0,
+      "y": 55,
+      "width": 1280,
+      "height": 776
+    },
+    "editors": {
+      "x": 0,
+      "y": 831,
+      "width": 1280,
+      "height": 37
+    },
+    "monaco": {
+      "x": 0,
+      "y": 863,
+      "width": 640,
+      "height": 5
+    },
+    "file": "/fixture/project/main.ts",
+    "dirty": []
+  },
+  "fixed": {
+    "rows": "33px 780px",
+    "primary": {
+      "x": 0,
+      "y": 55,
+      "width": 1280,
+      "height": 813
+    },
+    "bar": {
+      "x": 0,
+      "y": 55,
+      "width": 1280,
+      "height": 33
+    },
+    "editors": {
+      "x": 0,
+      "y": 88,
+      "width": 1280,
+      "height": 780
+    },
+    "monaco": {
+      "x": 0,
+      "y": 120,
+      "width": 640,
+      "height": 748
+    },
+    "file": "/fixture/project/main.ts",
+    "dirty": []
+  },
+  "cmdClick": "PASS after temporary CSS correction"
+}

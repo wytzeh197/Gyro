@@ -1,11 +1,14 @@
 import { normalizedInterfaceSize, normalizedMotionSpeed } from "./appearance.ts";
+import { automaticBrowserDevice } from "./browser-viewport.ts";
 import type {
+  DesktopNotificationPreferences,
   AppDestination,
   Automation,
   AutomationStatus,
   AutomationTriageState,
   BrowserPreview,
-  BrowserPreviewDevice,
+  BrowserViewportMode,
+  BrowserViewportState,
   BrowserPreviewStatus,
   ChatSidePanelId,
   ChatGridArrangement,
@@ -28,6 +31,7 @@ import type {
   IdeContribution,
   IdeViewId,
   LanguageServerState,
+  LaunchView,
   ModelFocus,
   ModelFollowMode,
   OutputChannel,
@@ -90,9 +94,10 @@ import {
 } from "./chat-companion.ts";
 import { normalizedWorkspaceTrustPath } from "./workspace-trust.ts";
 import {
-  MAX_WORKSPACE_FOLDERS,
+  normalizedWorkspaceFolderList,
   normalizedWorkspaceFolderPath,
 } from "./workspace-project.ts";
+import { relocateWorkspaceFolderPreferences } from "./workspace-roots.ts";
 import {
   defaultWorkspaceUserSettings,
   normalizedWorkspaceUserSettings,
@@ -116,6 +121,116 @@ function normalizedChatArrangement(
 }
 const MAX_RESTORED_EDITOR_TABS = 100;
 const MAX_RESTORED_EDITOR_GROUPS = 8;
+
+export const EDITOR_RECOVERY_MAX_BUFFERS = 30;
+export const EDITOR_RECOVERY_MAX_BUFFER_CHARS = 500_000;
+export const EDITOR_RECOVERY_MAX_TOTAL_CHARS = 1_000_000;
+
+export type EditorBufferBatchUpdate = {
+  path: string;
+  /** Omit only when the buffer must not exist yet. */
+  expectedContent?: string;
+  /** An explicitly present undefined value requires an absent disk hash. */
+  expectedHash?: string;
+  expectedSavedContent?: string;
+  /** null removes a buffer introduced by a transaction when undoing it. */
+  buffer: EditorBuffer | null;
+};
+
+/** Transactions must fit recovery in full; no file is silently excluded. */
+export function editorBufferRecoveryCapacity(
+  buffers: WorkbenchState["ide"]["buffers"],
+): { ok: boolean; count: number; totalChars: number; reason?: string } {
+  const dirty = Object.values(buffers).filter(
+    (buffer) => buffer.content !== buffer.savedContent,
+  );
+  const count = dirty.length;
+  const totalChars = dirty.reduce(
+    (sum, buffer) => sum + buffer.content.length + buffer.savedContent.length,
+    0,
+  );
+  const oversized = dirty.find(
+    (buffer) =>
+      buffer.content.length + buffer.savedContent.length >
+      EDITOR_RECOVERY_MAX_BUFFER_CHARS,
+  );
+  const reason = oversized
+    ? `Unsaved recovery is too large for ${oversized.path}. Save it before applying a workspace edit.`
+    : count > EDITOR_RECOVERY_MAX_BUFFERS
+      ? `Workspace edits support recovery for up to ${EDITOR_RECOVERY_MAX_BUFFERS} unsaved files. Save existing changes or narrow the edit.`
+      : totalChars > EDITOR_RECOVERY_MAX_TOTAL_CHARS
+        ? "Unsaved recovery exceeds the workspace edit limit. Save existing changes or narrow the edit."
+        : undefined;
+  return { ok: !reason, count, totalChars, ...(reason ? { reason } : {}) };
+}
+
+export function persistableDirtyEditorBuffers(
+  buffers: WorkbenchState["ide"]["buffers"],
+): WorkbenchState["ide"]["buffers"] {
+  const capacity = editorBufferRecoveryCapacity(buffers);
+  if (!capacity.ok) throw new Error(capacity.reason);
+  return Object.fromEntries(
+    Object.entries(buffers)
+      .filter(([, buffer]) => buffer.content !== buffer.savedContent)
+      .map(([path, buffer]) => [path, { ...buffer, status: "dirty" as const }]),
+  );
+}
+
+/** Validate every precondition before returning any changed buffer. */
+export function prepareEditorBufferBatch(
+  buffers: WorkbenchState["ide"]["buffers"],
+  updates: readonly EditorBufferBatchUpdate[],
+): WorkbenchState["ide"]["buffers"] {
+  const paths = new Set<string>();
+  for (const update of updates) {
+    if (
+      storedRelativeEditorPath(update.path) !== update.path ||
+      paths.has(update.path)
+    ) {
+      throw new Error(
+        "A workspace edit contains an invalid or duplicate buffer path.",
+      );
+    }
+    paths.add(update.path);
+    const current = buffers[update.path];
+    if (
+      (update.expectedContent === undefined
+        ? current !== undefined
+        : !current || current.content !== update.expectedContent) ||
+      (Object.hasOwn(update, "expectedHash") &&
+        current?.contentHash !== update.expectedHash) ||
+      (update.expectedSavedContent !== undefined &&
+        current?.savedContent !== update.expectedSavedContent)
+    )
+      throw new Error(
+        `The buffer changed while preparing edits: ${update.path}`,
+      );
+    if (update.buffer && update.buffer.path !== update.path) {
+      throw new Error(
+        "A workspace edit buffer does not match its target path.",
+      );
+    }
+  }
+  const next = { ...buffers };
+  for (const update of updates) {
+    if (!update.buffer) {
+      delete next[update.path];
+      continue;
+    }
+    const dirty = update.buffer.content !== update.buffer.savedContent;
+    next[update.path] = {
+      ...update.buffer,
+      status: dirty
+        ? "dirty"
+        : update.buffer.status === "dirty"
+          ? "ready"
+          : update.buffer.status,
+    };
+  }
+  const capacity = editorBufferRecoveryCapacity(next);
+  if (!capacity.ok) throw new Error(capacity.reason);
+  return next;
+}
 
 export type ChatGridAction =
   | { type: "activate-project"; projectKey: string }
@@ -141,6 +256,9 @@ export type ChatGridAction =
       projectKey: string;
       paneId: string;
       slotIndex: number;
+      insertPosition?: "before" | "after";
+      splitDirection?: "horizontal" | "vertical";
+      arrangement?: ChatGridArrangement;
     }
   | { type: "toggle-maximize-pane"; paneId: string }
   | {
@@ -271,20 +389,24 @@ export function persistableChatGridState(state: ChatGridState): ChatGridState {
  * quadrant under the pointer can read as occupied even though its own cell is
  * free. That pane steps aside into its partner cell and the new chat takes the
  * half the pointer was actually over. Only when the whole column is taken does
- * the drop fall back to the first free slot, and only a full grid lets a drop
- * replace the chat underneath it.
+ * the drop fall back to the first free slot. A full grid or invalid position
+ * rejects the drop so no open chat can be silently replaced.
  */
 export function resolveChatGridDropSlot(
   slots: Array<ChatPaneRef | null>,
   slotIndex: number,
-): { displacedIndex?: number; targetIndex: number } {
+): { displacedIndex?: number; targetIndex: number } | undefined {
+  if (normalizedChatSlotIndex(slotIndex) === undefined) return undefined;
   if (!slots[slotIndex]) return { targetIndex: slotIndex };
   const partnerIndex = slotIndex < 2 ? slotIndex + 2 : slotIndex - 2;
   if (!slots[partnerIndex]) {
     return { displacedIndex: partnerIndex, targetIndex: slotIndex };
   }
-  const emptyIndex = slots.findIndex((pane) => pane === null);
-  return { targetIndex: emptyIndex >= 0 ? emptyIndex : slotIndex };
+  const emptyIndex = Array.from(
+    { length: CHAT_GRID_MAX_SLOTS },
+    (_, index) => index,
+  ).find((index) => !slots[index]);
+  return emptyIndex === undefined ? undefined : { targetIndex: emptyIndex };
 }
 
 export function chatGridReducer(
@@ -420,53 +542,47 @@ export function chatGridReducer(
     state.layouts[projectKey] ?? createChatProjectLayout(projectKey);
   let next = current;
   if (action.type === "select-pane") {
+    // A chat never enters another project's grid. Accepting it here and
+    // evicting it later would first replace the pane the user had open.
+    if (chatProjectKey(action.pane.workspacePath) !== projectKey) {
+      return state;
+    }
+    const requestedIndex = normalizedChatSlotIndex(action.slotIndex);
+    // An invalid explicit position is a rejected gesture, not an invitation
+    // to insert at the focused pane or another fallback position.
+    if (
+      action.mode === "drop" &&
+      ((action.slotIndex !== undefined && requestedIndex === undefined) ||
+        !validChatInsertPosition(action.insertPosition) ||
+        (action.insertPosition &&
+          current.slots.some(Boolean) &&
+          (requestedIndex === undefined || !current.slots[requestedIndex])))
+    ) {
+      return state;
+    }
     const existingIndex = current.slots.findIndex(
       (pane) =>
         pane && chatPaneIdentity(pane) === chatPaneIdentity(action.pane),
     );
     if (existingIndex >= 0) {
       const existing = current.slots[existingIndex]!;
-      const requestedIndex = normalizedChatSlotIndex(action.slotIndex);
       if (action.mode === "drop" && requestedIndex !== undefined) {
-        const slots = current.slots.slice();
-        if (action.insertPosition && slots[requestedIndex]) {
-          const occupied = slots.filter((pane): pane is ChatPaneRef =>
-            Boolean(pane),
-          );
-          const fromPosition = occupied.findIndex(
-            (pane) => pane.paneId === existing.paneId,
-          );
-          const targetPosition = occupied.findIndex(
-            (pane) => pane.paneId === slots[requestedIndex]?.paneId,
-          );
-          let insertionIndex =
-            targetPosition + (action.insertPosition === "after" ? 1 : 0);
-          if (fromPosition < insertionIndex) insertionIndex -= 1;
-          occupied.splice(fromPosition, 1);
-          occupied.splice(insertionIndex, 0, existing);
-          const reordered: Array<ChatPaneRef | null> = occupied;
-          while (reordered.length < CHAT_GRID_MAX_SLOTS) reordered.push(null);
-          next = {
-            ...current,
-            slots: reordered,
-            focusedPaneId: existing.paneId,
-            arrangement: action.arrangement ?? current.arrangement,
-          };
-        } else {
-          slots[existingIndex] = slots[requestedIndex] ?? null;
-          slots[requestedIndex] = existing;
-          next = { ...current, slots, focusedPaneId: existing.paneId };
-        }
+        next = chatLayoutWithMovedPane(
+          current,
+          existingIndex,
+          requestedIndex,
+          action,
+        );
+        if (next === current) return state;
       } else {
         next = { ...current, focusedPaneId: existing.paneId };
       }
     } else {
-      // A full row has reorder targets only for a chat already in it. A stale
-      // or synthetic drop must not silently evict the last conversation.
+      // At capacity, only an already-open chat can move. A stale overlay or
+      // synthetic drop must never silently evict any open conversation.
       if (
         action.mode === "drop" &&
-        action.insertPosition &&
-        current.slots.every(Boolean)
+        current.slots.filter(Boolean).length >= CHAT_GRID_MAX_SLOTS
       ) {
         return state;
       }
@@ -479,7 +595,6 @@ export function chatGridReducer(
         (pane) => pane?.paneId === current.focusedPaneId,
       );
       const emptyIndex = current.slots.findIndex((pane) => pane === null);
-      const requestedIndex = normalizedChatSlotIndex(action.slotIndex);
       if (action.mode === "drop" && action.insertPosition) {
         const occupied = current.slots.filter((pane): pane is ChatPaneRef =>
           Boolean(pane),
@@ -510,7 +625,10 @@ export function chatGridReducer(
           focusedPaneId: incoming.paneId,
           splitDirection:
             occupied.length === 2
-              ? (action.splitDirection ?? "horizontal")
+              ? (action.splitDirection ??
+                ((action.arrangement ?? current.arrangement) === "rows"
+                  ? "vertical"
+                  : "horizontal"))
               : undefined,
           // An explicit drop arrangement wins; otherwise keep whatever the
           // user last chose so a row/stack survives adding more panes.
@@ -531,6 +649,7 @@ export function chatGridReducer(
         let displacedIndex: number | undefined;
         if (action.mode === "drop") {
           const resolved = resolveChatGridDropSlot(slots, targetIndex);
+          if (!resolved) return state;
           displacedIndex = resolved.displacedIndex;
           targetIndex = resolved.targetIndex;
         }
@@ -589,13 +708,16 @@ export function chatGridReducer(
       (pane) => pane?.paneId === action.paneId,
     );
     const toIndex = normalizedChatSlotIndex(action.slotIndex);
-    if (fromIndex >= 0 && toIndex !== undefined && fromIndex !== toIndex) {
-      const slots = current.slots.slice();
-      const fromPane = slots[fromIndex] ?? null;
-      slots[fromIndex] = slots[toIndex] ?? null;
-      slots[toIndex] = fromPane;
-      next = { ...current, slots, focusedPaneId: action.paneId };
+    if (
+      fromIndex < 0 ||
+      toIndex === undefined ||
+      !validChatInsertPosition(action.insertPosition) ||
+      (action.insertPosition && !current.slots[toIndex])
+    ) {
+      return state;
     }
+    next = chatLayoutWithMovedPane(current, fromIndex, toIndex, action);
+    if (next === current) return state;
   }
   // Keep state identity stable when nothing about the layout changed. Grid
   // slots dispatch focus on every pointerdown; a fresh object forced the chat
@@ -617,6 +739,72 @@ export function chatGridReducer(
         ? undefined
         : state.maximizedPaneId,
   });
+}
+
+function validChatInsertPosition(value?: "before" | "after") {
+  return value === undefined || value === "before" || value === "after";
+}
+
+/** Sidebar and pane-header drags share the same insertion/swap semantics. */
+function chatLayoutWithMovedPane(
+  layout: ChatProjectLayout,
+  fromIndex: number,
+  toIndex: number,
+  placement: {
+    insertPosition?: "before" | "after";
+    splitDirection?: "horizontal" | "vertical";
+    arrangement?: ChatGridArrangement;
+  },
+): ChatProjectLayout {
+  if (fromIndex === toIndex) {
+    if (
+      placement.insertPosition ||
+      !placement.arrangement ||
+      placement.arrangement === layout.arrangement
+    ) return layout;
+    return { ...layout, arrangement: placement.arrangement };
+  }
+  const moving = layout.slots[fromIndex];
+  if (!moving) return layout;
+  let slots: Array<ChatPaneRef | null>;
+  if (placement.insertPosition) {
+    const target = layout.slots[toIndex];
+    if (!target) return layout;
+    const occupied = layout.slots.filter((pane): pane is ChatPaneRef =>
+      Boolean(pane),
+    );
+    const fromPosition = occupied.indexOf(moving);
+    const targetPosition = occupied.indexOf(target);
+    let insertionIndex =
+      targetPosition + (placement.insertPosition === "after" ? 1 : 0);
+    if (fromPosition < insertionIndex) insertionIndex -= 1;
+    // A boundary immediately before/after the source is a cancelled move.
+    // Keep focus, maximization and the slots array untouched in this case.
+    if (insertionIndex === fromPosition) return layout;
+    occupied.splice(fromPosition, 1);
+    occupied.splice(insertionIndex, 0, moving);
+    slots = occupied;
+    while (slots.length < CHAT_GRID_MAX_SLOTS) slots.push(null);
+  } else {
+    slots = layout.slots.slice();
+    slots[fromIndex] = slots[toIndex] ?? null;
+    slots[toIndex] = moving;
+  }
+  return {
+    ...layout,
+    slots,
+    focusedPaneId: moving.paneId,
+    arrangement: placement.arrangement ?? layout.arrangement,
+    splitDirection:
+      slots.filter(Boolean).length === 2
+        ? (placement.splitDirection ??
+          (placement.arrangement === "rows"
+            ? "vertical"
+            : placement.arrangement === "columns"
+              ? "horizontal"
+              : layout.splitDirection))
+        : undefined,
+  };
 }
 
 /** A removed/replaced pane cannot keep every pane in the active grid hidden. */
@@ -781,12 +969,17 @@ export function sanitizeStoredIdeState(
         ? "explorer"
         : base.activeView;
 
+  // Recovery belongs to buffers, including files edited in the background.
+  // Turning off layout restoration must not discard their unsaved text.
+  const buffers = restoredDirtyEditorBuffers(ide.buffers);
+
   if (!restoreOnLaunch) {
     return {
       ...base,
       activePath: undefined,
       activeView,
       tabs: [],
+      buffers,
       layout: {
         ...base.layout,
         ...layoutPreferences,
@@ -943,42 +1136,6 @@ export function sanitizeStoredIdeState(
       );
     return { ...tab, groupId: ownerGroup?.id };
   });
-  const buffers: Record<string, EditorBuffer> = {};
-  const rawBuffers = storedRecord(ide.buffers);
-  let remainingBufferChars = 1_000_000;
-  if (rawBuffers) {
-    for (const [storedPath, value] of Object.entries(rawBuffers).slice(0, 30)) {
-      const buffer = storedRecord(value);
-      const path = storedRelativeEditorPath(buffer?.path ?? storedPath);
-      if (!path || !tabByPath.has(path) || buffer?.status !== "dirty") continue;
-      const content = typeof buffer.content === "string" ? buffer.content : "";
-      const savedContent =
-        typeof buffer.savedContent === "string" ? buffer.savedContent : "";
-      const chars = content.length + savedContent.length;
-      if (chars > 500_000 || chars > remainingBufferChars) continue;
-      remainingBufferChars -= chars;
-      buffers[path] = {
-        path,
-        content,
-        savedContent,
-        contentHash:
-          typeof buffer.contentHash === "string"
-            ? buffer.contentHash.slice(0, 256)
-            : undefined,
-        sizeBytes:
-          typeof buffer.sizeBytes === "number" &&
-          Number.isFinite(buffer.sizeBytes)
-            ? Math.max(0, Math.round(buffer.sizeBytes))
-            : content.length,
-        truncated: buffer.truncated === true,
-        status: "dirty",
-        updatedAt:
-          typeof buffer.updatedAt === "string"
-            ? buffer.updatedAt.slice(0, 64)
-            : new Date(0).toISOString(),
-      };
-    }
-  }
   const dirtyPaths = new Set(Object.keys(buffers));
   const tabsWithRecovery = restoredTabs.map((tab) => ({
     ...tab,
@@ -1004,6 +1161,50 @@ export function sanitizeStoredIdeState(
       activeGroupId,
     },
   };
+}
+
+function restoredDirtyEditorBuffers(
+  value: unknown,
+): Record<string, EditorBuffer> {
+  const rawBuffers = storedRecord(value);
+  const buffers: Record<string, EditorBuffer> = {};
+  if (!rawBuffers) return buffers;
+  for (const [storedPath, value] of Object.entries(rawBuffers)) {
+    const buffer = storedRecord(value);
+    const path = storedRelativeEditorPath(buffer?.path ?? storedPath);
+    if (
+      !path ||
+      path !== storedRelativeEditorPath(storedPath) ||
+      buffer?.status !== "dirty" ||
+      typeof buffer.content !== "string" ||
+      typeof buffer.savedContent !== "string" ||
+      buffer.content === buffer.savedContent
+    )
+      continue;
+    buffers[path] = {
+      path,
+      content: buffer.content,
+      savedContent: buffer.savedContent,
+      contentHash:
+        typeof buffer.contentHash === "string"
+          ? buffer.contentHash.slice(0, 256)
+          : undefined,
+      sizeBytes:
+        typeof buffer.sizeBytes === "number" &&
+        Number.isFinite(buffer.sizeBytes)
+          ? Math.max(0, Math.round(buffer.sizeBytes))
+          : buffer.content.length,
+      truncated: buffer.truncated === true,
+      status: "dirty",
+      updatedAt:
+        typeof buffer.updatedAt === "string"
+          ? buffer.updatedAt.slice(0, 64)
+          : new Date(0).toISOString(),
+    };
+  }
+  const capacity = editorBufferRecoveryCapacity(buffers);
+  if (!capacity.ok) throw new Error(capacity.reason);
+  return buffers;
 }
 
 function storedRecord(value: unknown): Record<string, unknown> | undefined {
@@ -1444,6 +1645,10 @@ export type WorkbenchAction =
   | { type: "set-interface-size"; interfaceSize: InterfaceSize }
   | { type: "set-motion-speed"; motionSpeed: MotionSpeed }
   | { type: "set-menu-bar-visible"; visible: boolean }
+  | {
+      type: "set-desktop-notifications";
+      notifications: Partial<DesktopNotificationPreferences>;
+    }
   | { type: "set-workspace-sidebar-hidden"; hidden: boolean }
   | { type: "set-workspace-sidebar-width"; width?: number }
   | { type: "set-workspace-panel-height"; height: number }
@@ -1459,9 +1664,21 @@ export type WorkbenchAction =
       name: string;
       pinned: boolean;
       primaryFolder?: string;
+      allowNestedFolders?: boolean;
     }
   | { type: "set-workspace-folders"; workspacePath: string; paths: string[] }
   | { type: "remove-workspace-folder"; workspacePath: string; path: string }
+  | {
+      type: "canonicalize-workspace-folders";
+      workspacePath: string;
+      replacements: Record<string, string>;
+    }
+  | {
+      type: "relocate-workspace-folder";
+      workspacePath: string;
+      from: string;
+      to: string;
+    }
   | {
       type: "set-workspace-settings";
       scope: WorkspaceSettingScope;
@@ -1474,6 +1691,7 @@ export type WorkbenchAction =
       keybinding?: WorkspaceKeybinding | null;
     }
   | { type: "set-settings-section"; section: SettingsSectionId }
+  | { type: "set-launch-view"; view: LaunchView }
   | { type: "set-usage-provider"; providerId?: ProviderId }
   | { type: "set-usage-visualization"; visualization: "bars" | "wheels" }
   | { type: "set-daily-pace-warning"; enabled: boolean }
@@ -1512,6 +1730,7 @@ export type WorkbenchAction =
   | { type: "ide-toggle-minimap" }
   | { type: "ide-toggle-assistant" }
   | { type: "ide-upsert-buffer"; buffer: EditorBuffer }
+  | { type: "ide-apply-buffer-batch"; updates: EditorBufferBatchUpdate[] }
   | { type: "ide-update-buffer"; path: string; content: string }
   | {
       type: "ide-mark-buffer-saved";
@@ -1697,7 +1916,8 @@ export type WorkbenchAction =
   | { type: "browser-forward" }
   | { type: "browser-reload" }
   | { type: "browser-loaded"; url: string }
-  | { type: "browser-device"; device: BrowserPreviewDevice }
+  | { type: "browser-device"; device: BrowserViewportMode }
+  | { type: "browser-viewport"; viewport: BrowserViewportState }
   | { type: "browser-capture-start" }
   | {
       type: "browser-capture-success";
@@ -1802,7 +2022,7 @@ export function createInitialWorkbenchState(
     activeDestination: "workspace",
     activeWorkspaceLayout: "thread",
     lastSessionsLayout: "thread",
-    activePaneTab: "diff",
+    activePaneTab: "terminal",
     isToolPanelOpen: false,
     terminalTemplate: 4,
     selectedTaskId: undefined,
@@ -1847,6 +2067,51 @@ export function createInitialWorkbenchState(
         ? overrides.selectedProviderSessionId
         : providerSessions[0]?.id,
   };
+}
+
+/**
+ * Applies the launch-view preference to a restored state.
+ *
+ * It runs once, while persisted state is being read, so the preference decides
+ * the first frame instead of fighting the user's navigation afterwards. `last`
+ * returns the state untouched, which is the restore-where-you-left-off default;
+ * the other three land on the same view `select-workspace-layout` produces, so
+ * a launch looks exactly like switching there by hand.
+ */
+export function applyLaunchView(
+  state: WorkbenchState,
+  view: LaunchView = state.preferences.launchView,
+): WorkbenchState {
+  switch (view) {
+    case "workspace":
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: "code",
+        // Leaving the sidebar's AI view open would greet a code launch with a
+        // chat rail, so the explorer is what Workspace opens on.
+        ide: state.ide.activeView === "ai" ? { ...state.ide, activeView: "explorer" } : state.ide,
+      };
+    case "sessions":
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: "thread",
+        lastSessionsLayout: "thread",
+        isToolPanelOpen: false,
+      };
+    case "terminals":
+      return {
+        ...state,
+        activeDestination: "workspace",
+        activeWorkspaceLayout: "terminal-grid",
+        lastSessionsLayout: "terminal-grid",
+        activePaneTab: "terminal",
+        isToolPanelOpen: true,
+      };
+    default:
+      return state;
+  }
 }
 
 export function workbenchReducer(
@@ -1908,7 +2173,13 @@ export function workbenchReducer(
       };
     }
     case "select-destination":
-      return { ...state, activeDestination: action.destination };
+      return action.destination === "providers"
+        ? {
+            ...state,
+            activeDestination: "settings",
+            preferences: { ...state.preferences, lastSettingsSection: "providers" },
+          }
+        : { ...state, activeDestination: action.destination };
     case "select-surface": {
       const layout = workspaceLayoutForLegacySurface(action.surface);
       return {
@@ -1976,7 +2247,7 @@ export function workbenchReducer(
     case "set-pane-tab":
       return { ...state, activePaneTab: action.tab };
     case "open-tool-panel": {
-      const tab = action.tab ?? state.activePaneTab;
+      const tab = action.tab ?? "terminal";
       if (tab === "browser") {
         return { ...state, ...browserRevealState(state) };
       }
@@ -2041,6 +2312,17 @@ export function workbenchReducer(
           showMenuBarIcon: action.visible,
         },
       };
+    case "set-desktop-notifications":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          desktopNotifications: {
+            ...state.preferences.desktopNotifications,
+            ...action.notifications,
+          },
+        },
+      };
     case "set-workspace-sidebar-hidden":
       return {
         ...state,
@@ -2095,10 +2377,10 @@ export function workbenchReducer(
           ...state.preferences,
           workspaceFolders: {
             ...state.preferences.workspaceFolders,
-            [workspacePath]: [...current, path].slice(
-              0,
-              MAX_WORKSPACE_FOLDERS - 1,
-            ),
+            [workspacePath]: normalizedWorkspaceFolderList(workspacePath, [
+              ...current,
+              path,
+            ]),
           },
         },
       };
@@ -2114,6 +2396,9 @@ export function workbenchReducer(
               name: action.name.trim().slice(0, 120),
               pinned: action.pinned,
               primaryFolder: action.primaryFolder,
+              ...(action.allowNestedFolders
+                ? { allowNestedFolders: true }
+                : {}),
             },
           },
         },
@@ -2121,13 +2406,7 @@ export function workbenchReducer(
     }
     case "set-workspace-folders": {
       const workspacePath = normalizedWorkspaceFolderPath(action.workspacePath);
-      const paths = action.paths
-        .map(normalizedWorkspaceFolderPath)
-        .filter(
-          (path, index, all) =>
-            path !== workspacePath && all.indexOf(path) === index,
-        )
-        .slice(0, MAX_WORKSPACE_FOLDERS - 1);
+      const paths = normalizedWorkspaceFolderList(workspacePath, action.paths);
       return {
         ...state,
         preferences: {
@@ -2156,6 +2435,40 @@ export function workbenchReducer(
         },
       };
     }
+    case "canonicalize-workspace-folders": {
+      const workspacePath = normalizedWorkspaceFolderPath(action.workspacePath);
+      const current = state.preferences.workspaceFolders[workspacePath];
+      if (!current) return state;
+      const next = normalizedWorkspaceFolderList(
+        workspacePath,
+        current.map(
+          (folder) =>
+            action.replacements[normalizedWorkspaceFolderPath(folder)] ??
+            folder,
+        ),
+      );
+      if (next.join("\n") === current.join("\n")) return state;
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          workspaceFolders: {
+            ...state.preferences.workspaceFolders,
+            [workspacePath]: next,
+          },
+        },
+      };
+    }
+    case "relocate-workspace-folder":
+      return {
+        ...state,
+        preferences: relocateWorkspaceFolderPreferences(
+          state.preferences,
+          action.workspacePath,
+          action.from,
+          action.to,
+        ),
+      };
     case "set-workspace-settings": {
       const settings = normalizedWorkspaceScopedSettings(action.settings);
       if (action.scope === "user") {
@@ -2199,6 +2512,14 @@ export function workbenchReducer(
         preferences: {
           ...state.preferences,
           lastSettingsSection: action.section,
+        },
+      };
+    case "set-launch-view":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          launchView: normalizedLaunchView(action.view),
         },
       };
     case "set-usage-provider":
@@ -2730,11 +3051,13 @@ export function workbenchReducer(
       };
     }
     case "ide-close-group": {
-      if (
-        !state.ide.layout.groups.some((group) => group.id === action.groupId)
-      ) {
+      const closingGroup = state.ide.layout.groups.find(
+        (group) => group.id === action.groupId,
+      );
+      if (!closingGroup) {
         return state;
       }
+      const closingPaths = new Set(closingGroup.tabs.map((tab) => tab.path));
       const remainingGroups = state.ide.layout.groups.filter(
         (group) => group.id !== action.groupId,
       );
@@ -2759,8 +3082,8 @@ export function workbenchReducer(
           return { ...tab, groupId: ownerGroup?.id };
         });
       const buffers = Object.fromEntries(
-        Object.entries(state.ide.buffers).filter(([path]) =>
-          openPaths.has(path),
+        Object.entries(state.ide.buffers).filter(
+          ([path]) => openPaths.has(path) || !closingPaths.has(path),
         ),
       );
       const activePath = groups.find(
@@ -2875,6 +3198,40 @@ export function workbenchReducer(
         },
       };
     }
+    case "ide-apply-buffer-batch": {
+      let buffers: WorkbenchState["ide"]["buffers"];
+      try {
+        buffers = prepareEditorBufferBatch(state.ide.buffers, action.updates);
+      } catch {
+        return state;
+      }
+      const changedPaths = new Set(action.updates.map((update) => update.path));
+      const updateTab = (tab: EditorTab): EditorTab => {
+        if (!changedPaths.has(tab.path)) return tab;
+        const buffer = buffers[tab.path];
+        const dirty = Boolean(buffer && buffer.content !== buffer.savedContent);
+        return {
+          ...tab,
+          dirty,
+          ...(dirty ? { pinned: true, preview: false } : {}),
+        };
+      };
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          buffers,
+          tabs: state.ide.tabs.map(updateTab),
+          layout: {
+            ...state.ide.layout,
+            groups: state.ide.layout.groups.map((group) => ({
+              ...group,
+              tabs: group.tabs.map(updateTab),
+            })),
+          },
+        },
+      };
+    }
     case "ide-update-buffer": {
       const existing = state.ide.buffers[action.path];
       if (!existing) {
@@ -2916,6 +3273,9 @@ export function workbenchReducer(
       if (!existing) {
         return state;
       }
+      // A save writes its captured snapshot. Keystrokes made while it was
+      // pending belong to the current buffer and must remain unsaved.
+      const dirty = existing.content !== action.content;
       return {
         ...state,
         ide: {
@@ -2924,20 +3284,27 @@ export function workbenchReducer(
             ...state.ide.buffers,
             [action.path]: {
               ...existing,
-              content: action.content,
+              content: existing.content,
               savedContent: action.content,
               contentHash: action.contentHash,
               error: undefined,
               sizeBytes: action.sizeBytes,
-              status: "saved",
+              status: dirty ? "dirty" : "saved",
               updatedAt: new Date().toISOString(),
             },
           },
           tabs: state.ide.tabs.map((tab) =>
-            tab.path === action.path ? { ...tab, dirty: false } : tab,
+            tab.path === action.path
+              ? {
+                  ...tab,
+                  dirty,
+                  ...(dirty ? { pinned: true, preview: false } : {}),
+                }
+              : tab,
           ),
           layout: updateEditorTabInLayout(state.ide.layout, action.path, {
-            dirty: false,
+            dirty,
+            ...(dirty ? { pinned: true, preview: false } : {}),
           }),
         },
       };
@@ -3003,6 +3370,20 @@ export function workbenchReducer(
         ide: { ...state.ide, diagnostics: action.diagnostics },
       };
     case "ide-set-source-control":
+      // Status polls return a fresh object every few seconds; an identical
+      // snapshot must not re-render the workbench. Git stamps `lastCheckedAt`
+      // on every read, so it is left out of the comparison: counting it made
+      // every poll re-render the app and reload the open diff, which showed up
+      // as a hitch every few seconds while scrolling an editor.
+      if (
+        state.ide.sourceControl === action.sourceControl ||
+        JSON.stringify({
+          ...state.ide.sourceControl,
+          lastCheckedAt: undefined,
+        }) === JSON.stringify({ ...action.sourceControl, lastCheckedAt: undefined })
+      ) {
+        return state;
+      }
       return {
         ...state,
         ide: {
@@ -3979,6 +4360,9 @@ export function workbenchReducer(
         browserPreview: {
           ...state.browserPreview,
           url: "",
+          device: "responsive",
+          deviceOverride: false,
+          viewport: undefined,
           nativeHost: false,
           title: undefined,
           status: "idle",
@@ -4015,6 +4399,8 @@ export function workbenchReducer(
           historyIndex: nextHistory.length - 1,
           status: action.status ?? "loading",
           url: action.url,
+          device: state.browserPreview.deviceOverride ? state.browserPreview.device : automaticBrowserDevice(action.url),
+          viewport: undefined,
           title: undefined,
           consoleErrors: 0,
           diagnostics: [],
@@ -4045,6 +4431,7 @@ export function workbenchReducer(
         browserPreview: {
           ...preview,
           url: action.url,
+          device: preview.deviceOverride ? preview.device : automaticBrowserDevice(action.url),
           history,
           historyIndex,
           status: "ready",
@@ -4091,12 +4478,28 @@ export function workbenchReducer(
         ...state,
         browserPreview: {
           ...state.browserPreview,
-          device: action.device,
+          device: action.device === "auto" ? automaticBrowserDevice(state.browserPreview.url) : action.device,
+          deviceOverride: action.device !== "auto",
+          viewport: undefined,
           captureStatus: "idle",
           captureError: undefined,
           latestCapture: undefined,
         },
       };
+    case "browser-viewport": {
+      const preview = state.browserPreview;
+      if (JSON.stringify(preview.viewport) === JSON.stringify(action.viewport)) return state;
+      const resized = preview.viewport?.width !== action.viewport.width ||
+        preview.viewport?.height !== action.viewport.height;
+      return {
+        ...state,
+        browserPreview: {
+          ...preview, viewport: action.viewport, device: action.viewport.device,
+          deviceOverride: action.viewport.mode !== "auto",
+          ...(resized ? { captureStatus: "idle", captureError: undefined, latestCapture: undefined } : {}),
+        },
+      };
+    }
     case "browser-capture-start":
       return {
         ...state,
@@ -4239,7 +4642,8 @@ export function workbenchReducer(
       );
       return {
         ...state,
-        activeDestination: "providers",
+        activeDestination: "settings",
+        preferences: { ...state.preferences, lastSettingsSection: "providers" },
         selectedProviderSessionId: session.id,
         providerSessions: existingSession
           ? state.providerSessions.map((item) =>
@@ -4525,10 +4929,14 @@ function normalizedSettingsSection(
 ): SettingsSectionId {
   switch (value) {
     case "general":
+    case "import-projects":
     case "editor-workspace":
     case "tools-contributions":
-    case "providers":
     case "usage-limits":
+      // Retired page: usage limits now live on Models, Accounts & Limits.
+      return "providers";
+    case "providers":
+    case "efficiency":
     case "cli-profiles":
     case "appearance":
     case "permissions":
@@ -4546,10 +4954,33 @@ function normalizedModelFollowMode(value: unknown): ModelFollowMode {
   return value === "off" || value === "follow" ? value : "peek";
 }
 
+/**
+ * The launch view is a closed set, so an unknown or missing value falls back to
+ * restoring the previous view rather than promising a destination it cannot
+ * render.
+ */
+function normalizedLaunchView(value: unknown): LaunchView {
+  return value === "workspace" || value === "sessions" || value === "terminals"
+    ? value
+    : "last";
+}
+
 function normalizeAppearanceColor(value: unknown, fallback: string) {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
     ? value.toLowerCase()
     : fallback;
+}
+
+/** Every notification kind starts on; macOS permission is the real gate. */
+export function normalizedDesktopNotifications(
+  value: Partial<DesktopNotificationPreferences> | undefined,
+): DesktopNotificationPreferences {
+  return {
+    enabled: value?.enabled !== false,
+    approvals: value?.approvals !== false,
+    finished: value?.finished !== false,
+    failed: value?.failed !== false,
+  };
 }
 
 function normalizeWorkbenchPreferences(
@@ -4572,6 +5003,7 @@ function normalizeWorkbenchPreferences(
     lastSettingsSection: normalizedSettingsSection(
       preferences?.lastSettingsSection,
     ),
+    launchView: normalizedLaunchView(preferences?.launchView),
     missionSessionIds: Array.isArray(preferences?.missionSessionIds)
       ? [
           ...new Set(
@@ -4632,6 +5064,9 @@ function normalizeWorkbenchPreferences(
     defaultWorkspaceMode:
       preferences?.defaultWorkspaceMode === "worktree" ? "worktree" : "local",
     showMenuBarIcon: preferences?.showMenuBarIcon !== false,
+    desktopNotifications: normalizedDesktopNotifications(
+      preferences?.desktopNotifications,
+    ),
     workspaceSidebarHidden: preferences?.workspaceSidebarHidden === true,
     workspaceSidebarWidth:
       typeof preferences?.workspaceSidebarWidth === "number" &&
@@ -4686,6 +5121,9 @@ function normalizeWorkbenchPreferences(
               typeof detail.primaryFolder === "string"
                 ? detail.primaryFolder
                 : undefined,
+            ...(detail.allowNestedFolders === true
+              ? { allowNestedFolders: true }
+              : {}),
           },
         ]),
     ),
@@ -4702,25 +5140,13 @@ function normalizeWorkbenchPreferences(
                   Array.isArray(folders),
               )
               .slice(0, 100)
-              .map(([workspacePath, folders]) => {
-                const normalizedWorkspace =
-                  normalizedWorkspaceFolderPath(workspacePath);
-                const normalizedFolders = (folders as unknown[])
-                  .filter(
-                    (folder): folder is string =>
-                      typeof folder === "string" &&
-                      folder.length > 0 &&
-                      folder.length <= 4096,
-                  )
-                  .map(normalizedWorkspaceFolderPath)
-                  .filter(
-                    (folder, index, all) =>
-                      folder !== normalizedWorkspace &&
-                      all.indexOf(folder) === index,
-                  )
-                  .slice(0, MAX_WORKSPACE_FOLDERS - 1);
-                return [normalizedWorkspace, normalizedFolders];
-              }),
+              .map(([workspacePath, folders]) => [
+                normalizedWorkspaceFolderPath(workspacePath),
+                normalizedWorkspaceFolderList(
+                  workspacePath,
+                  folders as unknown[],
+                ),
+              ]),
           )
         : {},
     workspaceUserSettings: {
@@ -4900,13 +5326,6 @@ export function defaultCommandProfiles(): CommandProfile[] {
       workingDirectory: "Workspace",
       providerId: "cursor",
       defaultModel: "cursor-default",
-    },
-    {
-      id: "gemini",
-      displayName: "Gemini CLI",
-      command: "gemini",
-      args: ["--yolo=false"],
-      workingDirectory: "Workspace",
     },
     {
       id: "opencode",
@@ -5252,7 +5671,8 @@ function defaultBrowserPreview() {
     url: "",
     history: [] as string[],
     historyIndex: -1,
-    device: "desktop" as const,
+    device: "responsive" as const,
+    deviceOverride: false,
     consoleErrors: 0,
     diagnostics: [],
     diagnosticsSupported: false,
@@ -5413,6 +5833,8 @@ function browserHistoryState(
       historyIndex,
       status: "loading",
       url,
+      device: state.browserPreview.deviceOverride ? state.browserPreview.device : automaticBrowserDevice(url),
+      viewport: undefined,
       consoleErrors: 0,
       diagnostics: [],
       diagnosticsSupported: false,

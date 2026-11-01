@@ -1,4 +1,15 @@
-import type { ComponentProps, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useId,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
+import { SelectionTrack } from "./selection-track";
+import { ChevronDown } from "lucide-react";
+import "./settings-design.css";
+
+const SettingsRowDescription = createContext<string | undefined>(undefined);
 
 /**
  * The settings controls every section is built from.
@@ -24,13 +35,18 @@ export function settingsSearchKey(label: string) {
 }
 
 export function SettingsSelect(props: ComponentProps<"select">) {
+  const descriptionId = useContext(SettingsRowDescription);
   return (
-    <select
-      {...props}
-      className={["gyro-settings-select", props.className]
-        .filter(Boolean)
-        .join(" ")}
-    />
+    <span className="gyro-settings-select-field">
+      <select
+        {...props}
+        aria-describedby={props["aria-describedby"] ?? descriptionId}
+        className={["gyro-settings-select", props.className]
+          .filter(Boolean)
+          .join(" ")}
+      />
+      <ChevronDown aria-hidden="true" size={13} />
+    </span>
   );
 }
 
@@ -49,14 +65,19 @@ export function SettingsRow({
   children?: ReactNode;
   tone?: "danger";
 }) {
+  const detailId = useId();
   const content = (
     <>
       <div>
         <strong>{label}</strong>
-        <span>{detail}</span>
+        <span id={detailId}>{detail}</span>
       </div>
       <div className="gyro-settings-control-column">
-        {children ?? <span className="gyro-settings-info-value">{value}</span>}
+        <SettingsRowDescription.Provider value={detailId}>
+          {children ?? (
+            <span className="gyro-settings-info-value">{value}</span>
+          )}
+        </SettingsRowDescription.Provider>
       </div>
     </>
   );
@@ -88,23 +109,46 @@ export function SettingsRow({
 export function SettingsGroup({
   label,
   badge,
+  description,
+  actions,
   children,
 }: {
   label: string;
   /** Marks a group whose controls are visible but not yet usable. */
   badge?: string;
+  description?: string;
+  actions?: ReactNode;
   children: ReactNode;
 }) {
+  const headingId = useId();
   return (
-    <section className={`gyro-settings-group${badge ? " is-unavailable" : ""}`}>
-      {badge ? (
-        <h2>
+    <section
+      aria-labelledby={headingId}
+      className={`gyro-settings-group${badge ? " is-unavailable" : ""}`}
+      data-setting-key={settingsSearchKey(label)}
+      tabIndex={-1}
+    >
+      {actions ? (
+        <div className="gyro-settings-group-header">
+          <h2 id={headingId}>
+            {label}
+            {badge ? (
+              <span className="gyro-settings-group-badge">{badge}</span>
+            ) : null}
+          </h2>
+          {actions}
+        </div>
+      ) : badge ? (
+        <h2 id={headingId}>
           {label}
           <span className="gyro-settings-group-badge">{badge}</span>
         </h2>
       ) : (
-        <h2>{label}</h2>
+        <h2 id={headingId}>{label}</h2>
       )}
+      {description ? (
+        <p className="gyro-settings-group-description">{description}</p>
+      ) : null}
       <div className="gyro-settings-group-rows">{children}</div>
     </section>
   );
@@ -115,18 +159,27 @@ export function SettingsSegmented<T extends string>({
   options,
   value,
   onChange,
+  disabled = false,
 }: {
   label: string;
   options: Array<{ label: string; value: T }>;
   value: T;
+  disabled?: boolean;
   onChange: (value: T) => void;
 }) {
+  const descriptionId = useContext(SettingsRowDescription);
   return (
-    <div aria-label={label} className="gyro-settings-segmented" role="group">
+    <SelectionTrack
+      label={label}
+      className="gyro-settings-segmented"
+      value={value}
+    >
       {options.map((option) => (
         <button
+          aria-describedby={descriptionId}
           aria-pressed={value === option.value}
           className={value === option.value ? "is-active" : ""}
+          disabled={disabled}
           key={option.value}
           onClick={() => onChange(option.value)}
           type="button"
@@ -134,6 +187,34 @@ export function SettingsSegmented<T extends string>({
           {option.label}
         </button>
       ))}
-    </div>
+    </SelectionTrack>
+  );
+}
+
+export function SettingsSwitch({
+  checked,
+  disabled,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+}) {
+  const descriptionId = useContext(SettingsRowDescription);
+  return (
+    <button
+      aria-describedby={descriptionId}
+      aria-checked={checked}
+      aria-label={label}
+      className={`gyro-settings-switch${checked ? " is-on" : ""}`}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      role="switch"
+      type="button"
+    >
+      <span />
+    </button>
   );
 }

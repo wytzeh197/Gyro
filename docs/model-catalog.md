@@ -112,6 +112,31 @@ and defaults cannot be changed by the document. Unknown providers and entries
 requiring a later client revision are ignored. Other invalid data rejects the
 whole document atomically.
 
+## Live model context
+
+The native `refresh_model_context_windows` command refreshes limits for each
+provider/model pair without making inference requests. It reads OpenAI CLI model
+metadata, advertised OpenAI-compatible API limits (including routed limits and
+published aliases), and Ollama discovery. Model-specific catalog values remain
+the offline baseline; an unknown model never inherits a provider-wide guess.
+
+ACP `usage_update` frames from Grok, Kimi, Gemini, Cursor, and OpenCode now reach
+the composer during the turn. Actual runtime allocations override published
+maxima. One replaceable context checkpoint tracks occupancy separately from
+accumulated billed usage, and catalog-only checkpoints cannot freeze a newer
+model limit. Limits remain scoped to provider, model, and endpoint; key changes
+invalidate the native cache. Metadata is cached for five minutes and runtime
+readings for fifteen, with background startup refresh, visible-window checks,
+and an immediate path for live context events. Refreshing limits does not select
+another provider or rewrite user settings.
+
+The renderer retains live metadata across model selection and config reloads.
+Missing capacity stays **Unknown**, even when a provider reports tokens used.
+Run `node --experimental-strip-types scripts/check-live-model-context.mjs`;
+it is included in the reliability suite. The standalone
+`apps/desktop/context-window-preview.html` uses the actual composer with
+clearly labeled simulated runtime readings.
+
 ## Scope and release requirements
 
 From revision 2 the native runner keeps its own copy of the catalog. The native
@@ -121,7 +146,7 @@ bucket, both for a fresh fetch and for the cached copy restored at startup. So
 the runner holds exactly the picker's catalog: never a document the picker
 refused, and never an entry outside this installation's rollout. The runner
 saves it to `model-catalog.json`, and the bucket to `model-catalog.bucket`, in
-Gyro's data directory, so it survives a restart without a network. The Codex and Grok runners take a model's allowed reasoning levels from
+Gyro's data directory, so it survives a restart without a network. The Codex, Claude, and Grok runners take a model's allowed reasoning levels from
 `supportedReasoningEfforts`, and context tracking takes its window from
 `contextWindowTokens`, before falling back to the bundled tables. So an ordinary
 new model for an existing provider needs only a catalog entry at
@@ -146,6 +171,106 @@ of that client, so installs on an earlier release keep the six-hour cadence unti
 they update, and the configured `rolloutPercentage` still decides who sees an
 addition at all. No app release or site deployment is performed by this
 implementation.
+
+## Effort and context audit (2026-10-13)
+
+`scripts/fixtures/model-metadata.json` records the checked context window,
+selectable positive effort levels, default, and source for all 42 picker models.
+Both the TypeScript catalog check and native tests verify it. Recheck the
+integration's metadata when updating it: CLI and API limits can differ.
+
+Codex 0.162.1 reports 500K for GPT-6.1 Sol and 272K for its other current
+full-size models; GPT-6.1 Sol and GPT-5.6 Sol default to low, and both Luna
+generations stop at max. Claude Code's Opus 5.5, Sonnet 5.5, and Haiku 5.5
+default to medium. Haiku 4.5 does not support effort. OpenRouter publishes each
+model's choices and default under `reasoning` in its public models endpoint,
+so routed models must not share an assumed universal ramp.
+
+Context limits already match the checked integrations. Runtime reports still
+override the catalog: Kimi's 262,144 baseline becomes 1,048,576 on Pro and
+Allegretto, and providers can reserve or allocate a smaller working window.
+Cursor and OpenCode leave fixed limits unspecified because their model is
+configured externally. Ollama obtains its models and allocations from the
+local runtime.
+
+Gyro's effort vocabulary excludes none/minimal and thinking toggles; the audit
+covers the positive effort levels the current control can represent.
+
+Verification: all 42 metadata checks, workspace typechecking, and the native
+model/context suites pass (44 passing tests in each suite). All 18 core config
+tests and the retirement guard test also pass. The standalone
+`apps/desktop/model-metadata-preview.html` renders the production composer
+with labeled fixtures. Browser checks confirm Sol's 500K picker label,
+Luna's five effort positions, Haiku 4.5's missing effort control, and routed
+DeepSeek's three positions. Four unrelated workbench smoke assertions also
+fail against the pre-change source; the model assertions pass.
+
+## Context recheck (2026-10-23)
+
+Every picker window was checked again against the window the launched tool
+serves, not the API maximum.
+
+Grok Build 1.0.67 serves `context_window` 256,000 for Grok 4.7, 4.6, 4.5, and
+4.7 Fast. 500,000 is only the optional larger window. Gyro had stored 500,000.
+The xAI baselines for those four ids are now 256,000. Grok 4.3 is not in the
+Grok Build model list, so it is not on the xAI CLI connection. The public API
+is a different connection. OpenRouter's `x-ai/grok-4.7` and `x-ai/grok-4.6`
+stay at 500,000.
+
+CLI and API connections are separate catalog rows for every picker model.
+Each row keeps the window that connection serves. The products listed on two
+connections are Grok 4.7 (Grok Build 256K, OpenRouter 500K), Grok 4.6 (Grok
+Build 256K, OpenRouter 500K), GPT-6 Astra (Codex 272K, OpenRouter 1.05M),
+Kimi K3 (Kimi Code 262,144, OpenRouter 1,048,576), Claude Sonnet 5 (Claude
+Code 1M, OpenRouter 1M), Claude Opus 5 (Claude Code 1M, OpenRouter 1M), and
+DeepSeek V4.1 Flash (DeepSeek API 1M, OpenRouter 1,048,576). Matching numbers
+stay when both sources serve them. Every other picker model exists on one
+connection and keeps that connection's window.
+
+Codex 0.163.0's logged-out bundled catalog lists 272K for GPT-6.1 Sol. Signed-in
+catalogs through 22 October still serve 500K, which is 475K after Codex's 95%
+reserve. That 272K print is a logged-out stub, so Gyro keeps 500K. The other
+current Codex models stay at 272K. The API maximum remains 1.05M and is not the
+Codex baseline.
+
+Claude Code 2.1.308 serves 1M by default for Fable 5.1, Fable 5, Opus 5.5,
+Opus 5, Opus 4.8, Sonnet 5.5, Sonnet 5, and Haiku 5.5. Haiku 4.5 stays at 200K.
+`CLAUDE_CODE_DISABLE_1M_CONTEXT` holds a session at 200K and is not the catalog
+baseline. Kimi's model page publishes exact ceilings: `k3` is 262,144 on Plus
+and Moderato, and 1,048,576 on Pro and Allegretto. The offline baseline stays
+at the lower ceiling, and a session's runtime window still wins. DeepSeek still
+publishes 1M for Flash and V4 Pro. Mistral still publishes 256K for Medium 3.5,
+Large 3 (`mistral-large-latest`), and Small 4, and 128K for Codestral. Large 4
+is a separate 1M model and is not in the picker. OpenRouter's public models
+endpoint on 23 October matches all 11 curated windows on both `context_length`
+and `top_provider.context_length`. Antigravity, Cursor, and OpenCode still
+have no fixed window.
+
+## Provider retirement audit (2026-10-13)
+
+`packages/ui/src/model-retirements.json` supplies the same confirmed retirement
+rules to the picker and backend. GPT-5.4 and GPT-5.4 mini retired from Codex with
+ChatGPT sign-in on August 31; both remain valid with API keys. The standard
+picker excludes them, saved sign-in selections fall back, and a stale remote
+catalog cannot reintroduce them. Codex receives explicit model IDs for
+authentication-specific validation instead of silently running its default.
+
+The backend defaults and legacy-config migration now use DeepSeek Flash/Pro
+instead of `deepseek-chat` and `deepseek-reasoner` (stopped July 24), and Gemini
+3.8 Flash instead of the stopped Gemini 3 Pro Preview. Known stopped API
+requests fail before provider dispatch, including old automation selections.
+DeepSeek's retired V4 Flash/vision aliases are also removed from saved lists.
+
+The rules are provider-specific. OpenRouter still serves
+`deepseek/deepseek-chat` through independent hosts, so that route is retained.
+Custom endpoints and local model names remain intact. Deprecated models that
+are still served are retained; GPT-5.5 remains available on October 13 and its
+announced October 14 retirement needs the next catalog update.
+
+Sources: [Codex model retirements](https://learn.chatgpt.com/docs/models#deprecated-codex-models),
+[DeepSeek change log](https://api-docs.deepseek.com/updates),
+[Gemini deprecations](https://ai.google.dev/gemini-api/docs/deprecations),
+and OpenRouter's public per-model endpoint lists.
 
 ## Validation
 

@@ -1,0 +1,751 @@
+{
+  "bodyWidth": 860,
+  "controls": [
+    {
+      "className": "",
+      "label": "1 pane",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 357.625,
+        "width": 54.765625,
+        "x": 302.859375,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "2 panes",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 428.34375,
+        "width": 62.71875,
+        "x": 365.625,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "3 panes",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 499.34375,
+        "width": 63,
+        "x": 436.34375,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "4 panes",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 570.546875,
+        "width": 63.203125,
+        "x": 507.34375,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "columns",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 644.125,
+        "width": 65.578125,
+        "x": 578.546875,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "grid",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 692.34375,
+        "width": 40.21875,
+        "x": 652.125,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "rows",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 745,
+        "width": 44.65625,
+        "x": 700.34375,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "Toggle theme",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 848,
+        "width": 95,
+        "x": 753,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "Fixture width",
+      "rect": {
+        "bottom": 65,
+        "height": 16,
+        "right": 222.171875,
+        "width": 129,
+        "x": 93.171875,
+        "y": 49
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 282.515625,
+        "height": 49.390625,
+        "right": 416.5,
+        "width": 273.5,
+        "x": 143,
+        "y": 233.125
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 312.90625,
+        "height": 28.5,
+        "right": 177.1875,
+        "width": 26.59375,
+        "x": 150.59375,
+        "y": 284.40625
+      }
+    },
+    {
+      "className": "gyro-composer-chip",
+      "label": "Approval mode: Ask for approval",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 238.03125,
+        "width": 54.203125,
+        "x": 183.828125,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: GPT-5.6 Sol",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 338.546875,
+        "width": 62.5625,
+        "x": 275.984375,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "gyro-model-rail-tile",
+      "label": "Anthropic",
+      "rect": {
+        "bottom": 182.15625,
+        "height": 34.1875,
+        "right": 183.3436279296875,
+        "width": 34.1875,
+        "x": 149.1561279296875,
+        "y": 147.96875
+      }
+    },
+    {
+      "className": "gyro-model-rail-tile is-selected is-in-use",
+      "label": "OpenAI",
+      "rect": {
+        "bottom": 220.140625,
+        "height": 34.1875,
+        "right": 183.3436279296875,
+        "width": 34.1875,
+        "x": 149.1561279296875,
+        "y": 185.953125
+      }
+    },
+    {
+      "className": "gyro-model-rail-tile is-disconnected",
+      "label": "Cursor, not connected",
+      "rect": {
+        "bottom": 268.546875,
+        "height": 34.1875,
+        "right": 183.3436279296875,
+        "width": 34.1875,
+        "x": 149.1561279296875,
+        "y": 234.359375
+      }
+    },
+    {
+      "className": "gyro-model-rail-tile is-disconnected",
+      "label": "DeepSeek, not connected",
+      "rect": {
+        "bottom": 306.53125,
+        "height": 34.1875,
+        "right": 183.3436279296875,
+        "width": 34.1875,
+        "x": 149.1561279296875,
+        "y": 272.34375
+      }
+    },
+    {
+      "className": "gyro-model-rail-tile is-disconnected",
+      "label": "Google Antigravity, not connected",
+      "rect": {
+        "bottom": 344.515625,
+        "height": 34.1875,
+        "right": 183.3436279296875,
+        "width": 34.1875,
+        "x": 149.1561279296875,
+        "y": 310.328125
+      }
+    },
+    {
+      "className": "gyro-model-rail-tile is-disconnected",
+      "label": "Kimi, not connected",
+      "rect": {
+        "bottom": 382.5,
+        "height": 34.1875,
+        "right": 183.3436279296875,
+        "width": 34.1875,
+        "x": 149.1561279296875,
+        "y": 348.3125
+      }
+    },
+    {
+      "className": "gyro-model-rail-tile is-disconnected",
+      "label": "Mistral, not connected",
+      "rect": {
+        "bottom": 420.484375,
+        "height": 34.1875,
+        "right": 183.3436279296875,
+        "width": 34.1875,
+        "x": 149.1561279296875,
+        "y": 386.296875
+      }
+    },
+    {
+      "className": "gyro-model-rail-tile is-disconnected",
+      "label": "Ollama, not connected",
+      "rect": {
+        "bottom": 458.46875,
+        "height": 34.1875,
+        "right": 183.3436279296875,
+        "width": 34.1875,
+        "x": 149.1561279296875,
+        "y": 424.28125
+      }
+    },
+    {
+      "className": "gyro-model-rail-tile is-disconnected",
+      "label": "OpenCode, not connected",
+      "rect": {
+        "bottom": 496.453125,
+        "height": 34.1875,
+        "right": 183.3436279296875,
+        "width": 34.1875,
+        "x": 149.1561279296875,
+        "y": 462.265625
+      }
+    },
+    {
+      "className": "gyro-model-rail-tile is-disconnected",
+      "label": "OpenRouter, not connected",
+      "rect": {
+        "bottom": 534.4375,
+        "height": 34.1875,
+        "right": 183.3436279296875,
+        "width": 34.1875,
+        "x": 149.1561279296875,
+        "y": 500.25
+      }
+    },
+    {
+      "className": "gyro-model-rail-tile is-disconnected",
+      "label": "xAI, not connected",
+      "rect": {
+        "bottom": 572.421875,
+        "height": 34.1875,
+        "right": 183.3436279296875,
+        "width": 34.1875,
+        "x": 149.1561279296875,
+        "y": 538.234375
+      }
+    },
+    {
+      "className": "gyro-model-rail-tile is-utility",
+      "label": "Manage providers",
+      "rect": {
+        "bottom": 278.671875,
+        "height": 28.5,
+        "right": 180.4998779296875,
+        "width": 28.5,
+        "x": 151.9998779296875,
+        "y": 250.171875
+      }
+    },
+    {
+      "className": "gyro-model-rail-model",
+      "label": "GPT-6.1 Sol500K",
+      "rect": {
+        "bottom": 154.140625,
+        "height": 32.296875,
+        "right": 399.8123779296875,
+        "width": 203.625,
+        "x": 196.1873779296875,
+        "y": 121.84375
+      }
+    },
+    {
+      "className": "gyro-model-rail-model",
+      "label": "GPT-6 Astra272K",
+      "rect": {
+        "bottom": 187.375,
+        "height": 32.296875,
+        "right": 399.8123779296875,
+        "width": 203.625,
+        "x": 196.1873779296875,
+        "y": 155.078125
+      }
+    },
+    {
+      "className": "gyro-model-rail-model is-active",
+      "label": "GPT-5.6 Sol272K",
+      "rect": {
+        "bottom": 243.984375,
+        "height": 32.296875,
+        "right": 399.8123779296875,
+        "width": 203.625,
+        "x": 196.1873779296875,
+        "y": 211.6875
+      }
+    },
+    {
+      "className": "gyro-model-rail-model",
+      "label": "GPT-5.6 Terra272K",
+      "rect": {
+        "bottom": 277.21875,
+        "height": 32.296875,
+        "right": 399.8123779296875,
+        "width": 203.625,
+        "x": 196.1873779296875,
+        "y": 244.921875
+      }
+    },
+    {
+      "className": "gyro-model-rail-model",
+      "label": "GPT-5.6 Luna272K",
+      "rect": {
+        "bottom": 310.453125,
+        "height": 32.296875,
+        "right": 399.8123779296875,
+        "width": 203.625,
+        "x": 196.1873779296875,
+        "y": 278.15625
+      }
+    },
+    {
+      "className": "gyro-model-rail-model",
+      "label": "GPT-5.5272K",
+      "rect": {
+        "bottom": 343.6875,
+        "height": 32.296875,
+        "right": 399.8123779296875,
+        "width": 203.625,
+        "x": 196.1873779296875,
+        "y": 311.390625
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger",
+      "label": "Reasoning effort: Low",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 375.671875,
+        "width": 30.484375,
+        "x": 345.1875,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 408.90625,
+        "width": 26.59375,
+        "x": 382.3125,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 282.515625,
+        "height": 49.390625,
+        "right": 717,
+        "width": 273.5,
+        "x": 443.5,
+        "y": 233.125
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 312.90625,
+        "height": 28.5,
+        "right": 477.6875,
+        "width": 26.59375,
+        "x": 451.09375,
+        "y": 284.40625
+      }
+    },
+    {
+      "className": "gyro-composer-chip",
+      "label": "Approval mode: Ask for approval",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 538.53125,
+        "width": 54.203125,
+        "x": 484.328125,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: GPT-5.6 Sol",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 639.046875,
+        "width": 62.5625,
+        "x": 576.484375,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger",
+      "label": "Reasoning effort: Low",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 676.171875,
+        "width": 30.484375,
+        "x": 645.6875,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 709.40625,
+        "width": 26.59375,
+        "x": 682.8125,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 537.015625,
+        "height": 49.390625,
+        "right": 416.5,
+        "width": 273.5,
+        "x": 143,
+        "y": 487.625
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 567.40625,
+        "height": 28.5,
+        "right": 177.1875,
+        "width": 26.59375,
+        "x": 150.59375,
+        "y": 538.90625
+      }
+    },
+    {
+      "className": "gyro-composer-chip",
+      "label": "Approval mode: Ask for approval",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 238.03125,
+        "width": 54.203125,
+        "x": 183.828125,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: GPT-5.6 Sol",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 338.546875,
+        "width": 62.5625,
+        "x": 275.984375,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger",
+      "label": "Reasoning effort: Low",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 375.671875,
+        "width": 30.484375,
+        "x": 345.1875,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 408.90625,
+        "width": 26.59375,
+        "x": 382.3125,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 537.015625,
+        "height": 49.390625,
+        "right": 717,
+        "width": 273.5,
+        "x": 443.5,
+        "y": 487.625
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 567.40625,
+        "height": 28.5,
+        "right": 477.6875,
+        "width": 26.59375,
+        "x": 451.09375,
+        "y": 538.90625
+      }
+    },
+    {
+      "className": "gyro-composer-chip",
+      "label": "Approval mode: Ask for approval",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 538.53125,
+        "width": 54.203125,
+        "x": 484.328125,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: GPT-5.6 Sol",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 639.046875,
+        "width": 62.5625,
+        "x": 576.484375,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger",
+      "label": "Reasoning effort: Low",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 676.171875,
+        "width": 30.484375,
+        "x": 645.6875,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 709.40625,
+        "width": 26.59375,
+        "x": 682.8125,
+        "y": 539.859375
+      }
+    }
+  ],
+  "htmlWidth": 860,
+  "overlaps": [
+    {
+      "a": "Message Gyro",
+      "b": "Cursor, not connected",
+      "height": 34.1875,
+      "width": 34.1875
+    },
+    {
+      "a": "Message Gyro",
+      "b": "DeepSeek, not connected",
+      "height": 10.171875,
+      "width": 34.1875
+    },
+    {
+      "a": "Message Gyro",
+      "b": "Manage providers",
+      "height": 28.5,
+      "width": 28.5
+    },
+    {
+      "a": "Message Gyro",
+      "b": "GPT-5.6 Sol272K",
+      "height": 10.859375,
+      "width": 203.625
+    },
+    {
+      "a": "Message Gyro",
+      "b": "GPT-5.6 Terra272K",
+      "height": 32.296875,
+      "width": 203.625
+    },
+    {
+      "a": "Message Gyro",
+      "b": "GPT-5.6 Luna272K",
+      "height": 4.359375,
+      "width": 203.625
+    },
+    {
+      "a": "Add context",
+      "b": "DeepSeek, not connected",
+      "height": 22.125,
+      "width": 26.59375
+    },
+    {
+      "a": "Approval mode: Ask for approval",
+      "b": "GPT-5.6 Luna272K",
+      "height": 25.09375,
+      "width": 41.8438720703125
+    },
+    {
+      "a": "Model: GPT-5.6 Sol",
+      "b": "GPT-5.6 Luna272K",
+      "height": 25.09375,
+      "width": 62.5625
+    },
+    {
+      "a": "Cursor, not connected",
+      "b": "Manage providers",
+      "height": 18.375,
+      "width": 28.5
+    },
+    {
+      "a": "DeepSeek, not connected",
+      "b": "Manage providers",
+      "height": 6.328125,
+      "width": 28.5
+    },
+    {
+      "a": "OpenCode, not connected",
+      "b": "Message Gyro",
+      "height": 8.828125,
+      "width": 34.1875
+    },
+    {
+      "a": "OpenRouter, not connected",
+      "b": "Message Gyro",
+      "height": 34.1875,
+      "width": 34.1875
+    },
+    {
+      "a": "xAI, not connected",
+      "b": "Add context",
+      "height": 28.5,
+      "width": 26.59375
+    },
+    {
+      "a": "GPT-5.6 Luna272K",
+      "b": "Reasoning effort: Low",
+      "height": 25.09375,
+      "width": 30.484375
+    },
+    {
+      "a": "GPT-5.6 Luna272K",
+      "b": "Send message",
+      "height": 25.09375,
+      "width": 17.4998779296875
+    }
+  ],
+  "popovers": [
+    {
+      "className": "gyro-composer-popover gyro-model-rail",
+      "clientHeight": 145,
+      "label": "Choose a model",
+      "rect": {
+        "bottom": 279.671875,
+        "height": 139.34375,
+        "right": 417.4998779296875,
+        "width": 275.5,
+        "x": 141.9998779296875,
+        "y": 140.328125
+      },
+      "scrollHeight": 145
+    },
+    {
+      "className": "gyro-model-rail-list",
+      "clientHeight": 108,
+      "label": "OpenAI models",
+      "rect": {
+        "bottom": 278.671875,
+        "height": 102.40625,
+        "right": 416.4998779296875,
+        "width": 226,
+        "x": 190.4998779296875,
+        "y": 176.265625
+      },
+      "scrollHeight": 260
+    }
+  ],
+  "theme": "dark",
+  "viewport": {
+    "height": 620,
+    "width": 860
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "verifiedAt": "2026-10-08T09:52:45.766339+00:00",
+  "synaraCommit": "f1b2f7c7e11867eee034d11020b043dcb53f03f9",
+  "objective": "Read Synara UI source and upgrade Gyro UI",
+  "sourceComparison": "QA.md, nine UI areas with immutable source links",
+  "implementation": [
+    "packages/ui/src/review-file-navigator.tsx",
+    "packages/ui/src/diff-file-tree.ts",
+    "packages/ui/src/subagents-view.tsx",
+    "packages/ui/src/tab-navigation.ts",
+    "packages/ui/src/session-approvals.ts",
+    "packages/ui/src/chat-run-view.tsx"
+  ],
+  "renderedEvidence": {
+    "initialSourcePass": {
+      "review": 48,
+      "workers": 36,
+      "integratedReview": 12,
+      "recordedBeforeContinuation": true
+    },
+    "continuation": {
+      "approvals": 48,
+      "simulatedRejection": "passed"
+    },
+    "totalRecordedCases": 144
+  },
+  "checks": {
+    "typecheck": {
+      "command": "CI=1 pnpm typecheck",
+      "exitCode": 0,
+      "log": "checks/typecheck.log"
+    },
+    "build": {
+      "command": "CI=1 pnpm --filter @gyro-dev/desktop build",
+      "exitCode": 0,
+      "log": "checks/build.log"
+    },
+    "smoke": {
+      "command": "CI=1 pnpm smoke:workbench",
+      "exitCode": 0,
+      "log": "checks/smoke.log"
+    },
+    "reliability": {
+      "command": "CI=1 pnpm test:reliability",
+      "exitCode": 0,
+      "log": "checks/reliability.log"
+    }
+  },
+  "additionalChecks": [
+    "chat-run behavioral checks passed",
+    "subagents and session approval checks passed",
+    "architecture boundaries passed",
+    "prettier checks passed",
+    "git diff --check passed"
+  ],
+  "limits": [
+    "Rendered states use fixture data",
+    "Native Synara and native execution behavior unverified",
+    "Initial 96 records predate continuation changes",
+    "Reduced motion uses production rules injected by capture harness",
+    "Existing build large-chunk advisory retained",
+    "No commit, push, or publication"
+  ]
+}

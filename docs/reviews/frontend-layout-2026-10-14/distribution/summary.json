@@ -1,0 +1,51 @@
+{
+  "completedAtUtc": "2026-10-14T10:13:16.315Z",
+  "build": "optimized release app+dmg, aarch64-apple-darwin",
+  "sourceDigestSha256": "ab016019059603d324f0bf32bf2d329e3c9568970797094c8e28832eeb9f7560",
+  "sourceUnchangedDuringFinalBuild": true,
+  "formattingOnlyIntermediateRebuild": {
+    "initialDistDigest": "cc2cd758378a7072d0e3d70c51ef59deb14bbf534593d7888861ba72633611ee",
+    "finalDistDigest": "cc2cd758378a7072d0e3d70c51ef59deb14bbf534593d7888861ba72633611ee",
+    "distBytesIdentical": true
+  },
+  "verification": {
+    "dmgChecksum": true,
+    "hdiutilImageIntegrity": true,
+    "readOnlyDmgMounted": true,
+    "applicationsShortcut": true,
+    "bundleVersion": "0.1.0-alpha.49.7",
+    "minimumMacOS": "14.0",
+    "architecture": "arm64",
+    "strictDeepBundleSignature": true,
+    "strictNestedExecutableSignatures": true,
+    "hardenedRuntime": true,
+    "signatureMode": "adhoc",
+    "packagedCodeModeWorker": true
+  },
+  "notarized": false,
+  "updaterArtifactsProduced": false,
+  "installedAppTouched": false,
+  "releasePublished": false,
+  "limitations": [
+    "Native UI acceptance of this refreshed bundle remains pending while the Mac is locked.",
+    "Clean browser-downloaded quarantine/Open Anyway acceptance remains pending.",
+    "No Intel bundle or signed updater was produced in this local refresh."
+  ],
+  "artifacts": [
+    {
+      "path": "/Users/wytze/Gyro/target/release/bundle/dmg/Gyro_0.1.0-alpha.49.7_aarch64.dmg",
+      "sizeBytes": 47220098,
+      "sha256": "9e556c0c50def32f605619ddebaa444e09d52401f5b9b60cfe68d3efc55631e1"
+    },
+    {
+      "path": "/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-desktop",
+      "sizeBytes": 39033392,
+      "sha256": "175e09ae66c17fb6ef9abae361e08a487c62b8e8277fcc203c8a6f6a69b5a36b"
+    },
+    {
+      "path": "/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-codemode",
+      "sizeBytes": 70846176,
+      "sha256": "d509409a977287453235a1fca4133bffb29cdbe37fd6501a5ea0093172627bf7"
+    }
+  ]
+}

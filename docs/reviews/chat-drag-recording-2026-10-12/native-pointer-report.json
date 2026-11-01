@@ -1,0 +1,328 @@
+{
+  "events": [
+    {
+      "afterHandlers": {
+        "prevented": false
+      },
+      "beforeHandlers": {
+        "prevented": false
+      },
+      "button": 0,
+      "buttons": 0,
+      "isPrimary": true,
+      "phase": "window-capture",
+      "pointerId": 1,
+      "pointerType": "mouse",
+      "target": "",
+      "trusted": true,
+      "type": "pointerdown",
+      "x": 91,
+      "y": 259
+    },
+    {
+      "afterHandlers": {
+        "prevented": false
+      },
+      "beforeHandlers": {
+        "prevented": false
+      },
+      "button": -1,
+      "buttons": 0,
+      "isPrimary": true,
+      "phase": "window-capture",
+      "pointerId": 1,
+      "pointerType": "mouse",
+      "target": "",
+      "trusted": true,
+      "type": "pointermove",
+      "x": 1115,
+      "y": 270
+    },
+    {
+      "activeDragAtCapture": {
+        "dragId": 1,
+        "inputMode": "pointer",
+        "kind": "session",
+        "projectKey": "/fixture/Gyro",
+        "sessionId": "beta"
+      },
+      "afterHandlers": {
+        "prevented": false
+      },
+      "beforeHandlers": {
+        "prevented": false
+      },
+      "button": 0,
+      "buttons": 0,
+      "isPrimary": true,
+      "phase": "window-capture",
+      "pointerId": 1,
+      "pointerType": "mouse",
+      "target": "gyro-session-row     is-nested   is-dragging  ",
+      "trusted": true,
+      "type": "pointerup",
+      "x": 1115,
+      "y": 270
+    },
+    {
+      "afterHandlers": {
+        "prevented": false
+      },
+      "beforeHandlers": {
+        "prevented": false
+      },
+      "button": 0,
+      "buttons": 0,
+      "isPrimary": true,
+      "phase": "window-capture",
+      "pointerId": 1,
+      "pointerType": "mouse",
+      "target": "gyro-session-row is-active    is-nested  is-open   ",
+      "trusted": true,
+      "type": "lostpointercapture",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "afterHandlers": {
+        "prevented": false
+      },
+      "beforeHandlers": {
+        "prevented": false
+      },
+      "button": 0,
+      "buttons": 0,
+      "isPrimary": true,
+      "phase": "window-capture",
+      "pointerId": 1,
+      "pointerType": "mouse",
+      "target": "",
+      "trusted": true,
+      "type": "pointerdown",
+      "x": 488,
+      "y": 689
+    },
+    {
+      "afterHandlers": {
+        "prevented": false
+      },
+      "beforeHandlers": {
+        "prevented": false
+      },
+      "button": 0,
+      "buttons": 0,
+      "isPrimary": true,
+      "phase": "window-capture",
+      "pointerId": 1,
+      "pointerType": "mouse",
+      "target": "",
+      "trusted": true,
+      "type": "pointerup",
+      "x": 488,
+      "y": 689
+    },
+    {
+      "afterHandlers": {
+        "prevented": false
+      },
+      "beforeHandlers": {
+        "prevented": false
+      },
+      "button": 0,
+      "buttons": 0,
+      "isPrimary": true,
+      "phase": "window-capture",
+      "pointerId": 1,
+      "pointerType": "mouse",
+      "target": "",
+      "trusted": true,
+      "type": "pointerdown",
+      "x": 317,
+      "y": 99.5
+    },
+    {
+      "afterHandlers": {
+        "prevented": false
+      },
+      "beforeHandlers": {
+        "prevented": false
+      },
+      "phase": "window-capture",
+      "target": "",
+      "trusted": true,
+      "type": "blur"
+    },
+    {
+      "afterHandlers": {
+        "prevented": false
+      },
+      "beforeHandlers": {
+        "prevented": false
+      },
+      "button": -1,
+      "buttons": 0,
+      "isPrimary": true,
+      "phase": "window-capture",
+      "pointerId": 1,
+      "pointerType": "mouse",
+      "target": "gyro-thread-body gyro-chat-transcript",
+      "trusted": true,
+      "type": "pointermove",
+      "x": 1266,
+      "y": 451
+    },
+    {
+      "activeDragAtCapture": {
+        "dragId": 2,
+        "inputMode": "pointer",
+        "kind": "pane",
+        "paneId": "alpha"
+      },
+      "afterHandlers": {
+        "prevented": false
+      },
+      "beforeHandlers": {
+        "prevented": false
+      },
+      "button": 0,
+      "buttons": 0,
+      "isPrimary": true,
+      "phase": "window-capture",
+      "pointerId": 1,
+      "pointerType": "mouse",
+      "target": "",
+      "trusted": true,
+      "type": "pointerup",
+      "x": 1266,
+      "y": 451
+    },
+    {
+      "afterHandlers": {
+        "prevented": false
+      },
+      "beforeHandlers": {
+        "prevented": false
+      },
+      "button": 0,
+      "buttons": 0,
+      "isPrimary": true,
+      "phase": "window-capture",
+      "pointerId": 1,
+      "pointerType": "mouse",
+      "target": "",
+      "trusted": true,
+      "type": "lostpointercapture",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "afterHandlers": {
+        "prevented": false
+      },
+      "beforeHandlers": {
+        "prevented": false
+      },
+      "button": -1,
+      "buttons": 1,
+      "isPrimary": false,
+      "phase": "window-capture",
+      "pointerId": 1,
+      "pointerType": "mouse",
+      "target": "window",
+      "trusted": true,
+      "type": "lostpointercapture",
+      "x": 0,
+      "y": 0
+    }
+  ],
+  "feedback": {
+    "dragging": false,
+    "sourceRows": [],
+    "zones": []
+  },
+  "href": "tauri://localhost/chat-drag-preview.html",
+  "nativeBuild": "debug-embedded-tauri",
+  "nativeCsp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' asset: http://asset.localhost data:; media-src 'self' asset: http://asset.localhost;style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost; frame-src gyro-canvas: http://localhost:* http://127.0.0.1:* https:",
+  "nativeWindow": {
+    "acceptFirstMouse": false,
+    "allowLinkPreview": true,
+    "alwaysOnBottom": false,
+    "alwaysOnTop": false,
+    "browserExtensionsEnabled": false,
+    "center": false,
+    "closable": true,
+    "contentProtected": false,
+    "create": true,
+    "decorations": true,
+    "devtools": false,
+    "disableInputAccessoryView": false,
+    "dragDropEnabled": false,
+    "focus": true,
+    "focusable": true,
+    "fullscreen": false,
+    "generalAutofillEnabled": true,
+    "height": 820.0,
+    "hiddenTitle": true,
+    "incognito": true,
+    "javascriptDisabled": false,
+    "label": "main",
+    "maximizable": true,
+    "maximized": false,
+    "minHeight": 620.0,
+    "minWidth": 860.0,
+    "minimizable": true,
+    "resizable": true,
+    "scrollBarStyle": "default",
+    "shadow": true,
+    "skipTaskbar": false,
+    "title": "Gyro chat drag native",
+    "titleBarStyle": "Overlay",
+    "trafficLightPosition": {
+      "x": 16.0,
+      "y": 17.0
+    },
+    "transparent": false,
+    "url": "chat-drag-preview.html",
+    "useHttpsScheme": false,
+    "visible": true,
+    "visibleOnAllWorkspaces": false,
+    "width": 1280.0,
+    "zoomHotkeysEnabled": false
+  },
+  "sequence": 38,
+  "state": {
+    "active": "beta",
+    "drafts": {
+      "alpha": "Native Alpha draft survives dragging"
+    },
+    "grid": {
+      "activeProjectKey": "/fixture/Gyro",
+      "layouts": {
+        "/fixture/Gyro": {
+          "arrangement": "columns",
+          "focusedPaneId": "alpha",
+          "projectKey": "/fixture/Gyro",
+          "slots": [
+            {
+              "kind": "session",
+              "paneId": "beta",
+              "sessionId": "beta",
+              "workspacePath": "/fixture/Gyro"
+            },
+            {
+              "kind": "session",
+              "paneId": "alpha",
+              "sessionId": "alpha",
+              "workspacePath": "/fixture/Gyro"
+            },
+            null,
+            null
+          ],
+          "splitDirection": "horizontal"
+        }
+      }
+    },
+    "media": 0
+  },
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
+}

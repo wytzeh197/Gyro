@@ -1,0 +1,397 @@
+{
+  "bodyWidth": 1440,
+  "controls": [
+    {
+      "className": "gyro-sidebar-toggle-button",
+      "label": "Hide sidebar",
+      "rect": {
+        "bottom": 39.4375,
+        "height": 29.890625,
+        "right": 119.890625,
+        "width": 29.890625,
+        "x": 90,
+        "y": 9.546875
+      }
+    },
+    {
+      "className": "gyro-titlebar-switch-option is-active",
+      "label": "Sessions",
+      "rect": {
+        "bottom": 37.4375,
+        "height": 25.890625,
+        "right": 173.890625,
+        "width": 44,
+        "x": 129.890625,
+        "y": 11.546875
+      }
+    },
+    {
+      "className": "gyro-titlebar-switch-option",
+      "label": "Workspace",
+      "rect": {
+        "bottom": 37.4375,
+        "height": 25.890625,
+        "right": 217.890625,
+        "width": 44,
+        "x": 173.890625,
+        "y": 11.546875
+      }
+    },
+    {
+      "className": "gyro-sidebar-action",
+      "label": "New Session",
+      "rect": {
+        "bottom": 82.5,
+        "height": 34.5,
+        "right": 230,
+        "width": 221,
+        "x": 9,
+        "y": 48
+      }
+    },
+    {
+      "className": "gyro-sidebar-action",
+      "label": "Search⌘K",
+      "rect": {
+        "bottom": 119,
+        "height": 34.5,
+        "right": 230,
+        "width": 221,
+        "x": 9,
+        "y": 84.5
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-active",
+      "label": "Automations",
+      "rect": {
+        "bottom": 155.5,
+        "height": 34.5,
+        "right": 230,
+        "width": 221,
+        "x": 9,
+        "y": 121
+      }
+    },
+    {
+      "className": "gyro-sidebar-project-toggle",
+      "label": "Collapse Gyro",
+      "rect": {
+        "bottom": 225.15625,
+        "height": 26,
+        "right": 220.8125,
+        "width": 202.625,
+        "x": 18.1875,
+        "y": 199.15625
+      }
+    },
+    {
+      "className": "gyro-sidebar-thread-main has-model-logo",
+      "label": "Automation: Update readme",
+      "rect": {
+        "bottom": 262.296875,
+        "height": 29.890625,
+        "right": 231,
+        "width": 213,
+        "x": 18,
+        "y": 232.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-thread-main has-model-logo",
+      "label": "Automation: Update readme",
+      "rect": {
+        "bottom": 293.1875,
+        "height": 29.890625,
+        "right": 231,
+        "width": 213,
+        "x": 18,
+        "y": 263.296875
+      }
+    },
+    {
+      "className": "gyro-sidebar-thread-main has-model-logo",
+      "label": "Automation: Update readme",
+      "rect": {
+        "bottom": 324.078125,
+        "height": 29.890625,
+        "right": 231,
+        "width": 213,
+        "x": 18,
+        "y": 294.1875
+      }
+    },
+    {
+      "className": "gyro-sidebar-thread-main has-model-logo",
+      "label": "Automation: Update readme",
+      "rect": {
+        "bottom": 354.96875,
+        "height": 29.890625,
+        "right": 231,
+        "width": 213,
+        "x": 18,
+        "y": 325.078125
+      }
+    },
+    {
+      "className": "gyro-account-button",
+      "label": "Settings",
+      "rect": {
+        "bottom": 888,
+        "height": 30,
+        "right": 107.34375,
+        "width": 99.34375,
+        "x": 8,
+        "y": 858
+      }
+    },
+    {
+      "className": "gyro-scheduled-search",
+      "label": "Search automations",
+      "rect": {
+        "bottom": 99.78125,
+        "height": 35.890625,
+        "right": 592,
+        "width": 332,
+        "x": 260,
+        "y": 63.890625
+      }
+    },
+    {
+      "className": "",
+      "label": "All",
+      "rect": {
+        "bottom": 48.890625,
+        "height": 29.890625,
+        "right": 297.546875,
+        "width": 34.546875,
+        "x": 263,
+        "y": 19
+      }
+    },
+    {
+      "className": "",
+      "label": "Active",
+      "rect": {
+        "bottom": 48.890625,
+        "height": 29.890625,
+        "right": 356.109375,
+        "width": 58.5625,
+        "x": 297.546875,
+        "y": 19
+      }
+    },
+    {
+      "className": "",
+      "label": "Paused",
+      "rect": {
+        "bottom": 48.890625,
+        "height": 29.890625,
+        "right": 422.109375,
+        "width": 66,
+        "x": 356.109375,
+        "y": 19
+      }
+    },
+    {
+      "className": "",
+      "label": "Completed",
+      "rect": {
+        "bottom": 48.890625,
+        "height": 29.890625,
+        "right": 511.59375,
+        "width": 89.484375,
+        "x": 422.109375,
+        "y": 19
+      }
+    },
+    {
+      "className": "gyro-scheduled-item",
+      "label": "Update the readme from the current project state and verify the docume",
+      "rect": {
+        "bottom": 226.78125,
+        "height": 114,
+        "right": 591,
+        "width": 330,
+        "x": 261,
+        "y": 112.78125
+      }
+    },
+    {
+      "className": "",
+      "label": "Daily project checkReview changes and surface what needs attention.",
+      "rect": {
+        "bottom": 354.78125,
+        "height": 80,
+        "right": 591,
+        "width": 330,
+        "x": 261,
+        "y": 274.78125
+      }
+    },
+    {
+      "className": "",
+      "label": "Weekly code reviewSummarize progress, risks, and next priorities.",
+      "rect": {
+        "bottom": 434.78125,
+        "height": 80,
+        "right": 591,
+        "width": 330,
+        "x": 261,
+        "y": 354.78125
+      }
+    },
+    {
+      "className": "",
+      "label": "Prompt",
+      "rect": {
+        "bottom": 102.0625,
+        "height": 104,
+        "right": 1386,
+        "width": 730,
+        "x": 656,
+        "y": -1.9375
+      }
+    },
+    {
+      "className": "gyro-scheduled-project-button",
+      "label": "Change project folder",
+      "rect": {
+        "bottom": 330.28125,
+        "height": 30,
+        "right": 1390,
+        "width": 123.984375,
+        "x": 1266.015625,
+        "y": 300.28125
+      }
+    },
+    {
+      "className": "gyro-automation-choice-trigger",
+      "label": "Workspace: Project folder",
+      "rect": {
+        "bottom": 380.28125,
+        "height": 34,
+        "right": 1390,
+        "width": 128.078125,
+        "x": 1261.921875,
+        "y": 346.28125
+      }
+    },
+    {
+      "className": "gyro-automation-choice-trigger",
+      "label": "Provider: DeepSeek",
+      "rect": {
+        "bottom": 428.28125,
+        "height": 34,
+        "right": 1390,
+        "width": 107.203125,
+        "x": 1282.796875,
+        "y": 394.28125
+      }
+    },
+    {
+      "className": "gyro-automation-choice-trigger",
+      "label": "Model: DeepSeek V4.1 Flash",
+      "rect": {
+        "bottom": 476.78125,
+        "height": 34,
+        "right": 1390,
+        "width": 175.15625,
+        "x": 1214.84375,
+        "y": 442.78125
+      }
+    },
+    {
+      "className": "gyro-automation-choice-trigger",
+      "label": "Repeat: Weekly on a day",
+      "rect": {
+        "bottom": 574.28125,
+        "height": 34,
+        "right": 1390,
+        "width": 145.6875,
+        "x": 1244.3125,
+        "y": 540.28125
+      }
+    },
+    {
+      "className": "gyro-scheduled-inline-input",
+      "label": "",
+      "rect": {
+        "bottom": 622.28125,
+        "height": 34,
+        "right": 1390,
+        "width": 120,
+        "x": 1270,
+        "y": 588.28125
+      }
+    },
+    {
+      "className": "gyro-automation-choice-trigger",
+      "label": "Time zone: Europe/Amsterdam",
+      "rect": {
+        "bottom": 670.28125,
+        "height": 34,
+        "right": 1390,
+        "width": 163.84375,
+        "x": 1226.15625,
+        "y": 636.28125
+      }
+    },
+    {
+      "className": "gyro-automation-choice-trigger",
+      "label": "Day: Friday",
+      "rect": {
+        "bottom": 718.78125,
+        "height": 34,
+        "right": 1390,
+        "width": 81.078125,
+        "x": 1308.921875,
+        "y": 684.78125
+      }
+    },
+    {
+      "className": "",
+      "label": "",
+      "rect": {
+        "bottom": 848.78125,
+        "height": 36,
+        "right": 1400,
+        "width": 758,
+        "x": 642,
+        "y": 812.78125
+      }
+    },
+    {
+      "className": "gyro-secondary-button",
+      "label": "Cancel",
+      "rect": {
+        "bottom": 884,
+        "height": 32,
+        "right": 1280.625,
+        "width": 70.90625,
+        "x": 1209.71875,
+        "y": 852
+      }
+    },
+    {
+      "className": "gyro-primary-button",
+      "label": "Save changes",
+      "rect": {
+        "bottom": 884,
+        "height": 32,
+        "right": 1405,
+        "width": 116.375,
+        "x": 1288.625,
+        "y": 852
+      }
+    }
+  ],
+  "htmlWidth": 1440,
+  "overlaps": [],
+  "popovers": [],
+  "theme": "light",
+  "viewport": {
+    "height": 900,
+    "width": 1440
+  }
+}

@@ -32,7 +32,7 @@ export function desktopDevArgs(port, extra = []) {
     JSON.stringify({
       build: {
         devUrl: `http://127.0.0.1:${port}`,
-        beforeDevCommand: `pnpm exec vite --host 127.0.0.1 --port ${port}`,
+        beforeDevCommand: `pnpm --filter @gyro-dev/codemode build && pnpm exec vite --host 127.0.0.1 --port ${port}`,
       },
     }),
     ...extra,

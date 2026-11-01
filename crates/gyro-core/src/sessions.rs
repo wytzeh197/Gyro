@@ -1,3 +1,6 @@
+mod project_import_storage;
+pub use project_import_storage::{ProjectImportCommit, SessionImportSource};
+
 use crate::capabilities::ProjectCapabilityPolicy;
 use crate::paths::{reject_unsafe_private_file, secure_private_file, GyroPaths};
 use crate::worktrees::validate_branch_name;
@@ -21,11 +24,19 @@ const MAX_SESSION_EVENTS_READ: usize = 1_000;
 const SESSION_EVENT_TAIL_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_SESSION_EVENT_LINE_BYTES: usize = 1024 * 1024;
 const MAX_SESSION_EVENT_TAIL_READ_BYTES: usize = 32 * 1024 * 1024;
+const MAX_WORKSPACE_CONTEXT_LOOKUP_BYTES: usize = 8 * 1024 * 1024;
+/// The payload marker every workspace-context event carries. A lookup matches
+/// it as plain text, so only events that could belong to the turn are decoded.
+const WORKSPACE_CONTEXT_MARKER: &str = "workspace-context";
 const MAX_SESSION_EVENT_BATCH: usize = 256;
 const MAX_SESSION_EVENT_BATCH_BYTES: usize = 8 * 1024 * 1024;
+/// How far back a replay check looks in a log that predates the turn index.
+/// A replay is of the turn just sent, so it is always near the tail.
+const LEGACY_TURN_MESSAGE_SCAN_LINES: usize = 64;
+const TRUNCATED_SESSION_EVENT_MARKER: &str = "… [truncated]";
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 /// Bump when additive schema migrations change so reopen skips table_info scans.
-const SESSION_STORE_SCHEMA_VERSION: i32 = 6;
+const SESSION_STORE_SCHEMA_VERSION: i32 = 8;
 /// Ceiling for one delete's sub-agent cleanup, so a cycle in the data — which
 /// the write path cannot create — cannot spin forever.
 const MAX_SUBAGENT_SESSION_TREE: usize = 256;
@@ -102,6 +113,7 @@ pub enum SessionEventKind {
     ApprovalRequested,
     PlanUpdated,
     GoalUpdated,
+    TaskCheckpoint,
     ChatModeChanged,
     CouncilRunStarted,
     CouncilSeatStarted,
@@ -112,6 +124,10 @@ pub enum SessionEventKind {
     CouncilRunCompleted,
     CouncilRunCancelled,
     SystemEvent,
+    /// A kind this build does not know, written by a newer Gyro. Reading it
+    /// keeps the rest of the chat readable; this build never writes it.
+    #[serde(other)]
+    Unknown,
 }
 
 impl SessionEventKind {
@@ -126,6 +142,7 @@ impl SessionEventKind {
             Self::ApprovalRequested => "approval-requested",
             Self::PlanUpdated => "plan-updated",
             Self::GoalUpdated => "goal-updated",
+            Self::TaskCheckpoint => "task-checkpoint",
             Self::ChatModeChanged => "chat-mode-changed",
             Self::CouncilRunStarted => "council-run-started",
             Self::CouncilSeatStarted => "council-seat-started",
@@ -136,6 +153,7 @@ impl SessionEventKind {
             Self::CouncilRunCompleted => "council-run-completed",
             Self::CouncilRunCancelled => "council-run-cancelled",
             Self::SystemEvent => "system-event",
+            Self::Unknown => "unknown",
         }
     }
 }
@@ -200,6 +218,8 @@ pub struct Session {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub events_path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_source: Option<SessionImportSource>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -420,18 +440,21 @@ impl Default for CreateSessionContext {
 
 pub struct SessionStore {
     paths: GyroPaths,
-    conn: Connection,
+    conn: crate::sqlite::PooledConnection,
 }
 
 impl SessionStore {
     pub fn open(paths: GyroPaths) -> Result<Self> {
         paths.ensure()?;
         reject_unsafe_private_file(&paths.database_path)?;
-        let conn = crate::sqlite::open_private_database(&paths.database_path)
+        let conn = crate::sqlite::open_pooled_database(&paths.database_path)
             .with_context(|| format!("open {}", paths.database_path.display()))?;
         secure_private_file(&paths.database_path)?;
         let store = Self { paths, conn };
-        store.initialize()?;
+        store
+            .conn
+            .ensure_schema(crate::sqlite::StoreSchema::Sessions, || store.initialize())?;
+        store.recover_project_imports()?;
         Ok(store)
     }
 
@@ -538,6 +561,7 @@ impl SessionStore {
             created_at: now,
             updated_at: now,
             events_path,
+            import_source: None,
         };
 
         self.conn.execute(
@@ -617,7 +641,7 @@ impl SessionStore {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id, import_source_json
                  from sessions where id = ?1",
                 params![session_id.to_string()],
                 row_to_session,
@@ -668,7 +692,7 @@ impl SessionStore {
         self.conn
             .query_row(
                 "select id, title, workspace_path, origin, created_at, updated_at, events_path
-                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
+                 , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id, import_source_json
                  from sessions where parent_session_id is null order by updated_at desc limit 1",
                 [],
                 row_to_session,
@@ -686,11 +710,11 @@ impl SessionStore {
     pub fn list_sessions_limited(&self, limit: Option<usize>) -> Result<Vec<Session>> {
         let sql = if limit.is_some() {
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
-             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id, import_source_json
              from sessions order by updated_at desc limit ?1"
         } else {
             "select id, title, workspace_path, origin, created_at, updated_at, events_path
-             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id
+             , workspace_mode, branch, worktree_name, provider_id, provider_label, model_id, model_label, reasoning_effort, summary, summary_updated_at, workspace_identity_json, parent_session_id, import_source_json
              from sessions order by updated_at desc"
         };
         let mut stmt = self.conn.prepare(sql)?;
@@ -699,8 +723,21 @@ impl SessionStore {
         } else {
             stmt.query_map([], row_to_session)?
         };
-        rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(Into::into)
+        // One row whose stored values no longer decode must not empty the
+        // whole sidebar. Database errors still fail the listing.
+        let mut sessions = Vec::new();
+        for row in rows {
+            match row {
+                Ok(session) => sessions.push(session),
+                Err(
+                    error @ (rusqlite::Error::FromSqlConversionFailure(..)
+                    | rusqlite::Error::InvalidColumnType(..)
+                    | rusqlite::Error::IntegralValueOutOfRange(..)),
+                ) => eprintln!("skipped a session row that could not be read: {error}"),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(sessions)
     }
 
     pub fn rename_session(
@@ -812,6 +849,7 @@ impl SessionStore {
                     );
                 }
             }
+            self.remove_chat_workspace(session_id);
             return Ok(false);
         };
 
@@ -828,6 +866,14 @@ impl SessionStore {
             .with_context(|| format!("lock {} for deletion", events_path.display()))?;
 
         let transaction = self.conn.unchecked_transaction()?;
+        transaction.execute(
+            "delete from project_import_metadata_commits where session_id = ?1",
+            params![session.id.to_string()],
+        )?;
+        transaction.execute(
+            "delete from project_imports where session_id = ?1",
+            params![session.id.to_string()],
+        )?;
         transaction.execute(
             "delete from provider_session_bindings where session_id = ?1",
             params![session_id.to_string()],
@@ -855,7 +901,16 @@ impl SessionStore {
                 );
             }
         }
+        self.remove_chat_workspace(session_id);
         Ok(changed > 0)
+    }
+
+    /// A projectless chat's private workspace goes with its chat. Best-effort:
+    /// the chat is already deleted, and a repeated delete retries this.
+    fn remove_chat_workspace(&self, session_id: Uuid) {
+        if let Err(error) = self.paths.remove_chat_workspace(session_id) {
+            eprintln!("could not remove the private workspace of chat {session_id}: {error}");
+        }
     }
 
     pub fn create_mutation_proposal(
@@ -1171,7 +1226,18 @@ impl SessionStore {
             return Ok(None);
         }
         if provider_changed || model_changed {
-            let _ = self.clear_all_provider_session_bindings(session_id)?;
+            if let Some(source) = previous
+                .import_source
+                .as_ref()
+                .filter(|source| !source.fresh_session_requested)
+            {
+                // Keep the imported native cursor so selecting its original
+                // model again can resume it. The runner rejects incompatible
+                // models until the user explicitly requests a fresh session.
+                self.conn.execute("delete from provider_session_bindings where session_id = ?1 and provider_id != ?2", params![session_id.to_string(), source.source_kind.provider_id()])?;
+            } else {
+                let _ = self.clear_all_provider_session_bindings(session_id)?;
+            }
         }
         self.get_session(session_id)
     }
@@ -1376,6 +1442,9 @@ impl SessionStore {
         payload: Value,
         turn_id: Option<Uuid>,
     ) -> Result<SessionEvent> {
+        if kind == SessionEventKind::Unknown {
+            return Err(anyhow!("an unknown session event kind cannot be written"));
+        }
         let session = self
             .get_session(session_id)?
             .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
@@ -1424,9 +1493,8 @@ impl SessionStore {
         file.flush()?;
         file.sync_data()
             .with_context(|| format!("sync {}", events_path.display()))?;
-        drop(event_lock);
-        drop(file);
-
+        // Index the turn message before another writer can take the lock, so
+        // its replay check sees this one without scanning the log.
         if let Some(turn_id) = event.turn_id.filter(|_| {
             matches!(
                 event.kind,
@@ -1437,6 +1505,9 @@ impl SessionStore {
                 eprintln!("session event was saved but its turn index was not updated: {error}");
             }
         }
+        drop(event_lock);
+        drop(file);
+
         if let Some(turn_id) = event.turn_id {
             if let Some(status) = provider_status_from_payload(&event.payload) {
                 if let Err(error) = self.record_turn_provider_status(session_id, turn_id, &status) {
@@ -1477,13 +1548,22 @@ impl SessionStore {
             .map_err(Into::into)
     }
 
+    /// Whether this conversation has a durable provider turn still in flight.
+    pub fn has_running_provider_turn(&self, session_id: Uuid) -> Result<bool> {
+        self.conn
+            .query_row(
+                "select exists(select 1 from session_turn_status where session_id = ?1 and status = 'running')",
+                params![session_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
     /// Turns whose durable status is still `running`.
     ///
-    /// Called at startup, where nothing can legitimately be in flight yet, so
-    /// every row this returns belongs to a run that died with its process. The
-    /// status is what [`latest_provider_status_for_turn`] reads to refuse a
-    /// second attempt on the same turn, so a row left behind by a crash or a
-    /// force-quit blocks that turn's retry for the rest of the session's life.
+    /// A running row may belong to another live process. Recovery callers must
+    /// hold the session's provider lease and recheck its current status before
+    /// closing it. A crash or force-quit can leave a row after ownership ends.
     ///
     /// [`latest_provider_status_for_turn`]: Self::latest_provider_status_for_turn
     pub fn list_running_turns(&self) -> Result<Vec<(Uuid, Uuid)>> {
@@ -1517,37 +1597,45 @@ impl SessionStore {
         if entries.is_empty() {
             return Ok(Vec::new());
         }
-        if entries.len() > MAX_SESSION_EVENT_BATCH {
-            return Err(anyhow!(
-                "session event batch exceeds the {MAX_SESSION_EVENT_BATCH} event limit"
-            ));
-        }
         let session = self
             .get_session(session_id)?
             .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        // One oversize activity used to reject the whole batch and lose every
+        // activity of the turn. Oversize entries are truncated instead, and a
+        // large batch is written in chunks within the per-write limits.
         let mut events = Vec::with_capacity(entries.len());
-        let mut encoded = Vec::new();
+        let mut chunks: Vec<Vec<u8>> = Vec::new();
+        let mut chunk = Vec::new();
+        let mut chunk_events = 0usize;
         for (message, payload, turn_id) in entries {
-            let message = normalize_session_event_message(message)?;
-            let payload = validate_session_event_payload(payload)?;
+            let message = truncate_session_event_message(message);
+            let payload = fit_session_event_payload(payload)?;
             let mut event =
                 SessionEvent::new(session_id, SessionEventKind::SystemEvent, message, payload);
             event.turn_id = turn_id;
             let mut line = serde_json::to_vec(&event)?;
             line.push(b'\n');
             if line.len() > MAX_SESSION_EVENT_LINE_BYTES {
-                return Err(anyhow!(
-                    "session event exceeds the {} byte line limit",
-                    MAX_SESSION_EVENT_LINE_BYTES
-                ));
+                eprintln!(
+                    "skipped a session activity over the {MAX_SESSION_EVENT_LINE_BYTES} byte line limit"
+                );
+                continue;
             }
-            if encoded.len().saturating_add(line.len()) > MAX_SESSION_EVENT_BATCH_BYTES {
-                return Err(anyhow!(
-                    "session event batch exceeds the {MAX_SESSION_EVENT_BATCH_BYTES} byte limit"
-                ));
+            if chunk_events == MAX_SESSION_EVENT_BATCH
+                || chunk.len().saturating_add(line.len()) > MAX_SESSION_EVENT_BATCH_BYTES
+            {
+                chunks.push(std::mem::take(&mut chunk));
+                chunk_events = 0;
             }
-            encoded.extend_from_slice(&line);
+            chunk.extend_from_slice(&line);
+            chunk_events += 1;
             events.push(event);
+        }
+        if !chunk.is_empty() {
+            chunks.push(chunk);
+        }
+        if events.is_empty() {
+            return Ok(events);
         }
 
         let events_path = self.session_events_path(session.id)?;
@@ -1561,7 +1649,9 @@ impl SessionStore {
             let _ = std::fs::remove_file(&events_path);
             return Err(anyhow!("session {session_id} was deleted while appending"));
         }
-        file.write_all(&encoded)?;
+        for chunk in &chunks {
+            file.write_all(chunk)?;
+        }
         file.flush()?;
         file.sync_data()
             .with_context(|| format!("sync {}", events_path.display()))?;
@@ -1583,6 +1673,107 @@ impl SessionStore {
 
     pub fn read_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
         self.read_recent_events(session_id, MAX_SESSION_EVENTS_READ)
+    }
+
+    /// Metadata-only display revision. Identity and modification time also
+    /// invalidate a same-size replacement; no event text is read or retained.
+    pub fn transcript_revision(&self, session_id: Uuid) -> Result<String> {
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let path = self.session_events_path(session.id)?;
+        if !path.exists() {
+            return Ok(format!("{session_id}:missing"));
+        }
+        let file = open_session_event_log_for_read(&path)?;
+        let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)?;
+        let metadata = file.metadata()?;
+        let modified = metadata
+            .modified()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|time| time.as_nanos())
+            .unwrap_or(0);
+        #[cfg(unix)]
+        let identity = {
+            use std::os::unix::fs::MetadataExt;
+            format!("{}:{}", metadata.dev(), metadata.ino())
+        };
+        #[cfg(not(unix))]
+        let identity = metadata
+            .created()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|time| time.as_nanos())
+            .unwrap_or(0)
+            .to_string();
+        Ok(format!(
+            "{session_id}:{identity}:{}:{modified}",
+            metadata.len()
+        ))
+    }
+
+    /// Complete display history. Provider context continues to use bounded reads.
+    pub fn read_transcript_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let events_path = self.session_events_path(session.id)?;
+        if !events_path.exists() {
+            return Ok(Vec::new());
+        }
+        let file = open_session_event_log_for_read(&events_path)?;
+        let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)
+            .with_context(|| format!("lock {} for transcript read", events_path.display()))?;
+        let mut reader = BufReader::new(file);
+        let mut events = Vec::new();
+        let mut line_index = 0;
+        while let Some(line) = read_bounded_session_event_line(&mut reader)? {
+            if !line.trim().is_empty() {
+                if let Some(event) =
+                    parse_session_event_line_or_skip(&events_path, line_index, &line)
+                {
+                    events.push(event);
+                }
+            }
+            line_index += 1;
+        }
+        Ok(events)
+    }
+
+    /// Walks complete events from the start of the log.
+    ///
+    /// `visit` returns `false` to stop. The returned flag is true when the walk
+    /// stopped early, and nothing past that point is read.
+    pub(crate) fn visit_transcript_events(
+        &self,
+        session_id: Uuid,
+        mut visit: impl FnMut(&SessionEvent) -> bool,
+    ) -> Result<bool> {
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let events_path = self.session_events_path(session.id)?;
+        if !events_path.exists() {
+            return Ok(false);
+        }
+        let file = open_session_event_log_for_read(&events_path)?;
+        let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)
+            .with_context(|| format!("lock {} for transcript read", events_path.display()))?;
+        let mut reader = BufReader::new(file);
+        let mut line_index = 0;
+        while let Some(line) = read_bounded_session_event_line(&mut reader)? {
+            if !line.trim().is_empty() {
+                if let Some(event) =
+                    parse_session_event_line_or_skip(&events_path, line_index, &line)
+                {
+                    if !visit(&event) {
+                        return Ok(true);
+                    }
+                }
+            }
+            line_index += 1;
+        }
+        Ok(false)
     }
 
     pub fn read_recent_events(
@@ -1611,12 +1802,14 @@ impl SessionStore {
                 if line.is_empty() {
                     None
                 } else {
-                    Some(parse_session_event_line(&events_path, index, line))
+                    parse_session_event_line_or_skip(&events_path, index, line)
                 }
             })
-            .collect::<Result<Vec<_>>>()?;
-        if let Some(first_line) = first_line.filter(|line| !line.trim().is_empty()) {
-            let first_event = parse_session_event_line(&events_path, 0, &first_line)?;
+            .collect::<Vec<_>>();
+        if let Some(first_event) = first_line
+            .filter(|line| !line.trim().is_empty())
+            .and_then(|line| parse_session_event_line_or_skip(&events_path, 0, &line))
+        {
             if first_event.kind == SessionEventKind::SessionCreated
                 && !events.iter().any(|item| item.id == first_event.id)
             {
@@ -1626,9 +1819,64 @@ impl SessionStore {
         Ok(events)
     }
 
+    /// The workspace-context event a turn already persisted, if any.
+    ///
+    /// A retried or resumed turn reuses the snapshot its earlier attempt wrote.
+    /// The lookup walks back from the end of the session log and stops at the
+    /// newest matching event, so a long chat pays for its recent tail instead
+    /// of a fixed window of older turns.
+    pub fn latest_workspace_context_event(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+    ) -> Result<Option<SessionEvent>> {
+        let session = self
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
+        let events_path = self.session_events_path(session.id)?;
+        if !events_path.exists() {
+            return Ok(None);
+        }
+        let mut file = open_session_event_log_for_read(&events_path)?;
+        let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)
+            .with_context(|| format!("lock {} for workspace context", events_path.display()))?;
+        let mut found = None;
+        // Both markers are literal substrings of the serialized event, so a
+        // long chat pays JSON decoding only for lines that could belong to this
+        // turn instead of every event in the tail window.
+        let turn_marker = turn_id.to_string();
+        visit_recent_event_lines(&mut file, MAX_WORKSPACE_CONTEXT_LOOKUP_BYTES, |line| {
+            if !line.contains(&turn_marker) || !line.contains(WORKSPACE_CONTEXT_MARKER) {
+                return false;
+            }
+            let Some(event) = parse_session_event_line_or_skip(&events_path, 0, line) else {
+                return false;
+            };
+            if event.turn_id == Some(turn_id)
+                && event.payload.get("kind").and_then(Value::as_str) == Some("workspace-context")
+            {
+                found = Some(event);
+                return true;
+            }
+            false
+        })?;
+        Ok(found)
+    }
+
     /// Read durable chat context independently of the bounded transcript tail.
     /// The SQLite rows are a rebuildable index over JSONL, never its source of truth.
     pub fn read_context_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
+        self.read_context_events_filtered(session_id, false)
+    }
+    /// Latest structured records plus durable routing evidence, without loading every old checkpoint.
+    pub fn read_efficiency_context_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
+        self.read_context_events_filtered(session_id, true)
+    }
+    fn read_context_events_filtered(
+        &self,
+        session_id: Uuid,
+        efficiency: bool,
+    ) -> Result<Vec<SessionEvent>> {
         let session = self
             .get_session(session_id)?
             .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
@@ -1672,8 +1920,12 @@ impl SessionStore {
             if next_offset == file_len && !has_complete_tail {
                 break;
             }
-            if !line.is_empty() {
-                let event = parse_session_event_line(&events_path, 0, &line)?;
+            let event = if line.is_empty() {
+                None
+            } else {
+                parse_session_event_line_or_skip(&events_path, 0, &line)
+            };
+            if let Some(event) = event {
                 if event.kind == SessionEventKind::AssistantMessage {
                     preceding_assistant = Some((offset, event.clone()));
                 }
@@ -1705,7 +1957,10 @@ impl SessionStore {
                     SessionEventKind::GoalUpdated
                         | SessionEventKind::PlanUpdated
                         | SessionEventKind::ChatModeChanged
-                ) {
+                        | SessionEventKind::TaskCheckpoint
+                ) || (event.kind == SessionEventKind::SystemEvent
+                    && event.payload["kind"] == "efficiency-phase-route")
+                {
                     context_events.push((offset, event));
                 }
             }
@@ -1714,7 +1969,13 @@ impl SessionStore {
         drop(reader);
         drop(_lock);
         if offset != indexed_bytes || indexed_bytes > file_len {
-            let transaction = self.conn.unchecked_transaction()?;
+            // Immediate: this reads then writes, and a deferred transaction
+            // that upgrades mid-way gets SQLITE_BUSY without waiting out the
+            // busy timeout when another process wrote in between.
+            let transaction = rusqlite::Transaction::new_unchecked(
+                &self.conn,
+                rusqlite::TransactionBehavior::Immediate,
+            )?;
             let current_offset: u64 = transaction
                 .query_row(
                     "select indexed_bytes from session_context_index where session_id = ?1",
@@ -1723,7 +1984,14 @@ impl SessionStore {
                 )
                 .optional()?
                 .unwrap_or(0);
-            let reset_index = current_offset > file_len;
+            // Another reader may have indexed further since this scan measured
+            // the log, which only grows. Only an index past the log as it is
+            // now means the log was truncated or replaced.
+            let current_len = std::fs::metadata(&events_path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(file_len)
+                .max(file_len);
+            let reset_index = current_offset > current_len;
             if reset_index {
                 transaction.execute(
                     "delete from session_context_events where session_id = ?1",
@@ -1759,10 +2027,12 @@ impl SessionStore {
             transaction.commit()?;
         }
 
-        let mut statement = self.conn.prepare(
-            "select event_json from session_context_events
-             where session_id = ?1 order by log_offset asc",
-        )?;
+        let sql = if efficiency {
+            "select event_json from session_context_events e where session_id=?1 and (json_extract(event_json,'$.payload.kind')='efficiency-phase-route' or json_extract(event_json,'$.kind')='goal-updated' or log_offset=(select max(log_offset) from session_context_events n where n.session_id=e.session_id and json_extract(n.event_json,'$.kind')=json_extract(e.event_json,'$.kind'))) order by log_offset asc"
+        } else {
+            "select event_json from session_context_events where session_id = ?1 order by log_offset asc"
+        };
+        let mut statement = self.conn.prepare(sql)?;
         let rows = statement.query_map(params![session_id.to_string()], |row| {
             row.get::<_, String>(0)
         })?;
@@ -1806,7 +2076,12 @@ impl SessionStore {
         let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)
             .with_context(|| format!("lock {} for read", events_path.display()))?;
         let mut reader = BufReader::new(file);
-        let mut ring: std::collections::VecDeque<SessionEvent> =
+        // Raw lines only: parsing every line up to the cursor made each "load
+        // earlier" page cost the whole history. Only a line that mentions the
+        // cursor id is parsed to confirm it, and only the page itself is
+        // decoded.
+        let cursor_text = before_event_id.to_string();
+        let mut ring: std::collections::VecDeque<(usize, String)> =
             std::collections::VecDeque::with_capacity(limit.saturating_add(1));
         let mut dropped_before_ring = false;
         let mut found_cursor = false;
@@ -1821,9 +2096,12 @@ impl SessionStore {
                 line_index = line_index.saturating_add(1);
                 continue;
             }
-            let event = parse_session_event_line(&events_path, line_index, &line)?;
+            let index = line_index;
             line_index = line_index.saturating_add(1);
-            if event.id == before_event_id {
+            if line.contains(&cursor_text)
+                && serde_json::from_str::<SessionEvent>(&line)
+                    .is_ok_and(|event| event.id == before_event_id)
+            {
                 found_cursor = true;
                 break;
             }
@@ -1831,7 +2109,7 @@ impl SessionStore {
                 ring.pop_front();
                 dropped_before_ring = true;
             }
-            ring.push_back(event);
+            ring.push_back((index, line));
         }
         if !found_cursor {
             return Ok(SessionEventPage {
@@ -1840,13 +2118,26 @@ impl SessionStore {
             });
         }
         Ok(SessionEventPage {
-            events: ring.into_iter().collect(),
+            events: ring
+                .iter()
+                .filter_map(|(index, line)| {
+                    parse_session_event_line_or_skip(&events_path, *index, line)
+                })
+                .collect(),
             has_more_before: dropped_before_ring,
         })
     }
 
     fn session_events_path(&self, session_id: Uuid) -> Result<PathBuf> {
-        let path = self.paths.sessions_dir.join(format!("{session_id}.jsonl"));
+        let imported = self
+            .paths
+            .sessions_dir
+            .join(format!("import-{session_id}.jsonl"));
+        let path = if imported.exists() {
+            imported
+        } else {
+            self.paths.sessions_dir.join(format!("{session_id}.jsonl"))
+        };
         if let Ok(metadata) = std::fs::symlink_metadata(&path) {
             if metadata.file_type().is_symlink() {
                 return Err(anyhow!("session event file cannot be a symlink"));
@@ -1860,13 +2151,39 @@ impl SessionStore {
             .conn
             .query_row("pragma user_version", [], |row| row.get(0))?;
         if user_version >= SESSION_STORE_SCHEMA_VERSION {
-            self.ensure_core_tables()?;
-            self.ensure_column("parent_session_id", "parent_session_id text")?;
-            self.ensure_parent_session_index()?;
-            crate::usage::ensure_usage_schema(&self.conn)?;
-            crate::file_review::ensure_file_review_schema(&self.conn)?;
-            return Ok(());
+            return self.ensure_current_schema();
         }
+        // The app and the CLI can both open an old database at once. One
+        // writer migrates; the other waits, then sees the new version.
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
+        let user_version: i32 =
+            transaction.query_row("pragma user_version", [], |row| row.get(0))?;
+        if user_version >= SESSION_STORE_SCHEMA_VERSION {
+            self.ensure_current_schema()?;
+        } else {
+            self.migrate_schema()?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Idempotent checks for a database already at the current version.
+    fn ensure_current_schema(&self) -> Result<()> {
+        self.ensure_core_tables()?;
+        self.ensure_provider_session_index()?;
+        self.ensure_column("parent_session_id", "parent_session_id text")?;
+        self.ensure_parent_session_index()?;
+        self.ensure_column("import_source_json", "import_source_json text")?;
+        self.ensure_project_import_schema()?;
+        crate::usage::ensure_usage_schema(&self.conn)?;
+        crate::file_review::ensure_file_review_schema(&self.conn)?;
+        Ok(())
+    }
+
+    fn migrate_schema(&self) -> Result<()> {
         self.ensure_core_tables()?;
         self.ensure_column(
             "workspace_mode",
@@ -1875,6 +2192,7 @@ impl SessionStore {
         self.ensure_column("branch", "branch text not null default 'main'")?;
         self.ensure_column("worktree_name", "worktree_name text")?;
         self.ensure_column("provider_id", "provider_id text")?;
+        self.ensure_provider_session_index()?;
         self.ensure_column("provider_label", "provider_label text")?;
         self.ensure_column("model_id", "model_id text")?;
         self.ensure_column("model_label", "model_label text")?;
@@ -1886,6 +2204,8 @@ impl SessionStore {
         // that predate the column are the user's own chats, so null is right.
         self.ensure_column("parent_session_id", "parent_session_id text")?;
         self.ensure_parent_session_index()?;
+        self.ensure_column("import_source_json", "import_source_json text")?;
+        self.ensure_project_import_schema()?;
         self.ensure_provider_binding_column("reasoning_effort", "reasoning_effort text")?;
         self.ensure_mutation_proposal_column("surfaced_at", "surfaced_at text")?;
         crate::usage::ensure_usage_schema(&self.conn)?;
@@ -1924,9 +2244,6 @@ impl SessionStore {
 
              create index if not exists idx_sessions_workspace_path
              on sessions(workspace_path);
-
-             create index if not exists idx_sessions_provider_id
-             on sessions(provider_id);
 
              create table if not exists provider_session_bindings (
                session_id text not null,
@@ -2016,6 +2333,15 @@ impl SessionStore {
         Ok(())
     }
 
+    fn ensure_provider_session_index(&self) -> Result<()> {
+        // Legacy databases do not have provider_id until migrate_schema adds
+        // it. Creating this index with the base tables aborts that migration.
+        self.conn.execute_batch(
+            "create index if not exists idx_sessions_provider_id on sessions(provider_id);",
+        )?;
+        Ok(())
+    }
+
     fn find_indexed_turn_message(
         &self,
         session_id: Uuid,
@@ -2053,8 +2379,29 @@ impl SessionStore {
                 created_at,
             }));
         }
-        // Legacy logs written before the turn index existed.
-        find_existing_turn_message(events_path, turn_id, kind)
+        // Once a session has any indexed turn message, every later one is
+        // indexed too (under the append lock), so the index is authoritative
+        // and a new turn costs no log scan.
+        let indexed: bool = self.conn.query_row(
+            "select exists(select 1 from session_turn_messages where session_id = ?1)",
+            params![session_id.to_string()],
+            |row| row.get(0),
+        )?;
+        if indexed {
+            return Ok(None);
+        }
+        // Legacy logs written before the turn index existed. The scan only
+        // guards replays, so a log it cannot read must not block the append.
+        match find_existing_turn_message(events_path, turn_id, kind) {
+            Ok(found) => Ok(found),
+            Err(error) => {
+                eprintln!(
+                    "skipped the legacy turn check for {}: {error:#}",
+                    events_path.display()
+                );
+                Ok(None)
+            }
+        }
     }
 
     fn record_turn_message_index(
@@ -2106,6 +2453,24 @@ impl SessionStore {
     ///
     /// Callers record every call, including failed and cancelled ones: a run
     /// that burned tokens and then timed out still spent them.
+    pub fn link_efficiency_task(&self, task: Uuid, session: Uuid, turn: Uuid) -> Result<()> {
+        crate::efficiency::accounting::link(&self.conn, task, session, turn)
+    }
+    pub fn record_efficiency_metadata(
+        &self,
+        usage: Uuid,
+        price: Option<&crate::efficiency::pricing::PriceSnapshot>,
+        attribution: &crate::efficiency::context::Attribution,
+    ) -> Result<()> {
+        crate::efficiency::accounting::metadata(&self.conn, usage, price, attribution)
+    }
+    pub fn efficiency_task_totals(
+        &self,
+        task: Uuid,
+    ) -> Result<crate::efficiency::accounting::TaskTotals> {
+        crate::efficiency::accounting::totals(&self.conn, task)
+    }
+
     pub fn record_usage(&self, entry: &crate::usage::UsageEntry) -> Result<Uuid> {
         crate::usage::insert_usage_entry(&self.conn, entry)
     }
@@ -2126,6 +2491,57 @@ impl SessionStore {
         summaries: &[crate::file_review::FileChangeSummary],
     ) -> Result<()> {
         crate::file_review::store_summaries(&self.conn, workspace_key, summaries)
+    }
+
+    pub fn note_usage_call(&self, session_id: Uuid, turn_id: Uuid) -> Result<()> {
+        crate::usage_receipts::note_call(&self.conn, session_id, turn_id)
+    }
+
+    pub fn session_usage_tokens(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Option<crate::usage::UsageTokens>> {
+        crate::usage_receipts::session_tokens(&self.conn, session_id)
+    }
+
+    pub fn task_usage_tokens(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+    ) -> Result<Option<crate::usage::UsageTokens>> {
+        crate::usage_receipts::task_tokens(&self.conn, session_id, turn_id)
+    }
+
+    pub fn provider_usage_outside_turn_since(
+        &self,
+        provider_id: &str,
+        since: chrono::DateTime<chrono::Utc>,
+        session_id: Uuid,
+        turn_id: Uuid,
+    ) -> Result<crate::usage::UsageTotals> {
+        crate::usage::provider_usage_outside_turn_since(
+            &self.conn,
+            provider_id,
+            since,
+            session_id,
+            turn_id,
+        )
+    }
+
+    pub fn link_usage_turn(
+        &self,
+        child_session: Uuid,
+        child_turn: Uuid,
+        parent_session: Uuid,
+        parent_turn: Uuid,
+    ) -> Result<()> {
+        crate::usage_receipts::link_turn(
+            &self.conn,
+            child_session,
+            child_turn,
+            parent_session,
+            parent_turn,
+        )
     }
 
     /// What one chat has cost, across every call it produced.
@@ -2204,10 +2620,7 @@ impl SessionStore {
         if columns.iter().any(|column| column == column_name) {
             return Ok(());
         }
-        self.conn.execute_batch(&format!(
-            "alter table provider_session_bindings add column {definition};"
-        ))?;
-        Ok(())
+        crate::sqlite::add_column_if_missing(&self.conn, "provider_session_bindings", definition)
     }
 
     fn ensure_mutation_proposal_column(&self, column_name: &str, definition: &str) -> Result<()> {
@@ -2218,10 +2631,7 @@ impl SessionStore {
         if columns.iter().any(|column| column == column_name) {
             return Ok(());
         }
-        self.conn.execute_batch(&format!(
-            "alter table mutation_proposals add column {definition};"
-        ))?;
-        Ok(())
+        crate::sqlite::add_column_if_missing(&self.conn, "mutation_proposals", definition)
     }
 
     fn ensure_column(&self, column_name: &str, definition: &str) -> Result<()> {
@@ -2232,9 +2642,7 @@ impl SessionStore {
         if columns.iter().any(|column| column == column_name) {
             return Ok(());
         }
-        self.conn
-            .execute_batch(&format!("alter table sessions add column {definition};"))?;
-        Ok(())
+        crate::sqlite::add_column_if_missing(&self.conn, "sessions", definition)
     }
 
     fn ensure_parent_session_index(&self) -> Result<()> {
@@ -2263,12 +2671,14 @@ fn find_existing_turn_message(
     kind: &SessionEventKind,
 ) -> Result<Option<SessionEvent>> {
     let mut file = open_session_event_log_for_read(path)?;
-    let lines = read_recent_event_lines(&mut file, MAX_SESSION_EVENTS_READ)?;
+    let lines = read_recent_event_lines(&mut file, LEGACY_TURN_MESSAGE_SCAN_LINES)?;
     for (index, line) in lines.iter().enumerate().rev() {
         if line.is_empty() {
             continue;
         }
-        let event = parse_session_event_line(path, index, line)?;
+        let Some(event) = parse_session_event_line_or_skip(path, index, line) else {
+            continue;
+        };
         if event.turn_id == Some(turn_id) && &event.kind == kind {
             return Ok(Some(event));
         }
@@ -2418,15 +2828,86 @@ fn read_bounded_session_event_line(reader: &mut impl BufRead) -> Result<Option<S
             MAX_SESSION_EVENT_LINE_BYTES
         ));
     }
+    let has_trailing_newline = bytes.last() == Some(&b'\n');
     while bytes
         .last()
         .is_some_and(|byte| *byte == b'\n' || *byte == b'\r')
     {
         bytes.pop();
     }
-    String::from_utf8(bytes)
-        .map(Some)
-        .context("session event log is not valid UTF-8")
+    match String::from_utf8(bytes) {
+        Ok(line) => Ok(Some(line)),
+        // An interrupted append can stop inside a UTF-8 character. Leave
+        // those bytes unconsumed by the context index until append repairs
+        // the tail; completed records must still decode strictly.
+        Err(_) if !has_trailing_newline => Ok(None),
+        Err(error) => Err(error).context("session event log is not valid UTF-8"),
+    }
+}
+
+/// Visits complete event lines from the end of the log, newest first.
+///
+/// Stops when `visit` returns true, the log was visited, or `max_bytes` of the
+/// tail was read. Windows end on a line boundary, so an event that spans a
+/// window edge is read whole by the next, larger window instead of in halves.
+fn visit_recent_event_lines(
+    file: &mut std::fs::File,
+    max_bytes: usize,
+    mut visit: impl FnMut(&str) -> bool,
+) -> Result<bool> {
+    let file_len = file.seek(SeekFrom::End(0))?;
+    if file_len == 0 || max_bytes == 0 {
+        return Ok(false);
+    }
+    let mut window_bytes = SESSION_EVENT_TAIL_CHUNK_BYTES.min(max_bytes);
+    let mut window_end = file_len;
+    while window_end > 0 {
+        let window_start = window_end.saturating_sub(window_bytes as u64);
+        let length = usize::try_from(window_end - window_start)?;
+        file.seek(SeekFrom::Start(window_start))?;
+        let mut buffer = vec![0u8; length];
+        file.read_exact(&mut buffer)?;
+        let line_start = if window_start == 0 {
+            0
+        } else {
+            match buffer.iter().position(|byte| *byte == b'\n') {
+                Some(newline) => newline + 1,
+                None => {
+                    // Still inside one event; widen the window instead of
+                    // parsing a fragment.
+                    window_end = window_start;
+                    if window_bytes >= max_bytes {
+                        break;
+                    }
+                    window_bytes = (window_bytes.saturating_mul(2)).min(max_bytes);
+                    continue;
+                }
+            }
+        };
+        let mut line_end = buffer.len();
+        if window_end == file_len && !buffer.ends_with(b"\n") {
+            // A crashed append left a partial last line; never parse it.
+            line_end = match buffer.iter().rposition(|byte| *byte == b'\n') {
+                Some(newline) => newline + 1,
+                None => 0,
+            };
+        }
+        if line_end > line_start {
+            let text = String::from_utf8_lossy(&buffer[line_start..line_end]);
+            for line in text.split('\n').rev().filter(|line| !line.is_empty()) {
+                if visit(line) {
+                    return Ok(true);
+                }
+            }
+        }
+        let aligned_start = window_start + line_start as u64;
+        if aligned_start == 0 || window_bytes >= max_bytes {
+            break;
+        }
+        window_end = aligned_start;
+        window_bytes = (window_bytes.saturating_mul(2)).min(max_bytes);
+    }
+    Ok(false)
 }
 
 fn read_recent_event_lines(file: &mut std::fs::File, max_lines: usize) -> Result<Vec<String>> {
@@ -2449,10 +2930,11 @@ fn read_recent_event_lines(file: &mut std::fs::File, max_lines: usize) -> Result
         .min(MAX_SESSION_EVENT_TAIL_READ_BYTES);
     while position > 0 && newline_count <= max_lines {
         if bytes_read >= max_tail_bytes {
-            return Err(anyhow!(
-                "recent session event window exceeds the {} byte read limit",
-                max_tail_bytes
-            ));
+            // Large events (command output) can fill the byte budget before
+            // `max_lines` lines are found. Return the complete lines already
+            // read — the partial first one is dropped below — rather than
+            // making the chat unopenable.
+            break;
         }
         let remaining_limit = max_tail_bytes - bytes_read;
         let chunk_len = usize::try_from(
@@ -2491,16 +2973,19 @@ fn read_recent_event_lines(file: &mut std::fs::File, max_lines: usize) -> Result
         }
     }
 
-    let has_trailing_newline = bytes.last() == Some(&b'\n');
+    if bytes.last() != Some(&b'\n') {
+        let tail_start = bytes
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map_or(0, |index| index + 1);
+        // Check the unfinished record before UTF-8 decoding the whole tail,
+        // otherwise a truncated character hides every earlier valid event.
+        if serde_json::from_slice::<SessionEvent>(&bytes[tail_start..]).is_err() {
+            bytes.truncate(tail_start);
+        }
+    }
     let text = String::from_utf8(bytes).context("session event log is not valid UTF-8")?;
     let mut lines = text.lines().map(str::to_string).collect::<Vec<_>>();
-    if !has_trailing_newline
-        && lines
-            .last()
-            .is_some_and(|line| serde_json::from_str::<SessionEvent>(line).is_err())
-    {
-        lines.pop();
-    }
     if lines.len() > max_lines {
         lines.drain(..lines.len() - max_lines);
     }
@@ -2587,6 +3072,7 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     let summary_updated_at: Option<String> = row.get(16)?;
     let workspace_identity_json: Option<String> = row.get(17)?;
     let parent_session_id: Option<String> = row.get(18)?;
+    let import_source_json: Option<String> = row.get(19)?;
     let workspace_path = PathBuf::from(workspace_path);
     let workspace_mode = SessionWorkspaceMode::from_str(&workspace_mode);
     let workspace_identity = workspace_identity_json
@@ -2626,6 +3112,9 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
             .map_err(parse_error)?
             .with_timezone(&Utc),
         events_path: PathBuf::from(events_path),
+        import_source: import_source_json
+            .map(|json| serde_json::from_str(&json).map_err(parse_error))
+            .transpose()?,
     })
 }
 
@@ -2645,6 +3134,23 @@ fn parse_session_event_line(
             line_number + 1
         )
     })
+}
+
+/// Read paths skip a complete line they cannot decode rather than making the
+/// whole chat unreadable. The line stays in the log; only its position is
+/// reported, never its content.
+fn parse_session_event_line_or_skip(
+    events_path: &Path,
+    line_number: usize,
+    line: &str,
+) -> Option<SessionEvent> {
+    match parse_session_event_line(events_path, line_number, line) {
+        Ok(event) => Some(event),
+        Err(error) => {
+            eprintln!("skipped an unreadable session event: {error:#}");
+            None
+        }
+    }
 }
 
 fn normalize_session_title(title: impl Into<String>) -> Result<String> {
@@ -2712,6 +3218,105 @@ fn validate_session_event_payload(payload: Value) -> Result<Value> {
         ));
     }
     Ok(payload)
+}
+
+/// Cut `text` to at most `max_chars` characters, ending with the truncation
+/// marker when anything was removed. Works in characters, so the cut is always
+/// on a UTF-8 boundary.
+fn truncate_chars_with_marker(text: &str, max_chars: usize) -> Option<String> {
+    if text.chars().count() <= max_chars {
+        return None;
+    }
+    let marker_chars = TRUNCATED_SESSION_EVENT_MARKER.chars().count();
+    let kept = max_chars.saturating_sub(marker_chars);
+    let mut truncated = text.chars().take(kept).collect::<String>();
+    truncated.push_str(TRUNCATED_SESSION_EVENT_MARKER);
+    Some(truncated)
+}
+
+/// Batch appends keep an oversize message, truncated, instead of failing.
+fn truncate_session_event_message(message: String) -> String {
+    let message = message.replace('\0', "");
+    truncate_chars_with_marker(&message, MAX_SESSION_EVENT_MESSAGE_CHARS).unwrap_or(message)
+}
+
+/// Batch appends keep an oversize payload by shortening its longest strings
+/// until it fits, and mark it `payloadTruncated`. A payload whose bulk is not
+/// in strings keeps only its small top-level fields.
+fn fit_session_event_payload(payload: Value) -> Result<Value> {
+    let encoded_len = serde_json::to_vec(&payload)?.len();
+    if encoded_len <= MAX_SESSION_EVENT_PAYLOAD_BYTES {
+        return Ok(payload);
+    }
+    // Short strings (ids, kinds, statuses) are never cut: a payload that only
+    // fits by cutting those falls through to the reduced form below.
+    let mut cap = longest_json_string_chars(&payload);
+    loop {
+        cap /= 2;
+        if cap < 256 {
+            break;
+        }
+        let mut candidate = payload.clone();
+        cap_json_strings(&mut candidate, cap);
+        mark_payload_truncated(&mut candidate);
+        if serde_json::to_vec(&candidate)?.len() <= MAX_SESSION_EVENT_PAYLOAD_BYTES {
+            return Ok(candidate);
+        }
+    }
+    let mut reduced = serde_json::Map::new();
+    if let Value::Object(object) = &payload {
+        for (key, value) in object {
+            if serde_json::to_vec(value)?.len() <= 1024 {
+                reduced.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    let mut reduced = Value::Object(reduced);
+    mark_payload_truncated(&mut reduced);
+    if serde_json::to_vec(&reduced)?.len() <= MAX_SESSION_EVENT_PAYLOAD_BYTES {
+        return Ok(reduced);
+    }
+    Ok(serde_json::json!({ "payloadTruncated": true }))
+}
+
+fn longest_json_string_chars(value: &Value) -> usize {
+    match value {
+        Value::String(text) => text.chars().count(),
+        Value::Array(items) => items
+            .iter()
+            .map(longest_json_string_chars)
+            .max()
+            .unwrap_or(0),
+        Value::Object(object) => object
+            .values()
+            .map(longest_json_string_chars)
+            .max()
+            .unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn cap_json_strings(value: &mut Value, max_chars: usize) {
+    match value {
+        Value::String(text) => {
+            if let Some(truncated) = truncate_chars_with_marker(text, max_chars) {
+                *text = truncated;
+            }
+        }
+        Value::Array(items) => items
+            .iter_mut()
+            .for_each(|item| cap_json_strings(item, max_chars)),
+        Value::Object(object) => object
+            .values_mut()
+            .for_each(|item| cap_json_strings(item, max_chars)),
+        _ => {}
+    }
+}
+
+fn mark_payload_truncated(payload: &mut Value) {
+    if let Value::Object(object) = payload {
+        object.insert("payloadTruncated".into(), Value::Bool(true));
+    }
 }
 
 fn normalize_provider_binding_text(label: &str, value: String) -> Result<String> {
@@ -2794,6 +3399,150 @@ mod tests {
         assert_eq!(events[0].kind, SessionEventKind::SessionCreated);
         assert_eq!(events[1].message, "hello");
         assert!(store.latest_session().unwrap().is_some());
+    }
+
+    #[test]
+    fn finds_the_workspace_context_event_for_its_turn_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "workspace chat")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+        store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::SystemEvent,
+                "Workspace context attached",
+                serde_json::json!({
+                    "kind": "workspace-context",
+                    "schema": "gyro.workspace-context.v1",
+                    "snapshot": { "schema": "gyro.workspace-context.v1", "revision": 7 },
+                }),
+                Some(turn_id),
+            )
+            .unwrap();
+        for index in 0..64 {
+            store
+                .append_event_with_turn_id(
+                    session.id,
+                    SessionEventKind::AssistantMessage,
+                    format!("later message {index}"),
+                    serde_json::json!({ "index": index }),
+                    Some(Uuid::new_v4()),
+                )
+                .unwrap();
+        }
+
+        let found = store
+            .latest_workspace_context_event(session.id, turn_id)
+            .unwrap()
+            .expect("workspace context event");
+        assert_eq!(found.turn_id, Some(turn_id));
+        assert_eq!(found.payload["kind"], "workspace-context");
+        assert_eq!(found.payload["snapshot"]["revision"], 7);
+        assert!(store
+            .latest_workspace_context_event(session.id, Uuid::new_v4())
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn workspace_context_lookup_reads_events_larger_than_the_tail_window() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "large context")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+        store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::SystemEvent,
+                "Workspace context attached",
+                serde_json::json!({
+                    "kind": "workspace-context",
+                    "snapshot": {
+                        "schema": "gyro.workspace-context.v1",
+                        "revision": 9,
+                        "buffers": ["x".repeat(90 * 1024)],
+                    },
+                }),
+                Some(turn_id),
+            )
+            .unwrap();
+        for index in 0..16 {
+            store
+                .append_event_with_turn_id(
+                    session.id,
+                    SessionEventKind::AssistantMessage,
+                    format!("after {index}"),
+                    serde_json::json!({ "index": index }),
+                    Some(Uuid::new_v4()),
+                )
+                .unwrap();
+        }
+
+        let found = store
+            .latest_workspace_context_event(session.id, turn_id)
+            .unwrap()
+            .expect("workspace context event spanning the tail window");
+        assert_eq!(found.payload["snapshot"]["revision"], 9);
+    }
+
+    #[test]
+    fn workspace_context_lookup_reads_a_crowded_tail() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "busy chat")
+            .unwrap();
+        for index in 0..240 {
+            store
+                .append_event_with_turn_id(
+                    session.id,
+                    SessionEventKind::UserMessage,
+                    format!("turn {index}"),
+                    serde_json::json!({ "index": index }),
+                    Some(Uuid::new_v4()),
+                )
+                .unwrap();
+        }
+        let turn_id = Uuid::new_v4();
+        store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::SystemEvent,
+                "Workspace context attached",
+                serde_json::json!({
+                    "kind": "workspace-context",
+                    "snapshot": { "revision": 41 },
+                }),
+                Some(turn_id),
+            )
+            .unwrap();
+        for index in 0..80 {
+            store
+                .append_event_with_turn_id(
+                    session.id,
+                    SessionEventKind::UserMessage,
+                    format!("later {index}"),
+                    serde_json::json!({ "index": index }),
+                    Some(Uuid::new_v4()),
+                )
+                .unwrap();
+        }
+
+        let found = store
+            .latest_workspace_context_event(session.id, turn_id)
+            .unwrap()
+            .expect("workspace context event behind a crowded tail");
+        assert_eq!(found.turn_id, Some(turn_id));
+        assert_eq!(found.payload["snapshot"]["revision"], 41);
+        assert!(store
+            .latest_workspace_context_event(session.id, Uuid::new_v4())
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -3087,6 +3836,7 @@ mod tests {
             .create_session(temp.path(), SessionOrigin::Desktop, "turn status")
             .unwrap();
         let turn_id = Uuid::new_v4();
+        assert!(!store.has_running_provider_turn(session.id).unwrap());
         store
             .append_event_with_turn_id(
                 session.id,
@@ -3113,6 +3863,8 @@ mod tests {
                 .as_deref(),
             Some("running")
         );
+        assert!(store.has_running_provider_turn(session.id).unwrap());
+        assert!(!store.has_running_provider_turn(Uuid::new_v4()).unwrap());
         store
             .append_event_with_turn_id(
                 session.id,
@@ -3129,6 +3881,7 @@ mod tests {
                 .as_deref(),
             Some("done")
         );
+        assert!(!store.has_running_provider_turn(session.id).unwrap());
     }
 
     #[test]
@@ -3217,6 +3970,116 @@ mod tests {
         assert!(repaired
             .lines()
             .all(|line| { serde_json::from_str::<SessionEvent>(line).is_ok() }));
+    }
+
+    #[test]
+    fn incomplete_utf8_tail_does_not_hide_durable_session_history() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "interrupted write")
+            .unwrap();
+        let goal = store
+            .append_event(
+                session.id,
+                SessionEventKind::GoalUpdated,
+                "Keep the completed work",
+                serde_json::json!({"action":"set","text":"Ship","status":"active"}),
+            )
+            .unwrap();
+        let durable = std::fs::read(&session.events_path).unwrap();
+        // A process can exit after writing only part of an emoji's four bytes.
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(&session.events_path)
+            .unwrap();
+        file.write_all(b"{\"message\":\"interrupted \xf0\x9f")
+            .unwrap();
+        file.sync_data().unwrap();
+        drop(file);
+        let interrupted = std::fs::read(&session.events_path).unwrap();
+        drop(store);
+        let store = SessionStore::open(paths).unwrap();
+
+        let recent = store.read_events(session.id);
+        let transcript = store.read_transcript_events(session.id);
+        let context = store.read_context_events(session.id);
+        assert!(
+            recent.is_ok() && transcript.is_ok() && context.is_ok(),
+            "incomplete UTF-8 must not hide durable events: recent={recent:?}, transcript={transcript:?}, context={context:?}"
+        );
+        for events in [recent.unwrap(), transcript.unwrap()] {
+            assert_eq!(events.len(), 2);
+            assert_eq!(events.last().unwrap().id, goal.id);
+        }
+        assert_eq!(context.unwrap()[0].id, goal.id);
+        let indexed_bytes: u64 = store
+            .conn
+            .query_row(
+                "select indexed_bytes from session_context_index where session_id = ?1",
+                params![session.id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexed_bytes, durable.len() as u64);
+        assert_eq!(
+            store.read_context_events(session.id).unwrap()[0].id,
+            goal.id
+        );
+
+        // Recovery reads leave the file alone; the next append repairs only
+        // the unfinished record and remains visible to the context index.
+        assert_eq!(std::fs::read(&session.events_path).unwrap(), interrupted);
+        let resumed = store
+            .append_event(
+                session.id,
+                SessionEventKind::GoalUpdated,
+                "Continue after recovery",
+                serde_json::json!({"action":"set","text":"Finish","status":"active"}),
+            )
+            .unwrap();
+        assert_eq!(store.read_transcript_events(session.id).unwrap().len(), 3);
+        let context = store.read_context_events(session.id).unwrap();
+        assert_eq!(context.len(), 2);
+        assert_eq!(context[1].id, resumed.id);
+        let repaired = std::fs::read_to_string(&session.events_path).unwrap();
+        assert!(!repaired.contains("interrupted"));
+    }
+
+    #[test]
+    fn complete_records_still_reject_invalid_utf8() {
+        let bytes = b"{\"message\":\"invalid \xf0\x9f\"}\n";
+        assert!(read_bounded_session_event_line(&mut &bytes[..]).is_err());
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(bytes).unwrap();
+        assert!(read_recent_event_lines(&mut file, 10).is_err());
+    }
+
+    #[test]
+    fn complete_event_without_final_newline_remains_readable() {
+        let event = SessionEvent::new(
+            Uuid::new_v4(),
+            SessionEventKind::AssistantMessage,
+            "Complete response 🦊",
+            serde_json::json!({}),
+        );
+        let bytes = serde_json::to_vec(&event).unwrap();
+        let line = read_bounded_session_event_line(&mut bytes.as_slice())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<SessionEvent>(&line).unwrap().id,
+            event.id
+        );
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(&bytes).unwrap();
+        let recent = read_recent_event_lines(&mut file, 10).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(
+            serde_json::from_str::<SessionEvent>(&recent[0]).unwrap().id,
+            event.id
+        );
     }
 
     #[test]
@@ -3427,21 +4290,439 @@ mod tests {
         assert_eq!(events[1].message, "durable message");
     }
 
+    fn append_raw_lines(path: &Path, lines: &[String]) {
+        let mut file = OpenOptions::new().append(true).open(path).unwrap();
+        for line in lines {
+            file.write_all(line.as_bytes()).unwrap();
+            file.write_all(b"\n").unwrap();
+        }
+        file.flush().unwrap();
+    }
+
+    fn raw_event_line(
+        session_id: Uuid,
+        kind: SessionEventKind,
+        message: &str,
+        turn_id: Option<Uuid>,
+    ) -> (Uuid, String) {
+        let mut event = SessionEvent::new(session_id, kind, message, serde_json::json!({}));
+        event.turn_id = turn_id;
+        (event.id, serde_json::to_string(&event).unwrap())
+    }
+
     #[test]
-    fn reports_corrupt_complete_event_lines() {
+    fn skips_corrupt_and_newer_event_lines_instead_of_failing_the_chat() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
         let session = store
             .create_session(temp.path(), SessionOrigin::Desktop, "corrupt session")
             .unwrap();
-        let mut file = OpenOptions::new()
-            .append(true)
-            .open(&session.events_path)
+        let (_, before) = raw_event_line(session.id, SessionEventKind::UserMessage, "before", None);
+        let mut newer = serde_json::from_str::<Value>(&before).unwrap();
+        newer["id"] = Value::String(Uuid::new_v4().to_string());
+        newer["kind"] = Value::String("kind-from-a-newer-gyro".into());
+        newer["message"] = Value::String("newer".into());
+        append_raw_lines(
+            &session.events_path,
+            &[
+                before,
+                "not-json".into(),
+                serde_json::to_string(&newer).unwrap(),
+            ],
+        );
+        let after = store
+            .append_event(
+                session.id,
+                SessionEventKind::GoalUpdated,
+                "after",
+                serde_json::json!({"action":"set","text":"Ship","status":"active"}),
+            )
             .unwrap();
-        file.write_all(b"not-json\n").unwrap();
-        file.flush().unwrap();
 
-        assert!(store.read_events(session.id).is_err());
+        let events = store.read_events(session.id).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.message.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Session created", "before", "newer", "after"]
+        );
+        assert_eq!(events[2].kind, SessionEventKind::Unknown);
+        let page = store.read_events_before(session.id, after.id, 10).unwrap();
+        assert_eq!(page.events.len(), 3);
+        assert_eq!(store.read_context_events(session.id).unwrap().len(), 1);
+        // This build never writes a kind it does not know.
+        assert!(store
+            .append_event(
+                session.id,
+                SessionEventKind::Unknown,
+                "never",
+                serde_json::json!({})
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn opens_a_chat_whose_recent_events_exceed_the_tail_read_budget() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "large output")
+            .unwrap();
+        // 40 events of ~900 KB each: more than the 32 MB tail budget before
+        // the requested number of lines is found.
+        let large = "x".repeat(900 * 1024);
+        let lines = (0..40)
+            .map(|index| {
+                let mut event = SessionEvent::new(
+                    session.id,
+                    SessionEventKind::CommandOutput,
+                    format!("output {index}"),
+                    serde_json::json!({ "output": large }),
+                );
+                event.turn_id = None;
+                serde_json::to_string(&event).unwrap()
+            })
+            .collect::<Vec<_>>();
+        append_raw_lines(&session.events_path, &lines);
+
+        let events = store.read_events(session.id).unwrap();
+        assert_eq!(events[0].kind, SessionEventKind::SessionCreated);
+        assert_eq!(events.last().unwrap().message, "output 39");
+        assert!(events.len() > 2 && events.len() < 41, "{}", events.len());
+        // Sending to the chat still works.
+        store
+            .append_user_turn_message(session.id, "still here", serde_json::json!({}))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_new_turn_trusts_the_turn_index_instead_of_scanning_the_log() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "indexed")
+            .unwrap();
+        store
+            .append_user_turn_message(session.id, "first", serde_json::json!({}))
+            .unwrap();
+        // A turn message the index never saw. Once the session is indexed the
+        // log is not scanned for it, so the append is not a replay of it.
+        let turn_id = Uuid::new_v4();
+        let (unindexed_id, line) = raw_event_line(
+            session.id,
+            SessionEventKind::UserMessage,
+            "unindexed",
+            Some(turn_id),
+        );
+        append_raw_lines(&session.events_path, &[line]);
+        let appended = store
+            .append_user_turn_message_with_turn_id(
+                session.id,
+                "second",
+                serde_json::json!({}),
+                turn_id,
+            )
+            .unwrap();
+        assert_ne!(appended.id, unindexed_id);
+        // Replays of indexed turns are still recognised.
+        let replay = store
+            .append_user_turn_message_with_turn_id(
+                session.id,
+                "second",
+                serde_json::json!({}),
+                turn_id,
+            )
+            .unwrap();
+        assert_eq!(replay.id, appended.id);
+    }
+
+    #[test]
+    fn a_legacy_log_still_catches_replays_and_never_blocks_an_append() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "legacy")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+        let (legacy_id, line) = raw_event_line(
+            session.id,
+            SessionEventKind::UserMessage,
+            "from before the index",
+            Some(turn_id),
+        );
+        append_raw_lines(&session.events_path, &[line]);
+        let replay = store
+            .append_user_turn_message_with_turn_id(
+                session.id,
+                "from before the index",
+                serde_json::json!({}),
+                turn_id,
+            )
+            .unwrap();
+        assert_eq!(replay.id, legacy_id);
+
+        // A log the legacy scan cannot read only loses the replay check.
+        let other = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "unreadable legacy")
+            .unwrap();
+        append_raw_lines(
+            &other.events_path,
+            &["x".repeat(MAX_SESSION_EVENT_LINE_BYTES + 1)],
+        );
+        store
+            .append_user_turn_message(other.id, "sent anyway", serde_json::json!({}))
+            .unwrap();
+    }
+
+    #[test]
+    fn listing_skips_a_session_row_it_cannot_decode() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let good = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "good")
+            .unwrap();
+        let bad_identity = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "bad identity")
+            .unwrap();
+        let bad_date = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "bad date")
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "update sessions set workspace_identity_json = '{broken' where id = ?1",
+                params![bad_identity.id.to_string()],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "update sessions set created_at = 'yesterday' where id = ?1",
+                params![bad_date.id.to_string()],
+            )
+            .unwrap();
+
+        let listed = store.list_sessions().unwrap();
+        assert_eq!(
+            listed.iter().map(|session| session.id).collect::<Vec<_>>(),
+            vec![good.id]
+        );
+        assert_eq!(store.list_sessions_limited(Some(10)).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn concurrent_opens_migrate_a_legacy_database_once() {
+        const OPENERS: usize = 8;
+        for _ in 0..3 {
+            let temp = tempfile::tempdir().unwrap();
+            let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+            paths.ensure().unwrap();
+            // A database from before most additive columns existed.
+            let conn = Connection::open(&paths.database_path).unwrap();
+            conn.execute_batch(
+                "create table sessions (
+                   id text primary key not null,
+                   title text not null,
+                   workspace_path text not null,
+                   origin text not null,
+                   created_at text not null,
+                   updated_at text not null,
+                   events_path text not null
+                 );
+                 create table provider_session_bindings (
+                   session_id text not null,
+                   provider_id text not null,
+                   model_id text,
+                   model_label text,
+                   resume_cursor_json text not null,
+                   status text not null,
+                   last_error text,
+                   updated_at text not null,
+                   primary key (session_id, provider_id)
+                 );",
+            )
+            .unwrap();
+            drop(conn);
+
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(OPENERS));
+            let threads = (0..OPENERS)
+                .map(|_| {
+                    let paths = paths.clone();
+                    let barrier = std::sync::Arc::clone(&barrier);
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        SessionStore::open(paths).map(|_| ())
+                    })
+                })
+                .collect::<Vec<_>>();
+            for thread in threads {
+                thread.join().unwrap().unwrap();
+            }
+            let store = SessionStore::open(paths).unwrap();
+            let version: i32 = store
+                .conn
+                .query_row("pragma user_version", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(version, SESSION_STORE_SCHEMA_VERSION);
+            store
+                .create_session(temp.path(), SessionOrigin::Cli, "after migration")
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn load_earlier_matches_only_the_cursor_event_and_skips_corrupt_history() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "cursor text")
+            .unwrap();
+        append_raw_lines(&session.events_path, &["not-json".into()]);
+        let cursor_id = Uuid::new_v4();
+        // An earlier event that mentions the cursor id is not the cursor.
+        let mentions = store
+            .append_event(
+                session.id,
+                SessionEventKind::SystemEvent,
+                format!("see {cursor_id}"),
+                serde_json::json!({ "relatedId": cursor_id }),
+            )
+            .unwrap();
+        let mut cursor = SessionEvent::new(
+            session.id,
+            SessionEventKind::UserMessage,
+            "cursor",
+            serde_json::json!({}),
+        );
+        cursor.id = cursor_id;
+        append_raw_lines(
+            &session.events_path,
+            &[serde_json::to_string(&cursor).unwrap()],
+        );
+
+        let page = store.read_events_before(session.id, cursor_id, 1).unwrap();
+        assert_eq!(page.events.len(), 1);
+        assert_eq!(page.events[0].id, mentions.id);
+        assert!(page.has_more_before);
+        let all = store.read_events_before(session.id, cursor_id, 10).unwrap();
+        assert_eq!(
+            all.events.iter().map(|event| event.id).collect::<Vec<_>>(),
+            vec![store.read_events(session.id).unwrap()[0].id, mentions.id]
+        );
+        assert!(!all.has_more_before);
+    }
+
+    #[test]
+    fn activity_batch_truncates_oversize_entries_and_splits_large_batches() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "big batch")
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+        // Multi-byte text, so a byte-based cut would split a character.
+        let huge_detail = "é".repeat(MAX_SESSION_EVENT_PAYLOAD_BYTES);
+        let huge_message = "m".repeat(MAX_SESSION_EVENT_MESSAGE_CHARS + 10);
+        let bulky = "b".repeat(100 * 1024);
+        let mut entries = vec![(
+            huge_message,
+            serde_json::json!({
+                "kind": "provider-activity",
+                "activityId": "big",
+                "detail": huge_detail,
+            }),
+            Some(turn_id),
+        )];
+        // 300 entries of ~100 KB: over both the 256-event and 8 MB limits.
+        entries.extend((0..300).map(|index| {
+            (
+                format!("activity {index}"),
+                serde_json::json!({ "kind": "provider-activity", "detail": bulky }),
+                Some(turn_id),
+            )
+        }));
+
+        let appended = store
+            .append_system_events_with_turn_id(session.id, entries)
+            .unwrap();
+        assert_eq!(appended.len(), 301);
+        let big = &appended[0];
+        assert_eq!(big.message.chars().count(), MAX_SESSION_EVENT_MESSAGE_CHARS);
+        assert!(big.message.ends_with(TRUNCATED_SESSION_EVENT_MARKER));
+        assert_eq!(big.payload["kind"], "provider-activity");
+        assert_eq!(big.payload["activityId"], "big");
+        assert_eq!(big.payload["payloadTruncated"], true);
+        let detail = big.payload["detail"].as_str().unwrap();
+        assert!(detail.ends_with(TRUNCATED_SESSION_EVENT_MARKER));
+        assert!(serde_json::to_vec(&big.payload).unwrap().len() <= MAX_SESSION_EVENT_PAYLOAD_BYTES);
+        assert!(appended[1].payload.get("payloadTruncated").is_none());
+
+        let events = store.read_recent_events(session.id, 400).unwrap();
+        assert_eq!(events.len(), 302);
+        assert_eq!(events[1].id, big.id);
+        assert_eq!(events.last().unwrap().message, "activity 299");
+    }
+
+    #[test]
+    fn context_indexing_from_several_processes_does_not_fail_on_a_stale_snapshot() {
+        const READERS: usize = 4;
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "shared context")
+            .unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(READERS));
+        let threads = (0..READERS)
+            .map(|reader| {
+                let paths = paths.clone();
+                let barrier = std::sync::Arc::clone(&barrier);
+                let session_id = session.id;
+                std::thread::spawn(move || {
+                    let store = SessionStore::open(paths).unwrap();
+                    barrier.wait();
+                    for round in 0..15 {
+                        store
+                            .append_event(
+                                session_id,
+                                SessionEventKind::GoalUpdated,
+                                format!("goal {reader}-{round}"),
+                                serde_json::json!({"action":"set","text":"x","status":"active"}),
+                            )
+                            .unwrap();
+                        store.read_context_events(session_id).unwrap();
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(
+            store.read_context_events(session.id).unwrap().len(),
+            READERS * 15
+        );
+    }
+
+    #[test]
+    fn deleting_a_projectless_chat_removes_its_private_workspace() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session("", SessionOrigin::Desktop, "no project")
+            .unwrap();
+        let kept = store
+            .create_session("", SessionOrigin::Desktop, "another")
+            .unwrap();
+        let workspace = paths.ensure_chat_workspace(session.id).unwrap();
+        let kept_workspace = paths.ensure_chat_workspace(kept.id).unwrap();
+        std::fs::write(workspace.join("scratch.txt"), b"work").unwrap();
+
+        assert!(store.delete_session(session.id).unwrap());
+        assert!(!workspace.exists());
+        assert!(kept_workspace.is_dir());
     }
 
     #[test]

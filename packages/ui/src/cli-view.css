@@ -1,0 +1,220 @@
+/* CLI chrome shares the app's tokens; terminal renderers retain their own theme. */
+:root .gyro-cli-sidebar-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 12px 20px;
+}
+:root .gyro-cli-sidebar-list .gyro-cli-back {
+  margin: 0 0 20px;
+  padding-inline: 10px;
+  color: var(--gyro-muted);
+}
+:root .gyro-cli-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 8px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+}
+:root .gyro-cli-list-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--gyro-faint);
+}
+:root .gyro-cli-sidebar-item {
+  position: relative;
+  margin: 4px 0;
+}
+:root .gyro-cli-sidebar-select {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 58px;
+  padding: 10px 36px 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--gyro-radius-md);
+  background: transparent;
+  color: var(--gyro-muted);
+  font: inherit;
+  text-align: left;
+}
+:root .gyro-cli-sidebar-select:is(:hover, .is-active) {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+:root .gyro-cli-sidebar-select.is-active {
+  border-color: var(--gyro-border-soft);
+  box-shadow: inset 2px 0 0 var(--gyro-accent);
+}
+:root .gyro-cli-sidebar-select > :is(svg, .gyro-provider-logo) {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+:root .gyro-cli-sidebar-select .gyro-cli-session-copy {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+:root .gyro-cli-session-copy > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+}
+:root .gyro-cli-session-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+:root .gyro-cli-session-meta > .gyro-ring {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  box-shadow: none;
+}
+:root .gyro-cli-session-folder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+:root .gyro-cli-sidebar-close {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  background: transparent;
+  color: var(--gyro-muted);
+  opacity: 0;
+}
+:root .gyro-cli-sidebar-item:is(:hover, :focus-within) .gyro-cli-sidebar-close {
+  opacity: 1;
+}
+:root .gyro-cli-sidebar-close:hover {
+  background: var(--gyro-sidebar-soft);
+  color: var(--gyro-text);
+}
+:root .gyro-cli-sidebar-list button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+:root[data-density="compact"] .gyro-cli-sidebar-select {
+  min-height: 50px;
+  padding-block: 6px;
+}
+
+/* Higher specificity keeps these rules independent of legacy terminal overrides. */
+:root[data-theme] .gyro-terminal-workspace:not(.is-empty) {
+  grid-template-rows: var(--gyro-tool-header-height) minmax(0, 1fr);
+}
+:root[data-theme]
+  .gyro-terminal-workspace
+  .gyro-terminal-toolbar:not(.is-empty) {
+  box-sizing: border-box;
+  height: var(--gyro-tool-header-height);
+  min-height: var(--gyro-tool-header-height);
+  padding: 2px 12px;
+  gap: 8px;
+  background: var(--gyro-pane);
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+:root[data-theme] .gyro-terminal-workspace .gyro-terminal-tabs {
+  gap: 4px;
+  padding: 2px;
+}
+:root[data-theme] .gyro-terminal-workspace .gyro-terminal-tab {
+  height: var(--gyro-control-height);
+  min-width: 120px;
+  border-radius: var(--gyro-radius-md);
+}
+:root[data-theme] .gyro-terminal-workspace .gyro-terminal-tab.is-active {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+  box-shadow: inset 0 -2px 0 var(--gyro-accent);
+}
+:root[data-theme]
+  .gyro-terminal-workspace
+  .gyro-terminal-tab:not(.is-active):hover {
+  background: var(--gyro-surface-soft);
+}
+:root[data-theme]
+  .gyro-terminal-workspace
+  .gyro-terminal-tab
+  > button[role="tab"] {
+  height: var(--gyro-control-height);
+  gap: 8px;
+  padding-inline: 10px 4px;
+  font-size: var(--gyro-font-support);
+}
+:root[data-theme] .gyro-terminal-workspace .gyro-terminal-tab-grip {
+  width: 8px;
+}
+:root[data-theme] .gyro-terminal-workspace .gyro-terminal-tab-close {
+  opacity: 0;
+}
+:root[data-theme]
+  .gyro-terminal-workspace
+  .gyro-terminal-tab:is(.is-active, :hover, :focus-within)
+  .gyro-terminal-tab-close {
+  opacity: 1;
+}
+:root[data-theme]
+  .gyro-terminal-workspace
+  .gyro-terminal-toolbar
+  .gyro-terminal-agent-button,
+:root[data-theme] .gyro-terminal-workspace .gyro-terminal-actions > button {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+}
+:root[data-theme]
+  .gyro-terminal-workspace
+  .gyro-terminal-toolbar
+  .gyro-terminal-agent-button
+  > svg {
+  display: block;
+}
+:root[data-theme]
+  .gyro-terminal-workspace
+  .gyro-terminal-toolbar
+  .gyro-terminal-agent-button:hover,
+:root[data-theme]
+  .gyro-terminal-workspace
+  .gyro-terminal-actions
+  > button:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+:root[data-theme]
+  .gyro-terminal-workspace
+  .gyro-terminal-toolbar
+  button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+:root[data-theme] .gyro-terminal-workspace .gyro-xterm-host {
+  padding: 16px 20px;
+}
+@media (hover: none) {
+  :root .gyro-cli-sidebar-close,
+  :root[data-theme] .gyro-terminal-workspace .gyro-terminal-tab-close {
+    opacity: 1;
+  }
+}

@@ -3,6 +3,7 @@ use crate::paths::GyroPaths;
 use crate::usage::UsageGuardConfig;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -12,49 +13,85 @@ use uuid::Uuid;
 
 const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 
-/// Process-local config cache keyed by absolute path + mtime. Desktop and CLI
-/// both re-read config on many UI actions; skipping identical disk parses is a
-/// large win on cold interaction paths without risking stale writes (save clears).
+/// Cache the version of the file actually read. A late reader must never stamp
+/// old approval settings with the metadata of a newer replacement.
 #[derive(Clone)]
 struct ConfigCacheEntry {
     path: PathBuf,
-    mtime: Option<SystemTime>,
+    version: ConfigFileVersion,
     config: GyroConfig,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ConfigFileVersion {
+    Missing,
+    File {
+        modified: Option<SystemTime>,
+        len: u64,
+        #[cfg(unix)]
+        identity: (u64, u64, i64, i64),
+    },
+}
+
+impl ConfigFileVersion {
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Self::File {
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+            #[cfg(unix)]
+            identity: (
+                metadata.dev(),
+                metadata.ino(),
+                metadata.ctime(),
+                metadata.ctime_nsec(),
+            ),
+        }
+    }
 }
 
 static CONFIG_CACHE: Mutex<Option<ConfigCacheEntry>> = Mutex::new(None);
 
-fn config_mtime(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path)
-        .and_then(|meta| meta.modified())
-        .ok()
+fn config_file_version(path: &Path) -> Result<ConfigFileVersion> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && metadata.len() <= MAX_CONFIG_BYTES as u64 => {
+            Ok(ConfigFileVersion::from_metadata(&metadata))
+        }
+        Ok(_) => Err(anyhow!("config cache target is not a bounded regular file")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(ConfigFileVersion::Missing)
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn read_config_cache(path: &Path) -> Option<GyroConfig> {
+    // Inspect without following links and outside the cache lock. Cache hits
+    // must enforce the same file/size restrictions as uncached reads.
+    let version = config_file_version(path).ok()?;
     let guard = CONFIG_CACHE.lock().ok()?;
     let entry = guard.as_ref()?;
     if entry.path != path {
         return None;
     }
-    let mtime = config_mtime(path);
-    if entry.mtime != mtime {
+    if entry.version != version {
         return None;
     }
     Some(entry.config.clone())
 }
 
-fn write_config_cache(path: &Path, config: &GyroConfig) {
+fn write_config_cache(path: &Path, config: &GyroConfig, version: ConfigFileVersion) {
     let Ok(mut guard) = CONFIG_CACHE.lock() else {
         return;
     };
     *guard = Some(ConfigCacheEntry {
         path: path.to_path_buf(),
-        mtime: config_mtime(path),
+        version,
         config: config.clone(),
     });
 }
 
-#[allow(dead_code)]
 fn clear_config_cache() {
     if let Ok(mut guard) = CONFIG_CACHE.lock() {
         *guard = None;
@@ -180,12 +217,20 @@ pub struct GyroConfig {
     /// settings save or relaunch.
     #[serde(default)]
     pub selected_provider_id: Option<String>,
+    /// Explicit per-model Fast mode opt-ins; absent choices use standard speed.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub fast_mode_models: HashMap<String, bool>,
+    /// Shipped providers hidden from the picker and settings until restored.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_provider_ids: Vec<String>,
     pub model_providers: Vec<ModelProviderConfig>,
     pub command_profiles: Vec<CommandProfile>,
     #[serde(default)]
     pub council: CouncilConfig,
     #[serde(default)]
     pub usage_guard: UsageGuardConfig,
+    #[serde(default)]
+    pub efficiency: crate::efficiency::Config,
 }
 
 impl Default for GyroConfig {
@@ -200,8 +245,11 @@ impl Default for GyroConfig {
             account_oidc: AccountOidcConfig::default(),
             account_session: AccountSessionState::default(),
             selected_provider_id: None,
+            fast_mode_models: HashMap::new(),
+            removed_provider_ids: Vec::new(),
             council: CouncilConfig::default(),
             usage_guard: UsageGuardConfig::default(),
+            efficiency: crate::efficiency::Config::default(),
             model_providers: vec![
                 ModelProviderConfig {
                     id: "openai".into(),
@@ -244,10 +292,10 @@ impl Default for GyroConfig {
                     model_ids: Vec::new(),
                 },
                 ModelProviderConfig {
-                    id: "gemini".into(),
-                    display_name: "Gemini".into(),
+                    id: "antigravity".into(),
+                    display_name: "Google Antigravity".into(),
                     base_url: None,
-                    api_key_ref: "provider-cli:gemini".into(),
+                    api_key_ref: "provider-cli:antigravity".into(),
                     enabled: false,
                     default_model_id: None,
                     kind: None,
@@ -292,9 +340,9 @@ impl Default for GyroConfig {
                     base_url: Some("https://api.deepseek.com/v1".into()),
                     api_key_ref: "provider:deepseek".into(),
                     enabled: false,
-                    default_model_id: Some("deepseek-chat".into()),
+                    default_model_id: Some("deepseek-flash".into()),
                     kind: None,
-                    model_ids: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
+                    model_ids: vec!["deepseek-flash".into(), "deepseek-v4-pro".into()],
                 },
                 ModelProviderConfig {
                     id: "mistral".into(),
@@ -317,7 +365,7 @@ impl Default for GyroConfig {
                     model_ids: vec![
                         "anthropic/claude-sonnet-4.5".into(),
                         "openai/gpt-5.1".into(),
-                        "google/gemini-3-pro-preview".into(),
+                        "google/gemini-3.8-flash".into(),
                         "deepseek/deepseek-chat".into(),
                         "meta-llama/llama-3.3-70b-instruct".into(),
                     ],
@@ -375,16 +423,6 @@ impl Default for GyroConfig {
                     readiness: CommandProfileReadiness::Waiting,
                 },
                 CommandProfile {
-                    id: "gemini-cli".into(),
-                    display_name: "Gemini CLI".into(),
-                    command: "gemini".into(),
-                    args: Vec::new(),
-                    working_directory: None,
-                    provider_id: Some("gemini".into()),
-                    default_model: Some("gemini-default".into()),
-                    readiness: CommandProfileReadiness::Waiting,
-                },
-                CommandProfile {
                     id: "cursor".into(),
                     display_name: "Cursor".into(),
                     command: "cursor-agent".into(),
@@ -425,24 +463,40 @@ fn default_automatic_update_checks() -> bool {
     true
 }
 
+/// What `remove_provider` changed, so the CLI can describe it without guessing.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemovedProvider {
+    pub display_name: String,
+    /// Gyro had a Keychain entry it should delete. The caller clears it.
+    pub clears_api_key: bool,
+    /// The vendor CLI on this Mac stays signed in.
+    pub keeps_cli_sign_in: bool,
+}
+
 impl GyroConfig {
     pub fn load(paths: &GyroPaths) -> Result<Self> {
         if let Some(cached) = read_config_cache(&paths.config_path) {
             return Ok(cached);
         }
-        let config = Self::load_unlocked(paths)?;
-        write_config_cache(&paths.config_path, &config);
+        let (config, version) = Self::load_unlocked_with_version(paths)?;
+        if let Some(version) = version {
+            write_config_cache(&paths.config_path, &config, version);
+        }
         Ok(config)
     }
 
     fn load_unlocked(paths: &GyroPaths) -> Result<Self> {
+        Self::load_unlocked_with_version(paths).map(|(config, _)| config)
+    }
+
+    fn load_unlocked_with_version(paths: &GyroPaths) -> Result<(Self, Option<ConfigFileVersion>)> {
         let Some(file) = open_config_for_read(&paths.config_path)? else {
-            let config = Self::default();
-            write_config_cache(&paths.config_path, &config);
-            return Ok(config);
+            return Ok((Self::default(), Some(ConfigFileVersion::Missing)));
         };
+        let version = ConfigFileVersion::from_metadata(&file.metadata()?);
         let mut bytes = Vec::new();
-        file.take((MAX_CONFIG_BYTES + 1) as u64)
+        (&file)
+            .take((MAX_CONFIG_BYTES + 1) as u64)
             .read_to_end(&mut bytes)
             .with_context(|| format!("read {}", paths.config_path.display()))?;
         if bytes.len() > MAX_CONFIG_BYTES {
@@ -458,7 +512,11 @@ impl GyroConfig {
             .with_context(|| format!("parse {}", paths.config_path.display()))?;
         config.normalize_legacy_state();
         config.council = std::mem::take(&mut config.council).normalized();
-        Ok(config)
+        // Atomic saves keep an open reader on its old inode; that version is
+        // safe to cache and will miss against the replacement. In-place edits
+        // during the read are returned uncached.
+        let after = ConfigFileVersion::from_metadata(&file.metadata()?);
+        Ok((config, (version == after).then_some(version)))
     }
 
     pub fn save(&self, paths: &GyroPaths) -> Result<()> {
@@ -486,7 +544,9 @@ impl GyroConfig {
             ));
         }
         atomic_write_private_config(&paths.config_path, &bytes)?;
-        write_config_cache(&paths.config_path, self);
+        // Do not label this value with a later writer's path metadata. The next
+        // read populates the cache from the opened file itself.
+        clear_config_cache();
         Ok(())
     }
 
@@ -508,6 +568,18 @@ impl GyroConfig {
             self.account_session.issuer = Some("local-device://gyro".into());
         }
 
+        // Gemini CLI is retired from the provider picker. Its OAuth session and
+        // model ids are not Antigravity credentials or an Antigravity inventory.
+        self.model_providers
+            .retain(|provider| provider.id != "gemini");
+        self.command_profiles.retain(|profile| {
+            profile.provider_id.as_deref() != Some("gemini")
+                && !matches!(profile.id.as_str(), "gemini" | "gemini-cli")
+        });
+        if self.selected_provider_id.as_deref() == Some("gemini") {
+            self.selected_provider_id = Some("antigravity".into());
+        }
+
         for profile in &mut self.command_profiles {
             if profile.provider_id.is_none() {
                 profile.provider_id = match profile.id.as_str() {
@@ -515,7 +587,6 @@ impl GyroConfig {
                     "claude" | "claude-code" => Some("anthropic".into()),
                     "kimi" | "kimi-code" => Some("kimi".into()),
                     "grok" | "grok-build" => Some("xai".into()),
-                    "gemini" | "gemini-cli" => Some("gemini".into()),
                     "ollama" => Some("ollama".into()),
                     "cursor" | "cursor-agent" => Some("cursor".into()),
                     "opencode" => Some("opencode".into()),
@@ -546,10 +617,10 @@ impl GyroConfig {
                 model_ids: Vec::new(),
             },
             ModelProviderConfig {
-                id: "gemini".into(),
-                display_name: "Gemini".into(),
+                id: "antigravity".into(),
+                display_name: "Google Antigravity".into(),
                 base_url: None,
-                api_key_ref: "provider-cli:gemini".into(),
+                api_key_ref: "provider-cli:antigravity".into(),
                 enabled: false,
                 default_model_id: None,
                 kind: None,
@@ -594,9 +665,9 @@ impl GyroConfig {
                 base_url: Some("https://api.deepseek.com/v1".into()),
                 api_key_ref: "provider:deepseek".into(),
                 enabled: false,
-                default_model_id: Some("deepseek-chat".into()),
+                default_model_id: Some("deepseek-flash".into()),
                 kind: None,
-                model_ids: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
+                model_ids: vec!["deepseek-flash".into(), "deepseek-v4-pro".into()],
             },
             ModelProviderConfig {
                 id: "mistral".into(),
@@ -619,7 +690,7 @@ impl GyroConfig {
                 model_ids: vec![
                     "anthropic/claude-sonnet-4.5".into(),
                     "openai/gpt-5.1".into(),
-                    "google/gemini-3-pro-preview".into(),
+                    "google/gemini-3.8-flash".into(),
                     "deepseek/deepseek-chat".into(),
                     "meta-llama/llama-3.3-70b-instruct".into(),
                 ],
@@ -632,6 +703,81 @@ impl GyroConfig {
             {
                 self.model_providers.push(provider);
             }
+        }
+
+        // Remove stopped API models from saved defaults and custom model lists.
+        // Config does not know the live Codex authentication route, so API-key
+        // exemptions are retained; the picker filters ChatGPT-only retirements.
+        for provider in &mut self.model_providers {
+            let replacement = provider.default_model_id.as_deref().and_then(|model| {
+                crate::model_retirements::retired_model_replacement(&provider.id, model, true)
+            });
+            if let Some(replacement) = replacement {
+                provider.default_model_id = Some(replacement.into());
+            }
+            provider.model_ids.retain(|model| {
+                crate::model_retirements::retired_model_replacement(&provider.id, model, true)
+                    .is_none()
+            });
+            if replacement.is_some() {
+                if let Some(default) = provider.default_model_id.as_ref() {
+                    if !provider.model_ids.contains(default) {
+                        provider.model_ids.push(default.clone());
+                    }
+                }
+            }
+        }
+        for profile in &mut self.command_profiles {
+            if let Some(replacement) = profile
+                .provider_id
+                .as_deref()
+                .zip(profile.default_model.as_deref())
+                .and_then(|(provider, model)| {
+                    crate::model_retirements::retired_model_replacement(provider, model, true)
+                })
+            {
+                profile.default_model = Some(replacement.into());
+            }
+        }
+
+        // Grok 4.7 Fast is the fast-pool launch id, not a picker model.
+        if self.model_providers.iter().any(|provider| {
+            provider.id == "xai"
+                && provider.default_model_id.as_deref() == Some(crate::grok::BUILD_FAST_MODEL_ID)
+        }) {
+            self.fast_mode_models
+                .entry("xai:grok-4.7".into())
+                .or_insert(true);
+            if let Some(provider) = self
+                .model_providers
+                .iter_mut()
+                .find(|provider| provider.id == "xai")
+            {
+                provider.default_model_id = Some("grok-4.7".into());
+            }
+        }
+        for profile in &mut self.command_profiles {
+            if profile.provider_id.as_deref() == Some("xai")
+                && profile.default_model.as_deref() == Some(crate::grok::BUILD_FAST_MODEL_ID)
+            {
+                profile.default_model = Some("grok-4.7".into());
+            }
+        }
+        for provider in &mut self.model_providers {
+            if self
+                .removed_provider_ids
+                .iter()
+                .any(|id| id == &provider.id)
+            {
+                provider.enabled = false;
+            }
+        }
+        if self
+            .selected_provider_id
+            .as_deref()
+            .is_some_and(|selected| self.removed_provider_ids.iter().any(|id| id == selected))
+        {
+            self.selected_provider_id = None;
         }
 
         // Older config files predate the explicit provider selection. A
@@ -677,16 +823,6 @@ impl GyroConfig {
                 readiness: CommandProfileReadiness::Waiting,
             },
             CommandProfile {
-                id: "gemini-cli".into(),
-                display_name: "Gemini CLI".into(),
-                command: "gemini".into(),
-                args: Vec::new(),
-                working_directory: None,
-                provider_id: Some("gemini".into()),
-                default_model: Some("gemini-default".into()),
-                readiness: CommandProfileReadiness::Waiting,
-            },
-            CommandProfile {
                 id: "cursor".into(),
                 display_name: "Cursor".into(),
                 command: "cursor-agent".into(),
@@ -725,6 +861,86 @@ impl GyroConfig {
                 self.command_profiles.push(profile);
             }
         }
+    }
+
+    /// Hide a shipped provider, or delete a `custom:` provider.
+    ///
+    /// Shipped providers stay in config so a later restore can show them again.
+    /// The caller deletes a stored API key when [`RemovedProvider::clears_api_key`]
+    /// is set. This does not sign out of a vendor CLI.
+    pub fn remove_provider(&mut self, provider_id: &str) -> Result<RemovedProvider, String> {
+        let provider_id = provider_id.trim();
+        if provider_id.is_empty() {
+            return Err("provider id is empty".into());
+        }
+        if crate::provider_registry::is_custom_provider_id(provider_id) {
+            let index = self
+                .model_providers
+                .iter()
+                .position(|provider| provider.id == provider_id)
+                .ok_or_else(|| format!("unknown provider `{provider_id}`"))?;
+            let removed = self.model_providers.remove(index);
+            if self.selected_provider_id.as_deref() == Some(provider_id) {
+                self.selected_provider_id = None;
+            }
+            return Ok(RemovedProvider {
+                display_name: removed.display_name,
+                clears_api_key: true,
+                keeps_cli_sign_in: false,
+            });
+        }
+        let descriptor = crate::provider_registry::provider_descriptor(provider_id)
+            .ok_or_else(|| format!("unknown provider `{provider_id}`"))?;
+        if !self.removed_provider_ids.iter().any(|id| id == provider_id) {
+            self.removed_provider_ids.push(provider_id.to_string());
+        }
+        let mut display_name = provider_id.to_string();
+        if let Some(provider) = self
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == provider_id)
+        {
+            provider.enabled = false;
+            display_name = provider.display_name.clone();
+        }
+        if self.selected_provider_id.as_deref() == Some(provider_id) {
+            self.selected_provider_id = None;
+        }
+        let keeps_cli_sign_in = matches!(
+            descriptor.execution_kind,
+            crate::provider_registry::ProviderExecutionKind::CodexCli
+                | crate::provider_registry::ProviderExecutionKind::ClaudeCode
+                | crate::provider_registry::ProviderExecutionKind::KimiAcp
+                | crate::provider_registry::ProviderExecutionKind::AcpCli
+        );
+        Ok(RemovedProvider {
+            display_name,
+            clears_api_key: crate::credentials::provider_supports_api_key(provider_id),
+            keeps_cli_sign_in,
+        })
+    }
+
+    /// Show a shipped provider again. A deleted custom provider cannot return.
+    pub fn restore_provider(&mut self, provider_id: &str) -> Result<String, String> {
+        let provider_id = provider_id.trim();
+        if crate::provider_registry::is_custom_provider_id(provider_id) {
+            return Err(
+                "a custom provider is deleted with its config entry and cannot be restored".into(),
+            );
+        }
+        if crate::provider_registry::provider_descriptor(provider_id).is_none() {
+            return Err(format!("unknown provider `{provider_id}`"));
+        }
+        if !self.removed_provider_ids.iter().any(|id| id == provider_id) {
+            return Err(format!("`{provider_id}` is not removed"));
+        }
+        self.removed_provider_ids.retain(|id| id != provider_id);
+        Ok(self
+            .model_providers
+            .iter()
+            .find(|provider| provider.id == provider_id)
+            .map(|provider| provider.display_name.clone())
+            .unwrap_or_else(|| provider_id.to_string()))
     }
 }
 
@@ -944,6 +1160,211 @@ mod tests {
     }
 
     #[test]
+    fn fast_pool_defaults_rewrite_and_providers_can_be_removed_and_restored() {
+        let mut config = GyroConfig::default();
+        config
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == "xai")
+            .unwrap()
+            .default_model_id = Some(crate::grok::BUILD_FAST_MODEL_ID.into());
+        config.command_profiles.push(CommandProfile {
+            id: "fast-profile".into(),
+            display_name: "Fast".into(),
+            command: "grok".into(),
+            args: Vec::new(),
+            working_directory: None,
+            provider_id: Some("xai".into()),
+            default_model: Some(crate::grok::BUILD_FAST_MODEL_ID.into()),
+            readiness: CommandProfileReadiness::Waiting,
+        });
+        config.normalize_legacy_state();
+        assert_eq!(
+            config
+                .model_providers
+                .iter()
+                .find(|provider| provider.id == "xai")
+                .unwrap()
+                .default_model_id
+                .as_deref(),
+            Some("grok-4.7")
+        );
+        assert_eq!(config.fast_mode_models.get("xai:grok-4.7"), Some(&true));
+        assert_eq!(
+            config
+                .command_profiles
+                .iter()
+                .find(|profile| profile.id == "fast-profile")
+                .unwrap()
+                .default_model
+                .as_deref(),
+            Some("grok-4.7")
+        );
+
+        let mut explicit = GyroConfig::default();
+        explicit
+            .fast_mode_models
+            .insert("xai:grok-4.7".into(), false);
+        explicit
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == "xai")
+            .unwrap()
+            .default_model_id = Some(crate::grok::BUILD_FAST_MODEL_ID.into());
+        explicit.normalize_legacy_state();
+        assert_eq!(explicit.fast_mode_models.get("xai:grok-4.7"), Some(&false));
+
+        config
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == "openai")
+            .unwrap()
+            .enabled = true;
+        config.selected_provider_id = Some("openai".into());
+        let openai = config.remove_provider("openai").unwrap();
+        assert_eq!(openai.display_name, "OpenAI");
+        assert!(openai.clears_api_key);
+        assert!(openai.keeps_cli_sign_in);
+        assert!(
+            !config
+                .model_providers
+                .iter()
+                .find(|provider| provider.id == "openai")
+                .unwrap()
+                .enabled
+        );
+        assert_ne!(config.selected_provider_id.as_deref(), Some("openai"));
+        config.remove_provider("openai").unwrap();
+        assert_eq!(
+            config
+                .removed_provider_ids
+                .iter()
+                .filter(|id| id.as_str() == "openai")
+                .count(),
+            1
+        );
+
+        let deepseek = config.remove_provider("deepseek").unwrap();
+        assert!(deepseek.clears_api_key);
+        assert!(!deepseek.keeps_cli_sign_in);
+        let ollama = config.remove_provider("ollama").unwrap();
+        assert!(!ollama.clears_api_key);
+        assert!(!ollama.keeps_cli_sign_in);
+
+        let json = serde_json::to_value(&config).unwrap();
+        assert!(json["removedProviderIds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == "deepseek"));
+        let restored: GyroConfig = serde_json::from_value(json).unwrap();
+        assert!(restored
+            .removed_provider_ids
+            .iter()
+            .any(|id| id == "ollama"));
+
+        assert_eq!(config.restore_provider("ollama").unwrap(), "Ollama");
+        assert!(config.removed_provider_ids.iter().all(|id| id != "ollama"));
+        assert!(config.restore_provider("ollama").is_err());
+        assert!(config.remove_provider("not-a-provider").is_err());
+
+        config.model_providers.push(ModelProviderConfig {
+            id: "custom:lab".into(),
+            display_name: "Lab".into(),
+            base_url: Some("https://lab.example/v1".into()),
+            api_key_ref: "provider:custom:lab".into(),
+            enabled: true,
+            default_model_id: None,
+            kind: Some("openai-compatible".into()),
+            model_ids: vec!["local".into()],
+        });
+        config.selected_provider_id = Some("custom:lab".into());
+        let custom = config.remove_provider("custom:lab").unwrap();
+        assert_eq!(custom.display_name, "Lab");
+        assert!(custom.clears_api_key);
+        assert!(!custom.keeps_cli_sign_in);
+        assert!(config
+            .model_providers
+            .iter()
+            .all(|provider| provider.id != "custom:lab"));
+        assert_ne!(config.selected_provider_id.as_deref(), Some("custom:lab"));
+        assert!(config.remove_provider("custom:missing").is_err());
+        assert!(config.restore_provider("custom:lab").is_err());
+    }
+
+    #[test]
+    fn retired_models_are_removed_from_defaults_and_saved_provider_state() {
+        let mut config = GyroConfig::default();
+        let deepseek = config
+            .model_providers
+            .iter_mut()
+            .find(|p| p.id == "deepseek")
+            .unwrap();
+        assert_eq!(deepseek.default_model_id.as_deref(), Some("deepseek-flash"));
+        assert_eq!(deepseek.model_ids, ["deepseek-flash", "deepseek-v4-pro"]);
+        deepseek.default_model_id = Some("deepseek-reasoner".into());
+        deepseek.model_ids = vec![
+            "deepseek-chat".into(),
+            "deepseek-reasoner".into(),
+            "deepseek-v4-pro".into(),
+        ];
+        let router = config
+            .model_providers
+            .iter_mut()
+            .find(|p| p.id == "openrouter")
+            .unwrap();
+        router.default_model_id = Some("google/gemini-3-pro-preview".into());
+        router.model_ids.push("google/gemini-3-pro-preview".into());
+        config.model_providers.push(ModelProviderConfig {
+            id: "custom:local".into(),
+            display_name: "Local".into(),
+            base_url: Some("http://localhost:8080/v1".into()),
+            api_key_ref: "local".into(),
+            enabled: true,
+            default_model_id: Some("deepseek-chat".into()),
+            kind: None,
+            model_ids: vec!["deepseek-chat".into()],
+        });
+        config.command_profiles[0].provider_id = Some("deepseek".into());
+        config.command_profiles[0].default_model = Some("deepseek-chat".into());
+        config.normalize_legacy_state();
+        let deepseek = config
+            .model_providers
+            .iter()
+            .find(|p| p.id == "deepseek")
+            .unwrap();
+        assert_eq!(deepseek.default_model_id.as_deref(), Some("deepseek-flash"));
+        assert_eq!(deepseek.model_ids, ["deepseek-v4-pro", "deepseek-flash"]);
+        let router = config
+            .model_providers
+            .iter()
+            .find(|p| p.id == "openrouter")
+            .unwrap();
+        assert_eq!(
+            router.default_model_id.as_deref(),
+            Some("google/gemini-3.8-flash")
+        );
+        assert!(!router
+            .model_ids
+            .iter()
+            .any(|id| id == "google/gemini-3-pro-preview"));
+        assert!(router
+            .model_ids
+            .iter()
+            .any(|id| id == "deepseek/deepseek-chat"));
+        let local = config
+            .model_providers
+            .iter()
+            .find(|p| p.id == "custom:local")
+            .unwrap();
+        assert_eq!(local.default_model_id.as_deref(), Some("deepseek-chat"));
+        assert_eq!(
+            config.command_profiles[0].default_model.as_deref(),
+            Some("deepseek-flash")
+        );
+    }
+
+    #[test]
     fn defaults_are_local_first() {
         let config = GyroConfig::default();
         assert!(!config.telemetry_enabled);
@@ -1113,7 +1534,7 @@ mod tests {
             config.command_profiles[1].provider_id.as_deref(),
             Some("anthropic")
         );
-        for provider_id in ["kimi", "xai", "gemini"] {
+        for provider_id in ["kimi", "xai", "antigravity"] {
             assert!(
                 config
                     .model_providers
@@ -1122,11 +1543,7 @@ mod tests {
                 "missing migrated provider {provider_id}"
             );
         }
-        for (profile_id, provider_id) in [
-            ("kimi-code", "kimi"),
-            ("grok-build", "xai"),
-            ("gemini-cli", "gemini"),
-        ] {
+        for (profile_id, provider_id) in [("kimi-code", "kimi"), ("grok-build", "xai")] {
             assert!(config.command_profiles.iter().any(|profile| {
                 profile.id == profile_id && profile.provider_id.as_deref() == Some(provider_id)
             }));
@@ -1134,15 +1551,72 @@ mod tests {
     }
 
     #[test]
+    fn retires_gemini_without_transferring_its_authentication() {
+        let mut config = GyroConfig::default();
+        assert!(!config
+            .model_providers
+            .iter()
+            .any(|provider| provider.id == "gemini"));
+        config.model_providers.push(ModelProviderConfig {
+            id: "gemini".into(),
+            display_name: "Gemini".into(),
+            base_url: None,
+            api_key_ref: "provider-cli:gemini".into(),
+            enabled: true,
+            default_model_id: Some("gemini-default".into()),
+            kind: None,
+            model_ids: Vec::new(),
+        });
+        config.command_profiles.push(CommandProfile {
+            id: "gemini-cli".into(),
+            display_name: "Gemini CLI".into(),
+            command: "gemini".into(),
+            args: Vec::new(),
+            working_directory: None,
+            provider_id: Some("gemini".into()),
+            default_model: None,
+            readiness: CommandProfileReadiness::Waiting,
+        });
+        config.selected_provider_id = Some("gemini".into());
+        config.normalize_legacy_state();
+        assert!(!config
+            .model_providers
+            .iter()
+            .any(|provider| provider.id == "gemini"));
+        assert!(!config
+            .command_profiles
+            .iter()
+            .any(|profile| profile.command == "gemini"));
+        assert_eq!(config.selected_provider_id, None);
+        let antigravity = config
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == "antigravity")
+            .unwrap();
+        assert!(!antigravity.enabled);
+        assert_eq!(antigravity.default_model_id, None);
+        antigravity.enabled = true;
+        config.selected_provider_id = Some("gemini".into());
+        config.normalize_legacy_state();
+        assert_eq!(config.selected_provider_id.as_deref(), Some("antigravity"));
+    }
+
+    #[test]
     fn saves_private_config_atomically_and_round_trips() {
         let temp = tempfile::tempdir().unwrap();
         let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
-        let config = GyroConfig {
+        let mut config = GyroConfig {
             telemetry_enabled: true,
             selected_provider_id: Some("anthropic".into()),
             change_summaries_enabled: true,
             ..GyroConfig::default()
         };
+        config
+            .model_providers
+            .iter_mut()
+            .find(|provider| provider.id == "anthropic")
+            .unwrap()
+            .enabled = true;
 
         config.save(&paths).unwrap();
 
@@ -1163,6 +1637,65 @@ mod tests {
                 0o600
             );
         }
+    }
+
+    #[test]
+    fn config_cache_does_not_publish_a_late_reader_as_the_new_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let original = GyroConfig::default();
+        original.save(&paths).unwrap();
+        let (old, old_version) = GyroConfig::load_unlocked_with_version(&paths).unwrap();
+        let updated = GyroConfig {
+            require_command_approval: false,
+            ..original
+        };
+        updated.save(&paths).unwrap();
+        // An earlier reader finishes after the writer and publishes its cache.
+        write_config_cache(&paths.config_path, &old, old_version.unwrap());
+        assert_eq!(GyroConfig::load(&paths).unwrap(), updated);
+    }
+
+    #[test]
+    fn config_cache_detects_replacement_with_preserved_modification_time() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        GyroConfig::default().save(&paths).unwrap();
+        let original = GyroConfig::load(&paths).unwrap();
+        let modified = std::fs::metadata(&paths.config_path)
+            .unwrap()
+            .modified()
+            .unwrap();
+        let replacement = paths.config_path.with_extension("replacement");
+        let updated = GyroConfig {
+            require_file_edit_approval: false,
+            ..original
+        };
+        std::fs::write(&replacement, serde_json::to_vec(&updated).unwrap()).unwrap();
+        File::options()
+            .write(true)
+            .open(&replacement)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        std::fs::rename(&replacement, &paths.config_path).unwrap();
+        assert_eq!(GyroConfig::load(&paths).unwrap(), updated);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_cache_rejects_a_symlink_to_the_previously_cached_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        GyroConfig::default().save(&paths).unwrap();
+        GyroConfig::load(&paths).unwrap();
+        let original = paths.config_path.with_extension("original");
+        std::fs::rename(&paths.config_path, &original).unwrap();
+        std::os::unix::fs::symlink(&original, &paths.config_path).unwrap();
+        assert!(GyroConfig::load(&paths)
+            .unwrap_err()
+            .to_string()
+            .contains("symlink"));
     }
 
     #[test]

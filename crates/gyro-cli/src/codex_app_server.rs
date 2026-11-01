@@ -150,6 +150,8 @@ pub(crate) struct CodexAppServerRequest {
     pub resume_session_id: Option<String>,
     pub require_command_approval: bool,
     pub require_file_edit_approval: bool,
+    pub full_access: bool,
+    pub advisory: bool,
     pub timeout: Duration,
     pub cancellation: CancellationToken,
 }
@@ -189,7 +191,10 @@ where
     let started_at = Instant::now();
     let mut protocol_guard = ProtocolGuard::new(started_at, request.timeout);
     let mut command = Command::new(&request.program);
-    gyro_core::apply_stored_provider_api_key(&mut command, "openai");
+    // Unit protocol peers use fixture credentials; the binary integration
+    // suite exercises the real Keychain protocol without a test-harness entry.
+    #[cfg(not(test))]
+    gyro_core::try_apply_stored_provider_api_key(&mut command, "openai")?;
     command
         .args(&request.program_args)
         .args(["app-server", "--stdio"])
@@ -198,8 +203,7 @@ where
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     configure_process_group(&mut command);
-    let child = command
-        .spawn()
+    let child = gyro_core::process_guard::spawn_guarded(&mut command)
         .with_context(|| format!("start {} app-server", request.program))?;
     let mut child = ChildGuard::new(child);
     let mut stdin = child
@@ -250,28 +254,13 @@ where
     write_message(&mut stdin, &json!({ "method": "initialized" }))?;
 
     let workspace = request.workspace.display().to_string();
-    let approval_policy = if request.require_command_approval {
-        "untrusted"
-    } else {
-        "on-request"
-    };
-    let (sandbox, sandbox_policy) = if request.require_file_edit_approval {
-        (
-            "read-only",
-            json!({ "type": "readOnly", "networkAccess": false }),
-        )
-    } else {
-        (
-            "workspace-write",
-            json!({
-                "type": "workspaceWrite",
-                "writableRoots": [workspace],
-                "networkAccess": false,
-                "excludeTmpdirEnvVar": false,
-                "excludeSlashTmp": false,
-            }),
-        )
-    };
+    let (approval_policy, sandbox, sandbox_policy) = gyro_core::codex_execution_policy(
+        request.advisory,
+        request.require_command_approval,
+        request.require_file_edit_approval,
+        request.full_access,
+        &request.workspace,
+    );
     let thread_request = if let Some(thread_id) = request.resume_session_id.as_deref() {
         json!({
             "id": 2,
@@ -779,11 +768,11 @@ fn elapsed_ms(started_at: Instant) -> u64 {
 }
 
 struct ChildGuard {
-    child: Child,
+    child: gyro_core::process_guard::GuardedChild,
 }
 
 impl ChildGuard {
-    fn new(child: Child) -> Self {
+    fn new(child: gyro_core::process_guard::GuardedChild) -> Self {
         Self { child }
     }
 
@@ -977,6 +966,8 @@ printf '%s\n' '{"method":"turn/completed","params":{"turn":{"status":"completed"
                 resume_session_id: None,
                 require_command_approval: true,
                 require_file_edit_approval: true,
+                full_access: false,
+                advisory: false,
                 timeout: Duration::from_secs(5),
                 cancellation: CancellationToken::default(),
             },
@@ -1033,6 +1024,8 @@ exit 9
                 resume_session_id: None,
                 require_command_approval: true,
                 require_file_edit_approval: true,
+                full_access: false,
+                advisory: false,
                 timeout: Duration::from_secs(5),
                 cancellation: CancellationToken::default(),
             },
@@ -1075,6 +1068,8 @@ case "$decision" in *'"decision":"cancel"'*) exit 0 ;; *) exit 25 ;; esac
                 resume_session_id: None,
                 require_command_approval: true,
                 require_file_edit_approval: true,
+                full_access: false,
+                advisory: false,
                 timeout: Duration::from_secs(5),
                 cancellation: CancellationToken::default(),
             },

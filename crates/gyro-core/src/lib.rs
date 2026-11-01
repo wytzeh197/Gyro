@@ -1,8 +1,13 @@
 pub mod account;
+pub mod acp_usage;
+pub mod agent_relay;
+pub mod agent_sessions;
+pub mod antigravity_cli;
 mod api_compatibility;
 pub mod automations;
 pub mod capabilities;
 mod chat_http;
+pub mod cli_install;
 pub mod cli_path;
 pub mod cli_updates;
 pub mod config;
@@ -10,31 +15,43 @@ pub mod council;
 pub mod credentials;
 pub mod diff;
 pub mod doctor;
+pub mod efficiency;
 pub mod execution;
+pub mod fast_mode;
 pub mod file_review;
 pub mod github;
+pub mod grok;
 pub mod harness;
 pub mod ipc;
 pub mod keychain;
 pub mod kimi_acp;
+pub mod model_retirements;
 pub mod mutations;
 pub mod ollama;
 pub mod openai_compatible;
 pub mod paths;
 pub mod policy;
+pub mod process_guard;
+pub mod project_import;
 pub mod provider_contract;
 pub mod provider_health;
+pub mod provider_install;
 pub mod provider_observation;
+pub mod provider_permissions;
 pub mod provider_registry;
-mod provider_retry;
+pub mod provider_retry;
 pub mod provider_stream;
 pub mod security;
 pub mod sessions;
 pub mod sqlite;
+pub mod text_stream;
 pub mod timing;
 pub mod usage;
+pub mod usage_receipts;
 pub mod web_fetch;
 pub mod workspace_check;
+pub mod workspace_roots;
+pub mod workspace_sandbox;
 pub mod worktrees;
 
 pub use account::{
@@ -57,6 +74,10 @@ pub use capabilities::{
     CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, MAX_CAPABILITY_RESULT_BYTES,
     PROVIDER_CAPABILITY_IPC_SCHEMA_V1, PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1,
 };
+pub use cli_install::{
+    provider_cli_install_plan, CliInstallMethod, CliInstallPlan, CliInstallPlanReport,
+    CliInstallUnavailable,
+};
 pub use cli_path::{augmented_gui_path, user_cli_paths};
 pub use cli_updates::{
     apply_cli_updates, check_cli_updates, CliUpdateApplyResult, CliUpdateCheckReport,
@@ -64,7 +85,7 @@ pub use cli_updates::{
 };
 pub use config::{
     AccountOidcConfig, AccountSessionState, CommandProfile, CommandProfileReadiness, GyroConfig,
-    ModelProviderConfig,
+    ModelProviderConfig, RemovedProvider,
 };
 pub use council::{
     barrier_decision, build_synthesizer_user_prompt, built_in_council_presets,
@@ -84,12 +105,14 @@ pub use credentials::{
     provider_api_key_env_name, provider_api_key_value, provider_credential_env_vars,
     provider_has_api_key, provider_id_from_program, provider_supports_api_key,
     relative_path_is_in_credential_store, set_stored_provider_api_key, stored_provider_api_key,
-    stored_provider_api_key_env, CredentialPolicy,
+    stored_provider_api_key_env, try_apply_stored_provider_api_key, try_provider_api_key_value,
+    try_stored_provider_api_key_env, CredentialPolicy,
 };
 pub use doctor::{DoctorCheck, DoctorReport, DoctorStatus};
 pub use execution::{
-    run_command, CancellationToken, ExecutionChunk, ExecutionOutcome, ExecutionRequest,
-    ExecutionStream, ExecutionTermination,
+    register_process_group, run_command, terminate_live_process_groups, unregister_process_group,
+    CancellationToken, ExecutionChunk, ExecutionOutcome, ExecutionRequest, ExecutionStream,
+    ExecutionTermination,
 };
 pub use file_review::{
     build_summary_prompt, cached_summaries, content_hash as file_review_content_hash,
@@ -112,14 +135,17 @@ pub use harness::{
     ProviderResumeCursorPayload, ProviderRunPayload, TerminalRequestPayload, HARNESS_SCHEMA_V1,
 };
 pub use ipc::{
-    request_desktop_provider_capability, AppNotification, AppNotificationKind,
-    DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
-    DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
+    app_not_running_message, request_app_automate, request_desktop_provider_capability,
+    AppNotification, AppNotificationKind, AutomateAction, AutomateRequest, AutomateResponse,
+    AutomateSummary, DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
+    DesktopProviderApprovalResponse, AUTOMATE_IPC_SCHEMA_V1,
+    DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
 };
 pub use kimi_acp::{
-    check_acp_health, check_kimi_acp_health, run_kimi_acp, KimiAcpActivity,
-    KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpApprovalRequest, KimiAcpHealth,
-    KimiAcpHealthStatus, KimiAcpMode, KimiAcpOutput, KimiAcpRequest,
+    check_acp_health, check_kimi_acp_health, discover_acp_models, plan_mode_denies_approval,
+    run_kimi_acp, AcpModel, AcpModelDiscovery, KimiAcpActivity, KimiAcpApprovalDecision,
+    KimiAcpApprovalKind, KimiAcpApprovalRequest, KimiAcpHealth, KimiAcpHealthStatus, KimiAcpMode,
+    KimiAcpOutput, KimiAcpRequest,
 };
 pub use mutations::{
     apply_provider_mutation_transaction, apply_provider_mutation_transaction_with_cancellation,
@@ -134,16 +160,17 @@ pub use mutations::{
     ProviderMutationResult,
 };
 pub use ollama::{
-    discover_ollama_model, discover_ollama_models, ollama_chat, ollama_endpoint, ollama_tool_chat,
+    discover_ollama_model, discover_ollama_model_with_cancellation, discover_ollama_models,
+    ollama_chat, ollama_chat_with_cancellation, ollama_endpoint, ollama_tool_chat,
     ollama_tool_chat_with_progress, OllamaChatRequest, OllamaChatResponse, OllamaDiscovery,
     OllamaModel, OllamaRuntimeStatus, OllamaToolCall, OllamaToolChatRequest,
     DEFAULT_OLLAMA_BASE_URL, OLLAMA_CANCELLED_MESSAGE,
 };
 pub use openai_compatible::{
-    openai_compat_endpoint, openai_compat_host_is_loopback, openai_compat_list_models,
-    openai_compat_tool_chat, openai_compat_tool_chat_with_progress, OpenAiCompatChatRequest,
-    OpenAiCompatChatResponse, OpenAiCompatDiscovery, OpenAiCompatModel, OpenAiCompatToolCall,
-    OPENAI_COMPAT_CANCELLED_MESSAGE,
+    openai_compat_endpoint, openai_compat_host_is_loopback, openai_compat_list_model_metadata,
+    openai_compat_list_models, openai_compat_tool_chat, openai_compat_tool_chat_with_progress,
+    OpenAiCompatChatRequest, OpenAiCompatChatResponse, OpenAiCompatDiscovery, OpenAiCompatModel,
+    OpenAiCompatToolCall, OPENAI_COMPAT_CANCELLED_MESSAGE,
 };
 pub use paths::GyroPaths;
 pub use policy::{CommandDecision, PermissionPolicy};
@@ -159,11 +186,18 @@ pub use provider_health::{
     should_skip_codex_login_for_external_env, ProviderHealthCheck, ProviderHealthRequest,
     ProviderHealthService, PROVIDER_HEALTH_CACHE_TTL,
 };
+pub use provider_install::{
+    install_command, install_guide, install_hint, ProviderInstallGuide, PROVIDER_INSTALL_GUIDES,
+};
+pub use provider_permissions::{
+    acp_permission_args, approval_posture, approve_for_me_keeps_escalations,
+    claude_permission_mode, codex_execution_policy, ApprovalPosture,
+};
 pub use provider_registry::{
     execution_kind_for, health_kind_for, is_custom_provider_id, is_openai_compatible_provider,
-    provider_descriptor, provider_is_executable, provider_is_executable_for, provider_registry,
-    ProviderDescriptor, ProviderExecutionKind, ProviderHealthKind, ProviderSupportTier,
-    CUSTOM_PROVIDER_PREFIX, OPENAI_COMPATIBLE_KIND,
+    provider_accepts_images, provider_descriptor, provider_is_executable,
+    provider_is_executable_for, provider_registry, ProviderDescriptor, ProviderExecutionKind,
+    ProviderHealthKind, ProviderSupportTier, CUSTOM_PROVIDER_PREFIX, OPENAI_COMPATIBLE_KIND,
 };
 pub use provider_stream::{
     extract_codex_agent_message_text, extract_provider_session_id, extract_provider_text_chunk,
@@ -191,8 +225,8 @@ pub use usage::{
 pub use web_fetch::{fetch_text, WebFetchPage, MAX_WEB_FETCH_BYTES};
 pub use workspace_check::{
     check_workspace, check_workspace_with_timeout, is_workspace_unavailable_error,
-    WorkspaceCheckReport, WorkspaceCheckStatus, WorkspaceGitBrief, WORKSPACE_CHECK_SCHEMA_V1,
-    WORKSPACE_CHECK_TIMEOUT, WORKSPACE_UNAVAILABLE_MESSAGE,
+    record_prepared_workspace, WorkspaceCheckReport, WorkspaceCheckStatus, WorkspaceGitBrief,
+    WORKSPACE_CHECK_SCHEMA_V1, WORKSPACE_CHECK_TIMEOUT, WORKSPACE_UNAVAILABLE_MESSAGE,
 };
 pub use worktrees::{
     create_worktree, git_top_level, slugify as slugify_worktree_name, validate_branch_name,

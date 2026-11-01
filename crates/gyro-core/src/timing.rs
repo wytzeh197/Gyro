@@ -49,6 +49,53 @@ pub enum Outcome {
     Cancelled,
     Interrupted,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EfficiencyComponent {
+    Checkpoint,
+    StructuredEvidence,
+    RequestAssembly,
+    Retrieval,
+    Progress,
+    CacheControls,
+}
+pub struct EfficiencyTimer {
+    component: EfficiencyComponent,
+    started: Instant,
+    active: bool,
+}
+impl EfficiencyTimer {
+    pub fn start(component: EfficiencyComponent) -> Self {
+        Self {
+            component,
+            started: Instant::now(),
+            active: ACTIVE.with(|slot| slot.borrow().is_some()),
+        }
+    }
+}
+impl Drop for EfficiencyTimer {
+    fn drop(&mut self) {
+        if self.active {
+            let elapsed = self.started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64;
+            ACTIVE.with(|slot| {
+                if let Some(mut trace) = slot.borrow().as_ref().and_then(|t| t.lock().ok()) {
+                    let value = trace.efficiency_overhead.entry(self.component).or_default();
+                    *value = value.saturating_add(elapsed);
+                }
+            });
+        }
+    }
+}
+pub fn efficiency_overhead() -> HashMap<EfficiencyComponent, u64> {
+    ACTIVE.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .and_then(|t| t.lock().ok())
+            .map(|t| t.efficiency_overhead.clone())
+            .unwrap_or_default()
+    })
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Point {
@@ -73,6 +120,8 @@ struct Trace {
     truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     provider_requests: Option<crate::provider_observation::Summary>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    efficiency_overhead: HashMap<EfficiencyComponent, u64>,
     #[serde(skip)]
     started: Option<Instant>,
     #[serde(skip)]
@@ -153,6 +202,7 @@ impl Scope {
                     outcome: Outcome::Interrupted,
                     truncated: false,
                     provider_requests: None,
+                    efficiency_overhead: HashMap::new(),
                     started: Some(Instant::now()),
                     attempt: 0,
                     tools: HashMap::new(),
@@ -366,6 +416,64 @@ pub fn record_frontend(value: &FrontendTiming) -> std::io::Result<()> {
     }
     write_record(&format!("frontend-{}", Uuid::new_v4()), value)
 }
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UiSurface {
+    Chat,
+    Terminal,
+    Explorer,
+    Search,
+    SourceControl,
+    RunTest,
+    Ai,
+    Tools,
+    Settings,
+    Automations,
+    Providers,
+    Onboarding,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UiTimingKind {
+    Startup,
+    Navigation,
+}
+
+/// Startup begins at the webview time origin; navigation begins at dispatch.
+/// Two frame callbacks after a commit are a paint opportunity, not a paint timestamp.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiTiming {
+    pub kind: UiTimingKind,
+    pub from: Option<UiSurface>,
+    pub surface: UiSurface,
+    pub started_to_commit_ms: f64,
+    pub started_to_frame_opportunity_ms: f64,
+}
+impl UiTiming {
+    pub fn valid(&self) -> bool {
+        let times_valid = [
+            self.started_to_commit_ms,
+            self.started_to_frame_opportunity_ms,
+        ]
+        .into_iter()
+        .all(|n| n.is_finite() && (0.0..=86_400_000.).contains(&n));
+        times_valid
+            && self.started_to_frame_opportunity_ms >= self.started_to_commit_ms
+            && match self.kind {
+                UiTimingKind::Startup => self.from.is_none(),
+                UiTimingKind::Navigation => self.from.is_some_and(|from| from != self.surface),
+            }
+    }
+}
+pub fn record_surface(value: &UiTiming) -> std::io::Result<()> {
+    if !enabled() || !value.valid() {
+        return Ok(());
+    }
+    write_record(&format!("surface-{}", Uuid::new_v4()), value)
+}
 fn write_record(name: &str, value: &impl Serialize) -> std::io::Result<()> {
     let paths = GyroPaths::for_current_user().map_err(std::io::Error::other)?;
     paths.ensure().map_err(std::io::Error::other)?;
@@ -534,5 +642,33 @@ mod tests {
             serde_json::json!({"turnId": Uuid::new_v4(), "prompt":"private"})
         )
         .is_err());
+    }
+
+    #[test]
+    fn surface_timing_rejects_content_and_unbounded_or_impossible_measurements() {
+        let input = serde_json::json!({"kind":"navigation", "from":"chat", "surface":"source-control", "startedToCommitMs":12., "startedToFrameOpportunityMs":40.});
+        let mut value: UiTiming = serde_json::from_value(input.clone()).unwrap();
+        assert!(value.valid());
+        for invalid in [-1., f64::NAN, f64::INFINITY, 86_400_001.] {
+            value.started_to_frame_opportunity_ms = invalid;
+            assert!(!value.valid());
+        }
+        value.started_to_frame_opportunity_ms = 10.;
+        assert!(!value.valid(), "frame cannot precede commit");
+        value.started_to_frame_opportunity_ms = 40.;
+        value.from = Some(UiSurface::SourceControl);
+        assert!(!value.valid(), "no-op navigation is unmeasured");
+        value.from = None;
+        assert!(!value.valid(), "navigation needs a source");
+        value.kind = UiTimingKind::Startup;
+        assert!(value.valid());
+        value.from = Some(UiSurface::Chat);
+        assert!(!value.valid());
+        let mut private = input.clone();
+        private["prompt"] = "private content".into();
+        assert!(serde_json::from_value::<UiTiming>(private).is_err());
+        let mut path = input;
+        path["surface"] = "/private/workspace".into();
+        assert!(serde_json::from_value::<UiTiming>(path).is_err());
     }
 }

@@ -1,0 +1,506 @@
+{
+  "bodyWidth": 860,
+  "controls": [
+    {
+      "className": "gyro-sidebar-restore-button gyro-sidebar-toggle-button",
+      "label": "Show sidebar",
+      "rect": {
+        "bottom": 38.9375,
+        "height": 29.890625,
+        "right": 119.890625,
+        "width": 29.890625,
+        "x": 90,
+        "y": 9.046875
+      }
+    },
+    {
+      "className": "gyro-sidebar-restore-button gyro-sidebar-new-session-shortcut",
+      "label": "New session",
+      "rect": {
+        "bottom": 38.9375,
+        "height": 29.890625,
+        "right": 153.78125,
+        "width": 29.890625,
+        "x": 123.890625,
+        "y": 9.046875
+      }
+    },
+    {
+      "className": "gyro-chat-surface-button",
+      "label": "Environment",
+      "rect": {
+        "bottom": 38.4375,
+        "height": 29.890625,
+        "right": 384.609375,
+        "width": 29.890625,
+        "x": 354.71875,
+        "y": 8.546875
+      }
+    },
+    {
+      "className": "gyro-chat-surface-button",
+      "label": "Close chat",
+      "rect": {
+        "bottom": 38.4375,
+        "height": 29.890625,
+        "right": 417.5,
+        "width": 29.890625,
+        "x": 387.609375,
+        "y": 8.546875
+      }
+    },
+    {
+      "className": "gyro-run-header-toggle",
+      "label": "Worked for 6m 1s",
+      "rect": {
+        "bottom": 172.03125,
+        "height": 24,
+        "right": 159.625,
+        "width": 129.625,
+        "x": 30,
+        "y": 148.03125
+      }
+    },
+    {
+      "className": "",
+      "label": "Continue",
+      "rect": {
+        "bottom": 174.375,
+        "height": 28.6875,
+        "right": 399.5,
+        "width": 79.421875,
+        "x": 320.078125,
+        "y": 145.6875
+      }
+    },
+    {
+      "className": "",
+      "label": "Copy response",
+      "rect": {
+        "bottom": 278.21875,
+        "height": 28,
+        "right": 52,
+        "width": 28,
+        "x": 24,
+        "y": 250.21875
+      }
+    },
+    {
+      "className": "is-undo",
+      "label": "Undo",
+      "rect": {
+        "bottom": 355.0625,
+        "height": 28,
+        "right": 314.015625,
+        "width": 76.84375,
+        "x": 237.171875,
+        "y": 327.0625
+      }
+    },
+    {
+      "className": "",
+      "label": "Review",
+      "rect": {
+        "bottom": 355.0625,
+        "height": 28,
+        "right": 388.5,
+        "width": 70.484375,
+        "x": 318.015625,
+        "y": 327.0625
+      }
+    },
+    {
+      "className": "",
+      "label": "src/sync.jsLine counts unavailable",
+      "rect": {
+        "bottom": 395.921875,
+        "height": 28,
+        "right": 386.5,
+        "width": 355.5,
+        "x": 31,
+        "y": 367.921875
+      }
+    },
+    {
+      "className": "",
+      "label": "src/sync.test.jsLine counts unavailable",
+      "rect": {
+        "bottom": 424.921875,
+        "height": 28,
+        "right": 386.5,
+        "width": 355.5,
+        "x": 31,
+        "y": 396.921875
+      }
+    },
+    {
+      "className": "",
+      "label": "src/queue/backoff.jsLine counts unavailable",
+      "rect": {
+        "bottom": 453.921875,
+        "height": 28,
+        "right": 386.5,
+        "width": 355.5,
+        "x": 31,
+        "y": 425.921875
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 561.5,
+        "height": 49.390625,
+        "right": 412.5,
+        "width": 395.5,
+        "x": 17,
+        "y": 512.109375
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 594.25,
+        "height": 30.578125,
+        "right": 52.328125,
+        "width": 26.59375,
+        "x": 25.734375,
+        "y": 563.671875
+      }
+    },
+    {
+      "className": "gyro-composer-chip",
+      "label": "Approval mode: Ask for approval",
+      "rect": {
+        "bottom": 594.25,
+        "height": 30.578125,
+        "right": 118.171875,
+        "width": 58.203125,
+        "x": 59.96875,
+        "y": 563.671875
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: Claude Opus 5",
+      "rect": {
+        "bottom": 594.25,
+        "height": 30.578125,
+        "right": 327.140625,
+        "width": 137.75,
+        "x": 189.390625,
+        "y": 563.671875
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger",
+      "label": "Reasoning effort: High",
+      "rect": {
+        "bottom": 594.25,
+        "height": 30.578125,
+        "right": 369.53125,
+        "width": 34.75,
+        "x": 334.78125,
+        "y": 563.671875
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 594.25,
+        "height": 30.578125,
+        "right": 403.765625,
+        "width": 26.59375,
+        "x": 377.171875,
+        "y": 563.671875
+      }
+    },
+    {
+      "className": "gyro-chat-companion-resizer",
+      "label": "Resize companion",
+      "rect": {
+        "bottom": 608,
+        "height": 552,
+        "right": 21,
+        "width": 8,
+        "x": 13,
+        "y": 56
+      }
+    },
+    {
+      "className": "",
+      "label": "Expand panel over chat",
+      "rect": {
+        "bottom": 93.5,
+        "height": 28,
+        "right": 374.5,
+        "width": 28,
+        "x": 346.5,
+        "y": 65.5
+      }
+    },
+    {
+      "className": "gyro-chat-companion-close",
+      "label": "Hide companion",
+      "rect": {
+        "bottom": 93.5,
+        "height": 28,
+        "right": 407.5,
+        "width": 28,
+        "x": 379.5,
+        "y": 65.5
+      }
+    },
+    {
+      "className": "",
+      "label": "Canvas",
+      "rect": {
+        "bottom": 268,
+        "height": 44,
+        "right": 381.5,
+        "width": 332.5,
+        "x": 49,
+        "y": 224
+      }
+    },
+    {
+      "className": "",
+      "label": "Review⌃⇧G",
+      "rect": {
+        "bottom": 312,
+        "height": 44,
+        "right": 381.5,
+        "width": 332.5,
+        "x": 49,
+        "y": 268
+      }
+    },
+    {
+      "className": "",
+      "label": "Terminal⌃`",
+      "rect": {
+        "bottom": 356,
+        "height": 44,
+        "right": 381.5,
+        "width": 332.5,
+        "x": 49,
+        "y": 312
+      }
+    },
+    {
+      "className": "",
+      "label": "Browser⌘T",
+      "rect": {
+        "bottom": 400,
+        "height": 44,
+        "right": 381.5,
+        "width": 332.5,
+        "x": 49,
+        "y": 356
+      }
+    },
+    {
+      "className": "",
+      "label": "Files⌘P",
+      "rect": {
+        "bottom": 444,
+        "height": 44,
+        "right": 381.5,
+        "width": 332.5,
+        "x": 49,
+        "y": 400
+      }
+    },
+    {
+      "className": "",
+      "label": "Side chat⌥⌘S",
+      "rect": {
+        "bottom": 488,
+        "height": 44,
+        "right": 381.5,
+        "width": 332.5,
+        "x": 49,
+        "y": 444
+      }
+    },
+    {
+      "className": "gyro-chat-surface-button",
+      "label": "Close chat",
+      "rect": {
+        "bottom": 38.4375,
+        "height": 29.890625,
+        "right": 848,
+        "width": 29.890625,
+        "x": 818.109375,
+        "y": 8.546875
+      }
+    },
+    {
+      "className": "gyro-chat-start-workspace-name",
+      "label": "aurora",
+      "rect": {
+        "bottom": 304.828125,
+        "height": 29.625,
+        "right": 787.90625,
+        "width": 67.421875,
+        "x": 720.484375,
+        "y": 275.203125
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 395.1875,
+        "height": 49.390625,
+        "right": 841.828125,
+        "width": 393.15625,
+        "x": 448.671875,
+        "y": 345.796875
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 430.125,
+        "height": 30.578125,
+        "right": 485.90625,
+        "width": 28.5,
+        "x": 457.40625,
+        "y": 399.546875
+      }
+    },
+    {
+      "className": "gyro-composer-chip",
+      "label": "Approval mode: Ask for approval",
+      "rect": {
+        "bottom": 430.125,
+        "height": 30.578125,
+        "right": 548.46875,
+        "width": 58.203125,
+        "x": 490.265625,
+        "y": 399.546875
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: GPT-5.6",
+      "rect": {
+        "bottom": 430.125,
+        "height": 30.578125,
+        "right": 802.140625,
+        "width": 106.6875,
+        "x": 695.453125,
+        "y": 399.546875
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 430.125,
+        "height": 30.578125,
+        "right": 833.09375,
+        "width": 26.59375,
+        "x": 806.5,
+        "y": 399.546875
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-context-summary-item is-project",
+      "label": "Project: aurora",
+      "rect": {
+        "bottom": 480.890625,
+        "height": 30.578125,
+        "right": 543.828125,
+        "width": 80.96875,
+        "x": 462.859375,
+        "y": 450.3125
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-context-summary-item is-workspace-mode",
+      "label": "Workspace mode: Project folder",
+      "rect": {
+        "bottom": 480.890625,
+        "height": 30.578125,
+        "right": 672.78125,
+        "width": 126.78125,
+        "x": 546,
+        "y": 450.3125
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-context-summary-item is-branch",
+      "label": "Branch: main",
+      "rect": {
+        "bottom": 480.890625,
+        "height": 30.578125,
+        "right": 764.28125,
+        "width": 89.328125,
+        "x": 674.953125,
+        "y": 450.3125
+      }
+    }
+  ],
+  "htmlWidth": 860,
+  "overlaps": [
+    {
+      "a": "Undo",
+      "b": "Terminal⌃`",
+      "height": 28,
+      "width": 76.84375
+    },
+    {
+      "a": "Review",
+      "b": "Terminal⌃`",
+      "height": 28,
+      "width": 63.484375
+    },
+    {
+      "a": "src/sync.jsLine counts unavailable",
+      "b": "Browser⌘T",
+      "height": 28,
+      "width": 332.5
+    },
+    {
+      "a": "src/sync.test.jsLine counts unavailable",
+      "b": "Browser⌘T",
+      "height": 3.078125,
+      "width": 332.5
+    },
+    {
+      "a": "src/sync.test.jsLine counts unavailable",
+      "b": "Files⌘P",
+      "height": 24.921875,
+      "width": 332.5
+    },
+    {
+      "a": "src/queue/backoff.jsLine counts unavailable",
+      "b": "Files⌘P",
+      "height": 18.078125,
+      "width": 332.5
+    },
+    {
+      "a": "src/queue/backoff.jsLine counts unavailable",
+      "b": "Side chat⌥⌘S",
+      "height": 9.921875,
+      "width": 332.5
+    },
+    {
+      "a": "Message Gyro",
+      "b": "Resize companion",
+      "height": 49.390625,
+      "width": 4
+    }
+  ],
+  "popovers": [],
+  "theme": "dark",
+  "viewport": {
+    "height": 620,
+    "width": 860
+  }
+}

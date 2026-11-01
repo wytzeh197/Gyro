@@ -40,8 +40,15 @@ pub enum UsageOrigin {
     /// so a user can see what the review card costs rather than finding it
     /// folded into their chat total.
     ChangeSummary,
+    /// The one model call a manual `/compact` spends on a provider that has no
+    /// compact command of its own, to write the checkpoint the next turn
+    /// starts from.
+    ContextCompaction,
     /// A read-only research sub-agent started by a chat turn.
     SubAgent,
+    Optimization,
+    /// A session an external agent started on this Mac.
+    AgentSession,
 }
 
 impl UsageOrigin {
@@ -53,7 +60,10 @@ impl UsageOrigin {
             Self::CouncilSynthesis => "council-synthesis",
             Self::CouncilResynthesis => "council-resynthesis",
             Self::ChangeSummary => "change-summary",
+            Self::ContextCompaction => "context-compaction",
             Self::SubAgent => "sub-agent",
+            Self::Optimization => "optimization",
+            Self::AgentSession => "agent-session",
         }
     }
 
@@ -64,7 +74,10 @@ impl UsageOrigin {
             "council-synthesis" => Self::CouncilSynthesis,
             "council-resynthesis" => Self::CouncilResynthesis,
             "change-summary" => Self::ChangeSummary,
+            "context-compaction" => Self::ContextCompaction,
             "sub-agent" => Self::SubAgent,
+            "optimization" => Self::Optimization,
+            "agent-session" => Self::AgentSession,
             _ => Self::Chat,
         }
     }
@@ -78,7 +91,10 @@ impl UsageOrigin {
             Self::CouncilSynthesis => "Council synthesis",
             Self::CouncilResynthesis => "Council re-synthesis",
             Self::ChangeSummary => "Change summaries",
-            Self::SubAgent => "Research sub-agents",
+            Self::ContextCompaction => "Context compaction",
+            Self::SubAgent => "Sub-agents",
+            Self::Optimization => "Optimization",
+            Self::AgentSession => "Agent sessions",
         }
     }
 }
@@ -111,28 +127,87 @@ impl UsageOutcome {
     }
 }
 
-/// Token counts for one call.
-///
-/// `measured` separates what a provider reported from what Gyro estimated. The
-/// distinction survives all the way to the UI; a guess is never rendered as a
-/// measurement.
+/// A reading carries its source and coverage separately from its numeric total.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UsageSource {
+    Provider,
+    CharacterEstimate,
+    Mixed,
+    Legacy,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UsageScope {
+    Request,
+    Turn,
+    Session,
+    Context,
+    Task,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UsageCoverage {
+    Complete,
+    Partial,
+    Estimated,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UsageReason {
+    MissingBaseline,
+    MissingUsage,
+    UnsupportedRuntime,
+    InconsistentCounts,
+    Interrupted,
+    ProviderIncomplete,
+    UnverifiedRuntime,
+    UnknownScope,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageKnownCounts {
+    pub input: bool,
+    pub output: bool,
+    pub cache_read: bool,
+    pub cache_write: bool,
+    pub reasoning: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageAccounting {
+    pub source: UsageSource,
+    pub scope: UsageScope,
+    pub coverage: UsageCoverage,
+    pub known: UsageKnownCounts,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<UsageReason>,
+}
+
+/// Numeric buckets use inclusive input and output. Optional metadata distinguishes
+/// absent breakdowns from reported zero without breaking old saved events.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageTokens {
     pub input_tokens: u64,
     pub cached_input_tokens: u64,
+    #[serde(default)]
+    pub cache_write_tokens: u64,
     pub output_tokens: u64,
     pub reasoning_output_tokens: u64,
     pub total_tokens: u64,
     pub measured: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounting: Option<UsageAccounting>,
 }
 
 impl UsageTokens {
-    /// Tokens a provider reported.
-    ///
-    /// `total_tokens` and the input/output pair disagree often enough that the
-    /// larger of the two is the honest reading, matching how the composer
-    /// context meter resolves the same conflict.
     pub fn measured(
         input_tokens: Option<u64>,
         cached_input_tokens: Option<u64>,
@@ -140,35 +215,255 @@ impl UsageTokens {
         reasoning_output_tokens: Option<u64>,
         total_tokens: Option<u64>,
     ) -> Self {
-        let input = input_tokens.unwrap_or_default();
-        let output = output_tokens.unwrap_or_default();
+        let input = input_tokens.unwrap_or(cached_input_tokens.unwrap_or_default());
+        let output = output_tokens.unwrap_or(reasoning_output_tokens.unwrap_or_default());
+        let sum = input.checked_add(output);
+        let inconsistent = sum.is_none()
+            || total_tokens.is_some_and(|total| {
+                total < sum.unwrap_or(u64::MAX)
+                    || (input_tokens.is_some() && output_tokens.is_some() && Some(total) != sum)
+            })
+            || input_tokens
+                .zip(cached_input_tokens)
+                .is_some_and(|(all, subset)| subset > all)
+            || output_tokens
+                .zip(reasoning_output_tokens)
+                .is_some_and(|(all, subset)| subset > all);
+        let complete = !inconsistent
+            && (total_tokens.is_some() || (input_tokens.is_some() && output_tokens.is_some()));
+        let available = total_tokens.is_some()
+            || input_tokens.is_some()
+            || output_tokens.is_some()
+            || cached_input_tokens.is_some()
+            || reasoning_output_tokens.is_some();
         Self {
             input_tokens: input,
-            cached_input_tokens: cached_input_tokens.unwrap_or_default(),
+            cached_input_tokens: cached_input_tokens.unwrap_or_default().min(input),
+            cache_write_tokens: 0,
             output_tokens: output,
-            reasoning_output_tokens: reasoning_output_tokens.unwrap_or_default(),
+            reasoning_output_tokens: reasoning_output_tokens.unwrap_or_default().min(output),
             total_tokens: total_tokens
                 .unwrap_or_default()
                 .max(input.saturating_add(output)),
-            measured: true,
+            measured: complete,
+            accounting: Some(UsageAccounting {
+                source: UsageSource::Provider,
+                scope: UsageScope::Request,
+                coverage: if inconsistent {
+                    UsageCoverage::Estimated
+                } else if complete {
+                    UsageCoverage::Complete
+                } else if available {
+                    UsageCoverage::Partial
+                } else {
+                    UsageCoverage::Unavailable
+                },
+                known: UsageKnownCounts {
+                    input: input_tokens.is_some(),
+                    output: output_tokens.is_some(),
+                    cache_read: cached_input_tokens.is_some()
+                        && cached_input_tokens.unwrap_or_default() <= input,
+                    cache_write: false,
+                    reasoning: reasoning_output_tokens.is_some()
+                        && reasoning_output_tokens.unwrap_or_default() <= output,
+                },
+                reason: if inconsistent {
+                    Some(UsageReason::InconsistentCounts)
+                } else if !complete {
+                    Some(UsageReason::MissingUsage)
+                } else {
+                    None
+                },
+            }),
         }
     }
 
-    /// A fallback reading for providers that report nothing.
-    ///
-    /// Four characters per token is the same rough ratio the composer meter
-    /// uses. It is wrong in both directions and is labelled as an estimate
-    /// everywhere it surfaces.
+    /// Character counts describe observed text only, not hidden runtime work.
     pub fn estimated(prompt_chars: usize, response_chars: usize) -> Self {
         let input = estimate_tokens(prompt_chars);
         let output = estimate_tokens(response_chars);
         Self {
             input_tokens: input,
-            cached_input_tokens: 0,
             output_tokens: output,
-            reasoning_output_tokens: 0,
-            total_tokens: input + output,
-            measured: false,
+            total_tokens: input.saturating_add(output),
+            accounting: Some(UsageAccounting {
+                source: UsageSource::CharacterEstimate,
+                scope: UsageScope::Request,
+                coverage: UsageCoverage::Estimated,
+                known: UsageKnownCounts {
+                    input: true,
+                    output: true,
+                    ..UsageKnownCounts::default()
+                },
+                reason: Some(UsageReason::MissingUsage),
+            }),
+            ..Self::default()
+        }
+    }
+
+    pub fn unavailable(reason: UsageReason) -> Self {
+        Self {
+            accounting: Some(UsageAccounting {
+                source: UsageSource::Provider,
+                scope: UsageScope::Turn,
+                coverage: UsageCoverage::Unavailable,
+                known: UsageKnownCounts::default(),
+                reason: Some(reason),
+            }),
+            ..Self::default()
+        }
+    }
+
+    /// Legacy readings are retained, but never promoted to verified complete totals.
+    pub fn effective_accounting(&self) -> UsageAccounting {
+        let mut accounting = self.accounting.unwrap_or(UsageAccounting {
+            source: UsageSource::Legacy,
+            scope: UsageScope::Turn,
+            coverage: if self.measured {
+                UsageCoverage::Unavailable
+            } else {
+                UsageCoverage::Estimated
+            },
+            known: UsageKnownCounts {
+                input: self.input_tokens > 0,
+                output: self.output_tokens > 0,
+                cache_read: self.cached_input_tokens > 0,
+                cache_write: self.cache_write_tokens > 0,
+                reasoning: self.reasoning_output_tokens > 0,
+            },
+            reason: Some(UsageReason::UnverifiedRuntime),
+        });
+        if accounting.coverage == UsageCoverage::Complete && !self.measured {
+            accounting.coverage = UsageCoverage::Partial;
+            accounting.reason = Some(UsageReason::ProviderIncomplete);
+        }
+        accounting
+    }
+
+    pub fn with_scope(mut self, scope: UsageScope) -> Self {
+        let mut accounting = self.effective_accounting();
+        accounting.scope = scope;
+        self.accounting = Some(accounting);
+        self
+    }
+
+    pub fn partial(mut self, reason: UsageReason) -> Self {
+        let mut accounting = self.effective_accounting();
+        if accounting.coverage == UsageCoverage::Complete {
+            accounting.coverage = UsageCoverage::Partial;
+        }
+        accounting.reason = Some(reason);
+        self.measured = false;
+        self.accounting = Some(accounting);
+        self
+    }
+
+    /// Cache writes are an input subset after provider-specific normalization.
+    pub fn with_cache_write(mut self, count: Option<u64>) -> Self {
+        let mut accounting = self.effective_accounting();
+        let write = count.unwrap_or_default();
+        let mut inconsistent = false;
+        if count.is_some() && !accounting.known.input {
+            // Read and write caches are disjoint input subsets. A missing
+            // inclusive input count still permits this observed lower bound.
+            let floor = self.cached_input_tokens.checked_add(write);
+            self.input_tokens = floor.unwrap_or(u64::MAX);
+            let sum = self.input_tokens.checked_add(self.output_tokens);
+            inconsistent = floor.is_none()
+                || sum.is_none()
+                || (accounting.coverage == UsageCoverage::Complete
+                    && self.total_tokens < sum.unwrap_or(u64::MAX));
+            self.total_tokens = self
+                .total_tokens
+                .max(self.input_tokens.saturating_add(self.output_tokens));
+            if accounting.coverage == UsageCoverage::Unavailable {
+                accounting.coverage = UsageCoverage::Partial;
+                accounting.reason = Some(UsageReason::MissingUsage);
+            }
+        } else if count.is_some() {
+            inconsistent = write > self.input_tokens
+                || self
+                    .cached_input_tokens
+                    .checked_add(write)
+                    .is_none_or(|sum| sum > self.input_tokens);
+        }
+        accounting.known.cache_write = count.is_some() && !inconsistent;
+        self.cache_write_tokens = write.min(self.input_tokens);
+        if inconsistent {
+            accounting.coverage = UsageCoverage::Estimated;
+            accounting.reason = Some(UsageReason::InconsistentCounts);
+        }
+        self.measured = accounting.coverage == UsageCoverage::Complete;
+        self.accounting = Some(accounting);
+        self
+    }
+
+    pub fn combine(self, other: Self) -> Self {
+        let a = self.effective_accounting();
+        let b = other.effective_accounting();
+        let left = if a.coverage == UsageCoverage::Unavailable {
+            Self::default()
+        } else {
+            self
+        };
+        let right = if b.coverage == UsageCoverage::Unavailable {
+            Self::default()
+        } else {
+            other
+        };
+        let overflow = left.total_tokens.checked_add(right.total_tokens).is_none();
+        let coverage = if overflow {
+            UsageCoverage::Estimated
+        } else if a.coverage == UsageCoverage::Unavailable
+            && b.coverage == UsageCoverage::Unavailable
+        {
+            UsageCoverage::Unavailable
+        } else if a.coverage == UsageCoverage::Estimated || b.coverage == UsageCoverage::Estimated {
+            UsageCoverage::Estimated
+        } else if a.coverage != UsageCoverage::Complete || b.coverage != UsageCoverage::Complete {
+            UsageCoverage::Partial
+        } else {
+            UsageCoverage::Complete
+        };
+        Self {
+            input_tokens: left.input_tokens.saturating_add(right.input_tokens),
+            cached_input_tokens: left
+                .cached_input_tokens
+                .saturating_add(right.cached_input_tokens),
+            cache_write_tokens: left
+                .cache_write_tokens
+                .saturating_add(right.cache_write_tokens),
+            output_tokens: left.output_tokens.saturating_add(right.output_tokens),
+            reasoning_output_tokens: left
+                .reasoning_output_tokens
+                .saturating_add(right.reasoning_output_tokens),
+            total_tokens: left.total_tokens.saturating_add(right.total_tokens),
+            measured: coverage == UsageCoverage::Complete,
+            accounting: Some(UsageAccounting {
+                source: if a.source == b.source {
+                    a.source
+                } else {
+                    UsageSource::Mixed
+                },
+                scope: if a.scope == b.scope {
+                    a.scope
+                } else {
+                    UsageScope::Turn
+                },
+                coverage,
+                known: UsageKnownCounts {
+                    input: a.known.input && b.known.input,
+                    output: a.known.output && b.known.output,
+                    cache_read: a.known.cache_read && b.known.cache_read,
+                    cache_write: a.known.cache_write && b.known.cache_write,
+                    reasoning: a.known.reasoning && b.known.reasoning,
+                },
+                reason: if overflow {
+                    Some(UsageReason::InconsistentCounts)
+                } else {
+                    a.reason.or(b.reason)
+                },
+            }),
         }
     }
 
@@ -219,6 +514,10 @@ pub struct UsageTotals {
     pub measured_calls: u32,
     /// Calls whose tokens Gyro estimated because the provider reported nothing.
     pub estimated_calls: u32,
+    #[serde(default)]
+    pub partial_calls: u32,
+    #[serde(default)]
+    pub unavailable_calls: u32,
     pub input_tokens: u64,
     /// The share of `input_tokens` that was context the call already had.
     ///
@@ -228,6 +527,10 @@ pub struct UsageTotals {
     pub cached_input_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
+    /// Provider-reported consumption only. None means no trustworthy reading;
+    /// an explicit provider zero remains Some(0). Budgets use total_tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported_total_tokens: Option<u64>,
     pub by_origin: Vec<UsageOriginTotals>,
     pub first_call_at: Option<DateTime<Utc>>,
     pub last_call_at: Option<DateTime<Utc>>,
@@ -236,7 +539,7 @@ pub struct UsageTotals {
 impl UsageTotals {
     /// Whether any part of this total rests on an estimate.
     pub fn has_estimates(&self) -> bool {
-        self.estimated_calls > 0
+        self.estimated_calls > 0 || self.partial_calls > 0 || self.unavailable_calls > 0
     }
 }
 
@@ -438,7 +741,9 @@ impl PauseState {
     pub fn covers(&self, origin: UsageOrigin) -> bool {
         match self.scope {
             PauseScope::All => true,
-            PauseScope::Automations => origin == UsageOrigin::Automation,
+            PauseScope::Automations => {
+                matches!(origin, UsageOrigin::Automation | UsageOrigin::AgentSession)
+            }
         }
     }
 
@@ -741,7 +1046,7 @@ pub fn recent_usage(conn: &Connection, since: DateTime<Utc>) -> Result<RecentUsa
         let count = count.max(0) as u32;
         recent.calls += count;
         match UsageOrigin::from_storage_value(&origin) {
-            UsageOrigin::Automation => recent.unattended_calls += count,
+            UsageOrigin::Automation | UsageOrigin::AgentSession => recent.unattended_calls += count,
             UsageOrigin::CouncilResynthesis => recent.resynthesis_calls += count,
             _ => {}
         }
@@ -792,13 +1097,16 @@ pub fn ensure_usage_schema(conn: &Connection) -> Result<()> {
            primary key (provider_id, window_id)
          );",
     )?;
+    crate::usage_receipts::ensure_schema(conn)?;
+    crate::efficiency::accounting::ensure_schema(conn)?;
     Ok(())
 }
 
-/// Append one call. The ledger is append-only; rows are never rewritten.
+/// Append one call. The ledger and its accounting receipts are append-only.
 pub fn insert_usage_entry(conn: &Connection, entry: &UsageEntry) -> Result<Uuid> {
     let id = Uuid::new_v4();
-    conn.execute(
+    let transaction = conn.unchecked_transaction()?;
+    transaction.execute(
         "insert into usage_ledger (
            id, occurred_at, session_id, turn_id, seat_id, provider_id, model_id,
            reasoning_effort, origin, outcome, input_tokens, cached_input_tokens,
@@ -829,6 +1137,8 @@ pub fn insert_usage_entry(conn: &Connection, entry: &UsageEntry) -> Result<Uuid>
             entry.retry_count,
         ],
     )?;
+    crate::usage_receipts::append_revision(&transaction, id, entry.tokens)?;
+    transaction.commit()?;
     Ok(id)
 }
 
@@ -840,7 +1150,9 @@ fn totals_from_rows(
     let mut totals = UsageTotals::default();
     let mut stmt = conn.prepare(&format!(
         "select origin, measured, input_tokens, cached_input_tokens, output_tokens,
-                total_tokens, occurred_at
+                total_tokens, occurred_at,
+                (select tokens_json from usage_receipt_revisions r
+                 where r.usage_id = usage_ledger.id order by r.id desc limit 1)
          from usage_ledger where {where_clause} order by occurred_at asc"
     ))?;
     let rows = stmt.query_map(bind, |row| {
@@ -852,6 +1164,7 @@ fn totals_from_rows(
             row.get::<_, i64>(4)?,
             row.get::<_, i64>(5)?,
             row.get::<_, String>(6)?,
+            row.get::<_, Option<String>>(7)?,
         ))
     })?;
 
@@ -859,18 +1172,71 @@ fn totals_from_rows(
     for row in rows {
         let (
             origin,
-            measured,
-            input_tokens,
-            cached_input_tokens,
-            output_tokens,
-            total_tokens,
+            _legacy_measured,
+            mut input_tokens,
+            mut cached_input_tokens,
+            mut output_tokens,
+            mut total_tokens,
             occurred_at,
+            receipt,
         ) = row?;
-        totals.calls += 1;
-        if measured != 0 {
-            totals.measured_calls += 1;
+        let coverage;
+        if let Some(tokens) = receipt
+            .as_deref()
+            .and_then(|value| serde_json::from_str::<UsageTokens>(value).ok())
+        {
+            input_tokens = tokens.input_tokens.min(i64::MAX as u64) as i64;
+            cached_input_tokens = tokens.cached_input_tokens.min(i64::MAX as u64) as i64;
+            output_tokens = tokens.output_tokens.min(i64::MAX as u64) as i64;
+            total_tokens = tokens.total_tokens.min(i64::MAX as u64) as i64;
+            let accounting = tokens.effective_accounting();
+            if accounting.source == UsageSource::Provider
+                && matches!(
+                    accounting.coverage,
+                    UsageCoverage::Complete | UsageCoverage::Partial
+                )
+                && matches!(
+                    accounting.scope,
+                    UsageScope::Request | UsageScope::Turn | UsageScope::Task
+                )
+            {
+                totals.reported_total_tokens = Some(
+                    totals
+                        .reported_total_tokens
+                        .unwrap_or_default()
+                        .saturating_add(tokens.total_tokens),
+                );
+            }
+            let unknown_consumption =
+                matches!(accounting.scope, UsageScope::Context | UsageScope::Session)
+                    || (accounting.coverage == UsageCoverage::Unavailable
+                        && accounting.source != UsageSource::Legacy);
+            if unknown_consumption {
+                input_tokens = 0;
+                cached_input_tokens = 0;
+                output_tokens = 0;
+                total_tokens = 0;
+            }
+            coverage = if unknown_consumption {
+                UsageCoverage::Unavailable
+            } else if accounting.source == UsageSource::Legacy
+                && accounting.coverage == UsageCoverage::Unavailable
+            {
+                // Historical numerical budgets stay conservative, with uncertainty explicit.
+                UsageCoverage::Estimated
+            } else {
+                accounting.coverage
+            };
         } else {
-            totals.estimated_calls += 1;
+            // Retain old numerical budgets conservatively; their accuracy is unverified.
+            coverage = UsageCoverage::Estimated;
+        }
+        totals.calls += 1;
+        match coverage {
+            UsageCoverage::Complete => totals.measured_calls += 1,
+            UsageCoverage::Estimated => totals.estimated_calls += 1,
+            UsageCoverage::Partial => totals.partial_calls += 1,
+            UsageCoverage::Unavailable => totals.unavailable_calls += 1,
         }
         totals.input_tokens += input_tokens.max(0) as u64;
         // Clamped to the input it is a share of: a provider that reports a
@@ -921,7 +1287,31 @@ fn totals_from_rows(
 /// What one chat has cost, across every call it produced.
 pub fn session_usage_totals(conn: &Connection, session_id: Uuid) -> Result<UsageTotals> {
     let session = session_id.to_string();
-    totals_from_rows(conn, "session_id = ?1", &[&session])
+    // A reused child session can contain work owned by other chats. Follow
+    // linked turn identities so only this chat's descendants are counted.
+    let mut totals = totals_from_rows(
+        conn,
+        "session_id = ?1 or exists(
+            with recursive owned(session_id, turn_id) as (
+                select child_session_id, child_turn_id from usage_turn_links
+                where parent_session_id = ?1
+                union
+                select links.child_session_id, links.child_turn_id from usage_turn_links links
+                join owned on links.parent_session_id = owned.session_id
+                    and links.parent_turn_id = owned.turn_id
+            )
+            select 1 from owned where owned.session_id = usage_ledger.session_id
+                and owned.turn_id = usage_ledger.turn_id
+         )",
+        &[&session],
+    )?;
+    // A dispatched call can lose its terminal receipt. Keep known token
+    // totals, but expose those missing calls instead of declaring full usage.
+    let missing =
+        crate::usage_receipts::session_missing_calls(conn, session_id)?.min(u32::MAX as u64) as u32;
+    totals.calls = totals.calls.saturating_add(missing);
+    totals.unavailable_calls = totals.unavailable_calls.saturating_add(missing);
+    Ok(totals)
 }
 
 /// What every provider has cost since a point in time. The budgets in the next
@@ -942,6 +1332,25 @@ pub fn provider_usage_totals_since(
         conn,
         "provider_id = ?1 and occurred_at >= ?2",
         &[&provider_id, &since],
+    )
+}
+
+/// Rolling spend from other turns. The active turn supplies its live receipt,
+/// including any continuations already recorded in the ledger, separately.
+pub fn provider_usage_outside_turn_since(
+    conn: &Connection,
+    provider_id: &str,
+    since: DateTime<Utc>,
+    session_id: Uuid,
+    turn_id: Uuid,
+) -> Result<UsageTotals> {
+    let since = since.to_rfc3339();
+    let session_id = session_id.to_string();
+    let turn_id = turn_id.to_string();
+    totals_from_rows(
+        conn,
+        "provider_id = ?1 and occurred_at >= ?2 and (session_id != ?3 or turn_id is null or turn_id != ?4)",
+        &[&provider_id, &since, &session_id, &turn_id],
     )
 }
 
@@ -1031,16 +1440,21 @@ pub fn replace_provider_rate_limits(
     provider_id: &str,
     windows: &[ProviderRateLimitRecord],
 ) -> Result<()> {
-    record_provider_rate_limits(conn, provider_id, windows)?;
+    // One transaction, so a reader never sees the fresh rows next to windows
+    // the same poll has just retired.
+    let transaction =
+        rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    record_provider_rate_limits(&transaction, provider_id, windows)?;
     let kept = windows
         .iter()
         .map(|window| window.window_id.as_str())
         .collect::<Vec<_>>();
     if kept.is_empty() {
-        conn.execute(
+        transaction.execute(
             "delete from provider_rate_limits where provider_id = ?1",
             params![provider_id],
         )?;
+        transaction.commit()?;
         return Ok(());
     }
     let placeholders = (0..kept.len())
@@ -1052,31 +1466,39 @@ pub fn replace_provider_rate_limits(
     for window_id in &kept {
         values.push(window_id);
     }
-    conn.execute(
+    transaction.execute(
         &format!(
             "delete from provider_rate_limits
              where provider_id = ?1 and window_id not in ({placeholders})"
         ),
         values.as_slice(),
     )?;
+    transaction.commit()?;
     Ok(())
 }
 
-/// The last reading for each of a provider's windows, expired ones dropped.
+/// The last reading for each of a provider's windows, expired ones unmarked.
 ///
 /// A window past its reset time has rolled over, so the stored status describes
-/// an allowance that no longer exists. Returning it would be worse than
-/// returning nothing: an exhausted window would keep reading as exhausted into
-/// the fresh one. Those rows are deleted on the way past.
+/// an allowance that no longer exists: an exhausted window must not keep
+/// reading as exhausted into the fresh one. Dropping it was no better, since
+/// the plan still meters that window and the composer lost the row until the
+/// next message reopened it. The new window has not been measured yet, so the
+/// row stays and its level is cleared until the next live reading.
 pub fn provider_rate_limits(
     conn: &Connection,
     provider_id: &str,
     now: DateTime<Utc>,
 ) -> Result<Vec<ProviderRateLimitRecord>> {
     let now = now.to_rfc3339();
+    // resets_at is the provider's own string, so its offset need not be UTC:
+    // compare instants, not text. A value SQLite cannot read as a time keeps
+    // the old text comparison.
     conn.execute(
-        "delete from provider_rate_limits
-         where provider_id = ?1 and resets_at is not null and resets_at <= ?2",
+        "update provider_rate_limits
+         set status = 'ok', used_percent = null, resets_at = null
+         where provider_id = ?1 and resets_at is not null
+           and coalesce(julianday(resets_at) <= julianday(?2), resets_at <= ?2)",
         params![provider_id, now],
     )?;
     let mut stmt = conn.prepare(
@@ -1131,10 +1553,124 @@ mod tests {
     fn measured_tokens_prefer_the_larger_of_total_and_the_pair() {
         let tokens = UsageTokens::measured(Some(900), Some(100), Some(300), Some(120), Some(50));
         assert_eq!(tokens.total_tokens, 1_200);
-        assert!(tokens.measured);
+        assert!(
+            !tokens.measured,
+            "contradictory totals are not an exact measurement"
+        );
 
         let trusted_total = UsageTokens::measured(Some(10), None, Some(10), None, Some(9_000));
         assert_eq!(trusted_total.total_tokens, 9_000);
+        assert!(
+            !trusted_total.measured,
+            "an inflated total contradicts known inclusive input and output"
+        );
+        assert_eq!(
+            trusted_total.effective_accounting().reason,
+            Some(UsageReason::InconsistentCounts)
+        );
+    }
+
+    #[test]
+    fn missing_inclusive_input_keeps_reported_cache_subsets_as_a_lower_bound() {
+        let tokens =
+            UsageTokens::measured(None, Some(20), None, None, None).with_cache_write(Some(5));
+        assert_eq!(
+            (
+                tokens.input_tokens,
+                tokens.cache_write_tokens,
+                tokens.total_tokens
+            ),
+            (25, 5, 25)
+        );
+        let accounting = tokens.effective_accounting();
+        assert_eq!(accounting.coverage, UsageCoverage::Partial);
+        assert!(
+            !accounting.known.input && accounting.known.cache_read && accounting.known.cache_write
+        );
+        let writes_only =
+            UsageTokens::measured(None, None, None, None, None).with_cache_write(Some(7));
+        assert_eq!(writes_only.total_tokens, 7);
+        assert_eq!(
+            writes_only.effective_accounting().coverage,
+            UsageCoverage::Partial
+        );
+        let invalid =
+            UsageTokens::measured(Some(10), Some(8), Some(2), None, None).with_cache_write(Some(5));
+        assert_eq!(
+            invalid.effective_accounting().coverage,
+            UsageCoverage::Estimated
+        );
+        assert_eq!(
+            invalid.effective_accounting().reason,
+            Some(UsageReason::InconsistentCounts)
+        );
+    }
+
+    #[test]
+    fn incomplete_zero_and_overflow_counts_keep_their_provenance() {
+        assert!(!UsageTokens::measured(None, None, None, None, None).measured);
+        assert!(!UsageTokens::measured(Some(12), None, None, None, None).measured);
+        let zero = UsageTokens::measured(Some(0), None, Some(0), None, Some(0));
+        assert!(zero.measured);
+        assert!(zero.is_empty());
+        let total_only = UsageTokens::measured(None, None, None, None, Some(150));
+        assert_eq!(total_only.total_tokens, 150);
+        assert!(total_only.measured);
+        let overflow = UsageTokens::measured(Some(u64::MAX), None, Some(1), None, None);
+        assert_eq!(overflow.total_tokens, u64::MAX);
+        assert!(!overflow.measured);
+        let subsets = UsageTokens::measured(Some(10), Some(99), Some(5), Some(99), None);
+        assert_eq!(subsets.cached_input_tokens, 10);
+        assert_eq!(subsets.reasoning_output_tokens, 5);
+        assert_eq!(subsets.total_tokens, 15);
+    }
+
+    #[test]
+    fn usage_counts_survive_disk_reopen_for_every_outcome() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("usage.db");
+        let session_id = Uuid::new_v4();
+        let mut audited = UsageTokens::measured(
+            Some(3_879_281),
+            Some(3_749_120),
+            Some(15_708),
+            Some(2_825),
+            Some(3_894_989),
+        );
+        audited.measured = false; // The original turn lacked a verified baseline.
+        {
+            let conn = Connection::open(&path).unwrap();
+            ensure_usage_schema(&conn).unwrap();
+            for outcome in [
+                UsageOutcome::Done,
+                UsageOutcome::Failed,
+                UsageOutcome::Cancelled,
+            ] {
+                let mut row = entry(session_id, UsageOrigin::Chat, audited);
+                row.outcome = outcome;
+                row.turn_id = Some(Uuid::new_v4());
+                insert_usage_entry(&conn, &row).unwrap();
+            }
+            insert_usage_entry(
+                &conn,
+                &entry(
+                    session_id,
+                    UsageOrigin::Chat,
+                    UsageTokens::measured(Some(0), None, Some(0), None, Some(0)),
+                ),
+            )
+            .unwrap();
+        }
+        let conn = Connection::open(&path).unwrap();
+        let totals = session_usage_totals(&conn, session_id).unwrap();
+        assert_eq!(totals.calls, 4);
+        assert_eq!(totals.total_tokens, 3 * 3_894_989);
+        assert_eq!(totals.input_tokens, 3 * 3_879_281);
+        assert_eq!(totals.cached_input_tokens, 3 * 3_749_120);
+        assert_eq!(totals.output_tokens, 3 * 15_708);
+        assert_eq!(totals.measured_calls, 1);
+        assert_eq!(totals.estimated_calls, 0);
+        assert_eq!(totals.partial_calls, 3);
     }
 
     #[test]
@@ -1232,6 +1768,327 @@ mod tests {
         assert_eq!(totals.measured_calls, 1);
         assert_eq!(totals.estimated_calls, 1);
         assert!(totals.has_estimates());
+    }
+
+    #[test]
+    fn reported_session_subtotal_is_separate_from_estimated_budget_totals() {
+        let conn = memory_conn();
+        let mixed = Uuid::new_v4();
+        insert_usage_entry(
+            &conn,
+            &entry(
+                mixed,
+                UsageOrigin::Chat,
+                UsageTokens::measured(Some(100), None, Some(0), None, None),
+            ),
+        )
+        .unwrap();
+        insert_usage_entry(
+            &conn,
+            &entry(mixed, UsageOrigin::Chat, UsageTokens::estimated(36_000, 0)),
+        )
+        .unwrap();
+        let totals = session_usage_totals(&conn, mixed).unwrap();
+        assert_eq!(totals.total_tokens, 9_100);
+        assert_eq!(totals.reported_total_tokens, Some(100));
+        assert_eq!((totals.measured_calls, totals.estimated_calls), (1, 1));
+        assert!(totals.has_estimates());
+
+        let estimated = Uuid::new_v4();
+        insert_usage_entry(
+            &conn,
+            &entry(
+                estimated,
+                UsageOrigin::Chat,
+                UsageTokens::estimated(36_000, 0),
+            ),
+        )
+        .unwrap();
+        let totals = session_usage_totals(&conn, estimated).unwrap();
+        assert_eq!(totals.total_tokens, 9_000);
+        assert_eq!(totals.reported_total_tokens, None);
+        assert!(serde_json::to_value(&totals)
+            .unwrap()
+            .get("reportedTotalTokens")
+            .is_none());
+
+        let zero = Uuid::new_v4();
+        insert_usage_entry(
+            &conn,
+            &entry(
+                zero,
+                UsageOrigin::Chat,
+                UsageTokens::measured(Some(0), None, Some(0), None, None),
+            ),
+        )
+        .unwrap();
+        let totals = session_usage_totals(&conn, zero).unwrap();
+        assert_eq!(totals.reported_total_tokens, Some(0));
+        assert_eq!(
+            serde_json::to_value(&totals).unwrap()["reportedTotalTokens"],
+            0
+        );
+    }
+
+    #[test]
+    fn reported_subtotals_include_partial_consumption_and_exclude_unverified_receipts() {
+        let conn = memory_conn();
+        let observed = Uuid::new_v4();
+        let partial = UsageTokens::measured(Some(7), None, None, None, None);
+        assert_eq!(
+            partial.effective_accounting().coverage,
+            UsageCoverage::Partial
+        );
+        for scope in [UsageScope::Request, UsageScope::Turn, UsageScope::Task] {
+            insert_usage_entry(
+                &conn,
+                &entry(observed, UsageOrigin::Chat, partial.with_scope(scope)),
+            )
+            .unwrap();
+        }
+        let totals = session_usage_totals(&conn, observed).unwrap();
+        assert_eq!(
+            (totals.total_tokens, totals.reported_total_tokens),
+            (21, Some(21))
+        );
+        assert_eq!(totals.partial_calls, 3);
+
+        for (source, coverage, scope, budget) in [
+            (
+                UsageSource::Provider,
+                UsageCoverage::Complete,
+                UsageScope::Context,
+                0,
+            ),
+            (
+                UsageSource::Provider,
+                UsageCoverage::Complete,
+                UsageScope::Session,
+                0,
+            ),
+            (
+                UsageSource::Provider,
+                UsageCoverage::Unavailable,
+                UsageScope::Turn,
+                0,
+            ),
+            (
+                UsageSource::Provider,
+                UsageCoverage::Estimated,
+                UsageScope::Turn,
+                100,
+            ),
+            (
+                UsageSource::Mixed,
+                UsageCoverage::Partial,
+                UsageScope::Turn,
+                100,
+            ),
+            (
+                UsageSource::Legacy,
+                UsageCoverage::Unavailable,
+                UsageScope::Turn,
+                100,
+            ),
+        ] {
+            let session = Uuid::new_v4();
+            let mut tokens = UsageTokens::measured(Some(100), None, Some(0), None, None);
+            let accounting = tokens.accounting.as_mut().unwrap();
+            accounting.source = source;
+            accounting.coverage = coverage;
+            accounting.scope = scope;
+            insert_usage_entry(&conn, &entry(session, UsageOrigin::Chat, tokens)).unwrap();
+            let totals = session_usage_totals(&conn, session).unwrap();
+            assert_eq!(
+                totals.reported_total_tokens, None,
+                "{source:?}/{coverage:?}/{scope:?}"
+            );
+            assert_eq!(
+                totals.total_tokens, budget,
+                "existing budget treatment stays unchanged"
+            );
+        }
+    }
+
+    #[test]
+    fn session_totals_keep_known_tokens_when_a_dispatched_call_has_no_receipt() {
+        let conn = memory_conn();
+        let session = Uuid::new_v4();
+        let turn = Uuid::new_v4();
+        let mut call = entry(
+            session,
+            UsageOrigin::Chat,
+            UsageTokens::measured(Some(100), None, Some(0), None, None),
+        );
+        call.turn_id = Some(turn);
+        crate::usage_receipts::note_call(&conn, session, turn).unwrap();
+        insert_usage_entry(&conn, &call).unwrap();
+        crate::usage_receipts::note_call(&conn, session, turn).unwrap();
+
+        let partial = session_usage_totals(&conn, session).unwrap();
+        assert_eq!(
+            (
+                partial.calls,
+                partial.measured_calls,
+                partial.unavailable_calls
+            ),
+            (2, 1, 1)
+        );
+        assert_eq!((partial.input_tokens, partial.total_tokens), (100, 100));
+        assert_eq!(partial.reported_total_tokens, Some(100));
+        assert!(partial.has_estimates());
+        assert_eq!(partial.by_origin.len(), 1);
+        assert_eq!(
+            (
+                partial.by_origin[0].calls,
+                partial.by_origin[0].total_tokens
+            ),
+            (1, 100)
+        );
+
+        call.tokens = UsageTokens::measured(Some(20), None, Some(0), None, None);
+        insert_usage_entry(&conn, &call).unwrap();
+        let complete = session_usage_totals(&conn, session).unwrap();
+        assert_eq!(
+            (
+                complete.calls,
+                complete.measured_calls,
+                complete.unavailable_calls
+            ),
+            (2, 2, 0)
+        );
+        assert_eq!(complete.total_tokens, 120);
+        assert_eq!(complete.reported_total_tokens, Some(120));
+        assert!(!complete.has_estimates());
+    }
+
+    #[test]
+    fn session_totals_report_a_missing_only_call_as_unavailable() {
+        let conn = memory_conn();
+        let session = Uuid::new_v4();
+        let turn = Uuid::new_v4();
+        crate::usage_receipts::note_call(&conn, session, turn).unwrap();
+
+        let missing = session_usage_totals(&conn, session).unwrap();
+        assert_eq!(
+            (
+                missing.calls,
+                missing.measured_calls,
+                missing.unavailable_calls
+            ),
+            (1, 0, 1)
+        );
+        assert_eq!(missing.total_tokens, 0);
+        assert_eq!(missing.reported_total_tokens, None);
+        assert!(missing.has_estimates());
+        assert!(missing.by_origin.is_empty());
+
+        let mut call = entry(
+            session,
+            UsageOrigin::Chat,
+            UsageTokens::measured(Some(0), None, Some(0), None, None),
+        );
+        call.turn_id = Some(turn);
+        insert_usage_entry(&conn, &call).unwrap();
+        let complete = session_usage_totals(&conn, session).unwrap();
+        assert_eq!(
+            (
+                complete.calls,
+                complete.measured_calls,
+                complete.unavailable_calls
+            ),
+            (1, 1, 0)
+        );
+        assert_eq!(complete.total_tokens, 0);
+        assert_eq!(complete.reported_total_tokens, Some(0));
+        assert!(!complete.has_estimates());
+    }
+
+    #[test]
+    fn session_missing_calls_count_exact_descendants_and_cyclic_roots_once() {
+        let conn = memory_conn();
+        let root = Uuid::new_v4();
+        let root_turn = Uuid::new_v4();
+        let child = Uuid::new_v4();
+        let child_turn = Uuid::new_v4();
+        let grandchild = Uuid::new_v4();
+        let grandchild_turn = Uuid::new_v4();
+        let mut root_call = entry(
+            root,
+            UsageOrigin::Chat,
+            UsageTokens::measured(Some(100), None, Some(0), None, None),
+        );
+        root_call.turn_id = Some(root_turn);
+        insert_usage_entry(&conn, &root_call).unwrap();
+        let mut child_call = entry(
+            child,
+            UsageOrigin::SubAgent,
+            UsageTokens::measured(Some(50), None, Some(0), None, None),
+        );
+        child_call.turn_id = Some(child_turn);
+        insert_usage_entry(&conn, &child_call).unwrap();
+        for _ in 0..2 {
+            crate::usage_receipts::note_call(&conn, root, root_turn).unwrap();
+        }
+        for _ in 0..3 {
+            crate::usage_receipts::note_call(&conn, child, child_turn).unwrap();
+        }
+        for _ in 0..10 {
+            crate::usage_receipts::note_call(&conn, child, Uuid::nil()).unwrap();
+        }
+        crate::usage_receipts::link_turn(&conn, child, child_turn, root, root_turn).unwrap();
+        crate::usage_receipts::link_turn(&conn, child, child_turn, root, root_turn).unwrap();
+        crate::usage_receipts::link_turn(&conn, grandchild, grandchild_turn, child, child_turn)
+            .unwrap();
+        crate::usage_receipts::link_turn(&conn, root, root_turn, grandchild, grandchild_turn)
+            .unwrap();
+
+        // Root owes one receipt, child owes two, and the linked grandchild
+        // owes one even though it never reached note_call. Unlinked work is excluded.
+        assert_eq!(
+            crate::usage_receipts::session_missing_calls(&conn, root).unwrap(),
+            4
+        );
+        let partial = session_usage_totals(&conn, root).unwrap();
+        assert_eq!(
+            (
+                partial.calls,
+                partial.measured_calls,
+                partial.unavailable_calls
+            ),
+            (6, 2, 4)
+        );
+        assert_eq!(partial.total_tokens, 150);
+        assert_eq!(
+            partial
+                .by_origin
+                .iter()
+                .map(|origin| origin.calls)
+                .sum::<u32>(),
+            2
+        );
+
+        root_call.tokens = UsageTokens::measured(Some(10), None, Some(0), None, None);
+        insert_usage_entry(&conn, &root_call).unwrap();
+        for amount in [20, 30] {
+            child_call.tokens = UsageTokens::measured(Some(amount), None, Some(0), None, None);
+            insert_usage_entry(&conn, &child_call).unwrap();
+        }
+        child_call.session_id = grandchild;
+        child_call.turn_id = Some(grandchild_turn);
+        child_call.tokens = UsageTokens::measured(Some(7), None, Some(0), None, None);
+        insert_usage_entry(&conn, &child_call).unwrap();
+        let complete = session_usage_totals(&conn, root).unwrap();
+        assert_eq!(
+            (
+                complete.calls,
+                complete.measured_calls,
+                complete.unavailable_calls
+            ),
+            (6, 6, 0)
+        );
+        assert_eq!(complete.total_tokens, 217);
+        assert!(!complete.has_estimates());
     }
 
     #[test]
@@ -1820,7 +2677,7 @@ mod tests {
     }
 
     #[test]
-    fn a_window_past_its_reset_is_dropped_rather_than_shown_stale() {
+    fn a_window_past_its_reset_waits_for_the_next_reading() {
         let conn = memory_conn();
         let now = Utc::now();
         let expired = (now - chrono::Duration::minutes(1)).to_rfc3339();
@@ -1836,8 +2693,18 @@ mod tests {
         .expect("record windows");
 
         let stored = provider_rate_limits(&conn, "anthropic", now).expect("read windows");
-        assert_eq!(stored.len(), 1);
-        assert_eq!(stored[0].window_id, "weekly");
+        let rolled = stored
+            .iter()
+            .find(|record| record.window_id == "five-hour")
+            .expect("the plan still meters the rolled-over window");
+        assert_eq!(rolled.status, "ok");
+        assert_eq!(rolled.used_percent, None);
+        assert!(rolled.resets_at.is_none());
+        let weekly = stored
+            .iter()
+            .find(|record| record.window_id == "weekly")
+            .expect("the live window is kept");
+        assert_eq!(weekly.resets_at.as_deref(), Some(live.as_str()));
     }
 
     #[test]
@@ -1888,6 +2755,73 @@ mod tests {
                 .expect("read windows")
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn expiry_compares_reset_instants_across_utc_offsets() {
+        let conn = memory_conn();
+        let now = Utc::now();
+        let offset = chrono::FixedOffset::east_opt(9 * 3600).unwrap();
+        let offset_west = chrono::FixedOffset::west_opt(7 * 3600).unwrap();
+        // Two hours ago, written in +09:00: as text it sorts after `now` in
+        // UTC, so it used to be served as live.
+        let expired = (now - chrono::Duration::hours(2))
+            .with_timezone(&offset)
+            .to_rfc3339();
+        // Two hours ahead, written in -07:00: as text it sorts before `now`,
+        // so it used to be deleted while still live.
+        let live = (now + chrono::Duration::hours(2))
+            .with_timezone(&offset_west)
+            .to_rfc3339();
+        record_provider_rate_limits(
+            &conn,
+            "anthropic",
+            &[
+                window("five-hour", "exhausted", Some(&expired)),
+                window("weekly", "ok", Some(&live)),
+            ],
+        )
+        .expect("record windows");
+
+        let stored = provider_rate_limits(&conn, "anthropic", now).expect("read windows");
+        let mut rolled = stored
+            .iter()
+            .map(|record| (record.window_id.as_str(), record.resets_at.is_some()))
+            .collect::<Vec<_>>();
+        rolled.sort();
+        assert_eq!(rolled, vec![("five-hour", false), ("weekly", true)]);
+    }
+
+    #[test]
+    fn a_failed_replace_leaves_the_previous_reading_whole() {
+        let conn = memory_conn();
+        let now = Utc::now();
+        let far_off = (now + chrono::Duration::days(30)).to_rfc3339();
+        record_provider_rate_limits(&conn, "openai", &[window("weekly", "ok", Some(&far_off))])
+            .expect("record windows");
+        // Make the delete half of the replace fail after its upsert ran.
+        conn.execute_batch(
+            "create trigger refuse_rate_limit_delete before delete on provider_rate_limits
+             begin select raise(abort, 'refused'); end;",
+        )
+        .unwrap();
+
+        assert!(replace_provider_rate_limits(
+            &conn,
+            "openai",
+            &[window("monthly", "ok", Some(&far_off))]
+        )
+        .is_err());
+        conn.execute_batch("drop trigger refuse_rate_limit_delete;")
+            .unwrap();
+        let stored = provider_rate_limits(&conn, "openai", now).expect("read windows");
+        assert_eq!(
+            stored
+                .iter()
+                .map(|record| record.window_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["weekly"]
         );
     }
 

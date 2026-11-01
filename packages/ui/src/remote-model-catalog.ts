@@ -1,8 +1,9 @@
-import { providerCatalog } from "./provider-catalog.ts";
+import { isPickerHiddenModel, providerCatalog } from "./provider-catalog.ts";
+import { retiredModelReplacement } from "./model-retirements.ts";
 import type { ProviderModel, ReasoningEffort } from "./types";
 
 // Increment when this client gains a new catalog-described model capability.
-export const MODEL_CATALOG_CLIENT_REVISION = 2;
+export const MODEL_CATALOG_CLIENT_REVISION = 3;
 export const MODEL_CATALOG_CACHE_KEY = "gyro.model-catalog.v1";
 /**
  * How long a focused, visible Gyro waits between catalog checks. This is the
@@ -154,7 +155,9 @@ export function applyModelCatalog(catalog: ModelCatalog, bucket: number): void {
     for (const entry of catalog.models) {
       if (
         entry.providerId !== provider.id ||
-        entry.minClientRevision > MODEL_CATALOG_CLIENT_REVISION
+        entry.minClientRevision > MODEL_CATALOG_CLIENT_REVISION ||
+        isPickerHiddenModel(entry.providerId, entry.id) ||
+        retiredModelReplacement(entry.providerId, entry.id)
       )
         continue;
       const {

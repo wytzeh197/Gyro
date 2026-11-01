@@ -22,16 +22,28 @@ assert.deepEqual(
   { reveal: false, reason: "split-view-background" },
 );
 
-// A single chat still reveals: there is one transcript and a free rail, and
-// watching the page the model is reading is the point.
+// Reading a link in a solo chat must stay in the background too.
 assert.deepEqual(
   resolveBrowserReveal({
     isUserInitiated: false,
     isSplitView: false,
     isBrowserVisible: false,
   }),
-  { reveal: true, reason: "reveal" },
+  { reveal: false, reason: "model-background" },
 );
+
+// Explicit show requests and previews can reveal in every layout.
+for (const isSplitView of [true, false]) {
+  assert.deepEqual(
+    resolveBrowserReveal({
+      isUserInitiated: false,
+      isSplitView,
+      isBrowserVisible: false,
+      revealRequested: true,
+    }),
+    { reveal: true, reason: "reveal" },
+  );
+}
 
 // The user's own action wins in every layout — suppressing a reveal they asked
 // for would make the Browser button look broken in a split.
@@ -57,8 +69,7 @@ assert.deepEqual(
   { reveal: false, reason: "already-visible" },
 );
 
-// A maximized pane owns the whole grid, so it is a single chat again and
-// reveals like one. This mirrors the grid's own isTiled rule.
+// Maximizing a pane changes the layout, without authorizing a reveal.
 assert.equal(
   isSplitChatLayout({ occupiedPaneCount: 2, hasMaximizedPane: false }),
   true,
@@ -92,7 +103,7 @@ assert.equal(
   assert.equal(background.activeDestination, before.activeDestination);
 }
 
-// Without the flag the old reveal is intact, so a solo chat is unaffected.
+// User navigation still reveals the Browser.
 {
   const thread = {
     ...createInitialWorkbenchState(),
@@ -119,6 +130,45 @@ assert.ok(
   listener.includes("background: !isActive || !decision.reveal"),
   "A suppressed reveal should navigate in the background",
 );
+assert.ok(
+  listener.includes("revealRequested: event.payload.reveal === true"),
+  "Only an explicit reveal request should open the model's Browser panel",
+);
+
+// Exercise the decision with the real reducer: default model reading preserves
+// the chat and other panels; a preview opens Browser; an inactive chat never
+// takes the current chat's surface, even if it requested a reveal.
+for (const panel of [undefined, "terminal", "diff", "browser"]) {
+  for (const isSplitView of [true, false]) {
+    for (const revealRequested of [undefined, false, true]) {
+      for (const isActive of [true, false]) {
+        const before = createInitialWorkbenchState();
+        before.activeWorkspaceLayout = "thread";
+        before.preferences.activeChatPanel = panel;
+        const decision = resolveBrowserReveal({
+          isUserInitiated: false,
+          isSplitView,
+          isBrowserVisible: panel === "browser",
+          revealRequested,
+        });
+        const after = workbenchReducer(before, {
+          type: "browser-navigate",
+          url: "https://example.com/article",
+          background: !isActive || !decision.reveal,
+        });
+        assert.equal(after.browserPreview.url, "https://example.com/article");
+        assert.equal(
+          after.preferences.activeChatPanel,
+          isActive && revealRequested ? "browser" : panel,
+        );
+        if (!isActive || !decision.reveal) {
+          assert.equal(after.activeDestination, before.activeDestination);
+          assert.equal(after.isToolPanelOpen, before.isToolPanelOpen);
+        }
+      }
+    }
+  }
+}
 assert.ok(
   /if \(isActive && decision\.reveal\) \{\s*dispatchRef\.current\(\{ type: "set-chat-panel", panel: "browser" \}\);/.test(
     listener,

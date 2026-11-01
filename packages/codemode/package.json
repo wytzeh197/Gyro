@@ -1,0 +1,18 @@
+{
+  "name": "@gyro-dev/codemode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test worker.test.mjs",
+    "check": "node --check worker.mjs"
+  },
+  "dependencies": {
+    "@opencode/codemode": "2.0.27",
+    "effect": "4.0.1"
+  },
+  "devDependencies": {
+    "bun": "1.4.3"
+  }
+}

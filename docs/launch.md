@@ -40,8 +40,23 @@ pnpm desktop:install-local
 ```
 
 `desktop:install-local` builds `Gyro.app`, copies it to
-`~/Applications/Gyro.app`, attempts an ad-hoc local signature, and opens that app
-bundle. Set `GYRO_SKIP_LOCAL_CODESIGN=1` to skip the ad-hoc signing step.
+`~/Applications/Gyro.app`, signs it locally, and opens that app bundle. Set
+`GYRO_SKIP_LOCAL_CODESIGN=1` to skip signing.
+
+The signature is reused from a real identity when the machine has one, in this
+order: `GYRO_CODESIGN_IDENTITY`, an installed **Developer ID Application**
+certificate, then a local **Gyro Dev** certificate. Only when none exist does it
+fall back to ad-hoc. That distinction is the difference between one Keychain
+prompt ever and one per build: saved API keys are guarded by an access list
+naming the signing certificate, so an ad-hoc build (a new identity every compile)
+never matches. To create the local identity once:
+
+```bash
+./scripts/setup-dev-signing.sh
+```
+
+The same fix covers the other per-build prompts, because the microphone grant
+and Keychain access are both keyed to the code signature.
 
 Avoid opening or pinning `target/debug/gyro-desktop`. It is the raw Tauri debug
 executable, not the macOS app bundle, and it expects the dev server path. When

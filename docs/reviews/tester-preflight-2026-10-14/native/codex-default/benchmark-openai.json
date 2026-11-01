@@ -1,0 +1,41 @@
+{
+  "build": "debug",
+  "elapsedMs": 49918,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": true,
+      "effort": "low",
+      "model": "gpt-5.6-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "1210ab5a-06cb-4e19-9106-be0b46137b96",
+      "task": "code",
+      "trial": 1,
+      "turnId": "35d6aa4d-76d5-4af4-80b4-968919794c0c",
+      "wallMs": 21470.634167
+    },
+    {
+      "correct": true,
+      "effort": "low",
+      "model": "gpt-5.6-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "responsePresent": true,
+      "resumedActual": true,
+      "resumedRequested": true,
+      "retryCount": 0,
+      "sessionId": "b9082da5-8a03-4d0c-88f1-7340d62910df",
+      "task": "code",
+      "trial": 1,
+      "turnId": "49c2802f-525e-460e-8c61-b029f9d20500",
+      "wallMs": 17132.451041
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

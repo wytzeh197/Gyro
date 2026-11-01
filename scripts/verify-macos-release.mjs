@@ -14,6 +14,7 @@ import {
   readdirSync,
   readlinkSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -24,6 +25,7 @@ const supportedTargets = new Map([
   ["aarch64-apple-darwin", "arm64"],
   ["x86_64-apple-darwin", "x86_64"],
 ]);
+const signingModes = new Set(["adhoc", "developer-id"]);
 
 function argument(name) {
   const indexes = process.argv.flatMap((value, index) =>
@@ -36,6 +38,39 @@ function argument(name) {
     throw new Error(`${name} requires a value`);
   }
   return value;
+}
+
+function staplerFailureIsTransient(output) {
+  return /network connection was lost|NSURLErrorDomain Code=-1005|kCFErrorDomainCFNetwork Code=-1005|CloudKit's response is inconsistent/i.test(
+    output,
+  );
+}
+
+function validateStaple(targetPath) {
+  const attempts = 4;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const result = spawnSync("xcrun", ["stapler", "validate", targetPath], {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    if (!result.error && result.status === 0) return;
+    const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}${
+      result.error?.message ?? ""
+    }`.trim();
+    const error = new Error(
+      `xcrun stapler validate ${targetPath} exited ${result.status ?? "missing"}${
+        output ? `:\n${output}` : ""
+      }`,
+    );
+    if (attempt === attempts || !staplerFailureIsTransient(output)) throw error;
+    console.error(
+      `stapler validate lost Apple's ticket service (attempt ${attempt} of ${attempts}); retrying.`,
+    );
+    const wait = spawnSync("sleep", [String(10 * attempt)], { encoding: "utf8" });
+    if (wait.error || wait.status !== 0) {
+      throw new Error("could not wait before retrying stapler validate");
+    }
+  }
 }
 
 function run(command, args, options = {}) {
@@ -150,7 +185,7 @@ function lstatExists(path) {
   }
 }
 
-function verifyBundle(appPath, config, target) {
+function verifyBundle(appPath, config, target, signing) {
   const infoPlistPath = join(appPath, "Contents", "Info.plist");
   requireFile(infoPlistPath, "app Info.plist");
 
@@ -226,30 +261,199 @@ function verifyBundle(appPath, config, target) {
   run("codesign", ["--verify", "--deep", "--strict", "--verbose=4", appPath]);
   const signature = run("codesign", ["--display", "--verbose=4", appPath]);
   const signatureDetails = `${signature.stdout}\n${signature.stderr}`;
-  for (const marker of [
-    `Identifier=${config.identifier}`,
-    "Signature=adhoc",
-    "TeamIdentifier=not set",
-    "Sealed Resources version=",
-  ]) {
-    if (!signatureDetails.includes(marker)) {
-      throw new Error(`bundle signature is missing ${marker}`);
+  if (!signatureDetails.includes(`Identifier=${config.identifier}`)) {
+    throw new Error(`bundle signature is missing Identifier=${config.identifier}`);
+  }
+  if (signing.mode === "developer-id") {
+    verifyDeveloperIdBundle(appPath, signatureDetails, signing);
+  } else {
+    verifyAdhocBundle(signatureDetails);
+  }
+}
+
+function requireMarkers(details, label, required, forbidden) {
+  for (const marker of required) {
+    if (!details.includes(marker)) {
+      throw new Error(`${label} signature is missing ${marker}`);
     }
   }
-  for (const forbidden of [
-    "Authority=",
-    "Developer ID",
-    "linker-signed",
-    "Sealed Resources=none",
-  ]) {
-    if (signatureDetails.includes(forbidden)) {
-      throw new Error(`bundle signature unexpectedly contains ${forbidden}`);
+  for (const marker of forbidden) {
+    if (details.includes(marker)) {
+      throw new Error(`${label} signature unexpectedly contains ${marker}`);
     }
   }
 }
 
-function attachAndVerifyDmg(dmgPath, config, target) {
+// Alpha builds carry a complete ad-hoc signature and nothing that could be
+// mistaken for an Apple-issued identity.
+function verifyAdhocBundle(signatureDetails) {
+  requireMarkers(
+    signatureDetails,
+    "bundle",
+    ["Signature=adhoc", "TeamIdentifier=not set", "Sealed Resources version="],
+    ["Authority=", "Developer ID", "linker-signed", "Sealed Resources=none"],
+  );
+}
+
+// Release builds must be signed by Gyro's Developer ID with a secure
+// timestamp and the hardened runtime, carry a stapled notarization ticket,
+// and pass Gatekeeper exactly as a freshly downloaded copy would.
+function verifyDeveloperIdBundle(appPath, signatureDetails, signing) {
+  requireMarkers(
+    signatureDetails,
+    "bundle",
+    [
+      "Authority=Developer ID Application: ",
+      "Authority=Developer ID Certification Authority",
+      "Authority=Apple Root CA",
+      `TeamIdentifier=${signing.teamId}`,
+      "Timestamp=",
+      "Sealed Resources version=",
+    ],
+    ["Signature=adhoc", "linker-signed", "Sealed Resources=none"],
+  );
+  if (!/flags=0x[0-9a-f]+\([^)]*\bruntime\b[^)]*\)/.test(signatureDetails)) {
+    throw new Error("bundle signature does not enable the hardened runtime");
+  }
+  const entitlements = run("codesign", [
+    "--display",
+    "--entitlements",
+    "-",
+    "--xml",
+    appPath,
+  ]);
+  const entitlementText = `${entitlements.stdout}\n${entitlements.stderr}`;
+  if (entitlementText.includes("com.apple.security.get-task-allow")) {
+    throw new Error("bundle is signed with the debugging get-task-allow entitlement");
+  }
+  // The hardened runtime gates audio input and speech recognition on these
+  // entitlements. Without them macOS denies the microphone before any sheet is
+  // presented, so dictation fails with no prompt to accept.
+  for (const key of [
+    "com.apple.security.device.audio-input",
+    "com.apple.security.personal-information.speech-recognition",
+  ]) {
+    if (!entitlementText.includes(key)) {
+      throw new Error(
+        `bundle signature is missing ${key}; sign with --entitlements apps/desktop/src-tauri/Entitlements.plist`,
+      );
+    }
+  }
+  validateStaple(appPath);
+  const assessment = run("spctl", [
+    "--assess",
+    "--type",
+    "execute",
+    "--verbose=4",
+    appPath,
+  ]);
+  requireGatekeeperSource(assessment, "app bundle");
+}
+
+function requireGatekeeperSource(assessment, label) {
+  const details = `${assessment.stdout}\n${assessment.stderr}`;
+  if (!details.includes("source=Notarized Developer ID")) {
+    throw new Error(
+      `Gatekeeper did not accept the ${label} as notarized Developer ID software:\n${details.trim()}`,
+    );
+  }
+}
+
+function verifyDeveloperIdDmg(dmgPath, signing) {
+  run("codesign", ["--verify", "--strict", "--verbose=4", dmgPath]);
+  const signature = run("codesign", ["--display", "--verbose=4", dmgPath]);
+  requireMarkers(
+    `${signature.stdout}\n${signature.stderr}`,
+    "DMG",
+    [
+      "Authority=Developer ID Application: ",
+      `TeamIdentifier=${signing.teamId}`,
+      "Timestamp=",
+    ],
+    ["Signature=adhoc"],
+  );
+  validateStaple(dmgPath);
+  const assessment = run("spctl", [
+    "--assess",
+    "--type",
+    "open",
+    "--context",
+    "context:primary-signature",
+    "--verbose=4",
+    dmgPath,
+  ]);
+  requireGatekeeperSource(assessment, "DMG");
+}
+
+// The updater installs the app from this archive, so it must hold the same
+// signed (and, for Developer ID builds, stapled) bundle as the DMG.
+function verifyUpdaterArchive(archivePath, config, target, signing) {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "gyro-release-updater-"));
+  try {
+    run("tar", ["-xzf", archivePath, "-C", temporaryRoot]);
+    const appName = `${config.productName}.app`;
+    requireEqual(
+      readdirSync(temporaryRoot).join(" "),
+      appName,
+      "updater archive contents",
+    );
+    verifyBundle(join(temporaryRoot, appName), config, target, signing);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+function pngSize(path) {
+  const header = readFileSync(path).subarray(0, 24);
+  return { width: header.readUInt32BE(16), height: header.readUInt32BE(20) };
+}
+
+// Finder styles a DMG only through its own view options: the picture lives in
+// .background, the window size and icon geometry in .DS_Store. Tauri's bundler
+// skips both steps when it detects CI, so a finished-looking build can still
+// ship the unstyled fallback. Check the artwork rather than trusting the build.
+function verifyDmgArtwork(mountPath, config) {
+  const dmg = config.bundle?.macOS?.dmg;
+  if (!dmg?.background || !dmg.windowSize) {
+    throw new Error(
+      "bundle.macOS.dmg is not configured, so the DMG cannot carry artwork",
+    );
+  }
+  const backgroundDirectory = join(mountPath, ".background");
+  if (
+    !existsSync(backgroundDirectory) ||
+    !lstatSync(backgroundDirectory).isDirectory()
+  ) {
+    throw new Error(
+      "DMG has no .background directory: the Finder layout step was skipped",
+    );
+  }
+  const images = readdirSync(backgroundDirectory).filter((name) =>
+    name.toLowerCase().endsWith(".png"),
+  );
+  if (images.length === 0) {
+    throw new Error("DMG .background directory holds no background PNG");
+  }
+  const expected = `${dmg.windowSize.width * 2}x${dmg.windowSize.height * 2}`;
+  for (const image of images) {
+    const size = pngSize(join(backgroundDirectory, image));
+    requireEqual(
+      `${size.width}x${size.height}`,
+      expected,
+      `.background/${image} pixel size`,
+    );
+  }
+  const dsStore = join(mountPath, ".DS_Store");
+  if (!existsSync(dsStore) || statSync(dsStore).size === 0) {
+    throw new Error(
+      "DMG has no .DS_Store: window size and icon positions were not written",
+    );
+  }
+}
+
+function attachAndVerifyDmg(dmgPath, config, target, signing) {
   run("hdiutil", ["verify", dmgPath]);
+  if (signing.mode === "developer-id") verifyDeveloperIdDmg(dmgPath, signing);
 
   const temporaryRoot = mkdtempSync(join(tmpdir(), "gyro-release-dmg-"));
   const mountPath = join(temporaryRoot, "mounted");
@@ -269,6 +473,7 @@ function attachAndVerifyDmg(dmgPath, config, target) {
     attached = true;
 
     verifyApplicationsShortcut(mountPath);
+    verifyDmgArtwork(mountPath, config);
     const appName = `${config.productName}.app`;
     const appEntries = readdirSync(mountPath).filter((name) =>
       name.endsWith(".app"),
@@ -278,7 +483,7 @@ function attachAndVerifyDmg(dmgPath, config, target) {
     if (!lstatSync(appPath).isDirectory()) {
       throw new Error(`${appName} is not an app bundle directory`);
     }
-    verifyBundle(appPath, config, target);
+    verifyBundle(appPath, config, target, signing);
   } catch (error) {
     failure = error;
   } finally {
@@ -300,11 +505,32 @@ function attachAndVerifyDmg(dmgPath, config, target) {
 }
 
 async function main() {
+  if (process.argv.includes("--self-test")) {
+    const dropped =
+      'error is Error Domain=NSURLErrorDomain Code=-1005 "The network connection was lost." CloudKit\'s response is inconsistent with expections: (null)';
+    if (!staplerFailureIsTransient(dropped)) {
+      throw new Error("a dropped ticket lookup must be retried");
+    }
+    if (
+      staplerFailureIsTransient(
+        "The validate action failed! Error 65. Gyro.app does not have a ticket stapled to it.",
+      )
+    ) {
+      throw new Error("a missing staple must not be retried");
+    }
+    console.log("Stapler validate retry classification passed.");
+    return;
+  }
   if (process.argv.includes("--help")) {
     console.log(`Verify a Gyro macOS release DMG:
-  node scripts/verify-macos-release.mjs --dmg <path> --target <target> [--checksums <SHA256SUMS>]
+  node scripts/verify-macos-release.mjs --dmg <path> --target <target>
+    [--checksums <SHA256SUMS>] [--updater-archive <Gyro.app.tar.gz>]
+    [--signing adhoc|developer-id] [--team-id <TEAMID>]
 
-Supported targets: ${[...supportedTargets.keys()].join(", ")}`);
+Supported targets: ${[...supportedTargets.keys()].join(", ")}
+--signing defaults to adhoc. developer-id requires --team-id and checks the
+Developer ID signature, hardened runtime, timestamp, stapled notarization
+tickets, and Gatekeeper acceptance of both the app and the DMG.`);
     return;
   }
   if (process.platform !== "darwin") {
@@ -314,6 +540,11 @@ Supported targets: ${[...supportedTargets.keys()].join(", ")}`);
   const dmgArgument = argument("--dmg");
   const target = argument("--target");
   const checksumsArgument = argument("--checksums");
+  const updaterArchiveArgument = argument("--updater-archive");
+  const signing = {
+    mode: argument("--signing") ?? "adhoc",
+    teamId: argument("--team-id"),
+  };
   if (!dmgArgument || !target) {
     throw new Error(
       "use --dmg <path> --target <target> [--checksums <SHA256SUMS>]",
@@ -321,6 +552,15 @@ Supported targets: ${[...supportedTargets.keys()].join(", ")}`);
   }
   if (!supportedTargets.has(target)) {
     throw new Error(`unsupported release target ${target}`);
+  }
+  if (!signingModes.has(signing.mode)) {
+    throw new Error(`unsupported signing mode ${signing.mode}`);
+  }
+  if (signing.mode === "developer-id" && !/^[A-Z0-9]{10}$/.test(signing.teamId ?? "")) {
+    throw new Error("--signing developer-id requires a 10-character --team-id");
+  }
+  if (signing.mode === "adhoc" && signing.teamId) {
+    throw new Error("--team-id only applies to --signing developer-id");
   }
 
   const dmgPath = resolve(dmgArgument);
@@ -340,9 +580,15 @@ Supported targets: ${[...supportedTargets.keys()].join(", ")}`);
   if (checksumsArgument) requireFile(checksumsPath, "SHA256SUMS");
 
   await verifyChecksum(dmgPath, checksumsPath);
-  attachAndVerifyDmg(dmgPath, config, target);
+  attachAndVerifyDmg(dmgPath, config, target, signing);
+  if (updaterArchiveArgument) {
+    const archivePath = resolve(updaterArchiveArgument);
+    requireFile(archivePath, "updater archive");
+    verifyUpdaterArchive(archivePath, config, target, signing);
+    console.log(`Verified ${basename(archivePath)} holds the same signed app.`);
+  }
   console.log(
-    `Verified ${basename(dmgPath)} as the ${target} Gyro ${config.version} release DMG.`,
+    `Verified ${basename(dmgPath)} as the ${target} Gyro ${config.version} release DMG (${signing.mode} signing).`,
   );
 }
 

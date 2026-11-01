@@ -1,0 +1,85 @@
+GYRO FRONTEND POLISH — 15 OCTOBER 2026
+
+Implemented locally on v0.1.0, retaining the existing work in progress.
+The pass uses the current neutral surface palette, system typography, density
+and interface-size controls, and user accent. Positioning means alignment and
+placement within the existing app; product identity and navigation are retained.
+
+CHANGES
+- Chat: Send remains circular at all interface sizes. Removed composer/Send
+  drop shadows. Split welcome screens no longer double their logo/composer
+  margins, and their heading follows the shared heading size. Composer focus
+  stays neutral.
+- Settings: clickable rows have hover feedback, select controls align, and
+  narrow text fields, color controls and keyboard bindings stack cleanly.
+- Review: selectors and buttons share usable heights, labels wrap, and edit
+  selectors have visible keyboard focus. Disabled actions do not highlight.
+- Automations: long project paths and result actions wrap; primary text actions
+  honor the user's accent; advanced options have clear disclosure feedback.
+- Pull-request form: primary/secondary actions are distinct, Draft checkbox is
+  inline, inputs and type use shared tokens, and short windows scroll to actions.
+- Menus: Escape returns to the trigger that opened the current menu without a
+  scroll jump. Leaving the menu dismisses it. Menu arrows no longer intercept
+  unrelated focus, modified shortcuts or editable text.
+- Confirmation dialogs: Tab stays inside the dialog, Escape cancels, and focus
+  returns appropriately. Nested menus/controls receive Escape first. Native
+  modal dialog behavior and reduced motion are retained.
+
+PRODUCTION FILES
+packages/ui/src/chat-design.css
+packages/ui/src/settings-design.css
+packages/ui/src/review-design.css
+packages/ui/src/automation-detail.css
+packages/ui/src/workflow-forms.css
+packages/ui/src/menu-dismiss.ts
+packages/ui/src/use-dialog-dismiss.ts
+
+The existing workbench source guard was updated to recognize the new current-
+trigger focus chain and preventScroll option. Its baseline was not loosened.
+The linked private design-system/components.md now documents the actual menu
+source, shared dialog behavior and styled workflow primary action.
+
+VERIFICATION
+PASS desktop and UI TypeScript checks on final source.
+PASS pnpm smoke:workbench, including the UI token check.
+PASS optimized frontend production build. Vite retains its large-chunk warning.
+PASS 40 full-app captures with viewport/composer/menu bounds and no runtime
+     errors: dark/light, 1440x900 and 860x620, default/large; additional small
+     interface and custom accent states. Coverage: welcome, chat, Appearance,
+     providers, Workspace Source Control, automations, General, keyboard
+     shortcuts, Usage & Limits, Tools, Updates, search, and session menus.
+PASS 47 focused secondary-surface checks, including 360px Review, narrow
+     settings, long automation content, and 500x400 form scrolling.
+PASS 21 interaction regressions with normal motion and the same 21 with Reduce
+     Motion. The baseline reproduced 8 failures among its original 16 checks.
+PASS motion browser suite: companion open/close/reversal, nested disclosures,
+     native branch dialog dismissal and reduced-motion behavior. An initial
+     run lost a fixture button while source edits/HMR were active; the settled
+     rerun passed without source or test changes.
+PASS split composer/model menu bounds and Escape at small/default/large sizes.
+PASS visual inspection of representative captures, including both themes,
+     minimum-size screens, narrow Review, dialogs, Workspace diff/terminal,
+     CLI view and browser chrome. These additional tool captures had no page
+     errors. Not every captured frame received a separate visual critique.
+PASS git diff --check.
+
+EVIDENCE
+- after/results.json and visual-qa.mjs: 40 full-app captures and geometry checks.
+- chat/: actual before/after captures for split, welcome and active chat.
+- surfaces/verification.json and scripts: 47 checks and representative images.
+  workflow-before-dark.png reconstructs the baseline using HEAD's workflow
+  stylesheet on the current production component; it is not an old app capture.
+- interaction-before.json and interaction-after{,-motion}.json: real DOM and
+  keyboard results from production hooks/components mounted by the QA script.
+- logs/: final frontend build and passing motion-browser output.
+
+LIMITS
+This is browser rendering and interaction evidence using production React
+components with simulated development data. It does not establish native
+macOS WebView/window behavior, live providers, real GitHub actions, or installed
+app acceptance. No macOS bundle was rebuilt or installed in this pass. Fixture
+model names, dates, counts, terminals and repository operations are examples.
+No full accessibility-compliance or exhaustive state-combination claim is made.
+
+Existing dirty/untracked work was retained; no commit, push or publication was
+performed. The prior packaged candidate does not include this new polish.

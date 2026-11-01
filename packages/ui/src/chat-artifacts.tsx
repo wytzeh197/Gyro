@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
 import {
+  ArrowUpRight,
   Brain,
   Check,
   ChevronDown,
   ChevronRight,
   CircleAlert,
   Copy,
+  ExternalLink,
   FileText,
   Globe2,
   ListChecks,
@@ -84,6 +86,13 @@ function ChatArtifactCard({
 }) {
   const [isExpanded, setIsExpanded] = useState(true);
   const icon = artifactIcon(artifact.kind);
+  if (artifact.kind === "preview") {
+    return (
+      <section className="gyro-chat-artifact is-preview" aria-label={`${artifact.title} preview`}>
+        <ChatArtifactContent actions={actions} artifact={artifact} />
+      </section>
+    );
+  }
   return (
     <section
       className={`gyro-chat-artifact is-${artifact.kind}`}
@@ -258,59 +267,45 @@ export function ChatArtifactContent({
   }
   if (artifact.kind === "preview") {
     const host = previewHostLabel(artifact.url);
-    const statusLabel =
-      artifact.status === "streaming"
-        ? "Loading"
-        : artifact.status === "failed"
-          ? "Failed"
-          : artifact.status === "stale"
-            ? "Stale"
-            : artifact.captureUrl
-              ? "Captured"
-              : "Preview";
+    const statusLabel = artifact.status === "streaming" ? "Loading" :
+      artifact.status === "failed" ? "Failed" : artifact.status === "stale" ? "Stale" : undefined;
+    const canOpen = Boolean(actions?.onOpenPreview || actions?.onOpenTool);
     return (
       <div className="gyro-chat-artifact-preview">
         <button
+          aria-label={`Open ${artifact.title} in panel`}
           className="gyro-chat-artifact-preview-card"
+          disabled={!canOpen}
           onClick={() => actions?.onOpenPreview ? actions.onOpenPreview(artifact.url) : actions?.onOpenTool?.("browser")}
+          title={[artifact.description, artifact.url].filter(Boolean).join("\n")}
           type="button"
         >
           <span className="gyro-chat-artifact-preview-media">
             {artifact.captureUrl ? (
               <img alt="" draggable={false} src={artifact.captureUrl} />
             ) : (
-              <span className="gyro-chat-artifact-preview-fallback">
-                <Globe2 aria-hidden="true" size={18} />
-              </span>
+              <Globe2 aria-hidden="true" size={17} />
             )}
           </span>
           <span className="gyro-chat-artifact-preview-meta">
-            <strong>{host || artifact.title || "Browser preview"}</strong>
-            {artifact.url ? (
-              <code className="gyro-chat-artifact-url">{artifact.url}</code>
-            ) : null}
-            {artifact.description ? (
-              <small>{artifact.description}</small>
-            ) : null}
-            <em>{statusLabel}</em>
+            <strong>{artifact.title || "Browser preview"}</strong>
+            <small>{host || "Browser preview"}{statusLabel ? (
+              <span className={`gyro-chat-artifact-preview-status is-${artifact.status}`} role="status"> · {statusLabel}</span>
+            ) : null}</small>
           </span>
+          {canOpen ? <span className="gyro-chat-artifact-preview-open" aria-hidden="true">Open <ArrowUpRight size={13} /></span> : null}
         </button>
-        <div className="gyro-chat-artifact-footer-actions">
+        {actions?.onOpenExternalPreview && artifact.url ? (
           <button
-            onClick={() => actions?.onOpenPreview ? actions.onOpenPreview(artifact.url) : actions?.onOpenTool?.("browser")}
+            aria-label="Open external"
+            className="gyro-chat-artifact-preview-external"
+            onClick={() => actions.onOpenExternalPreview?.(artifact.url)}
+            title="Open external"
             type="button"
           >
-            Open in panel
+            <ExternalLink aria-hidden="true" size={15} />
           </button>
-          {actions?.onOpenExternalPreview && artifact.url ? (
-            <button
-              onClick={() => actions.onOpenExternalPreview?.(artifact.url)}
-              type="button"
-            >
-              Open external
-            </button>
-          ) : null}
-        </div>
+        ) : null}
       </div>
     );
   }
