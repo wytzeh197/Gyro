@@ -4796,7 +4796,8 @@ expect(
         "goal_runner::run(app, request, expected_run)",
       ) &&
         /run_timed_provider_chat_in_lease\(\s*app\.clone\(\),\s*request\.clone\(\),\s*UsageOrigin::Chat,\s*Some\(&lease\)/.test(
-                ))) &&
+          readRepoFile("apps/desktop/src-tauri/src/goal_runner.rs"),
+        ))) &&
     /run_provider_chat_blocking(?:_in_lease)?\(app, request, origin(?:, lease)?\)/.test(
       turnTimingRustSource,
     ) &&
