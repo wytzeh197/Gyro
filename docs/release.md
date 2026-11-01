@@ -236,6 +236,19 @@ Open a pull request for the release branch and require CI to pass. Merge it into
 Never tag or publish directly from an unmerged release branch. Pushing the tag
 starts the draft release workflow described below.
 
+If a hosted runner loses Apple's notarization ticket connection, retry the
+failed job. The release workflow forces ticket requests over TCP on disposable
+Developer ID build runners and retries transient DMG stapling failures; signature,
+staple and Gatekeeper checks remain mandatory. See the
+[GitHub runner issue](https://github.com/actions/runner-images/issues/14924).
+
+For a reviewed workflow repair after tagging, run **Release** manually from
+`main` with the existing `release_tag` and its exact approved `expected_commit`.
+The workflow verifies the tag, commit, version and main ancestry before using
+signing secrets, then builds that immutable commit. Never move or recreate the
+tag. Recovery still creates a draft and requires the same artifact acceptance
+before publication.
+
 Delete the release branch after it is merged. These branches are temporary
 coordination points, not permanent branches for historic versions. Ordinary
 feature and dependency changes continue to use normal short-lived branches and
