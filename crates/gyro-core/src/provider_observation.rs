@@ -364,7 +364,7 @@ pub fn add_usage(total: &mut Option<UsageTokens>, tokens: UsageTokens) {
 pub fn text_size(value: &Value) -> (usize, bool) {
     match value {
         Value::String(text) if text.starts_with("data:image/") => (0, true),
-        Value::String(text) => (text.chars().count().saturating_add(2), false),
+        Value::String(text) => (text_chars(text).saturating_add(2), false),
         Value::Array(items) => items
             .iter()
             .map(text_size)
@@ -386,6 +386,21 @@ pub fn text_size(value: &Value) -> (usize, bool) {
             )
         }),
         _ => (value.to_string().len(), false),
+    }
+}
+
+/// Character count used as the token estimate.
+///
+/// Tool output and source files are almost always ASCII. `str::is_ascii` is a
+/// byte scan, and for ASCII the byte length is the character length, so a
+/// multi-megabyte result does not pay for scalar decoding. Non-ASCII text
+/// still counts scalars, which is what the four-characters-per-token estimate
+/// means.
+fn text_chars(text: &str) -> usize {
+    if text.is_ascii() {
+        text.len()
+    } else {
+        text.chars().count()
     }
 }
 
@@ -543,6 +558,29 @@ mod tests {
             "type": "image", "data": "x".repeat(100_000), "mimeType": "image/png"
         }));
         assert!(unknown && chars < 100);
+    }
+    #[test]
+    fn text_size_counts_ascii_bytes_and_unicode_scalars_the_same_way() {
+        let ascii = "fn main() {\n    println!(\"ok\");\n}\n".repeat(200);
+        let mixed = format!("{ascii}café 🦀");
+        for text in [ascii, mixed] {
+            let (chars, unknown) = text_size(&Value::String(text.clone()));
+            assert!(!unknown);
+            assert_eq!(chars, text.chars().count() + 2);
+        }
+        let content = "a".repeat(4_096);
+        let note = "line — two";
+        let (object_chars, unknown) = text_size(&serde_json::json!({
+            "content": content,
+            "note": note
+        }));
+        assert!(!unknown);
+        // Object overhead is the same walk `text_size` uses: 2 for `{}`, then
+        // key length + 4 and the string's own quoted character count per field.
+        let expected = 2
+            + ("content".len() + 4 + content.chars().count() + 2)
+            + ("note".len() + 4 + note.chars().count() + 2);
+        assert_eq!(object_chars, expected);
     }
     #[test]
     fn native_restarts_keep_prior_attempts_and_reported_cache_counts() {

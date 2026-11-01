@@ -334,34 +334,46 @@ fn strip_stale_images(message: &mut Value) -> usize {
         .and_then(Value::as_array)
         .is_some_and(|images| !images.is_empty())
     {
-        if let Some(images) = message.get("images").cloned() {
-            saved += serde_json::to_string(&images)
-                .map(|text| text.len())
-                .unwrap_or(0);
+        // The saved-byte count is the compact JSON length. Measuring it by
+        // reference avoids cloning the base64 just to format and drop it.
+        if let Some(images) = message.get("images") {
+            saved += super::compaction::message_bytes(images);
         }
         message
             .as_object_mut()
             .map(|object| object.remove("images"));
         append_image_note(message);
     }
-    let Some(parts) = message.get("content").and_then(Value::as_array).cloned() else {
+    let has_image_part = message
+        .get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|parts| parts.iter().any(is_image_part));
+    if !has_image_part {
+        return saved;
+    }
+    let Some(content) = message.get_mut("content") else {
         return saved;
     };
-    let mut kept = Vec::new();
+    let replaced = std::mem::replace(content, Value::Null);
+    let Value::Array(parts) = replaced else {
+        *content = replaced;
+        return saved;
+    };
+    let mut kept = Vec::with_capacity(parts.len());
     let mut removed = 0;
     for part in parts {
         if is_image_part(&part) {
-            removed += serde_json::to_string(&part)
-                .map(|text| text.len())
-                .unwrap_or(0);
+            removed += super::compaction::message_bytes(&part);
         } else {
             kept.push(part);
         }
     }
     if removed > 0 {
         kept.push(serde_json::json!({"type": "text", "text": IMAGE_NOTE}));
-        message["content"] = Value::Array(kept);
+        *content = Value::Array(kept);
         saved += removed;
+    } else {
+        *content = Value::Array(kept);
     }
     saved
 }
@@ -414,11 +426,15 @@ fn apply_stub(payload: &mut Value) -> Option<()> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
-    let data = payload
-        .pointer("/result/data")
-        .cloned()
-        .unwrap_or(Value::Null);
-    payload["result"]["data"] = slim_data(&data, &capability);
+    // Move the evidence out. Cloning it first kept a second copy of the tool
+    // body (file text, command output) alive until the stub replaced it.
+    let data = match payload.pointer_mut("/result/data") {
+        Some(slot) => std::mem::replace(slot, Value::Null),
+        None => Value::Null,
+    };
+    let slim = slim_data(&data, &capability);
+    drop(data);
+    payload["result"]["data"] = slim;
     cap_text_field(payload, "/result/summary");
     cap_error_message(payload);
     Some(())
@@ -844,6 +860,47 @@ mod tests {
         assert_eq!(messages[6], pointer);
         assert_eq!(messages[8], newest_image);
         assert_eq!(retire_stale_tool_results(&mut messages), 0);
+    }
+
+    #[test]
+    fn image_retirement_counts_removed_json_and_leaves_text_parts() {
+        let images = serde_json::json!(["i".repeat(3000)]);
+        let part = serde_json::json!({
+            "type": "image_url",
+            "image_url": {"url": format!("data:image/png;base64,{}", "abc".repeat(800))}
+        });
+        let expected = serde_json::to_string(&images).unwrap().len()
+            + serde_json::to_string(&part).unwrap().len();
+        let mut messages = vec![
+            serde_json::json!({"role":"system","content":"instructions"}),
+            serde_json::json!({"role":"user","content":"briefing"}),
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "text", "text": "page text"}, part],
+                "images": images,
+            }),
+            serde_json::json!({"role":"assistant","content":"done"}),
+        ];
+        assert_eq!(retire_stale_tool_results(&mut messages), expected);
+        assert_eq!(messages[2]["content"][0]["text"], "page text");
+        assert!(messages[2].get("images").is_none());
+        assert!(messages[2]["content"][1]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Earlier image omitted"));
+        assert!(!messages[2].to_string().contains("data:image"));
+        let text_only = serde_json::json!({
+            "role": "user",
+            "content": [{"type": "text", "text": "n".repeat(8_000)}]
+        });
+        let mut untouched = vec![
+            serde_json::json!({"role":"system","content":"instructions"}),
+            serde_json::json!({"role":"user","content":"briefing"}),
+            text_only.clone(),
+            serde_json::json!({"role":"assistant","content":"done"}),
+        ];
+        assert_eq!(retire_stale_tool_results(&mut untouched), 0);
+        assert_eq!(untouched[2], text_only);
     }
 
     #[test]
