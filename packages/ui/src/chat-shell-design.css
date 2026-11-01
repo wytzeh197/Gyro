@@ -1,0 +1,539 @@
+/* Sessions and Workspace share the same navigation surround. */
+:root[data-theme]
+  .gyro-app-shell:is(.is-thread-layout, .is-workspace-chrome-active, .is-settings-layout) {
+  --gyro-chat-surround: color-mix(
+    in srgb,
+    var(--gyro-sidebar) 97%,
+    var(--gyro-text)
+  );
+}
+
+:root[data-theme="light"]
+  .gyro-app-shell:is(.is-thread-layout, .is-workspace-chrome-active, .is-settings-layout) {
+  --gyro-chat-surround: color-mix(
+    in srgb,
+    var(--gyro-sidebar) 90%,
+    var(--gyro-text)
+  );
+}
+
+/* The conversation is an inset canvas. Navigation and companion tools share
+   the surrounding material, including the thin top and bottom window rim. */
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) {
+  --gyro-chat-rim: 6px;
+  --gyro-chat-canvas-radius: 12px;
+  --gyro-chat-header-control-size: max(
+    28px,
+    calc(28px * var(--gyro-ui-scale, 1))
+  );
+  background: var(--gyro-chat-surround);
+}
+
+/* Porcelain needs a visible value step: a soft grey surround, a nearly white
+   reading canvas, and white controls with a quiet but legible edge. */
+:root[data-theme="light"] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) {
+  --gyro-app: var(--gyro-pane);
+  --gyro-border: color-mix(in srgb, var(--gyro-text) 18%, var(--gyro-surface));
+  --gyro-border-soft: color-mix(
+    in srgb,
+    var(--gyro-text) 10%,
+    var(--gyro-surface)
+  );
+}
+
+/* Keep the same separation with native material, including the system's
+   reduced-transparency preference, without adding a second sidebar layer. */
+:root[data-native-material="sidebar"][data-theme="light"]
+  .gyro-app-shell:is(.is-thread-layout, .is-workspace-chrome-active, .is-settings-layout) {
+  --gyro-sidebar-material: color-mix(
+    in srgb,
+    var(--gyro-chat-surround) max(88%, var(--gyro-window-tint)),
+    transparent
+  );
+}
+
+/* Opaque and reduced-transparency navigation follows the same palette too. */
+:root[data-theme] .gyro-app-shell.is-workspace-chrome-active {
+  --gyro-workspace-chrome: var(--gyro-chat-surround);
+}
+
+:root[data-theme]:not([data-native-material="sidebar"])
+  .gyro-app-shell.is-workspace-shell.is-workspace-chrome-active > .gyro-sidebar {
+  background: var(--gyro-chat-surround);
+}
+
+/* Beat the legacy theme-specific navigation fills in styles.css, so the
+   sidebar, title band and footer reveal the same surround in both themes. */
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell:is(.is-thread-layout, .is-settings-layout)
+  > .gyro-sidebar,
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-sidebar-windowbar,
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-sidebar-footer {
+  background: transparent;
+  border-color: transparent;
+}
+
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-sidebar-project-row {
+  background: var(--gyro-chat-surround);
+}
+
+:root[data-theme]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-sidebar
+  .gyro-sidebar-small-title {
+  /* Sticky labels still need an opaque backing when chats scroll below. */
+  background: var(--gyro-chat-surround);
+}
+
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) > .gyro-main {
+  background: transparent;
+  clip-path: none;
+  box-sizing: border-box;
+  padding: var(--gyro-chat-rim) var(--gyro-chat-rim) var(--gyro-chat-rim) 0;
+}
+
+:root[data-theme]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
+  > .gyro-main
+  > .gyro-seam-corner {
+  display: none;
+}
+
+/* Sample native material once, behind the complete surround. Chat content
+   remains opaque; menus keep their existing stacking and containing blocks. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) {
+  background: transparent;
+  isolation: isolate;
+  position: relative;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--gyro-sidebar-material);
+  -webkit-backdrop-filter: var(--gyro-window-blur);
+  backdrop-filter: var(--gyro-window-blur);
+  pointer-events: none;
+  z-index: -1;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
+  > .gyro-sidebar::before {
+  content: none;
+}
+
+/* Project group labels reveal the shared native material too. An opaque
+   surround token reads as a highlighted strip over the translucent sidebar. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-sidebar-project-row {
+  background: transparent;
+}
+
+:root[data-theme]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-workspace-route.is-thread,
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-workspace-primary {
+  background: transparent;
+}
+
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-grid {
+  border-radius: var(--gyro-chat-canvas-radius);
+  background: var(--gyro-border-soft);
+  /* Composite isolated split panes through one opaque mask. Rounded overflow
+     alone can punch transparent pixels through the lower canvas corners. */
+  -webkit-mask-image: linear-gradient(white, white);
+  mask-image: linear-gradient(white, white);
+}
+
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-grid-slot {
+  border: 0;
+  background: var(--gyro-app);
+}
+
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-surface,
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-thread-topbar,
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-thread-canvas,
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-transcript,
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-composer-dock {
+  background: var(--gyro-app);
+}
+
+/* Subtract the canvas rim so the header ends at the window navigation
+   baseline (48px from the shell top). Companion headers share that row. */
+:root[data-theme] .gyro-chat-surface,
+:root[data-theme] .gyro-chat-companion,
+:root[data-theme] .gyro-chat-companion-host {
+  --gyro-chat-header-height: calc(48px - var(--gyro-chat-rim, 0px));
+  --gyro-chat-canvas-radius: 12px;
+  --gyro-chat-composer-radius: 14px;
+  --gyro-radius-composer: var(--gyro-chat-composer-radius);
+}
+
+/* Split-chat document chrome: a steady title baseline and quiet controls.
+   Leave the window-origin navigation inset and native traffic lights alone. */
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-thread-topbar {
+  gap: 12px;
+  padding-right: 10px;
+  box-shadow: inset 0 -1px color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-thread-identity {
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-thread-identity > strong {
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: -0.01em;
+}
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-thread-project-icon {
+  width: 15px;
+  height: 15px;
+  opacity: 0.8;
+}
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-thread-topbar .gyro-chat-surface-controls {
+  gap: 4px;
+}
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-thread-topbar .gyro-chat-surface-button {
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-muted);
+  transition: background-color 120ms ease, color 120ms ease;
+}
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-thread-topbar .gyro-chat-surface-button:hover,
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-thread-topbar .gyro-chat-surface-button.is-active {
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  color: var(--gyro-text);
+}
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-thread-topbar .gyro-chat-surface-button:focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-thread-topbar .gyro-chat-surface-button {
+    transition: none;
+  }
+}
+
+:root[data-theme] .gyro-chat-workspace {
+  display: flex;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  isolation: isolate;
+  background: transparent;
+}
+
+:root[data-theme] .gyro-chat-workspace > .gyro-chat-grid {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* Each pane frame holds its conversation and its own panel, so the canvas
+   edge wraps both and split chats keep their tools side by side. */
+:root[data-theme] .gyro-chat-grid-slot.is-occupied:not(.is-hidden-by-maximize) {
+  display: flex;
+}
+
+/* Pane-width queries keep measuring the conversation, not chat plus panel. */
+:root[data-theme] .gyro-chat-grid-slot.is-occupied > .gyro-chat-surface {
+  flex: 1 1 0;
+  min-width: 0;
+  container-name: gyro-chat-pane;
+  container-type: inline-size;
+}
+
+:root[data-theme] .gyro-chat-grid-slot.is-occupied > .gyro-chat-surface.is-empty.is-tiled {
+  container-name: gyro-chat-pane gyro-draft-pane;
+  container-type: size;
+}
+
+:root[data-theme] .gyro-chat-companion-host {
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  position: relative;
+  background: var(--gyro-app);
+}
+
+/* One hairline inside the frame separates the chat from its panel. */
+:root[data-theme] .gyro-chat-companion-host:not(.is-overlay, .is-expanded)::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 1px;
+  background: var(--gyro-border-soft);
+  pointer-events: none;
+  z-index: 2;
+}
+
+:root[data-theme] .gyro-chat-companion-host-pane {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+:root[data-theme] .gyro-chat-companion-host-pane:not(.is-active),
+:root[data-theme] .gyro-chat-companion-host-pane[hidden] {
+  display: none;
+}
+
+:root[data-theme] .gyro-chat-companion-host-pane > .gyro-chat-companion {
+  position: relative;
+  inset: auto;
+  margin: 0;
+  height: 100%;
+  max-height: none;
+  max-width: 100%;
+  border: 0;
+  transform: none;
+}
+
+:root[data-theme] .gyro-chat-companion-host:is(.is-overlay, .is-expanded) {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+}
+
+:root[data-theme] .gyro-chat-companion-host-pane > .gyro-plan-rail {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+
+:root[data-theme] .gyro-chat-companion-host .gyro-plan-panel-head {
+  box-sizing: border-box;
+  min-height: var(--gyro-chat-header-height);
+  padding: 8px 12px;
+  background: transparent;
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+
+:root[data-theme] .gyro-chat-companion-host .gyro-plan-panel-title strong {
+  font-size: var(--gyro-font-chrome);
+  font-weight: 500;
+}
+
+:root[data-theme] .gyro-chat-surface > .gyro-chat-thread-topbar,
+:root[data-theme] .gyro-chat-companion > .gyro-chat-companion-tabs {
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--gyro-chat-header-height);
+  min-height: var(--gyro-chat-header-height);
+  padding-block: 0;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  box-shadow: none;
+}
+
+:root[data-theme] .gyro-chat-companion-host .gyro-chat-companion,
+:root[data-theme] .gyro-chat-surface > .gyro-chat-companion,
+:root[data-theme] .gyro-chat-companion > .gyro-chat-companion-tabs,
+:root[data-theme] .gyro-chat-companion > .gyro-chat-companion-content {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+:root[data-theme] .gyro-chat-companion > .gyro-chat-companion-tabs {
+  gap: 8px;
+  padding-inline: 12px 6px;
+}
+
+:root[data-theme] .gyro-chat-companion .gyro-chat-companion-tab-list {
+  gap: 4px;
+  min-width: 0;
+  scrollbar-width: none;
+}
+
+:root[data-theme] .gyro-chat-companion .gyro-chat-companion-tab {
+  align-self: center;
+  border-radius: var(--gyro-radius-md);
+  flex: 0 0 auto;
+  min-width: 0;
+  padding-right: 2px;
+}
+
+:root[data-theme] .gyro-chat-companion .gyro-chat-companion-tab.is-active {
+  min-width: 0;
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+}
+
+:root[data-theme]
+  .gyro-chat-companion
+  .gyro-chat-companion-tab
+  > button[role="tab"] {
+  gap: 6px;
+  height: 28px;
+  min-height: 28px;
+  max-width: 180px;
+  padding-inline: 8px;
+  font-size: var(--gyro-font-chrome);
+  font-weight: 500;
+}
+
+:root[data-theme]
+  .gyro-chat-companion
+  .gyro-chat-companion-tab
+  > .gyro-chat-companion-tab-close {
+  height: 24px;
+  min-height: 24px;
+  width: 24px;
+  max-width: 24px;
+  flex-basis: 24px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+:root[data-theme]
+  .gyro-chat-companion
+  .gyro-chat-companion-tab:is(.is-active, :hover, :focus-within)
+  > .gyro-chat-companion-tab-close {
+  opacity: 0.7;
+  pointer-events: auto;
+}
+
+:root[data-theme] .gyro-chat-companion .gyro-chat-companion-window-actions {
+  gap: 4px;
+}
+
+:root[data-theme]
+  .gyro-chat-companion
+  :is(.gyro-chat-companion-window-actions, .gyro-chat-companion-add)
+  > button {
+  align-items: center;
+  justify-content: center;
+  display: inline-flex;
+  height: 28px;
+  min-height: 28px;
+  width: 28px;
+  min-width: 28px;
+  border-radius: var(--gyro-radius-md);
+  padding: 0;
+}
+
+:root[data-theme] .gyro-chat-companion-tabs button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+
+:root[data-theme] .gyro-chat-companion-tabs button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+:root[data-theme]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider:not(.is-provider-collapsed) {
+  border-radius: var(--gyro-chat-composer-radius);
+  box-shadow: none;
+}
+
+:root[data-theme]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider:not(.is-provider-collapsed)
+  > textarea {
+  border-radius: var(--gyro-chat-composer-radius)
+    var(--gyro-chat-composer-radius) 0 0;
+}
+
+:root[data-theme]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-user-message-bubble {
+  border-radius: var(--gyro-chat-canvas-radius);
+}
+
+:root[data-theme] .gyro-chat-surface .gyro-response-code-block {
+  border-radius: var(--gyro-radius-lg);
+}
+
+:root[data-theme="light"] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-grid {
+  box-shadow: 0 0 0 1px var(--gyro-border);
+}
+
+:root[data-theme="light"]
+  .gyro-app-shell.is-chat-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-sidebar
+  .gyro-session-row.is-active {
+  background: var(--gyro-surface);
+  box-shadow: inset 0 0 0 1px var(--gyro-border);
+}
+
+:root[data-theme="light"]
+  .gyro-app-shell.is-chat-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-sidebar
+  .gyro-session-row.is-active:is(:hover, :focus-within) {
+  background: var(--gyro-pane);
+}
+
+:root[data-theme="light"]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-chat-companion
+  .gyro-chat-companion-tab.is-active {
+  background: var(--gyro-surface);
+  box-shadow: inset 0 0 0 1px var(--gyro-border);
+}
+
+:root[data-theme="light"]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  .gyro-user-message-bubble {
+  background: color-mix(in srgb, var(--gyro-text) 7%, var(--gyro-surface));
+  border-color: var(--gyro-border-soft);
+  box-shadow: none;
+}
+
+:root[data-theme="light"]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  :is(.gyro-chat-start, .gyro-chat-composer-dock)
+  > .gyro-composer-shell.is-hero.has-provider:not(.is-provider-collapsed) {
+  background: var(--gyro-surface);
+  border-color: var(--gyro-border);
+  box-shadow: 0 2px 6px var(--gyro-premium-shadow-soft);
+}
+
+/* Hidden sidebar navigation keeps its native window position. Reserve a small
+   left rim below it without moving macOS traffic lights. */
+:root[data-theme]
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout).is-sidebar-hidden
+  > .gyro-main {
+  padding-left: var(--gyro-chat-rim);
+}
+
+@media (max-width: 780px) {
+  :root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) > .gyro-main {
+    padding-left: var(--gyro-chat-rim);
+  }
+}
+
+@media (hover: none) {
+  :root[data-theme]
+    .gyro-chat-companion
+    .gyro-chat-companion-tab
+    > .gyro-chat-companion-tab-close {
+    opacity: 0.7;
+    pointer-events: auto;
+  }
+}

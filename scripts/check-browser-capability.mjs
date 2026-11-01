@@ -1,10 +1,11 @@
+import { readFileSync } from "./read-product-source.mjs";
 /**
  * Assert every browser capability descriptor has a provider tool name, class,
  * schema arm, and handler arm — the same table-driven contract used for the
  * rest of CAPABILITY_DESCRIPTORS.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,6 +34,11 @@ const observationFixture = readFileSync(
 
 /** New drive-capable browser tools (plus the original four). */
 const BROWSER_TOOLS = [
+  {"id": "BrowserTargets", "tool": "gyro_browser_targets", "class": "BrowserInspect", "required": []},
+  {"id": "BrowserSelectTarget", "tool": "gyro_browser_select_target", "class": "BrowserNavigate", "required": ["targetId"]},
+  {"id": "BrowserCapturePreview", "tool": "gyro_browser_capture_preview", "class": "BrowserInspect", "required": []},
+  {"id": "BrowserPreviewClick", "tool": "gyro_browser_preview_click", "class": "BrowserNavigate", "required": ["captureId", "x", "y"]},
+
   {
     id: "BrowserOpen",
     tool: "gyro_browser_open",
@@ -56,6 +62,12 @@ const BROWSER_TOOLS = [
     tool: "gyro_browser_screenshot",
     class: "BrowserInspect",
     required: [],
+  },
+  {
+    id: "BrowserViewport",
+    tool: "gyro_browser_set_viewport",
+    class: "BrowserInspect",
+    required: ["mode"],
   },
   {
     id: "BrowserNavigate",

@@ -1,0 +1,41 @@
+{
+  "workspace": {
+    "passed": 1345,
+    "failed": 0,
+    "ignored_in_default_run": 7
+  },
+  "ollama_live": {
+    "passed": 2,
+    "failed": 0,
+    "model": "qwen3:0.6b",
+    "input_tokens": 18039,
+    "requested_context_tokens": 20480,
+    "model_context_tokens": 40960,
+    "stop_after_first_visible_text_ms": 0.202917
+  },
+  "desktop_live": {
+    "passed": [
+      "live_model_catalog",
+      "codex_usage",
+      "installed_provider_arg_vectors"
+    ],
+    "failed": [
+      {
+        "test": "anthropic_usage",
+        "reason": "upstream 401 or 403 sign-in rejected"
+      },
+      {
+        "test": "kimi_usage",
+        "reason": "upstream payload yielded no plan usage windows; schema/account cause not diagnosed"
+      }
+    ]
+  },
+  "strict_clippy": "failed on existing lint debt; not a CI gate",
+  "advisory_all_targets_clippy": "completed with warnings",
+  "format_check": {
+    "failed_files": 38,
+    "already_unformatted_at_HEAD": 38
+  },
+  "cli_locked_build": "passed",
+  "installed_app_pid_preserved": 76440
+}

@@ -1,0 +1,39 @@
+{
+  "builtAtUtc": "2026-10-14T07:16:40.049321+00:00",
+  "macOS": "26.2",
+  "architecture": "arm64",
+  "signing": "adhoc with hardened runtime",
+  "notarized": false,
+  "localPackagingOverride": {
+    "bundle": {
+      "createUpdaterArtifacts": false
+    }
+  },
+  "artifacts": [
+    {
+      "path": "/Users/wytze/Gyro/target/release/bundle/dmg/Gyro_0.1.0-alpha.49.7_aarch64.dmg",
+      "sizeBytes": 47217961,
+      "sha256": "010274c27d208bc06ee0f397ba8c66fd9cf1445164861fa053c0437b120ce2a6"
+    },
+    {
+      "path": "/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-desktop",
+      "sizeBytes": 39033392,
+      "sha256": "90e8ba665dbe5e2bb5bf15a4d186729caf22b4ef893a3ada527d235aae66c462"
+    },
+    {
+      "path": "/Users/wytze/Gyro/target/release/bundle/macos/Gyro.app/Contents/MacOS/gyro-codemode",
+      "sizeBytes": 70846176,
+      "sha256": "d509409a977287453235a1fca4133bffb29cdbe37fd6501a5ea0093172627bf7"
+    },
+    {
+      "path": "/Users/wytze/Gyro/target/release/gyro",
+      "sizeBytes": 12071424,
+      "sha256": "c33698a47dba5995c5a21fd46de71bc1764a71f4527dabe11d6b678343f96b21"
+    },
+    {
+      "path": "/Users/wytze/Gyro/target/debug/bundle/macos/Gyro.app/Contents/MacOS/gyro-desktop",
+      "sizeBytes": 72448752,
+      "sha256": "4ec2a6b065ee96501d025b89a8208af4bb08cc40af4cae4b880ae1a6c6861c5a"
+    }
+  ]
+}

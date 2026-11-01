@@ -34,9 +34,16 @@ pub(crate) async fn set_provider_api_key(
 ) -> Result<ProviderApiKeyStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
         gyro_core::set_stored_provider_api_key(&provider_id, &value).map_err(to_string)?;
+        let stored = gyro_core::stored_provider_api_key(&provider_id)
+            .map_err(to_string)?
+            .filter(|item| item == value.trim());
+        if stored.is_none() {
+            return Err("the API key was not saved".into());
+        }
         // A cached probe was taken before this key existed, so it must not keep
         // answering "not signed in" now that Gyro holds one.
         gyro_core::invalidate_provider_health_cache();
+        crate::live_model_context::invalidate(&provider_id);
         Ok(ProviderApiKeyStatus {
             supported: true,
             env_name: gyro_core::provider_api_key_env_name(&provider_id).map(str::to_string),
@@ -57,6 +64,7 @@ pub(crate) async fn clear_provider_api_key(
         // The opposite of the save path: a cached "signed in" must not outlive
         // the key it was taken from.
         gyro_core::invalidate_provider_health_cache();
+        crate::live_model_context::invalidate(&provider_id);
         Ok(ProviderApiKeyStatus {
             supported: gyro_core::provider_supports_api_key(&provider_id),
             env_name: gyro_core::provider_api_key_env_name(&provider_id).map(str::to_string),
@@ -73,6 +81,7 @@ pub(crate) async fn clear_provider_api_key(
 pub(crate) struct CustomProviderModel {
     id: String,
     display_name: String,
+    context_window_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -95,14 +104,16 @@ pub(crate) async fn list_custom_provider_models(
     api_key: Option<String>,
 ) -> Result<CustomProviderModels, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let api_key = api_key
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| {
-                provider_id
-                    .as_deref()
-                    .and_then(gyro_core::provider_api_key_value)
-            })
-            .unwrap_or_default();
+        let api_key = match api_key.filter(|value| !value.trim().is_empty()) {
+            Some(value) => value,
+            None => provider_id
+                .as_deref()
+                .map(gyro_core::try_provider_api_key_value)
+                .transpose()
+                .map_err(to_string)?
+                .flatten()
+                .unwrap_or_default(),
+        };
         let discovery =
             gyro_core::openai_compat_list_models(&base_url, &api_key).map_err(to_string)?;
         Ok(CustomProviderModels {
@@ -113,6 +124,7 @@ pub(crate) async fn list_custom_provider_models(
                 .map(|model| CustomProviderModel {
                     id: model.id,
                     display_name: model.display_name,
+                    context_window_tokens: model.context_window_tokens,
                 })
                 .collect(),
         })

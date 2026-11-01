@@ -1,0 +1,26 @@
+/* Keep tree columns ahead of shared sidebar styles in every stylesheet order. */
+:root .gyro-app-shell .gyro-sidebar-row.gyro-sidebar-explorer-row {
+  grid-template-columns: 12px 14px minmax(0, 1fr) auto;
+}
+
+.gyro-sidebar-explorer-row > .gyro-explorer-file-icon {
+  grid-column: 2;
+}
+
+.gyro-sidebar-explorer-row > span {
+  grid-column: 3;
+}
+
+.gyro-sidebar-explorer-row > .gyro-explorer-decoration {
+  grid-column: 4;
+}
+
+.gyro-explorer-folder-icon {
+  color: var(--gyro-muted);
+  flex: none;
+}
+
+.gyro-sidebar-explorer-row.is-drop-target {
+  outline: 1px solid var(--gyro-accent);
+  outline-offset: -1px;
+}

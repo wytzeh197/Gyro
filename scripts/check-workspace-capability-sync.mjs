@@ -1,5 +1,7 @@
+import { createIdeEvidenceScheduler } from "../apps/desktop/src/ide-evidence-push.ts";
+import { readFileSync } from "./read-product-source.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import ts from "typescript";
 
 // Exercise the production hooks without a Tauri window. Re-rendering with new
@@ -139,6 +141,8 @@ assert.equal(
 const contextHooks = hooks();
 const requests = [];
 const contextDependencies = {
+  // Cadence is covered by check-ide-evidence-push; isolate root ownership here.
+  createIdeEvidenceScheduler: send => createIdeEvidenceScheduler(send, { throttleMs: 0 }),
   useEffect: contextHooks.useEffect,
   useMemo: contextHooks.useMemo,
   selectedFile: undefined,

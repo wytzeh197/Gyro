@@ -1,5 +1,6 @@
+import { readFileSync } from "./read-product-source.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 
 import {
   isAssistantPreambleBlock,
@@ -10,6 +11,7 @@ import {
 } from "../packages/ui/src/chat-commentary.ts";
 import {
   buildRunModel,
+  failureDetail,
   formatRunDuration,
   groupRunSteps,
   isGenericProviderToolLabel,
@@ -19,12 +21,56 @@ import {
   runHeaderLabel,
   runRetryText,
   runRowText,
+  segmentLineStats,
   segmentRunSteps,
   splitToolName,
   splitSegmentSummary,
   summarizeSegment,
   workItemFromEvent,
 } from "../packages/ui/src/chat-run.ts";
+import { fileMatchesPathUndo } from "../packages/ui/src/workspace-path-undo.ts";
+
+// These run before the rail wording checks. An unrelated copy mismatch must
+// not hide a path-undo regression.
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/private/tmp/repo/notes.md",
+      label: "Undo move of notes.md",
+    },
+    ["/tmp/repo"],
+  ),
+  true,
+  "a /private/tmp path still matches the /tmp workspace root",
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/tmp/repo/notes.md",
+      label: "Undo move of notes.md",
+    },
+    ["/private/tmp/repo"],
+  ),
+  true,
+  "the /tmp and /private/tmp alias matches in either direction",
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/Users/me/app/notes.md",
+      label: "Undo move of notes.md",
+    },
+    ["/app"],
+  ),
+  false,
+  "an absolute suffix is not the same workspace root",
+);
 
 let sequence = 0;
 assert.deepEqual(
@@ -147,6 +193,117 @@ assert.equal(
   distinctNotes.steps.length,
   2,
   "tools that share a name but not a target should not coalesce",
+);
+
+// Imported calls preserve output and ordering while remaining past activity.
+const importedDetail =
+  '{"path":"src/a.ts"}\nUpdated the heading.\n<script>untrusted transcript text</script>';
+const historicalEdit = activity("file", "Edit", {
+  historical: true,
+  tool: "Edit",
+  sourceCallId: "native-edit-one",
+  path: "src/a.ts",
+  additions: 40,
+  deletions: 12,
+  detail: importedDetail,
+});
+const historicalBrowser = activity("tool", "gyro_browser_click", {
+  historical: true,
+  tool: "mcp__gyro_capabilities__gyro_browser_click",
+  sourceCallId: "native-browser-one",
+  status: "running",
+  detail: '{"target":"Save"}\nClicked Save.',
+});
+const importedTool = workItemFromEvent(historicalEdit);
+assert.equal(
+  importedTool.kind,
+  "tool",
+  "an imported edit must be display-only tool history",
+);
+assert.equal(
+  importedTool.historicalDetail,
+  importedDetail,
+  "imported arguments and results must survive verbatim",
+);
+assert.equal(importedTool.historicalCallId, "native-edit-one");
+assert.equal(
+  workItemFromEvent(historicalBrowser).kind,
+  "tool",
+  "imported browser activity must never become current browser work",
+);
+assert.equal(
+  workItemFromEvent(historicalBrowser).status,
+  "done",
+  "historical activity must not start a live timer",
+);
+const importedRail = buildRunModel([
+  historicalEdit,
+  activity(
+    "file",
+    "Edit",
+    {
+      ...historicalEdit.payload,
+      sourceCallId: "native-edit-two",
+    },
+    1,
+  ),
+  historicalBrowser,
+  activity(
+    "file",
+    "Updated src/current.ts",
+    { path: "src/current.ts", additions: 3, deletions: 1 },
+    2,
+  ),
+]);
+assert.deepEqual(
+  importedRail.steps
+    .filter((step) => step.kind === "work")
+    .map((step) =>
+      step.item.kind === "tool" ? step.item.historicalCallId : step.item.path,
+    ),
+  [
+    "native-edit-one",
+    "native-edit-two",
+    "native-browser-one",
+    "src/current.ts",
+  ],
+  "historical calls with equal names and contents must remain distinct in their source order",
+);
+assert.deepEqual(
+  importedRail.files,
+  [{ path: "src/current.ts", additions: 3, deletions: 1, status: "done" }],
+  "imported edits must not add current file changes or line counts",
+);
+const importedWithoutNativeIds = buildRunModel([
+  activity("tool", "Bash", { historical: true, detail: "pwd\n/repo" }),
+  activity("tool", "Bash", { historical: true, detail: "pwd\n/repo" }),
+]);
+assert.equal(
+  importedWithoutNativeIds.steps.length,
+  2,
+  "distinct historical calls without native IDs must keep their event identities",
+);
+const historicalCallUpdate = buildRunModel([
+  historicalEdit,
+  activity(
+    "tool",
+    "Edit",
+    {
+      historical: true,
+      sourceCallId: "native-edit-one",
+      detail: "Updated result",
+    },
+    1,
+  ),
+]);
+assert.equal(
+  historicalCallUpdate.steps.length,
+  1,
+  "updates for one historical call should share its native identity",
+);
+assert.equal(
+  historicalCallUpdate.steps[0].item.historicalDetail,
+  "Updated result",
 );
 
 // --- exact work is preserved; the view groups it --------------------------------
@@ -413,6 +570,22 @@ assert.deepEqual(
     recoveryMessage: undefined,
   },
   "a failed turn carries its message",
+);
+assert.equal(
+  failureDetail(
+    "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.",
+    "Unlock your Mac and allow Gyro to read the saved credential, then send again.",
+  ),
+  "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.",
+  "a Keychain error that already says to unlock should not repeat the recovery line",
+);
+assert.equal(
+  failureDetail(
+    "The provider stopped responding.",
+    "Send again to continue.",
+  ),
+  "The provider stopped responding. Send again to continue.",
+  "recovery advice still follows an error that does not already include it",
 );
 // A turn left in flight by a restart is interrupted, not still working.
 assert.deepEqual(
@@ -722,6 +895,87 @@ for (const narration of [
     `progress narration is a preamble: ${narration}`,
   );
 }
+// Two sentences over 100 characters used to miss the closing-sentence check:
+// the multi-sentence bail returned first, so "Next I'll …" left the rail,
+// the live phase became finalizing, and the line drew under the working process.
+const nextStepNarration =
+  "The prefix split is in place. Next I'll spill large results, add the tool catalog, and taper history after a model switch.";
+assert.equal(
+  isAssistantPreambleBlock(nextStepNarration),
+  true,
+  "an observation that closes with Next I'll stays narration",
+);
+assert.equal(
+  isAssistantPreambleBlock(
+    "The prefix split is in place. The byte budget is unchanged.",
+  ),
+  false,
+  "two sentences that do not promise more work stay the answer",
+);
+assert.equal(
+  isAssistantPreambleBlock(
+    `${"The measured result holds. ".repeat(20)}Next I'll stop here.`,
+  ),
+  false,
+  "a long answer is not pulled onto the rail because its last clause says Next I'll",
+);
+for (const [label, messageEvent] of [
+  ["plain", say(nextStepNarration, 1)],
+  [
+    "durable",
+    event(
+      "assistant-message",
+      nextStepNarration,
+      { kind: "provider-response", status: "done" },
+      1,
+    ),
+  ],
+]) {
+  const liveNarration = buildRunModel(
+    [activity("tool", "Used tool", { tool: "Read" }, 0), messageEvent],
+    { isRunning: true },
+  );
+  assert.equal(
+    liveNarration.response,
+    undefined,
+    `${label}: live narration stays out of the answer body`,
+  );
+  assert.deepEqual(
+    liveNarration.phase,
+    { name: "working" },
+    `${label}: a run still promising its next step is working, not finalizing`,
+  );
+  assert.equal(
+    liveNarration.steps.at(-1)?.kind,
+    "say",
+    `${label}: the narration stays inside the working rail`,
+  );
+  assert.equal(liveNarration.steps.at(-1)?.text, nextStepNarration);
+}
+assert.equal(
+  buildRunModel(
+    [
+      activity("tool", "Used tool", { tool: "Read" }, 0),
+      event(
+        "assistant-message",
+        "Yes. The diff does what we intended, and the tests passed.",
+        { kind: "provider-response", status: "done" },
+        1,
+      ),
+    ],
+    { isRunning: true },
+  ).phase.name,
+  "finalizing",
+  "a durable answer still finalizes a live run",
+);
+assert.equal(
+  buildRunModel([
+    activity("tool", "Used tool", { tool: "Read" }, 0),
+    say(nextStepNarration, 1),
+  ]).response?.message,
+  nextStepNarration,
+  "a settled turn still answers with its last narration block",
+);
 
 // A real preamble event that trails the last tool (so it is peeled from the
 // closing answer) must not be drawn twice — once in the main pass and once
@@ -805,10 +1059,49 @@ assert.deepEqual(
 assert.deepEqual(rowText("memory", "Edited memory"), {
   label: "Edited memory",
 });
+// A compaction row may only claim what the provider actually did: only a Codex
+// session summarizes, everything else condenses the transcript or keeps it.
 assert.deepEqual(rowText("context", "Compacted context"), {
   label: "Compacted context",
-  description: "Earlier conversation summarized",
+  description: undefined,
 });
+assert.deepEqual(
+  rowText("context", "Compacted context", { compactionMode: "summarized" }),
+  {
+    label: "Compacted context",
+    description: "Earlier conversation summarized",
+  },
+);
+assert.deepEqual(
+  rowText("context", "Compacted context", { compactionMode: "condensed" }),
+  {
+    label: "Compacted context",
+    description: "Earlier turns condensed into a digest",
+  },
+);
+assert.deepEqual(
+  rowText("context", "Compacted context", { compactionMode: "kept" }),
+  {
+    label: "Compacted context",
+    description: "History already fit; nothing dropped",
+  },
+);
+// Events recorded before the marker existed: a checkpoint payload identifies
+// the local rewrite, which never summarized anything.
+assert.deepEqual(
+  rowText("context", "Compacted context", { contextSummary: "kept whole" }),
+  {
+    label: "Compacted context",
+    description: "Earlier turns condensed into a digest",
+  },
+);
+assert.deepEqual(
+  rowText("context", "Compacting context", { status: "running" }),
+  {
+    label: "Compacting context",
+    description: "Summarizing the earlier conversation",
+  },
+);
 
 const compactionVisible = buildRunModel([
   activity("tool", "Read a.ts", {}, 0),
@@ -931,6 +1224,59 @@ assert.deepEqual(
 
 // --- what never reaches the rail ----------------------------------------------------
 
+// Delegation records the launch in place, without pinning live children above
+// the parent's work or replaying each later lifecycle update.
+const launch = event(
+  "system-event",
+  "Updated 1 sub-agent(s)",
+  {
+    schema: "gyro.capability.v1",
+    kind: "capability-call",
+    capabilityId: "agent-spawn",
+    status: "completed",
+    resource: { id: "child", kind: "chat", label: "Parser implementation" },
+  },
+  1,
+);
+const delegationRun = buildRunModel(
+  [
+    activity("commentary", "I’ll inspect the parser first.", {}, 0),
+    launch,
+    ...["running", "waiting", "completed"].map((status, index) =>
+      event(
+        "system-event",
+        `Parser: ${status}`,
+        {
+          kind: "subagent-state",
+          agent: { agentId: "child", name: "Parser implementation", status },
+        },
+        index + 2,
+      ),
+    ),
+    activity("commentary", "I’m checking the result.", {}, 5),
+  ],
+  { isRunning: true },
+);
+assert.deepEqual(
+  delegationRun.steps.map((step) => step.kind),
+  ["say", "work", "say"],
+);
+assert.deepEqual(runRowText(delegationRun.steps[1]), {
+  label: "Started sub-agent",
+  description: "Parser implementation",
+});
+for (const [status, label] of [
+  ["running", "Starting sub-agent"],
+  ["denied", "Could not start sub-agent"],
+  ["failed", "Could not start sub-agent"],
+]) {
+  const item = workItemFromEvent({
+    ...launch,
+    payload: { ...launch.payload, status },
+  });
+  assert.equal(runRowText({ kind: "work", item }).label, label);
+}
+
 // Commentary is prose, never a work row or a generic system-event card.
 assert.equal(
   workItemFromEvent(activity("commentary", "Let me check the config.")),
@@ -987,6 +1333,15 @@ assert.equal(
   ]).steps.length,
   1,
   "the session title marker should be dropped",
+);
+
+assert.equal(
+  buildRunModel([
+    activity("commentary", 'GYRO_AGENT_UPDATE: {"status":"continue"}', {}, 0),
+    activity("command", "pnpm test", {}, 1),
+  ]).steps.length,
+  1,
+  "sub-agent completion metadata must stay out of the work timeline",
 );
 
 // Live streamed text still carries the marker until the turn settles; a block
@@ -1073,7 +1428,8 @@ const clicked = workItemFromEvent(
   capabilityCall("browser-click", { target: "Save", resource: page }),
 );
 assert.deepEqual(
-  clicked && runRowText({ kind: "work", id: "click", at: at(0), item: clicked }),
+  clicked &&
+    runRowText({ kind: "work", id: "click", at: at(0), item: clicked }),
   { label: "Clicked", description: "Save" },
   "a browser click should name the element it touched",
 );
@@ -1099,7 +1455,9 @@ assert.deepEqual(
       capabilityCall("browser-screenshot", { resource: page }, 1),
     ]).steps,
   ).map((step) =>
-    step.kind === "work-group" ? [step.groupKind, step.steps.length] : step.kind,
+    step.kind === "work-group"
+      ? [step.groupKind, step.steps.length]
+      : step.kind,
   ),
   [["browser", 2]],
   "browser reads and captures should group as browser work, not workspace review",
@@ -1324,10 +1682,10 @@ assert.deepEqual(
   { label: "Running", description: "git remote -v" },
   "a call row should show the command as typed, without shell wrapper or cd",
 );
-assert.deepEqual(
-  runCallText(call("a", { kind: "search", query: "useNow" })),
-  { label: "Searched for", description: "useNow" },
-);
+assert.deepEqual(runCallText(call("a", { kind: "search", query: "useNow" })), {
+  label: "Searched for",
+  description: "useNow",
+});
 
 // Reasoning headlines are a live status, never a tool row or a reply.
 const reasoningEvents = [
@@ -1410,8 +1768,165 @@ assert.deepEqual(
   "a completed string-replacement edit should count as a changed file",
 );
 
+// The working-process line reads the receipt, not the bare path. Provider
+// payloads often omit the delta; the applied mutation is the measurement.
+const measuredEdit = buildRunModel([
+  activity(
+    "file",
+    "Updated src/app.ts",
+    { detail: "src/app.ts", additions: 1, deletions: 0 },
+    0,
+  ),
+  capabilityCall(
+    "workspace-edit",
+    { resource: { id: "p5", kind: "proposal", label: "src/lib.rs" } },
+    1,
+  ),
+  event(
+    "system-event",
+    "Applied src/app.ts",
+    {
+      schema: "gyro.mutation.v1",
+      proposalId: "receipt-app",
+      status: "applied",
+      fileChanges: [{ path: "src/app.ts", additions: 20, deletions: 4 }],
+    },
+    2,
+  ),
+  event(
+    "system-event",
+    "Applied src/lib.rs",
+    {
+      schema: "gyro.mutation.v1",
+      proposalId: "receipt-lib",
+      status: "applied",
+      fileChanges: [{ path: "src/lib.rs", additions: 6, deletions: 5 }],
+    },
+    3,
+  ),
+]);
+assert.deepEqual(
+  measuredEdit.steps.flatMap((step) =>
+    step.kind === "work" && step.item.kind === "file"
+      ? [[step.item.path, step.item.additions, step.item.deletions]]
+      : [],
+  ),
+  [
+    ["src/app.ts", 20, 4],
+    ["src/lib.rs", 6, 5],
+  ],
+  "applied receipts should put line counts on each working-process edit",
+);
+assert.deepEqual(
+  segmentLineStats(measuredEdit.steps),
+  { additions: 26, deletions: 9 },
+  "the folded edit line should total those counts, like +26 -9",
+);
 assert.equal(
-  buildRunModel([], { status: { status: "failed", message: "DeepSeek send needs attention", error: "DeepSeek exceeded Gyro's tool-call limit for one turn" } }).phase.message,
+  segmentLineStats([
+    call("a", { kind: "file", path: "a.ts", additions: 4, deletions: 1 }),
+    call("b", { kind: "file", path: "b.ts" }),
+  ]),
+  undefined,
+  "one unmeasured edit should hide the stretch total",
+);
+assert.deepEqual(
+  segmentLineStats([
+    call("a", { kind: "read", path: "a.ts" }),
+    call("b", { kind: "file", path: "b.ts", additions: 4, deletions: 0 }),
+  ]),
+  { additions: 4, deletions: 0 },
+  "reads should not block the edit line delta",
+);
+
+assert.equal(
+  buildRunModel([], {
+    status: {
+      status: "failed",
+      message: "DeepSeek send needs attention",
+      error: "DeepSeek exceeded Gyro's tool-call limit for one turn",
+    },
+  }).phase.message,
   "DeepSeek exceeded Gyro's tool-call limit for one turn",
   "failure banners expose the actual cause instead of a generic heading",
+);
+
+// A finished move is a path card, not a content edit, and Undo matches only
+// while that destination is still the top of the journal.
+const moved = workItemFromEvent(
+  capabilityCall("workspace-move-path", {
+    status: "completed",
+    summary: "Moved drafts/a.txt to notes.md",
+    resource: { id: "file-1", kind: "file", label: "notes.md" },
+  }),
+);
+assert.equal(moved?.kind, "file");
+assert.equal(moved?.lifecycle, "move");
+assert.deepEqual(
+  moved && runCallText({ kind: "work", id: "move", at: at(0), item: moved }),
+  { label: "Moved", description: "notes.md" },
+);
+const roots = ["/repo"];
+const topMove = {
+  action: "moved",
+  path: "/repo/notes.md",
+  label: "Undo move of notes.md",
+};
+assert.equal(fileMatchesPathUndo(moved, topMove, roots), true);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    { action: "moved", path: "/repo/docs/notes.md", label: "Undo move of notes.md" },
+    roots,
+  ),
+  false,
+  "a root file must not match a nested file of the same name",
+);
+assert.equal(
+  fileMatchesPathUndo(moved, { ...topMove, action: "created" }, roots),
+  false,
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "app/main.ts", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/Users/me/app/main.ts",
+      label: "Undo move of main.ts",
+    },
+    ["/Users/me/app"],
+  ),
+  false,
+  "a card whose path only shares a suffix must not undo a different root file",
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "main.ts", lifecycle: "move" },
+    { action: "moved", path: "p/main.ts", label: "Undo move of main.ts" },
+    ["/Users/me/app"],
+  ),
+  false,
+  "a root that merely ends with the same letters is not that directory",
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/private/tmp/repo/notes.md",
+      label: "Undo move of notes.md",
+    },
+    ["/tmp/repo"],
+  ),
+  true,
+  "a canonical directory still matches when the extra prefix sits on a slash",
+);
+assert.equal(
+  buildRunModel([
+    capabilityCall("workspace-create-path", {
+      resource: { id: "file-2", kind: "file", label: "notes.md" },
+    }),
+  ]).files.length,
+  0,
+  "creating a path is not a content edit",
 );

@@ -1,0 +1,89 @@
+{
+  "recordedAt": "2026-10-08T18:04:03.331225+00:00",
+  "hashes": {
+    "crates/gyro-core/src/process_guard.rs": "291413cec404145c45951de0e63f089e331c9705bb8cb3d1efdbea5986e2f614",
+    "crates/gyro-core/src/process_guard/macos.rs": "12a469c67572ae1b24e21b91de5086bc5eaa660bee78cb49e1012959f567b778",
+    "crates/gyro-cli/src/main.rs": "e1805661cb3e622389ca6b1237885ae587ed83fb38bbe143ea3c3a551636836c",
+    "apps/desktop/src-tauri/src/lib.rs": "3fe50184b4cf0539aeecb081610dfebe6e2b348329e8b6831ebd3dedc1bc69da",
+    "apps/desktop/src-tauri/src/provider_session_lifecycle.rs": "a6315f840f70100914cacc80fae1b60a42f7a16138e02eeaa8408092b3a19ca3",
+    "target/debug/gyro-desktop": "e8cca4f5a51ead27f92a2762297ea79fb71e8c57d7a41fd26c1b809a9ec1332a",
+    "apps/desktop/dist/index.html": "f8095acd46c50096999e1a8aa9e5e65ddad8fdf58391a3e25b2350b19655ad1b"
+  },
+  "rustVerification": {
+    "workspacePassed": 1078,
+    "workspaceIgnored": 7,
+    "corePassed": 499,
+    "cliPassed": 62,
+    "fixtureIntegrationPassed": 1,
+    "workspaceDesktopPassed": 516,
+    "finalDesktopPassed": 518,
+    "finalDesktopIgnored": 5
+  },
+  "reliabilitySuite": {
+    "passed": true,
+    "guards": 81,
+    "behavioral": 74,
+    "sourceText": 7
+  },
+  "nativeBuild": "final static native target passed; running verification bundle remains unchanged",
+  "benchmark": {
+    "before": {
+      "samples": 40,
+      "medianCommandMs": 28.217,
+      "meanCommandMs": 28.89065,
+      "runWallMs": [
+        528.490834,
+        643.494209
+      ],
+      "observedWatchdogCounts": [
+        20,
+        20
+      ]
+    },
+    "after": {
+      "samples": 40,
+      "medianCommandMs": 2.521,
+      "meanCommandMs": 2.4760999999999997,
+      "runWallMs": [
+        64.08308399999996,
+        55.769499999999915
+      ],
+      "observedWatchdogCounts": [
+        1,
+        1
+      ]
+    }
+  },
+  "benchmarkScope": "Two immutable standalone probe executables, same 20 true commands, alternating block order, owned-child PID sampling every 1ms, helper argv checked after exec; desktop/model latency is not measured",
+  "forceQuitProductionEntry": {
+    "ownerForceQuit": true,
+    "childAliveAfterCleanupGrace": false,
+    "childWroteFixtureAfterOwnerExit": false,
+    "providerAccountsUsed": false,
+    "groupCleanupOwned": true
+  },
+  "regressions": [
+    "one helper reused after completed command and startup failure",
+    "model and worker share context while executing concurrently",
+    "wrong registration generation cannot release another command",
+    "nested scopes remain isolated and restore prior owner",
+    "idle helper retains lease until final owner drops and helper is reaped",
+    "host force-quit exits four TERM-ignoring processes across two groups; lease held through batch cleanup",
+    "another process legacy listener defers recovery; stale socket does not",
+    "current host own listener cannot falsely block legacy recovery"
+  ],
+  "intermediateFailures": [
+    "initial core test compile still referenced removed prepare method; updated tests before green runs",
+    "path-only PID sampler misclassified pre-exec children; corrected argv sampler and preserved invalid counts"
+  ],
+  "limitations": [
+    "standalone command fixture timing, not native UI or model latency",
+    "macOS guardian behavior verified; other platform process behavior unchanged",
+    "owned process groups, not deliberately detached processes",
+    "remaining native UI and provider access acceptance gates remain open"
+  ],
+  "nativeAcceptanceAvailability": {
+    "checkedAt": "2026-10-08T18:06:09.481132+00:00",
+    "state": "Mac remains locked; pending manual unlock request has no reply"
+  }
+}

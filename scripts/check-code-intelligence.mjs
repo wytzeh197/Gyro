@@ -1,5 +1,7 @@
+import { capabilityLabel } from "../packages/ui/src/capability-ui.ts";
+import { readFile } from "./read-product-source.mjs";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+
 import vm from "node:vm";
 import ts from "typescript";
 
@@ -20,6 +22,7 @@ const tools = [
   ["CodeReferences", "code.references", "gyro_code_references"],
   ["CodeHover", "code.hover", "gyro_code_hover"],
   ["CodeSymbols", "code.symbols", "gyro_code_symbols"],
+  ["CodeFormat", "code.format", "gyro_code_format"],
 ];
 
 for (const [variant, id, tool] of tools) {
@@ -137,13 +140,13 @@ for (const [id, label] of [
   ["code-symbols", "File symbols"],
 ]) {
   assert.equal(
-    executeFunction(chatRun, "chat-run.ts", "humanizeCapabilityId", id),
+    capabilityLabel(id),
     label,
     `chat-run.ts no longer labels ${id} "${label}"`,
   );
 }
 assert.ok(
-  chatRun.includes('capabilityId.startsWith("code-")'),
+  chatRun.includes("capabilityUi(capabilityId)") && chatRun.includes("capabilityLabel(capabilityId)"),
   "code capabilities have no activity beat",
 );
 assert.deepEqual(

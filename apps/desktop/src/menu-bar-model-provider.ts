@@ -1,9 +1,10 @@
 import type { MenuBarJob } from "@gyro-dev/ui";
 
 export type MenuBarModelProvider =
-  "anthropic" | "gemini" | "kimi" | "openai" | "xai" | "unknown";
+  "anthropic" | "antigravity" | "gemini" | "kimi" | "openai" | "xai" | "unknown";
 
 const PROVIDER_ALIASES: Array<[MenuBarModelProvider, readonly RegExp[]]> = [
+  ["antigravity", [/\bantigravity\b/]],
   ["openai", [/openai/, /chatgpt/, /\bgpt(?:-|\s|$)/, /\bcodex\b/]],
   ["anthropic", [/anthropic/, /\bclaude\b/]],
   ["kimi", [/\bkimi\b/, /moonshot/]],

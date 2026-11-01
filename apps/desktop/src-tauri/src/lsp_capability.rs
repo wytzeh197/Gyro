@@ -15,7 +15,6 @@ const MAX_CODE_LOCATIONS: usize = 50;
 const MAX_CODE_SYMBOLS: usize = 200;
 const MAX_CODE_PREVIEWS: usize = 20;
 const MAX_CODE_PREVIEW_CHARS: usize = 400;
-const MAX_CODE_HOVER_CHARS: usize = 4_000;
 
 const SYMBOL_KINDS: &[&str] = &[
     "",
@@ -84,6 +83,17 @@ pub(super) fn execute(
         },
         CapabilityId::CodeHover => LspFileRequest::Hover { line, column },
         CapabilityId::CodeSymbols => LspFileRequest::DocumentSymbol,
+        CapabilityId::CodeFormat => LspFileRequest::Formatting {
+            tab_size: arguments
+                .get("tabSize")
+                .and_then(Value::as_u64)
+                .map(|value| value.clamp(1, 16) as u32)
+                .unwrap_or(4),
+            insert_spaces: arguments
+                .get("insertSpaces")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+        },
         _ => anyhow::bail!("lsp_capability does not handle {}", request.capability_id),
     };
     let manager = app.state::<LanguageServerManager>();
@@ -97,6 +107,20 @@ pub(super) fn execute(
             "message": "The language server is still indexing this workspace; retry shortly instead of concluding the symbol is missing.",
         }),
         LspFileOutcome::Result(result) => match request.capability_id {
+            CapabilityId::CodeFormat => {
+                let (edits, total) = format_entries(Path::new(&path), &result, page);
+                paged_result(
+                    json!({
+                        "schema": CODE_OBSERVATION_SCHEMA,
+                        "path": &path,
+                        "status": "ok",
+                        "edits": edits,
+                        "total": total,
+                        "offset": page.offset,
+                    }),
+                    "edits",
+                )
+            }
             CapabilityId::CodeDefinition | CapabilityId::CodeReferences => {
                 let (locations, total) = location_entries(&canonical_workspace, &result, page);
                 paged_result(
@@ -117,8 +141,7 @@ pub(super) fn execute(
                     "schema": CODE_OBSERVATION_SCHEMA,
                     "path": &path,
                     "status": "ok",
-                    "truncated": text.chars().count() > MAX_CODE_HOVER_CHARS,
-                    "hover": text.chars().take(MAX_CODE_HOVER_CHARS).collect::<String>(),
+                    "hover": text,
                 })
             }
             CapabilityId::CodeSymbols => {
@@ -138,7 +161,20 @@ pub(super) fn execute(
             _ => anyhow::bail!("lsp_capability does not handle {}", request.capability_id),
         },
     };
-    let data = bound_code_result(redact_json_strings(data))?;
+    let data = if data.get("hover").is_some() {
+        capability_output_budget::text_result(
+            data,
+            &[capability_output_budget::TextField {
+                pointer: "/hover",
+                window: "hoverWindow",
+                offset: "offset",
+                tail: false,
+            }],
+            arguments,
+        )?
+    } else {
+        bound_code_result(data, workspace_result_byte_limit(arguments)?)?
+    };
     let summary = if data["status"] == "indexing" {
         format!("Language server is indexing for {path}")
     } else {
@@ -199,7 +235,14 @@ impl CodePage {
                     }),
             }
         };
-        let limit = integer("limit", maximum)?;
+        let limit = integer(
+            "limit",
+            if id == CapabilityId::CodeSymbols {
+                50
+            } else {
+                20
+            },
+        )?;
         if limit == 0 || limit > maximum {
             anyhow::bail!("capability argument `limit` must be between 1 and {maximum}");
         }
@@ -403,6 +446,37 @@ fn hover_text(result: &Value) -> String {
     text
 }
 
+/// Project `textDocument/formatting` edits into 1-based workspace positions.
+fn format_entries(path: &Path, result: &Value, page: CodePage) -> (Vec<Value>, usize) {
+    let Value::Array(items) = result else {
+        return (Vec::new(), 0);
+    };
+    let mut entries = Vec::new();
+    let mut total = 0usize;
+    for edit in items {
+        let range = &edit["range"];
+        if !range.is_object() {
+            continue;
+        }
+        let index = total;
+        total += 1;
+        if !page.includes(index) {
+            continue;
+        }
+        let start = &range["start"];
+        let end = &range["end"];
+        entries.push(json!({
+            "path": path.to_string_lossy(),
+            "startLine": start["line"].as_u64().unwrap_or(0) + 1,
+            "startColumn": start["character"].as_u64().unwrap_or(0) + 1,
+            "endLine": end["line"].as_u64().unwrap_or(0) + 1,
+            "endColumn": end["character"].as_u64().unwrap_or(0) + 1,
+            "newText": edit["newText"].clone(),
+        }));
+    }
+    (entries, total)
+}
+
 fn symbol_entries(
     workspace: &Path,
     file: &Path,
@@ -475,7 +549,7 @@ fn symbol_kind(symbol: &Value) -> &'static str {
 
 /// Keep the observation inside the shared capability budget by trimming
 /// whole trailing entries; a half entry would be worse than a smaller list.
-fn bound_code_result(mut data: Value) -> anyhow::Result<Value> {
+fn bound_code_result(data: Value, max_bytes: usize) -> anyhow::Result<Value> {
     let key = if data.get("locations").is_some() {
         "locations"
     } else if data.get("symbols").is_some() {
@@ -483,23 +557,21 @@ fn bound_code_result(mut data: Value) -> anyhow::Result<Value> {
     } else {
         return Ok(data);
     };
-    while serde_json::to_vec(&data)?.len() > gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES {
-        let length = data[key].as_array().map(Vec::len).unwrap_or(0);
-        if length <= 1 {
-            anyhow::bail!("a code navigation entry exceeds the tool response size limit");
-        }
-        if let Some(items) = data[key].as_array_mut() {
-            items.truncate(length / 2);
-        }
-        data = paged_result(data, key);
-    }
-    Ok(data)
+    capability_output_budget::array_result(data, key, max_bytes)
 }
 
 /// Tool schemas live here so `lib.rs` keeps a single delegation guard instead
 /// of one arm per capability.
 pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
     let (mut properties, required) = match id {
+        CapabilityId::CodeFormat => (
+            json!({
+                "path": { "type": "string" },
+                "tabSize": { "type": "integer", "minimum": 1, "maximum": 16, "description": "Indent width in spaces for the formatter; defaults to 4." },
+                "insertSpaces": { "type": "boolean", "description": "True to indent with spaces (default), false to indent with tabs." }
+            }),
+            vec!["path"],
+        ),
         CapabilityId::CodeDefinition | CapabilityId::CodeHover => (
             json!({
                 "path": { "type": "string" },
@@ -525,7 +597,10 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
         ),
         _ => return None,
     };
-    if id != CapabilityId::CodeHover {
+    properties["maxBytes"] = workspace_result_bytes_schema();
+    if id == CapabilityId::CodeHover {
+        properties["offset"] = capability_output_budget::offset_schema();
+    } else {
         properties["offset"] = json!({
             "type": "integer", "minimum": 0,
             "description": "Zero-based result offset. Use nextOffset from the previous result to read the next page. Results may change when the workspace changes."
@@ -533,7 +608,8 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
         properties["limit"] = json!({
             "type": "integer", "minimum": 1,
             "maximum": if id == CapabilityId::CodeSymbols { MAX_CODE_SYMBOLS } else { MAX_CODE_LOCATIONS },
-            "description": "Maximum entries to return in this page. Omit to use the maximum."
+            "default": if id == CapabilityId::CodeSymbols { 50 } else { 20 },
+            "description": "Maximum entries to return in this page. Use nextOffset to retrieve more."
         });
     }
     Some((properties, required))
@@ -657,6 +733,63 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0]["kind"], "function");
         assert_eq!(entries[0]["line"], 10);
+    }
+
+    #[test]
+    fn format_entries_project_one_based_ranges_and_respect_the_page() {
+        let result = serde_json::json!([
+            {
+                "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 3 } },
+                "newText": "let"
+            },
+            {
+                "range": { "start": { "line": 4, "character": 2 }, "end": { "line": 4, "character": 2 } },
+                "newText": "    "
+            }
+        ]);
+        let path = std::path::Path::new("src/lib.rs");
+        let (entries, total) = format_entries(
+            path,
+            &result,
+            CodePage {
+                offset: 0,
+                limit: 10,
+            },
+        );
+        assert_eq!(total, 2);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["startLine"], 1);
+        assert_eq!(entries[0]["startColumn"], 1);
+        assert_eq!(entries[0]["endColumn"], 4);
+        assert_eq!(entries[0]["newText"], "let");
+        assert_eq!(entries[1]["startLine"], 5);
+        assert_eq!(entries[1]["startColumn"], 3);
+
+        let (paged, total) = format_entries(
+            path,
+            &result,
+            CodePage {
+                offset: 1,
+                limit: 1,
+            },
+        );
+        assert_eq!(total, 2);
+        assert_eq!(paged.len(), 1);
+        assert_eq!(paged[0]["startLine"], 5);
+    }
+
+    #[test]
+    fn format_entries_tolerate_a_null_server_answer() {
+        let (entries, total) = format_entries(
+            std::path::Path::new("src/lib.rs"),
+            &serde_json::Value::Null,
+            CodePage {
+                offset: 0,
+                limit: 10,
+            },
+        );
+        assert!(entries.is_empty());
+        assert_eq!(total, 0);
     }
 
     #[test]
@@ -864,7 +997,8 @@ mod tests {
             json!({ "symbols": symbols, "total": 10, "offset": 3 }),
             "symbols",
         );
-        let bounded = bound_code_result(data).unwrap();
+        let bounded =
+            bound_code_result(data, gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES).unwrap();
         assert_eq!(bounded["returned"], 2);
         assert_eq!(bounded["nextOffset"], 5);
         assert_eq!(bounded["hasMore"], true);
@@ -873,7 +1007,8 @@ mod tests {
                 <= gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES
         );
         assert!(bound_code_result(
-            json!({ "symbols": [{ "name": "x".repeat(200_000) }], "total": 1, "offset": 0 })
+            json!({ "symbols": [{ "name": "x".repeat(200_000) }], "total": 1, "offset": 0 }),
+            gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES,
         )
         .is_err());
     }

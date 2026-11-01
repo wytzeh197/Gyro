@@ -17,6 +17,8 @@ pub enum ProviderExecutionKind {
     ClaudeCode,
     KimiAcp,
     AcpCli,
+    /// Google Antigravity's official CLI (`agy`) in headless print mode.
+    AntigravityCli,
     OllamaApi,
     OpenAiCompatibleApi,
     ReadinessOnly,
@@ -38,6 +40,8 @@ pub enum ProviderHealthKind {
     Environment,
     CursorCli,
     OpenCodeCli,
+    /// Google Antigravity CLI: present on PATH and signed in with Google.
+    AntigravityCli,
     OllamaApi,
     OpenAiCompatibleApi,
 }
@@ -121,6 +125,22 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         support_tier: ProviderSupportTier::Supported,
     },
     ProviderDescriptor {
+        id: "antigravity",
+        // Google's official CLI (`agy`) in headless stream-json mode. Its own
+        // Google sign-in replaces the former ACP bridge and Gemini API key.
+        execution_kind: ProviderExecutionKind::AntigravityCli,
+        health_kind: ProviderHealthKind::AntigravityCli,
+        runner: "agy",
+        auth_owner: "google-antigravity",
+        supports_approvals: false,
+        supports_images: false,
+        supports_resume: true,
+        // Token counts come from each run's `result` frame, but no plan or
+        // quota window is scraped, so this stays false like Gemini.
+        supports_usage: false,
+        support_tier: ProviderSupportTier::Supported,
+    },
+    ProviderDescriptor {
         id: "ollama",
         execution_kind: ProviderExecutionKind::OllamaApi,
         health_kind: ProviderHealthKind::OllamaApi,
@@ -139,10 +159,10 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         runner: "cursor-acp",
         auth_owner: "provider-cli",
         supports_approvals: true,
-        supports_images: false,
+        supports_images: true,
         supports_resume: true,
         supports_usage: false,
-        support_tier: ProviderSupportTier::Experimental,
+        support_tier: ProviderSupportTier::Supported,
     },
     ProviderDescriptor {
         id: "opencode",
@@ -151,10 +171,10 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         runner: "opencode-acp",
         auth_owner: "provider-cli",
         supports_approvals: true,
-        supports_images: false,
+        supports_images: true,
         supports_resume: true,
         supports_usage: false,
-        support_tier: ProviderSupportTier::Experimental,
+        support_tier: ProviderSupportTier::Supported,
     },
     // API-key providers that speak the OpenAI wire format directly. Nothing
     // here is bespoke: the descriptor is data the shared HTTPS runner reads, so
@@ -180,7 +200,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         runner: "openai-compatible-api",
         auth_owner: "provider-sdk",
         supports_approvals: true,
-        supports_images: false,
+        supports_images: true,
         supports_resume: true,
         supports_usage: false,
         support_tier: ProviderSupportTier::Experimental,
@@ -192,7 +212,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         runner: "openai-compatible-api",
         auth_owner: "provider-sdk",
         supports_approvals: true,
-        supports_images: false,
+        supports_images: true,
         supports_resume: true,
         supports_usage: false,
         support_tier: ProviderSupportTier::Experimental,
@@ -205,6 +225,19 @@ pub fn provider_registry() -> &'static [ProviderDescriptor] {
 
 pub fn provider_descriptor(provider_id: &str) -> Option<&'static ProviderDescriptor> {
     PROVIDERS.iter().find(|provider| provider.id == provider_id)
+}
+
+/// Whether this provider can be sent image input.
+///
+/// Ollama stays false here: vision is decided per installed model. DeepSeek's
+/// descriptor stays true and the runner still limits that to Flash models.
+/// A user-defined endpoint uses the same image content path as the other
+/// OpenAI-compatible providers.
+pub fn provider_accepts_images(provider_id: &str) -> bool {
+    if is_custom_provider_id(provider_id) {
+        return true;
+    }
+    provider_descriptor(provider_id).is_some_and(|provider| provider.supports_images)
 }
 
 pub fn provider_is_executable(provider_id: &str) -> bool {
@@ -279,6 +312,43 @@ mod tests {
         assert!(provider_is_executable("kimi"));
         assert!(provider_is_executable("xai"));
         assert!(provider_is_executable("gemini"));
+        assert!(provider_is_executable("antigravity"));
+        let antigravity = provider_descriptor("antigravity").unwrap();
+        assert_eq!(
+            antigravity.execution_kind,
+            ProviderExecutionKind::AntigravityCli
+        );
+        assert_eq!(antigravity.runner, "agy");
+        assert_eq!(antigravity.support_tier, ProviderSupportTier::Supported);
+        assert!(!antigravity.supports_images && antigravity.supports_resume);
+        // A headless `agy` run has no channel for an approval dialog.
+        assert!(!antigravity.supports_approvals);
+        // Tokens are accounted per run; no plan window is scraped.
+        assert!(!antigravity.supports_usage);
+        for id in ["cursor", "opencode"] {
+            assert_eq!(
+                provider_descriptor(id).unwrap().support_tier,
+                ProviderSupportTier::Supported
+            );
+        }
+        for id in [
+            "openai",
+            "anthropic",
+            "kimi",
+            "xai",
+            "gemini",
+            "deepseek",
+            "cursor",
+            "opencode",
+            "mistral",
+            "openrouter",
+            "custom:my-gateway",
+        ] {
+            assert!(provider_accepts_images(id), "{id}");
+        }
+        assert!(!provider_accepts_images("ollama"));
+        assert!(!provider_accepts_images("antigravity"));
+        assert!(!provider_accepts_images("unknown"));
         assert!(provider_is_executable("ollama"));
         assert!(provider_is_executable("cursor"));
         assert!(provider_is_executable("opencode"));

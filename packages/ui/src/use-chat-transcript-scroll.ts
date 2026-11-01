@@ -10,6 +10,7 @@ import {
   type WheelEvent,
 } from "react";
 import type { SessionEvent } from "./types";
+import { chatScrollMemory } from "./chat-scroll-memory";
 
 const BOTTOM_SLACK = 72;
 const LOAD_EARLIER_SLACK = 96;
@@ -60,6 +61,14 @@ export function useChatTranscriptScroll({
     scrollTop: number;
   }>();
   const sessionId = events[0]?.sessionId;
+  const contextRef = useRef({
+    sessionId,
+    firstId: events.find((event) => event.kind !== "session-created")?.id,
+  });
+  contextRef.current = {
+    sessionId,
+    firstId: events.find((event) => event.kind !== "session-created")?.id,
+  };
 
   const updateScrollPosition = useCallback(() => {
     const transcript = transcriptRef.current;
@@ -71,17 +80,26 @@ export function useChatTranscriptScroll({
     const distanceFromBottom =
       transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop;
     const isAtBottom = distanceFromBottom <= BOTTOM_SLACK;
-    if (isAtBottom) {
-      isFollowingBottomRef.current = true;
-    } else if (
+    if (
       pointerDownRef.current &&
       transcript.scrollTop < lastScrollTopRef.current
     ) {
       isFollowingBottomRef.current = false;
+    } else if (isAtBottom && transcript.scrollTop > lastScrollTopRef.current) {
+      // Only moving back toward latest resumes following. Activity and pane
+      // resize updates can run within the bottom slack (or before a wheel
+      // gesture scrolls); they must not undo the reader's upward intent.
+      isFollowingBottomRef.current = true;
     }
     lastScrollTopRef.current = transcript.scrollTop;
     setIsTranscriptAwayFromBottom(!isAtBottom);
     setIsLoadedChatClipped(isLoadedTranscriptClipped(transcript));
+    chatScrollMemory.save(contextRef.current.sessionId, {
+      top: transcript.scrollTop,
+      height: transcript.scrollHeight,
+      following: isFollowingBottomRef.current,
+      firstId: contextRef.current.firstId,
+    });
   }, []);
 
   const requestEarlierMessages = useCallback(
@@ -138,12 +156,25 @@ export function useChatTranscriptScroll({
   }, [pinToBottom, updateScrollPosition]);
 
   useLayoutEffect(() => {
-    isFollowingBottomRef.current = true;
+    const transcript = transcriptRef.current;
+    const restored = transcript
+      ? chatScrollMemory.restore(
+          sessionId,
+          events
+            .filter((event) => event.kind !== "session-created")
+            .map((event) => event.id),
+          transcript.scrollHeight,
+        )
+      : undefined;
+    isFollowingBottomRef.current = restored === undefined;
     upwardIntentRef.current = false;
     requestedEarlierCursorRef.current = undefined;
     pendingEarlierScrollRef.current = undefined;
     lastScrollTopRef.current = 0;
-    pinToBottom();
+    if (transcript && restored !== undefined) {
+      transcript.scrollTop = restored;
+      lastScrollTopRef.current = transcript.scrollTop;
+    } else pinToBottom();
     updateScrollPosition();
   }, [sessionId, pinToBottom, updateScrollPosition]);
   useLayoutEffect(() => {

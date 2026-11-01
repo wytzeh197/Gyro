@@ -9,6 +9,14 @@ export type WorkspaceLayoutId = "thread" | "terminal-grid" | "code";
 
 export type SessionsLayoutId = Exclude<WorkspaceLayoutId, "code">;
 
+/**
+ * Where Gyro lands when it launches.
+ *
+ * `last` restores whatever was on screen at the previous exit; the other three
+ * name a view the app opens on every time, whatever it was showing before.
+ */
+export type LaunchView = "last" | "workspace" | "sessions" | "terminals";
+
 export type AppDestination =
   | "workspace"
   | "tools"
@@ -48,7 +56,8 @@ export type ChatSidePanelId =
   | "changes"
   | "terminal"
   | "files"
-  | "side-chat";
+  | "side-chat"
+  | "agents";
 
 export type ChatMode = "normal" | "plan" | "council";
 
@@ -89,8 +98,18 @@ export type ChatGridState = {
   maximizedPaneId?: string;
 };
 
+/**
+ * Mirrors `CapabilityId` in `crates/gyro-core/src/capabilities.rs`, whose
+ * variants serialise to these kebab-case wire ids. The Rust enum decides which
+ * capabilities exist; `CAPABILITY_UI` must name every one of them, and
+ * `scripts/check-capability-labels.mjs` fails the build if the lists disagree.
+ */
 export type CapabilityId =
+  | "code-mode-discover"
+  | "code-mode-execute"
   | "workspace-context"
+  | "workspace-outline"
+  | "task-checkpoint"
   | "workspace-check"
   | "workspace-list"
   | "workspace-search"
@@ -105,42 +124,64 @@ export type CapabilityId =
   | "workspace-git-blame"
   | "workspace-propose-edit"
   | "workspace-edit"
-  | "workspace-create"
-  | "workspace-rename"
-  | "workspace-delete"
+  | "workspace-create-path"
+  | "workspace-rename-path"
+  | "workspace-delete-path"
+  | "workspace-move-path"
+  | "workspace-duplicate-path"
+  | "workspace-undo-path"
+  | "workspace-open-folder"
   | "workspace-run-task"
   | "workspace-run-test"
   | "workspace-read-output"
-  | "web-fetch"
-  | "memory-read"
-  | "memory-write"
-  | "research-run"
   | "code-definition"
   | "code-references"
   | "code-hover"
   | "code-symbols"
+  | "code-format"
   | "ide-reveal"
   | "ide-open-panel"
   | "terminal-open"
   | "terminal-read"
   | "terminal-wait"
   | "terminal-stop"
+  | "browser-targets"
+  | "browser-select-target"
+  | "browser-capture-preview"
+  | "browser-preview-click"
   | "browser-open"
   | "browser-inspect"
   | "browser-reload"
   | "browser-screenshot"
+  | "browser-viewport"
   | "browser-navigate"
   | "browser-back"
   | "browser-forward"
-  | "browser-mouse"
   | "browser-click"
+  | "browser-mouse"
   | "browser-type"
   | "browser-scroll"
   | "browser-form-input"
   | "browser-read-page"
   | "browser-find"
   | "browser-console"
-  | "browser-network";
+  | "browser-network"
+  | "github-status"
+  | "github-pull-requests"
+  | "github-workflow-runs"
+  | "github-workflow-logs"
+  | "github-create-pull-request"
+  | "github-rerun-workflow"
+  | "github-push"
+  | "web-fetch"
+  | "memory-read"
+  | "memory-write"
+  | "research-run"
+  | "agent-spawn"
+  | "agent-wait"
+  | "agent-send"
+  | "agent-stop"
+  | "tool-catalog";
 
 export type CapabilityClass =
   | "workspace-inspect"
@@ -303,6 +344,7 @@ export type ProviderCapabilitySupport = {
   supportsImages: boolean;
   supportsResume: boolean;
   supportsUsage: boolean;
+  efficiency?: { ownsRequests: boolean; nativeContinuation: "supported" | "unsupported" | "unknown"; effort: "supported" | "unsupported" | "unknown"; cacheControls: "supported" | "unsupported" | "unknown"; usage: "supported" | "unsupported" | "unknown"; hiddenContext: boolean };
   capabilities: CapabilityId[];
   reason?: string;
 };
@@ -330,6 +372,28 @@ export type SessionGoal = {
   sessionId?: string;
   text: string;
   status: SessionGoalStatus;
+  run?: {
+    id: string;
+    status:
+      | "queued"
+      | "running"
+      | "waiting-approval"
+      | "blocked"
+      | "paused"
+      | "complete";
+    reason?: string;
+    checkpoint?: string;
+    nextAction?: string;
+    startedAt?: string;
+    deadline?: string;
+    automaticTurns?: number;
+    newTokens?: number;
+  };
+  runLimits?: {
+    maxAutomaticTurns: number;
+    maxMinutes: number;
+    maxNewTokens: number;
+  };
   sourceTurnId?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -364,10 +428,12 @@ export type ChatAttachment = {
 
 export type SettingsSectionId =
   | "general"
+  | "import-projects"
   | "editor-workspace"
   | "tools-contributions"
   | "providers"
   | "usage-limits"
+  | "efficiency"
   | "cli-profiles"
   | "appearance"
   | "permissions"
@@ -539,6 +605,14 @@ export type MenuBarJob = {
   providerLabel?: string;
   modelId?: string;
   modelLabel?: string;
+  /** A pending provider approval the popover can answer inline. */
+  approval?: MenuBarApproval;
+};
+
+export type MenuBarApproval = {
+  id: string;
+  approvalType: string;
+  summary: string;
 };
 
 export type MenuBarOutcome = {
@@ -561,6 +635,17 @@ export type MenuBarSnapshot = {
   recentOutcome?: MenuBarOutcome;
   theme: ResolvedTheme;
   reduceMotion: boolean;
+  notifications: DesktopNotificationPreferences;
+};
+
+/** Which macOS notifications Gyro sends while it is in the background. */
+export type DesktopNotificationPreferences = {
+  /** Preserve the historical preview unless explicitly disabled. */
+  showNames?: boolean;
+  enabled: boolean;
+  approvals: boolean;
+  finished: boolean;
+  failed: boolean;
 };
 
 export type DiffSource = "agent-generated" | "user-edited" | "mixed" | "stale";
@@ -651,7 +736,15 @@ export type DiffReview = {
   lastAction?: string;
 };
 
-export type BrowserPreviewDevice = "desktop" | "tablet" | "mobile";
+export type BrowserPreviewDevice = "responsive" | "desktop" | "tablet" | "mobile";
+export type BrowserViewportMode = "auto" | BrowserPreviewDevice;
+export type BrowserViewportState = {
+  mode: BrowserViewportMode;
+  device: BrowserPreviewDevice;
+  width: number;
+  height: number;
+  displayScale: number;
+};
 
 export type BrowserPreviewStatus =
   | "idle"
@@ -700,10 +793,13 @@ export type BrowserFeedback = {
 };
 
 export type BrowserPreview = {
+  runtime?: import("./app-preview-panel").AppPreviewRuntime;
   url: string;
   history: string[];
   historyIndex: number;
   device: BrowserPreviewDevice;
+  deviceOverride?: boolean;
+  viewport?: BrowserViewportState;
   consoleErrors: number;
   diagnostics: BrowserPreviewDiagnostic[];
   diagnosticsSupported: boolean;
@@ -780,7 +876,8 @@ export type ProviderId =
   | "kimi"
   | "xai"
   | "cursor"
-  | "gemini"
+  | "gemini" // Legacy transcript identity; absent from the selectable catalog.
+  | "antigravity"
   | "opencode"
   | "ollama"
   | "deepseek"
@@ -793,6 +890,7 @@ export type ProviderExecutionKind =
   | "claude-code"
   | "kimi-acp"
   | "acp-cli"
+  | "antigravity-cli"
   | "ollama-api"
   | "openai-compatible-api"
   | "readiness-only";
@@ -823,6 +921,15 @@ export type ProviderRuntimeStatus =
 export type ProviderAuthOwner =
   "provider-cli" | "provider-env" | "provider-sdk";
 
+/** Vendor install guidance carried by a provider health payload. */
+export type ProviderInstallGuide = {
+  providerId: string;
+  binary: string;
+  command: string | null;
+  docsUrl: string;
+  summary: string;
+};
+
 export type ProviderHealthDetails = {
   runtimeStatus: ProviderRuntimeStatus;
   authOwner: ProviderAuthOwner;
@@ -834,15 +941,21 @@ export type ProviderHealthDetails = {
   secretStorage: string;
   privacyNote: string;
   diagnosticsOptIn: boolean;
+  /** Vendor install guidance when this provider's CLI is missing. */
+  install?: ProviderInstallGuide | null;
 };
 
 export type ProviderModel = {
   /** Derived remote entry; discard saved copies when its catalog entry is withdrawn. */
   catalogManaged?: boolean;
+  /** Models reported by a local agent; replace this inventory when refreshed. */
+  cliDiscovered?: boolean;
   id: string;
   displayName: string;
   description?: string;
   contextWindowTokens?: number;
+  /** Fresh native metadata; discarded when the endpoint or its limit changes. */
+  liveContextWindow?: import("./live-model-context").LiveModelContext;
   defaultReasoningEffort?: ReasoningEffort;
   supportedReasoningEfforts?: ReasoningEffort[];
   /** Runtime-discovered capability; absent for static provider catalogs. */
@@ -924,6 +1037,9 @@ export type ProviderChatStreamPhase =
   /** Running cost of the turn so far, for the providers Gyro meters itself. */
   | "turn-tokens"
   | "started"
+  /** Native session recovery keeps the current invoke alive while waiting. */
+  | "retry-wait"
+  | "retry-started"
   | "activity"
   | "delta"
   /** Backend keep-alive while the provider process is quiet but still running. */
@@ -951,11 +1067,19 @@ export type ProviderChatStreamEvent = {
       }[]
     | null;
   phase: ProviderChatStreamPhase;
+  /** Native recovery deadline in UTC; distinct from host-owned resend timers. */
+  retryAt?: string | null;
+  retryAttempt?: number | null;
+  retryMaxAttempts?: number | null;
+  /** A session allocation outranks catalog/published model metadata. */
+  contextWindowSource?: "runtime" | "catalog";
   contextUsage?: {
     inputTokens?: number;
     outputTokens?: number;
     totalTokens?: number;
     modelContextWindow?: number;
+    /** True when this count was not measured by the provider. The meter ignores it. */
+    estimated?: boolean;
   } | null;
   /**
    * Every request this turn has billed, added together.
@@ -966,8 +1090,13 @@ export type ProviderChatStreamEvent = {
    */
   turnTokens?: {
     inputTokens?: number;
+    cachedInputTokens?: number;
+    cacheWriteTokens?: number;
     outputTokens?: number;
+    reasoningOutputTokens?: number;
     totalTokens?: number;
+    measured?: boolean;
+    accounting?: import("./turn-tokens").UsageAccounting;
   } | null;
   status?: HarnessRunStatus | null;
   textDelta?: string | null;
@@ -1177,6 +1306,10 @@ export type OnboardingState = {
 };
 
 export type WorkbenchPreferences = {
+  settingsSections?: Record<string, boolean>;
+  defaultChatProviderId?: ProviderId;
+  defaultChatEffort?: string;
+  checkReminders?: boolean;
   theme: ThemeMode;
   /** User-selected brand accents applied across every local Gyro surface. */
   mainColor: string;
@@ -1185,6 +1318,8 @@ export type WorkbenchPreferences = {
   interfaceSize: InterfaceSize;
   motionSpeed: MotionSpeed;
   lastSettingsSection: SettingsSectionId;
+  /** Where Gyro lands on launch; `last` restores the previous view. */
+  launchView: LaunchView;
   commandPaletteRecents: string[];
   sidebarChatsCollapsed: boolean;
   chatEnvironmentRailOpen: boolean;
@@ -1218,6 +1353,7 @@ export type WorkbenchPreferences = {
    */
   dailyPaceWarning: boolean;
   showMenuBarIcon: boolean;
+  desktopNotifications: DesktopNotificationPreferences;
   workspaceSidebarHidden: boolean;
   workspaceSidebarWidth?: number;
   workspacePanelHeight: number;
@@ -1229,7 +1365,13 @@ export type WorkbenchPreferences = {
   workspaceTrust: Record<string, WorkspaceTrustDecision>;
   projectDetails?: Record<
     string,
-    { name: string; pinned: boolean; primaryFolder?: string }
+    {
+      name: string;
+      pinned: boolean;
+      primaryFolder?: string;
+      /** Let one source folder sit inside another. Off by default. */
+      allowNestedFolders?: boolean;
+    }
   >;
   workspaceFolders: Record<string, string[]>;
   workspaceUserSettings: WorkspaceScopedSettings;
@@ -1292,7 +1434,9 @@ export type UsageOrigin =
   | "automation"
   | "council-seat"
   | "council-synthesis"
-  | "council-resynthesis";
+  | "council-resynthesis"
+  | "optimization"
+  | "agent-session";
 
 export type UsageOriginTotals = {
   origin: UsageOrigin;
@@ -1307,11 +1451,15 @@ export type SessionUsageTotals = {
   measuredCalls: number;
   /** Calls Gyro estimated because the provider reports no counts. */
   estimatedCalls: number;
+  partialCalls?: number;
+  unavailableCalls?: number;
   inputTokens: number;
   /** The share of `inputTokens` that was context re-read rather than sent fresh. */
   cachedInputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /** Trustworthy provider consumption only; present zero is an observed zero. */
+  reportedTotalTokens?: number;
   byOrigin: UsageOriginTotals[];
   firstCallAt?: string;
   lastCallAt?: string;
@@ -1511,6 +1659,8 @@ export type SourceControlFile = {
 };
 
 export type SourceControlState = {
+  /** Requested workspace: file paths in this snapshot are relative to it. */
+  workspacePath?: string | null;
   history?: Array<{
     hash: string;
     shortHash: string;
@@ -1539,6 +1689,8 @@ export type SourceControlState = {
   additions: number;
   deletions: number;
   statsPartial: boolean;
+  /** False until line counts and history have been attempted. */
+  detailsLoaded?: boolean;
   comparedToMain?: {
     additions: number;
     deletions: number;
@@ -1854,6 +2006,7 @@ export type Session = {
     worktreeRootId?: string;
   };
   origin: SessionOrigin;
+  importSource?: import("./project-import-types").SessionImportSource;
   /**
    * The chat whose turn started this session, when the user did not start it:
    * a research sub-agent keeps its transcript in a session of its own, but
@@ -1895,6 +2048,7 @@ export type SessionEvent = {
     | "approval-requested"
     | "plan-updated"
     | "goal-updated"
+    | "task-checkpoint"
     | "chat-mode-changed"
     | "council-run-started"
     | "council-seat-started"
@@ -2251,7 +2405,7 @@ export type ModelProviderConfig = {
 export type CustomProviderDraft = {
   displayName: string;
   baseUrl: string;
-  /** Sent only to the Keychain; it is never written into the config file. */
+  /** Kept in the private store on this Mac; it is never written into the config file. */
   apiKey?: string;
   modelIds: string[];
 };
@@ -2276,6 +2430,19 @@ export type GyroAccountOidcConfig = {
   scopes: string[];
 };
 
+export type PriceSnapshot = {
+  id: string; provider: string; model: string; effectiveDate: string; currency: string;
+  inputMicrosPerMillion: number; cachedMicrosPerMillion: number | null;
+  cacheWriteMicrosPerMillion: number | null; outputMicrosPerMillion: number;
+};
+export type EfficiencyRoute = {phase: string; provider: string; model: string};
+export type EfficiencyConfig = {
+  enabled: boolean; experimental: boolean; profile: "routine" | "standard" | "deep";
+  parallelAgents: boolean; prices: PriceSnapshot[];
+  routing?: {enabled: boolean; routes: EfficiencyRoute[]; escalation: EfficiencyRoute | null};
+  structuredEvidence?: boolean; cacheAssembly?: boolean; taskState?: boolean; repositoryRetrieval?: boolean; progressDetection?: boolean; compactToolCatalog?: boolean; recoverableEvidence?: boolean; retainToolCatalog?: boolean;
+};
+
 export type GyroConfig = {
   automaticUpdateChecks?: boolean;
   telemetryEnabled: boolean;
@@ -2286,6 +2453,11 @@ export type GyroConfig = {
   accountOidc?: GyroAccountOidcConfig;
   accountSession?: GyroAccountSession;
   selectedProviderId?: ProviderId;
+  /** Explicit per-model opt-in; absent choices use standard speed. */
+  fastModeModels?: Record<string, boolean>;
+  /** Shipped providers the user removed from the picker and settings. */
+  removedProviderIds?: string[];
+  efficiency?: EfficiencyConfig;
   modelProviders: ModelProviderConfig[];
   commandProfiles: CommandProfile[];
   council?: CouncilConfig;

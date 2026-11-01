@@ -228,20 +228,62 @@ export function deriveSessionGoal(
   sessionId?: string,
 ): SessionGoal | undefined {
   let goal: SessionGoal | undefined;
+  const pendingApprovals = new Set<string>();
+  let goalVersion: string | undefined;
   for (const event of events) {
-    if (event.kind !== "goal-updated") {
-      continue;
-    }
     const payload = recordFromUnknown(event.payload);
+    const approvalId =
+      stringFromRecord(payload, "approvalId") ??
+      stringFromRecord(payload, "proposalId");
+    if (
+      (event.kind === "approval-requested" || event.kind === "system-event") &&
+      approvalId
+    ) {
+      const status = stringFromRecord(payload, "status");
+      if (!status || status === "waiting" || status === "pending")
+        pendingApprovals.add(approvalId);
+      else pendingApprovals.delete(approvalId);
+    }
+    if (event.kind !== "goal-updated") continue;
+    const source = stringFromRecord(payload, "source");
+    if (source === "goal-runner") {
+      if (!goal || stringFromRecord(payload, "goalVersion") !== goalVersion)
+        continue;
+      if (
+        goal.status === "complete" &&
+        stringFromRecord(payload, "status") !== "complete"
+      )
+        continue;
+    } else if (source === "model") {
+      if (
+        !goal ||
+        stringFromRecord(payload, "text") !== goal.text ||
+        (payload?.goalVersion !== undefined &&
+          stringFromRecord(payload, "goalVersion") !== goalVersion)
+      )
+        continue;
+    } else goalVersion = event.id;
     const action = stringFromRecord(payload, "action") ?? "set";
     if (action === "clear") {
       goal = undefined;
       continue;
     }
     const text = stringFromRecord(payload, "text") ?? goal?.text;
-    if (!text) {
-      continue;
-    }
+    if (!text) continue;
+    const run = recordFromUnknown(payload?.run);
+    const runId = stringFromRecord(run, "id");
+    const runStatus = stringFromRecord(run, "status");
+    const validStatus =
+      runStatus &&
+      [
+        "queued",
+        "running",
+        "waiting-approval",
+        "blocked",
+        "paused",
+        "complete",
+      ].includes(runStatus);
+    const runLimits = recordFromUnknown(payload?.runLimits);
     goal = {
       sessionId,
       text,
@@ -249,11 +291,42 @@ export function deriveSessionGoal(
         stringFromRecord(payload, "status") === "complete"
           ? "complete"
           : "active",
+      run:
+        runId && validStatus
+          ? {
+              id: runId,
+              status: runStatus as NonNullable<SessionGoal["run"]>["status"],
+              reason: stringFromRecord(run, "reason"),
+              checkpoint: stringFromRecord(run, "checkpoint"),
+              nextAction: stringFromRecord(run, "nextAction"),
+              startedAt: stringFromRecord(run, "startedAt"),
+              deadline: stringFromRecord(run, "deadline"),
+              automaticTurns:
+                typeof run?.automaticTurns === "number"
+                  ? run.automaticTurns
+                  : undefined,
+              newTokens:
+                typeof run?.newTokens === "number" ? run.newTokens : undefined,
+            }
+          : undefined,
+      runLimits:
+        typeof runLimits?.maxAutomaticTurns === "number" &&
+        typeof runLimits.maxMinutes === "number" &&
+        typeof runLimits.maxNewTokens === "number"
+          ? {
+              maxAutomaticTurns: runLimits.maxAutomaticTurns,
+              maxMinutes: runLimits.maxMinutes,
+              maxNewTokens: runLimits.maxNewTokens,
+            }
+          : goal?.runLimits,
       sourceTurnId:
         stringFromRecord(payload, "sourceTurnId") ?? goal?.sourceTurnId,
       createdAt: goal?.createdAt ?? event.createdAt,
       updatedAt: event.createdAt,
     };
+  }
+  if (goal?.run?.status === "running" && pendingApprovals.size) {
+    goal = { ...goal, run: { ...goal.run, status: "waiting-approval" } };
   }
   return goal;
 }

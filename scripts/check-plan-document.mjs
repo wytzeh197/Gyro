@@ -104,4 +104,36 @@ assert.equal(
   ]).content,
   "Explicit document",
 );
+// Replaying the saved progress sequence must advance the reported 7/8 case.
+const eightStepPlan = event("plan-updated", {
+  action: "replace",
+  content: "# UI upgrade",
+  items: Array.from({ length: 8 }, (_, index) => ({
+    id: `step-${index}`,
+    title: index === 7 ? "Verify themes and accessibility" : `Step ${index + 1}`,
+    status: index === 7 ? "in-progress" : "complete",
+  })),
+});
+const finishVerification = event("plan-updated", {
+  action: "update-items",
+  items: [{ id: "step-7", status: "complete" }],
+}, "", "turn-2");
+const savedEvents = [eightStepPlan, response, finishVerification];
+const finished = derive(JSON.parse(JSON.stringify(savedEvents)));
+assert.equal(finished.items.filter(item => item.status === "complete").length, 8);
+assert.equal(finished.items.some(item => item.status === "in-progress"), false);
+assert.equal(finished.content, "# UI upgrade");
+// Ending a reply alone is not evidence that unfinished acceptance passed.
+const unfinished = derive([eightStepPlan, response]);
+assert.equal(unfinished.items[7].status, "in-progress");
+const blocked = derive([eightStepPlan, event("plan-updated", {
+  action: "update-items",
+  items: [{
+    id: "step-7",
+    status: "blocked",
+    detail: "Requires native packaged-app acceptance",
+  }],
+}, "", "turn-2")]);
+assert.equal(blocked.items[7].status, "blocked");
+assert.equal(blocked.items[7].detail, "Requires native packaged-app acceptance");
 console.log("Plan document regression checks passed.");

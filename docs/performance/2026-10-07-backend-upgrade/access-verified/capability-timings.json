@@ -1,0 +1,14 @@
+[
+  {
+    "turnId": "06a6d36e-b64a-456b-b2bf-05e29b070d27",
+    "toolBusyMs": null,
+    "openTools": 0,
+    "durationsMs": []
+  },
+  {
+    "turnId": "ae9bb24d-bcad-46fa-94a0-136fd160c62e",
+    "toolBusyMs": null,
+    "openTools": 0,
+    "durationsMs": []
+  }
+]

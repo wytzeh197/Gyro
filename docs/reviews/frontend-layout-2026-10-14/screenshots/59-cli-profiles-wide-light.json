@@ -1,0 +1,289 @@
+{
+  "bodyWidth": 1440,
+  "controls": [
+    {
+      "className": "gyro-sidebar-toggle-button",
+      "label": "Hide sidebar",
+      "rect": {
+        "bottom": 39.890625,
+        "height": 29.890625,
+        "right": 121.890625,
+        "width": 29.890625,
+        "x": 92,
+        "y": 10
+      }
+    },
+    {
+      "className": "gyro-settings-back-button has-label",
+      "label": "Back to Sessions",
+      "rect": {
+        "bottom": 86,
+        "height": 34,
+        "right": 133.53125,
+        "width": 115.53125,
+        "x": 18,
+        "y": 52
+      }
+    },
+    {
+      "className": "",
+      "label": "Search settings",
+      "rect": {
+        "bottom": 128,
+        "height": 30,
+        "right": 224,
+        "width": 171,
+        "x": 53,
+        "y": 98
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "General",
+      "rect": {
+        "bottom": 202.1875,
+        "height": 32.1875,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 170
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Appearance",
+      "rect": {
+        "bottom": 237.375,
+        "height": 32.1875,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 205.1875
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Keyboard Shortcuts",
+      "rect": {
+        "bottom": 272.5625,
+        "height": 32.1875,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 240.375
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Usage & Limits",
+      "rect": {
+        "bottom": 336.75,
+        "height": 32.1875,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 304.5625
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Models & Accounts",
+      "rect": {
+        "bottom": 371.9375,
+        "height": 32.1875,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 339.75
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-active is-settings-page",
+      "label": "CLI Profiles",
+      "rect": {
+        "bottom": 407.125,
+        "height": 32.1875,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 374.9375
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Permissions",
+      "rect": {
+        "bottom": 442.3125,
+        "height": 32.1875,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 410.125
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Workspace",
+      "rect": {
+        "bottom": 506.5,
+        "height": 32.1875,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 474.3125
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Tools",
+      "rect": {
+        "bottom": 541.6875,
+        "height": 32.1875,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 509.5
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Import projects",
+      "rect": {
+        "bottom": 576.875,
+        "height": 32.1875,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 544.6875
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Updates",
+      "rect": {
+        "bottom": 641.0625,
+        "height": 32.1875,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 608.875
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Advanced",
+      "rect": {
+        "bottom": 676.25,
+        "height": 32.1875,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 644.0625
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Help",
+      "rect": {
+        "bottom": 711.4375,
+        "height": 32.1875,
+        "right": 268,
+        "width": 257,
+        "x": 11,
+        "y": 679.25
+      }
+    },
+    {
+      "className": "gyro-settings-select",
+      "label": "Preset profile",
+      "rect": {
+        "bottom": 261.390625,
+        "height": 32.1875,
+        "right": 641.5,
+        "width": 131,
+        "x": 510.5,
+        "y": 229.203125
+      }
+    },
+    {
+      "className": "",
+      "label": "Decrease pane count",
+      "rect": {
+        "bottom": 259.296875,
+        "height": 28,
+        "right": 679.5,
+        "width": 29,
+        "x": 650.5,
+        "y": 231.296875
+      }
+    },
+    {
+      "className": "",
+      "label": "Increase pane count",
+      "rect": {
+        "bottom": 259.296875,
+        "height": 28,
+        "right": 732.5,
+        "width": 29,
+        "x": 703.5,
+        "y": 231.296875
+      }
+    },
+    {
+      "className": "gyro-icon-button is-subtle",
+      "label": "Remove preset profile",
+      "rect": {
+        "bottom": 259.296875,
+        "height": 28,
+        "right": 773.5,
+        "width": 32,
+        "x": 741.5,
+        "y": 231.296875
+      }
+    },
+    {
+      "className": "gyro-secondary-button",
+      "label": "Add profile",
+      "rect": {
+        "bottom": 303.578125,
+        "height": 32.1875,
+        "right": 636.984375,
+        "width": 126.484375,
+        "x": 510.5,
+        "y": 271.390625
+      }
+    },
+    {
+      "className": "is-active",
+      "label": "First",
+      "rect": {
+        "bottom": 303.578125,
+        "height": 32.1875,
+        "right": 1137.8125,
+        "width": 57.53125,
+        "x": 1080.28125,
+        "y": 271.390625
+      }
+    },
+    {
+      "className": "",
+      "label": "Last",
+      "rect": {
+        "bottom": 303.578125,
+        "height": 32.1875,
+        "right": 1198.5,
+        "width": 56.6875,
+        "x": 1141.8125,
+        "y": 271.390625
+      }
+    }
+  ],
+  "htmlWidth": 1440,
+  "overlaps": [],
+  "popovers": [],
+  "theme": "light",
+  "viewport": {
+    "height": 900,
+    "width": 1440
+  }
+}

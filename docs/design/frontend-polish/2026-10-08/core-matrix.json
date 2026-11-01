@@ -1,0 +1,854 @@
+[
+  {
+    "state": "Chat",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automations",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automation setup",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Workspace",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Chat",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automations",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automation setup",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Workspace",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Chat",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automations",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automation setup",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Workspace",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Chat",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automations",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automation setup",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Workspace",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Chat",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automations",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automation setup",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Workspace",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Chat",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automations",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automation setup",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Workspace",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Chat",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automations",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automation setup",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Workspace",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Chat",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automations",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automation setup",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Workspace",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Chat",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automations",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automation setup",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Workspace",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Chat",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automations",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automation setup",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Workspace",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Chat",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automations",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automation setup",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Workspace",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Chat",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automations",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Automation setup",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "Automations"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Workspace",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Welcome",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "What should we do in aurora?"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Welcome",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "What should we do in aurora?"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Welcome",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "What should we do in aurora?"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Welcome",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "What should we do in aurora?"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Welcome",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "What should we do in aurora?"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Welcome",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "What should we do in aurora?"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "dark",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Welcome",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "What should we do in aurora?"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Welcome",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "What should we do in aurora?"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Welcome",
+    "clippedControls": [],
+    "density": "compact",
+    "headings": [
+      "What should we do in aurora?"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Welcome",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "What should we do in aurora?"
+    ],
+    "overflow": false,
+    "size": "small",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Welcome",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "What should we do in aurora?"
+    ],
+    "overflow": false,
+    "size": "default",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  },
+  {
+    "state": "Welcome",
+    "clippedControls": [],
+    "density": "comfortable",
+    "headings": [
+      "What should we do in aurora?"
+    ],
+    "overflow": false,
+    "size": "large",
+    "theme": "light",
+    "viewport": [
+      860,
+      620
+    ]
+  }
+]

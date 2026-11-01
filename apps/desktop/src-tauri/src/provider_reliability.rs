@@ -3,6 +3,7 @@ use super::*;
 pub(super) fn is_transient_provider_error(error: &str) -> bool {
     let normalized = error.to_ascii_lowercase();
     if is_provider_cancellation(error)
+        || error.contains(provider_retry_recovery::CAPACITY_RETRY_EXHAUSTED)
         || is_stale_resume_error(error)
         || gyro_core::is_workspace_unavailable_error(error)
         || is_hopeless_provider_timeout(error)
@@ -30,6 +31,7 @@ pub(super) fn is_transient_provider_error(error: &str) -> bool {
         || normalized.contains("timed out")
         || normalized.contains("timeout")
         || normalized.contains("temporarily unavailable")
+        || is_model_capacity_error(error)
         || normalized.contains("try again")
         || normalized.contains("network is unreachable")
         || normalized.contains("could not resolve host")
@@ -41,6 +43,31 @@ pub(super) fn is_transient_provider_error(error: &str) -> bool {
         ]
         .iter()
         .any(|status| normalized.contains(status))
+}
+
+pub(super) fn is_model_capacity_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    (normalized.contains("model is at capacity")
+        || normalized.contains("model at capacity")
+        || normalized.contains("model is temporarily at capacity")
+        || normalized.contains("overloaded_error")
+        || normalized.contains("model is overloaded"))
+        && ![
+            "size limit",
+            "tool-call limit",
+            "output exceeded",
+            "http 401",
+            "http 403",
+            "unauthorized",
+            "authentication",
+            "insufficient_quota",
+            "http 402",
+            "status 402",
+            "payment required",
+            "balance exhausted",
+        ]
+        .iter()
+        .any(|cause| normalized.contains(cause))
 }
 
 fn is_hopeless_provider_timeout(error: &str) -> bool {
@@ -72,6 +99,8 @@ pub(super) fn configured_tool_rounds() -> Option<usize> {
 /// Gyro's to report: a model told to name the internal budget paraphrases it
 /// into a heading like "paused at the tool-round limit", which reads as a
 /// product limit the user cannot lift and buries the way out.
+const TOOL_BUDGET_CHECKPOINT: &str = "Gyro has stopped offering tools for this turn. Do not call more tools. Give a concise checkpoint: what is verified complete, what remains unfinished, and what to do next. Do not claim the whole task is complete.";
+
 pub(super) fn tools_for_round(
     messages: &mut Vec<serde_json::Value>,
     tools: &[serde_json::Value],
@@ -81,16 +110,87 @@ pub(super) fn tools_for_round(
     if limit.is_none_or(|limit| round < limit) {
         return tools.to_vec();
     }
-    messages.push(serde_json::json!({
-        "role": "user",
-        "content": "Gyro has stopped offering tools for this turn. Do not call more tools. Give a concise checkpoint: what is verified complete, what remains unfinished, and what to do next. Do not claim the whole task is complete."
-    }));
+    // A length-limited checkpoint may continue at the same round. Keep one
+    // instruction in history instead of charging for another copy each time.
+    if !messages
+        .iter()
+        .any(|message| message["role"] == "user" && message["content"] == TOOL_BUDGET_CHECKPOINT)
+    {
+        messages.push(serde_json::json!({
+            "role": "user", "content": TOOL_BUDGET_CHECKPOINT
+        }));
+    }
     Vec::new()
+}
+
+/// The cache-assembly experiment can keep definitions at a prose-only checkpoint.
+/// Permission to execute is separate; presence of definitions never lifts a limit.
+pub(super) fn openai_tools_for_round(
+    messages: &mut Vec<serde_json::Value>,
+    tools: &[serde_json::Value],
+    round: usize,
+    limit: Option<usize>,
+    retain_checkpoint_catalog: bool,
+) -> (Vec<serde_json::Value>, bool) {
+    let offered = tools_for_round(messages, tools, round, limit);
+    let allow_calls = !offered.is_empty();
+    let definitions = if !allow_calls && retain_checkpoint_catalog {
+        tools.to_vec()
+    } else {
+        offered
+    };
+    (definitions, allow_calls)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn checkpoint_continuations_do_not_accumulate_budget_notices() {
+        let tools = vec![serde_json::json!({"type":"function"})];
+        let mut messages = Vec::new();
+        assert!(tools_for_round(&mut messages, &tools, 1, Some(1)).is_empty());
+        messages.push(serde_json::json!({"role":"assistant","content":"partial checkpoint"}));
+        let before = messages.clone();
+        for _ in 0..3 {
+            assert!(tools_for_round(&mut messages, &tools, 1, Some(1)).is_empty());
+            assert_eq!(messages, before);
+        }
+        // Compaction may remove the old instruction; reinstate it when absent.
+        messages.remove(0);
+        assert!(tools_for_round(&mut messages, &tools, 1, Some(1)).is_empty());
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["content"], "partial checkpoint");
+        assert_eq!(messages[1]["content"], TOOL_BUDGET_CHECKPOINT);
+    }
+    #[test]
+    fn checkpoint_catalog_never_reopens_tools_and_is_opt_in() {
+        let tools = vec![serde_json::json!({"type":"function","function":{"name":"edit"}})];
+        for retain in [false, true] {
+            for (round, limit, permitted) in
+                [(0, Some(1), true), (1, Some(1), false), (100, None, true)]
+            {
+                let mut messages = vec![serde_json::json!({"role":"tool","content":"edit result"})];
+                let (definitions, allow_calls) =
+                    openai_tools_for_round(&mut messages, &tools, round, limit, retain);
+                assert_eq!(allow_calls, permitted);
+                assert_eq!(
+                    definitions,
+                    if permitted || retain {
+                        tools.clone()
+                    } else {
+                        Vec::new()
+                    }
+                );
+                assert_eq!(messages[0]["content"], "edit result");
+                assert_eq!(messages.len(), if permitted { 1 } else { 2 });
+            }
+            let (definitions, allow_calls) =
+                openai_tools_for_round(&mut Vec::new(), &[], 0, None, retain);
+            assert!(definitions.is_empty());
+            assert!(!allow_calls);
+        }
+    }
     #[test]
     fn tool_budget_reserves_checkpoint_without_replaying_tools() {
         let mut messages = vec![serde_json::json!({"role":"tool","content":"edit applied"})];
@@ -220,11 +320,35 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
     // Checked next: a stop is not a failure, and every branch below reads it
     // as one. The ceiling case in particular must not be offered a plain retry,
     // which would run into the same ceiling and stop in the same place.
+    // A declined tool ends the provider turn. That is not the person pressing
+    // Stop, and it must not be offered as a generic crash retry.
+    if normalized.contains("tool permission was declined") {
+        return (
+            "permission-declined",
+            "A tool was declined, so the provider ended the turn. Send again to continue.",
+        );
+    }
+    // The same stop without a decline behind it. The runner already asked the
+    // session once to carry on, so this is the agent's final word on the turn;
+    // the reply above it is saved and nothing here was a crash.
+    if normalized.contains("ended the turn without finishing") {
+        return (
+            "turn-stopped",
+            "The provider stopped its own turn. Send again to continue from here.",
+        );
+    }
     if error.contains(PROVIDER_STOP_MARKER) {
-        return if normalized.contains("per-call ceiling") {
+        return if normalized.contains("repeated unchanged tool results") {
+            ("no-progress", "Gyro paused repeated work. Review the saved checkpoint, then send a changed approach to resume; completed work is preserved.")
+        } else if normalized.contains("per-call ceiling") {
             (
                 "spend-ceiling",
                 "Gyro stopped this turn at its per-call token ceiling. Ask for a smaller piece of the work, or raise `usageGuard.maxTokensPerCall` in config.json.",
+            )
+        } else if normalized.contains("rolling token budget") {
+            (
+                "spend-ceiling",
+                "This provider's token budget is spent. Wait for its rolling window to free up, or adjust the provider budget in usage settings.",
             )
         } else {
             ("stopped", "You stopped this turn. Send again to continue.")
@@ -266,6 +390,24 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
             "The provider CLI's own configuration asks for an environment variable that is not set. Fix that CLI config or pick a different profile; retrying will not help.",
         );
     }
+    if normalized.contains("organization has disabled claude subscription access") {
+        return (
+            "provider-config",
+            "Ask your organization administrator to enable Claude Code subscription access, or explicitly configure API-key access in Settings > Providers.",
+        );
+    }
+    if normalized.contains("macos keychain") {
+        // Skip a second copy when the reader already told the person to
+        // unlock and send again. A bare Keychain refusal still needs it.
+        return (
+            "provider-config",
+            if normalized.contains("unlock your mac") {
+                ""
+            } else {
+                "Unlock your Mac and allow Gyro to read the saved credential, then send again."
+            },
+        );
+    }
     if normalized.contains("offline")
         || normalized.contains("network is unreachable")
         || normalized.contains("connection refused")
@@ -305,6 +447,21 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
             "Reconnect this provider, then retry the message.",
         );
     }
+    // Model availability is temporary and distinct from the output/tool
+    // capacity branch below. Keep the recovery structured so the UI does not
+    // have to interpret a provider's urgent wording as an action requirement.
+    if error.contains(provider_retry_recovery::CAPACITY_RETRY_EXHAUSTED) {
+        return (
+            "model-capacity-exhausted",
+            "Your work is saved. Retry when you are ready to continue.",
+        );
+    }
+    if is_model_capacity_error(error) {
+        return (
+            "model-capacity",
+            "Your conversation is saved. You can retry or choose another model.",
+        );
+    }
     if normalized.contains("http 429")
         || normalized.contains("rate limit")
         || normalized.contains("too many requests")
@@ -339,7 +496,19 @@ pub(super) fn validate_tool_call(
         return Err("Tool arguments must be a JSON object. Correct the arguments and try again. No action was executed.".into());
     }
     validate_compatibility_schema_value(arguments, &desktop_capability_tool_schema(id), "arguments")
-        .map_err(|error| format!("Invalid Gyro tool arguments: {error}. Correct the arguments and try again. No action was executed."))?;
+        .map_err(|error| {
+            let catalog = if provider_tool_batch::inline_tool_schema(id) {
+                String::new()
+            } else {
+                format!(
+                    " Call gyro_tool_catalog with prefix {} for the full schema.",
+                    provider_tool_batch::catalog_prefix(id)
+                )
+            };
+            format!(
+                "Invalid Gyro tool arguments: {error}.{catalog} Correct the arguments and try again. No action was executed."
+            )
+        })?;
     Ok(id)
 }
 
@@ -422,6 +591,59 @@ mod recovery_tests {
     }
 
     #[test]
+    fn model_availability_is_distinct_from_a_turn_output_budget() {
+        for error in [
+            "Selected model is at capacity. Please try a different model.",
+            "The model is temporarily at capacity.",
+            "API error: overloaded_error",
+        ] {
+            let (kind, message) = provider_failure_recovery(error);
+            assert_eq!(kind, "model-capacity");
+            assert!(message.contains("conversation is saved"));
+            assert!(is_transient_provider_error(error));
+        }
+        for permanent in [
+            "HTTP 401: model is at capacity",
+            "HTTP 403: model is at capacity",
+            "HTTP 402: model is at capacity",
+            "authentication failed: model is at capacity",
+            "output exceeded its size limit: model is at capacity",
+        ] {
+            assert!(!is_model_capacity_error(permanent));
+            assert!(!is_transient_provider_error(permanent));
+        }
+        assert_eq!(
+            provider_failure_recovery("output exceeded its size limit").0,
+            "capacity"
+        );
+        assert_eq!(
+            provider_failure_recovery("HTTP 402: model is at capacity").0,
+            "plan-exhausted"
+        );
+        assert_eq!(
+            provider_failure_recovery("HTTP 401: model is at capacity").0,
+            "authentication"
+        );
+    }
+
+    #[test]
+    fn access_restrictions_get_actionable_recovery_without_automatic_retry() {
+        let refusal = gyro_core::provider_stream::CLAUDE_SUBSCRIPTION_ACCESS_DETAIL;
+        assert_eq!(provider_failure_recovery(refusal).0, "provider-config");
+        assert!(!is_transient_provider_error(refusal));
+        let keychain = "Gyro could not read the saved credential from macOS Keychain without user interaction.";
+        assert!(provider_failure_recovery(keychain).1.contains("Unlock"));
+        assert!(!is_transient_provider_error(keychain));
+        let already_actionable = "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.";
+        assert_eq!(
+            provider_failure_recovery(already_actionable).0,
+            "provider-config"
+        );
+        assert_eq!(provider_failure_recovery(already_actionable).1, "");
+        assert!(!is_transient_provider_error(already_actionable));
+    }
+
+    #[test]
     fn an_agent_json_error_reads_as_its_message() {
         assert_eq!(
             readable_provider_error(GROK_402),
@@ -435,5 +657,15 @@ mod recovery_tests {
             readable_provider_error("bad frame {not json}"),
             "bad frame {not json}"
         );
+    }
+    #[test]
+    fn repeated_work_pause_requires_explicit_resume_and_is_not_a_user_stop() {
+        let message = ProviderStopReason::NoProgress.message();
+        assert!(!is_transient_provider_error(&message));
+        assert!(is_provider_cancellation(&message));
+        let (kind, detail) = provider_failure_recovery(&message);
+        assert_eq!(kind, "no-progress");
+        assert!(detail.contains("checkpoint"));
+        assert!(!detail.contains("You stopped"));
     }
 }

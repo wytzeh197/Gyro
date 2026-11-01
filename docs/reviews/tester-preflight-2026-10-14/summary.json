@@ -1,0 +1,86 @@
+{
+  "candidate": {
+    "version": "0.1.0-alpha.49.7",
+    "branch": "v0.1.0",
+    "commit": "ca28b906b8ac8dd0468328d3c49e8acb13664b10",
+    "selectedSourceDigestSha256": "7d1f0215b850b4a61c60ddba73de68fdab3d73a3471117e4abd1e28efa2ef349",
+    "includesInitialLocalChanges": true
+  },
+  "handoffStatus": "Final sign-off pending: locked native UI/clean-user acceptance and existing aggregate quality gate failures",
+  "runtimeFixes": [
+    "macOS helper trust checks resolve executable aliases and symlinks",
+    "Workspace edit-bar selector no longer collapses the editor"
+  ],
+  "rustDefaultSuite": {
+    "passed": 1345,
+    "failed": 0,
+    "ignoredInitially": 7
+  },
+  "rustOptIns": {
+    "passed": 5,
+    "failed": 2,
+    "remainingUnexecuted": 0,
+    "failures": [
+      "Claude account usage rejected sign-in",
+      "Kimi account payload yielded no recognized plan usage window"
+    ]
+  },
+  "frontendReliability": {
+    "invocations": 98,
+    "uniqueScripts": 97,
+    "passedInvocations": 97,
+    "failedInvocations": 1,
+    "failure": "Existing architecture size ceiling"
+  },
+  "browserSuites": {
+    "passed": 10,
+    "failedFinal": 0
+  },
+  "native": {
+    "broker": "passed before and after hardened ad-hoc signing",
+    "lspStepsPassed": 3,
+    "browserExecutedSteps": 16,
+    "browserSkippedSteps": 1,
+    "browserNativeOsMouse": "blocked by foreground requirement while Mac locked",
+    "syntaxProductionCspChecksPassed": 59,
+    "syntaxBlockedWasmChecksPassed": 11
+  },
+  "nativeCodex": {
+    "defaultModel": "gpt-5.6-sol",
+    "freshCoding": "passed",
+    "resumedCoding": "passed with actual native resume",
+    "gpt-6.1-solFreshNoTool": "passed",
+    "gpt-6.1-solResumeAndCoding": "upstream HTTP429 prevented completion"
+  },
+  "artifacts": {
+    "appleSiliconDmg": "passed full adhoc macOS integrity verifier",
+    "releaseCli": "passed deterministic packaging/extracted execution/checksum rejection",
+    "releaseWorker": "passed signed optimized packaged protocol execution",
+    "intel": "not built or executed",
+    "notarized": false,
+    "signedUpdater": "not produced/tested"
+  },
+  "qualityGates": {
+    "typecheck": "passed",
+    "workbenchSmoke": "passed",
+    "pnpmTest": "failed on existing architecture guard",
+    "cargoFmt": "38 existing unformatted files",
+    "strictClippy": "existing lint debt; advisory all-target run completes",
+    "gitDiffCheck": "passed",
+    "pnpmProductionAudit": "21 production dependencies, 0 known advisories"
+  },
+  "manualAcceptancePending": [
+    "Downloaded/quarantined clean-user installation on supported macOS",
+    "Fresh native app first-run connect/message/review approval/restart path",
+    "Native OS mouse/Finder/window interactions",
+    "Intel hardware execution if offering Intel artifacts",
+    "Signed updater install/relaunch/session preservation if distributing updater"
+  ],
+  "originalWorkPreservation": {
+    "originalFiles": 9154,
+    "changed": [
+      "scripts/check-workbench-ui.mjs"
+    ],
+    "missing": []
+  }
+}

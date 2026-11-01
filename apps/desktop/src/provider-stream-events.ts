@@ -3,12 +3,9 @@ import type { ProviderChatStreamEvent, SessionEvent } from "@gyro-dev/ui";
 
 export const MAX_CHAT_RESPONSE_CHARS = 64_000;
 export const CHAT_RESPONSE_TRUNCATION_SUFFIX = "...";
-/** Default open window — keeps the first paint cheap. */
+/** Bounded refresh/optimistic transport; never a limit on display history. */
 export const MAX_CHAT_EVENT_RENDER_COUNT = 400;
-/**
- * After the user loads earlier history, keep a larger in-memory window so the
- * 400-cap does not immediately drop the older page they just requested.
- */
+/** Legacy explicit buffer cap; display history is never pruned to this size. */
 export const MAX_CHAT_EVENT_HOLD_COUNT = 2_500;
 /**
  * How many out-of-order events a turn may hold before the missing sequence is
@@ -19,11 +16,13 @@ export const MAX_CHAT_EVENT_HOLD_COUNT = 2_500;
  */
 const MAX_PENDING_STREAM_EVENTS_PER_TURN = 8;
 const MAX_STREAM_TURN_ORDER_STATES = 256;
+export const PROVIDER_STREAM_GAP_WAIT_MS = 500;
 
 type ProviderStreamSequence = {
   nextSequence: number;
   pending: Map<number, ProviderChatStreamEvent>;
   terminal: boolean;
+  pendingSince?: number;
 };
 
 export type ProviderStreamOrderState = Map<string, ProviderStreamSequence>;
@@ -31,6 +30,7 @@ export type ProviderStreamOrderState = Map<string, ProviderStreamSequence>;
 export function orderProviderChatStreamEvent(
   state: ProviderStreamOrderState,
   event: ProviderChatStreamEvent,
+  receivedAt = performance.now(),
 ) {
   if (!Number.isSafeInteger(event.sequence) || event.sequence < 0) {
     return [event];
@@ -43,7 +43,10 @@ export function orderProviderChatStreamEvent(
   }
   if (!sequence) {
     if (state.size >= MAX_STREAM_TURN_ORDER_STATES) {
-      const oldestKey = state.keys().next().value;
+      // Completed history must not evict the ordering state of a still-live
+      // background turn, which would let duplicate late frames paint again.
+      const oldestKey = Array.from(state).find(([, turn]) => turn.terminal)?.[0]
+        ?? state.keys().next().value;
       if (oldestKey) {
         state.delete(oldestKey);
       }
@@ -79,6 +82,14 @@ export function orderProviderChatStreamEvent(
     sequence.nextSequence = Math.min(...sequence.pending.keys());
   }
 
+  return drainProviderStreamSequence(sequence, recoverFromTerminalGap, receivedAt);
+}
+
+function drainProviderStreamSequence(
+  sequence: ProviderStreamSequence,
+  recoverFromTerminalGap: boolean,
+  now: number,
+) {
   const ordered: ProviderChatStreamEvent[] = [];
   if (recoverFromTerminalGap) {
     // A terminal event is the last chance to drain a turn. If an IPC message
@@ -93,6 +104,7 @@ export function orderProviderChatStreamEvent(
       sequence.nextSequence = availableSequence + 1;
       if (next) {
         ordered.push(next);
+        if (isTerminalStreamEvent(next)) break;
       }
     }
   } else {
@@ -102,19 +114,46 @@ export function orderProviderChatStreamEvent(
       sequence.nextSequence += 1;
       if (next) {
         ordered.push(next);
+        if (isTerminalStreamEvent(next)) break;
       }
     }
   }
-  if (
-    ordered.some(
-      (item) =>
-        item.phase === "completed" ||
-        item.phase === "failed" ||
-        item.phase === "cancelled",
-    )
-  ) {
+  if (ordered.some(isTerminalStreamEvent)) {
     sequence.pending.clear();
     sequence.terminal = true;
+  }
+  sequence.pendingSince = sequence.pending.size
+    ? sequence.pendingSince ?? now
+    : undefined;
+  return ordered;
+}
+
+function isTerminalStreamEvent(event: ProviderChatStreamEvent) {
+  return event.phase === "completed" || event.phase === "failed" || event.phase === "cancelled";
+}
+
+export function nextProviderStreamGapDeadline(state: ProviderStreamOrderState) {
+  let deadline: number | undefined;
+  for (const sequence of state.values()) {
+    if (sequence.pendingSince === undefined) continue;
+    const candidate = sequence.pendingSince + PROVIDER_STREAM_GAP_WAIT_MS;
+    deadline = deadline === undefined ? candidate : Math.min(deadline, candidate);
+  }
+  return deadline;
+}
+
+/** A sparse turn must recover even if no ninth frame or terminal event arrives.
+ * The grace period permits ordinary IPC reordering; it cannot recover a frame
+ * that was lost, so final transcript reconciliation stays authoritative. */
+export function flushExpiredProviderStreamGaps(
+  state: ProviderStreamOrderState,
+  now = performance.now(),
+) {
+  const ordered: ProviderChatStreamEvent[] = [];
+  for (const sequence of state.values()) {
+    if (sequence.pendingSince !== undefined && now - sequence.pendingSince >= PROVIDER_STREAM_GAP_WAIT_MS) {
+      ordered.push(...drainProviderStreamSequence(sequence, true, now));
+    }
   }
   return ordered;
 }
@@ -135,9 +174,10 @@ type PendingStreamDeltaEvent = {
   turnId: string;
 };
 
+/** Display history is complete unless an explicit transient-buffer cap is supplied. */
 export function limitSessionEventsForUi(
   events: SessionEvent[],
-  maxEvents: number = MAX_CHAT_EVENT_RENDER_COUNT,
+  maxEvents: number = Number.POSITIVE_INFINITY,
 ) {
   if (events.length <= maxEvents) {
     return events;
@@ -155,9 +195,14 @@ export function limitSessionEventsForUi(
   return recentEvents;
 }
 
+export function limitOptimisticSessionEvents(events: SessionEvent[]) {
+  return limitSessionEventsForUi(events, MAX_CHAT_EVENT_RENDER_COUNT);
+}
+
 export function mergePersistedAndOptimisticEvents(
   persistedEvents: SessionEvent[],
   optimisticEvents?: SessionEvent[],
+  maxEvents: number = Number.POSITIVE_INFINITY,
 ) {
   if (!optimisticEvents || optimisticEvents.length === 0) {
     return persistedEvents;
@@ -176,7 +221,7 @@ export function mergePersistedAndOptimisticEvents(
       })
       .map((event) => `${event.sessionId}:${event.turnId}`),
   );
-  const merged = limitSessionEventsForUi(persistedEvents).filter(
+  const merged = limitSessionEventsForUi(persistedEvents, maxEvents).filter(
     (event) =>
       !(
         event.turnId &&
@@ -281,6 +326,7 @@ export function mergePersistedAndOptimisticEvents(
         ? preserveFirstSeenTimelineMetadata(optimistic, event, timeline)
         : event;
     }),
+    maxEvents,
   );
 }
 
@@ -452,6 +498,9 @@ export function preserveDeliveredResponses(
     return (
       event.kind === "assistant-message" &&
       payload?.kind === "provider-response" &&
+      // Imported messages are already durable, separate source records. They
+      // must not enter the live-response merge that folds one reply per turn.
+      payload?.historical !== true &&
       visibleTurns.has(`${event.sessionId}:${event.turnId}`)
     );
   });
@@ -821,7 +870,7 @@ export function settleOpenProviderActivitiesForTurn(
     if (nextOptimistic !== currentOptimistic) {
       optimisticEventsRef.current.set(
         sessionId,
-        limitSessionEventsForUi(nextOptimistic),
+        limitOptimisticSessionEvents(nextOptimistic),
       );
     }
   }
@@ -957,7 +1006,7 @@ export function applyProviderChatStreamActivity(
   };
   optimisticEventsRef.current.set(
     streamEvent.sessionId,
-    limitSessionEventsForUi(
+    limitOptimisticSessionEvents(
       updateEvents(
         optimisticEventsRef.current.get(streamEvent.sessionId) ?? [],
       ),
@@ -1019,7 +1068,7 @@ export function applyProviderChatStreamDeltas(
     updatedSessionIds.add(streamEvent.sessionId);
     optimisticEventsRef.current.set(
       streamEvent.sessionId,
-      limitSessionEventsForUi(
+      limitOptimisticSessionEvents(
         upsertStreamingAssistantEvent(
           optimisticEventsRef.current.get(streamEvent.sessionId) ?? [],
           streamEvent,
@@ -1276,6 +1325,7 @@ export function applyProviderChatStreamContextUsage(
         providerId: streamEvent.providerId,
         modelId: streamEvent.modelId,
         contextUsage: streamEvent.contextUsage,
+        contextWindowSource: streamEvent.contextWindowSource,
         contextCharacterBaseline: Object.fromEntries(
           items.map((event) => [event.id, estimatedEventCharacters(event)]),
         ),
@@ -1284,7 +1334,7 @@ export function applyProviderChatStreamContextUsage(
   ];
   optimisticEventsRef.current.set(
     streamEvent.sessionId,
-    limitSessionEventsForUi(
+    limitOptimisticSessionEvents(
       update(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
     ),
   );
@@ -1317,6 +1367,7 @@ export function applyProviderChatStreamTurnTokens(
       message: "",
       payload: {
         kind: "provider-turn-tokens",
+        streaming: true,
         providerId: streamEvent.providerId,
         modelId: streamEvent.modelId,
         turnTokens: streamEvent.turnTokens,
@@ -1325,7 +1376,7 @@ export function applyProviderChatStreamTurnTokens(
   ];
   optimisticEventsRef.current.set(
     streamEvent.sessionId,
-    limitSessionEventsForUi(
+    limitOptimisticSessionEvents(
       update(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
     ),
   );

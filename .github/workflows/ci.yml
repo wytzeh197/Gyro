@@ -8,7 +8,7 @@ on:
 jobs:
   node:
     name: Node
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -28,22 +28,36 @@ jobs:
       # server; scripts/run-canvas-preview-browser.mjs boots Vite itself.
       - run: pnpm test:canvas-browser
       - run: pnpm release:check
+        # Source validation checks the intended signed preview notes. The tagged
+        # release job resolves the actual signing mode and verifies the artifacts.
+        env:
+          GYRO_MACOS_SIGNING: developer-id
 
   rust:
     name: Rust
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - uses: dtolnay/rust-toolchain@stable
       - name: Install ripgrep for workspace search tests
         run: brew install ripgrep
+      - name: Build confined Code Mode worker for native tests
+        run: pnpm --filter @gyro-dev/codemode build
       - run: cargo test --workspace
       - run: cargo build -p gyro-cli
       - run: node scripts/check-cli-release-packaging.mjs
 
   tauri:
     name: Tauri build smoke
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -58,6 +72,8 @@ jobs:
       - run: pnpm --filter @gyro-dev/desktop build
       - name: Install ripgrep for workspace search tests
         run: brew install ripgrep
+      - name: Build confined Code Mode worker for native tests
+        run: pnpm --filter @gyro-dev/codemode build
       - run: cargo test --workspace
       # The packaged app is built and actually launched: the debug-only
       # browser and LSP smoke harnesses (browser_smoke.rs, lsp_smoke.rs) run

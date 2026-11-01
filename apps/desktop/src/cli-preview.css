@@ -1,0 +1,117 @@
+.cli-preview {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--gyro-app);
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-ui);
+}
+.cli-preview-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 16px 8px;
+  font-size: var(--gyro-font-micro);
+}
+.cli-preview-controls strong {
+  margin-right: auto;
+  font-weight: 500;
+}
+.cli-preview-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--gyro-muted);
+}
+.cli-preview-controls :is(select, button) {
+  color: var(--gyro-text);
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  min-height: 28px;
+  font: inherit;
+}
+/* Deterministic theme captures even when the embedded preview is backgrounded. */
+.cli-preview *,
+.cli-preview *::before,
+.cli-preview *::after {
+  transition: none !important;
+  animation: none !important;
+}
+.cli-preview-notice {
+  margin: 0;
+  padding: 0 16px 12px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+.cli-preview-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 16px 16px;
+}
+.cli-preview-window {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  width: 100%;
+  min-width: 580px;
+  height: 100%;
+  min-height: 420px;
+  overflow: hidden;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-lg);
+}
+.cli-preview-window > .gyro-sidebar {
+  width: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--gyro-sidebar);
+  border-right: 1px solid var(--gyro-border-soft);
+}
+.cli-preview-sidebar-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 22px;
+  font-size: var(--gyro-font-body);
+}
+.cli-preview-sidebar-title span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+.cli-preview-window > .gyro-workspace-tool-panel {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+.cli-preview-window .gyro-terminal-workspace {
+  height: 100%;
+  min-height: 0;
+}
+.cli-preview-window .cli-preview-output {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: auto;
+  font: var(--gyro-font-support)/1.55 var(--gyro-font-mono);
+  background: var(--gyro-terminal-canvas);
+  color: var(--gyro-text);
+}
+.cli-preview-output p {
+  margin: 0;
+}
+.cli-preview-output .cli-preview-request {
+  margin: 36px 0 24px;
+}
+.cli-preview-muted {
+  color: var(--gyro-muted);
+}
+.cli-preview-prompt p + p {
+  margin-top: 16px;
+}

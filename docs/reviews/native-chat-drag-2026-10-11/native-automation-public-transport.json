@@ -1,0 +1,130 @@
+{
+  "events": [
+    {
+      "prevented": false,
+      "target": "gyro-main",
+      "trusted": true,
+      "type": "blur"
+    },
+    {
+      "dropEffect": "none",
+      "effectAllowed": "uninitialized",
+      "prevented": false,
+      "target": "gyro-session-row     is-nested     ",
+      "trusted": true,
+      "type": "dragstart",
+      "types": [],
+      "x": 100,
+      "y": 260
+    },
+    {
+      "nativeText": "Gyro native drag transport diagnostic",
+      "publicTransport": true,
+      "trusted": true,
+      "type": "dragstart-written",
+      "types": [
+        "application/x-gyro-chat-session",
+        "application/x-gyro-chat-drag-id",
+        "text/plain"
+      ]
+    },
+    {
+      "activeDrag": {
+        "dragId": 1,
+        "kind": "session",
+        "projectKey": "/fixture/Gyro",
+        "sessionId": "beta"
+      },
+      "dropEffect": "copy",
+      "effectAllowed": "copyMove",
+      "prevented": false,
+      "target": "gyro-session-row     is-nested   is-dragging  ",
+      "trusted": true,
+      "type": "dragend",
+      "types": [],
+      "x": 932,
+      "y": 496
+    }
+  ],
+  "feedback": {
+    "dragging": false,
+    "sourceRows": [],
+    "zones": []
+  },
+  "href": "tauri://localhost/chat-drag-preview.html",
+  "nativeBuild": "debug-embedded-tauri",
+  "nativeCsp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' asset: http://asset.localhost data:; media-src 'self' asset: http://asset.localhost;style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost; frame-src gyro-canvas: http://localhost:* http://127.0.0.1:* https:",
+  "nativeWindow": {
+    "acceptFirstMouse": false,
+    "allowLinkPreview": true,
+    "alwaysOnBottom": false,
+    "alwaysOnTop": false,
+    "browserExtensionsEnabled": false,
+    "center": false,
+    "closable": true,
+    "contentProtected": false,
+    "create": true,
+    "decorations": true,
+    "devtools": false,
+    "disableInputAccessoryView": false,
+    "dragDropEnabled": false,
+    "focus": true,
+    "focusable": true,
+    "fullscreen": false,
+    "generalAutofillEnabled": true,
+    "height": 820.0,
+    "hiddenTitle": true,
+    "incognito": true,
+    "javascriptDisabled": false,
+    "label": "main",
+    "maximizable": true,
+    "maximized": false,
+    "minHeight": 620.0,
+    "minWidth": 860.0,
+    "minimizable": true,
+    "resizable": true,
+    "scrollBarStyle": "default",
+    "shadow": true,
+    "skipTaskbar": false,
+    "title": "Gyro chat drag native",
+    "titleBarStyle": "Overlay",
+    "trafficLightPosition": {
+      "x": 16.0,
+      "y": 17.0
+    },
+    "transparent": false,
+    "url": "chat-drag-preview.html",
+    "useHttpsScheme": false,
+    "visible": true,
+    "visibleOnAllWorkspaces": false,
+    "width": 1280.0,
+    "zoomHotkeysEnabled": false
+  },
+  "sequence": 7,
+  "state": {
+    "active": "alpha",
+    "drafts": {},
+    "grid": {
+      "activeProjectKey": "/fixture/Gyro",
+      "layouts": {
+        "/fixture/Gyro": {
+          "focusedPaneId": "alpha",
+          "projectKey": "/fixture/Gyro",
+          "slots": [
+            {
+              "kind": "session",
+              "paneId": "alpha",
+              "sessionId": "alpha",
+              "workspacePath": "/fixture/Gyro"
+            },
+            null,
+            null,
+            null
+          ]
+        }
+      }
+    },
+    "media": 0
+  },
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
+}

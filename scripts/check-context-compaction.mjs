@@ -1,6 +1,8 @@
+import { readFileSync } from "./read-product-source.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import ts from "typescript";
+import { limitOptimisticSessionEvents } from "../apps/desktop/src/provider-stream-events.ts";
 
 // Execute the actual composer action with deferred native calls to exercise
 // the race between compaction and the next user action.
@@ -45,6 +47,7 @@ for (const [providerId, outcome] of [
     providersForConfig: () => [],
     optimisticEventsRef: { current: new Map() },
     mergePersistedAndOptimisticEvents: (a, b) => [...a, ...b],
+    limitOptimisticSessionEvents,
     setEventsForSession() {},
     updateOptimisticProviderStatus: (_ref, _set, _id, _turn, status) =>
       statuses.push(status),

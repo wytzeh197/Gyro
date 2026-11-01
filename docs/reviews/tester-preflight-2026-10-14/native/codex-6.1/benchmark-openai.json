@@ -1,0 +1,65 @@
+{
+  "build": "debug",
+  "elapsedMs": 23392,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": true,
+      "effort": "low",
+      "model": "gpt-6.1-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "907467a6-a692-45e4-b8c4-5c13d3bebe72",
+      "task": "no-tool",
+      "toolActivityRecords": 0,
+      "trial": 1,
+      "turnId": "9cd004fb-216d-4cfc-b7a4-5ddd0e0a23f2",
+      "wallMs": 9144.725166
+    },
+    {
+      "correct": false,
+      "effort": "low",
+      "failureClass": "provider-failed",
+      "failureDetail": "exceeded retry limit, last status: 429 Too Many Requests",
+      "model": "gpt-6.1-sol",
+      "outcome": "failed",
+      "provider": "openai",
+      "resumedRequested": true,
+      "sessionId": "d34b789c-4e34-4ceb-90f5-8f11d6b0c069",
+      "task": "no-tool",
+      "trial": 1,
+      "wallMs": 2730.787958
+    },
+    {
+      "correct": false,
+      "effort": "low",
+      "failureClass": "provider-failed",
+      "failureDetail": "exceeded retry limit, last status: 429 Too Many Requests",
+      "model": "gpt-6.1-sol",
+      "outcome": "failed",
+      "provider": "openai",
+      "resumedRequested": false,
+      "sessionId": "b5d23881-8db3-465a-801b-57846bcb3d38",
+      "task": "code",
+      "trial": 1,
+      "wallMs": 2905.6279590000004
+    },
+    {
+      "effort": "low",
+      "failureClass": "provider-failed",
+      "failureDetail": "exceeded retry limit, last status: 429 Too Many Requests",
+      "model": "gpt-6.1-sol",
+      "outcome": "setup-failed",
+      "provider": "openai",
+      "resumedRequested": true,
+      "task": "code",
+      "trial": 1
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

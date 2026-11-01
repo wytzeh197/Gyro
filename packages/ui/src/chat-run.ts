@@ -16,8 +16,14 @@ import { FILE_REVIEW_SCHEMA } from "./types.ts";
 import {
   appliedFileChangeCounts,
   isAppliedFileMutationEvent,
+  measuredFileCounts,
 } from "./file-change-counts.ts";
 import type { SessionEvent } from "./types.ts";
+import {
+  capabilityLabel,
+  capabilityUi,
+  type BrowserAction,
+} from "./capability-ui.ts";
 
 /**
  * The run model: one flat, ordered list of beats, with the raw material of each
@@ -31,6 +37,14 @@ import type { SessionEvent } from "./types.ts";
  */
 
 export type WorkStatus = "running" | "done" | "failed";
+
+/** Create, rename, move, trash, or duplicate. Content edits leave this unset. */
+export type FileLifecycle =
+  | "create"
+  | "rename"
+  | "move"
+  | "trash"
+  | "duplicate";
 type CommandCategory = "inspect" | "test" | "build";
 
 export type WorkItem =
@@ -58,6 +72,11 @@ export type WorkItem =
       additions?: number;
       deletions?: number;
       /**
+       * Path lifecycle, not a content edit. Undo on the row reverses the
+       * workspace journal. Editor undo stays with Monaco.
+       */
+      lifecycle?: FileLifecycle;
+      /**
        * What the agent said it was doing to this file, in its own words. Free
        * and already true, so the review card prefers it over a line count when
        * no summary has been bought.
@@ -77,7 +96,16 @@ export type WorkItem =
       media: "image" | "file";
     }
   | { kind: "memory"; id: string; status: WorkStatus }
-  | { kind: "context"; id: string; status: WorkStatus }
+  | {
+      kind: "context";
+      id: string;
+      status: WorkStatus;
+      /**
+       * What a finished compaction actually did. A Codex session summarizes;
+       * every other provider condenses the transcript or keeps it whole.
+       */
+      compaction?: "summarized" | "condensed" | "kept";
+    }
   | {
       kind: "browser";
       id: string;
@@ -97,26 +125,14 @@ export type WorkItem =
        * tool name (Bash, Skill, mcp__…). Shown muted next to the bright label.
        */
       note?: string;
+      /** Imported arguments and result, preserved for read-only inspection. */
+      historicalDetail?: string;
+      /** Native call identity prevents distinct imported calls folding together. */
+      historicalCallId?: string;
     };
 
-/** One Gyro Browser verb, so each row says what the agent did to the page. */
-export type BrowserAction =
-  | "open"
-  | "navigate"
-  | "back"
-  | "forward"
-  | "reload"
-  | "inspect"
-  | "read"
-  | "find"
-  | "console"
-  | "network"
-  | "capture"
-  | "mouse"
-  | "click"
-  | "type"
-  | "scroll"
-  | "form";
+// The verb vocabulary lives with the capability table that names each one.
+export type { BrowserAction };
 
 /** One exact event in a run. Work is grouped for display below, never discarded. */
 export type RunStep =
@@ -379,6 +395,36 @@ export function splitSegmentSummary(summary: string): {
 }
 
 /**
+ * The line delta for a finished stretch, drawn after its summary the way a
+ * file row draws `+26 -9`.
+ *
+ * Only edits contribute. A file with no measured count omits the total, so a
+ * partial sum is never presented as everything the stretch changed.
+ */
+export function segmentLineStats(
+  steps: RunStep[],
+): { additions: number; deletions: number } | undefined {
+  const files = segmentWorkSteps(steps).flatMap((step) =>
+    step.item.kind === "file" ? [step.item] : [],
+  );
+  if (files.length === 0) return undefined;
+  let additions = 0;
+  let deletions = 0;
+  for (const file of files) {
+    if (file.additions == null && file.deletions == null) return undefined;
+    const measured = measuredFileCounts({
+      additions: file.additions ?? 0,
+      deletions: file.deletions ?? 0,
+    });
+    if (!measured) return undefined;
+    additions += measured.additions;
+    deletions += measured.deletions;
+  }
+  if (additions === 0 && deletions === 0) return undefined;
+  return { additions, deletions };
+}
+
+/**
  * The live tail of a stretch: its newest calls, and how many scrolled out of
  * view above them. The in-flight call is always the newest, so it is never the
  * one hidden.
@@ -412,7 +458,10 @@ export function runCallText(
         description: displayCommand(item.command),
       };
     case "file":
-      return { label: running ? "Editing" : "Edited", description: item.path };
+      return {
+        label: fileChangeVerb(item.lifecycle, running ? "running" : "done", true),
+        description: item.path,
+      };
     case "read": {
       const target = readTarget(item.path);
       const image = item.media === "image";
@@ -542,6 +591,21 @@ export type RunModel = {
   response?: SessionEvent;
 };
 
+/** A settled work turn must visibly explain an absent closing reply.
+ * This is recovery UI, never an invented assistant answer or a tool replay. */
+export function runNeedsFinalResponse(
+  model: RunModel,
+  completionConfirmed = false,
+): boolean {
+  return (
+    model.phase.name === "done" &&
+    !model.response?.message.trim() &&
+    (completionConfirmed ||
+      model.files.length > 0 ||
+      model.steps.some((step) => step.kind === "work"))
+  );
+}
+
 /** Provider status for the turn, already parsed by the caller. */
 export type RunStatusInput = {
   status: string;
@@ -629,7 +693,7 @@ export function buildRunModel(
     }
     const item = workItemFromEvent(event);
     if (item) {
-      if (item.kind === "file") {
+      if (item.kind === "file" && !item.lifecycle) {
         const stats = options.fileStats?.(item.path);
         item.additions = item.additions ?? stats?.additions;
         item.deletions = item.deletions ?? stats?.deletions;
@@ -674,12 +738,24 @@ export function buildRunModel(
 
   // Guarded mutations record exact per-operation counts before writing. These
   // survive reloads and take precedence over duplicate provider/capability rows.
+  // The same numbers go on the file row, so the working-process line can show
+  // `+26 -9` instead of a bare path.
   for (const [path, counts] of appliedFileChangeCounts(events)) {
     const existing = files.find((file) => file.path === path);
     if (existing) {
       Object.assign(existing, counts);
     } else {
       files.push({ path, ...counts, status: "done" });
+    }
+    for (const step of steps) {
+      if (
+        step.kind === "work" &&
+        step.item.kind === "file" &&
+        step.item.path === path
+      ) {
+        step.item.additions = counts.additions;
+        step.item.deletions = counts.deletions;
+      }
     }
   }
 
@@ -746,6 +822,9 @@ function coalesceAdjacentToolSteps(steps: RunStep[]): RunStep[] {
 }
 
 function toolIdentity(item: Extract<WorkItem, { kind: "tool" }>): string {
+  if (item.historicalDetail !== undefined) {
+    return `historical:${item.historicalCallId ?? item.id}`;
+  }
   // Include the note so consecutive Skill/Bash-shaped rows with different
   // targets stay as separate beats instead of collapsing into one.
   return `${item.server ?? ""}::${item.tool}::${item.note ?? ""}`.toLowerCase();
@@ -911,16 +990,21 @@ function partitionClosingResponse(
 
 /**
  * True when nothing in an assistant message reads as an answer — every block is
- * a plan line, a status line, or a stray fragment. A message left with no usable
- * blocks at all counts, since what it held was dropped as noise.
+ * a plan line, a status line, or a stray fragment. An empty non-durable message
+ * counts, since what it held was dropped as noise. An empty durable reply does
+ * not: a symbol or digit is still the answer.
  */
 function isNarrationOnly(event: SessionEvent): boolean {
-  if (isDurableAssistantResponse(event)) {
-    return false;
+  const blocks = structuredCommentaryBlocks(event.message);
+  // A durable stamp means the provider saved the reply, not that this sentence
+  // is the answer. While the run is live, a reply that only promises the next
+  // step still belongs on the rail. A symbol or digit that commentary
+  // stripping drops is still an answer, so an empty durable block is not
+  // narration.
+  if (blocks.length === 0) {
+    return !isDurableAssistantResponse(event);
   }
-  return structuredCommentaryBlocks(event.message).every(
-    isAssistantPreambleBlock,
-  );
+  return blocks.every(isAssistantPreambleBlock);
 }
 
 function joinAssistantEvents(events: SessionEvent[]): SessionEvent {
@@ -939,6 +1023,32 @@ function sanitizeResponseEvent(event: SessionEvent): SessionEvent {
     ? finalAssistantResponseText(event.message)
     : structuredCommentaryBlocks(event.message).join("\n\n");
   return message === event.message ? event : { ...event, message };
+}
+
+/**
+ * One failed-turn paragraph.
+ *
+ * Recovery is extra advice. Skip it when the error already contains that
+ * sentence, and when both already tell the person to unlock the Mac and send
+ * again. Those two Keychain lines differ by a few words, so a plain inclusion
+ * check still leaves the instruction on screen twice.
+ */
+export function failureDetail(message: string, recovery?: string) {
+  const problem = message.trim();
+  const advice = recovery?.trim() ?? "";
+  if (!advice) return problem;
+  if (!problem) return advice;
+  const problemText = problem.toLowerCase();
+  const adviceText = advice.toLowerCase();
+  if (problemText.includes(adviceText)) return problem;
+  if (asksToUnlockAndResend(problemText) && asksToUnlockAndResend(adviceText)) {
+    return problem;
+  }
+  return `${problem} ${advice}`;
+}
+
+function asksToUnlockAndResend(text: string) {
+  return text.includes("unlock your mac") && text.includes("send again");
 }
 
 function runPhase(
@@ -1080,6 +1190,20 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
   const label = text(payload, "label") ?? event.message;
   const detail = text(payload, "detail");
 
+  // Imported calls are a record of past work. Keep their output inspectable,
+  // without classifying a past edit, command, or browser action as current work.
+  if (payload?.historical === true) {
+    return {
+      kind: "tool",
+      id,
+      status: status === "failed" ? "failed" : "done",
+      ...splitToolName(text(payload, "tool") ?? label),
+      note: text(payload, "note"),
+      historicalDetail: detail ?? "",
+      historicalCallId: text(payload, "sourceCallId") ?? id,
+    };
+  }
+
   switch (text(payload, "activityKind")) {
     case "command":
       return classifyCommandActivity({
@@ -1113,7 +1237,12 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
     case "memory":
       return { kind: "memory", id, status };
     case "context":
-      return { kind: "context", id, status };
+      return {
+        kind: "context",
+        id,
+        status,
+        compaction: compactionModeFromPayload(payload),
+      };
     case "commentary":
       // Commentary is prose, not work. It reaches the rail as a `say` step via
       // the assistant-message path, so it must not become a row here.
@@ -1247,102 +1376,131 @@ function workItemFromCapabilityCall(
   if (!capabilityId) {
     return undefined;
   }
+  // Workflow children remain inspectable inside their parent card, without flooding the live rail.
+  if (text(payload, "groupId")) return undefined;
   const id = event.id;
   const status = capabilityWorkStatus(text(payload, "status"));
   const summary = text(payload, "summary");
   const resource = record(payload?.resource);
   const resourceLabel = text(resource, "label");
-
-  // Terminal-shaped work → command row (matches "Ran command").
+  const ui = capabilityUi(capabilityId);
+  const label = ui?.label ?? capabilityLabel(capabilityId);
+  const path = resourceLabel ?? summary;
+  const lifecycle = pathLifecycleForCapability(capabilityId);
+  // A finished create, rename, move, trash, or duplicate is a path card.
+  // A failed call changed nothing, so it stays a plain beat.
+  if (lifecycle && resourceLabel && status !== "failed") {
+    return { kind: "file", id, status, path: resourceLabel, lifecycle };
+  }
   if (
-    capabilityId.startsWith("terminal-") ||
-    capabilityId === "workspace-run-task" ||
-    capabilityId === "workspace-run-test"
+    capabilityId === "code-mode-execute" ||
+    capabilityId === "code-mode-discover"
   ) {
-    return classifyCommandActivity({
-      command: summary ?? resourceLabel ?? humanizeCapabilityId(capabilityId),
-      id,
-      intent: summary,
-      status,
-    });
-  }
-
-  // Project search → search row.
-  if (capabilityId === "workspace-search") {
-    return {
-      kind: "search",
-      id,
-      status,
-      scope: "project",
-      query: summary ?? resourceLabel,
-    };
-  }
-
-  // Reading a workspace file is the same beat as a provider read, so it gets
-  // the same row rather than a generic wrench.
-  if (
-    capabilityId === "workspace-read" ||
-    capabilityId === "workspace-read-range"
-  ) {
-    const path = resourceLabel ?? summary;
-    return {
-      kind: "read",
-      id,
-      status,
-      path,
-      media: isImagePath(path) ? "image" : "file",
-    };
-  }
-  if (capabilityId === "workspace-list") {
+    const workflow = record(payload?.codeMode);
     return {
       kind: "tool",
       id,
       status,
-      tool: humanizeCapabilityId(capabilityId),
+      tool: text(workflow, "label") ?? label,
+      note: summary,
     };
   }
 
-  // Gyro's own edit and lifecycle tools change a file just like a provider edit
-  // does. The path only arrives on the completed call; a failed call changed
-  // nothing.
-  if (
-    (capabilityId === "workspace-propose-edit" ||
-      capabilityId === "workspace-edit" ||
-      capabilityId === "workspace-create" ||
-      capabilityId === "workspace-rename" ||
-      capabilityId === "workspace-delete") &&
-    resourceLabel &&
-    status !== "failed"
-  ) {
-    return { kind: "file", id, status, path: resourceLabel };
-  }
-
-  // Semantic navigation is a read beat: the answer is source locations.
-  if (capabilityId.startsWith("code-")) {
-    const path = resourceLabel ?? summary;
-    return { kind: "read", id, status, path, media: "file" };
-  }
-
-  if (capabilityId.startsWith("browser-")) {
+  // Record the launch where it happened; ongoing child state belongs to the
+  // sub-agent strip and Environment rather than the parent's work timeline.
+  if (capabilityId === "agent-spawn") {
     return {
-      kind: "browser",
+      kind: "tool",
       id,
       status,
-      action: browserActionFromName(capabilityId.slice("browser-".length)),
-      target:
-        text(payload, "target") ??
-        (resourceLabel ? browserPageLabel(resourceLabel) : undefined),
+      tool:
+        status === "running"
+          ? "Starting sub-agent"
+          : status === "failed"
+            ? "Could not start sub-agent"
+            : "Started sub-agent",
+      note: resourceLabel,
     };
   }
 
-  // Everything else (workspace-context, browser-*, ide-*, git, diff, …)
-  // is a single tool beat with a human label.
-  return {
-    kind: "tool",
-    id,
-    status,
-    tool: humanizeCapabilityId(capabilityId),
-  };
+  switch (ui?.row) {
+    // Terminal-shaped work → command row (matches "Ran command").
+    case "command":
+      return classifyCommandActivity({
+        command: summary ?? resourceLabel ?? label,
+        id,
+        intent: summary,
+        status,
+      });
+
+    // Project search → search row.
+    case "search":
+      return {
+        kind: "search",
+        id,
+        status,
+        scope: ui?.scope ?? "project",
+        query: summary ?? resourceLabel,
+      };
+
+    // Reading a workspace file is the same beat as a provider read, so it gets
+    // the same row rather than a generic wrench.
+    case "read":
+      return {
+        kind: "read",
+        id,
+        status,
+        path,
+        media: isImagePath(path) ? "image" : "file",
+      };
+
+    // Gyro's own edit and lifecycle tools change a file just like a provider
+    // edit does. The path only arrives on the completed call, and a failed call
+    // changed nothing, so it falls through to a plain beat.
+    case "file":
+      if (resourceLabel && status !== "failed") {
+        return { kind: "file", id, status, path: resourceLabel };
+      }
+      break;
+
+    case "browser": {
+      const action = ui?.action;
+      if (action) {
+        return {
+          kind: "browser",
+          id,
+          status,
+          action,
+          target:
+            text(payload, "target") ??
+            (resourceLabel ? browserPageLabel(resourceLabel) : undefined),
+        };
+      }
+      break;
+    }
+  }
+
+  // Everything else is a single tool beat with the table's own title.
+  return { kind: "tool", id, status, tool: label };
+}
+
+function pathLifecycleForCapability(
+  capabilityId: string,
+): FileLifecycle | undefined {
+  switch (capabilityId) {
+    case "workspace-create-path":
+      return "create";
+    case "workspace-rename-path":
+      return "rename";
+    case "workspace-move-path":
+      return "move";
+    case "workspace-delete-path":
+      return "trash";
+    case "workspace-duplicate-path":
+      return "duplicate";
+    default:
+      return undefined;
+  }
 }
 
 function capabilityWorkStatus(value: string | undefined): WorkStatus {
@@ -1353,66 +1511,6 @@ function capabilityWorkStatus(value: string | undefined): WorkStatus {
     return "failed";
   }
   return "done";
-}
-
-/** `workspace-context` → `Workspace context` */
-function humanizeCapabilityId(capabilityId: string): string {
-  const known: Record<string, string> = {
-    "workspace-context": "Workspace context",
-    "workspace-check": "Workspace check",
-    "workspace-list": "List workspace",
-    "workspace-search": "Workspace search",
-    "workspace-read": "Read file",
-    "workspace-read-range": "Read file range",
-    "workspace-diagnostics": "Workspace diagnostics",
-    "workspace-git-status": "Git status",
-    "workspace-diff": "Workspace diff",
-    "workspace-git-log": "Git log",
-    "workspace-git-show": "Git show",
-    "workspace-git-blame": "Git blame",
-    "workspace-propose-edit": "Propose edit",
-    "workspace-edit": "Edit file",
-    "workspace-create": "Create path",
-    "workspace-rename": "Rename path",
-    "workspace-delete": "Delete path",
-    "workspace-run-task": "Run task",
-    "workspace-run-test": "Run tests",
-    "workspace-read-output": "Read output",
-    "web-fetch": "Fetch page",
-    "memory-read": "Read memory",
-    "memory-write": "Remember",
-    "research-run": "Research sub-agent",
-    "code-definition": "Go to definition",
-    "code-references": "Find references",
-    "code-hover": "Hover info",
-    "code-symbols": "File symbols",
-    "ide-reveal": "Reveal in editor",
-    "ide-open-panel": "Open panel",
-    "terminal-open": "Open terminal",
-    "terminal-read": "Read terminal",
-    "terminal-wait": "Wait for command",
-    "terminal-stop": "Stop terminal",
-    "browser-open": "Open browser",
-    "browser-inspect": "Inspect browser",
-    "browser-reload": "Reload browser",
-    "browser-screenshot": "Browser screenshot",
-    "browser-navigate": "Navigate browser",
-    "browser-back": "Browser back",
-    "browser-forward": "Browser forward",
-    "browser-click": "Browser click",
-    "browser-type": "Browser type",
-    "browser-scroll": "Browser scroll",
-    "browser-form-input": "Browser form input",
-    "browser-read-page": "Read page",
-    "browser-find": "Find on page",
-    "browser-console": "Browser console",
-    "browser-network": "Browser network",
-  };
-  if (known[capabilityId]) {
-    return known[capabilityId] as string;
-  }
-  const human = capabilityId.split("-").filter(Boolean).join(" ");
-  return human ? human.charAt(0).toUpperCase() + human.slice(1) : capabilityId;
 }
 
 /**
@@ -1519,6 +1617,22 @@ export function runRetryText(
  * says what it was for. Splitting them here rather than in CSS keeps the row a
  * dumb two-span render and makes the wording assertable.
  */
+/**
+ * The compaction outcome recorded on a provider activity event.
+ *
+ * Older events carry no marker: only the local transcript rewrite wrote a
+ * checkpoint summary, so its presence identifies those as condensed.
+ */
+function compactionModeFromPayload(
+  payload: Record<string, unknown> | undefined,
+): "summarized" | "condensed" | "kept" | undefined {
+  const mode = text(payload, "compactionMode");
+  if (mode === "summarized" || mode === "condensed" || mode === "kept") {
+    return mode;
+  }
+  return text(payload, "contextSummary") ? "condensed" : undefined;
+}
+
 export function runRowText(step: RunStep): RunRowText {
   if (step.kind === "say" || step.kind === "status") {
     return { label: step.text };
@@ -1541,7 +1655,10 @@ export function runRowText(step: RunStep): RunRowText {
         description: item.intent ?? item.command,
       };
     case "file":
-      return { label: fileVerb(item.status), description: item.path };
+      return {
+        label: fileChangeVerb(item.lifecycle, item.status, false),
+        description: item.path,
+      };
     case "read":
       return {
         label: readVerb(item.status, item.media),
@@ -1561,7 +1678,18 @@ export function runRowText(step: RunStep): RunRowText {
       };
     case "memory":
       return { label: "Edited memory" };
-    case "context":
+    case "context": {
+      // Codex compacts inside its own session; every other provider spends one
+      // real summarization call. Only a failed call falls back to the local
+      // digest, and the stored mode already says which of the two happened.
+      const described =
+        item.compaction === "condensed"
+          ? "Earlier turns condensed into a digest"
+          : item.compaction === "kept"
+            ? "History already fit; nothing dropped"
+            : item.compaction === "summarized"
+              ? "Earlier conversation summarized"
+              : undefined;
       return {
         label:
           item.status === "running"
@@ -1569,9 +1697,10 @@ export function runRowText(step: RunStep): RunRowText {
             : "Compacted context",
         description:
           item.status === "running"
-            ? "Summarizing earlier conversation"
-            : "Earlier conversation summarized",
+            ? "Summarizing the earlier conversation"
+            : described,
       };
+    }
     case "browser": {
       const [running, done] = BROWSER_ROW_LABELS[item.action];
       return {
@@ -1670,9 +1799,43 @@ function isRawToolPayload(value: string): boolean {
   );
 }
 
-function fileVerb(status: WorkStatus) {
-  if (status === "running") return "Editing file";
-  return status === "failed" ? "Edit failed" : "Edited file";
+/**
+ * Wording for a file row.
+ *
+ * Content edits keep the long form ("Edited file") the rail already uses.
+ * A path change names the lifecycle ("Moved") because Undo reverses that
+ * journal entry, not the editor buffer. `short` drops the trailing "file"
+ * for a call nested under a summary that already counted the files.
+ */
+export function fileChangeVerb(
+  lifecycle: FileLifecycle | undefined,
+  status: WorkStatus,
+  short: boolean,
+): string {
+  if (!lifecycle) {
+    if (status === "running") return short ? "Editing" : "Editing file";
+    if (short) return status === "failed" ? "Edit failed" : "Edited";
+    return status === "failed" ? "Edit failed" : "Edited file";
+  }
+  if (status === "failed") {
+    const name = {
+      create: "create",
+      rename: "rename",
+      move: "move",
+      trash: "trash",
+      duplicate: "duplicate",
+    }[lifecycle];
+    return `Could not ${name}`;
+  }
+  const done = status !== "running";
+  const verb = {
+    create: done ? "Created" : "Creating",
+    rename: done ? "Renamed" : "Renaming",
+    move: done ? "Moved" : "Moving",
+    trash: done ? "Trashed" : "Trashing",
+    duplicate: done ? "Duplicated" : "Duplicating",
+  }[lifecycle];
+  return short ? verb : `${verb} file`;
 }
 
 function readVerb(status: WorkStatus, media: "image" | "file") {
@@ -1791,6 +1954,10 @@ function extractToolNameFromRaw(raw: string): string {
 }
 
 const BROWSER_ACTIONS: Record<string, BrowserAction> = {
+  targets: "targets",
+  "select-target": "select-target", select_target: "select-target",
+  "capture-preview": "capture-preview", capture_preview: "capture-preview",
+  "preview-click": "preview-click", preview_click: "preview-click",
   open: "open",
   navigate: "navigate",
   back: "back",
@@ -1803,6 +1970,9 @@ const BROWSER_ACTIONS: Record<string, BrowserAction> = {
   console: "console",
   network: "network",
   screenshot: "capture",
+  viewport: "viewport",
+  "set-viewport": "viewport",
+  set_viewport: "viewport",
   mouse: "mouse",
   click: "click",
   type: "type",
@@ -1812,6 +1982,10 @@ const BROWSER_ACTIONS: Record<string, BrowserAction> = {
 };
 
 const BROWSER_ROW_LABELS: Record<BrowserAction, [string, string]> = {
+  targets: ["Finding preview targets", "Found preview targets"],
+  "select-target": ["Selecting preview target", "Selected preview target"],
+  "capture-preview": ["Capturing app preview", "Captured app preview"],
+  "preview-click": ["Clicking app preview", "Clicked app preview"],
   open: ["Opening page", "Opened page"],
   navigate: ["Navigating", "Navigated"],
   back: ["Going back", "Went back"],
@@ -1823,6 +1997,7 @@ const BROWSER_ROW_LABELS: Record<BrowserAction, [string, string]> = {
   console: ["Reading console", "Read console"],
   network: ["Reading network", "Read network"],
   capture: ["Capturing page", "Captured page"],
+  viewport: ["Resizing viewport", "Resized viewport"],
   mouse: ["Using browser mouse", "Used browser mouse"],
   click: ["Clicking", "Clicked"],
   type: ["Typing", "Typed"],
@@ -1839,7 +2014,12 @@ export function browserCapabilityText(
   status: string,
   target?: string,
 ): { label: string; description?: string } {
-  const action = browserActionFromName(capabilityId.replace(/^browser-/, ""));
+  const action = capabilityUi(capabilityId)?.action;
+  if (!action) {
+    // Not a browser verb: name the capability instead of reporting an
+    // inspection that never happened.
+    return { label: capabilityLabel(capabilityId), description: target };
+  }
   const [running, done] = BROWSER_ROW_LABELS[action];
   return {
     label: status === "completed" ? done : running,
@@ -1954,7 +2134,9 @@ function matchingLastStep(steps: RunStep[], identity: string) {
 function workIdentity(item: WorkItem): string | undefined {
   switch (item.kind) {
     case "file":
-      return `file:${item.path}`;
+      return item.lifecycle
+        ? `file:${item.lifecycle}:${item.path}`
+        : `file:${item.path}`;
     case "read":
       return item.path ? `read:${item.media}:${item.path}` : undefined;
     case "command":
@@ -1964,6 +2146,9 @@ function workIdentity(item: WorkItem): string | undefined {
     case "browser":
       return item.target ? `browser:${item.action}:${item.target}` : undefined;
     case "tool":
+      if (item.historicalDetail !== undefined) {
+        return `tool:historical:${item.historicalCallId ?? item.id}`;
+      }
       return `tool:${item.server ?? ""}:${item.tool}:${item.note ?? ""}`;
     case "memory":
     case "context":
@@ -2024,6 +2209,7 @@ function isHiddenRunEvent(event: SessionEvent) {
     return false;
   }
   const payload = record(event.payload);
+  if (text(payload, "kind") === "subagent-state") return true;
   // A "Kept" is the user's reading record, not something the run did. Without
   // this it would fall through to the unrecognized-event branch and draw as an
   // approval row the agent never asked for.
@@ -2038,7 +2224,10 @@ function isHiddenRunEvent(event: SessionEvent) {
   const label = text(payload, "label") ?? event.message;
   return (
     (label.includes("GYRO_SESSION_TITLE:") ||
-      label.includes("GYRO_ARTIFACTS:")) &&
+      label.includes("GYRO_ARTIFACTS:") ||
+      label.includes("GYRO_QUESTIONS:") ||
+      label.includes("GYRO_TASKS:") ||
+      label.includes("GYRO_AGENT_UPDATE:")) &&
     !stripHiddenControlMarkers(label).trim()
   );
 }

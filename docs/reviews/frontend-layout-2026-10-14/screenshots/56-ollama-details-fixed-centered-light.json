@@ -1,0 +1,368 @@
+{
+  "bodyWidth": 860,
+  "controls": [
+    {
+      "className": "gyro-sidebar-toggle-button",
+      "label": "Hide sidebar",
+      "rect": {
+        "bottom": 39.890625,
+        "height": 29.890625,
+        "right": 121.890625,
+        "width": 29.890625,
+        "x": 92,
+        "y": 10
+      }
+    },
+    {
+      "className": "gyro-settings-back-button has-label",
+      "label": "Back to Sessions",
+      "rect": {
+        "bottom": 86,
+        "height": 34,
+        "right": 133.53125,
+        "width": 115.53125,
+        "x": 18,
+        "y": 52
+      }
+    },
+    {
+      "className": "",
+      "label": "Search settings",
+      "rect": {
+        "bottom": 128,
+        "height": 30,
+        "right": 134,
+        "width": 81,
+        "x": 53,
+        "y": 98
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "General",
+      "rect": {
+        "bottom": 202.1875,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 170
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Appearance",
+      "rect": {
+        "bottom": 237.375,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 205.1875
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Keyboard Shortcuts",
+      "rect": {
+        "bottom": 272.5625,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 240.375
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Usage & Limits",
+      "rect": {
+        "bottom": 336.75,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 304.5625
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-active is-settings-page",
+      "label": "Models & Accounts",
+      "rect": {
+        "bottom": 371.9375,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 339.75
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "CLI Profiles",
+      "rect": {
+        "bottom": 407.125,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 374.9375
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Permissions",
+      "rect": {
+        "bottom": 442.3125,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 410.125
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Workspace",
+      "rect": {
+        "bottom": 506.5,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 474.3125
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Tools",
+      "rect": {
+        "bottom": 541.6875,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 509.5
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Import projects",
+      "rect": {
+        "bottom": 576.875,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 544.6875
+      }
+    },
+    {
+      "className": "gyro-sidebar-action is-settings-page",
+      "label": "Updates",
+      "rect": {
+        "bottom": 641.0625,
+        "height": 32.1875,
+        "right": 167,
+        "width": 156,
+        "x": 11,
+        "y": 608.875
+      }
+    },
+    {
+      "className": "gyro-secondary-button",
+      "label": "Use in chat",
+      "rect": {
+        "bottom": 6.03125,
+        "height": 34.5,
+        "right": 345.328125,
+        "width": 105.9375,
+        "x": 239.390625,
+        "y": -28.46875
+      }
+    },
+    {
+      "className": "gyro-secondary-button",
+      "label": "Test Codex",
+      "rect": {
+        "bottom": 87.28125,
+        "height": 34.5,
+        "right": 569.328125,
+        "width": 204,
+        "x": 365.328125,
+        "y": 52.78125
+      }
+    },
+    {
+      "className": "gyro-danger-button",
+      "label": "Disable in Gyro",
+      "rect": {
+        "bottom": 208.09375,
+        "height": 32.1875,
+        "right": 569.328125,
+        "width": 204,
+        "x": 365.328125,
+        "y": 175.90625
+      }
+    },
+    {
+      "className": "gyro-settings-select",
+      "label": "Claude Code default model",
+      "rect": {
+        "bottom": 128.21875,
+        "height": 32.1875,
+        "right": 799.609375,
+        "width": 560.21875,
+        "x": 239.390625,
+        "y": 96.03125
+      }
+    },
+    {
+      "className": "gyro-secondary-button",
+      "label": "Use in chat",
+      "rect": {
+        "bottom": 174.71875,
+        "height": 34.5,
+        "right": 345.328125,
+        "width": 105.9375,
+        "x": 239.390625,
+        "y": 140.21875
+      }
+    },
+    {
+      "className": "gyro-secondary-button",
+      "label": "Test CLI",
+      "rect": {
+        "bottom": 255.96875,
+        "height": 34.5,
+        "right": 569.328125,
+        "width": 204,
+        "x": 365.328125,
+        "y": 221.46875
+      }
+    },
+    {
+      "className": "gyro-danger-button",
+      "label": "Disable in Gyro",
+      "rect": {
+        "bottom": 376.78125,
+        "height": 32.1875,
+        "right": 569.328125,
+        "width": 204,
+        "x": 365.328125,
+        "y": 344.59375
+      }
+    },
+    {
+      "className": "gyro-secondary-button",
+      "label": "Use in chat",
+      "rect": {
+        "bottom": 327.296875,
+        "height": 34.5,
+        "right": 345.328125,
+        "width": 105.9375,
+        "x": 239.390625,
+        "y": 292.796875
+      }
+    },
+    {
+      "className": "gyro-secondary-button",
+      "label": "Refresh models",
+      "rect": {
+        "bottom": 327.296875,
+        "height": 34.5,
+        "right": 488.640625,
+        "width": 136.3125,
+        "x": 352.328125,
+        "y": 292.796875
+      }
+    },
+    {
+      "className": "gyro-secondary-button",
+      "label": "Test",
+      "rect": {
+        "bottom": 378.546875,
+        "height": 34.5,
+        "right": 712.640625,
+        "width": 204,
+        "x": 508.640625,
+        "y": 344.046875
+      }
+    },
+    {
+      "className": "gyro-danger-button",
+      "label": "Disable in Gyro",
+      "rect": {
+        "bottom": 499.359375,
+        "height": 32.1875,
+        "right": 712.640625,
+        "width": 204,
+        "x": 508.640625,
+        "y": 467.171875
+      }
+    },
+    {
+      "className": "gyro-secondary-button",
+      "label": "Use Kimi sign-in",
+      "rect": {
+        "bottom": 477.796875,
+        "height": 34.5,
+        "right": 380.265625,
+        "width": 140.875,
+        "x": 239.390625,
+        "y": 443.296875
+      }
+    },
+    {
+      "className": "gyro-secondary-button",
+      "label": "Test Kimi",
+      "rect": {
+        "bottom": 559.046875,
+        "height": 34.5,
+        "right": 604.265625,
+        "width": 204,
+        "x": 400.265625,
+        "y": 524.546875
+      }
+    },
+    {
+      "className": "gyro-settings-select",
+      "label": "xAI default model",
+      "rect": {
+        "bottom": 599.984375,
+        "height": 32.1875,
+        "right": 799.609375,
+        "width": 560.21875,
+        "x": 239.390625,
+        "y": 567.796875
+      }
+    },
+    {
+      "className": "gyro-secondary-button",
+      "label": "Start CLI sign-in",
+      "rect": {
+        "bottom": 646.484375,
+        "height": 34.5,
+        "right": 383.171875,
+        "width": 143.78125,
+        "x": 239.390625,
+        "y": 611.984375
+      }
+    }
+  ],
+  "htmlWidth": 860,
+  "overlaps": [
+    {
+      "a": "Disable in Gyro",
+      "b": "Test",
+      "height": 32.1875,
+      "width": 60.6875
+    }
+  ],
+  "popovers": [],
+  "theme": "light",
+  "viewport": {
+    "height": 620,
+    "width": 860
+  }
+}

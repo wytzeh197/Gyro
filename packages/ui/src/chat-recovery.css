@@ -1,0 +1,88 @@
+/* Recovery stays part of the turn, with the same quiet tone in both themes. */
+.gyro-run .gyro-run-problem.gyro-run-recovery,
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-recovery
+  .gyro-run-problem.gyro-run-recovery {
+  align-items: center;
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-comfortable);
+  margin-top: var(--gyro-space-standard);
+  padding: var(--gyro-space-comfortable);
+}
+
+.gyro-run .gyro-run-recovery .gyro-run-problem-text {
+  flex: 1 1 calc(240px * var(--gyro-ui-scale, 1));
+  gap: var(--gyro-space-compact);
+}
+
+.gyro-run .gyro-run-recovery .gyro-run-problem-text strong {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.gyro-run .gyro-run-recovery .gyro-run-problem-text > span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.gyro-run .gyro-run-recovery .gyro-run-problem-actions {
+  align-items: center;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-standard);
+  max-width: 100%;
+}
+
+.gyro-run .gyro-run-recovery .gyro-run-problem-actions button {
+  background: transparent;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+  min-height: var(--gyro-control-standard);
+  padding: var(--gyro-space-compact) var(--gyro-space-standard);
+  white-space: nowrap;
+}
+
+.gyro-run .gyro-run-recovery .gyro-run-problem-actions button:hover {
+  background: var(--gyro-control-hover);
+  border-color: var(--gyro-border-strong);
+}
+
+.gyro-run .gyro-run-recovery .gyro-run-problem-actions button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
+.gyro-run .gyro-run-recovery .gyro-run-problem-actions button.is-subtle {
+  border-color: transparent;
+  color: var(--gyro-muted);
+}
+
+.gyro-run-retry-countdown {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-problem.is-recovery:not(.is-cancelled)
+  .gyro-run-header,
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-retrying.is-recovery:not(.is-cancelled)
+  .gyro-run-header {
+  color: var(--gyro-muted);
+}

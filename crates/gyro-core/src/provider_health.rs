@@ -1,15 +1,17 @@
 use crate::execution::{
     run_command, CancellationToken, ExecutionOutcome, ExecutionRequest, ExecutionTermination,
 };
+use crate::provider_install::{install_guide, ProviderInstallGuide};
 use crate::{
     check_acp_health, check_kimi_acp_health, discover_ollama_models, health_kind_for,
     openai_compat_endpoint, openai_compat_host_is_loopback, openai_compat_list_models,
-    provider_api_key_env_name, provider_api_key_value, provider_has_api_key,
-    stored_provider_api_key_env, KimiAcpHealthStatus, ProviderHealthKind,
+    provider_api_key_env_name, provider_has_api_key, try_stored_provider_api_key_env,
+    KimiAcpHealthStatus, ProviderHealthKind,
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
+use std::path::Path;
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -94,19 +96,26 @@ static PROVIDER_HEALTH_CACHE: Mutex<Vec<(String, ProviderHealthCacheEntry)>> =
 /// Best-effort cached lookup. A poisoned lock and a miss both mean "probe".
 fn cached_provider_health(request: &ProviderHealthRequest) -> Option<ProviderHealthCheck> {
     let key = provider_health_cache_key(request);
+    cached_provider_health_key(&key)
+}
+
+fn cached_provider_health_key(key: &str) -> Option<ProviderHealthCheck> {
     let mut cache = PROVIDER_HEALTH_CACHE.lock().ok()?;
     cache.retain(|(_, (taken_at, _))| taken_at.elapsed() < PROVIDER_HEALTH_CACHE_TTL);
     cache
         .iter()
-        .find(|(entry_key, _)| entry_key == &key)
+        .find(|(entry_key, _)| entry_key == key)
         .map(|(_, (_, check))| check.clone())
 }
 
 fn remember_provider_health(request: &ProviderHealthRequest, check: &ProviderHealthCheck) {
+    remember_provider_health_key(provider_health_cache_key(request), check);
+}
+
+fn remember_provider_health_key(key: String, check: &ProviderHealthCheck) {
     let Ok(mut cache) = PROVIDER_HEALTH_CACHE.lock() else {
         return;
     };
-    let key = provider_health_cache_key(request);
     cache.retain(|(entry_key, (taken_at, _))| {
         entry_key != &key && taken_at.elapsed() < PROVIDER_HEALTH_CACHE_TTL
     });
@@ -143,6 +152,40 @@ pub fn provider_health(request: ProviderHealthRequest) -> Result<ProviderHealthC
     Ok(check)
 }
 
+/// Use the same readiness service for a persisted imported session's original
+/// provider home. The caller resolves the path from trusted session metadata;
+/// no process-global environment or credentials are changed.
+pub fn provider_health_with_data_home(
+    request: ProviderHealthRequest,
+    data_home: &Path,
+) -> Result<ProviderHealthCheck> {
+    anyhow::ensure!(
+        matches!(request.provider_id.as_str(), "anthropic" | "openai"),
+        "this provider has no imported data home"
+    );
+    anyhow::ensure!(
+        data_home.is_absolute(),
+        "provider data home must be absolute"
+    );
+    let key = scoped_health_cache_key(&request, data_home);
+    if !request.force {
+        if let Some(check) = cached_provider_health_key(&key) {
+            return Ok(check);
+        }
+    }
+    let check = ProviderHealthService.check_with_data_home(request, Some(data_home))?;
+    remember_provider_health_key(key, &check);
+    Ok(check)
+}
+
+fn scoped_health_cache_key(request: &ProviderHealthRequest, data_home: &Path) -> String {
+    format!(
+        "{}\u{1f}imported-home\u{1f}{}",
+        provider_health_cache_key(request),
+        data_home.to_string_lossy()
+    )
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderHealthCheck {
@@ -158,6 +201,9 @@ pub struct ProviderHealthCheck {
     pub secret_storage: String,
     pub privacy_note: String,
     pub diagnostics_opt_in: bool,
+    /// Vendor install guidance for this provider's CLI, when Gyro knows one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install: Option<ProviderInstallGuide>,
 }
 
 #[derive(Default)]
@@ -178,10 +224,30 @@ pub struct ProviderHealthService;
 
 impl ProviderHealthService {
     pub fn check(&self, request: ProviderHealthRequest) -> Result<ProviderHealthCheck> {
+        self.check_with_data_home(request, None)
+    }
+
+    fn check_with_data_home(
+        &self,
+        request: ProviderHealthRequest,
+        data_home: Option<&Path>,
+    ) -> Result<ProviderHealthCheck> {
+        let mut check = self.check_core(request, data_home)?;
+        // Attached here so every provider kind carries the guide, not only the
+        // CLI paths that already build their own health checks.
+        check.install = install_guide(&check.provider_id).copied();
+        Ok(check)
+    }
+
+    fn check_core(
+        &self,
+        request: ProviderHealthRequest,
+        data_home: Option<&Path>,
+    ) -> Result<ProviderHealthCheck> {
         let health_kind = health_kind_for(&request.provider_id, request.kind.as_deref())
             .ok_or_else(|| anyhow::anyhow!("unknown provider `{}`", request.provider_id))?;
         match health_kind {
-            ProviderHealthKind::CodexCli => self.check_openai(request),
+            ProviderHealthKind::CodexCli => self.check_openai(request, data_home),
             ProviderHealthKind::ClaudeCli => self.check_cli_or_stored_key(
                 &CliProbe {
                     provider_id: "anthropic",
@@ -192,8 +258,23 @@ impl ProviderHealthService {
                     secret_storage: "Provider CLI, OS Keychain, or provider-owned files",
                 },
                 &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
+                data_home,
             ),
             ProviderHealthKind::KimiAcp => Ok(acp_provider_health(&request.provider_id)),
+            // `agy models` is the CLI's own readiness surface: it lists the
+            // plan's models when signed in and prints a sign-in error when not,
+            // so one probe answers "installed?" and "signed in?" together.
+            ProviderHealthKind::AntigravityCli => self.cli_check(
+                &CliProbe {
+                    provider_id: "antigravity",
+                    auth_owner: "google-antigravity",
+                    command: crate::antigravity_cli::PROGRAM,
+                    args: &["models"],
+                    login_command: Some(crate::antigravity_cli::PROGRAM),
+                    secret_storage: "Google account, held by the Antigravity CLI",
+                },
+                data_home,
+            ),
             ProviderHealthKind::CursorCli => Ok(acp_provider_health(&request.provider_id)),
             ProviderHealthKind::Environment if request.provider_id == "xai" => Ok(
                 env_provider_health("xai", request.api_key_ref.as_deref(), &["XAI_API_KEY"]),
@@ -218,7 +299,11 @@ impl ProviderHealthService {
         }
     }
 
-    fn check_openai(&self, request: ProviderHealthRequest) -> Result<ProviderHealthCheck> {
+    fn check_openai(
+        &self,
+        request: ProviderHealthRequest,
+        data_home: Option<&Path>,
+    ) -> Result<ProviderHealthCheck> {
         if should_skip_codex_login_for_external_env(
             request.base_url.as_deref(),
             request.api_key_ref.as_deref(),
@@ -231,28 +316,36 @@ impl ProviderHealthService {
             ));
         }
 
-        self.cli_check(&CliProbe {
-            provider_id: "openai",
-            auth_owner: "provider-cli",
-            command: "codex",
-            args: &["login", "status"],
-            login_command: Some("codex login --device-auth"),
-            secret_storage: "Provider CLI, OS Keychain, or provider-owned files",
-        })
+        self.cli_check(
+            &CliProbe {
+                provider_id: "openai",
+                auth_owner: "provider-cli",
+                command: "codex",
+                args: &["login", "status"],
+                login_command: Some("codex login --device-auth"),
+                secret_storage: "Provider CLI, OS Keychain, or provider-owned files",
+            },
+            data_home,
+        )
     }
 
     fn check_cli_or_stored_key(
         &self,
         probe: &CliProbe<'_>,
         env_names: &[&str],
+        data_home: Option<&Path>,
     ) -> Result<ProviderHealthCheck> {
         if provider_has_api_key(probe.provider_id) {
             return Ok(env_provider_health(probe.provider_id, None, env_names));
         }
-        self.cli_check(probe)
+        self.cli_check(probe, data_home)
     }
 
-    fn cli_check(&self, probe: &CliProbe<'_>) -> Result<ProviderHealthCheck> {
+    fn cli_check(
+        &self,
+        probe: &CliProbe<'_>,
+        data_home: Option<&Path>,
+    ) -> Result<ProviderHealthCheck> {
         let &CliProbe {
             provider_id,
             auth_owner,
@@ -265,7 +358,7 @@ impl ProviderHealthService {
             .chain(args.iter().copied())
             .collect::<Vec<_>>()
             .join(" ");
-        let output = match command_output(command, args, provider_id) {
+        let output = match command_output(command, args, provider_id, data_home) {
             Ok(output) => output,
             Err(CommandOutputError::Unavailable(error)) => {
                 format!("{command} unavailable: {error}")
@@ -288,6 +381,7 @@ impl ProviderHealthService {
             privacy_note:
                 "Gyro stores readiness summaries only; provider tokens stay outside Gyro.".into(),
             diagnostics_opt_in: false,
+            install: None,
             output,
         })
     }
@@ -327,6 +421,7 @@ fn ollama_provider_health(base_url: Option<&str>) -> ProviderHealthCheck {
                 secret_storage: "No credentials; Ollama is contacted only over loopback.".into(),
                 privacy_note: "Gyro sends prompts only to the configured loopback Ollama runtime.".into(),
                 diagnostics_opt_in: false,
+                install: None,
             }
         }
         Err(error) => ProviderHealthCheck {
@@ -344,6 +439,7 @@ fn ollama_provider_health(base_url: Option<&str>) -> ProviderHealthCheck {
             secret_storage: "No credentials; Ollama is contacted only over loopback.".into(),
             privacy_note: "Gyro sends prompts only to the configured loopback Ollama runtime.".into(),
             diagnostics_opt_in: false,
+            install: None,
         },
     }
 }
@@ -368,11 +464,12 @@ fn openai_compatible_provider_health(
         account_label: None,
         subscription_label: None,
         provider_mode: Some("OpenAI-compatible HTTPS".into()),
-        secret_storage: "macOS Keychain, or the provider's environment variable".into(),
+        secret_storage: "On this Mac, or the provider's environment variable".into(),
         privacy_note:
             "Gyro sends prompts straight to the endpoint you configured; no vendor CLI is involved."
                 .into(),
         diagnostics_opt_in: false,
+        install: None,
     };
     let Some(raw) = base_url.map(str::trim).filter(|value| !value.is_empty()) else {
         return check(
@@ -389,7 +486,10 @@ fn openai_compatible_provider_health(
             )
         }
     };
-    let api_key = provider_api_key_value(provider_id);
+    let api_key = match crate::try_provider_api_key_value(provider_id) {
+        Ok(value) => value,
+        Err(error) => return check(error.to_string(), "not-logged-in"),
+    };
     if api_key.is_none() && !openai_compat_host_is_loopback(&endpoint) {
         let env_hint = provider_api_key_env_name(provider_id)
             .map(|name| format!(", or set {name}"))
@@ -450,6 +550,7 @@ fn kimi_provider_health() -> ProviderHealthCheck {
         secret_storage: "Kimi Code provider-owned files".into(),
         privacy_note: "Gyro stores readiness summaries only; Kimi tokens stay outside Gyro.".into(),
         diagnostics_opt_in: false,
+        install: None,
     }
 }
 
@@ -470,6 +571,13 @@ fn acp_provider_health(provider_id: &str) -> ProviderHealthCheck {
             vec!["--acp"],
             vec!["oauth-personal", "gemini-api-key", "vertex-ai", "login"],
             "gemini",
+        ),
+        "antigravity" => (
+            "Google Antigravity",
+            crate::antigravity_cli::PROGRAM,
+            vec!["models"],
+            vec!["google-account"],
+            "agy",
         ),
         "cursor" => (
             "Cursor",
@@ -537,12 +645,20 @@ fn acp_provider_health(provider_id: &str) -> ProviderHealthCheck {
         login_command: Some(login_command.into()),
         account_label: None,
         subscription_label: None,
-        provider_mode: Some("local-subscription-cli".into()),
+        provider_mode: Some(
+            if provider_id == "antigravity" {
+                "local-api-key-acp"
+            } else {
+                "local-subscription-cli"
+            }
+            .into(),
+        ),
         secret_storage: "Provider CLI, OS Keychain, or provider-owned files".into(),
         privacy_note:
             "Gyro checks the local ACP login state without reading provider credential values."
                 .into(),
         diagnostics_opt_in: false,
+        install: None,
     }
 }
 
@@ -582,15 +698,15 @@ fn env_provider_health(
         .iter()
         .find(|env_name| std::env::var_os(env_name.as_str()).is_some())
         .cloned();
-    let keychain_key = provider_has_api_key(provider_id) && present_env.is_none();
+    let saved_key = provider_has_api_key(provider_id) && present_env.is_none();
     let output = if let Some(env_name) = present_env.as_deref() {
         format!(
             "{provider_id} provider-env auth available; {env_name} is set; value not read by Gyro."
         )
-    } else if keychain_key {
+    } else if saved_key {
         let env_name = env_names.first().map(String::as_str).unwrap_or("API_KEY");
         format!(
-            "{provider_id} provider-env auth available; {env_name} is stored in macOS Keychain; key value omitted."
+            "{provider_id} provider-env auth available; {env_name} is stored on this Mac; key value omitted."
         )
     } else {
         format!(
@@ -601,7 +717,7 @@ fn env_provider_health(
 
     ProviderHealthCheck {
         provider_id: provider_id.into(),
-        runtime_status: if present_env.is_some() || keychain_key {
+        runtime_status: if present_env.is_some() || saved_key {
             "ready".into()
         } else {
             "not-logged-in".into()
@@ -611,19 +727,20 @@ fn env_provider_health(
         login_command: None,
         account_label: None,
         subscription_label: None,
-        provider_mode: Some(if keychain_key {
-            "keychain-owned auth".into()
+        provider_mode: Some(if saved_key {
+            "saved on this Mac".into()
         } else {
             "environment-owned auth".into()
         }),
-        secret_storage: if keychain_key {
-            "macOS Keychain".into()
+        secret_storage: if saved_key {
+            "On this Mac".into()
         } else {
             "Environment variable or provider SDK store".into()
         },
         privacy_note: "Gyro stores readiness summaries only; provider tokens stay outside Gyro."
             .into(),
         diagnostics_opt_in: false,
+        install: None,
         output,
     }
 }
@@ -650,6 +767,9 @@ pub fn provider_runtime_status_from_output(output: &str) -> &'static str {
     {
         "not-installed"
     } else if normalized.contains("not authenticated")
+        || normalized.contains("please sign in")
+        || normalized.contains("not signed in")
+        || normalized.contains("authentication required")
         || normalized.contains("not logged in")
         || normalized.contains("logged out")
         || normalized.contains("authentication_failed")
@@ -719,14 +839,16 @@ fn command_output(
     command: &str,
     args: &[&str],
     provider_id: &str,
+    data_home: Option<&Path>,
 ) -> std::result::Result<String, CommandOutputError> {
-    let mut result = command_output_with_limits(
+    let mut result = command_output_with_limits_scoped(
         command,
         args,
         provider_id,
         PROVIDER_HEALTH_TIMEOUT,
         PROVIDER_HEALTH_MAX_STDOUT_CHARS,
         PROVIDER_HEALTH_MAX_STDERR_CHARS,
+        data_home,
     );
 
     for attempt in 1..PROVIDER_HEALTH_ATTEMPTS {
@@ -737,13 +859,14 @@ fn command_output(
         // checks several providers at once. Do not retry authentication or
         // installation problems: neither can recover without user action.
         thread::sleep(PROVIDER_HEALTH_RETRY_DELAY * attempt as u32);
-        result = command_output_with_limits(
+        result = command_output_with_limits_scoped(
             command,
             args,
             provider_id,
             PROVIDER_HEALTH_TIMEOUT,
             PROVIDER_HEALTH_MAX_STDOUT_CHARS,
             PROVIDER_HEALTH_MAX_STDERR_CHARS,
+            data_home,
         );
     }
 
@@ -778,6 +901,7 @@ fn is_transient_health_result(result: &std::result::Result<String, CommandOutput
     .any(|marker| output.contains(marker))
 }
 
+#[cfg(test)]
 fn command_output_with_limits(
     command: &str,
     args: &[&str],
@@ -785,6 +909,26 @@ fn command_output_with_limits(
     timeout: Duration,
     max_stdout_chars: usize,
     max_stderr_chars: usize,
+) -> std::result::Result<String, CommandOutputError> {
+    command_output_with_limits_scoped(
+        command,
+        args,
+        provider_id,
+        timeout,
+        max_stdout_chars,
+        max_stderr_chars,
+        None,
+    )
+}
+
+fn command_output_with_limits_scoped(
+    command: &str,
+    args: &[&str],
+    provider_id: &str,
+    timeout: Duration,
+    max_stdout_chars: usize,
+    max_stderr_chars: usize,
+    data_home: Option<&Path>,
 ) -> std::result::Result<String, CommandOutputError> {
     let mut request = ExecutionRequest::new(command);
     request.args = args.iter().copied().map(OsString::from).collect();
@@ -797,9 +941,12 @@ fn command_output_with_limits(
             Some(OsString::from(crate::cli_path::augmented_gui_path())),
         ));
     }
-    if let Some((name, value)) = stored_provider_api_key_env(provider_id) {
+    if let Some((name, value)) = try_stored_provider_api_key_env(provider_id)
+        .map_err(|error| CommandOutputError::Unavailable(error.to_string()))?
+    {
         request.env.push((name, Some(value)));
     }
+    apply_health_data_home(&mut request, provider_id, data_home);
     let outcome = run_command(request, CancellationToken::default(), |_| {})
         .map_err(|error| CommandOutputError::Unavailable(error.to_string()))?;
     match &outcome.termination {
@@ -838,6 +985,23 @@ fn command_output_with_limits(
     }
 }
 
+fn apply_health_data_home(
+    request: &mut ExecutionRequest,
+    provider_id: &str,
+    data_home: Option<&Path>,
+) {
+    let variable = match provider_id {
+        "openai" => "CODEX_HOME",
+        "anthropic" => "CLAUDE_CONFIG_DIR",
+        _ => return,
+    };
+    if let Some(home) = data_home {
+        request
+            .env
+            .push((OsString::from(variable), Some(home.as_os_str().to_owned())));
+    }
+}
+
 fn combined_command_output(outcome: &ExecutionOutcome) -> String {
     let stdout = retained_stream_output(
         &outcome.stdout,
@@ -872,6 +1036,48 @@ fn retained_stream_output(output: &str, truncated: bool, marker: &str) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn imported_health_cache_scope_distinguishes_provider_data_homes() {
+        let request = cache_probe_request("openai", None);
+        let first = scoped_health_cache_key(&request, Path::new("/tmp/first-home"));
+        let second = scoped_health_cache_key(&request, Path::new("/tmp/second-home"));
+        assert_ne!(first, second);
+        assert_ne!(first, provider_health_cache_key(&request));
+    }
+
+    #[test]
+    fn imported_health_environment_is_applied_to_one_process_only() {
+        for (provider, variable) in [("openai", "CODEX_HOME"), ("anthropic", "CLAUDE_CONFIG_DIR")] {
+            let mut scoped = ExecutionRequest::new("unused-test-command");
+            apply_health_data_home(
+                &mut scoped,
+                provider,
+                Some(Path::new("/tmp/provider home with $literal")),
+            );
+            assert!(scoped.env.iter().any(|(name, value)| name == variable
+                && value
+                    .as_ref()
+                    .is_some_and(|value| value == "/tmp/provider home with $literal")));
+            let mut ordinary = ExecutionRequest::new("unused-test-command");
+            apply_health_data_home(&mut ordinary, provider, None);
+            assert!(ordinary.env.is_empty());
+        }
+    }
+
+    #[test]
+    fn imported_health_rejects_unsupported_scope_before_starting_a_provider() {
+        assert!(provider_health_with_data_home(
+            cache_probe_request("openai", None),
+            Path::new("relative")
+        )
+        .is_err());
+        assert!(provider_health_with_data_home(
+            cache_probe_request("kimi", None),
+            Path::new("/tmp/home")
+        )
+        .is_err());
+    }
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
 
@@ -900,6 +1106,10 @@ mod tests {
         );
         assert_eq!(
             provider_runtime_status_from_output("Failed to authenticate: unauthorized"),
+            "not-logged-in"
+        );
+        assert_eq!(
+            provider_runtime_status_from_output("Error: Please sign in to view available models."),
             "not-logged-in"
         );
     }

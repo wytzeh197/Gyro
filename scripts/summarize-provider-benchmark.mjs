@@ -20,7 +20,9 @@ const raw = (
   )
 ).flatMap((report) => report.records);
 const providers = [...new Set(raw.map((record) => record.provider))].sort();
-const spec = JSON.parse(await readFile(join(root, "spec.json"), "utf8").catch(() => "null"));
+const spec = JSON.parse(
+  await readFile(join(root, "spec.json"), "utf8").catch(() => "null"),
+);
 const excluded = raw.filter((r) => r.failureDetail?.includes("safety limit"));
 const records = raw
   .filter((r) => !excluded.includes(r))
@@ -59,7 +61,11 @@ const stats = (values) => ({
   n: values.filter(Number.isFinite).length,
   medianMs: round(median(values)),
   p95Ms: values.some(Number.isFinite)
-    ? round(values.filter(Number.isFinite).sort((a, b) => a - b)[Math.ceil(values.filter(Number.isFinite).length * 0.95) - 1])
+    ? round(
+        values.filter(Number.isFinite).sort((a, b) => a - b)[
+          Math.ceil(values.filter(Number.isFinite).length * 0.95) - 1
+        ],
+      )
     : null,
   slowestMs: values.some(Number.isFinite)
     ? round(Math.max(...values.filter(Number.isFinite)))
@@ -76,9 +82,14 @@ function stages(trace) {
     active = new Map();
   for (const p of trace.points) {
     const key = `${p.attempt}:${p.toolIndex}`;
-    if (["tool-start", "broker-tool-start"].includes(p.stage)) active.set(key, p.elapsedMs);
+    if (["tool-start", "broker-tool-start"].includes(p.stage))
+      active.set(key, p.elapsedMs);
     if (["tool-end", "broker-tool-end"].includes(p.stage) && active.has(key)) {
-      intervals.push([active.get(key), p.elapsedMs, p.stage === "broker-tool-end"]);
+      intervals.push([
+        active.get(key),
+        p.elapsedMs,
+        p.stage === "broker-tool-end",
+      ]);
       active.delete(key);
     }
   }
@@ -100,13 +111,18 @@ function stages(trace) {
     requestCount: trace.providerRequests?.requests ?? null,
     observedUsage: trace.providerRequests?.tokens ?? null,
     unmeasuredContent: trace.providerRequests?.unmeasuredContent ?? null,
-    toolDurationsMs: (protocolIntervals.length ? protocolIntervals : brokerIntervals)
-      .map(([start, end]) => end - start),
+    toolDurationsMs: (protocolIntervals.length
+      ? protocolIntervals
+      : brokerIntervals
+    ).map(([start, end]) => end - start),
     brokerToolDurationsMs: brokerIntervals.map(([start, end]) => end - start),
     providerPhaseMs: span("prompt-sent", "provider-complete"),
     finalizationMs: span("provider-complete", "complete"),
-    toolCount: trace.points.filter((p) => p.stage === "tool-start").length || trace.points.filter((p) => p.stage === "broker-tool-start").length,
-    brokerToolCount: trace.points.filter((p) => p.stage === "broker-tool-start").length,
+    toolCount:
+      trace.points.filter((p) => p.stage === "tool-start").length ||
+      trace.points.filter((p) => p.stage === "broker-tool-start").length,
+    brokerToolCount: trace.points.filter((p) => p.stage === "broker-tool-start")
+      .length,
     toolBusyMs: merged.reduce((sum, [a, b]) => sum + b - a, 0),
     openTools: active.size,
     retriesObserved: Math.max(
@@ -222,7 +238,8 @@ for (const r of records) {
   const t = byTurn.get(r.turnId);
   if (t) {
     r.timing = stages(t);
-    r.timing.toolSource = r.timing.brokerToolCount > 0 ? "protocol-and-broker" : "protocol";
+    r.timing.toolSource =
+      r.timing.brokerToolCount > 0 ? "protocol-and-broker" : "protocol";
     // Early Codex traces missed MCP item boundaries. Recover those measurements
     // from the existing capability ledger; never interpret missing hooks as zero work.
     if (r.provider === "openai" && r.timing.toolCount === 0) {
@@ -270,7 +287,7 @@ for (const r of records) {
 }
 const groups = [];
 for (const provider of providers)
-  for (const task of ["readme", "code", "follow-up"])
+  for (const task of spec?.tasks ?? ["readme", "code", "follow-up"])
     for (const resumed of [false, true]) {
       const rows = records.filter(
         (r) =>
@@ -293,7 +310,8 @@ for (const provider of providers)
         incorrect: completed.filter((r) => !r.correct || !r.responsePresent)
           .length,
         retries: rows.reduce(
-          (sum, r) => sum + Math.max(r.retryCount ?? 0, r.timing?.retriesObserved ?? 0),
+          (sum, r) =>
+            sum + Math.max(r.retryCount ?? 0, r.timing?.retriesObserved ?? 0),
           0,
         ),
         actualResumes: rows.filter((r) => r.resumedActual === true).length,
@@ -344,7 +362,9 @@ await writeFile(
       fixture: "meridian-v1",
       build: "debug",
       frontendMeasured: false,
-      expectedSlots: spec ? spec.providers.length * 3 * 2 * spec.trials : null,
+      expectedSlots: spec
+        ? spec.providers.length * (spec.tasks?.length ?? 3) * 2 * spec.trials
+        : null,
       recordedSlots: records.length,
       excludedRateGuardRecords: excluded.length,
       groups,

@@ -27,7 +27,15 @@ pub(super) fn execute(
         "url",
     )?)
     .map_err(anyhow::Error::msg)?;
-    let page = gyro_core::fetch_text(&url, WEB_FETCH_BYTES)?;
+    let source_bytes = capability_output_budget::offset(&request.arguments, "maxSourceBytes")?
+        .unwrap_or(WEB_FETCH_BYTES);
+    if !(1024..=gyro_core::web_fetch::MAX_WEB_FETCH_BYTES).contains(&source_bytes) {
+        anyhow::bail!(
+            "maxSourceBytes must be between 1024 and {}",
+            gyro_core::web_fetch::MAX_WEB_FETCH_BYTES
+        );
+    }
+    let page = gyro_core::fetch_text(&url, source_bytes)?;
     let summary = format!(
         "Fetched {}{} ({} bytes{})",
         page.final_url,
@@ -38,16 +46,19 @@ pub(super) fn execute(
         page.bytes,
         if page.truncated { ", truncated" } else { "" }
     );
-    let data = bound_web_result(json!({
-        "schema": WEB_FETCH_SCHEMA,
-        "url": page.requested_url,
-        "finalUrl": page.final_url,
-        "status": page.status,
-        "contentType": page.content_type,
-        "bytes": page.bytes,
-        "truncated": page.truncated,
-        "text": page.text,
-    }))?;
+    let data = bound_web_result(
+        json!({
+            "schema": WEB_FETCH_SCHEMA,
+            "url": page.requested_url,
+            "finalUrl": page.final_url,
+            "status": page.status,
+            "contentType": page.content_type,
+            "bytes": page.bytes,
+            "truncated": page.truncated,
+            "text": page.text,
+        }),
+        &request.arguments,
+    )?;
     let resource = CapabilityResourceRef {
         id: format!("web:{}", request.context.session_id),
         kind: "url".into(),
@@ -58,21 +69,23 @@ pub(super) fn execute(
 
 /// Trim the body on a character boundary until the whole payload fits. Halving
 /// terminates, and the caller learns the text was cut from `truncated`.
-fn bound_web_result(mut data: Value) -> anyhow::Result<Value> {
-    while serde_json::to_vec(&data)?.len() > gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES {
-        let Some(text) = data.get("text").and_then(Value::as_str) else {
-            break;
-        };
-        if text.is_empty() {
-            break;
-        }
-        let mut keep = text.len() / 2;
-        while keep > 0 && !text.is_char_boundary(keep) {
-            keep -= 1;
-        }
-        data["text"] = json!(text[..keep].to_string());
-        data["truncated"] = json!(true);
-    }
+fn bound_web_result(mut data: Value, arguments: &Value) -> anyhow::Result<Value> {
+    data["sourceTruncated"] = json!(data["truncated"].as_bool().unwrap_or(false));
+    data["truncated"] = data["sourceTruncated"].clone();
+    let mut data = capability_output_budget::text_result(
+        data,
+        &[capability_output_budget::TextField {
+            pointer: "/text",
+            window: "textWindow",
+            offset: "offset",
+            tail: false,
+        }],
+        arguments,
+    )?;
+    data["truncated"] = json!(
+        data["sourceTruncated"].as_bool().unwrap_or(false)
+            || data["textWindow"]["truncated"].as_bool().unwrap_or(false)
+    );
     Ok(data)
 }
 
@@ -85,7 +98,10 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
                 "url": {
                     "type": "string",
                     "description": "Absolute http(s) URL to read. A bare host is treated as https. Credential-bearing URLs are refused."
-                }
+                },
+                "offset": capability_output_budget::offset_schema(),
+                "maxBytes": workspace_result_bytes_schema(),
+                "maxSourceBytes": { "type":"integer","minimum":1024,"maximum":gyro_core::web_fetch::MAX_WEB_FETCH_BYTES,"default":WEB_FETCH_BYTES,"description":"Maximum fetched body bytes; increase when the source itself was truncated. Keep the same URL and source limit while following textWindow.nextOffset." }
             }),
             vec!["url"],
         ),
@@ -101,7 +117,8 @@ mod tests {
     #[test]
     fn oversized_bodies_are_trimmed_to_fit_the_result_limit() {
         let text = "x".repeat(gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES * 2);
-        let bounded = bound_web_result(json!({ "text": text, "truncated": false })).unwrap();
+        let bounded =
+            bound_web_result(json!({ "text": text, "truncated": false }), &json!({})).unwrap();
         assert_eq!(bounded["truncated"], true);
         let kept = bounded["text"].as_str().unwrap();
         assert!(kept.len() < gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES);
@@ -116,7 +133,7 @@ mod tests {
         // Each character is three bytes, so halving lands mid-character unless
         // the trim walks back to a boundary.
         let text = "→".repeat(gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES);
-        let bounded = bound_web_result(json!({ "text": text })).unwrap();
+        let bounded = bound_web_result(json!({ "text": text }), &json!({})).unwrap();
         let kept = bounded["text"].as_str().unwrap();
         assert!(kept.chars().all(|c| c == '→'));
         assert!(kept.len() < gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES);

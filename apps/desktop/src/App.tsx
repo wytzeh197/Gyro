@@ -1,338 +1,442 @@
-import { workspaceEditorOptions } from "./editor-presentation";
-import { useWorkbenchAppearance, storedThemeMode, THEME_STORAGE_KEY } from "./use-workbench-appearance";
+import type { BrowserViewportMode } from "@gyro-dev/ui";
 import {
-  turnIdFromSessionEvent,
-  chatModeEventMessage,
-  createChatModeSessionEvent,
-  normalizePlanItem,
-  normalizePlanStatus,
-  recordFromUnknown,
-  stringFromRecord,
-  numberFromUnknown,
-  planStatusVerb,
-  createPlanSessionEvent,
-  createGoalSessionEvent,
-  createEditorSessionEvent,
-  slugify,
-} from "./session-context-events";
-import {
-  deriveSessionContext,
-  useDerivedSessionContext,
-  useSessionContextEvents,
-} from "./use-session-context-events";
-import { ComposerContextCandidates } from "@gyro-dev/ui";
-import {
-  restoreCompanionPanes,
-  PullRequestForm,
-  type PullRequestDraft,
+ChatFileActionsContext,
+ChatFileScopeContext,
+ChatRetryContext,
+ComposerContextCandidates,
+FirstRunTour,
+ProviderSignInContext,
+PullRequestForm,
+WorkspaceEditBar,
+WorkspacePathUndoContext,
+WorkspaceRenameDialog,
+askTextValue,
+browserConfirm,
+confirmAction,
+fastModeConfigFromAction,
+isSplitChatLayout,
+registerExternalLinkOpener,
+resolveLanguage,
+restoreCompanionPanes,
+sessionApprovalCounts,sessionQuestionCounts,
+setConfirmActionHandler,
+setOpenDroppedWorkspaceHandler,
+terminalLaunchProfiles,
+validateWorkspaceEntryName,
+workspaceEntryName,
+type PullRequestDraft,
+type WorkspacePathUndoOffer,
 } from "@gyro-dev/ui";
-import { restoreModelCatalog, useModelCatalog } from "./use-model-catalog";
+import { convertFileSrc,invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { confirm as nativeConfirm,open,save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { flushSync } from "react-dom";
+import { appPreviewClient } from "./app-preview-client";
+import { CHAT_ATTACHMENTS_STORAGE_KEY,CHAT_DRAFT_MODES_STORAGE_KEY,CHAT_GRID_STORAGE_KEY,CHAT_TASK_METADATA_KEY,EMPTY_CONFIG,MAX_CHAT_MESSAGE_CHARS,MAX_PINNED_SESSIONS,MAX_RECENT_PROJECTS,MAX_REMOVED_PROJECTS,PINNED_SESSIONS_STORAGE_KEY,PREVIEW_CONFIG_STORAGE_KEY,RECENT_PROJECTS_STORAGE_KEY,REMOVED_PROJECTS_STORAGE_KEY,applyProviderChatStreamEvent,approvalNotificationCopy,areWorkbenchTurnsEqual,base64Utf8,cancelPersistedWorkbenchStateFlush,capabilityActivityFromSessionEvent,capabilityApprovalFromSessionEvent,chatMessageLength,chatPaneForSession,createAutomationDraft,createOptimisticTurnEvents,createPreviewAutomation,createProviderHealthOutput,createTurnId,deriveActiveTurn,diagnosticsFromLspMessages,disposeEditorModels,editorBufferHasUnsavedChanges,editorPathMatches,flushPersistedWorkbenchState,getCommandProfile,ideAiToolCallFromActivity,isPlainShellTerminal,isProviderStop,isRecord,loadChatAttachments,loadChatDraftModes,loadChatDrafts,loadChatGridState,loadChatTaskMetadata,loadInitialWorkspacePath,loadPinnedSessionIds,loadPreviewConfig,loadRecentProjectPaths,loadRemovedProjectPaths,loadStoredWorkbenchState,lspRelativePath,markInactiveCapabilityResources,normalizeChatMessage,parentDirectory,pathFromSessionEvent,persistChatDrafts,persistableWorkbenchState,profileSupportsGovernance,providerLabelForId,providerStopDetail,providerStreamBatchKey,rekeySessionEvents,relativeFilePath,renameEditorPath,savedProjectsFromSessions,schedulePersistedWorkbenchStateFlush,sessionTitleFromMessage,shouldSuggestSessionTitle,sourceControlLineStats,terminalCommandLine,terminalPaneFromSnapshot,terminalPaneProcessIsMissing,terminalProcessForProfile,terminalSizeForTemplate,terminalSnapshotFromCapabilityData,terminalStatusFromSnapshot,untrackedWorkspaceFileDiff,updateOptimisticProviderStatus,withCouncilConfig,workspaceContentToEditorBuffer,workspaceFailedTests,workspaceName,workspaceTaskTerminalPaneId,workspaceTreeSignature,type OptimisticProviderStatus,type SavedProject,type TerminalPaneSnapshot } from "./app-state-helpers";
 import { persistAutoCompactPercent } from "./auto-compaction";
-import { useUsageActions } from "./usage-actions";
-import { useProviderApiKeys } from "./provider-api-keys";
-import { useProviderConnectionGuard } from "./provider-connection-guard";
-import {
-  providerHealthDetailsFromCheck,
-  providerHealthRequest,
-  providerProbeKeyFor,
-  type ProviderHealthCheck,
-} from "./provider-health-probes";
-import { createBrowserHostVisibility } from "./browser-host-visibility";
-import {
-  browserLiveStatusMessage,
-  browserUnreachableMessage,
-  normalizedPreviewUrl,
-} from "./browser-preview-text";
-import {
-  appendFeedback,
-  browserFeedbackDraft,
-  captureChatBrowserPage,
-  revealBrowserCapture,
-} from "./browser-capture";
-import { useModelBrowserReveal } from "./model-browser-reveal";
-import { useRemoteCheck } from "./use-remote-check";
-import {
-  useSessionModelSave,
-  type SessionModelSelection,
-} from "./use-session-model-save";
-import { loadGitComparisonDiff } from "./load-comparison-diff";
-import { createGithubRefreshController } from "./github-refresh";
-import { useProviderUsage } from "./use-provider-usage";
-import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
-import { resolveChatPaneClose } from "./chat-pane-close";
-import {
-  normalizeProjectPath,
-  visibleSessionsForProjects,
-} from "./session-listing";
-import * as turnTiming from "./turn-timing";
-import { terminalLaunchProfiles } from "@gyro-dev/ui";
-import {
-  pendingMediaAttachment,
-  settlePendingMedia,
-  trackPendingMedia,
-  withoutPendingMedia,
-} from "./pending-media-attachments";
-import { terminalOutputUpdate } from "./terminal-output";
-import { LiveTerminalPaneBody } from "./live-terminal-pane";
-import {
-  readTerminalAttachmentSource,
-  rememberTerminalAttachmentSource,
-  useTerminalAttachmentController,
-} from "./terminal-attachment";
-import { isTauriRuntime } from "./tauri-runtime";
-import { decodeSemanticTokens, semanticLegend } from "./editor/semantic-tokens";
 import { BranchNameDialog } from "./branch-name-dialog";
 import {
-  chatAttachmentKindForPath,
-  chatAttachmentPickerFilters,
-  chatAttachmentPickerTitle,
-  isSupportedChatVideoPath,
-  type ChatAttachmentPickerKind,
+appendFeedback,
+browserFeedbackDraft,
+captureChatBrowserPage,
+revealBrowserCapture,
+} from "./browser-capture";
+import { createBrowserHostVisibility } from "./browser-host-visibility";
+import {
+browserLiveStatusMessage,
+browserUnreachableMessage,
+normalizedPreviewUrl,
+} from "./browser-preview-text";
+import {
+chatAttachmentKindForPath,
+chatAttachmentPickerFilters,
+chatAttachmentPickerTitle,
+isSupportedChatVideoPath,
+type ChatAttachmentPickerKind,
 } from "./chat-attachment-picker";
-import { resolveLanguage, editorFilePolicy } from "@gyro-dev/ui";
-import { useSyntax } from "./editor/use-syntax";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import type { OnMount } from "@monaco-editor/react";
+import { createChatFileActions } from "./chat-file-actions";
+import { resolveChatPaneClose } from "./chat-pane-close";
+import {
+createChatRetryDispatcher,
+isChatRetryCurrent,
+} from "./chat-retry-dispatch";
+import { isComposerCliUpdating } from "./cli-update-scope";
+import "./dictation-access";
+import { canonicalFileUri,filePathFromUri } from "./editor/document-uri";
+import {
+hasEditRecovery,
+recoverWorkspaceBuffers,
+writeEditRecovery,
+} from "./editor/edit-recovery";
+import { useLanguageSessions } from "./editor/use-language-sessions";
+import {
+editorBufferFromFile,
+useWorkspaceRename,
+} from "./editor/use-workspace-rename";
+import {
+MonacoEditorPane,
+type WorkspaceNavigationSource,
+} from "./editor/workspace-code-editor";
+import { createGithubRefreshController } from "./github-refresh";
+import {
+createIdeEvidenceScheduler,
+type IdeEvidenceScheduler,
+} from "./ide-evidence-push";
+import { LiveTerminalPaneBody } from "./live-terminal-pane";
+import { loadGitComparisonDiff } from "./load-comparison-diff";
+import { LocalCheckHost } from "./local-check";
+import { ManagedDiffEditor } from "./managed-diff-editor";
+import { useModelBrowserReveal } from "./model-browser-reveal";
+import {
+MODEL_DEFAULT_SUGGESTION_MAX_STORAGE_CHARS,
+MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
+dismissModelDefaultSuggestion,
+isSuccessfulModelUseResponse,
+markModelDefaultSuggestionShown,
+modelDefaultSuggestionFor,
+parseModelDefaultSuggestionState,
+recordCompletedModelUse,
+snoozeProviderDefaultSuggestions,
+type ModelDefaultSuggestionState,
+} from "./model-default-suggestion";
+import { newChatDefaultSelection } from "./new-chat-defaults";
+import {
+pendingMediaAttachment,
+queueMediaUpload,
+settlePendingMedia,
+trackPendingMedia,
+withMediaUploadTimeout,
+withoutPendingMedia,
+} from "./pending-media-attachments";
+import { useProviderApiKeys } from "./provider-api-keys";
+import {
+useProviderConnectionGuard,
+type ProviderConnectionOptions,
+} from "./provider-connection-guard";
+import {
+providerHealthDetailsFromCheck,
+providerHealthRequest,
+providerProbeKeyFor,
+type ProviderHealthCheck,
+} from "./provider-health-probes";
+import {
+providerCliName,
+providerInstallProfile,
+providerLoginCommandText,
+providerLoginProfile,
+type CliInstallPlanReport,
+} from "./provider-login-profile";
+import { parseProviderLoginProgress } from "./provider-login-progress";
+import { QuitConfirmDialog } from "./quit-confirm-dialog";
+import {
+sameSessionEvents,
+useCoalescedByKey,
+useDebouncedPersist,
+} from "./responsiveness";
+import {
+chatModeEventMessage,
+createChatModeSessionEvent,
+createEditorSessionEvent,
+createGoalSessionEvent,
+createPlanSessionEvent,
+numberFromUnknown,
+planStatusVerb,
+recordFromUnknown,
+stringFromRecord,
+turnIdFromSessionEvent
+} from "./session-context-events";
+import {
+createPreviewSession,
+createPreviewWorkspaceFileContent,
+createTauriThreadSession,
+newSessionModelFromConfig,
+normalizeSessionTitleInput,
+previewFiles,
+selectedSessionModelFromConfig,
+sessionModelSelectionFromSession,
+workspaceRunMetadata,
+} from "./session-creation";
+import {
+compareSessionEventsForHistory,
+mergeSessionHistoryPages,
+} from "./session-event-order";
+import {
+normalizeProjectPath,
+visibleSessionsForProjects,
+} from "./session-listing";
+import {
+sourceControlForWorkspace,
+useScopedIdeState,
+} from "./source-control-scope";
+import {
+SYSTEM_ACCESS_STATUS_STORAGE_KEY,
+parseSystemAccessSnapshot,
+} from "./system-access-state";
+import { isTauriRuntime } from "./tauri-runtime";
+import {
+readTerminalAttachmentSource,
+rememberTerminalAttachmentSource,
+useTerminalAttachmentController,
+} from "./terminal-attachment";
+import * as turnTiming from "./turn-timing";
+import {
+readBoundedLocalStorage,
+readStoredAppearance,
+safeSetLocalStorage
+} from "./ui-storage";
+import { useUsageActions } from "./usage-actions";
+import { useAppearanceSaveFeedback } from "./use-appearance-save-feedback";
+import { useChatAutoRetry } from "./use-chat-auto-retry";
+import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
+import { useCheckReminders } from "./use-check-reminders";
+import { useGoogleModels } from "./use-google-models";
+import { useLiveModelContext } from "./use-live-model-context";
+import { useMeasuredWorkbenchReducer } from "./use-measured-workbench";
+import { restoreModelCatalog,useModelCatalog } from "./use-model-catalog";
+import { useProjectImport } from "./use-project-import";
+import {
+useInlineSignInRunner,
+useProviderSignIn,
+useProviderSignInActions,
+} from "./use-provider-sign-in";
+import { useProviderUsage } from "./use-provider-usage";
+import { useQuitConfirmation } from "./use-quit-confirmation";
+import { useRemoteCheck } from "./use-remote-check";
+import { changeSessionBrowserViewport,useSessionBrowserEvents } from "./use-session-browser-events";
+import {
+deriveSessionContext,
+useDerivedSessionContext,
+useSessionContextEvents,
+} from "./use-session-context-events";
+import {
+useSessionModelSave,
+type SessionModelSelection,
+} from "./use-session-model-save";
+import { useSubagents } from "./use-subagents";
+import { useTaskHandoff } from "./use-task-handoff";
+import {
+useWorkbenchAppearance
+} from "./use-workbench-appearance";
+import {
+admitWorkspaceFile,
+admitWorkspaceFolders,
+useWorkspaceRootHealth,
+useWorkspaceRootRecovery,
+workspaceRootRejectionNotice,
+} from "./use-workspace-roots";
+import {
+workspaceContextRelativePath,
+workspaceContextWithLiveEditor,
+} from "./workspace-context-bridge";
+
+import {
+AppChrome,
+AppearanceContext,
+AutomationsSurface,
+CLI_LAUNCH_PRESET_MAX_PANES,
+COUNCIL_COMING_SOON,
+ChatCloseConfirmOverlay,
+ChatGridSurface,
+ChatSurface,
+CommandPaletteOverlay,
+IdeStatusBar,
+IdeSurface,
+ModelStandardPromptOverlay,
+NEW_CHAT_DRAFT_KEY,
+ProjectRemoveConfirmOverlay,
+SettingsSurface,
+TerminalAttachmentActionsContext,
+TerminalTerminateConfirmOverlay,
+ToolsSurface,
+WorkspaceToolPanel,
+absoluteWorkspaceFilePath,
+activeChatCompanionPanel,
+applyLaunchView,
+applyProviderCapabilityManifest,
+askAboutFilePrompt,
+chatCompanionPane,
+chatCompanionReducer,
+chatGridReducer,
+chatProjectKey,
+cliUpdateDismissKey,
+createChatProjectLayout,
+createInitialChatCompanionState,
+createInitialWorkbenchState,
+createNotification,
+createTerminalPane,
+defaultCommandProfiles,
+discardedSideChatSessionIds,
+formatExplorerAskListing,
+getProviderModel,
+isChatCompanionTabId,
+isProviderExecutable,
+isProviderId,
+isProviderRuntimeUsable,
+isUserSelectedWorkspacePath,
+isWorkspaceTrusted,
+latestFileReviewTurn,
+mergeWorkspaceRootFiles,
+normalizeCliLaunchPreset,
+normalizedCouncilConfig,
+normalizedWorkspaceTrustPath,
+parseGyroWorkspaceFile,
+parseProviderHealthOutput,
+persistableChatGridState,
+planWorkspaceMove,
+promoteQueuedMessage,
+providerAuthStatusAfterHealth,
+providerConnectionStatusFromRuntime,
+providerDefaultModelId,
+providerHealthAfterSignInRejection,
+providerNeedsSignIn,
+providerSupportsUsage,
+providersForConfig,
+readyCouncilProviders,
+resolveChatRailPanel,
+resolveCleanMachinePath,
+resolveCouncilSeatRequests,
+resolvedWorkspaceSettings,
+selectQueuedMessageDelivery,
+selectedReasoningEffort,
+sendableChatImage,
+serializeGyroWorkspaceFile,
+staleSideChatSessionIds,
+updateSendingSessions,
+withoutSideChatSessions,
+workspaceCommandForKeybinding,
+workspaceFilesForRoot,
+workspaceFolderPaths,
+workspacePathExcluded,
+workspaceRootForPath,
+type AppDestination,
+type Automation,
+type BrowserFeedback,
+type BrowserPreviewCapture,
+type BrowserPreviewDiagnostic,
+type CapabilityActivity,
+type CapabilityApprovalDecision,
+type CapabilityResourceRef,
+type ChatAttachment,
+type ChatBrowserResource,
+type ChatCompanionTabId,
+type ChatCompanionWidthMode,
+type ChatMode,
+type ChatPaneRef,
+type ChatRailDiffTools,
+type ChatRailTerminalTools,
+type ChatSidePanelId,
+type CliLaunchPreset,
+type CliUpdateApplyResult,
+type CliUpdateCheckReport,
+type CliUpdateOffer,
+type CliUpdatePhase,
+type CommandProfile,
+type CouncilActionRequest,
+type CouncilRun,
+type CustomTaskDraft,
+type DebugSessionState,
+type EditorRevealTarget,
+type EditorSelection,
+type FileReviewSummary,
+type GitBranchCatalog,
+type GitReviewActionId,
+type GithubPullRequest,
+type GithubWorkflowRunDetail,
+type GyroConfig,
+type IdeAssistantAction,
+type IdeAssistantRequest,
+type MenuBarOutcome,
+type MenuBarSnapshot,
+type ModelFocus,
+type ModelFocusPeekContent,
+type ModelFollowMode,
+type ModelProviderConfig,
+type NotificationPermissionState,
+type OutputChannel,
+type ProjectCapabilityPolicy,
+type ProviderCapabilitySupport,
+type ProviderChatStreamEvent,
+type ProviderHealthDetails,
+type ProviderId,
+type ProviderLedgerSummary,
+type ProviderResumeCursor,
+type ReasoningEffort,
+type Session,
+type SessionEvent,
+type SessionGoal,
+type SessionPlan,
+type SessionPlanItemStatus,
+type SessionUsageTotals,
+type SettingsSectionId,
+type SideChatMessage,
+type SideChatState,
+type SourceControlState,
+type SystemAccessScope,
+type SystemAccessScopeId,
+type TaskDefinition,
+type TerminalPane,
+type TerminalTemplate,
+type TestTreeItem,
+type UpdateState,
+type UsageSafetySnapshot,
+type WorkbenchAction,
+type WorkbenchPaneTab,
+type WorkbenchState,
+type WorkspaceChangedEvent,
+type WorkspaceContextSnapshot,
+type WorkspaceFile,
+type WorkspaceFileContent,
+type WorkspaceFileStat,
+type WorkspaceLayoutId,
+type WorkspacePreparationProgress,
+type WorkspacePreparationSnapshot,
+type WorkspaceSearchQuery,
+type WorkspaceSearchResult
+} from "@gyro-dev/ui";
+import { openUrl,revealItemInDir } from "@tauri-apps/plugin-opener";
 import "@xterm/xterm/css/xterm.css";
 import {
-  AppChrome,
-  absoluteWorkspaceFilePath,
-  applyProviderCapabilityManifest,
-  CHAT_GRID_MAX_SLOTS,
-  CLI_LAUNCH_PRESET_MAX_PANES,
-  AutomationsSurface,
-  ChatCloseConfirmOverlay,
-  ChatGridSurface,
-  ChatSurface,
-  NEW_CHAT_DRAFT_KEY,
-  TerminalAttachmentActionsContext,
-  type TerminalAttachmentActions,
-  CommandPaletteOverlay,
-  IdeStatusBar,
-  IdeSurface,
-  askAboutFilePrompt,
-  latestFileReviewTurn,
-  ModelStandardPromptOverlay,
-  ProjectRemoveConfirmOverlay,
-  providerNeedsSignIn,
-  ProvidersSurface,
-  SettingsSurface,
-  TerminalTerminateConfirmOverlay,
-  ToolsSurface,
-  WorkspaceToolPanel,
-  activeChatCompanionPanel,
-  chatProjectKey,
-  chatCompanionPane,
-  chatCompanionReducer,
-  chatGridReducer,
-  createChatProjectLayout,
-  AppearanceContext,
-  useAppearance,
-  createInitialChatCompanionState,
-  createInitialChatGridState,
-  createInitialWorkbenchState,
-  type WorkbenchAction,
-  discardedSideChatSessionIds,
-  isChatCompanionTabId,
-  resolveChatRailPanel,
-  staleSideChatSessionIds,
-  withoutSideChatSessions,
-  createNotification,
-  createTerminalPane,
-  isUserSelectedWorkspacePath,
-  defaultCommandProfiles,
-  getProviderModel,
-  isProviderId,
-  isProviderExecutable,
-  isProviderRuntimeUsable,
-  isWorkspaceTrusted,
-  mergeWorkspaceRootFiles,
-  normalizeCliLaunchPreset,
-  normalizedWorkspaceTrustPath,
-  workspaceFolderPaths,
-  workspaceFilesForRoot,
-  workspaceRelativeFilePath,
-  workspaceRootForPath,
-  workspacePathExcluded,
-  normalizedConfig,
-  COUNCIL_COMING_SOON,
-  normalizedCouncilConfig,
-  readyCouncilProviders,
-  resolveCouncilSeatRequests,
-  parseProviderHealthOutput,
-  cliUpdateDismissKey,
-  parseGyroWorkspaceFile,
-  workspaceCommandForKeybinding,
-  providerAuthStatusAfterHealth,
-  providerConnectionStatusFromRuntime,
-  providerDefaultModelId,
-  providerHealthAfterSignInRejection,
-  providerSupportsUsage,
-  providersForConfig,
-  resolveCleanMachinePath,
-  resolvedWorkspaceSettings,
-  promoteQueuedMessage,
-  selectQueuedMessageDelivery,
-  updateSendingSessions,
-  persistableChatGridState,
-  sanitizeStoredIdeState,
-  sendableChatImage,
-  sanitizeStoredChatGridState,
-  selectedReasoningEffort,
-  serializeGyroWorkspaceFile,
-  workbenchReducer,
-  type AppDestination,
-  type Automation,
-  type BrowserPreviewCapture,
-  type BrowserFeedback,
-  type BrowserPreviewDiagnostic,
-  type CapabilityActivity,
-  type CapabilityApprovalDecision,
-  type CapabilityApprovalEvent,
-  type CapabilityCallEvent,
-  type CapabilityResourceRef,
-  type ChatBrowserResource,
-  type ChatAttachment,
-  type ChatGridState,
-  type ChatMode,
-  type CouncilActionRequest,
-  type CouncilRun,
-  type ChatPaneRef,
-  type ChatRailDiffTools,
-  type ChatRailTerminalTools,
-  type ChatCompanionTabId,
-  type ChatCompanionWidthMode,
-  type SideChatMessage,
-  type SideChatState,
-  type ChatSidePanelId,
-  type CliLaunchPreset,
-  type CommandProfile,
-  type DebugSessionState,
-  type EditorBuffer,
-  type EditorRevealTarget,
-  type EditorSelection,
-  type GyroConfig,
-  type GitBranchCatalog,
-  type GitReviewActionId,
-  type GithubAvailability,
-  type GithubPullRequest,
-  type GithubWorkflowRun,
-  type GithubWorkflowRunDetail,
-  type HarnessRunStatus,
-  type IdeAiToolCall,
-  type IdeAssistantAction,
-  type IdeAssistantRequest,
-  type LanguageServerState,
-  type MenuBarOutcome,
-  type MenuBarSnapshot,
-  type OutputChannel,
-  type ModelFocus,
-  type ModelFocusPeekContent,
-  type ModelFollowMode,
-  type ModelProviderConfig,
-  type NotificationPermissionState,
-  type ProviderHealthDetails,
-  type ProviderCapabilitySupport,
-  type ProjectCapabilityPolicy,
-  type ProviderId,
-  type SessionUsageTotals,
-  type UsageSafetySnapshot,
-  type ProviderLedgerSummary,
-  type ProviderHandoff,
-  type ProviderChatStreamEvent,
-  type ProviderResumeCursor,
-  type ReasoningEffort,
-  type ResolvedTheme,
-  type ProviderSession,
-  type ProblemDiagnostic,
-  type Session,
-  type SessionEvent,
-  type SessionGoal,
-  type SessionPlan,
-  type SessionPlanItem,
-  type SessionPlanItemStatus,
-  type SessionsLayoutId,
-  type SettingsSectionId,
-  type SourceControlState,
-  type SystemAccessScope,
-  type SystemAccessScopeId,
-  type Task,
-  type CustomTaskDraft,
-  type TaskDefinition,
-  type TestTreeItem,
-  type TerminalPaneStatus,
-  type TerminalPane,
-  type TerminalTemplate,
-  type ThemeMode,
-  type UpdateState,
-  type CliUpdateOffer,
-  type CliUpdateCheckReport,
-  type CliUpdateApplyResult,
-  type CliUpdatePhase,
-  type WorkbenchPaneTab,
-  type WorkbenchState,
-  type WorkbenchTurn,
-  type WorkspaceFile,
-  type WorkspaceFileContent,
-  type WorkspaceFileStat,
-  type WorkspaceChangedEvent,
-  type WorkspaceContextSnapshot,
-  type WorkspacePreparationProgress,
-  type WorkspacePreparationSnapshot,
-  type WorkspaceSearchQuery,
-  type WorkspaceSearchResult,
-  type WorkspaceScopedSettings,
-  type WorkspaceSettingScope,
-  type WorkspaceLayoutId,
-  type FileReviewSummary,
-} from "@gyro-dev/ui";
-import {
-  lazy,
-  startTransition,
-  Suspense,
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useState,
-  type DragEvent as ReactDragEvent,
+Suspense,
+lazy,
+useCallback,
+useDeferredValue,
+useEffect,
+useLayoutEffect,
+useMemo,
+useReducer,
+useRef,
+useState,
+type DragEvent as ReactDragEvent,
+type PointerEvent as ReactPointerEvent
 } from "react";
 import {
-  applyProviderChatStreamPresentation,
-  applyProviderChatStreamDeltas,
-  settleOpenProviderActivitiesForTurn,
-  isProviderStatusEvent,
-  limitSessionEventsForUi,
-  MAX_CHAT_EVENT_HOLD_COUNT,
-  MAX_CHAT_EVENT_RENDER_COUNT,
-  mergePersistedAndOptimisticEvents,
-  mergeLiveCapabilityEvent,
-  mergeProviderResponseEvents,
-  preserveDeliveredResponses,
-  resetStreamingAssistantForRetry,
-  type ProviderStreamOrderState,
-  upsertStreamingAssistantEvent,
-} from "./provider-stream-events";
-import {
-  chatPaneEnvironmentControls,
-  useChatEnvironmentVisibility,
-  useSoloChatEnvironmentControls,
+chatPaneEnvironmentControls,
+useChatEnvironmentVisibility,
+useSoloChatEnvironmentControls,
 } from "./chat-environment-rail";
-import { useWorkspaceExplorerFiles } from "./workspace-explorer";
-import { useGyroUpdater } from "./update-controller";
 import {
-  deriveLatestMenuBarOutcome,
-  deriveMenuBarSnapshot,
+deriveLatestMenuBarOutcome,
+deriveMenuBarSnapshot,
 } from "./menu-bar-state";
+import {
+MAX_CHAT_EVENT_RENDER_COUNT,
+applyProviderChatStreamDeltas,
+applyProviderChatStreamPresentation,
+limitOptimisticSessionEvents,
+limitSessionEventsForUi,
+mergeLiveCapabilityEvent,
+mergePersistedAndOptimisticEvents,
+mergeProviderResponseEvents,
+preserveDeliveredResponses,
+resetStreamingAssistantForRetry,
+settleOpenProviderActivitiesForTurn,
+type ProviderStreamOrderState
+} from "./provider-stream-events";
 import { useUnreadCompletedChats } from "./unread-completed-chats";
+import { useGyroUpdater } from "./update-controller";
+import { useWorkspaceExplorerFiles } from "./workspace-explorer";
+import { runWorkspaceSearchRoots } from "./workspace-search-run";
 
-const MonacoEditor = lazy(() => import("./monaco-editor"));
 const SourceControlDiffEditor = lazy(
   () => import("./source-control-diff-editor"),
 );
@@ -362,32 +466,6 @@ type ProviderCapabilityResourceEvent = {
   callId: string;
   resource: CapabilityResourceRef;
   data: unknown;
-};
-
-type TerminalPaneSnapshot = {
-  paneId: string;
-  title: string;
-  profileId?: string | null;
-  command: string;
-  output?: string | null;
-  outputRevision: number;
-  status: "running" | "done" | "failed";
-  hasForegroundJob?: boolean | null;
-  exitCode?: number | null;
-  workspacePath?: string;
-  workingDirectory?: string;
-  cols: number;
-  rows: number;
-  governedSessionId?: string | null;
-  governedProviderId?: string | null;
-};
-
-type LspSessionResult = {
-  serverId: string;
-  languageId: string;
-  command: string;
-  status: string;
-  message: string;
 };
 
 type LspBridgeResponse = {
@@ -459,6 +537,8 @@ type ChatTurnContextSnapshot = {
   preserveDraft?: boolean;
   turnId?: string;
   retryTurnId?: string;
+  /** Cancel a retry that is still preparing when Stop or a new send wins. */
+  retryDispatchGuard?: () => boolean;
 };
 
 type QueuedChatMessage = {
@@ -491,81 +571,20 @@ type GitSyncResult = {
   status: SourceControlState;
 };
 
-type AutomationDraft = Pick<
-  Automation,
-  | "branch"
-  | "nextRunAt"
-  | "project"
-  | "prompt"
-  | "provider"
-  | "schedule"
-  | "stopCondition"
-  | "title"
-  | "workspaceMode"
-  | "worktreeName"
-  | "execution"
->;
-
 type ModelStandardPrompt = {
-  count: number;
+  usageCount: number;
+  chatCount: number;
   modelId: string;
   modelLabel: string;
   providerId: ProviderId;
   providerLabel: string;
 };
 
-type ModelUsageEntry = {
-  count: number;
-  snoozeUntil?: number;
-  standard?: boolean;
-};
-
-type ModelUsageMap = Record<string, ModelUsageEntry>;
-
-type SavedProject = {
-  path: string;
-  label: string;
-  detail: string;
-  sessionCount: number;
-};
-
-const EMPTY_CONFIG: GyroConfig = {
-  automaticUpdateChecks: true,
-  telemetryEnabled: false,
-  requireCommandApproval: true,
-  requireFileEditApproval: true,
-  fullAccess: false,
-  changeSummariesEnabled: false,
-  accountOidc: {
-    issuerUrl: "local-device://gyro",
-    clientId: "gyro-local-device",
-    redirectLoopbackBase: "http://127.0.0.1",
-    scopes: ["openid", "profile", "email", "offline_access"],
-  },
-  accountSession: { signedIn: false },
-  modelProviders: [],
-  commandProfiles: [],
-};
-
 const PREVIEW_WORKSPACE_PATH = "/preview/Gyro";
-const WORKBENCH_STORAGE_KEY = "gyro.workbench-state";
-const CHAT_TASK_METADATA_KEY = "gyro.chat-task-metadata.v1";
-const PINNED_SESSIONS_STORAGE_KEY = "gyro.pinned-session-ids";
-const REMOVED_PROJECTS_STORAGE_KEY = "gyro.removed-project-paths";
-const RECENT_PROJECTS_STORAGE_KEY = "gyro.recent-project-paths";
-const PREVIEW_CONFIG_STORAGE_KEY = "gyro.preview-config";
-const MODEL_USAGE_STORAGE_KEY = "gyro.model-standard-usage";
 /** Lines shown either side of the revealed line in a model focus peek. */
 const MODEL_FOCUS_PEEK_CONTEXT_LINES = 12;
-
-const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
-const CHAT_DRAFT_MODES_STORAGE_KEY = "gyro.chat-draft-modes-v1";
-const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
-const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
-/** Set once the first launch has asked macOS for its folder grants. */
+/** Record the first automatic request before macOS opens a permission sheet. */
 const SYSTEM_ACCESS_PROMPTED_STORAGE_KEY = "gyro.system-access-prompted-v1";
-const MODEL_STANDARD_PROMPT_THRESHOLD = 3;
-const MODEL_STANDARD_PROMPT_SNOOZE_SELECTIONS = 3;
 const DEFAULT_TOOL_PANEL_HEIGHT = 280;
 const BROWSER_TOOL_PANEL_HEIGHT = 420;
 /** ~65% of viewport — Browser focus mode; never shrink a taller panel. */
@@ -576,7 +595,12 @@ const PROVIDER_AUTH_POLL_ATTEMPTS = 40;
 // runs a browser login someone has to complete by hand, and giving up early
 // means dropping the message that was waiting on it.
 const PROVIDER_SIGN_IN_POLL_ATTEMPTS = 100;
-const MAX_CHAT_MESSAGE_CHARS = 24_000;
+// The model popover shows the sign-in link as soon as the CLI prints it, so an
+// inline sign-in reads its terminal quickly for the first few seconds.
+const PROVIDER_SIGN_IN_FAST_POLL_MS = 500;
+const PROVIDER_SIGN_IN_FAST_POLL_ATTEMPTS = 12;
+// npm installs of a provider CLI finish in well under five minutes.
+const PROVIDER_INSTALL_POLL_ATTEMPTS = 600;
 const MAX_CHAT_IMAGES_PER_MESSAGE = 10;
 const MAX_CHAT_VIDEOS_PER_MESSAGE = 2;
 // Mirrors the native limits so oversized files are rejected before they are
@@ -588,8 +612,8 @@ const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
 // The draft key for a chat with no session yet. Shared with the UI package so
 // a drop and the composer holding it always name the same draft.
 const PROVIDER_STREAM_FLUSH_MS = 80;
+
 const WORKBENCH_PERSIST_DEBOUNCE_MS = 500;
-const WORKBENCH_PERSIST_IDLE_TIMEOUT_MS = 1_500;
 const TERMINAL_POLL_INTERVAL_MS = 1_000;
 
 type BrowserPreviewCheck = {
@@ -612,16 +636,6 @@ type OllamaDiscovery = {
   }>;
 };
 const TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS = 4_000;
-const MAX_PERSISTED_TERMINAL_OUTPUT_CHARS = 8_000;
-const MAX_PERSISTED_OUTPUT_CHANNEL_LINES = 100;
-const MAX_PERSISTED_DIRTY_BUFFER_CHARS = 500_000;
-const MAX_PERSISTED_DIRTY_BUFFERS_TOTAL_CHARS = 1_000_000;
-const MAX_STORED_WORKBENCH_STATE_CHARS = 2_000_000;
-const MAX_STORED_PREVIEW_CONFIG_CHARS = 200_000;
-const MAX_STORED_MODEL_USAGE_CHARS = 100_000;
-const MAX_PINNED_SESSIONS = 200;
-const MAX_REMOVED_PROJECTS = 200;
-const MAX_RECENT_PROJECTS = 12;
 const AUTOMATION_SCHEDULER_COMMANDS = {
   claimDue: "claim_due_automation",
   completeLease: "complete_automation_lease",
@@ -630,79 +644,6 @@ const AUTOMATION_SCHEDULER_COMMANDS = {
   recoverLeases: "recover_automation_leases",
 } as const;
 const ACTIVE_TURN_IDLE_MS = 5 * 60 * 1000;
-
-function modelUsageKey(providerId: ProviderId, modelId: string) {
-  return `${providerId}:${modelId}`;
-}
-
-function providerLoginProfile(providerId: ProviderId): CommandProfile {
-  if (providerId === "anthropic") {
-    return {
-      args: ["auth", "login"],
-      command: "claude",
-      displayName: "Anthropic Login",
-      id: "anthropic-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "cursor") {
-    return {
-      args: ["login"],
-      command: "cursor-agent",
-      displayName: "Cursor Login",
-      id: "cursor-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "opencode") {
-    return {
-      args: ["auth", "login"],
-      command: "opencode",
-      displayName: "OpenCode Login",
-      id: "opencode-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "kimi") {
-    return {
-      args: ["login"],
-      command: "kimi",
-      displayName: "Kimi Login",
-      id: "kimi-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "xai") {
-    return {
-      args: ["login"],
-      command: "grok",
-      displayName: "xAI Login",
-      id: "xai-login",
-      workingDirectory: null,
-    };
-  }
-  if (providerId === "gemini") {
-    return {
-      args: [],
-      command: "gemini",
-      displayName: "Gemini Login",
-      id: "gemini-login",
-      workingDirectory: null,
-    };
-  }
-
-  return {
-    args: ["login", "--device-auth"],
-    command: "codex",
-    displayName: "OpenAI Login",
-    id: "openai-login",
-    workingDirectory: null,
-  };
-}
-
-function providerLoginCommandText(profile: CommandProfile) {
-  return [profile.command, ...profile.args].join(" ");
-}
 
 /**
  * Propose a branch name from the pending commit message, so the common case is
@@ -748,51 +689,14 @@ function waitForNextPaint() {
   });
 }
 
-function loadModelUsageMap(): ModelUsageMap {
-  try {
-    const stored = readBoundedLocalStorage(
-      MODEL_USAGE_STORAGE_KEY,
-      MAX_STORED_MODEL_USAGE_CHARS,
-    );
-    if (!stored) {
-      return {};
-    }
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    return Object.fromEntries(
-      Object.entries(parsed).flatMap(([key, value]) => {
-        if (!value || typeof value !== "object" || Array.isArray(value)) {
-          return [];
-        }
-        const entry = value as Partial<ModelUsageEntry>;
-        return [
-          [
-            key,
-            {
-              count:
-                typeof entry.count === "number" && Number.isFinite(entry.count)
-                  ? entry.count
-                  : 0,
-              snoozeUntil:
-                typeof entry.snoozeUntil === "number" &&
-                Number.isFinite(entry.snoozeUntil)
-                  ? entry.snoozeUntil
-                  : undefined,
-              standard: entry.standard === true,
-            },
-          ],
-        ];
-      }),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function saveModelUsageMap(usage: ModelUsageMap) {
-  safeSetLocalStorage(MODEL_USAGE_STORAGE_KEY, JSON.stringify(usage));
+function loadModelDefaultSuggestionState() {
+  return parseModelDefaultSuggestionState(
+    readBoundedLocalStorage(
+      MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
+      MODEL_DEFAULT_SUGGESTION_MAX_STORAGE_CHARS,
+    ),
+    Date.now(),
+  );
 }
 
 /** Pane key for the chat surfaces that render outside the tiled grid. */
@@ -805,15 +709,19 @@ type BrowserOwner = {
 };
 
 export function App() {
-  const [workbench, dispatchWorkbench] = useReducer(
-    workbenchReducer,
-    undefined,
+  const quitConfirmation = useQuitConfirmation();
+  const [workbench, dispatchWorkbench] = useMeasuredWorkbenchReducer(
     loadInitialWorkbenchState,
   );
-  const { resolvedTheme, reduceMotion, appearance } = useWorkbenchAppearance(workbench.preferences);
+  const { appearanceSaveStatus, onAppearancePersisted, retryAppearanceSave } =
+    useAppearanceSaveFeedback(workbench.preferences);
+  const { resolvedTheme, reduceMotion, appearance } = useWorkbenchAppearance(
+    workbench.preferences,
+  );
   const [sessions, setSessions] = useState<Session[]>([]);
   // Session persistence and title updates must not interrupt live tool events.
   const sessionsRef = useRef(sessions);
+  const sessionsLoadedRef = useRef(false);
   sessionsRef.current = sessions;
   const [activeSessionId, setActiveSessionId] = useState<string>();
   const activeSessionIdRef = useRef(activeSessionId);
@@ -822,6 +730,8 @@ export function App() {
   // user changes surface or follow preference.
   const modelFollowRef = useRef(workbench.preferences.modelFollow);
   modelFollowRef.current = workbench.preferences.modelFollow;
+  // Assigned once the workspace handlers exist, further down this component.
+  const openWorkspaceFolderRef = useRef<(path: string) => Promise<void>>();
   const activeWorkspaceLayoutRef = useRef(workbench.activeWorkspaceLayout);
   activeWorkspaceLayoutRef.current = workbench.activeWorkspaceLayout;
   const [sessionEventsById, setSessionEventsById] = useState<
@@ -842,22 +752,31 @@ export function App() {
     useState<Record<string, ChatBrowserResource>>({});
   const [capabilityResourceDataByCallId, setCapabilityResourceDataByCallId] =
     useState<Record<string, unknown>>({});
-  const [chatGrid, dispatchChatGrid] = useReducer(
+  const [chatGrid, reduceChatGrid] = useReducer(
     chatGridReducer,
     undefined,
     loadChatGridState,
+  );
+  const chatGridRef = useRef(chatGrid);
+  chatGridRef.current = chatGrid;
+  // Keep acceptance and queued layout updates on the same state, including
+  // multiple drops dispatched before React commits another render.
+  const dispatchChatGrid = useCallback(
+    (action: Parameters<typeof chatGridReducer>[1]) => {
+      const current = chatGridRef.current;
+      const next = chatGridReducer(current, action);
+      if (next === current) return false;
+      chatGridRef.current = next;
+      reduceChatGrid(action);
+      return true;
+    },
+    [],
   );
   const events = activeSessionId
     ? (sessionEventsById[activeSessionId] ?? [])
     : [];
   const limitEventsForSession = useCallback(
-    (sessionId: string, events: SessionEvent[]) =>
-      limitSessionEventsForUi(
-        events,
-        expandedHistorySessionsRef.current.has(sessionId)
-          ? MAX_CHAT_EVENT_HOLD_COUNT
-          : MAX_CHAT_EVENT_RENDER_COUNT,
-      ),
+    (_sessionId: string, events: SessionEvent[]) => events,
     [],
   );
   const setEventsForSession = useCallback(
@@ -882,14 +801,27 @@ export function App() {
     [setEventsForSession],
   );
   const eventsRef = useRef<SessionEvent[]>([]);
+  const sessionEventsByIdRef = useRef(sessionEventsById);
+  sessionEventsByIdRef.current = sessionEventsById;
   const optimisticEventsRef = useRef(new Map<string, SessionEvent[]>());
-  const [workspacePath, setWorkspacePath] = useState<string>();
+  const [workspacePath, setWorkspacePath] = useState<string | undefined>(
+    loadInitialWorkspacePath,
+  );
   const [branchCatalog, setBranchCatalog] = useState<GitBranchCatalog>();
   const [isBranchLoading, setIsBranchLoading] = useState(false);
   /** A push or pull is in flight, so the sync control stays a single press. */
   const [sourceControlSyncing, setSourceControlSyncing] = useState(false);
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string>();
+  const selectedFileRef = useRef(selectedFile);
+  selectedFileRef.current = selectedFile;
+  const editorBuffersRef = useRef(workbench.ide.buffers);
+  editorBuffersRef.current = workbench.ide.buffers;
+  const navigationRequestRef = useRef(0);
+  const [navigationHistory, setNavigationHistory] = useState<{
+    entries: WorkspaceNavigationSource[];
+    index: number;
+  }>({ entries: [], index: -1 });
   const [languageOverrides, setLanguageOverrides] = useState<
     Record<string, string>
   >({});
@@ -918,6 +850,16 @@ export function App() {
   >(() => loadChatDraftModes());
   const chatDraftModesRef = useRef(chatDraftModes);
   const chatDraftModeRevisionsRef = useRef<Record<string, number>>({});
+  /**
+   * Goal mode is a selection, not a one-shot editor: it outlives the message
+   * that sets the goal, so the chip stays with the chat until removed.
+   */
+  const [chatDraftGoalModes, setChatDraftGoalModes] = useState<
+    Record<string, boolean>
+  >({});
+  /** Draft key whose Goal mode should follow a newly started goal chat. */
+  const goalModeCarryRef = useRef<string>();
+  const draftWorkspaceModes = useRef<Record<string, WorkbenchState["workspaceMode"]>>({});
   /** Per-draft model picks so split-screen new chats don't share the global model. */
   const [chatDraftModels, setChatDraftModels] = useState<
     Record<string, SessionModelSelection>
@@ -925,6 +867,8 @@ export function App() {
   const [chatAttachments, setChatAttachments] = useState<
     Record<string, ChatAttachment[]>
   >(() => loadChatAttachments());
+  const chatAttachmentsRef = useRef(chatAttachments);
+  chatAttachmentsRef.current = chatAttachments;
   const [chatMessageQueues, setChatMessageQueues] = useState<
     Record<string, QueuedChatMessage[]>
   >({});
@@ -944,13 +888,19 @@ export function App() {
     setTerminalSourceControlLoadingPaneId,
   ] = useState<string>();
   const [config, setConfig] = useState<GyroConfig>(loadPreviewConfig);
+  const [configLoaded, setConfigLoaded] = useState(false);
   const configRef = useRef(config);
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermissionState>("prompt");
   const [isTestingNotification, setIsTestingNotification] = useState(false);
-  const [systemAccess, setSystemAccess] = useState<SystemAccessScope[]>([]);
+  const [systemAccess, setSystemAccess] = useState<SystemAccessScope[]>(() =>
+    parseSystemAccessSnapshot(
+      readBoundedLocalStorage(SYSTEM_ACCESS_STATUS_STORAGE_KEY, 16_000),
+    ),
+  );
   const [isCheckingSystemAccess, setIsCheckingSystemAccess] = useState(false);
   const systemAccessBootstrapRef = useRef(false);
+  const systemAccessCheckRef = useRef<Promise<SystemAccessScope[]> | null>(null);
   // What each chat has spent, read from Gyro's usage ledger. Unlike the
   // provider quota windows above, this covers every provider, including the
   // ones whose CLIs report no token counts at all.
@@ -1003,6 +953,14 @@ export function App() {
     useState<SavedProject>();
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
   const sendingSessionIdsRef = useRef(new Set<string>());
+  const approvalCountsBySessionId = useMemo(
+    () => sessionApprovalCounts(sessions, sessionEventsById),
+    [sessions, sessionEventsById],
+  );
+  const questionCountsBySessionId = useMemo(
+    () => sessionQuestionCounts(sessions, sessionEventsById, sendingSessionIds),
+    [sessions, sessionEventsById, sendingSessionIds],
+  );
   const queuedDeliveryNotBeforeRef = useRef(new Map<string, number>());
   const {
     unreadCompletedSessionIds,
@@ -1023,6 +981,25 @@ export function App() {
   const queuedChatDispatchMessageIdsRef = useRef(new Map<string, string>());
   const persistedChatTurnIdsRef = useRef(new Set<string>());
   const [queueRetryTick, setQueueRetryTick] = useState(0);
+  const retryProviderStatusRef = useRef<(event: SessionEvent) => void>(
+    () => {},
+  );
+  const retryDispatchRef = useRef(createChatRetryDispatcher());
+  useEffect(() => () => retryDispatchRef.current.cancelAll(), []);
+  const chatAutoRetry = useChatAutoRetry({
+    enabled: isTauriRuntime(),
+    eventsBySessionId: sessionEventsById,
+    sendingSessionIds,
+    queueVersion: chatMessageQueues,
+    pauseVersion: queueRetryTick,
+    blockedSessionIds: () =>
+      new Set([
+        ...sendingSessionIdsRef.current,
+        ...stoppedChatSessionsRef.current,
+        ...queuedChatDispatchesRef.current,
+      ]),
+    onRetry: (event) => retryProviderStatusRef.current(event),
+  });
   const pendingPaneSendRef = useRef<{
     paneId: string;
     message: string;
@@ -1113,6 +1090,32 @@ export function App() {
   const planEditorRequestTokenRef = useRef(0);
   const [modelStandardPrompt, setModelStandardPrompt] =
     useState<ModelStandardPrompt>();
+  const [pendingModelDefaultCandidate, setPendingModelDefaultCandidate] =
+    useState<{ providerId: ProviderId; modelId: string }>();
+  const [isModelDefaultSaving, setIsModelDefaultSaving] = useState(false);
+  const [modelDefaultSaveError, setModelDefaultSaveError] = useState<string>();
+  const modelDefaultSavingRef = useRef(false);
+  const modelSuggestionShownRef = useRef(false);
+  const modelSuggestionStateRef = useRef<ModelDefaultSuggestionState>();
+  if (!modelSuggestionStateRef.current) {
+    modelSuggestionStateRef.current = loadModelDefaultSuggestionState();
+  }
+  const saveModelSuggestionState = useCallback(
+    (next: ModelDefaultSuggestionState) => {
+      modelSuggestionStateRef.current = next;
+      safeSetLocalStorage(
+        MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
+        JSON.stringify(next),
+      );
+    },
+    [],
+  );
+  const clearModelDefaultSuggestion = useCallback(() => {
+    setPendingModelDefaultCandidate(undefined);
+    setModelStandardPrompt(undefined);
+    setModelDefaultSaveError(undefined);
+  }, []);
+
   const [terminalTerminateCandidate, setTerminalTerminateCandidate] =
     useState<TerminalPane>();
   const [chatCloseCandidate, setChatCloseCandidate] = useState<{
@@ -1129,7 +1132,8 @@ export function App() {
   const [loadingEarlierSessionIds, setLoadingEarlierSessionIds] = useState<
     string[]
   >([]);
-  const expandedHistorySessionsRef = useRef(new Set<string>());
+  const completeHistorySessionsRef = useRef(new Set<string>());
+  const historyRevisionsRef = useRef<Record<string, string | undefined>>({});
   const toolPanelHeight = workbench.preferences.workspacePanelHeight;
   const [isStartingFirstTurn, setIsStartingFirstTurn] = useState(false);
   // Chat UI paints immediately; non-essential actions stay gated until the
@@ -1137,6 +1141,8 @@ export function App() {
   const [isShellOptimizing, setIsShellOptimizing] = useState(() =>
     isTauriRuntime(),
   );
+  const refreshModelContexts = useLiveModelContext(config, setConfig, isShellOptimizing);
+  const refreshGoogleModels = useGoogleModels(config, setConfig, isShellOptimizing);
   const suppressSessionAutoSelectRef = useRef(true);
   // Sessions whose chat pane the user closed.
   //
@@ -1151,8 +1157,6 @@ export function App() {
   const refreshedFileActivityKeysRef = useRef(new Set<string>());
   const lastNonSettingsDestinationRef = useRef<AppDestination>("workspace");
   const initialTerminalRestoreModeRef = useRef(workbench.workspaceMode);
-  const languageServerIdsRef = useRef<Record<string, string>>({});
-  const languageServerOpenedDocsRef = useRef(new Set<string>());
   // Providers that rejected the sign-in Gyro sent with, mirrored into a ref so
   // the stream and health callbacks read the live set without re-subscribing.
   // The writers below update it eagerly: a sign-in and the health check that
@@ -1246,9 +1250,10 @@ export function App() {
   const sessionBrowserKey =
     activeSessionId ??
     (activeWorkspaceRoot ? `workbench:${activeWorkspaceRoot}` : "workbench");
-  const browserPreview =
-    workbench.browserPreviewsBySession?.[sessionBrowserKey] ??
-    EMPTY_BROWSER_PREVIEW;
+  const browserPreview = {
+    ...(workbench.browserPreviewsBySession?.[sessionBrowserKey] ?? EMPTY_BROWSER_PREVIEW),
+    runtime: isTauriRuntime() ? appPreviewClient(sessionBrowserKey, activeWorkspaceRoot ?? "") : undefined,
+  };
   // Each render captures its browser owner, including callbacks completing after
   // a chat switch. Native events explicitly supply the originating session.
   const dispatchActiveBrowser = useCallback(
@@ -1282,7 +1287,7 @@ export function App() {
     workbench.activePaneTab === "browser" &&
     workbench.isToolPanelOpen &&
     Boolean(activeWorkspaceRoot);
-  const workspaceRoots = useMemo(() => {
+  const configuredWorkspaceRoots = useMemo(() => {
     const configured = workspaceFolderPaths(
       activeWorkspaceRoot,
       workbench.preferences.workspaceFolders,
@@ -1307,10 +1312,18 @@ export function App() {
     workbench.preferences.workspaceFolders,
     workbench.preferences.projectDetails,
   ]);
+  // Unavailable roots stay configured but leave the session, Explorer, and agent.
+  const workspaceRootHealth = useWorkspaceRootHealth(
+    configuredWorkspaceRoots,
+    activeWorkspaceRoot,
+    dispatchWorkbench,
+  );
+  const workspaceRoots = workspaceRootHealth.roots;
   const workspaceActionRoot =
     workspaceRootForPath(workspaceRoots, selectedWorkspaceRoot) ??
     workspaceRootForPath(workspaceRoots, selectedFile) ??
     activeWorkspaceRoot;
+  const scopedIde = useScopedIdeState(workbench.ide, workspaceActionRoot);
   useEffect(() => {
     const identity = activeSession?.workspaceIdentity;
     const active = identity?.roots.find(
@@ -1372,6 +1385,14 @@ export function App() {
   useEffect(() => {
     dispatchCompanion({ type: "focus-pane", paneId: companionFocusPaneId });
   }, [companionFocusPaneId]);
+  // Model "follow" reports arrive through a long-lived listener; it reads the
+  // split through this ref so a browser the model drives stays on the backend
+  // instead of covering the transcript of a tiled pane.
+  const isSplitChatViewRef = useRef(false);
+  isSplitChatViewRef.current = isSplitChatLayout({
+    occupiedPaneCount: (activeChatLayout?.slots ?? []).filter(Boolean).length,
+    hasMaximizedPane: Boolean(chatGrid.maximizedPaneId),
+  });
   useModelBrowserReveal({
     activeSessionId,
     dispatch: dispatchWorkbench,
@@ -1681,10 +1702,20 @@ export function App() {
     },
     [openCompanionTab, soloEnvironment],
   );
+  const sessionForPane = (paneId: string) => {
+    const pane = displayedChatLayout.slots.find(
+      (slot) => slot?.paneId === paneId,
+    );
+    return pane?.kind === "session" ? pane.sessionId : undefined;
+  };
   const companionSurfaceProps = (paneId: string) => ({
     dailyPaceWarning: workbench.preferences.dailyPaceWarning,
     providerLedgerById,
     sideChat: sideChatFor(paneId),
+    subagents: subagentController.forPane(
+      paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId),
+      paneId,
+    ),
     companionTabs: chatCompanionPane(companion, paneId).openTabs,
     companionWidth: companion.dockWidth,
     browserCompanionWidth: companion.browserDockWidth,
@@ -1842,6 +1873,31 @@ export function App() {
   // The chip describes the next message. Historical mode events describe
   // submitted turns and must never select a mode for an unsent draft.
   const selectedDraftMode = chatDraftModes[activeDraftKey] ?? "normal";
+  // A goal outlives the message that set it: a chat with a goal starts with
+  // Goal mode selected, and a dismissal stays off for that draft. The editor
+  // itself also reads as selected, so opening Goal always shows the chip.
+  const activeGoalMode =
+    isGoalComposerActive ||
+    (chatDraftGoalModes[activeDraftKey] ?? Boolean(activeSessionGoal?.text));
+  const closeGoalComposer = useCallback(() => {
+    setIsGoalComposerActive(false);
+    // Saving or starting a goal selects Goal mode again, even if the user had
+    // dismissed it earlier; the goal is what the chat is now working toward.
+    // A draft has no chat key yet, so its new session picks the mode up from
+    // the goal itself rather than leaving a stale entry on the draft.
+    if (activeDraftKey === NEW_CHAT_DRAFT_KEY) return;
+    setChatDraftGoalModes((current) => ({
+      ...current,
+      [activeDraftKey]: true,
+    }));
+  }, [activeDraftKey]);
+  const dismissGoalComposer = useCallback(() => {
+    setIsGoalComposerActive(false);
+    setChatDraftGoalModes((current) => ({
+      ...current,
+      [activeDraftKey]: false,
+    }));
+  }, [activeDraftKey]);
   const activeChatMode =
     COUNCIL_COMING_SOON && selectedDraftMode === "council"
       ? "normal"
@@ -1853,6 +1909,16 @@ export function App() {
     : [];
   useEffect(() => {
     setIsGoalComposerActive(false);
+    // Starting a goal creates its chat a moment later. Carry the selection
+    // onto that chat so the chip never blinks off while its first events load.
+    const carriedDraftKey = goalModeCarryRef.current;
+    if (!activeSessionId || !carriedDraftKey) return;
+    goalModeCarryRef.current = undefined;
+    setChatDraftGoalModes((current) => {
+      const next = { ...current, [activeSessionId]: true };
+      delete next[carriedDraftKey];
+      return next;
+    });
   }, [activeSessionId]);
   const derivedActiveTurn = useMemo(
     () =>
@@ -1890,6 +1956,7 @@ export function App() {
     );
   }, [pinnedSessionIds, removedProjectPaths, sessions]);
   useEffect(() => {
+    if (!sessionsLoadedRef.current) return;
     const sessionById = new Map(
       sessions.map((session) => [session.id, session]),
     );
@@ -2074,9 +2141,14 @@ export function App() {
             persistedRoots.some((path, index) => path !== workspaceRoots[index])
           ) {
             dispatchWorkbench({
-              type: "set-workspace-folders",
+              type: "canonicalize-workspace-folders",
               workspacePath: updated.workspacePath,
-              paths: persistedRoots.slice(1),
+              replacements: Object.fromEntries(
+                workspaceRoots.map((root, index) => [
+                  root,
+                  persistedRoots[index] ?? root,
+                ]),
+              ),
             });
             const active = updated.workspaceIdentity?.roots.find(
               (root) => root.id === updated.workspaceIdentity?.activeRootId,
@@ -2145,6 +2217,7 @@ export function App() {
       files,
       isTauriRuntime() ? loadExplorerDirectory : undefined,
       reportExplorerError,
+      workspaceChangeGeneration,
     );
   const visibleWorkspaceFiles = useMemo(
     () =>
@@ -2194,7 +2267,7 @@ export function App() {
   useEffect(() => {
     if (
       activeDestination !== "settings" ||
-      workbench.preferences.lastSettingsSection !== "permissions" ||
+      workbench.preferences.lastSettingsSection !== "general" ||
       !isTauriRuntime()
     ) {
       return undefined;
@@ -2231,23 +2304,33 @@ export function App() {
     }
   }, [isTestingNotification, notify]);
   /**
-   * Resolves Gyro's macOS folder grants. On an undetermined scope the read
-   * inside `check_system_access` is what makes macOS show its permission sheet,
-   * so the first call of the app's life is also the one that asks.
+   * Reading an undetermined scope can open a native permission sheet.
+   * Only first launch or an explicit recheck requests access; Settings
+   * restores the saved display snapshot without touching protected folders.
    */
-  const checkSystemAccess = useCallback(async () => {
-    if (!isTauriRuntime()) return [] as SystemAccessScope[];
+  const checkSystemAccess = useCallback(() => {
+    if (!isTauriRuntime()) return Promise.resolve([] as SystemAccessScope[]);
+    if (systemAccessCheckRef.current) return systemAccessCheckRef.current;
     setIsCheckingSystemAccess(true);
-    try {
-      const scopes = await invoke<SystemAccessScope[]>("check_system_access");
-      setSystemAccess(scopes);
-      return scopes;
-    } catch (error) {
-      notify("command-failed", "Could not check macOS access", String(error));
-      return [] as SystemAccessScope[];
-    } finally {
-      setIsCheckingSystemAccess(false);
-    }
+    const pending = invoke<SystemAccessScope[]>("check_system_access")
+      .then((scopes) => {
+        safeSetLocalStorage(
+          SYSTEM_ACCESS_STATUS_STORAGE_KEY,
+          JSON.stringify(scopes),
+        );
+        setSystemAccess(scopes);
+        return scopes;
+      })
+      .catch((error) => {
+        notify("command-failed", "Could not check macOS access", String(error));
+        return [] as SystemAccessScope[];
+      })
+      .finally(() => {
+        systemAccessCheckRef.current = null;
+        setIsCheckingSystemAccess(false);
+      });
+    systemAccessCheckRef.current = pending;
+    return pending;
   }, [notify]);
   const openSystemAccessSettings = useCallback(
     async (scope: SystemAccessScopeId) => {
@@ -2278,8 +2361,10 @@ export function App() {
       });
       return undefined;
     }
+    // Record the attempt before opening a native sheet, including denial,
+    // interruption, or a reload while the decision is still pending.
+    safeSetLocalStorage(SYSTEM_ACCESS_PROMPTED_STORAGE_KEY, "true");
     void checkSystemAccess().then((scopes) => {
-      safeSetLocalStorage(SYSTEM_ACCESS_PROMPTED_STORAGE_KEY, "true");
       dispatchWorkbench({
         type: "complete-onboarding-step",
         step: "system-access",
@@ -2296,21 +2381,6 @@ export function App() {
     });
     return undefined;
   }, [checkSystemAccess, notify]);
-  useEffect(() => {
-    if (
-      activeDestination !== "settings" ||
-      workbench.preferences.lastSettingsSection !== "permissions" ||
-      !isTauriRuntime()
-    ) {
-      return undefined;
-    }
-    void checkSystemAccess();
-    return undefined;
-  }, [
-    activeDestination,
-    checkSystemAccess,
-    workbench.preferences.lastSettingsSection,
-  ]);
   const { providerUsageByProvider, refreshProviderUsage } = useProviderUsage({
     notify,
     backgroundUsageProviderIds,
@@ -2321,7 +2391,7 @@ export function App() {
   useEffect(() => {
     if (
       activeDestination !== "settings" ||
-      workbench.preferences.lastSettingsSection !== "usage-limits" ||
+      workbench.preferences.lastSettingsSection !== "providers" ||
       !selectedUsageProviderId
     ) {
       return undefined;
@@ -2401,6 +2471,7 @@ export function App() {
       deriveMenuBarSnapshot({
         automations: workbench.automations,
         finishedOutcomes: finishedMenuBarOutcomes,
+        notifications: workbench.preferences.desktopNotifications,
         outcome: menuBarOutcome,
         reduceMotion,
         sendingSessionIds,
@@ -2416,6 +2487,7 @@ export function App() {
       sessionEventsById,
       sessions,
       workbench.automations,
+      workbench.preferences.desktopNotifications,
       resolvedTheme,
     ],
   );
@@ -2458,8 +2530,14 @@ export function App() {
     }
   }, [latestMenuBarOutcome]);
 
+  // The snapshot memo recomputes on every stream flush; only cross IPC when
+  // what the menu bar shows actually changed.
+  const lastMenuBarSnapshotRef = useRef("");
   useEffect(() => {
     if (!isTauriRuntime()) return;
+    const serialized = JSON.stringify(menuBarSnapshot);
+    if (serialized === lastMenuBarSnapshotRef.current) return;
+    lastMenuBarSnapshotRef.current = serialized;
     void invoke("set_menu_bar_snapshot", { snapshot: menuBarSnapshot }).catch(
       () => undefined,
     );
@@ -2482,9 +2560,7 @@ export function App() {
   const selectedTerminalSourceControl = selectedTerminalPane
     ? terminalSourceControlByPane[selectedTerminalPane.id]
     : undefined;
-  useEffect(() => {
-    safeSetLocalStorage(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(chatDrafts));
-  }, [chatDrafts]);
+  useDebouncedPersist(chatDrafts, persistChatDrafts);
   useEffect(() => {
     safeSetLocalStorage(
       CHAT_DRAFT_MODES_STORAGE_KEY,
@@ -2611,7 +2687,7 @@ export function App() {
             "Preview config updated",
           );
         }
-        return;
+        return true;
       }
       try {
         configSaveQueueRef.current = configSaveQueueRef.current
@@ -2621,12 +2697,14 @@ export function App() {
         if (shouldNotifySuccess) {
           notify("provider", "Settings saved", "Configuration persisted");
         }
+        return true;
       } catch {
         notify(
           "command-failed",
           "Settings save failed",
           "Config kept in memory",
         );
+        return false;
       }
     },
     [notify],
@@ -2634,6 +2712,7 @@ export function App() {
 
   const refreshSessions = useCallback(async () => {
     if (!isTauriRuntime()) {
+      sessionsLoadedRef.current = true;
       setSessions([]);
       return;
     }
@@ -2646,6 +2725,7 @@ export function App() {
         nextSessions,
         removedProjectPaths,
       );
+      sessionsLoadedRef.current = true;
       setSessions(nextSessions);
       setActiveSessionId((current) => {
         if (current || suppressSessionAutoSelectRef.current) {
@@ -2661,75 +2741,153 @@ export function App() {
         (current) => current ?? nextVisibleSessions[0]?.workspacePath,
       );
     } catch {
-      setSessions([]);
+      // A failed read cannot invalidate durable sessions or their open panes.
     }
   }, [removedProjectPaths]);
 
-  const refreshEvents = useCallback(
+  const readSessionEvents = useCallback(
     async (sessionId: string) => {
       const requestId = (sessionEventsRequestRef.current[sessionId] ?? 0) + 1;
       sessionEventsRequestRef.current[sessionId] = requestId;
       if (!isTauriRuntime()) {
-        setEventsForSession(
-          sessionId,
-          limitEventsForSession(
-            sessionId,
-            optimisticEventsRef.current.get(sessionId) ?? [],
+        setEventsForSession(sessionId, (current) =>
+          mergePersistedAndOptimisticEvents(
+            current,
+            optimisticEventsRef.current.get(sessionId),
           ),
         );
         return;
       }
+      let fullHistory = !completeHistorySessionsRef.current.has(sessionId) ||
+        !sessionEventsByIdRef.current[sessionId]?.length;
       try {
-        const page = await invoke<{
+        type HistoryPage = {
           events: SessionEvent[];
           contextEvents: SessionEvent[];
           hasMoreBefore: boolean;
-        }>("read_session_events", {
+          revision?: string | null;
+          unchanged?: boolean;
+        };
+        let page = await invoke<HistoryPage>("read_session_events", {
           sessionId,
+          fullHistory,
+          knownRevision: fullHistory
+            ? undefined
+            : historyRevisionsRef.current[sessionId],
         });
+        if (sessionEventsRequestRef.current[sessionId] !== requestId) return;
+        // A sleeping/backgrounded chat may have advanced beyond the refresh
+        // window. Recover the entire gap instead of silently losing its middle.
+        const knownIds = new Set(
+          !fullHistory && page.hasMoreBefore
+            ? (sessionEventsByIdRef.current[sessionId] ?? []).map(
+                (event) => event.id,
+              )
+            : [],
+        );
+        if (
+          !fullHistory &&
+          page.hasMoreBefore &&
+          !page.events.some(
+            (event) => event.kind !== "session-created" && knownIds.has(event.id),
+          )
+        ) {
+          fullHistory = true;
+          page = await invoke<HistoryPage>("read_session_events", {
+            sessionId,
+            fullHistory: true,
+          });
+        }
+        // Older desktop runtimes may ignore fullHistory while the frontend
+        // updates. Walk their bounded pages automatically until nothing remains.
+        let cursor = page.events.find(
+          (event) => event.kind !== "session-created",
+        );
+        while (fullHistory && page.hasMoreBefore) {
+          if (sessionEventsRequestRef.current[sessionId] !== requestId) return;
+          if (!cursor) throw new Error("Chat history returned no earlier cursor");
+          const earlier = await invoke<HistoryPage>("read_session_events", {
+            sessionId,
+            beforeEventId: cursor.id,
+            limit: MAX_CHAT_EVENT_RENDER_COUNT,
+          });
+          const nextCursor = earlier.events.find(
+            (event) => event.kind !== "session-created",
+          );
+          if (
+            earlier.hasMoreBefore &&
+            (!nextCursor || nextCursor.id === cursor.id)
+          )
+            throw new Error("Chat history pagination made no progress");
+          page = {
+            ...page,
+            events: mergeSessionHistoryPages(earlier.events, page.events),
+            hasMoreBefore: earlier.hasMoreBefore,
+          };
+          cursor = nextCursor;
+        }
         if (sessionEventsRequestRef.current[sessionId] === requestId) {
-          // Streaming can continue while the persisted transcript is loading.
-          // Read the buffer after the await so late chunks are never overwritten
-          // by the older transcript snapshot.
+          historyRevisionsRef.current[sessionId] = page.revision ?? undefined;
+          if (!page.hasMoreBefore)
+            completeHistorySessionsRef.current.add(sessionId);
+          // Streaming can continue during the read; use the latest buffer.
           const latestOptimisticEvents =
             optimisticEventsRef.current.get(sessionId);
-          // Fresh open always starts from the recent window; expanded history
-          // only grows via load-earlier.
-          expandedHistorySessionsRef.current.delete(sessionId);
-          replaceSessionContextEvents(sessionId, page.contextEvents);
-          setHasMoreBeforeBySession((current) => ({
-            ...current,
-            [sessionId]: page.hasMoreBefore,
-          }));
-          setEventsForSession(sessionId, (current) =>
-            limitEventsForSession(
-              sessionId,
-              preserveDeliveredResponses(
-                markInactiveCapabilityResources(
-                  mergePersistedAndOptimisticEvents(
-                    page.events,
-                    latestOptimisticEvents,
-                  ),
-                  liveCapabilityResourceIdsRef.current,
-                ),
-                current,
-              ),
-            ),
+          if (!page.unchanged)
+            replaceSessionContextEvents(sessionId, page.contextEvents);
+          const hasMoreBefore =
+            !completeHistorySessionsRef.current.has(sessionId) &&
+            page.hasMoreBefore;
+          setHasMoreBeforeBySession((current) =>
+            current[sessionId] === hasMoreBefore
+              ? current
+              : { ...current, [sessionId]: hasMoreBefore },
           );
+          setEventsForSession(sessionId, (current) => {
+            const next = preserveDeliveredResponses(
+              markInactiveCapabilityResources(
+                mergePersistedAndOptimisticEvents(
+                  mergeSessionHistoryPages(current, page.events),
+                  latestOptimisticEvents,
+                ),
+                liveCapabilityResourceIdsRef.current,
+              ),
+              current,
+            );
+            // Unchanged reads retain the array and avoid another chat render.
+            return sameSessionEvents(current, next) ? current : next;
+          });
         }
-      } catch {
+      } catch (error) {
         if (sessionEventsRequestRef.current[sessionId] === requestId) {
           const optimisticEvents = optimisticEventsRef.current.get(sessionId);
-          if (optimisticEvents && optimisticEvents.length > 0) {
-            setEventsForSession(
-              sessionId,
-              limitEventsForSession(sessionId, optimisticEvents),
+          if (optimisticEvents?.length) {
+            setEventsForSession(sessionId, (current) =>
+              mergePersistedAndOptimisticEvents(current, optimisticEvents),
             );
           }
+          if (fullHistory)
+            notify(
+              "command-failed",
+              "Could not load chat history",
+              String(error),
+            );
         }
       }
     },
-    [limitEventsForSession, replaceSessionContextEvents, setEventsForSession],
+    [notify, replaceSessionContextEvents, setEventsForSession],
+  );
+  const refreshEvents = useCoalescedByKey(readSessionEvents);
+  const openAgentPanel = useCallback(
+    (paneId: string) => {
+      closeLegacyRail();
+      setPaneLegacyPanelByPaneId((current) => ({
+        ...current,
+        [paneId]: undefined,
+      }));
+      openCompanionTab("agents", paneId);
+    },
+    [closeLegacyRail, openCompanionTab],
   );
 
   const loadEarlierEvents = useCallback(
@@ -2760,7 +2918,6 @@ export function App() {
           beforeEventId: cursor.id,
           limit: MAX_CHAT_EVENT_RENDER_COUNT,
         });
-        expandedHistorySessionsRef.current.add(sessionId);
         setHasMoreBeforeBySession((current) => ({
           ...current,
           [sessionId]: page.hasMoreBefore,
@@ -2776,10 +2933,7 @@ export function App() {
             }
           }
           const merged = Array.from(byId.values()).sort(
-            (first, second) =>
-              new Date(first.createdAt).getTime() -
-                new Date(second.createdAt).getTime() ||
-              first.id.localeCompare(second.id),
+            compareSessionEventsForHistory,
           );
           return limitEventsForSession(sessionId, merged);
         });
@@ -2803,6 +2957,23 @@ export function App() {
       setEventsForSession,
     ],
   );
+
+  const subagentController = useSubagents({
+    parentIds: [
+      activeSessionId,
+      ...displayedChatLayout.slots.flatMap((pane) =>
+        pane?.kind === "session" ? [pane.sessionId] : [],
+      ),
+    ].filter((id): id is string => Boolean(id)),
+    eventsBySessionId: sessionEventsById,
+    readEvents: readSessionEvents,
+    openPanel: openAgentPanel,
+    closePanel: (paneId) =>
+      dispatchCompanion({ type: "close-tab", tab: "agents", paneId }),
+    hasMoreBeforeBySession,
+    loadingEarlierSessionIds,
+    loadEarlier: loadEarlierEvents,
+  });
 
   useEffect(() => {
     const layout = chatGrid.activeProjectKey
@@ -2858,8 +3029,10 @@ export function App() {
         );
       optimisticEventsRef.current.set(
         capabilityEvent.sessionId,
-        mergeEvent(
-          optimisticEventsRef.current.get(capabilityEvent.sessionId) ?? [],
+        limitOptimisticSessionEvents(
+          mergeEvent(
+            optimisticEventsRef.current.get(capabilityEvent.sessionId) ?? [],
+          ),
         ),
       );
       setEventsForSession(capabilityEvent.sessionId, (current) =>
@@ -3048,7 +3221,10 @@ export function App() {
               label: payload.resource.label,
               paneTab: panel,
             });
-            if (shouldFollow) {
+            if (
+              shouldFollow &&
+              !(panel === "browser" && isSplitChatViewRef.current)
+            ) {
               dispatchWorkbench({ type: "open-tool-panel", tab: panel });
             }
           } else {
@@ -3132,6 +3308,18 @@ export function App() {
             dispatchWorkbench({ type: "open-tool-panel", tab: "diff" });
           }
         }
+        if (payload.resource.kind === "workspace") {
+          const folder = stringFromRecord(
+            recordFromUnknown(payload.data),
+            "path",
+          );
+          // The user asked this chat to open the folder and approved the call.
+          // If they have since moved to another chat, opening a project would
+          // pull them out of it, so the call only reports what it validated.
+          if (folder && isActiveModelWorkspace) {
+            void openWorkspaceFolderRef.current?.(folder);
+          }
+        }
       },
     ).then((unlisten) => {
       if (!isMounted) unlisten();
@@ -3190,7 +3378,9 @@ export function App() {
         streamEvent.phase === "completed" ||
         streamEvent.phase === "failed" ||
         streamEvent.phase === "cancelled" ||
-        streamEvent.phase === "heartbeat"
+        streamEvent.phase === "heartbeat" ||
+        streamEvent.phase === "retry-wait" ||
+        streamEvent.phase === "retry-started"
       ) {
         flushProviderStreamBatches();
         applyProviderChatStreamEvent(
@@ -3217,6 +3407,7 @@ export function App() {
       }
       if (
         streamEvent.phase === "context-usage" ||
+        streamEvent.phase === "turn-tokens" ||
         streamEvent.phase === "activity"
       ) {
         flushProviderStreamBatches();
@@ -3265,7 +3456,10 @@ export function App() {
     ],
   );
 
-  turnTiming.useTurnTiming(events);
+  turnTiming.useTurnTiming(
+    events,
+    activeDestination === "workspace" && activeWorkspaceLayout === "thread",
+  );
 
   const queueProviderChatStreamEvent = turnTiming.useProviderStreamTiming(
     providerStreamOrderRef,
@@ -3321,7 +3515,9 @@ export function App() {
         );
       optimisticEventsRef.current.set(
         sessionId,
-        mergeEvent(optimisticEventsRef.current.get(sessionId) ?? []),
+        limitOptimisticSessionEvents(
+          mergeEvent(optimisticEventsRef.current.get(sessionId) ?? []),
+        ),
       );
       setEventsForSession(sessionId, (current) => mergeEvent(current));
     }).then((unlisten) => {
@@ -3383,21 +3579,97 @@ export function App() {
       }
       optimisticEventsRef.current.set(
         sessionId,
-        mergeProviderResponseEvents(
-          optimisticEventsRef.current.get(sessionId) ?? [],
-          responseEvents,
+        limitOptimisticSessionEvents(
+          mergeProviderResponseEvents(
+            optimisticEventsRef.current.get(sessionId) ?? [],
+            responseEvents,
+          ),
         ),
       );
-      startTransition(() => {
-        setEventsForSession(sessionId, (current) => {
-          return limitSessionEventsForUi(
-            mergeProviderResponseEvents(current, responseEvents),
-          );
-        });
-      });
+      // Commit the terminal response before the sending flag clears. Deferring
+      // it can briefly expose an old running status as an interrupted turn.
+      setEventsForSession(sessionId, (current) =>
+        mergeProviderResponseEvents(current, responseEvents),
+      );
     },
     [setEventsForSession],
   );
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    const owners = new Map<string, { owner: string; ownsSending: boolean }>();
+    void listen<{
+      sessionId: string;
+      owner?: string;
+      event?: SessionEvent;
+      userEvent?: SessionEvent;
+      response?: ProviderChatResponse;
+      finished?: boolean;
+    }>("gyro://goal-run-event", ({ payload }) => {
+      if (disposed) return;
+      const { sessionId, owner, event, userEvent, response, finished } = payload;
+      if (finished) {
+        const current = owners.get(sessionId);
+        if (owner && current?.owner === owner) {
+          owners.delete(sessionId);
+          // Composer invokes clear their own flag after applying the final
+          // response. Only recovered background runs are owned by this listener.
+          if (current.ownsSending) setSessionSending(sessionId, false);
+        }
+        return;
+      }
+      const run = recordFromUnknown(recordFromUnknown(event?.payload)?.run);
+      if (owner && (run?.status === "running" || run?.status === "queued")) {
+        const current = owners.get(sessionId);
+        owners.set(sessionId, {
+          owner,
+          ownsSending:
+            current?.owner === owner
+              ? current.ownsSending
+              : !sendingSessionIdsRef.current.has(sessionId),
+        });
+        setSessionSending(sessionId, true);
+      } else if (
+        owner &&
+        owners.has(sessionId) &&
+        owners.get(sessionId)?.owner !== owner
+      ) {
+        return;
+      }
+      flushProviderStreamBatches();
+      if (response) applyProviderChatResponse(sessionId, response);
+      const additions = [userEvent, event].filter((item): item is SessionEvent =>
+        Boolean(item),
+      );
+      if (additions.length) {
+        const merge = (items: SessionEvent[]) =>
+          limitSessionEventsForUi(
+            mergePersistedAndOptimisticEvents(items, additions),
+          );
+        optimisticEventsRef.current.set(
+          sessionId,
+          limitOptimisticSessionEvents(
+            merge(optimisticEventsRef.current.get(sessionId) ?? []),
+          ),
+        );
+        setEventsForSession(sessionId, merge);
+      }
+    }).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [
+    applyProviderChatResponse,
+    flushProviderStreamBatches,
+    setEventsForSession,
+    setSessionSending,
+  ]);
 
   const applyCouncilChatResponse = useCallback(
     (sessionId: string, response?: CouncilChatInvokeResponse) => {
@@ -3512,6 +3784,7 @@ export function App() {
   const refreshConfig = useCallback(async () => {
     if (!isTauriRuntime()) {
       setConfig(loadPreviewConfig());
+      setConfigLoaded(true);
       setActiveProfileId("shell");
       return;
     }
@@ -3526,6 +3799,7 @@ export function App() {
       applyProviderCapabilityManifest(capabilityManifest);
       const resolvedConfig = withCouncilConfig(nextConfig);
       setConfig(resolvedConfig);
+      setConfigLoaded(true);
       setActiveProfileId(nextConfig.commandProfiles[0]?.id ?? "shell");
       const ollama = providersForConfig(resolvedConfig).find(
         (provider) => provider.id === "ollama",
@@ -3575,6 +3849,7 @@ export function App() {
       }
     } catch {
       setConfig(withCouncilConfig(EMPTY_CONFIG));
+      setConfigLoaded(true);
       setActiveProfileId("shell");
     }
   }, []);
@@ -3640,8 +3915,8 @@ export function App() {
       dispatchWorkbench({ type: "close-tool-panel" });
       return;
     }
-    openToolPanel(workbench.activePaneTab);
-  }, [openToolPanel, workbench.activePaneTab, workbench.isToolPanelOpen]);
+    openToolPanel("terminal");
+  }, [openToolPanel, workbench.isToolPanelOpen]);
 
   const openSettingsSection = useCallback(
     (section: SettingsSectionId) => {
@@ -3663,10 +3938,10 @@ export function App() {
   );
 
   const refreshIdeSourceControl = useCallback(function refresh(root?: string) {
+    ideSourceControlRootRef.current = root;
     if (!root) {
       return;
     }
-    ideSourceControlRootRef.current = root;
     if (ideSourceControlInFlightRef.current.has(root)) {
       ideSourceControlQueuedRef.current.add(root);
       return;
@@ -3676,6 +3951,7 @@ export function App() {
         type: "ide-set-source-control",
         sourceControl: {
           provider: "git",
+          workspacePath: root,
           available: true,
           branch: "preview",
           ahead: 0,
@@ -3708,6 +3984,7 @@ export function App() {
           type: "ide-set-source-control",
           sourceControl: {
             provider: "git",
+            workspacePath: root,
             available: false,
             ahead: 0,
             behind: 0,
@@ -3989,9 +4266,9 @@ export function App() {
         return;
       }
       if (
-        !window.confirm(
+        !(await confirmAction(
           `Remove the worktree for ${branch}? The branch and chat history will be kept.`,
-        )
+        ))
       ) {
         return;
       }
@@ -4108,7 +4385,7 @@ export function App() {
     async (query: WorkspaceSearchQuery) => {
       const requestId = workspaceSearchRequestRef.current + 1;
       workspaceSearchRequestRef.current = requestId;
-      dispatchWorkbench({ type: "ide-set-search-query", query });
+      dispatchWorkbench({ type: "ide-set-search-results", query, results: [] });
       if (workspaceRoots.length === 0 || !query.query.trim()) {
         dispatchWorkbench({
           type: "ide-set-search-results",
@@ -4140,8 +4417,9 @@ export function App() {
         return;
       }
       try {
-        const resultsByRoot = await Promise.all(
-          workspaceRoots.map(async (root) => {
+        await runWorkspaceSearchRoots<WorkspaceSearchResult>(
+          workspaceRoots,
+          async (root) => {
             const settings = resolvedWorkspaceSettings(
               workbench.preferences.workspaceUserSettings,
               workbench.preferences.workspaceSettingsByWorkspace,
@@ -4155,43 +4433,34 @@ export function App() {
                 (pattern) => `!${pattern.replace(/^!+/, "")}`,
               ),
             ].filter((glob, index, all) => all.indexOf(glob) === index);
-            return {
-              root,
-              results: await invoke<WorkspaceSearchResult[]>(
-                "search_workspace",
-                {
-                  request: {
-                    workspacePath: root,
-                    query: query.query,
-                    globs: globs.length > 0 ? globs : undefined,
-                    maxResults: query.maxResults ?? settings.searchMaxResults,
-                  },
+            const rootResults = await invoke<WorkspaceSearchResult[]>(
+              "search_workspace",
+              {
+                request: {
+                  workspacePath: root,
+                  query: query.query,
+                  globs: globs.length > 0 ? globs : undefined,
+                  maxResults: query.maxResults ?? settings.searchMaxResults,
                 },
-              ),
-            };
-          }),
-        );
-        const results = resultsByRoot
-          .flatMap(({ root, results: rootResults }) =>
-            rootResults.map((result) => ({
+              },
+            );
+            return rootResults.map((result) => ({
               ...result,
               path: absoluteWorkspaceFilePath(root, result.path),
-            })),
-          )
-          .slice(
-            0,
-            query.maxResults ?? effectiveWorkspaceSettings.searchMaxResults,
-          );
-        if (workspaceSearchRequestRef.current === requestId) {
-          dispatchWorkbench({
-            type: "ide-set-search-results",
-            query,
-            results,
-          });
-        }
+            }));
+          },
+          (results) =>
+            dispatchWorkbench({
+              type: "ide-set-search-results",
+              query,
+              results,
+            }),
+          () => workspaceSearchRequestRef.current === requestId,
+          query.maxResults ?? effectiveWorkspaceSettings.searchMaxResults,
+        );
       } catch (error) {
         if (workspaceSearchRequestRef.current === requestId) {
-          notify("command-failed", "Workspace search failed", String(error));
+          notify("command-failed", "Workspace search incomplete", String(error));
         }
       }
     },
@@ -4345,7 +4614,9 @@ export function App() {
           event.payload.files,
         ),
       );
-      setWorkspaceChangeGeneration(event.payload.generation);
+      // Watcher generations are per root; equal generations from different
+      // roots must still invalidate expanded directory caches.
+      setWorkspaceChangeGeneration((revision) => revision + 1);
     }).then((unlisten) => {
       if (disposed) unlisten();
       else unlistenWorkspace = unlisten;
@@ -4384,7 +4655,7 @@ export function App() {
       );
       return;
     }
-    const unstaged = workbench.ide.sourceControl.files.filter(
+    const unstaged = scopedIde.sourceControl.files.filter(
       (file) => !file.staged,
     );
     if (unstaged.length === 0) {
@@ -4409,7 +4680,7 @@ export function App() {
   }, [
     notify,
     refreshIdeSourceControl,
-    workbench.ide.sourceControl.files,
+    scopedIde.sourceControl.files,
     workbench.preferences.workspaceTrust,
     workspaceActionRoot,
   ]);
@@ -4506,7 +4777,7 @@ export function App() {
         ? workspaceContextWithLiveEditor(
             workspaceContextSnapshot,
             selectedFile,
-            workbench.ide.buffers[selectedFile ?? ""],
+            workbench.ide.buffers,
             workbench.ide.selection,
             workbench.ide.tabs.map((tab) => tab.path),
           )
@@ -4520,20 +4791,34 @@ export function App() {
     ],
   );
 
+  // The snapshot is rebuilt on editor changes. It lists every open tab and
+  // holds unsaved text that fits in the evidence limit, so pushes are
+  // coalesced. The first change of a burst goes out at once, sustained
+  // editing is throttled to one update a second, and the last change lands
+  // shortly after typing pauses. Sending a turn still awaits its own push,
+  // so a turn never reads stale editor text.
+  const ideEvidenceScheduler = useMemo<IdeEvidenceScheduler<WorkspaceContextSnapshot>>(
+    () =>
+      createIdeEvidenceScheduler<WorkspaceContextSnapshot>((evidence) => {
+        void invoke("update_capability_ide_evidence", {
+          request: {
+            workspacePath: evidence.workspaceKey,
+            diagnostics: evidence.diagnostics ?? [],
+            context: evidence,
+          },
+        }).catch(() => {
+          // A background evidence refresh must not produce an unhandled
+          // rejection. Sending a turn awaits this same update and exposes any
+          // persistent error.
+        });
+      }),
+    [],
+  );
+
   useEffect(() => {
-    const root = liveEditorEvidence?.workspaceKey;
-    if (!root || !isTauriRuntime()) return;
-    void invoke("update_capability_ide_evidence", {
-      request: {
-        workspacePath: root,
-        diagnostics: liveEditorEvidence?.diagnostics ?? [],
-        context: liveEditorEvidence,
-      },
-    }).catch(() => {
-      // A background evidence refresh must not produce an unhandled rejection.
-      // Sending a turn awaits this same update and exposes any persistent error.
-    });
-  }, [liveEditorEvidence]);
+    if (!liveEditorEvidence || !isTauriRuntime()) return;
+    ideEvidenceScheduler.schedule(liveEditorEvidence);
+  }, [ideEvidenceScheduler, liveEditorEvidence]);
 
   const refreshTerminalSourceControl = useCallback(
     async (paneId: string) => {
@@ -4782,27 +5067,32 @@ export function App() {
           lastRunAt: new Date().toISOString(),
         });
         if (task.group === "test" && testStatus) {
-          const currentChildren =
-            workbench.ide.testTree.find(
-              (item) => item.id === "workspace-test-results",
-            )?.children ?? [];
+          // Update the run test in place. Replacing the tree with only the
+          // tests that ran hid every other discovered test after one run.
+          const suite = workbench.ide.testTree[0];
+          const children = suite?.children ?? [];
           const result = {
             id: task.id,
             label: task.label,
             status: testStatus,
           } as const;
+          const nextChildren = children.some((item) => item.id === task.id)
+            ? children.map((item) => (item.id === task.id ? result : item))
+            : [...children, result];
           dispatchWorkbench({
             type: "ide-set-test-tree",
             tests: [
               {
-                id: "workspace-test-results",
-                label: "Workspace tests",
-                status: testStatus,
-                children: [
-                  ...currentChildren.filter((item) => item.id !== task.id),
-                  result,
-                ],
+                id: suite?.id ?? "workspace-tests",
+                label: suite?.label ?? "Workspace tests",
+                status: nextChildren.some((item) => item.status === "failed")
+                  ? "failed"
+                  : nextChildren.some((item) => item.status === "running")
+                    ? "running"
+                    : testStatus,
+                children: nextChildren,
               },
+              ...workbench.ide.testTree.slice(1),
             ],
           });
         }
@@ -5234,17 +5524,31 @@ export function App() {
   }, [refreshWorkspaceTree, workspaceRoots.length]);
 
   const createWorkspacePath = useCallback(
-    async (kind: "file" | "directory", parentPath?: string) => {
+    async (
+      kind: "file" | "directory",
+      parentPath?: string,
+      namedPath?: string,
+    ) => {
       const root =
         workspaceRootForPath(workspaceRoots, parentPath) ?? workspaceRoots[0];
       if (!root) {
         notify("command-failed", "Create blocked", "Open a workspace first");
         return;
       }
-      const entered = window.prompt(
-        kind === "directory" ? "New folder path" : "New file path",
-        parentPath ? `${parentPath}/` : "",
-      );
+      /* The Explorer's inline row already names the entry, so skip the dialog. */
+      const entered =
+        namedPath ??
+        (await askTextValue({
+          title: kind === "directory" ? "New folder" : "New file",
+          label: kind === "directory" ? "Folder name" : "File name",
+          message: parentPath
+            ? `Inside ${parentPath}`
+            : "Inside the workspace root",
+          initialValue: parentPath ? `${parentPath}/` : "",
+          confirmLabel: "Create",
+          validate: (value) =>
+            validateWorkspaceEntryName(workspaceEntryName(value)),
+        }));
       const enteredPath = entered?.trim();
       if (!enteredPath) {
         return;
@@ -5302,8 +5606,28 @@ export function App() {
     [notify, refreshWorkspaceTree, workspaceRoots],
   );
 
+  /* The macOS WebView has no JavaScript dialog support, so confirmations go
+     through the native dialog plugin. Without this every `window.confirm` in
+     this file returned false and the guarded action silently did nothing. */
+  useEffect(() => {
+    setConfirmActionHandler(async (message) => {
+      if (!isTauriRuntime()) {
+        return browserConfirm(message);
+      }
+      try {
+        return await nativeConfirm(message, {
+          title: "Gyro",
+          kind: "warning",
+        });
+      } catch {
+        return false;
+      }
+    });
+    return () => setConfirmActionHandler(undefined);
+  }, []);
+
   const renameWorkspacePath = useCallback(
-    async (fromPath: string) => {
+    async (fromPath: string, nextName: string) => {
       const root = workspaceRootForPath(workspaceRoots, fromPath);
       if (!root || !fromPath) {
         return;
@@ -5320,8 +5644,8 @@ export function App() {
         .map((tab) => tab.path)
         .filter((path) => editorPathMatches(path, fromPath));
       if (
-        affectedEditorPaths.some(
-          (path) => workbench.ide.buffers[path]?.status === "dirty",
+        affectedEditorPaths.some((path) =>
+          editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
         )
       ) {
         notify(
@@ -5331,9 +5655,16 @@ export function App() {
         );
         return;
       }
-      const entered = window.prompt("Rename workspace path", fromPath);
-      const toPath = entered?.trim()
-        ? absoluteWorkspaceFilePath(root, entered.trim())
+      /* The Explorer collects the new name in its own inline row. Rename must
+         never depend on window.prompt: WKWebView returns null for it, so every
+         rename on macOS used to cancel itself with no feedback. Only the
+         basename changes, so the entry stays in its current folder. */
+      const requestedName = nextName.trim();
+      const fromPathParent = fromPath.includes("/")
+        ? fromPath.slice(0, fromPath.lastIndexOf("/"))
+        : "";
+      const toPath = requestedName
+        ? absoluteWorkspaceFilePath(root, `${fromPathParent}/${requestedName}`)
         : undefined;
       if (!toPath || toPath === fromPath) {
         return;
@@ -5380,6 +5711,86 @@ export function App() {
     ],
   );
 
+  /* A model, a second window or a script can rename or delete a file this
+     editor has open. The explorer's own commands announce themselves on the
+     same event, so one listener follows every mutation, whoever made it. */
+  type WorkspacePathChange = {
+    action: "created" | "renamed" | "moved" | "deleted";
+    path: string;
+    destination?: string;
+    kind?: string;
+    origin: "ui" | "model";
+  };
+
+  const workspacePathChanged = useRef<(change: WorkspacePathChange) => void>(
+    () => {},
+  );
+  useEffect(() => {
+    workspacePathChanged.current = (change) => {
+      if (change.action === "deleted") {
+        dispatchWorkbench({ type: "ide-delete-path", path: change.path });
+        disposeEditorModels([change.path]);
+        if (selectedFile && editorPathMatches(selectedFile, change.path)) {
+          setSelectedFile(undefined);
+        }
+        return;
+      }
+      if (change.action === "created" || !change.destination) {
+        return;
+      }
+      dispatchWorkbench({
+        type: "ide-rename-path",
+        fromPath: change.path,
+        toPath: change.destination,
+      });
+      disposeEditorModels([change.path, change.destination]);
+      if (selectedFile && editorPathMatches(selectedFile, change.path)) {
+        setSelectedFile(
+          renameEditorPath(selectedFile, change.path, change.destination),
+        );
+      }
+    };
+  });
+
+  const [workspacePathUndo, setWorkspacePathUndo] =
+    useState<WorkspacePathUndoOffer | null>(null);
+  const refreshWorkspacePathUndo = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      setWorkspacePathUndo(null);
+      return;
+    }
+    try {
+      setWorkspacePathUndo(
+        await invoke<WorkspacePathUndoOffer | null>("peek_workspace_path_undo"),
+      );
+    } catch {
+      setWorkspacePathUndo(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void refreshWorkspacePathUndo();
+    void listen<WorkspacePathChange>(
+      "gyro://workspace-paths-changed",
+      (event) => {
+        workspacePathChanged.current(event.payload);
+        void refreshWorkspacePathUndo();
+      },
+    ).then((unlisten) => {
+      if (disposed) {
+        unlisten();
+        return;
+      }
+      stop = unlisten;
+    });
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, [refreshWorkspacePathUndo]);
+
   const deleteWorkspacePath = useCallback(
     async (path: string) => {
       const root = workspaceRootForPath(workspaceRoots, path);
@@ -5399,8 +5810,8 @@ export function App() {
         .filter((tabPath) => editorPathMatches(tabPath, path));
       const buffer = workbench.ide.buffers[path];
       if (
-        affectedEditorPaths.some(
-          (editorPath) => workbench.ide.buffers[editorPath]?.status === "dirty",
+        affectedEditorPaths.some((editorPath) =>
+          editorBufferHasUnsavedChanges(workbench.ide.buffers[editorPath]),
         )
       ) {
         notify(
@@ -5410,7 +5821,9 @@ export function App() {
         );
         return;
       }
-      if (!window.confirm(`Delete ${path}? This cannot be undone in Gyro.`)) {
+      if (
+        !(await confirmAction(`Move ${path} to the Trash?`))
+      ) {
         return;
       }
       if (!isTauriRuntime()) {
@@ -5451,9 +5864,176 @@ export function App() {
     ],
   );
 
+  const moveWorkspacePath = useCallback(
+    async (fromPath: string, destinationDirectory: string) => {
+      const plan = planWorkspaceMove(
+        workspaceRoots,
+        fromPath,
+        destinationDirectory,
+      );
+      if (plan.kind === "noop") return;
+      if (plan.kind === "blocked") {
+        notify("command-failed", "Move blocked", plan.reason);
+        return;
+      }
+      const affectedEditorPaths = workbench.ide.tabs
+        .map((tab) => tab.path)
+        .filter((path) => editorPathMatches(path, plan.fromPath));
+      if (
+        affectedEditorPaths.some((path) =>
+          editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
+        )
+      ) {
+        notify(
+          "command-failed",
+          "Move blocked",
+          "Save or revert the file first",
+        );
+        return;
+      }
+      const name = plan.toPath.slice(plan.toPath.lastIndexOf("/") + 1);
+      if (isTauriRuntime()) {
+        try {
+          await invoke("stat_workspace_file", {
+            workspacePath: plan.root,
+            path: plan.toPath,
+          });
+          await confirmAction(
+            `${name} already exists in that folder, so the move was not applied.`,
+          );
+          return;
+        } catch {
+          // The destination name is free. stat_workspace_file throws when the
+          // path is missing, which is the only case rename will accept.
+        }
+      }
+      try {
+        await invoke("rename_workspace_path", {
+          request: {
+            workspacePath: plan.root,
+            fromPath: plan.fromPath,
+            toPath: plan.toPath,
+          },
+        });
+        await refreshWorkspaceTree();
+      } catch (error) {
+        notify("command-failed", "Move failed", String(error));
+        return;
+      }
+      dispatchWorkbench({
+        type: "ide-rename-path",
+        fromPath: plan.fromPath,
+        toPath: plan.toPath,
+      });
+      disposeEditorModels(affectedEditorPaths);
+      if (selectedFile && editorPathMatches(selectedFile, plan.fromPath)) {
+        setSelectedFile(
+          renameEditorPath(selectedFile, plan.fromPath, plan.toPath),
+        );
+      }
+      notify("tests-passed", "Moved", `${plan.fromPath} → ${plan.toPath}`);
+    },
+    [
+      notify,
+      refreshWorkspaceTree,
+      selectedFile,
+      workbench.ide.buffers,
+      workbench.ide.tabs,
+      workspaceRoots,
+    ],
+  );
+
+  const duplicateWorkspacePath = useCallback(
+    async (path: string) => {
+      if (!path) return;
+      const root = workspaceRootForPath(workspaceRoots, path);
+      if (!root) return;
+      try {
+        const created = await invoke<{ path: string }>("duplicate_workspace_path", {
+          request: { workspacePath: root, path },
+        });
+        await refreshWorkspaceTree();
+        notify("tests-passed", "Duplicated", created.path);
+      } catch (error) {
+        notify("command-failed", "Duplicate failed", String(error));
+      }
+    },
+    [notify, refreshWorkspaceTree, workspaceRoots],
+  );
+
+  const revealWorkspacePath = useCallback(
+    async (path: string) => {
+      if (!path) return;
+      const root = workspaceRootForPath(workspaceRoots, path);
+      if (!root) return;
+      try {
+        // Explorer paths are already absolute. Joining the root again points
+        // Finder at a path that does not exist.
+        await revealItemInDir(absoluteWorkspaceFilePath(root, path));
+      } catch (error) {
+        notify("command-failed", "Reveal failed", String(error));
+      }
+    },
+    [notify, workspaceRoots],
+  );
+
+  const undoWorkspacePathChange = useCallback(async () => {
+    try {
+      const undone = await invoke<boolean>("undo_workspace_path");
+      await refreshWorkspacePathUndo();
+      if (!undone) {
+        notify("command-failed", "Nothing to undo", "No path change is pending");
+        return;
+      }
+      await refreshWorkspaceTree();
+    } catch (error) {
+      notify("command-failed", "Undo failed", String(error));
+    }
+  }, [notify, refreshWorkspacePathUndo, refreshWorkspaceTree]);
+
+  const redoWorkspacePathChange = useCallback(async () => {
+    try {
+      const redone = await invoke<boolean>("redo_workspace_path");
+      await refreshWorkspacePathUndo();
+      if (!redone) {
+        notify("command-failed", "Nothing to redo", "No path change is pending");
+        return;
+      }
+      await refreshWorkspaceTree();
+    } catch (error) {
+      notify("command-failed", "Redo failed", String(error));
+    }
+  }, [notify, refreshWorkspacePathUndo, refreshWorkspaceTree]);
+
+  // ⌘Z / ⇧⌘Z for file operations. Monaco and text fields keep their own undo
+  // stacks; the workspace journal only takes over when focus is elsewhere.
+  useEffect(() => {
+    const onUndoKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest(
+          "input, textarea, [contenteditable='true'], .monaco-editor",
+        )
+      ) {
+        return;
+      }
+      event.preventDefault();
+      if (event.shiftKey) {
+        void redoWorkspacePathChange();
+      } else {
+        void undoWorkspacePathChange();
+      }
+    };
+    window.addEventListener("keydown", onUndoKey);
+    return () => window.removeEventListener("keydown", onUndoKey);
+  }, [redoWorkspacePathChange, undoWorkspacePathChange]);
+
   const openSourceControlDiffForRoot = useCallback(
     async (root: string, path: string, staged: boolean) => {
-      const file = workbench.ide.sourceControl.files.find(
+      const file = scopedIde.sourceControl.files.find(
         (file) => file.path === path && file.staged === staged,
       );
       const reviewPath = `gyro-diff:${encodeURIComponent(root)}:${staged ? "index" : "worktree"}:${encodeURIComponent(path)}`;
@@ -5475,7 +6055,7 @@ export function App() {
       setSelectedFile(reviewPath);
       dispatchWorkbench({ type: "close-tool-panel" });
     },
-    [workbench.ide.sourceControl.files],
+    [scopedIde.sourceControl.files],
   );
 
   const openSourceControlDiff = useCallback(
@@ -5503,7 +6083,7 @@ export function App() {
       const relativePath = normalizedPath.startsWith(`${normalizedRoot}/`)
         ? normalizedPath.slice(normalizedRoot.length + 1)
         : normalizedPath;
-      const file = workbench.ide.sourceControl.files.find((item) => {
+      const file = scopedIde.sourceControl.files.find((item) => {
         const candidate = item.path.replaceAll("\\", "/");
         return candidate === normalizedPath || candidate === relativePath;
       });
@@ -5539,7 +6119,7 @@ export function App() {
     [
       activeSession?.workspacePath,
       workspacePath,
-      workbench.ide.sourceControl.files,
+      scopedIde.sourceControl.files,
     ],
   );
 
@@ -5693,15 +6273,22 @@ export function App() {
       });
       dispatchWorkbench({ type: "ide-select-view", view: "source-control" });
       dispatchWorkbench({ type: "select-workspace-layout", layout: "code" });
-      if (file && selectedTerminalSourceControl.repoRoot) {
-        void openSourceControlDiffForRoot(
-          selectedTerminalSourceControl.repoRoot,
-          file.path,
-          file.staged,
-        );
+      // Status paths are relative to the folder it was read for, not the repo.
+      const root =
+        selectedTerminalPane?.workingDirectory ??
+        activeSession?.workspacePath ??
+        workspacePath;
+      if (file && root) {
+        void openSourceControlDiffForRoot(root, file.path, file.staged);
       }
     },
-    [openSourceControlDiffForRoot, selectedTerminalSourceControl],
+    [
+      activeSession?.workspacePath,
+      openSourceControlDiffForRoot,
+      selectedTerminalPane?.workingDirectory,
+      selectedTerminalSourceControl,
+      workspacePath,
+    ],
   );
 
   const commitSourceControl = useCallback(
@@ -5723,15 +6310,15 @@ export function App() {
         return;
       }
       try {
-        const hasStaged = workbench.ide.sourceControl.files.some(
+        const hasStaged = scopedIde.sourceControl.files.some(
           (file) => file.staged,
         );
-        const hasUnstaged = workbench.ide.sourceControl.files.some(
+        const hasUnstaged = scopedIde.sourceControl.files.some(
           (file) => !file.staged,
         );
         // VS Code-style "Commit All": stage remaining changes when nothing is staged.
         if (!hasStaged && hasUnstaged) {
-          for (const file of workbench.ide.sourceControl.files.filter(
+          for (const file of scopedIde.sourceControl.files.filter(
             (item) => !item.staged,
           )) {
             await invoke<SourceControlState>("git_stage", {
@@ -5777,7 +6364,7 @@ export function App() {
       refreshIdeServices,
       refreshIdeSourceControl,
       refreshWorkspaceBranches,
-      workbench.ide.sourceControl.files,
+      scopedIde.sourceControl.files,
       workbench.preferences.workspaceTrust,
       workspaceActionRoot,
     ],
@@ -5804,7 +6391,7 @@ export function App() {
       );
       return;
     }
-    const publishing = !workbench.ide.sourceControl.upstream;
+    const publishing = !scopedIde.sourceControl.upstream;
     setSourceControlSyncing(true);
     try {
       const result = await invoke<GitSyncResult>("git_push", {
@@ -5848,7 +6435,7 @@ export function App() {
     notify,
     refreshIdeSourceControl,
     refreshWorkspaceBranches,
-    workbench.ide.sourceControl.upstream,
+    scopedIde.sourceControl.upstream,
     workbench.preferences.workspaceTrust,
     workspaceActionRoot,
   ]);
@@ -5953,9 +6540,6 @@ export function App() {
   // reports a status, but Workspace can be opened with no active chat, and
   // without this the panel keeps the empty default and claims Git is not ready.
   useEffect(() => {
-    if (!workspaceActionRoot) {
-      return;
-    }
     refreshIdeSourceControl(workspaceActionRoot);
   }, [refreshIdeSourceControl, workspaceActionRoot]);
 
@@ -5974,7 +6558,7 @@ export function App() {
     remoteCheckMessage,
   } = useRemoteCheck({
     root: workspaceActionRoot,
-    sourceControl: workbench.ide.sourceControl,
+    sourceControl: scopedIde.sourceControl,
     visible: isSourceControlVisible,
     trusted: workspaceActionRoot
       ? isWorkspaceTrusted(
@@ -5995,6 +6579,7 @@ export function App() {
     }
     refreshIdeSourceControl(workspaceActionRoot);
     const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       refreshIdeSourceControl(workspaceActionRoot);
     }, 5_000);
     return () => window.clearInterval(timer);
@@ -6006,6 +6591,7 @@ export function App() {
     void refreshGithub(workspaceActionRoot);
     const timer = window.setInterval(
       () => {
+        if (document.visibilityState !== "visible") return;
         void refreshGithub(workspaceActionRoot);
       },
       hasActiveGithubRun ? 15_000 : 60_000,
@@ -6152,6 +6738,22 @@ export function App() {
     [notify],
   );
 
+  // Reply links open in Gyro Browser by default; a ⌘/Ctrl-click hands the URL
+  // to the device's own browser through this registration, so reply surfaces
+  // need no extra callback of their own.
+  useEffect(() => {
+    registerExternalLinkOpener((url) => {
+      if (isTauriRuntime()) {
+        void openUrl(url).catch((error) =>
+          notify("command-failed", "Could not open link", String(error)),
+        );
+        return;
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+    });
+    return () => registerExternalLinkOpener();
+  }, [notify]);
+
   /**
    * Run one of the diff-review git actions for real.
    *
@@ -6177,7 +6779,7 @@ export function App() {
         return;
       }
 
-      const sourceControl = workbench.ide.sourceControl;
+      const sourceControl = scopedIde.sourceControl;
       const branch = sourceControl.branch;
       dispatchWorkbench({ type: "start-git-review-action", actionId });
 
@@ -6293,7 +6895,7 @@ export function App() {
       requestBranchName,
       requestPullRequest,
       workbench.diffReview.commitMessage,
-      workbench.ide.sourceControl,
+      scopedIde.sourceControl,
       workbench.preferences.workspaceTrust,
       workspaceActionRoot,
     ],
@@ -6313,7 +6915,14 @@ export function App() {
           .filter(Boolean)
           .slice(0, MAX_RECENT_PROJECTS),
       );
+      // An explicit folder choice must survive an unrelated turn's session refresh.
+      suppressSessionAutoSelectRef.current = true;
+      activeSessionIdRef.current = undefined;
       setActiveSessionId(undefined);
+      dispatchChatGrid({
+        type: "activate-project",
+        projectKey: chatProjectKey(selected),
+      });
       setSelectedWorkspaceRoot(selected);
       if (!isTauriRuntime()) {
         setWorkspacePath(selected);
@@ -6334,10 +6943,29 @@ export function App() {
         step: "workspace",
       });
       notify("terminal", notificationTitle, workspaceName(selected));
-      await prepareWorkspace(selected);
+      // Selection completes now; slow preparation must not defer caller navigation.
+      void prepareWorkspace(selected);
     },
     [notify, prepareWorkspace, refreshIdeServices],
   );
+
+  // A folder opened without a picker, by the model at the user's request, goes
+  // through the same trust and activation steps as one picked in the dialog.
+  const openWorkspaceFolder = useCallback(
+    async (selected: string) => {
+      const trustPath = normalizedWorkspaceTrustPath(selected);
+      if (!(trustPath in workbench.preferences.workspaceTrust)) {
+        dispatchWorkbench({
+          type: "set-workspace-trust",
+          path: selected,
+          decision: "restricted",
+        });
+      }
+      await activateWorkspacePath(selected);
+    },
+    [activateWorkspacePath, workbench.preferences.workspaceTrust],
+  );
+  openWorkspaceFolderRef.current = openWorkspaceFolder;
 
   const openWorkspace = useCallback(async (): Promise<string | undefined> => {
     if (!isTauriRuntime()) {
@@ -6353,15 +6981,7 @@ export function App() {
       if (typeof selected !== "string") {
         return undefined;
       }
-      const trustPath = normalizedWorkspaceTrustPath(selected);
-      if (!(trustPath in workbench.preferences.workspaceTrust)) {
-        dispatchWorkbench({
-          type: "set-workspace-trust",
-          path: selected,
-          decision: "restricted",
-        });
-      }
-      await activateWorkspacePath(selected);
+      await openWorkspaceFolder(selected);
       return selected;
     } catch {
       notify(
@@ -6371,19 +6991,19 @@ export function App() {
       );
       return undefined;
     }
-  }, [activateWorkspacePath, notify, workbench.preferences.workspaceTrust]);
+  }, [activateWorkspacePath, notify, openWorkspaceFolder]);
 
-  const addWorkspaceFolder = useCallback(async () => {
+  const addWorkspaceFolder = useCallback(async (explicitPath?: string) => {
     if (!activeWorkspaceRoot) {
       await openWorkspace();
       return;
     }
-    let selected: string | null = null;
-    if (!isTauriRuntime()) {
+    let selected: string | null = explicitPath ?? null;
+    if (!selected && !isTauriRuntime()) {
       selected = workspaceRoots.includes("/preview/Components")
         ? "/preview/Documentation"
         : "/preview/Components";
-    } else {
+    } else if (!selected) {
       const chosen = await open({
         directory: true,
         multiple: false,
@@ -6392,15 +7012,22 @@ export function App() {
       selected = typeof chosen === "string" ? chosen : null;
     }
     if (!selected) return;
-    const normalizedSelected = normalizeProjectPath(selected);
-    if (
-      workspaceRoots.some(
-        (root) => normalizeProjectPath(root) === normalizedSelected,
-      )
-    ) {
-      notify("command-failed", "Folder already added", workspaceName(selected));
+    const admission = await admitWorkspaceFolders(
+      configuredWorkspaceRoots,
+      [selected],
+      workbench.preferences.projectDetails?.[activeWorkspaceRoot]
+        ?.allowNestedFolders,
+    ).catch((error: unknown) => {
+      notify("command-failed", "Folder could not be added", String(error));
+      return undefined;
+    });
+    const rejection =
+      admission && workspaceRootRejectionNotice(admission.issues);
+    if (!admission?.accepted[0]) {
+      if (rejection) notify("command-failed", ...rejection);
       return;
     }
+    selected = admission.accepted[0];
     dispatchWorkbench({
       type: "add-workspace-folder",
       workspacePath: activeWorkspaceRoot,
@@ -6447,11 +7074,67 @@ export function App() {
     setSelectedWorkspaceRoot(selected);
   }, [
     activeWorkspaceRoot,
+    configuredWorkspaceRoots,
     notify,
     openWorkspace,
+    workbench.preferences.projectDetails,
     workbench.preferences.workspaceTrust,
     workspaceRoots,
   ]);
+
+  const openDroppedWorkspaceFolders = useCallback(
+    async (paths: string[], onExplorer: boolean) => {
+      if (!isTauriRuntime()) return;
+      if (paths.length === 0) {
+        notify(
+          "command-failed",
+          "Could not open that folder",
+          "The drop did not include a folder path.",
+        );
+        return;
+      }
+      const directories: string[] = [];
+      for (const path of paths) {
+        try {
+          const kind = await invoke<string>("classify_dropped_path", { path });
+          if (kind === "directory") directories.push(path);
+        } catch {
+          // A missing path is not a workspace.
+        }
+      }
+      // A file drop stays on the attachment path. This command only opens
+      // directories, and only after the transfer was not an image or video.
+      const selected = directories[0];
+      if (!selected) return;
+      if (workspaceRoots.length > 0 && onExplorer) {
+        await addWorkspaceFolder(selected);
+        return;
+      }
+      const trustPath = normalizedWorkspaceTrustPath(selected);
+      if (!(trustPath in workbench.preferences.workspaceTrust)) {
+        dispatchWorkbench({
+          type: "set-workspace-trust",
+          path: selected,
+          decision: "restricted",
+        });
+      }
+      await activateWorkspacePath(selected, "Workspace opened");
+    },
+    [
+      activateWorkspacePath,
+      addWorkspaceFolder,
+      notify,
+      workbench.preferences.workspaceTrust,
+      workspaceRoots.length,
+    ],
+  );
+
+  useEffect(() => {
+    setOpenDroppedWorkspaceHandler((paths, onExplorer) => {
+      void openDroppedWorkspaceFolders(paths, onExplorer);
+    });
+    return () => setOpenDroppedWorkspaceHandler(undefined);
+  }, [openDroppedWorkspaceFolders]);
 
   const removeWorkspaceFolder = useCallback(
     (path: string) => {
@@ -6505,6 +7188,22 @@ export function App() {
     ],
   );
 
+  const workspaceRootIssues = useWorkspaceRootRecovery({
+    activateWorkspacePath,
+    configured: configuredWorkspaceRoots,
+    dispatch: dispatchWorkbench,
+    health: workspaceRootHealth,
+    notify,
+    pickFolder: async (title) => {
+      if (!isTauriRuntime()) return "/preview/Components";
+      const chosen = await open({ directory: true, multiple: false, title });
+      return typeof chosen === "string" ? chosen : null;
+    },
+    preferences: workbench.preferences,
+    removeFolder: removeWorkspaceFolder,
+    workspacePath: activeWorkspaceRoot,
+  });
+
   const openWorkspaceConfiguration = useCallback(async () => {
     try {
       let filePath: string;
@@ -6538,14 +7237,21 @@ export function App() {
         );
         content = file.content;
       }
-      const workspaceFile = parseGyroWorkspaceFile(content, filePath);
-      const primary = workspaceFile.folders[0]?.path;
+      const parsedFile = parseGyroWorkspaceFile(content, filePath);
+      const primary = parsedFile.folders[0]?.path;
       if (!primary)
         throw new Error("Workspace file does not contain a primary folder");
+      // Every folder goes through the same policy as an Explorer add.
+      const { workspaceFile, extraFolders, rejection } =
+        await admitWorkspaceFile(
+          parsedFile,
+          workbench.preferences.projectDetails?.[primary]?.allowNestedFolders,
+        );
+      if (rejection) notify("command-failed", ...rejection);
       dispatchWorkbench({
         type: "set-workspace-folders",
         workspacePath: primary,
-        paths: workspaceFile.folders.slice(1).map((folder) => folder.path),
+        paths: extraFolders,
       });
       dispatchWorkbench({
         type: "set-workspace-settings",
@@ -6578,7 +7284,12 @@ export function App() {
         String(error),
       );
     }
-  }, [activateWorkspacePath, notify, workbench.preferences.workspaceTrust]);
+  }, [
+    activateWorkspacePath,
+    notify,
+    workbench.preferences.projectDetails,
+    workbench.preferences.workspaceTrust,
+  ]);
 
   const saveWorkspaceConfiguration = useCallback(async () => {
     if (workspaceRoots.length === 0) {
@@ -6824,6 +7535,57 @@ export function App() {
     workspacePath,
   ]);
 
+  /**
+   * A prompt typed before any folder was open is still the message the user
+   * means to send. Choosing a folder starts a chat under a new draft key, so
+   * the composer would re-bind to an empty draft and the prompt and its images
+   * would look discarded. Carry that unsent draft onto the chat the folder
+   * starts; an existing draft for the target chat always wins.
+   */
+  const carryFolderlessDraft = useCallback((targetDraftKey: string) => {
+    // Only a project draft (`new:<project>`) can receive the prompt. A session
+    // id names a live chat whose composer belongs to that conversation, and
+    // `NEW_CHAT_DRAFT_KEY` is the folderless composer itself.
+    if (!targetDraftKey.startsWith("new:")) return;
+    const sources = [
+      NEW_CHAT_DRAFT_KEY,
+      `new:${chatProjectKey()}`,
+    ].filter((key) => key !== targetDraftKey);
+    setChatDrafts((current) => {
+      if (current[targetDraftKey]?.trim()) return current;
+      const source = sources.find((key) => current[key]?.trim());
+      const carried = source ? current[source] : undefined;
+      if (!source || !carried) return current;
+      return { ...current, [source]: "", [targetDraftKey]: carried };
+    });
+    setChatAttachments((current) => {
+      if ((current[targetDraftKey]?.length ?? 0) > 0) return current;
+      const source = sources.find((key) => (current[key]?.length ?? 0) > 0);
+      const carried = source ? current[source] : undefined;
+      if (!source || !carried || carried.length === 0) return current;
+      return { ...current, [source]: [], [targetDraftKey]: carried };
+    });
+  }, []);
+
+  // Whichever handler binds the composer to a project's draft — starting a
+  // chat for a chosen folder, or restoring a layout — the prompt typed with no
+  // folder open follows it, so picking a folder never looks like discarding it.
+  // Only a real switch away from the folderless draft carries: a restored
+  // layout must not inherit a prompt left over from an earlier session.
+  const previousDraftKeyRef = useRef(activeDraftKey);
+  useEffect(() => {
+    const previous = previousDraftKeyRef.current;
+    previousDraftKeyRef.current = activeDraftKey;
+    if (previous === activeDraftKey) return;
+    if (
+      previous !== NEW_CHAT_DRAFT_KEY &&
+      previous !== `new:${chatProjectKey()}`
+    ) {
+      return;
+    }
+    carryFolderlessDraft(activeDraftKey);
+  }, [activeDraftKey, carryFolderlessDraft]);
+
   const startNewChat = useCallback(
     (options: { keepLayout?: boolean; workspacePath?: string } = {}) => {
       suppressSessionAutoSelectRef.current = true;
@@ -6833,6 +7595,12 @@ export function App() {
           : options.workspacePath;
       const projectKey = chatProjectKey(projectPath);
       const draftKey = `new:${projectKey}`;
+      // Picking a folder moves the composer to this project's draft. Carry a
+      // prompt (and its images) typed while no folder was open so the message
+      // the user already wrote is not silently discarded.
+      carryFolderlessDraft(draftKey);
+      if (configLoaded) setChatDraftModels(current => current[draftKey] ? current : { ...current, [draftKey]: newChatDefaultSelection(config, workbench.preferences) ?? selectedSessionModelFromConfig(config) });
+
       // A project has one unsent draft; if it is already open in a pane, focus
       // it there rather than opening it twice. A new
       // pane gets an id of its own: a sent draft keeps its pane id, so a
@@ -6866,7 +7634,9 @@ export function App() {
       // Drafts belong to their chat/project, even when its pane was replaced.
       // Sending or explicitly discarding a draft is what clears its contents.
       setDraftResetToken((token) => token + 1);
-      dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });
+      const draftWorkspaceMode = draftWorkspaceModes.current[draftKey] ?? workbench.preferences.defaultWorkspaceMode;
+      draftWorkspaceModes.current[draftKey] = draftWorkspaceMode;
+      dispatchWorkbench({ type: "set-workbench-mode", mode: draftWorkspaceMode });
       // Starting a chat from the AI view keeps the code layout: the chat is
       // already visible in the sidebar.
       if (!options.keepLayout) {
@@ -6877,7 +7647,7 @@ export function App() {
       }
       dispatchWorkbench({ type: "close-tool-panel" });
     },
-    [activeSession?.workspacePath, chatGrid.layouts, workspacePath],
+    [activeSession?.workspacePath, carryFolderlessDraft, chatGrid.layouts, workspacePath, config, configLoaded, workbench.preferences],
   );
 
   /**
@@ -7243,7 +8013,14 @@ export function App() {
       if (!session) {
         return;
       }
-      const nextTitle = window.prompt("Rename chat", session.title)?.trim();
+      const nextTitle = (
+        await askTextValue({
+          title: "Rename chat",
+          label: "Chat name",
+          initialValue: session.title,
+          confirmLabel: "Rename",
+        })
+      )?.trim();
       if (!nextTitle || nextTitle === session.title) {
         return;
       }
@@ -7307,6 +8084,8 @@ export function App() {
         delete next[sessionId];
         return next;
       });
+      completeHistorySessionsRef.current.delete(sessionId);
+      delete historyRevisionsRef.current[sessionId];
       forgetSessionContextEvents(sessionId);
       setPinnedSessionIds((current) =>
         current.filter((id) => id !== sessionId),
@@ -7407,6 +8186,10 @@ export function App() {
         ),
       ),
     );
+    for (const sessionId of projectSessionIds) {
+      completeHistorySessionsRef.current.delete(sessionId);
+      delete historyRevisionsRef.current[sessionId];
+    }
     forgetManySessionContextEvents(projectSessionIds);
 
     if (
@@ -7669,10 +8452,12 @@ export function App() {
                 multiple: false,
                 title: "Open terminal in folder",
               })
-            : window.prompt(
-                "Open terminal in folder",
-                workspaceActionRoot ?? "",
-              );
+            : await askTextValue({
+                title: "Open terminal in folder",
+                label: "Folder path",
+                initialValue: workspaceActionRoot ?? "",
+                confirmLabel: "Open",
+              });
           if (typeof selected !== "string" || !selected.trim()) return;
           folderPath = selected;
         }
@@ -7727,6 +8512,7 @@ export function App() {
 
   const selectProvider = useCallback(
     (providerId: ProviderId) => {
+      clearModelDefaultSuggestion();
       const providers = providersForConfig(config);
       const provider = providers.find((item) => item.id === providerId);
       const model = provider ? getProviderModel(provider) : undefined;
@@ -7757,7 +8543,7 @@ export function App() {
         }));
       }
     },
-    [activeDraftKey, activeSessionId, config, persistConfig, saveSessionModel],
+    [activeDraftKey, activeSessionId, config, clearModelDefaultSuggestion, persistConfig, saveSessionModel],
   );
 
   const setProviderAuthStatus = useCallback(
@@ -7847,15 +8633,27 @@ export function App() {
     [setProviderAuthStatus],
   );
 
+  const providerSignIn = useProviderSignIn({
+    dispatchWorkbench,
+    terminalOutputRevisionRef,
+  });
+  const {
+    patch: patchProviderSignIn,
+    dismissPane: dismissProviderSignInPane,
+    panesRef: providerSignInPanesRef,
+    isCancelled: isProviderSignInCancelled,
+  } = providerSignIn;
+
   const runProviderConnection = useCallback(
     async (
       providerId: ProviderId,
-      options?: { forceLogin?: boolean },
+      options?: ProviderConnectionOptions,
     ): Promise<boolean> => {
       const provider = providersForConfig(config).find(
         (item) => item.id === providerId,
       );
       const providerLabel = provider?.displayName ?? providerId;
+      const importedSessionId = options?.importedSessionId;
       // A provider that rejected the last send needs the login flow whoever
       // asked for the connection: its status command still reports a stored
       // sign-in, so believing that answer would return someone to the failure
@@ -7863,18 +8661,160 @@ export function App() {
       const forceLogin = Boolean(
         options?.forceLogin || providerSignInRejectionsRef.current[providerId],
       );
+      // An inline sign-in reports to the model popover, which stays open
+      // beside the chat; only the outcome is worth a notification.
+      const inline = Boolean(options?.inline);
+      const cliName = providerCliName(providerId, providerLabel);
+      const signInCancelled = () =>
+        inline && isProviderSignInCancelled(providerId);
       dispatchWorkbench({
         type: "set-provider-status",
         providerId,
         status: "checking",
       });
-      notify(
-        "provider",
-        providerId === "openai"
-          ? "Checking Codex sign-in"
-          : "Connecting provider",
-        providerLabel,
-      );
+      if (!inline) {
+        notify(
+          "provider",
+          providerId === "openai"
+            ? "Checking Codex sign-in"
+            : "Connecting provider",
+          providerLabel,
+        );
+      }
+
+      // Mirror a background pane into the workbench, so "Show details" opens a
+      // terminal that already holds everything the CLI printed.
+      const readSignInPane = async (paneId: string) => {
+        const progress = await invoke<TerminalPaneSnapshot>(
+          "read_terminal_output",
+          {
+            paneId,
+            knownOutputRevision: terminalOutputRevisionRef.current[paneId],
+          },
+        ).catch(() => undefined);
+        if (!progress) return undefined;
+        terminalOutputRevisionRef.current[paneId] = progress.outputRevision;
+        dispatchWorkbench({
+          type: "sync-terminal-pane-snapshot",
+          paneId,
+          event:
+            progress.exitCode === null || progress.exitCode === undefined
+              ? progress.status
+              : `${progress.status} (${progress.exitCode})`,
+          output: progress.output ?? "",
+          status: terminalStatusFromSnapshot(progress.status),
+          hasForegroundJob: progress.hasForegroundJob ?? undefined,
+        });
+        if (progress.output) setTerminalOutput(progress.output);
+        return progress;
+      };
+      const startBackgroundPane = async (
+        paneId: string,
+        profile: CommandProfile,
+      ) => {
+        providerSignInPanesRef.current[providerId] = paneId;
+        dispatchWorkbench({
+          type: "upsert-background-terminal-pane",
+          pane: createTerminalPane(
+            paneId,
+            profile,
+            "running",
+            workspaceRunMetadata(
+              "local",
+              profile.displayName,
+              activeSession?.workspacePath ?? workspacePath,
+            ),
+          ),
+        });
+        const snapshot = await invoke<TerminalPaneSnapshot>(
+          "create_terminal_pane",
+          {
+            request: {
+              args: profile.args,
+              command: profile.command,
+              paneId,
+              title: profile.displayName,
+              workspacePath: undefined,
+              workspaceMode: "local",
+              workingDirectory: "Home",
+              providerAuthSessionId: importedSessionId,
+              // Wide enough that a sign-in URL never hard-wraps.
+              cols: 400,
+            },
+          },
+        );
+        terminalOutputRevisionRef.current[paneId] = snapshot.outputRevision;
+        return snapshot;
+      };
+
+      // The backend picks an install Gyro can run and then find: the
+      // provider's installer or npm, falling back to a per-user npm prefix
+      // when the global one is root-owned or outside Gyro's search path.
+      const fetchInstallPlan = () =>
+        invoke<CliInstallPlanReport>("provider_cli_install_plan_command", {
+          providerId,
+        }).catch(() => undefined);
+      const reportNotInstalled = async (message: string) => {
+        const report = await fetchInstallPlan();
+        patchProviderSignIn(providerId, {
+          phase: "not-installed",
+          installCommand: report?.plan?.displayCommand,
+          message:
+            report?.plan || !report?.message
+              ? message
+              : `${message} ${report.message}`,
+        });
+      };
+
+      if (inline && options?.install && isTauriRuntime()) {
+        const plan = (await fetchInstallPlan())?.plan;
+        if (!plan) {
+          await reportNotInstalled(
+            `${providerLabel} needs ${cliName}, which isn't installed yet.`,
+          );
+          return false;
+        }
+        const installProfile = providerInstallProfile(providerId, plan);
+        patchProviderSignIn(providerId, {
+          phase: "installing",
+          installCommand: undefined,
+          message: undefined,
+        });
+        const installPaneId = `provider-${providerId}-install-${Date.now()}`;
+        let exitCode: number | null | undefined;
+        try {
+          exitCode = (await startBackgroundPane(installPaneId, installProfile))
+            .exitCode;
+          for (
+            let attempt = 0;
+            attempt < PROVIDER_INSTALL_POLL_ATTEMPTS &&
+            (exitCode === null || exitCode === undefined);
+            attempt += 1
+          ) {
+            await waitFor(PROVIDER_SIGN_IN_FAST_POLL_MS);
+            if (signInCancelled()) return false;
+            exitCode = (await readSignInPane(installPaneId))?.exitCode;
+          }
+        } catch (error) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `Couldn't start the install: ${String(error)}`,
+          });
+          return false;
+        }
+        if (exitCode !== 0) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message:
+              exitCode === null || exitCode === undefined
+                ? `Installing ${cliName} is taking too long.`
+                : `Installing ${cliName} failed (exit ${exitCode}).`,
+          });
+          return false;
+        }
+        dismissProviderSignInPane(providerId);
+        patchProviderSignIn(providerId, { phase: "starting" });
+      }
 
       if (isTauriRuntime()) {
         try {
@@ -7882,6 +8822,7 @@ export function App() {
             "check_provider_health",
             {
               // Connect is a user action, so it probes for real.
+              importedSessionId,
               request: providerHealthRequest(provider, providerId, {
                 force: true,
               }),
@@ -7892,6 +8833,24 @@ export function App() {
             check.output,
             check,
           );
+          if (signInCancelled()) return false;
+          if (inline && check.runtimeStatus === "not-installed") {
+            if (options?.install || providerId === "ollama") {
+              patchProviderSignIn(providerId, {
+                phase: "not-installed",
+                installCommand: undefined,
+                message:
+                  providerId === "ollama"
+                    ? "Ollama isn't running. Install and start it, then try again."
+                    : `${cliName} installed, but Gyro can't find it yet. Restart Gyro, then try again.`,
+              });
+            } else {
+              await reportNotInstalled(
+                `${providerLabel} needs ${cliName}, which isn't installed yet.`,
+              );
+            }
+            return false;
+          }
           if (provider?.authMode === "env") {
             notify(
               result.connectionStatus === "connected" ? "provider" : "approval",
@@ -7982,6 +8941,12 @@ export function App() {
       }
 
       if (provider?.authMode === "env") {
+        if (inline) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `Set ${provider.apiKeyRef ?? "an API key"} outside Gyro, then try again.`,
+          });
+        }
         notify(
           "approval",
           "Provider env setup needed",
@@ -8002,22 +8967,24 @@ export function App() {
       const profile = providerLoginProfile(providerId);
       const commandText = providerLoginCommandText(profile);
       const paneId = `provider-${providerId}-login-${Date.now()}`;
-      const pane = createTerminalPane(
-        paneId,
-        profile,
-        "running",
-        workspaceRunMetadata(
-          "local",
-          profile.displayName,
-          activeSession?.workspacePath ?? workspacePath,
-        ),
-      );
-      dispatchWorkbench({
-        type: "select-workspace-layout",
-        layout: "terminal-grid",
-      });
-      dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
-      dispatchWorkbench({ type: "add-terminal-pane", pane });
+      if (!inline) {
+        const pane = createTerminalPane(
+          paneId,
+          profile,
+          "running",
+          workspaceRunMetadata(
+            "local",
+            profile.displayName,
+            activeSession?.workspacePath ?? workspacePath,
+          ),
+        );
+        dispatchWorkbench({
+          type: "select-workspace-layout",
+          layout: "terminal-grid",
+        });
+        dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
+        dispatchWorkbench({ type: "add-terminal-pane", pane });
+      }
       setTerminalOutput(`Starting ${providerLabel} sign-in: ${commandText}`);
 
       if (!isTauriRuntime()) {
@@ -8026,21 +8993,39 @@ export function App() {
         return true;
       }
 
+      // What the popover shows comes from what the CLI printed. A device code
+      // page is opened once on the person's behalf, since those CLIs don't.
+      let openedDevicePage = false;
+      const showSignInProgress = (output?: string | null) => {
+        if (!inline || !output) return;
+        const progress = parseProviderLoginProgress(output);
+        patchProviderSignIn(providerId, {
+          phase: "waiting",
+          ...(progress.url ? { url: progress.url } : {}),
+          ...(progress.deviceCode ? { deviceCode: progress.deviceCode } : {}),
+          ...(progress.acceptsCode ? { acceptsCode: true } : {}),
+        });
+        if (progress.deviceCode && progress.url && !openedDevicePage) {
+          openedDevicePage = true;
+          void openUrl(progress.url).catch(() => undefined);
+        }
+      };
+
       try {
-        const snapshot = await invoke<TerminalPaneSnapshot>(
-          "create_terminal_pane",
-          {
-            request: {
-              args: profile.args,
-              command: profile.command,
-              paneId,
-              title: profile.displayName,
-              workspacePath: undefined,
-              workspaceMode: "local",
-              workingDirectory: "Home",
-            },
-          },
-        );
+        const snapshot = inline
+          ? await startBackgroundPane(paneId, profile)
+          : await invoke<TerminalPaneSnapshot>("create_terminal_pane", {
+              request: {
+                args: profile.args,
+                command: profile.command,
+                paneId,
+                title: profile.displayName,
+                workspacePath: undefined,
+                workspaceMode: "local",
+                workingDirectory: "Home",
+                providerAuthSessionId: importedSessionId,
+              },
+            });
         dispatchWorkbench({
           type: "sync-terminal-pane-snapshot",
           paneId: snapshot.paneId,
@@ -8058,11 +9043,16 @@ export function App() {
         terminalOutputRevisionRef.current[snapshot.paneId] =
           snapshot.outputRevision;
         setTerminalOutput(snapshot.output ?? "");
-        notify(
-          "provider",
-          "Finish provider sign-in",
-          `Complete ${commandText}. Gyro will connect automatically.`,
-        );
+        if (inline) {
+          patchProviderSignIn(providerId, { phase: "waiting" });
+          showSignInProgress(snapshot.output);
+        } else {
+          notify(
+            "provider",
+            "Finish provider sign-in",
+            `Complete ${commandText}. Gyro will connect automatically.`,
+          );
+        }
 
         // Shared post-login watcher for every CLI provider (OpenAI, Anthropic,
         // Kimi, xAI, Gemini, Cursor, OpenCode). A successful login process exit
@@ -8075,11 +9065,19 @@ export function App() {
         ) => {
           clearProviderSignInRejection(providerId);
           setProviderAuthStatus(providerId, "connected");
+          // The popover now lists the models; the login terminal has done its
+          // job. A health-confirmed login may still be idling at its prompt.
+          if (inline) {
+            dismissProviderSignInPane(providerId, {
+              stop: source === "health",
+            });
+          }
           if (source === "login-exit") {
             // Credentials just landed, so a cached answer is stale.
             const verified = await invoke<ProviderHealthCheck>(
               "check_provider_health",
               {
+                importedSessionId,
                 request: providerHealthRequest(provider, providerId, {
                   force: true,
                 }),
@@ -8096,7 +9094,9 @@ export function App() {
               : "Provider verified",
             providerId === "openai" && source === "health"
               ? "OpenAI is available through your local ChatGPT/Codex login."
-              : providerLabel,
+              : inline && provider?.models.length
+                ? `${providerLabel} · ${provider.models.length} ${provider.models.length === 1 ? "model" : "models"} ready`
+                : providerLabel,
           );
           return true as const;
         };
@@ -8108,32 +9108,25 @@ export function App() {
           PROVIDER_SIGN_IN_POLL_ATTEMPTS,
         );
         for (let attempt = 0; attempt < loginPollAttempts; attempt += 1) {
-          await waitFor(PROVIDER_AUTH_POLL_INTERVAL_MS);
+          await waitFor(
+            inline && attempt < PROVIDER_SIGN_IN_FAST_POLL_ATTEMPTS
+              ? PROVIDER_SIGN_IN_FAST_POLL_MS
+              : PROVIDER_AUTH_POLL_INTERVAL_MS,
+          );
+          if (signInCancelled()) return false;
 
-          const progress = await invoke<TerminalPaneSnapshot>(
-            "read_terminal_output",
-            {
-              paneId,
-              knownOutputRevision: terminalOutputRevisionRef.current[paneId],
-            },
-          ).catch(() => undefined);
+          const progress = await readSignInPane(paneId);
           if (progress) {
-            terminalOutputRevisionRef.current[paneId] = progress.outputRevision;
-            dispatchWorkbench({
-              type: "sync-terminal-pane-snapshot",
-              paneId,
-              event:
-                progress.exitCode === null || progress.exitCode === undefined
-                  ? progress.status
-                  : `${progress.status} (${progress.exitCode})`,
-              output: progress.output ?? "",
-              status: terminalStatusFromSnapshot(progress.status),
-              hasForegroundJob: progress.hasForegroundJob ?? undefined,
-            });
-            if (progress.output) setTerminalOutput(progress.output);
+            showSignInProgress(progress.output);
             if (progress.exitCode !== null && progress.exitCode !== undefined) {
               if (progress.exitCode === 0) {
                 return completeProviderLogin("login-exit");
+              }
+              if (inline) {
+                patchProviderSignIn(providerId, {
+                  phase: "failed",
+                  message: `${providerLabel} sign-in didn't finish (exit ${progress.exitCode}).`,
+                });
               }
               notify(
                 "approval",
@@ -8155,6 +9148,7 @@ export function App() {
           const check = await invoke<ProviderHealthCheck>(
             "check_provider_health",
             {
+              importedSessionId,
               request: providerHealthRequest(provider, providerId),
             },
           ).catch((error) => ({
@@ -8177,6 +9171,12 @@ export function App() {
           }
         }
 
+        if (inline) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `${providerLabel} sign-in timed out. Try again when you're ready.`,
+          });
+        }
         notify(
           "approval",
           "Provider sign-in still pending",
@@ -8195,6 +9195,19 @@ export function App() {
         const output = String(error);
         setTerminalOutput(output);
         recordProviderHealthOutput(providerId, output);
+        if (inline) {
+          const missing = /not found|no such file|cannot find/i.test(output);
+          if (missing) {
+            await reportNotInstalled(
+              `${providerLabel} needs ${cliName}, which isn't installed yet.`,
+            );
+            return false;
+          }
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `${providerLabel} sign-in couldn't start.`,
+          });
+        }
         notify("command-failed", `${providerLabel} login failed`, output);
         return false;
       }
@@ -8203,7 +9216,11 @@ export function App() {
       activeSession?.workspacePath,
       clearProviderSignInRejection,
       config,
+      dismissProviderSignInPane,
       notify,
+      isProviderSignInCancelled,
+      patchProviderSignIn,
+      providerSignInPanesRef,
       recordProviderHealthOutput,
       setProviderAuthStatus,
       workbench.workspaceMode,
@@ -8211,46 +9228,64 @@ export function App() {
     ],
   );
 
-  const { connectProvider, connectingProviderIds } = useProviderConnectionGuard(
+  const runProviderConnectionInline = useInlineSignInRunner(
+    providerSignIn,
     runProviderConnection,
   );
+  const { connectProvider, connectingProviderIds } = useProviderConnectionGuard(
+    runProviderConnectionInline,
+  );
+  const openProviderSettings = useCallback(
+    () => openSettingsSection("providers"),
+    [openSettingsSection],
+  );
+  const providerSignInState = useProviderSignInActions(providerSignIn, {
+    connectProvider,
+    dispatchWorkbench,
+    isProviderId,
+    notify,
+    openProviderSettings,
+  });
 
-  const recordModelSelection = useCallback(
+  const recordCompletedModelChoice = useCallback(
     (
-      providerId: ProviderId,
-      providerLabel: string,
-      modelId: string,
-      modelLabel: string,
+      sessionId: string,
+      turnId: string,
+      selection: SessionModelSelection,
+      response: ProviderChatResponse,
     ) => {
-      const usage = loadModelUsageMap();
-      const key = modelUsageKey(providerId, modelId);
-      const current = usage[key] ?? { count: 0 };
-      const count = current.count + 1;
-      const nextEntry: ModelUsageEntry = { ...current, count };
-      usage[key] = nextEntry;
-      saveModelUsageMap(usage);
-
-      const shouldPrompt =
-        !modelStandardPrompt &&
-        !nextEntry.standard &&
-        count >= MODEL_STANDARD_PROMPT_THRESHOLD &&
-        count >= (nextEntry.snoozeUntil ?? MODEL_STANDARD_PROMPT_THRESHOLD);
-
-      if (shouldPrompt) {
-        setModelStandardPrompt({
-          count,
-          modelId,
-          modelLabel,
-          providerId,
-          providerLabel,
-        });
-      }
+      if (
+        !isSuccessfulModelUseResponse(response) ||
+        !selection.providerId ||
+        !isProviderId(selection.providerId) ||
+        !selection.modelId
+      )
+        return;
+      const now = Date.now();
+      saveModelSuggestionState(
+        recordCompletedModelUse(
+          modelSuggestionStateRef.current!,
+          {
+            providerId: selection.providerId,
+            modelId: selection.modelId,
+            sessionId,
+            turnId,
+            completedAt: now,
+          },
+          now,
+        ),
+      );
+      setPendingModelDefaultCandidate({
+        providerId: selection.providerId,
+        modelId: selection.modelId,
+      });
     },
-    [modelStandardPrompt],
+    [saveModelSuggestionState],
   );
 
   const selectProviderModel = useCallback(
     (providerId: ProviderId, modelId: string) => {
+      clearModelDefaultSuggestion();
       let providers = providersForConfig(config).map((provider) =>
         provider.id === providerId
           ? { ...provider, selectedModelId: modelId }
@@ -8296,21 +9331,13 @@ export function App() {
           }));
         }
       }
-      if (provider && selectedModel) {
-        recordModelSelection(
-          providerId,
-          provider.displayName,
-          modelId,
-          selectedModel.displayName,
-        );
-      }
     },
     [
       activeDraftKey,
       activeSessionId,
       config,
+      clearModelDefaultSuggestion,
       persistConfig,
-      recordModelSelection,
       saveSessionModel,
     ],
   );
@@ -8324,6 +9351,20 @@ export function App() {
    */
   const selectProviderDefaultModel = useCallback(
     (providerId: ProviderId, modelId: string) => {
+      saveModelSuggestionState(
+        snoozeProviderDefaultSuggestions(
+          modelSuggestionStateRef.current!,
+          providerId,
+          Date.now(),
+        ),
+      );
+      if (modelStandardPrompt?.providerId === providerId) {
+        setModelStandardPrompt(undefined);
+        setModelDefaultSaveError(undefined);
+      }
+      if (pendingModelDefaultCandidate?.providerId === providerId) {
+        setPendingModelDefaultCandidate(undefined);
+      }
       const providers = providersForConfig(config).map((provider) =>
         provider.id === providerId
           ? { ...provider, defaultModelId: modelId }
@@ -8343,7 +9384,14 @@ export function App() {
         }`,
       );
     },
-    [config, notify, persistConfig],
+    [
+      config,
+      notify,
+      persistConfig,
+      saveModelSuggestionState,
+      modelStandardPrompt,
+      pendingModelDefaultCandidate,
+    ],
   );
 
   const selectProviderReasoningEffort = useCallback(
@@ -8403,81 +9451,76 @@ export function App() {
     ],
   );
 
-  const acceptModelStandardPrompt = useCallback(() => {
-    if (!modelStandardPrompt) {
+  const acceptModelStandardPrompt = useCallback(async () => {
+    if (!modelStandardPrompt || modelDefaultSavingRef.current) return;
+    const currentConfig = configRef.current;
+    const provider = providersForConfig(currentConfig).find(
+      (item) => item.id === modelStandardPrompt.providerId,
+    );
+    const model = provider?.models?.find(
+      (item) => item.id === modelStandardPrompt.modelId,
+    );
+    if (!provider?.enabled || !model) {
+      setModelStandardPrompt(undefined);
+      setPendingModelDefaultCandidate(undefined);
       return;
     }
-    const usage = loadModelUsageMap();
-    const key = modelUsageKey(
-      modelStandardPrompt.providerId,
-      modelStandardPrompt.modelId,
+    modelDefaultSavingRef.current = true;
+    setIsModelDefaultSaving(true);
+    setModelDefaultSaveError(undefined);
+    // A default is a preference for future provider chats. Leave the selected
+    // provider, every existing session, and their reasoning effort untouched.
+    const saved = await persistConfig(
+      {
+        ...currentConfig,
+        modelProviders: providersForConfig(currentConfig).map((item) =>
+          item.id === provider.id ? { ...item, defaultModelId: model.id } : item,
+        ),
+      },
+      { notifySuccess: false },
     );
-    const current = usage[key] ?? { count: modelStandardPrompt.count };
-    usage[key] = {
-      ...current,
-      count: Math.max(current.count, modelStandardPrompt.count),
-      snoozeUntil: undefined,
-      standard: true,
-    };
-    saveModelUsageMap(usage);
-
-    const providers = providersForConfig(config).map((provider) =>
-      provider.id === modelStandardPrompt.providerId
-        ? { ...provider, selectedModelId: modelStandardPrompt.modelId }
-        : provider,
-    );
-    void persistConfig({
-      ...config,
-      selectedProviderId: modelStandardPrompt.providerId,
-      modelProviders: providers,
-    });
-    dispatchWorkbench({
-      type: "set-provider-model",
-      providerId: modelStandardPrompt.providerId,
-      model: modelStandardPrompt.modelLabel,
-    });
-    if (activeSessionId) {
-      void saveSessionModel(activeSessionId, {
-        providerId: modelStandardPrompt.providerId,
-        providerLabel: modelStandardPrompt.providerLabel,
-        modelId: modelStandardPrompt.modelId,
-        modelLabel: modelStandardPrompt.modelLabel,
-      });
+    modelDefaultSavingRef.current = false;
+    setIsModelDefaultSaving(false);
+    if (!saved) {
+      setModelDefaultSaveError("Couldn't save the default to disk. Try again.");
+      return;
     }
+    saveModelSuggestionState(
+      snoozeProviderDefaultSuggestions(
+        modelSuggestionStateRef.current!,
+        provider.id,
+        Date.now(),
+      ),
+    );
     notify(
       "provider",
-      "Standard model set",
-      `${modelStandardPrompt.providerLabel} · ${modelStandardPrompt.modelLabel}`,
+      "Default model updated",
+      `${provider.displayName} · ${model.displayName}`,
     );
     setModelStandardPrompt(undefined);
-  }, [
-    activeSessionId,
-    config,
-    modelStandardPrompt,
-    notify,
-    persistConfig,
-    saveSessionModel,
-  ]);
+    setPendingModelDefaultCandidate(undefined);
+  }, [modelStandardPrompt, notify, persistConfig, saveModelSuggestionState]);
 
-  const dismissModelStandardPrompt = useCallback(() => {
-    if (!modelStandardPrompt) {
-      return;
-    }
-    const usage = loadModelUsageMap();
-    const key = modelUsageKey(
-      modelStandardPrompt.providerId,
-      modelStandardPrompt.modelId,
-    );
-    const current = usage[key] ?? { count: modelStandardPrompt.count };
-    const count = Math.max(current.count, modelStandardPrompt.count);
-    usage[key] = {
-      ...current,
-      count,
-      snoozeUntil: count + MODEL_STANDARD_PROMPT_SNOOZE_SELECTIONS,
-    };
-    saveModelUsageMap(usage);
-    setModelStandardPrompt(undefined);
-  }, [modelStandardPrompt]);
+  const dismissModelStandardPrompt = useCallback(
+    (neverSuggestAgain = false) => {
+      if (!modelStandardPrompt || modelDefaultSavingRef.current) return;
+      saveModelSuggestionState(
+        dismissModelDefaultSuggestion(
+          modelSuggestionStateRef.current!,
+          {
+            providerId: modelStandardPrompt.providerId,
+            modelId: modelStandardPrompt.modelId,
+            neverSuggestAgain,
+          },
+          Date.now(),
+        ),
+      );
+      setModelStandardPrompt(undefined);
+      setPendingModelDefaultCandidate(undefined);
+      setModelDefaultSaveError(undefined);
+    },
+    [modelStandardPrompt, saveModelSuggestionState],
+  );
 
   const updateActiveChatDraft = useCallback(
     (value: string) => {
@@ -8574,7 +9617,20 @@ export function App() {
   );
 
   const selectChatAttachment = useCallback(
-    async (kind: ChatAttachmentPickerKind, explicitPath?: string) => {
+    async (
+      kind: ChatAttachmentPickerKind,
+      explicitPath?: string,
+      target?: {
+        draftKey: string;
+        sessionId?: string;
+        workspacePath?: string;
+      },
+    ) => {
+      const attachmentDraftKey = target?.draftKey ?? activeDraftKey;
+      const attachmentSessionId = target ? target.sessionId : activeSessionId;
+      const attachmentWorkspacePath = target
+        ? target.workspacePath
+        : workspacePath;
       if (!isTauriRuntime()) {
         notify(
           "command-failed",
@@ -8583,7 +9639,7 @@ export function App() {
         );
         return;
       }
-      if (kind === "workspace-file" && !workspacePath) {
+      if (kind === "workspace-file" && !attachmentWorkspacePath) {
         notify(
           "command-failed",
           "Select a project first",
@@ -8602,7 +9658,7 @@ export function App() {
           }));
         const paths =
           typeof selected === "string" ? [selected] : (selected ?? []);
-        const existing = chatAttachments[activeDraftKey] ?? [];
+        const existing = chatAttachmentsRef.current[attachmentDraftKey] ?? [];
         const remaining = {
           image: Math.max(
             0,
@@ -8620,7 +9676,7 @@ export function App() {
         let limitExceeded = false;
         for (const path of paths) {
           const attachmentKind = chatAttachmentKindForPath(kind, path);
-          if (attachmentKind === "workspace-file" && !workspacePath) {
+          if (attachmentKind === "workspace-file" && !attachmentWorkspacePath) {
             rejected.push(
               `${workspaceName(path)}: select a project to attach project files`,
             );
@@ -8639,9 +9695,9 @@ export function App() {
               "prepare_chat_attachment",
               {
                 request: {
-                  sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                  sessionId: attachmentSessionId ?? NEW_CHAT_DRAFT_KEY,
                   path,
-                  workspacePath,
+                  workspacePath: attachmentWorkspacePath,
                   kind: attachmentKind,
                 },
               },
@@ -8663,12 +9719,12 @@ export function App() {
         if (prepared.length) {
           // Picking an image already in the draft stores the same file again.
           setChatAttachments((current) => {
-            const draft = current[activeDraftKey] ?? [];
+            const draft = current[attachmentDraftKey] ?? [];
             const seen = new Set(draft.map((item) => item.path));
             const fresh = prepared.filter(
               (item) => !seen.has(item.path) && Boolean(seen.add(item.path)),
             );
-            return { ...current, [activeDraftKey]: [...draft, ...fresh] };
+            return { ...current, [attachmentDraftKey]: [...draft, ...fresh] };
           });
         }
         if (rejected.length) {
@@ -8686,6 +9742,95 @@ export function App() {
       }
     },
     [activeDraftKey, activeSessionId, chatAttachments, notify, workspacePath],
+  );
+
+  /* Explorer "Ask Gyro" attaches the selection and leaves sending to Return.
+     A folder is a short listing, not a recursive copy of its files. */
+  const askWorkspacePath = useCallback(
+    async (path: string) => {
+      const root = workspaceRootForPath(workspaceRoots, path);
+      if (!root || !path) {
+        notify(
+          "command-failed",
+          "Ask Gyro blocked",
+          "Stay inside this workspace folder",
+        );
+        return false;
+      }
+      const entry = explorerFiles.find((file) => file.path === path);
+      const isDirectory =
+        entry?.kind === "directory" ||
+        entry?.isWorkspaceRoot === true ||
+        path === root;
+      try {
+        const attachment = isDirectory
+          ? await invoke<ChatAttachment>("prepare_chat_attachment", {
+              request: {
+                sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                path: "",
+                workspacePath: root,
+                kind: "ide-snapshot",
+                name: `${workspaceName(path)}.snapshot.txt`.slice(0, 255),
+                relativePath:
+                  path === root
+                    ? workspaceName(root)
+                    : relativeFilePath(path, root),
+                bytes: Array.from(
+                  new TextEncoder().encode(
+                    formatExplorerAskListing(
+                      workspaceName(path),
+                      await invoke<WorkspaceFile[]>("list_workspace_tree", {
+                        workspacePath: path,
+                        depth: 2,
+                      }),
+                    ),
+                  ),
+                ),
+              },
+            })
+          : await invoke<ChatAttachment>("prepare_chat_attachment", {
+              request: {
+                sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                path,
+                workspacePath: root,
+                kind: "workspace-file",
+              },
+            });
+        flushSync(() => {
+          setChatAttachments((current) => {
+            const draft = current[activeDraftKey] ?? [];
+            const alreadyAttached = draft.some(
+              (item) =>
+                item.path === attachment.path ||
+                (item.relativePath &&
+                  item.relativePath === attachment.relativePath &&
+                  item.name === attachment.name),
+            );
+            if (alreadyAttached) return current;
+            return {
+              ...current,
+              [activeDraftKey]: [...draft, attachment],
+            };
+          });
+        });
+        notify(
+          "terminal",
+          isDirectory ? "Folder attached" : "File attached",
+          "It is in the composer. Press Return when you want to send.",
+        );
+        return true;
+      } catch (error) {
+        notify("command-failed", "Could not attach", String(error));
+        return false;
+      }
+    },
+    [
+      activeDraftKey,
+      activeSessionId,
+      explorerFiles,
+      notify,
+      workspaceRoots,
+    ],
   );
 
   const attachBrowserSnapshot = useCallback(async () => {
@@ -8798,7 +9943,7 @@ export function App() {
       const attachmentWorkspacePath = target
         ? target.workspacePath
         : workspacePath;
-      const existing = chatAttachments[attachmentDraftKey] ?? [];
+      const existing = chatAttachmentsRef.current[attachmentDraftKey] ?? [];
       const remaining = {
         image: Math.max(
           0,
@@ -8832,8 +9977,15 @@ export function App() {
         const placeholder = pendingMediaAttachment(dropped, kind);
         queued.push({ dropped, kind, placeholder });
       }
-      // The chip lands with the drop; the upload fills it in behind it.
+      // Reserve synchronously so overlapping drops share the same limits.
       if (queued.length) {
+        chatAttachmentsRef.current = {
+          ...chatAttachmentsRef.current,
+          [attachmentDraftKey]: [
+            ...existing,
+            ...queued.map((item) => item.placeholder),
+          ],
+        };
         setChatAttachments((current) => ({
           ...current,
           [attachmentDraftKey]: [
@@ -8843,36 +9995,45 @@ export function App() {
         }));
       }
       const upload = async (dropped: File, kind: "image" | "video") => {
+        const cancellation = new AbortController();
         try {
-          const file =
-            kind === "image"
-              ? await sendableChatImage(dropped, MAX_CHAT_IMAGE_BYTES)
-              : dropped;
-          const name =
-            file.name ||
-            `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`;
-          const byteLimit =
-            kind === "video" ? MAX_CHAT_VIDEO_BYTES : MAX_CHAT_IMAGE_BYTES;
-          if (file.size > byteLimit) {
-            rejected.push(
-              `${name}: ${kind}s must be ${byteLimit / (1024 * 1024)} MB or smaller`,
-            );
-            return undefined;
-          }
-          const headers: Record<string, string> = {
-            "x-gyro-kind": kind,
-            "x-gyro-name": base64Utf8(name),
-            "x-gyro-session-id": attachmentSessionId ?? NEW_CHAT_DRAFT_KEY,
-          };
-          if (attachmentWorkspacePath) {
-            headers["x-gyro-workspace"] = base64Utf8(attachmentWorkspacePath);
-          }
-          const attachment = await invoke<ChatAttachment>(
-            "prepare_chat_media_upload",
-            new Uint8Array(await file.arrayBuffer()),
-            { headers },
+          return await withMediaUploadTimeout(
+            queueMediaUpload(async () => {
+              const file =
+                kind === "image"
+                  ? await sendableChatImage(dropped, MAX_CHAT_IMAGE_BYTES)
+                  : dropped;
+              const name =
+                file.name ||
+                `pasted-${kind}-${Date.now()}.${kind === "video" ? "mp4" : "png"}`;
+              const byteLimit =
+                kind === "video" ? MAX_CHAT_VIDEO_BYTES : MAX_CHAT_IMAGE_BYTES;
+              if (file.size > byteLimit) {
+                rejected.push(
+                  `${name}: ${kind}s must be ${byteLimit / (1024 * 1024)} MB or smaller`,
+                );
+                return undefined;
+              }
+              const headers: Record<string, string> = {
+                "x-gyro-kind": kind,
+                "x-gyro-name": base64Utf8(name),
+                "x-gyro-session-id": attachmentSessionId ?? NEW_CHAT_DRAFT_KEY,
+              };
+              if (attachmentWorkspacePath) {
+                headers["x-gyro-workspace"] = base64Utf8(attachmentWorkspacePath);
+              }
+              const attachment = await invoke<ChatAttachment>(
+                "prepare_chat_media_upload",
+                new Uint8Array(await file.arrayBuffer()),
+                { headers },
+              );
+              return {
+                ...attachment,
+                previewUrl: convertFileSrc(attachment.path),
+              };
+            }, cancellation.signal),
+            () => cancellation.abort(),
           );
-          return { ...attachment, previewUrl: convertFileSrc(attachment.path) };
         } catch (error) {
           rejected.push(`${dropped.name || kind}: ${String(error)}`);
           return undefined;
@@ -8956,12 +10117,21 @@ export function App() {
   );
 
   const handleComposerAction = useCallback(
-    (action: string, draftKey = activeDraftKey) => {
+    (
+      action: string,
+      draftKey = activeDraftKey,
+      attachmentTarget?: {
+        draftKey: string;
+        sessionId?: string;
+        workspacePath?: string;
+      },
+    ) => {
       if (isShellOptimizing) {
         const allowedWhileOptimizing =
           action.startsWith("select-provider:") ||
           action.startsWith("select-provider-model:") ||
           action.startsWith("select-provider-effort:") ||
+          action.startsWith("set-provider-fast-mode:") ||
           action.startsWith("set-workspace-mode:") ||
           action.startsWith("refresh-provider-usage:");
         if (!allowedWhileOptimizing) {
@@ -8979,6 +10149,7 @@ export function App() {
         nextMode: WorkbenchState["workspaceMode"],
       ) => {
         const applyWorkspaceMode = () => {
+          if (!activeSessionId) draftWorkspaceModes.current[activeDraftKey] = nextMode;
           dispatchWorkbench({ type: "set-workbench-mode", mode: nextMode });
           dispatchWorkbench({ type: "close-tool-panel" });
           notify(
@@ -9045,7 +10216,13 @@ export function App() {
       if (action.startsWith("connect-provider:")) {
         const providerId = action.replace("connect-provider:", "");
         if (isProviderId(providerId)) {
-          connectProvider(providerId);
+          const session = sessionsRef.current.find(
+            (session) => session.id === draftKey,
+          );
+          connectProvider(providerId, {
+            inline: true,
+            importedSessionId: session?.importSource ? session.id : undefined,
+          });
         }
         return;
       }
@@ -9076,24 +10253,43 @@ export function App() {
         return;
       }
 
+      if (action.startsWith("set-provider-fast-mode:")) {
+        const nextConfig = fastModeConfigFromAction(configRef.current, action);
+        if (nextConfig) {
+          void persistConfig(nextConfig, { notifySuccess: false });
+        }
+        return;
+      }
+
       if (action.startsWith("refresh-provider-models:")) {
         const providerId = action.replace("refresh-provider-models:", "");
         if (isProviderId(providerId)) {
           const provider = providersForConfig(config).find(
             (item) => item.id === providerId,
           );
-          void persistConfig({
-            ...config,
-            selectedProviderId: providerId,
-            modelProviders: providersForConfig(config),
+          if (providerId === "antigravity") {
+            void refreshGoogleModels(providerId, true).then((discovery) => {
+              notify(
+                discovery ? "provider" : "command-failed",
+                discovery ? "Google models refreshed" : "Model discovery failed",
+                discovery
+                  ? `${provider?.displayName ?? providerId}: ${discovery.models.length} models reported by the connected agent.`
+                  : "Check the provider installation and credentials, then try again.",
+              );
+            });
+            return;
+          }
+          void refreshModelContexts(providerId, true).then((windows) => {
+            const live = windows.filter((window) =>
+              window.contextWindowTokens && window.source !== "catalog" && window.source !== "unknown",
+            ).length;
+            notify(
+              "provider", "Context limits refreshed",
+              provider
+                ? `${provider.displayName}: ${live} live model limit${live === 1 ? "" : "s"}; catalog limits remain available for other models.`
+                : "Model context limits refreshed.",
+            );
           });
-          notify(
-            "provider",
-            "Models refreshed",
-            provider
-              ? `${provider.displayName} is using the seeded model catalog.`
-              : "Seeded model catalog is current.",
-          );
         }
         return;
       }
@@ -9116,6 +10312,7 @@ export function App() {
         void selectChatAttachment(
           "workspace-file",
           decodeURIComponent(action.slice("attach-workspace-path:".length)),
+          attachmentTarget,
         );
         return;
       }
@@ -9259,20 +10456,24 @@ export function App() {
           startNewChat();
           break;
         case "attach-files":
-          void selectChatAttachment("any");
+          void selectChatAttachment("any", undefined, attachmentTarget);
           break;
         case "add-context":
         case "select-file":
-          void selectChatAttachment("workspace-file");
+          void selectChatAttachment(
+            "workspace-file",
+            undefined,
+            attachmentTarget,
+          );
           break;
         case "select-image":
-          void selectChatAttachment("image");
+          void selectChatAttachment("image", undefined, attachmentTarget);
           break;
         case "select-video":
-          void selectChatAttachment("video");
+          void selectChatAttachment("video", undefined, attachmentTarget);
           break;
         case "select-media":
-          void selectChatAttachment("media");
+          void selectChatAttachment("media", undefined, attachmentTarget);
           break;
         case "attach-editor-snapshot":
           void attachEditorSnapshot();
@@ -9447,9 +10648,11 @@ export function App() {
           );
           optimisticEventsRef.current.set(
             activeSessionId,
-            mergePersistedAndOptimisticEvents(
-              optimisticEventsRef.current.get(activeSessionId) ?? [],
-              compactEvents,
+            limitOptimisticSessionEvents(
+              mergePersistedAndOptimisticEvents(
+                optimisticEventsRef.current.get(activeSessionId) ?? [],
+                compactEvents,
+              ),
             ),
           );
           setEventsForSession(activeSessionId, (current) =>
@@ -9537,6 +10740,8 @@ export function App() {
       persistConfig,
       refreshEvents,
       refreshIdeServices,
+      refreshModelContexts,
+      refreshGoogleModels,
       refreshProviderUsage,
       refreshSourceControl,
       removeWorkspaceWorktree,
@@ -9728,12 +10933,19 @@ export function App() {
       if (!pane) {
         return;
       }
-      const title = window.prompt("Rename terminal", pane.title)?.trim();
-      if (!title || title === pane.title) {
-        return;
-      }
-      dispatchWorkbench({ type: "rename-terminal-pane", paneId, title });
-      notify("terminal", "Terminal renamed", title);
+      void askTextValue({
+        title: "Rename terminal",
+        label: "Terminal name",
+        initialValue: pane.title,
+        confirmLabel: "Rename",
+      }).then((nextTitle) => {
+        const title = nextTitle?.trim();
+        if (!title || title === pane.title) {
+          return;
+        }
+        dispatchWorkbench({ type: "rename-terminal-pane", paneId, title });
+        notify("terminal", "Terminal renamed", title);
+      });
     },
     [notify, workbench.terminalPanes],
   );
@@ -9771,18 +10983,42 @@ export function App() {
       const message = normalizeChatMessage(overrideMessage ?? activeChatDraft);
       const draftAttachments =
         overrideContext?.attachments ?? activeChatAttachments;
+      const requestedSessionId = overrideContext?.sessionId ?? activeSessionId;
+      if (
+        requestedSessionId &&
+        message.length <= MAX_CHAT_MESSAGE_CHARS &&
+        (message || draftAttachments.length > 0)
+      ) {
+        chatAutoRetry.cancelSession(requestedSessionId);
+        if (
+          !overrideContext?.retryTurnId &&
+          !overrideContext?.retryDispatchGuard
+        ) {
+          retryDispatchRef.current.cancelSession(requestedSessionId);
+        }
+      }
+      if (overrideContext?.retryDispatchGuard?.() === false) return false;
       // An image dropped a moment ago may still be uploading.
-      const turnAttachments = draftAttachments.some((item) => item.pending)
-        ? await settlePendingMedia(draftAttachments)
-        : draftAttachments;
+      let turnAttachments = draftAttachments;
+      try {
+        if (draftAttachments.some((item) => item.pending)) {
+          turnAttachments = await settlePendingMedia(draftAttachments);
+        }
+      } catch (error) {
+        notify("command-failed", "Attachment upload failed", String(error));
+        return false;
+      }
+      if (overrideContext?.retryDispatchGuard?.() === false) return false;
       // Every mode carries the goal, Plan included: planning toward a stated
       // outcome is the case the goal exists for.
       const turnGoal =
         overrideContext && "goal" in overrideContext
           ? overrideContext.goal
           : activeSessionGoal;
-      const turnPlan = overrideContext?.plan ?? activeSessionPlan;
-      const requestedSessionId = overrideContext?.sessionId ?? activeSessionId;
+      const turnPlan =
+        overrideContext && "plan" in overrideContext
+          ? (overrideContext.plan ?? { title: "Plan", items: [] })
+          : activeSessionPlan;
       const previewSessionId =
         isTauriRuntime() && requestedSessionId?.startsWith("preview-")
           ? requestedSessionId
@@ -9813,6 +11049,10 @@ export function App() {
       const selectedProvider = providersForConfig(config).find(
         (provider) => provider.id === sessionModel.providerId,
       );
+      if (!requestedSessionId && sessionModel.providerId && (!selectedProvider || !selectedProvider.enabled || !isProviderRuntimeUsable(selectedProvider, workbench.providerStatuses.find(item => item.id === selectedProvider.id)) || !getProviderModel(selectedProvider, sessionModel.modelId))) {
+        notify("command-failed", "Choose an available model", "The model saved for this draft is unavailable. Connect its provider or choose another model.");
+        return false;
+      }
       const requireCommandApproval =
         overrideContext?.requireCommandApproval ??
         config.requireCommandApproval;
@@ -9821,10 +11061,15 @@ export function App() {
         config.requireFileEditApproval;
       const fullAccess =
         overrideContext?.fullAccess ?? Boolean(config.fullAccess);
+      // A chat belongs to the project of the pane it was typed in. The global
+      // workspace can move (Code layout, sidebar) while an already-focused
+      // draft keeps its own project, so never let it pick the project here.
       const chatWorkspacePath =
         overrideContext?.workspacePath ??
         targetSession?.workspacePath ??
-        workspacePath;
+        (!requestedSessionId && activeChatPane?.kind === "draft"
+          ? activeChatPane.workspacePath
+          : workspacePath);
       const turnWorkspaceContext =
         overrideContext?.workspaceContext ??
         (workspaceContextSnapshot &&
@@ -9882,6 +11127,10 @@ export function App() {
         targetSessionId &&
         sendingSessionIdsRef.current.has(targetSessionId)
       ) {
+        // Recovery keeps the original turn. The dispatch controller waits for
+        // a finishing invoke; it must never fall into the normal send queue.
+        if (overrideContext?.retryTurnId || overrideContext?.retryDispatchGuard)
+          return false;
         if (
           (chatMessageQueues[targetSessionId]?.length ?? 0) >=
           MAX_QUEUED_CHAT_MESSAGES_PER_SESSION
@@ -9970,11 +11219,35 @@ export function App() {
         void openWorkspace();
         return false;
       }
-      if (
-        !isCouncilTurn &&
-        !checkProviderReadiness("chat", sessionModel.providerId)
-      ) {
-        return false;
+      if (!isCouncilTurn) {
+        if (targetSession?.importSource && isTauriRuntime()) {
+          const check = await invoke<ProviderHealthCheck>(
+            "check_provider_health",
+            {
+              importedSessionId: targetSession.id,
+              request: providerHealthRequest(
+                selectedProvider,
+                sessionModel.providerId,
+              ),
+            },
+          ).catch(() => undefined);
+          if (
+            !check ||
+            recordProviderHealthOutput(
+              sessionModel.providerId!,
+              check.output,
+              check,
+            ).connectionStatus !== "connected"
+          ) {
+            notify(
+              "provider",
+              "Connect this chat's provider",
+              "Use Connect to sign in with this imported chat's provider data folder.",
+            );
+            return false;
+          }
+        } else if (!checkProviderReadiness("chat", sessionModel.providerId))
+          return false;
       }
       if (isCouncilTurn && COUNCIL_COMING_SOON) {
         notify(
@@ -10008,12 +11281,17 @@ export function App() {
       const turnId = retryTurnId ?? overrideContext?.turnId ?? createTurnId();
       if (!isCouncilTurn) turnTiming.beginTurnTiming(turnId);
       setTurnSourceControlBaselines((current) => {
+        if (
+          scopedIde.sourceControl.detailsLoaded === false ||
+          scopedIde.sourceControl.statsPartial
+        )
+          return current;
         if (current[turnId]) {
           return current;
         }
         return Object.fromEntries([
           ...Object.entries(current).slice(-49),
-          [turnId, sourceControlLineStats(workbench.ide.sourceControl)],
+          [turnId, sourceControlLineStats(scopedIde.sourceControl)],
         ]);
       });
       const isRetry = Boolean(targetSessionId && retryTurnId);
@@ -10074,7 +11352,10 @@ export function App() {
           );
         }
         let sendingSessionId = session.id;
-        optimisticEventsRef.current.set(session.id, optimisticEvents);
+        optimisticEventsRef.current.set(
+          session.id,
+          limitOptimisticSessionEvents(optimisticEvents),
+        );
         suppressSessionAutoSelectRef.current = false;
         setSessionSending(session.id, true);
         if (consumeSelectedMode) {
@@ -10111,6 +11392,7 @@ export function App() {
             workspacePath: session.workspacePath,
           });
         }
+        delete draftWorkspaceModes.current[activeDraftKey];
         setChatDraftModels((current) => {
           if (!(activeDraftKey in current)) {
             return current;
@@ -10159,7 +11441,10 @@ export function App() {
             persistedSession.id,
           );
           optimisticEventsRef.current.delete(session.id);
-          optimisticEventsRef.current.set(persistedSession.id, migratedEvents);
+          optimisticEventsRef.current.set(
+            persistedSession.id,
+            limitOptimisticSessionEvents(migratedEvents),
+          );
           setSessionEventsById((current) => {
             const next = { ...current };
             delete next[session.id];
@@ -10336,6 +11621,7 @@ export function App() {
               },
             });
           }
+          await configSaveQueueRef.current;
           persistedChatTurnIdsRef.current.add(turnId);
           if (isCouncilTurn && councilResolution) {
             const councilResponse = await invoke<CouncilChatInvokeResponse>(
@@ -10394,6 +11680,7 @@ export function App() {
                 },
               );
             applyProviderChatResponse(persistedSession.id, providerResponse);
+            recordCompletedModelChoice(persistedSession.id, turnId, sessionModel, providerResponse);
           }
           didDeliverProviderResponse = true;
           persistedChatTurnIdsRef.current.delete(turnId);
@@ -10483,12 +11770,22 @@ export function App() {
       } else {
         await pendingModelSave(targetSessionId);
       }
+      await configSaveQueueRef.current;
+      // Preparation can await media, provider health and model saves. A new
+      // send or Stop may win meanwhile, or another sender may have started.
+      if (
+        overrideContext?.retryDispatchGuard?.() === false ||
+        (isRetry && sendingSessionIdsRef.current.has(targetSessionId))
+      )
+        return false;
       if (isRetry) {
         const resetEvents = (items: SessionEvent[]) =>
           resetStreamingAssistantForRetry(items, turnId);
         optimisticEventsRef.current.set(
           targetSessionId,
-          resetEvents(optimisticEventsRef.current.get(targetSessionId) ?? []),
+          limitOptimisticSessionEvents(
+            resetEvents(optimisticEventsRef.current.get(targetSessionId) ?? []),
+          ),
         );
         setEventsForSession(targetSessionId, (current) => resetEvents(current));
         updateOptimisticProviderStatus(
@@ -10501,9 +11798,11 @@ export function App() {
       } else {
         optimisticEventsRef.current.set(
           targetSessionId,
-          mergePersistedAndOptimisticEvents(
-            optimisticEventsRef.current.get(targetSessionId) ?? [],
-            optimisticEvents,
+          limitOptimisticSessionEvents(
+            mergePersistedAndOptimisticEvents(
+              optimisticEventsRef.current.get(targetSessionId) ?? [],
+              optimisticEvents,
+            ),
           ),
         );
       }
@@ -10648,6 +11947,7 @@ export function App() {
               },
             );
           applyProviderChatResponse(targetSessionId, providerResponse);
+          recordCompletedModelChoice(targetSessionId, turnId, sessionModel, providerResponse);
         }
         didDeliverProviderResponse = true;
         persistedChatTurnIdsRef.current.delete(turnId);
@@ -10702,6 +12002,7 @@ export function App() {
       activeSession?.workspacePath,
       activeSessionHasTranscriptEvents,
       activeDraftKey,
+      activeChatPane,
       activeChatAttachments,
       activeChatDraft,
       changeChatMode,
@@ -10713,8 +12014,11 @@ export function App() {
       applyProviderChatResponse,
       chatDraftModels,
       chatMessageQueues,
+      chatAutoRetry.cancelSession,
       refreshProviderUsage,
       checkProviderReadiness,
+      recordProviderHealthOutput,
+      recordCompletedModelChoice,
       config,
       isShellOptimizing,
       isStartingFirstTurn,
@@ -10729,13 +12033,21 @@ export function App() {
       setSessionSending,
       setEventsForSession,
       updateSessionTitle,
-      workbench.ide.sourceControl,
+      scopedIde.sourceControl,
       liveEditorEvidence,
       workbench.providerStatuses,
       workbench.workspaceMode,
       workspacePath,
     ],
   );
+  // sendDraft changes with every draft and status update. A stable handler
+  // keeps the transcript memo (which lists onContinueChat) from rebuilding
+  // every turn on each render.
+  const sendDraftRef = useRef(sendDraft);
+  sendDraftRef.current = sendDraft;
+  const continueChat = useCallback(() => {
+    void sendDraftRef.current("Continue");
+  }, []);
 
   const handleCouncilAction = useCallback(
     async (action: CouncilActionRequest): Promise<string | void> => {
@@ -10885,14 +12197,18 @@ export function App() {
 
   const startNewGoalChat = useCallback(
     (goal: string) => {
-      // The goal composer keeps its own text, so the chat draft stays put.
+      // A new goal is the message already in the composer, same as Plan, so
+      // sending it consumes that draft instead of leaving a second copy. Only
+      // a fresh chat needs the selection carried; an existing chat picks it up
+      // from the goal it is about to gain.
+      if (!activeSessionId) goalModeCarryRef.current = activeDraftKey;
       void sendDraft(goal, {
         goal: { text: goal, status: "active" },
-        preserveDraft: true,
+        preserveDraft: false,
         consumeDraftMode: true,
       });
     },
-    [sendDraft],
+    [activeDraftKey, activeSessionId, sendDraft],
   );
 
   useEffect(() => {
@@ -10927,12 +12243,18 @@ export function App() {
       if (plan.items.length === 0 && !plan.content) {
         return false;
       }
+      // Approving lands in a fresh Normal-mode draft, whose model picker starts
+      // empty. Carry the model and effort the approval bar showed — the plan
+      // pane's own selection — so the run does not fall back to the global
+      // picker's defaults.
+      const planModel = chatDraftModels[target?.draftKey ?? activeDraftKey];
       return sendDraft("Implement the approved plan.", {
         goal: target ? target.goal : activeSessionGoal,
         mode: "normal",
         plan,
         preserveDraft: true,
         sessionId: target?.sessionId,
+        ...(planModel ? { sessionModel: planModel } : {}),
       });
     },
     [
@@ -10940,6 +12262,7 @@ export function App() {
       activeSessionGoal,
       activeSessionPlan,
       changeChatMode,
+      chatDraftModels,
       notify,
       sendDraft,
     ],
@@ -11126,12 +12449,31 @@ export function App() {
 
   const handleProviderStatusAction = useCallback(
     (action: string, event: SessionEvent) => {
+      if (action === "cancel-retry") {
+        chatAutoRetry.cancelSession(event.sessionId);
+        retryDispatchRef.current.cancelSession(event.sessionId);
+        stoppedChatSessionsRef.current.add(event.sessionId);
+        void invoke("stop_provider_chat", { sessionId: event.sessionId }).catch(
+          (error) => {
+            stoppedChatSessionsRef.current.delete(event.sessionId);
+            setQueueRetryTick((current) => current + 1);
+            notify("command-failed", "Could not cancel retry", String(error));
+          },
+        );
+        return;
+      }
+      if (action === "retry-send" || action === "reconnect-provider") {
+        chatAutoRetry.cancel(event.id);
+      }
       const payload = recordFromUnknown(event.payload);
       const providerId = stringFromRecord(payload, "providerId");
       const turnId = turnIdFromSessionEvent(event);
+      const eventSessionEvents =
+        sessionEventsById[event.sessionId] ?? eventsRef.current;
       const userEvent = turnId
-        ? eventsRef.current.find(
+        ? eventSessionEvents.find(
             (item) =>
+              item.sessionId === event.sessionId &&
               item.kind === "user-message" &&
               (turnIdFromSessionEvent(item) ?? item.id) === turnId,
           )
@@ -11145,12 +12487,12 @@ export function App() {
         const activity = capabilityActivityFromSessionEvent(event);
         if (!activity?.resource) return;
         if (activity.resource.kind === "chat") {
-          // A research sub-agent keeps its transcript in a chat of its own.
-          // That chat is not listed among the user's chats, so the call that
-          // ran it is what opens it — and the session list may not know about
-          // it yet.
-          const chatSessionId = activity.resource.id;
-          void refreshSessions().then(() => selectSession(chatSessionId));
+          const paneId =
+            displayedChatLayout.slots.find(
+              (pane) =>
+                pane?.kind === "session" && pane.sessionId === event.sessionId,
+            )?.paneId ?? SOLO_CHAT_PANE_ID;
+          subagentController.select(paneId, activity.resource.id);
           return;
         }
         selectSession(event.sessionId);
@@ -11307,7 +12649,8 @@ export function App() {
 
       const replayFailedTurn = () => {
         if (!userMessage) return;
-        if (turnId) {
+        const removeQueuedReplay = () => {
+          if (!turnId) return;
           setChatMessageQueues((current) => {
             const queued = current[event.sessionId] ?? [];
             const remaining = queued.filter(
@@ -11321,7 +12664,7 @@ export function App() {
             else delete next[event.sessionId];
             return next;
           });
-        }
+        };
         const userPayload = recordFromUnknown(userEvent?.payload);
         const attachments = Array.isArray(userPayload?.attachments)
           ? (userPayload.attachments as ChatAttachment[])
@@ -11330,7 +12673,9 @@ export function App() {
             : [];
         const goalRecord = recordFromUnknown(payload?.goal);
         const planRecord = recordFromUnknown(payload?.plan);
-        void sendDraft(userMessage, {
+        const retryContext: ChatTurnContextSnapshot = {
+          sessionId: event.sessionId,
+          preserveDraft: true,
           retryTurnId: turnId,
           mode:
             stringFromRecord(payload, "chatMode") === "plan"
@@ -11351,7 +12696,30 @@ export function App() {
             planRecord && Array.isArray(planRecord.items)
               ? (planRecord as unknown as SessionPlan)
               : undefined,
-        });
+        };
+        void retryDispatchRef.current
+          .dispatch(event.sessionId, turnId, {
+            isBusy: () =>
+              sendingSessionIdsRef.current.has(event.sessionId) ||
+              queuedChatDispatchesRef.current.has(event.sessionId),
+            isCurrent: () =>
+              isChatRetryCurrent(
+                sessionEventsByIdRef.current[event.sessionId] ?? [],
+                event,
+              ),
+            send: (retryDispatchGuard) => {
+              // A finishing queued delivery can reinsert its failed item. Drop
+              // that replay only after its dispatch cleanup has also settled.
+              removeQueuedReplay();
+              return sendDraftRef.current(userMessage, {
+                ...retryContext,
+                retryDispatchGuard,
+              });
+            },
+          })
+          .catch((error) =>
+            notify("command-failed", "Could not retry", String(error)),
+          );
       };
 
       if (action === "reconnect-provider" && isProviderId(providerId)) {
@@ -11363,11 +12731,12 @@ export function App() {
         const needsSignIn = providerNeedsSignIn(
           stringFromRecord(payload, "recoveryKind"),
         );
-        void connectProvider(providerId, { forceLogin: needsSignIn }).then(
-          (connected) => {
-            if (connected && needsSignIn) replayFailedTurn();
-          },
-        );
+        void connectProvider(providerId, {
+          forceLogin: needsSignIn,
+          importedSessionId: event.sessionId,
+        }).then((connected) => {
+          if (connected && needsSignIn) replayFailedTurn();
+        });
         return;
       }
 
@@ -11376,6 +12745,10 @@ export function App() {
       }
     },
     [
+      subagentController,
+      chatAutoRetry.cancel,
+      chatAutoRetry.cancelSession,
+      displayedChatLayout,
       browserResourcesBySessionId,
       capabilityResourceDataByCallId,
       connectProvider,
@@ -11383,22 +12756,113 @@ export function App() {
       refreshSessions,
       selectSession,
       sendDraft,
+      sessionEventsById,
       sessions,
     ],
   );
+
+  retryProviderStatusRef.current = (event) =>
+    handleProviderStatusAction("retry-send", event);
+
+  const projectImport = useProjectImport({
+    enabled:
+      activeDestination === "settings" &&
+      workbench.preferences.lastSettingsSection === "import-projects",
+    visibleSessions: sessions.filter(
+      (session) =>
+        session.id === activeSessionId ||
+        displayedChatLayout.slots.some(
+          (pane) => pane?.kind === "session" && pane.sessionId === session.id,
+        ),
+    ),
+    events,
+    refreshEvents,
+    onOpenSettings: () => openSettingsSection("import-projects"),
+    onImported: (paths) => {
+      setRemovedProjectPaths((current) =>
+        current.filter(
+          (path) =>
+            !paths.some(
+              (imported) =>
+                normalizeProjectPath(imported) === normalizeProjectPath(path),
+            ),
+        ),
+      );
+      setRecentProjectPaths((current) => [...new Set([...paths, ...current])]);
+      void refreshSessions();
+    },
+    onOpenSession: (id, path) => {
+      path =
+        sessions.find((session) => session.id === id)?.workspacePath ?? path;
+      setRemovedProjectPaths((current) =>
+        current.filter(
+          (removed) =>
+            normalizeProjectPath(removed) !== normalizeProjectPath(path),
+        ),
+      );
+      setRecentProjectPaths((current) => [...new Set([path, ...current])]);
+      selectSession(id);
+      setWorkspacePath(path);
+      dispatchWorkbench({
+        type: "select-destination",
+        destination: "workspace",
+      });
+    },
+    onSessionUpdated: (updated) => {
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === updated.id ? updated : session,
+        ),
+      );
+      if (updated.id === activeSessionId)
+        setWorkspacePath(updated.workspacePath);
+    },
+    onRetrySession: (id) => {
+      const failure = [...(sessionEventsById[id] ?? [])]
+        .reverse()
+        .find(
+          (event) =>
+            stringFromRecord(recordFromUnknown(event.payload), "status") ===
+              "failed" && turnIdFromSessionEvent(event),
+        );
+      if (failure) handleProviderStatusAction("retry-send", failure);
+      else
+        notify(
+          "terminal",
+          "Ready to retry",
+          "Send your message again to retry the original session.",
+        );
+    },
+  });
+  const taskHandoff = useTaskHandoff({
+    config,
+    sessions,
+    send: (message, context) => sendDraftRef.current(message, context),
+    refreshSessions,
+    selectSession,
+    notify,
+  });
 
   const handleMutationApprovalAction = useCallback(
     async (proposalId: string, decision: "approve" | "reject") => {
       if (!activeSessionId || !isTauriRuntime()) {
         return;
       }
+      const approvalEvent = Object.values(sessionEventsById)
+        .flat()
+        .find(
+          (event) =>
+            stringFromRecord(recordFromUnknown(event.payload), "proposalId") ===
+            proposalId,
+        );
+      const ownerSessionId = approvalEvent?.sessionId ?? activeSessionId;
       try {
         const result = await invoke<{
           proposal: { path: string; status: string };
         }>("resolve_file_mutation_proposal", {
           request: { proposalId, decision },
         });
-        await refreshEvents(activeSessionId);
+        await refreshEvents(ownerSessionId);
         if (result.proposal.status === "applied") {
           await refreshWorkspaceTree();
           refreshIdeSourceControl(
@@ -11420,7 +12884,7 @@ export function App() {
           "Could not resolve change",
           error instanceof Error ? error.message : String(error),
         );
-        await refreshEvents(activeSessionId);
+        await refreshEvents(ownerSessionId);
       }
     },
     [
@@ -11431,6 +12895,7 @@ export function App() {
       refreshIdeSourceControl,
       refreshWorkspaceTree,
       workspacePath,
+      sessionEventsById,
     ],
   );
 
@@ -11532,6 +12997,8 @@ export function App() {
       if (options?.pauseQueue !== false) {
         stoppedChatSessionsRef.current.add(sessionId);
       }
+      chatAutoRetry.cancelSession(sessionId);
+      retryDispatchRef.current.cancelSession(sessionId);
       void invoke("stop_provider_chat", { sessionId }).catch((error) => {
         if (options?.pauseQueue !== false) {
           stoppedChatSessionsRef.current.delete(sessionId);
@@ -11540,7 +13007,7 @@ export function App() {
         notify("command-failed", "Stop failed", String(error));
       });
     },
-    [notify],
+    [chatAutoRetry.cancelSession, notify],
   );
 
   const stopActiveChat = useCallback(() => {
@@ -11753,15 +13220,15 @@ export function App() {
   );
 
   const closeEditorTab = useCallback(
-    (path: string, groupId?: string) => {
+    async (path: string, groupId?: string) => {
       const groupsWithPath = workbench.ide.layout.groups.filter((group) =>
         group.tabs.some((tab) => tab.path === path),
       );
       const closesLastReference = !groupId || groupsWithPath.length <= 1;
       if (
         closesLastReference &&
-        workbench.ide.buffers[path]?.status === "dirty" &&
-        !window.confirm(`Discard unsaved changes in ${workspaceName(path)}?`)
+        editorBufferHasUnsavedChanges(workbench.ide.buffers[path]) &&
+        !(await confirmAction(`Discard unsaved changes in ${workspaceName(path)}?`))
       ) {
         return;
       }
@@ -11797,7 +13264,7 @@ export function App() {
   );
 
   const closeEditorGroup = useCallback(
-    (groupId: string) => {
+    async (groupId: string) => {
       const group = workbench.ide.layout.groups.find(
         (item) => item.id === groupId,
       );
@@ -11815,15 +13282,15 @@ export function App() {
         .filter(
           (path) =>
             !pathsStillOpen.has(path) &&
-            workbench.ide.buffers[path]?.status === "dirty",
+            editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
         );
       if (
         dirtyPaths.length > 0 &&
-        !window.confirm(
+        !(await confirmAction(
           dirtyPaths.length === 1
             ? `Discard unsaved changes in ${workspaceName(dirtyPaths[0] ?? "file")}?`
             : `Discard unsaved changes in ${dirtyPaths.length} files?`,
-        )
+        ))
       ) {
         return;
       }
@@ -11848,17 +13315,46 @@ export function App() {
     dispatchWorkbench({ type: "ide-pin-tab", path });
   }, []);
 
-  const updateEditorBuffer = useCallback((path: string, content: string) => {
-    dispatchWorkbench({ type: "ide-update-buffer", path, content });
-  }, []);
+  const updateEditorBuffer = useCallback(
+    (path: string, content: string) => {
+      const current = editorBuffersRef.current[path];
+      if (current) {
+        const next = {
+          ...editorBuffersRef.current,
+          [path]: {
+            ...current,
+            content,
+            status:
+              content === current.savedContent
+                ? ("ready" as const)
+                : ("dirty" as const),
+          },
+        };
+        editorBuffersRef.current = next;
+        if (hasEditRecovery()) {
+          try {
+            writeEditRecovery(next);
+          } catch (failure) {
+            notify(
+              "command-failed",
+              "Could not update edit recovery",
+              String(failure),
+            );
+          }
+        }
+      }
+      dispatchWorkbench({ type: "ide-update-buffer", path, content });
+    },
+    [notify],
+  );
 
   const saveEditorBuffer = useCallback(
     async (path: string) => {
-      const buffer = workbench.ide.buffers[path];
+      const buffer = editorBuffersRef.current[path];
       const root = workspaceRootForPath(workspaceRoots, path);
       if (!buffer || !root) {
         notify("command-failed", "Save blocked", "Open a workspace first");
-        return;
+        return false;
       }
       if (buffer.truncated) {
         notify(
@@ -11866,7 +13362,7 @@ export function App() {
           "Save blocked",
           "This is a truncated preview. The complete file must be loaded before saving.",
         );
-        return;
+        return false;
       }
       if (!isTauriRuntime()) {
         dispatchWorkbench({
@@ -11887,7 +13383,7 @@ export function App() {
           path,
           preview: true,
         });
-        return;
+        return true;
       }
       try {
         const saved = await invoke<WorkspaceFileContent>(
@@ -11901,6 +13397,31 @@ export function App() {
             } satisfies WorkspaceFileWriteRequest,
           },
         );
+        const live = editorBuffersRef.current[path] ?? buffer;
+        const next = {
+          ...editorBuffersRef.current,
+          [path]: {
+            ...live,
+            savedContent: saved.content,
+            contentHash: saved.contentHash,
+            status:
+              live.content === saved.content
+                ? ("saved" as const)
+                : ("dirty" as const),
+          },
+        };
+        editorBuffersRef.current = next;
+        if (hasEditRecovery()) {
+          try {
+            writeEditRecovery(next);
+          } catch (failure) {
+            notify(
+              "command-failed",
+              "Could not update edit recovery",
+              String(failure),
+            );
+          }
+        }
         dispatchWorkbench({
           type: "ide-mark-buffer-saved",
           path,
@@ -11908,12 +13429,14 @@ export function App() {
           contentHash: saved.contentHash,
           sizeBytes: saved.sizeBytes,
         });
-        setSelectedFileContent(saved);
+        if (selectedFileRef.current === path)
+          setSelectedFileContent({ ...saved, content: live.content });
         notify("tests-passed", "File saved", path);
         void appendEditorEvent("file-write-approved", `Saved ${path}`, {
           path,
           contentHash: saved.contentHash,
         });
+        return true;
       } catch (error) {
         const detail = String(error);
         dispatchWorkbench({
@@ -11930,10 +13453,179 @@ export function App() {
             error: detail,
           },
         );
+        return false;
       }
     },
     [appendEditorEvent, notify, workbench.ide.buffers, workspaceRoots],
   );
+
+  const languageSessions = useLanguageSessions({
+    roots: workspaceRoots,
+    buffers: workbench.ide.buffers,
+    languageOverrides,
+    trust: workbench.preferences.workspaceTrust,
+    onState: (server) =>
+      dispatchWorkbench({ type: "ide-set-language-server", server }),
+    onMessages: (messages, root) => {
+      const diagnostics = diagnosticsFromLspMessages(messages, root);
+      if (!diagnostics) return;
+      const publishedPaths = new Set(
+        (messages ?? []).flatMap((message) =>
+          isRecord(message) &&
+          message.method === "textDocument/publishDiagnostics" &&
+          isRecord(message.params) &&
+          typeof message.params.uri === "string"
+            ? [lspRelativePath(message.params.uri, root)]
+            : [],
+        ),
+      );
+      dispatchWorkbench({
+        type: "ide-set-diagnostics",
+        diagnostics: [
+          ...workbench.ide.diagnostics.filter(
+            (diagnostic) => !publishedPaths.has(diagnostic.path),
+          ),
+          ...diagnostics,
+        ],
+      });
+    },
+  });
+  const requestLanguageFeature = languageSessions.request;
+  const workspaceRename = useWorkspaceRename({
+    roots: workspaceRoots,
+    buffers: workbench.ide.buffers,
+    trust: workbench.preferences.workspaceTrust,
+    request: requestLanguageFeature,
+    version: languageSessions.version,
+    synchronize: languageSessions.synchronize,
+    isOpen: (path) => workbench.ide.tabs.some((tab) => tab.path === path),
+    capabilities: (path) => languageSessions.ready(path)?.capabilities,
+    read: async (path, root) =>
+      isTauriRuntime()
+        ? invoke<WorkspaceFileContent>("read_workspace_file_full", {
+            path,
+            workspacePath: root,
+          })
+        : createPreviewWorkspaceFileContent(path),
+    dispatch: dispatchWorkbench,
+    save: saveEditorBuffer,
+    notify: (message) =>
+      notify("command-failed", "Could not rename symbol", message),
+  });
+  const openWorkspaceLocation = useCallback(
+    async (
+      path: string,
+      lineNumber: number,
+      column: number,
+      source?: WorkspaceNavigationSource,
+      record = true,
+    ) => {
+      const token = ++navigationRequestRef.current;
+      try {
+        const normalized = filePathFromUri(canonicalFileUri(path));
+        const root = normalized
+          ? workspaceRootForPath(workspaceRoots, normalized)
+          : undefined;
+        if (!normalized || !root)
+          throw new Error("The target is outside the workspace folders.");
+        if (!editorBuffersRef.current[normalized]) {
+          const file = isTauriRuntime()
+            ? await invoke<WorkspaceFileContent>("read_workspace_file_full", {
+                path: normalized,
+                workspacePath: root,
+              })
+            : createPreviewWorkspaceFileContent(normalized);
+          if (file.truncated)
+            throw new Error("The target exceeds the editable file limit.");
+          if (navigationRequestRef.current !== token) return false;
+          const buffer =
+            editorBuffersRef.current[normalized] ?? editorBufferFromFile(file);
+          if (!editorBuffersRef.current[normalized]) {
+            editorBuffersRef.current = {
+              ...editorBuffersRef.current,
+              [normalized]: buffer,
+            };
+            dispatchWorkbench({
+              type: "ide-apply-buffer-batch",
+              updates: [{ path: normalized, buffer }],
+            });
+          }
+        }
+        if (navigationRequestRef.current !== token) return false;
+        if (
+          source &&
+          selectedFileRef.current &&
+          selectedFileRef.current !== source.path
+        )
+          return false;
+        if (record)
+          setNavigationHistory((history) => {
+            const entries = history.entries.slice(0, history.index + 1);
+            if (source) {
+              if (entries.length) entries[entries.length - 1] = source;
+              else entries.push(source);
+            }
+            entries.push({ path: normalized, lineNumber, column });
+            return {
+              entries: entries.slice(-100),
+              index: Math.min(entries.length - 1, 99),
+            };
+          });
+        openEditorLocation(normalized, lineNumber, column);
+        return true;
+      } catch (failure) {
+        notify(
+          "command-failed",
+          "Could not open code location",
+          String(failure),
+        );
+        return false;
+      }
+    },
+    [notify, openEditorLocation, workspaceRoots],
+  );
+  const navigateEditorHistory = useCallback(
+    async (direction: number) => {
+      const index = navigationHistory.index + direction;
+      const target = navigationHistory.entries[index];
+      if (!target) return;
+      if (
+        await openWorkspaceLocation(
+          target.path,
+          target.lineNumber,
+          target.column,
+          undefined,
+          false,
+        )
+      )
+        setNavigationHistory((history) => ({ ...history, index }));
+    },
+    [navigationHistory, openWorkspaceLocation],
+  );
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.ctrlKey &&
+        !event.metaKey &&
+        (event.code === "Minus" || event.key === "-") &&
+        !workspaceRename.draft
+      ) {
+        event.preventDefault();
+        void navigateEditorHistory(event.shiftKey ? 1 : -1);
+      }
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === "s" &&
+        !workspaceRename.draft
+      ) {
+        event.preventDefault();
+        void workspaceRename.saveAll();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [navigateEditorHistory, workspaceRename.draft, workspaceRename.saveAll]);
 
   const applyWorkspaceReplace = useCallback(
     async (
@@ -11944,8 +13636,8 @@ export function App() {
       const searchText = query.query;
       const uniquePaths = [...new Set(paths)];
       if (!searchText || uniquePaths.length === 0) return;
-      const dirtyPath = uniquePaths.find(
-        (path) => workbench.ide.buffers[path]?.status === "dirty",
+      const dirtyPath = uniquePaths.find((path) =>
+        editorBufferHasUnsavedChanges(workbench.ide.buffers[path]),
       );
       if (dirtyPath) {
         notify(
@@ -11971,9 +13663,9 @@ export function App() {
         return;
       }
       if (
-        !window.confirm(
+        !(await confirmAction(
           `Replace “${searchText}” in ${uniquePaths.length} selected file${uniquePaths.length === 1 ? "" : "s"}?`,
-        )
+        ))
       ) {
         return;
       }
@@ -12253,10 +13945,28 @@ export function App() {
 
   const changeGoal = useCallback(
     async (
-      action: "set" | "edit" | "complete" | "reopen" | "clear",
+      action:
+        "set" | "edit" | "complete" | "reopen" | "clear" | "pause" | "resume",
       value?: string,
     ) => {
       if (action !== "set" && !activeSessionGoal) return false;
+      if (action === "resume") {
+        return sendDraftRef.current(
+          "Continue the goal from its saved checkpoint.",
+        );
+      }
+      if (action === "pause") {
+        if (activeSessionId) stoppedChatSessionsRef.current.add(activeSessionId);
+        if (
+          activeSessionId &&
+          sendingSessionIdsRef.current.has(activeSessionId) &&
+          isTauriRuntime()
+        ) {
+          stopChatSession(activeSessionId);
+          return true;
+        }
+        return appendGoalEvent({ action: "pause" }, "Goal paused");
+      }
       const text =
         action === "set" || action === "edit"
           ? value?.trim()
@@ -12265,7 +13975,7 @@ export function App() {
       const status =
         action === "complete"
           ? "complete"
-          : action === "set" || action === "reopen"
+          : action === "set" || action === "reopen" || action === "edit"
             ? "active"
             : (activeSessionGoal?.status ?? "active");
       if (!activeSessionId) {
@@ -12287,6 +13997,7 @@ export function App() {
               action: "set",
               text,
               status,
+              runLimits: activeSessionGoal?.runLimits,
             };
       const message =
         action === "clear"
@@ -12302,7 +14013,7 @@ export function App() {
       // longer cancels the other — the composer shows both.
       return appendGoalEvent(payload, message);
     },
-    [activeSessionGoal, activeSessionId, appendGoalEvent],
+    [activeSessionGoal, activeSessionId, appendGoalEvent, stopChatSession],
   );
 
   const syncTerminalSnapshot = useCallback((snapshot: TerminalPaneSnapshot) => {
@@ -12977,20 +14688,169 @@ export function App() {
     }),
     [sessionBrowserKey, sessionBrowserWorkspaceKey, activeDraftKey],
   );
-  const previewForBrowser = (owner: BrowserOwner) =>
-    workbench.browserPreviewsBySession?.[owner.sessionId] ??
-    EMPTY_BROWSER_PREVIEW;
+  const previewForBrowser = (owner: BrowserOwner) => ({
+    ...(workbench.browserPreviewsBySession?.[owner.sessionId] ?? EMPTY_BROWSER_PREVIEW),
+    runtime: isTauriRuntime() ? appPreviewClient(owner.sessionId, owner.workspaceKey) : undefined,
+  });
   const sendBrowserAction = (owner: BrowserOwner, action: WorkbenchAction) =>
     dispatchWorkbench({
       type: "browser-session",
       sessionId: owner.sessionId,
       action,
     });
+  const handleBrowserDeviceChange = (mode: BrowserViewportMode, owner = activeBrowserOwner) =>
+    void changeSessionBrowserViewport(owner.sessionId, mode, Boolean(previewForBrowser(owner).url),
+      dispatchWorkbench, (error) => notify("command-failed", "Viewport change failed", String(error)));
   const browserNativeHost = isTauriRuntime();
+  const [isFirstRunTourActive, setIsFirstRunTourActive] = useState(false);
+  useEffect(() => {
+    if (!configLoaded || activeSessionId) return;
+    const mode = draftWorkspaceModes.current[activeDraftKey] ?? workbench.preferences.defaultWorkspaceMode;
+    draftWorkspaceModes.current[activeDraftKey] = mode;
+    dispatchWorkbench({ type: "set-workbench-mode", mode });
+    setChatDraftModels(current => current[activeDraftKey] ? current : { ...current, [activeDraftKey]: newChatDefaultSelection(config, workbench.preferences) ?? selectedSessionModelFromConfig(config) });
+  }, [activeDraftKey, activeSessionId, config, configLoaded, workbench.preferences]);
+  const checkReminders = useCheckReminders(workbench.preferences.checkReminders === true, sendingSessionIds, sessionEventsById);
+  const suggestionProviderId =
+    chatDraftModels[activeDraftKey]?.providerId ?? config.selectedProviderId;
+  const canShowModelDefaultSuggestion =
+    activeDestination === "workspace" &&
+    activeWorkspaceLayout === "thread" &&
+    !activeSessionId &&
+    !activeChatDraft.trim() &&
+    activeChatAttachments.length === 0 &&
+    sendingSessionIds.length === 0 &&
+    !isStartingFirstTurn &&
+    !isShellOptimizing &&
+    !isFirstRunTourActive &&
+    !isCommandPaletteOpen &&
+    !quitConfirmation.requested &&
+    !branchNameRequest &&
+    !workspaceRename.draft &&
+    !projectRemoveCandidate &&
+    !terminalTerminateCandidate &&
+    !chatCloseCandidate;
+
+  useEffect(() => {
+    const candidate = modelStandardPrompt ?? pendingModelDefaultCandidate;
+    if (!candidate) return;
+    const provider = providersForConfig(config).find(
+      (item) => item.id === candidate.providerId,
+    );
+    const model = provider?.models?.find((item) => item.id === candidate.modelId);
+    const status = workbench.providerStatuses.find(
+      (item) => item.id === candidate.providerId,
+    );
+    const available = Boolean(
+      provider?.enabled &&
+      model &&
+      (!status || status.connectionStatus === "connected"),
+    );
+    const matchesContext = suggestionProviderId === candidate.providerId;
+    const alreadyDefault =
+      provider && providerDefaultModelId(provider) === candidate.modelId;
+    if (modelStandardPrompt) {
+      if (
+        !modelDefaultSavingRef.current &&
+        (!canShowModelDefaultSuggestion ||
+          !matchesContext ||
+          !available ||
+          (alreadyDefault && !modelDefaultSaveError))
+      ) {
+        setModelStandardPrompt(undefined);
+        setPendingModelDefaultCandidate(undefined);
+        setModelDefaultSaveError(undefined);
+      }
+      return;
+    }
+    if (
+      !canShowModelDefaultSuggestion ||
+      !matchesContext ||
+      !provider ||
+      !model ||
+      !available ||
+      modelSuggestionShownRef.current
+    )
+      return;
+    let timer: number;
+    const schedule = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        if (document.hidden || !document.hasFocus()) return;
+        // Menus/dialogs may be owned inside a child component rather than App.
+        if (
+          Array.from(
+            document.querySelectorAll<HTMLElement>(
+              '.gyro-composer-popover, dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+            ),
+          ).some(
+            (node) =>
+              node.getClientRects().length > 0 &&
+              getComputedStyle(node).visibility !== "hidden",
+          )
+        )
+          return;
+        const now = Date.now();
+        const evidence = modelDefaultSuggestionFor(
+          modelSuggestionStateRef.current!,
+          {
+            providerId: provider.id,
+            modelId: model.id,
+            defaultModelId: providerDefaultModelId(provider),
+            available,
+            shownThisLaunch: modelSuggestionShownRef.current,
+            now,
+          },
+        );
+        if (!evidence) return;
+        modelSuggestionShownRef.current = true;
+        saveModelSuggestionState(
+          markModelDefaultSuggestionShown(modelSuggestionStateRef.current!, now),
+        );
+        setModelDefaultSaveError(undefined);
+        setModelStandardPrompt({
+          ...evidence,
+          providerId: provider.id,
+          providerLabel: provider.displayName,
+          modelLabel: model.displayName,
+        });
+      }, 8_000);
+    };
+    schedule();
+    document.addEventListener("pointerdown", schedule, true);
+    document.addEventListener("keydown", schedule, true);
+    document.addEventListener("wheel", schedule, {
+      capture: true,
+      passive: true,
+    });
+    document.addEventListener("visibilitychange", schedule);
+    window.addEventListener("focus", schedule);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("pointerdown", schedule, true);
+      document.removeEventListener("keydown", schedule, true);
+      document.removeEventListener("wheel", schedule, true);
+      document.removeEventListener("visibilitychange", schedule);
+      window.removeEventListener("focus", schedule);
+    };
+  }, [
+    canShowModelDefaultSuggestion,
+    config,
+    modelDefaultSaveError,
+    modelStandardPrompt,
+    pendingModelDefaultCandidate,
+    saveModelSuggestionState,
+    suggestionProviderId,
+    workbench.providerStatuses,
+    isModelDefaultSaving,
+  ]);
+
   const browserOverlayOccluded =
+    isFirstRunTourActive ||
+    quitConfirmation.requested ||
     isCommandPaletteOpen ||
-    Boolean(modelStandardPrompt) ||
     Boolean(branchNameRequest) ||
+    Boolean(workspaceRename.draft) ||
     Boolean(projectRemoveCandidate) ||
     Boolean(terminalTerminateCandidate) ||
     Boolean(chatCloseCandidate);
@@ -13016,7 +14876,7 @@ export function App() {
           message: "Loading…",
           nativeHost: true,
         });
-        await invoke("session_browser_open", {
+        const opened = await invoke<{ viewport: { mode: BrowserViewportMode } }>("session_browser_open", {
           request: {
             sessionId: owner.sessionId,
             workspaceKey: owner.workspaceKey,
@@ -13025,6 +14885,15 @@ export function App() {
             visible: bounds != null,
           },
         });
+        const preview = previewForBrowser(owner);
+        if (preview.deviceOverride && opened.viewport.mode === "auto") {
+          await invoke("session_browser_set_viewport", {
+            sessionId: owner.sessionId,
+            request: { mode: preview.viewport?.mode ?? preview.device,
+              width: preview.viewport?.device === "responsive" ? undefined : preview.viewport?.width,
+              height: preview.viewport?.device === "responsive" ? undefined : preview.viewport?.height },
+          });
+        }
         return true;
       } catch (error) {
         notify("command-failed", "Browser open failed", String(error));
@@ -13038,7 +14907,7 @@ export function App() {
         return false;
       }
     },
-    [activeBrowserOwner, notify],
+    [activeBrowserOwner, notify, workbench.browserPreviewsBySession],
   );
 
   const [updateBrowserHostVisibility] = useState(() =>
@@ -13139,44 +15008,7 @@ export function App() {
     });
   }, []);
 
-  // The native child webview reports its document title asynchronously. Keep
-  // that small piece of browser state in the React shell so its selected tab
-  // identifies the actual page, just like an in-app browser should.
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    let unlisten: Promise<(() => void) | undefined> =
-      Promise.resolve(undefined);
-    try {
-      unlisten = listen<{
-        kind?: string;
-        sessionId: string;
-        title?: string;
-        url?: string;
-      }>("session-browser-event", (event) => {
-        if (event.payload.kind === "loaded" && event.payload.url) {
-          dispatchWorkbench({
-            type: "browser-session",
-            sessionId: event.payload.sessionId,
-            action: { type: "browser-loaded", url: event.payload.url },
-          });
-        } else if (
-          event.payload.kind === "title" &&
-          event.payload.title !== undefined
-        ) {
-          dispatchWorkbench({
-            type: "browser-session",
-            sessionId: event.payload.sessionId,
-            action: { type: "browser-title", title: event.payload.title },
-          });
-        }
-      });
-    } catch {
-      unlisten = Promise.resolve(undefined);
-    }
-    return () => {
-      void unlisten.then((dispose) => dispose?.());
-    };
-  }, []);
+  useSessionBrowserEvents(dispatchWorkbench);
 
   useEffect(() => {
     if (!isTauriRuntime() || !browserOverlayOccluded) return;
@@ -13657,6 +15489,42 @@ export function App() {
     [connectProvider],
   );
 
+  const installProvider = useCallback(
+    async (providerId: string) => {
+      if (!isProviderId(providerId)) {
+        return { installed: false, message: "Unknown provider." };
+      }
+      try {
+        const outcome = await invoke<{
+          installed: boolean;
+          output: string;
+          health?: ProviderHealthCheck | null;
+        }>("install_provider_cli", { providerId, confirm: true });
+        recordProviderHealthOutput(
+          providerId,
+          outcome.output,
+          outcome.health ?? undefined,
+        );
+        if (outcome.installed) {
+          signInProvider(providerId);
+        }
+        const tail = outcome.output.trim().split("\n").slice(-2).join(" ");
+        return {
+          installed: outcome.installed,
+          message: outcome.installed
+            ? ""
+            : tail || "The installer finished without a working binary.",
+        };
+      } catch (error) {
+        return {
+          installed: false,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    [recordProviderHealthOutput, signInProvider],
+  );
+
   const testProvider = useCallback(
     async (providerId: string) => {
       if (providerId === "ollama") {
@@ -13733,81 +15601,6 @@ export function App() {
     notify,
     testProvider,
     persistConfig, // lets the hook add or remove a custom provider
-  );
-
-  const queueProviderHandoff = useCallback(
-    ({
-      fromProviderId,
-      toProviderId,
-      contextSummary,
-    }: {
-      fromProviderId: string;
-      toProviderId: string;
-      contextSummary: string;
-    }) => {
-      if (!checkProviderReadiness("handoff", toProviderId)) {
-        return;
-      }
-      const providerConfigs = providersForConfig(config);
-      const fromLabel = providerLabelForId(
-        providerConfigs,
-        workbench.providerStatuses,
-        fromProviderId,
-      );
-      const toLabel = providerLabelForId(
-        providerConfigs,
-        workbench.providerStatuses,
-        toProviderId,
-      );
-      const toStatus = workbench.providerStatuses.find(
-        (provider) => provider.id === toProviderId,
-      );
-      const now = new Date().toISOString();
-      const sessionTitle = activeSession?.title ?? "Desktop session";
-      const providerSession: ProviderSession = {
-        id: `provider-session-${toProviderId}-${activeSessionId ?? "local"}`,
-        providerId: toProviderId,
-        displayName: toLabel,
-        status: "queued",
-        model: toStatus?.defaultModel ?? "Default",
-        sessionId: activeSessionId,
-        sessionTitle,
-        workspaceMode: activeSession?.workspaceMode ?? workbench.workspaceMode,
-        branch: activeSession?.branch ?? "main",
-        worktreeName: activeSession?.worktreeName,
-        lastEvent: `handoff queued from ${fromLabel}`,
-        createdAt: now,
-        updatedAt: now,
-      };
-      const handoff: ProviderHandoff = {
-        id: `handoff-${Date.now()}`,
-        fromProviderId,
-        fromLabel,
-        toProviderId,
-        toLabel,
-        status: "queued",
-        sessionId: activeSessionId,
-        sessionTitle,
-        contextSummary,
-        createdAt: now,
-        updatedAt: now,
-      };
-      dispatchWorkbench({
-        type: "queue-provider-handoff",
-        handoff,
-        session: providerSession,
-      });
-      notify("provider", "Handoff queued", `${fromLabel} to ${toLabel}`);
-    },
-    [
-      activeSession,
-      activeSessionId,
-      checkProviderReadiness,
-      config,
-      notify,
-      workbench.providerStatuses,
-      workbench.workspaceMode,
-    ],
   );
 
   const runCommandPaletteCommand = useCallback(
@@ -14107,9 +15900,10 @@ export function App() {
       schedulePersistedWorkbenchStateFlush(
         pendingWorkbenchPersistRef,
         workbenchPersistIdleRef,
+        onAppearancePersisted,
       );
     }, WORKBENCH_PERSIST_DEBOUNCE_MS);
-  }, [persistableWorkbench]);
+  }, [persistableWorkbench, onAppearancePersisted]);
 
   useEffect(
     () => () => {
@@ -14118,49 +15912,9 @@ export function App() {
         workbenchPersistTimerRef.current = undefined;
       }
       cancelPersistedWorkbenchStateFlush(workbenchPersistIdleRef);
-      flushPersistedWorkbenchState(pendingWorkbenchPersistRef);
+      flushPersistedWorkbenchState(pendingWorkbenchPersistRef, onAppearancePersisted);
     },
-    [],
-  );
-
-  const requestLanguageFeature = useCallback(
-    async (path: string, method: string, params: Record<string, unknown>) => {
-      const root = workspaceRootForPath(workspaceRoots, path);
-      const descriptor = languageServerDescriptorForPath(
-        path,
-        languageOverrides[path],
-      );
-      if (!root || !descriptor || !isTauriRuntime()) {
-        return undefined;
-      }
-      const stateId = `${root}:${descriptor.languageId}:${descriptor.command}`;
-      const serverId = languageServerIdsRef.current[stateId];
-      if (!serverId) {
-        return undefined;
-      }
-      const response = await invoke<LspBridgeResponse>("lsp_request", {
-        request: {
-          serverId,
-          method,
-          params: {
-            ...params,
-            textDocument: {
-              ...(isRecord(params.textDocument) ? params.textDocument : {}),
-              uri: workspaceFileUri(root, path),
-            },
-          },
-        },
-      });
-      const diagnostics = diagnosticsFromLspMessages(response.messages, root);
-      if (diagnostics) {
-        dispatchWorkbench({ type: "ide-set-diagnostics", diagnostics });
-      }
-      if (response.status === "error") {
-        throw new Error(JSON.stringify(response.error ?? "LSP request failed"));
-      }
-      return response.result;
-    },
-    [workspaceRoots, languageOverrides],
+    [onAppearancePersisted],
   );
 
   useEffect(() => {
@@ -14200,8 +15954,9 @@ export function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       const isCommand = event.metaKey || event.ctrlKey;
       if (event.key === "Escape") {
+        if (event.defaultPrevented) return;
         closeGlobalSearch();
-        setModelStandardPrompt(undefined);
+        dismissModelStandardPrompt();
         setProjectRemoveCandidate(undefined);
         return;
       }
@@ -14219,7 +15974,7 @@ export function App() {
         workbench.ide.activePath
       ) {
         event.preventDefault();
-        void saveEditorBuffer(workbench.ide.activePath);
+        if (!event.shiftKey) void saveEditorBuffer(workbench.ide.activePath);
       } else if (event.key.toLowerCase() === "p" && event.shiftKey) {
         event.preventDefault();
         openGlobalSearch("commands");
@@ -14281,6 +16036,7 @@ export function App() {
     activeSession?.workspacePath,
     addTerminalPane,
     closeGlobalSearch,
+    dismissModelStandardPrompt,
     openGlobalSearch,
     openToolPanel,
     runCommandPaletteCommand,
@@ -14306,6 +16062,13 @@ export function App() {
   useEffect(() => {
     if (!activeSession) {
       workspaceTreeRequestRef.current += 1;
+      if (
+        workspacePath &&
+        workspacePreparationPathRef.current !==
+          normalizeProjectPath(workspacePath)
+      ) {
+        void prepareWorkspace(workspacePath);
+      }
       return;
     }
     setWorkspacePath(activeSession.workspacePath);
@@ -14364,7 +16127,7 @@ export function App() {
     }
     setFiles([]);
     void prepareWorkspace(activeSession.workspacePath);
-  }, [activeSession, prepareWorkspace, refreshIdeServices]);
+  }, [activeSession, prepareWorkspace, refreshIdeServices, workspacePath]);
 
   useEffect(() => {
     if (!selectedFile || selectedFile.startsWith("gyro-diff:")) {
@@ -14375,7 +16138,7 @@ export function App() {
     }
 
     const existingBuffer = workbench.ide.buffers[selectedFile];
-    if (existingBuffer && existingBuffer.status === "dirty") {
+    if (existingBuffer && editorBufferHasUnsavedChanges(existingBuffer)) {
       setSelectedFileContent({
         path: selectedFile,
         content: existingBuffer.content,
@@ -14546,7 +16309,7 @@ export function App() {
         if (!stat.contentHash || stat.contentHash === buffer.contentHash) {
           return;
         }
-        if (buffer.status === "dirty") {
+        if (editorBufferHasUnsavedChanges(buffer)) {
           dispatchWorkbench({
             type: "ide-mark-buffer-error",
             path: selectedFile,
@@ -14650,251 +16413,6 @@ export function App() {
   ]);
 
   useEffect(() => {
-    const root = activeSession?.workspacePath ?? workspacePath;
-    const descriptor = selectedFile
-      ? languageServerDescriptorForPath(
-          selectedFile,
-          languageOverrides[selectedFile],
-        )
-      : undefined;
-    const fileBuffer = selectedFile
-      ? workbench.ide.buffers[selectedFile]
-      : undefined;
-    const filePolicy = editorFilePolicy(
-      selectedFile ?? "",
-      fileBuffer?.content ?? selectedFileContent?.content ?? "",
-      fileBuffer?.sizeBytes ?? selectedFileContent?.sizeBytes,
-      fileBuffer?.truncated ?? selectedFileContent?.truncated,
-    );
-    if (filePolicy.limited || filePolicy.binary) return;
-    if (
-      !root ||
-      !selectedFile ||
-      !descriptor ||
-      !isTauriRuntime() ||
-      !isWorkspaceTrusted(workbench.preferences.workspaceTrust, root)
-    ) {
-      return;
-    }
-    let cancelled = false;
-    const stateId = `${root}:${descriptor.languageId}:${descriptor.command}`;
-    const startingState: LanguageServerState = {
-      id: stateId,
-      languageId: descriptor.languageId,
-      command: descriptor.command,
-      status: "starting",
-      activePath: selectedFile,
-      message: `Starting ${descriptor.command}`,
-    };
-    dispatchWorkbench({
-      type: "ide-set-language-server",
-      server: startingState,
-    });
-    void invoke<LspSessionResult>("lsp_start", {
-      request: {
-        workspacePath: root,
-        languageId: descriptor.languageId,
-        command: descriptor.command,
-      },
-    })
-      .then(async (session) => {
-        if (cancelled) {
-          return;
-        }
-        languageServerIdsRef.current[stateId] = session.serverId;
-        dispatchWorkbench({
-          type: "ide-set-language-server",
-          server: {
-            ...startingState,
-            serverId: session.serverId,
-            status: "ready",
-            message: session.message,
-          },
-        });
-        dispatchWorkbench({
-          type: "ide-upsert-output-channel",
-          channel: {
-            id: `lsp:${descriptor.languageId}`,
-            label: `${descriptor.languageId} language server`,
-            kind: "lsp",
-            lines: [session.message],
-            updatedAt: new Date().toISOString(),
-          },
-        });
-        const content =
-          workbench.ide.buffers[selectedFile]?.content ??
-          (selectedFileContent?.path === selectedFile
-            ? selectedFileContent.content
-            : "");
-        const uri = workspaceFileUri(root, selectedFile);
-        const documentKey = `${session.serverId}:${uri}`;
-        if (languageServerOpenedDocsRef.current.has(documentKey)) {
-          return;
-        }
-        languageServerOpenedDocsRef.current.add(documentKey);
-        const response = await invoke<LspBridgeResponse>("lsp_request", {
-          request: {
-            serverId: session.serverId,
-            method: "textDocument/didOpen",
-            params: {
-              textDocument: {
-                uri,
-                languageId: descriptor.languageId,
-                version: 1,
-                text: content,
-              },
-            },
-          },
-        });
-        const diagnostics = diagnosticsFromLspMessages(response.messages, root);
-        if (diagnostics) {
-          dispatchWorkbench({ type: "ide-set-diagnostics", diagnostics });
-        }
-        window.setTimeout(() => {
-          void invoke<LspBridgeResponse>("lsp_request", {
-            request: {
-              serverId: session.serverId,
-              method: "$/gyro/poll",
-              params: {},
-            },
-          })
-            .then((pollResponse) => {
-              const publishedDiagnostics = diagnosticsFromLspMessages(
-                pollResponse.messages,
-                root,
-              );
-              if (publishedDiagnostics) {
-                dispatchWorkbench({
-                  type: "ide-set-diagnostics",
-                  diagnostics: publishedDiagnostics,
-                });
-              }
-            })
-            .catch(() => undefined);
-        }, 350);
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-        const message = String(error);
-        dispatchWorkbench({
-          type: "ide-set-language-server",
-          server: {
-            ...startingState,
-            status: message.toLowerCase().includes("not found")
-              ? "not-installed"
-              : "error",
-            message,
-          },
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    languageOverrides,
-    selectedFile,
-    selectedFileContent?.contentHash,
-    workbench.preferences.workspaceTrust,
-    workspaceRoots,
-  ]);
-
-  useEffect(() => {
-    const root = workspaceRootForPath(workspaceRoots, selectedFile);
-    const descriptor = selectedFile
-      ? languageServerDescriptorForPath(
-          selectedFile,
-          languageOverrides[selectedFile],
-        )
-      : undefined;
-    const content = selectedFile
-      ? workbench.ide.buffers[selectedFile]?.content
-      : undefined;
-    const fileBuffer = selectedFile
-      ? workbench.ide.buffers[selectedFile]
-      : undefined;
-    const filePolicy = editorFilePolicy(
-      selectedFile ?? "",
-      fileBuffer?.content ?? selectedFileContent?.content ?? "",
-      fileBuffer?.sizeBytes ?? selectedFileContent?.sizeBytes,
-      fileBuffer?.truncated ?? selectedFileContent?.truncated,
-    );
-    if (filePolicy.limited || filePolicy.binary) return;
-    if (
-      !root ||
-      !selectedFile ||
-      !descriptor ||
-      content === undefined ||
-      !isTauriRuntime()
-    ) {
-      return;
-    }
-    const stateId = `${root}:${descriptor.languageId}:${descriptor.command}`;
-    const serverId = languageServerIdsRef.current[stateId];
-    if (!serverId) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      const uri = workspaceFileUri(root, selectedFile);
-      void invoke<LspBridgeResponse>("lsp_request", {
-        request: {
-          serverId,
-          method: "textDocument/didChange",
-          params: {
-            textDocument: { uri, version: Date.now() },
-            contentChanges: [{ text: content }],
-          },
-        },
-      })
-        .then((response) => {
-          const immediate = diagnosticsFromLspMessages(response.messages, root);
-          if (immediate) {
-            dispatchWorkbench({
-              type: "ide-set-diagnostics",
-              diagnostics: immediate,
-            });
-          }
-          window.setTimeout(() => {
-            void invoke<LspBridgeResponse>("lsp_request", {
-              request: { serverId, method: "$/gyro/poll", params: {} },
-            }).then((pollResponse) => {
-              const diagnostics = diagnosticsFromLspMessages(
-                pollResponse.messages,
-                root,
-              );
-              if (diagnostics) {
-                dispatchWorkbench({
-                  type: "ide-set-diagnostics",
-                  diagnostics,
-                });
-              }
-            });
-          }, 300);
-        })
-        .catch(() => undefined);
-    }, 450);
-    return () => window.clearTimeout(timer);
-  }, [
-    languageOverrides,
-    selectedFile,
-    selectedFile ? workbench.ide.buffers[selectedFile]?.content : undefined,
-    workspaceRoots,
-  ]);
-
-  useEffect(
-    () => () => {
-      if (!isTauriRuntime()) {
-        return;
-      }
-      for (const serverId of Object.values(languageServerIdsRef.current)) {
-        void invoke("lsp_stop", { serverId });
-      }
-    },
-    [],
-  );
-
-  useEffect(() => {
     if (!isTauriRuntime() || !terminalPanePollKey) {
       return;
     }
@@ -14908,6 +16426,9 @@ export function App() {
     }
 
     const interval = window.setInterval(() => {
+      // Output buffers in Rust while hidden; the visibility listener below
+      // catches up the moment the window returns.
+      if (document.visibilityState !== "visible") return;
       for (const paneId of paneIds) {
         void refreshTerminalPane(paneId);
       }
@@ -15219,7 +16740,7 @@ export function App() {
         terminalSourceControlLoadingPaneId === selectedTerminalPane?.id
       }
       height={isPrimary ? undefined : toolPanelHeight}
-      ide={workbench.ide}
+      ide={scopedIde}
       isPrimary={isPrimary}
       isLaunchingCliPreset={isLaunchingCliPreset}
       isResizable={!isPrimary}
@@ -15241,7 +16762,7 @@ export function App() {
       onAddTerminalPane={addTerminalPane}
       onBrowserBack={() => handleBrowserBack()}
       onBrowserDeviceChange={(device) =>
-        dispatchActiveBrowser({ type: "browser-device", device })
+        handleBrowserDeviceChange(device)
       }
       onBrowserForward={() => handleBrowserForward()}
       onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
@@ -15276,8 +16797,8 @@ export function App() {
           layout,
         })
       }
-      onOpenDiffInEditor={(path) => {
-        openEditorFile(path);
+      onOpenDiffInEditor={(path, lineNumber, column) => {
+        openEditorLocation(path, lineNumber, column);
         dispatchWorkbench({
           type: "select-workspace-layout",
           layout: "code",
@@ -15292,6 +16813,15 @@ export function App() {
         dispatchWorkbench({ type: "set-pane-tab", tab });
       }}
       onLaunchCliPreset={launchCliPreset}
+      onRunTestTask={(taskId) => {
+        const task = workbench.ide.taskDefinitions.find(
+          (item) => item.id === taskId,
+        );
+        if (task) void runIdeTask(task);
+      }}
+      onSelectOutputChannel={(channelId) =>
+        dispatchWorkbench({ type: "ide-select-output-channel", channelId })
+      }
       onProfileChange={setActiveProfileId}
       onRejectAllDiffs={() =>
         dispatchWorkbench({
@@ -15488,6 +17018,11 @@ export function App() {
   // Provider CLI updates (Claude, Codex, Grok, …) — separate from Gyro.app.
   const [cliUpdateOffers, setCliUpdateOffers] = useState<CliUpdateOffer[]>([]);
   const [cliUpdatePhase, setCliUpdatePhase] = useState<CliUpdatePhase>("idle");
+  // Snapshot the requested providers; offers and notice dismissal can change in flight.
+  const [cliUpdatingProviderIds, setCliUpdatingProviderIds] = useState<
+    readonly string[]
+  >([]);
+  const cliUpdatingProvidersRef = useRef<readonly string[]>([]);
   // Only an update (or a check) the user pressed can fail the notice; a
   // background check that times out keeps the last known offers silently.
   const [cliUpdateFailure, setCliUpdateFailure] = useState<{
@@ -15495,14 +17030,12 @@ export function App() {
     providerIds: string[];
   }>();
   const cliUpdateCheckingRef = useRef(false);
-  const cliUpdatePhaseRef = useRef(cliUpdatePhase);
-  cliUpdatePhaseRef.current = cliUpdatePhase;
   const checkCliUpdates = useCallback(
     async (userInitiated = false) => {
       if (!isTauriRuntime() || cliUpdateCheckingRef.current) {
         return;
       }
-      if (cliUpdatePhaseRef.current === "updating") {
+      if (cliUpdatingProvidersRef.current.length > 0) {
         return;
       }
       cliUpdateCheckingRef.current = true;
@@ -15542,19 +17075,24 @@ export function App() {
   );
 
   const applyCliUpdates = useCallback(async () => {
-    if (!isTauriRuntime() || cliUpdateOffers.length === 0) {
+    if (
+      !isTauriRuntime() ||
+      cliUpdateOffers.length === 0 ||
+      cliUpdatingProvidersRef.current.length > 0
+    ) {
       return;
     }
+    const providerIds = cliUpdateOffers.map((offer) => offer.providerId);
+    cliUpdatingProvidersRef.current = providerIds;
+    setCliUpdatingProviderIds(providerIds);
     setCliUpdatePhase("updating");
     setCliUpdateFailure(undefined);
     try {
-      const providerIds = cliUpdateOffers.map((offer) => offer.providerId);
       const results = await invoke<CliUpdateApplyResult[]>(
         "apply_cli_updates_command",
         { providerIds },
       );
       const failed = results.filter((result) => !result.ok);
-      setCliUpdatePhase("idle");
       if (failed.length > 0) {
         setCliUpdateFailure({
           message: failed
@@ -15582,15 +17120,18 @@ export function App() {
         setCliUpdateOffers([]);
         localStorage.removeItem("gyro.cli-updates.dismissed.v1");
       }
-      // Re-check so a partial failure still lists remaining updates.
-      void checkCliUpdates(false);
     } catch (error) {
-      setCliUpdatePhase("idle");
       setCliUpdateFailure({
         message: String(error),
-        providerIds: cliUpdateOffers.map((offer) => offer.providerId),
+        providerIds,
       });
       notify("command-failed", "CLI update failed", String(error));
+    } finally {
+      cliUpdatingProvidersRef.current = [];
+      setCliUpdatingProviderIds([]);
+      setCliUpdatePhase("idle");
+      // Re-check after releasing the in-flight guard, including partial failures.
+      void checkCliUpdates(false);
     }
   }, [checkCliUpdates, cliUpdateOffers, notify]);
 
@@ -15600,7 +17141,9 @@ export function App() {
       localStorage.setItem("gyro.cli-updates.dismissed.v1", key);
     }
     setCliUpdateOffers([]);
-    setCliUpdatePhase("idle");
+    setCliUpdatePhase(
+      cliUpdatingProvidersRef.current.length > 0 ? "updating" : "idle",
+    );
     setCliUpdateFailure(undefined);
   }, [cliUpdateOffers]);
 
@@ -15661,6 +17204,15 @@ export function App() {
     [updater],
   );
 
+  const activeComposerModel = activeSession
+    ? sessionModelSelectionFromSession(activeSession)
+    : chatDraftModels[activeDraftKey];
+  const activeComposerCliUpdating = isComposerCliUpdating(
+    cliUpdatingProviderIds,
+    activeComposerModel,
+    config.selectedProviderId,
+  );
+
   const renderChatPane = (
     pane: ChatPaneRef,
     options: {
@@ -15668,6 +17220,7 @@ export function App() {
       isTiled: boolean;
       onPaneDragEnd: () => void;
       onPaneDragStart: (event: ReactDragEvent<HTMLSpanElement>) => void;
+      onPanePointerDown: (event: ReactPointerEvent<HTMLSpanElement>) => void;
     },
   ) => {
     const paneSession =
@@ -15686,6 +17239,15 @@ export function App() {
         : undefined;
     const paneDraftKey =
       pane.kind === "session" ? pane.sessionId : pane.draftKey;
+    const paneComposerModel =
+      pane.kind === "session"
+        ? sessionModelSelectionFromSession(paneSession)
+        : chatDraftModels[paneDraftKey];
+    const paneComposerCliUpdating = isComposerCliUpdating(
+      cliUpdatingProviderIds,
+      paneComposerModel,
+      config.selectedProviderId,
+    );
     const panePlan = paneContext?.plan ?? pendingNewChatPlan;
     const paneGoal =
       pane.kind === "session" ? paneContext?.goal : pendingNewChatGoal;
@@ -15798,7 +17360,13 @@ export function App() {
       draftKey: paneDraftKey,
     };
     return (
+      <ChatFileScopeContext.Provider value={{
+        sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+        workspacePath: pane.workspacePath,
+      }}>
       <ChatSurface
+        {...projectImport.chatProps(paneSession)}
+        {...taskHandoff.chatProps(paneSession)}
         activeChatPanel={panePanel}
         paneKey={paneDraftKey}
         onSelectChatPanel={selectPanePanel}
@@ -15810,10 +17378,7 @@ export function App() {
         browserOverlayOccluded={browserOverlayOccluded || !isFocused}
         onBrowserBack={() => handleBrowserBack(paneBrowserOwner)}
         onBrowserDeviceChange={(device) =>
-          sendBrowserAction(paneBrowserOwner, {
-            type: "browser-device",
-            device,
-          })
+          handleBrowserDeviceChange(device, paneBrowserOwner)
         }
         onBrowserForward={() => handleBrowserForward(paneBrowserOwner)}
         onBrowserHostBoundsChange={(bounds) =>
@@ -15877,17 +17442,21 @@ export function App() {
         branchCatalog={branchCatalog}
         isEnvironmentRailOpen={panePanel === "environment"}
         isGoalComposerActive={isFocused && isGoalComposerActive}
+        isGoalModeActive={isFocused && activeGoalMode}
         isComposerSending={
           pane.kind === "session"
             ? sendingSessionIds.includes(pane.sessionId)
             : isFocused && isStartingFirstTurn
         }
-        isCliUpdating={cliUpdatePhase === "updating"}
+        isCliUpdating={paneComposerCliUpdating}
         shellReady={!isShellOptimizing}
         isBranchLoading={isBranchLoading}
         isToolPanelOpen={isFocused && workbench.isToolPanelOpen}
         isToolPanelAvailable={isBottomDrawerAvailable}
         isTiled={options.isTiled}
+        onPaneDragStart={options.onPaneDragStart}
+        onPaneDragEnd={options.onPaneDragEnd}
+        onPanePointerDown={options.onPanePointerDown}
         maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
         onAgentAction={(action) => notify("terminal", "Agent action", action)}
         canAttachEditorSnapshot={canAttachEditorSnapshot}
@@ -15899,12 +17468,29 @@ export function App() {
             workspacePath: pane.workspacePath,
           });
         }}
+        onAttachMediaPaths={(paths) => {
+          const target = {
+            draftKey: paneDraftKey,
+            sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+            workspacePath: pane.workspacePath,
+          };
+          focusChatPane(pane);
+          void (async () => {
+            for (const path of paths) {
+              await selectChatAttachment("media", path, target);
+            }
+          })();
+        }}
         onMediaDropError={(message) =>
           notify("command-failed", "Image could not be attached", message)
         }
         onComposerAction={(action) => {
           focusChatPane(pane);
-          handleComposerAction(action, paneDraftKey);
+          handleComposerAction(action, paneDraftKey, {
+            draftKey: paneDraftKey,
+            sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+            workspacePath: pane.workspacePath,
+          });
         }}
         onDraftChange={(value) =>
           setChatDrafts((current) => ({ ...current, [paneDraftKey]: value }))
@@ -15982,11 +17568,12 @@ export function App() {
         onStartGoalChat={(goal) =>
           requestSend(goal, {
             goal: { text: goal, status: "active" },
-            preserveDraft: true,
+            preserveDraft: false,
             consumeDraftMode: true,
           })
         }
-        onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+        onCancelGoalComposer={dismissGoalComposer}
+        onCloseGoalComposer={closeGoalComposer}
         fileReview={
           // The summaries and the Keep both belong to the focused session, so a
           // background pane keeps the plain summary card rather than showing
@@ -16034,51 +17621,145 @@ export function App() {
           message: item.message,
         }))}
         savedProjects={savedProjects}
-        sessionModel={
-          pane.kind === "session"
-            ? sessionModelSelectionFromSession(paneSession)
-            : chatDraftModels[paneDraftKey]
-        }
+        sessionModel={paneComposerModel}
         sessionPlan={panePlan}
         sessionGoal={paneGoal}
         sessionSummary={paneSession?.summary}
         sessionTitle={paneSession?.title}
-        sourceControl={workbench.ide.sourceControl}
+        sourceControl={sourceControlForWorkspace(
+          workbench.ide.sourceControl,
+          pane.workspacePath,
+        )}
         terminalPanes={workbench.terminalPanes}
         turnSourceControlBaselines={turnSourceControlBaselines}
         worktreeName={paneSession?.worktreeName}
         workspaceMode={workbench.workspaceMode}
         workspacePath={pane.workspacePath}
       />
+      </ChatFileScopeContext.Provider>
     );
   };
+
+  // Draft panes and the cold-launch start screen are not sessions. List
+  // them anyway so an unsent chat is visible before the first message.
+  // Abandoned placeholder sessions stay out of this list.
+  const sidebarDraftChats = useMemo(() => {
+    const drafts: Array<{
+      id: string;
+      title: string;
+      workspacePath: string;
+    }> = [];
+    const seen = new Set<string>();
+    for (const layout of Object.values(chatGrid.layouts)) {
+      for (const pane of layout.slots) {
+        if (pane?.kind !== "draft" || seen.has(pane.paneId)) continue;
+        seen.add(pane.paneId);
+        drafts.push({
+          id: pane.paneId,
+          title: "New chat",
+          workspacePath: pane.workspacePath,
+        });
+      }
+    }
+    const occupied = activeChatLayout?.slots.some(Boolean) ?? false;
+    if (!occupied && !activeSessionId) {
+      drafts.unshift({
+        id: `start:${currentChatProjectKey}`,
+        title: "New chat",
+        workspacePath: workspacePath ?? "",
+      });
+    }
+    return drafts;
+  }, [
+    activeChatLayout,
+    activeSessionId,
+    chatGrid.layouts,
+    currentChatProjectKey,
+    workspacePath,
+  ]);
+  const activeDraftChatId =
+    activeChatPane?.kind === "draft"
+      ? activeChatPane.paneId
+      : !activeChatLayout?.slots.some(Boolean) && !activeSessionId
+        ? `start:${currentChatProjectKey}`
+        : undefined;
+  const selectSidebarDraft = useCallback(
+    (draftId: string, options: { keepLayout?: boolean } = {}) => {
+      const showThread = () => {
+        dispatchWorkbench({ type: "set-chat-panel" });
+        if (!options.keepLayout) {
+          dispatchWorkbench({
+            type: "select-workspace-layout",
+            layout: "thread",
+          });
+        }
+      };
+      // The cold-launch row is the start screen itself. Focusing it must not
+      // run startNewChat, which resets the unsent composer.
+      if (draftId.startsWith("start:")) {
+        showThread();
+        return;
+      }
+      for (const layout of Object.values(chatGrid.layouts)) {
+        const pane = layout.slots.find(
+          (slot) => slot?.kind === "draft" && slot.paneId === draftId,
+        );
+        if (!pane) continue;
+        focusChatPane(pane);
+        showThread();
+        return;
+      }
+    },
+    [chatGrid.layouts, focusChatPane],
+  );
 
   // The workspace chat lives in the AI sidebar view — the same surface the
   // Sessions destination renders, at sidebar width.
   // Recent chats for the project the workspace is on, newest first, so the AI
   // view can switch chats without the Sessions sidebar.
   const workspaceChatSwitcher = {
-    chats: sessions
-      .filter(
-        (session) =>
-          chatProjectKey(session.workspacePath) ===
-          chatProjectKey(activeSession?.workspacePath ?? workspacePath),
-      )
-      .sort((first, second) => second.updatedAt.localeCompare(first.updatedAt))
-      .slice(0, 8)
-      .map((session) => ({
-        id: session.id,
-        title: session.title || "Untitled chat",
-        meta: session.branch,
-      })),
-    activeChatId: activeSessionId,
-    onSelect: (sessionId: string) =>
-      selectSession(sessionId, { keepLayout: true }),
+    chats: [
+      ...sidebarDraftChats
+        .filter(
+          (draft) =>
+            chatProjectKey(draft.workspacePath) ===
+            chatProjectKey(activeSession?.workspacePath ?? workspacePath),
+        )
+        .map((draft) => ({
+          id: draft.id,
+          title: draft.title || "New chat",
+        })),
+      ...sessions
+        .filter(
+          (session) =>
+            chatProjectKey(session.workspacePath) ===
+            chatProjectKey(activeSession?.workspacePath ?? workspacePath),
+        )
+        .sort((first, second) =>
+          second.updatedAt.localeCompare(first.updatedAt),
+        )
+        .slice(0, 8)
+        .map((session) => ({
+          id: session.id,
+          title: session.title || "Untitled chat",
+          meta: session.branch,
+        })),
+    ],
+    activeChatId: activeDraftChatId ?? activeSessionId,
+    onSelect: (chatId: string) => {
+      if (sidebarDraftChats.some((draft) => draft.id === chatId)) {
+        selectSidebarDraft(chatId, { keepLayout: true });
+        return;
+      }
+      selectSession(chatId, { keepLayout: true });
+    },
     onNewChat: () => startNewChat({ keepLayout: true }),
   };
 
   const renderWorkspaceChat = () => (
     <ChatSurface
+      {...projectImport.chatProps(activeSession)}
+      {...taskHandoff.chatProps(activeSession)}
       chatSwitcher={workspaceChatSwitcher}
       paneKey={activeDraftKey}
       activeChatPanel={activeChatPanel}
@@ -16091,7 +17772,7 @@ export function App() {
       browserOverlayOccluded={browserOverlayOccluded}
       onBrowserBack={() => handleBrowserBack()}
       onBrowserDeviceChange={(device) =>
-        dispatchActiveBrowser({ type: "browser-device", device })
+        handleBrowserDeviceChange(device)
       }
       onBrowserForward={() => handleBrowserForward()}
       onBrowserHostBoundsChange={handleBrowserHostBoundsChange}
@@ -16150,8 +17831,9 @@ export function App() {
       branchCatalog={branchCatalog}
       isEnvironmentRailOpen={activeChatPanel === "environment"}
       isGoalComposerActive={isGoalComposerActive}
+      isGoalModeActive={activeGoalMode}
       isComposerSending={isActiveSessionSending}
-      isCliUpdating={cliUpdatePhase === "updating"}
+      isCliUpdating={activeComposerCliUpdating}
       shellReady={!isShellOptimizing}
       isBranchLoading={isBranchLoading}
       isToolPanelOpen={workbench.isToolPanelOpen}
@@ -16159,6 +17841,11 @@ export function App() {
       maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
       canAttachEditorSnapshot={canAttachEditorSnapshot}
       onAttachMediaFiles={attachDroppedMedia}
+      onAttachMediaPaths={(paths) => {
+        void (async () => {
+          for (const path of paths) await selectChatAttachment("media", path);
+        })();
+      }}
       onMediaDropError={(message) =>
         notify("command-failed", "Image could not be attached", message)
       }
@@ -16167,7 +17854,7 @@ export function App() {
       onRemoveAttachment={removeChatAttachment}
       onReusePrompt={updateActiveChatDraft}
       onStopChat={stopActiveChat}
-      onContinueChat={() => void sendDraft("Continue")}
+      onContinueChat={continueChat}
       onCouncilAction={handleCouncilAction}
       onOpenToolPanel={openToolPanel}
       onToggleToolPanel={toggleChatToolPanel}
@@ -16178,7 +17865,8 @@ export function App() {
       onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
       onGoalAction={changeGoal}
       onStartGoalChat={startNewGoalChat}
-      onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+      onCancelGoalComposer={dismissGoalComposer}
+      onCloseGoalComposer={closeGoalComposer}
       fileReview={fileReviewTools}
       onLoadChangeDiff={loadInlineChangeDiff}
       onLoadComparisonDiff={loadComparisonDiff}
@@ -16210,13 +17898,27 @@ export function App() {
       sessionGoal={activeSessionGoal}
       sessionSummary={activeSession?.summary}
       sessionTitle={activeSession?.title}
-      sourceControl={workbench.ide.sourceControl}
+      sourceControl={scopedIde.sourceControl}
       terminalPanes={workbench.terminalPanes}
       turnSourceControlBaselines={turnSourceControlBaselines}
       worktreeName={activeSession?.worktreeName}
       workspaceMode={workbench.workspaceMode}
       workspacePath={activeSession?.workspacePath ?? workspacePath}
     />
+  );
+
+  const chatFileActions = useMemo(
+    () =>
+      createChatFileActions({
+        invoke,
+        convertFileSrc,
+        open: (path) => {
+          void revealItemInDir(path).catch((error) =>
+            notify("command-failed", "Could not show the file", String(error)),
+          );
+        },
+      }),
+    [notify],
   );
 
   const appChrome = (
@@ -16227,6 +17929,8 @@ export function App() {
       activeSessionId={sidebarActiveSessionId}
       sendingSessionIds={sendingSessionIds}
       completedSessionIds={unreadCompletedSessionIds}
+      approvalCountsBySessionId={approvalCountsBySessionId}
+      questionCountsBySessionId={questionCountsBySessionId}
       modelTerminalSessionIds={modelTerminalSessionIds}
       activeSettingsSection={workbench.preferences.lastSettingsSection}
       activeWorkspaceLayout={activeWorkspaceLayout}
@@ -16251,7 +17955,7 @@ export function App() {
       workspaceSidebarWidth={workbench.preferences.workspaceSidebarWidth}
       workspacePreparation={workspacePreparation}
       files={visibleWorkspaceFiles}
-      ide={workbench.ide}
+      ide={scopedIde}
       isChatsCollapsed={workbench.preferences.sidebarChatsCollapsed}
       isShellOptimizing={isShellOptimizing}
       notifications={workbench.notifications}
@@ -16274,6 +17978,7 @@ export function App() {
       onOpenWorkspace={openWorkspace}
       onAddWorkspaceFolder={addWorkspaceFolder}
       onRemoveWorkspaceFolder={removeWorkspaceFolder}
+      workspaceRootIssues={workspaceRootIssues}
       onSelectWorkspaceFolder={setSelectedWorkspaceRoot}
       onUpdateAction={runUpdateAction}
       onWorkspaceSidebarHiddenChange={(hidden) =>
@@ -16293,6 +17998,10 @@ export function App() {
       onCreateWorkspacePath={createWorkspacePath}
       onRenameWorkspacePath={renameWorkspacePath}
       onDeleteWorkspacePath={deleteWorkspacePath}
+      onMoveWorkspacePath={moveWorkspacePath}
+      onDuplicateWorkspacePath={duplicateWorkspacePath}
+      onRevealWorkspacePath={revealWorkspacePath}
+      onAskWorkspacePath={(path) => askWorkspacePath(path)}
       onOpenToolPanel={openToolPanel}
       onOpenSourceControlDiff={openSourceControlDiff}
       onCommitSourceControl={commitSourceControl}
@@ -16350,13 +18059,16 @@ export function App() {
           });
           return typeof chosen === "string" ? chosen : null;
         },
-        save: (path, name, pinned, folders, primaryFolder) => {
+        validateFolders: (path, folders, candidates, allowNested) =>
+          admitWorkspaceFolders([path, ...folders], candidates, allowNested),
+        save: (path, name, pinned, folders, primaryFolder, allowNested) => {
           dispatchWorkbench({
             type: "set-project-details",
             path,
             name,
             pinned,
             primaryFolder,
+            allowNestedFolders: allowNested,
           });
           dispatchWorkbench({
             type: "set-workspace-folders",
@@ -16394,6 +18106,9 @@ export function App() {
       openChatSessionIds={(activeChatLayout?.slots ?? []).flatMap((pane) =>
         pane?.kind === "session" ? [pane.sessionId] : [],
       )}
+      draftChats={sidebarDraftChats}
+      activeDraftId={activeDraftChatId}
+      onSelectDraftChat={selectSidebarDraft}
       savedProjects={savedProjects}
       selectedTerminalPaneId={workbench.selectedTerminalPaneId}
       sessions={visibleSessions}
@@ -16427,42 +18142,75 @@ export function App() {
                   const session = sessions.find(
                     (item) => item.id === sessionId,
                   );
-                  if (!session) return;
+                  if (!session) return false;
+                  // Resolve the real session's project; a native payload cannot
+                  // choose which saved layout gets edited.
                   const projectKey = chatProjectKey(session.workspacePath);
-                  if (
-                    sourceProjectKey &&
-                    sourceProjectKey !== displayedChatLayout.projectKey
-                  ) {
+                  if (chatProjectKey(sourceProjectKey) !== projectKey)
+                    return false;
+                  const switchingProject =
+                    projectKey !== displayedChatLayout.projectKey;
+                  const existingPane = chatGridRef.current.layouts[
+                    projectKey
+                  ]?.slots.find(
+                    (pane) =>
+                      pane?.kind === "session" && pane.sessionId === session.id,
+                  );
+                  const action = {
+                    type: "select-pane" as const,
+                    projectKey,
+                    mode:
+                      switchingProject && existingPane
+                        ? ("replace" as const)
+                        : ("drop" as const),
+                    // The old project's slot/arrangement has no meaning in the
+                    // destination. Focus its existing pane or append safely.
+                    slotIndex: switchingProject ? undefined : slotIndex,
+                    arrangement: switchingProject
+                      ? undefined
+                      : placement?.arrangement,
+                    insertPosition: switchingProject
+                      ? undefined
+                      : placement?.insertPosition,
+                    splitDirection: switchingProject
+                      ? undefined
+                      : placement?.splitDirection,
+                    pane: chatPaneForSession(session),
+                  };
+                  if (!dispatchChatGrid(action)) {
+                    if (switchingProject && !existingPane) {
+                      notify(
+                        "terminal",
+                        "Chat layout is full",
+                        "Close a chat in that project before adding another.",
+                      );
+                    }
+                    return false;
+                  }
+                  if (switchingProject) {
                     notify(
                       "terminal",
                       "Chat project switched",
                       workspaceName(session.workspacePath),
                     );
                   }
-                  dispatchChatGrid({
-                    type: "select-pane",
-                    projectKey,
-                    mode: "drop",
-                    slotIndex,
-                    arrangement: placement?.arrangement,
-                    insertPosition: placement?.insertPosition,
-                    splitDirection: placement?.splitDirection,
-                    pane: chatPaneForSession(session),
-                  });
                   activeSessionIdRef.current = session.id;
                   setActiveSessionId(session.id);
                   setWorkspacePath(session.workspacePath);
                   void refreshEvents(session.id);
+                  return true;
                 }}
                 onFocusPane={focusChatPane}
-                onMovePane={(paneId, slotIndex) =>
-                  dispatchChatGrid({
-                    type: "move-pane",
+                onMovePane={(paneId, slotIndex, placement) => {
+                  const action = {
+                    type: "move-pane" as const,
                     projectKey: displayedChatLayout.projectKey,
                     paneId,
                     slotIndex,
-                  })
-                }
+                    ...placement,
+                  };
+                  return dispatchChatGrid(action);
+                }}
                 onToggleMaximize={(paneId) =>
                   dispatchChatGrid({
                     type: "toggle-maximize-pane",
@@ -16473,6 +18221,8 @@ export function App() {
               >
                 {!activeChatLayout?.slots.some(Boolean) ? (
                   <ChatSurface
+                    {...projectImport.chatProps(activeSession)}
+                    {...taskHandoff.chatProps(activeSession)}
                     activeChatPanel={activeChatPanel}
                     paneKey={activeDraftKey}
                     onSelectChatPanel={selectSoloChatPanel}
@@ -16531,8 +18281,9 @@ export function App() {
                     branchCatalog={branchCatalog}
                     isEnvironmentRailOpen={activeChatPanel === "environment"}
                     isGoalComposerActive={isGoalComposerActive}
+                    isGoalModeActive={activeGoalMode}
                     isComposerSending={isActiveSessionSending}
-                    isCliUpdating={cliUpdatePhase === "updating"}
+                    isCliUpdating={activeComposerCliUpdating}
                     shellReady={!isShellOptimizing}
                     isBranchLoading={isBranchLoading}
                     isToolPanelOpen={workbench.isToolPanelOpen}
@@ -16543,6 +18294,11 @@ export function App() {
                     }
                     canAttachEditorSnapshot={canAttachEditorSnapshot}
                     onAttachMediaFiles={attachDroppedMedia}
+      onAttachMediaPaths={(paths) => {
+        void (async () => {
+          for (const path of paths) await selectChatAttachment("media", path);
+        })();
+      }}
                     onMediaDropError={(message) =>
                       notify(
                         "command-failed",
@@ -16555,7 +18311,7 @@ export function App() {
                     onRemoveAttachment={removeChatAttachment}
                     onReusePrompt={updateActiveChatDraft}
                     onStopChat={stopActiveChat}
-                    onContinueChat={() => void sendDraft("Continue")}
+                    onContinueChat={continueChat}
                     onCouncilAction={handleCouncilAction}
                     onOpenToolPanel={openToolPanel}
                     onToggleToolPanel={toggleChatToolPanel}
@@ -16568,7 +18324,8 @@ export function App() {
                     }
                     onGoalAction={changeGoal}
                     onStartGoalChat={startNewGoalChat}
-                    onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+                    onCancelGoalComposer={dismissGoalComposer}
+                    onCloseGoalComposer={closeGoalComposer}
                     fileReview={fileReviewTools}
                     onLoadChangeDiff={loadInlineChangeDiff}
                     onLoadComparisonDiff={loadComparisonDiff}
@@ -16602,7 +18359,7 @@ export function App() {
                     sessionGoal={activeSessionGoal}
                     sessionSummary={activeSession?.summary}
                     sessionTitle={activeSession?.title}
-                    sourceControl={workbench.ide.sourceControl}
+                    sourceControl={scopedIde.sourceControl}
                     terminalPanes={workbench.terminalPanes}
                     turnSourceControlBaselines={turnSourceControlBaselines}
                     worktreeName={activeSession?.worktreeName}
@@ -16622,7 +18379,24 @@ export function App() {
 
           {activeWorkspaceLayout === "code" ? (
             <section className="gyro-workspace-primary" aria-label="Workspace">
+              <WorkspaceEditBar
+                paths={workspaceRename.paths}
+                canUndo={workspaceRename.canUndo}
+                busy={workspaceRename.busy}
+                error={workspaceRename.error}
+                onUndo={workspaceRename.undo}
+                onSaveAll={() => void workspaceRename.saveAll()}
+                onOpenFile={openEditorFile}
+              />
               <IdeSurface
+                editorNavigation={{
+                  canBack: navigationHistory.index > 0,
+                  canForward:
+                    navigationHistory.index <
+                    navigationHistory.entries.length - 1,
+                  onBack: () => void navigateEditorHistory(-1),
+                  onForward: () => void navigateEditorHistory(1),
+                }}
                 activePaneTab={workbench.activePaneTab}
                 isToolPanelOpen={workbench.isToolPanelOpen}
                 browserPreview={browserPreview}
@@ -16635,13 +18409,24 @@ export function App() {
                 fileError={selectedFileError}
                 fileLoadState={selectedFileLoadState}
                 files={visibleWorkspaceFiles}
-                ide={workbench.ide}
+                ide={scopedIde}
                 effectiveMinimapEnabled={
                   effectiveWorkspaceSettings.editorMinimapEnabled
                 }
                 workspacePath={activeWorkspaceRoot}
                 workspaceTrusted={workspaceTrusted}
                 onOpenWorkspace={openWorkspace}
+                recentProjects={savedProjects}
+                onOpenRecentProject={(path) =>
+                  void activateWorkspacePath(path, "Project opened").catch(
+                    (error) =>
+                      notify(
+                        "command-failed",
+                        "Project unavailable",
+                        String(error),
+                      ),
+                  )
+                }
                 onTrustWorkspace={() => {
                   if (!workspaceActionRoot) return;
                   dispatchWorkbench({
@@ -16674,7 +18459,7 @@ export function App() {
                 onAddTerminalPane={addTerminalPane}
                 onBrowserBack={() => handleBrowserBack()}
                 onBrowserDeviceChange={(device) =>
-                  dispatchActiveBrowser({ type: "browser-device", device })
+                  handleBrowserDeviceChange(device)
                 }
                 onBrowserForward={() => handleBrowserForward()}
                 onBrowserNavigate={handleBrowserNavigate}
@@ -16802,7 +18587,7 @@ export function App() {
                                 : { ...previous, [key]: id },
                             );
                         }}
-                        refreshKey={workbench.ide.sourceControl.lastCheckedAt}
+                        refreshKey={scopedIde.sourceControl.lastCheckedAt}
                         languageOverride={
                           languageOverrides[
                             absoluteWorkspaceFilePath(
@@ -16830,12 +18615,10 @@ export function App() {
                       }
                       fileError={selectedFileError}
                       semanticReady={
-                        workbench.ide.languageServers?.find(
-                          (server) =>
-                            server.activePath === props.path &&
-                            server.status === "ready",
-                        )?.serverId
+                        languageSessions.ready(props.path)?.serverId
                       }
+                      onOpenLocation={openWorkspaceLocation}
+                      onRenameSymbol={workspaceRename.begin}
                       onLspRequest={requestLanguageFeature}
                       theme={resolvedTheme}
                     />
@@ -16849,25 +18632,12 @@ export function App() {
               never draws it: terminals, review and the browser live on the
               chat's own rail there. */}
           {activeWorkspaceLayout === "code" &&
-          Boolean(activeSession?.workspacePath ?? workspacePath) ? (
-            workbench.isToolPanelOpen ? (
-              renderWorkspaceToolPanel(false)
-            ) : (
-              <nav
-                aria-label="Workspace tools"
-                className="gyro-workspace-tool-launcher"
-              >
-                <button
-                  aria-label="Open the workspace panel"
-                  onClick={toggleChatToolPanel}
-                  title="Open the panel you used last (⌘J)"
-                  type="button"
-                >
-                  Panel
-                </button>
-              </nav>
-            )
-          ) : null}
+          Boolean(activeSession?.workspacePath ?? workspacePath)
+            ? // Closed, the panel costs no row: its toggle sits in the status bar.
+              workbench.isToolPanelOpen
+              ? renderWorkspaceToolPanel(false)
+              : null
+            : null}
           {activeWorkspaceLayout === "code" &&
           Boolean(activeSession?.workspacePath ?? workspacePath) ? (
             <IdeStatusBar
@@ -16904,11 +18674,29 @@ export function App() {
               fileContent={selectedFileContent}
               fileLoadState={selectedFileLoadState}
               groupCount={Math.max(workbench.ide.layout.groups.length, 1)}
-              ide={workbench.ide}
+              ide={scopedIde}
               isBranchLoading={isBranchLoading}
+              isPanelOpen={workbench.isToolPanelOpen}
+              onShowProblems={() =>
+                dispatchWorkbench({ type: "open-tool-panel", tab: "problems" })
+              }
+              onTogglePanel={toggleChatToolPanel}
+              onDragPanel={(height, phase) => {
+                // Past a short pull the panel snaps open at its minimum and
+                // then follows the pointer; letting go low puts it away.
+                if (height < (phase === "end" ? 96 : 48)) {
+                  dispatchWorkbench({ type: "close-tool-panel" });
+                  return;
+                }
+                dispatchWorkbench({
+                  type: "set-workspace-panel-height",
+                  height,
+                });
+                dispatchWorkbench({ type: "open-tool-panel" });
+              }}
               onCreateBranch={() =>
                 void createWorkspaceBranch(
-                  workbench.ide.sourceControl.branch ?? branchCatalog?.current,
+                  scopedIde.sourceControl.branch ?? branchCatalog?.current,
                 )
               }
               onSelectBranch={(branch) => void switchWorkspaceBranch(branch)}
@@ -16917,22 +18705,70 @@ export function App() {
           ) : null}
         </div>
       ) : null}
-      {activeDestination === "settings" ? (
+      {activeDestination === "settings" || activeDestination === "providers" ? (
         <SettingsSurface
-          activeSection={workbench.preferences.lastSettingsSection}
+          preferences={workbench.preferences}
+          onSettingsPreferencesChange={patch => dispatchWorkbench({ type: "set-settings-preferences", patch })}
+          onImportSettings={settings => dispatchWorkbench({ type: "import-portable-settings", settings })}
+          projectImport={projectImport.settingsProps}
+          activeSection={
+            activeDestination === "providers"
+              ? "providers"
+              : workbench.preferences.lastSettingsSection
+          }
           activeWorkspaceRoot={workspaceActionRoot}
           cliLaunchPreset={workbench.preferences.cliLaunchPreset}
           config={config}
           density={workbench.preferences.density}
           interfaceSize={workbench.preferences.interfaceSize}
           motionSpeed={workbench.preferences.motionSpeed}
+          launchView={workbench.preferences.launchView}
           reduceMotion={reduceMotion}
-          onInterfaceSizeChange={(interfaceSize) => dispatchWorkbench({ type: "set-interface-size", interfaceSize })}
-          onMotionSpeedChange={(motionSpeed) => dispatchWorkbench({ type: "set-motion-speed", motionSpeed })}
+          appearanceSaveStatus={appearanceSaveStatus}
+          onRetryAppearanceSave={() => {
+            retryAppearanceSave();
+            pendingWorkbenchPersistRef.current = persistableWorkbench;
+            flushPersistedWorkbenchState(pendingWorkbenchPersistRef, onAppearancePersisted);
+          }}
+          onInterfaceSizeChange={(interfaceSize) =>
+            dispatchWorkbench({ type: "set-interface-size", interfaceSize })
+          }
+          onMotionSpeedChange={(motionSpeed) =>
+            dispatchWorkbench({ type: "set-motion-speed", motionSpeed })
+          }
+          onLaunchViewChange={(view) =>
+            dispatchWorkbench({ type: "set-launch-view", view })
+          }
           mainColor={workbench.preferences.mainColor}
           secondaryColor={workbench.preferences.secondaryColor}
           showMenuBarIcon={workbench.preferences.showMenuBarIcon}
+          desktopNotifications={workbench.preferences.desktopNotifications}
+          onDesktopNotificationsChange={(notifications) =>
+            dispatchWorkbench({
+              type: "set-desktop-notifications",
+              notifications,
+            })
+          }
           onConfigChange={handleConfigChange}
+          onEfficiencyRoute={async (phase, escalate) => {
+            if (!activeSessionId)
+              throw new Error("Select a chat before applying a phase route.");
+            if (!isTauriRuntime())
+              throw new Error("Phase handoffs require the desktop app.");
+            await invoke("route_efficiency_phase", {
+              sessionId: activeSessionId,
+              phase,
+              escalate,
+            });
+            await refreshSessions();
+            await refreshEvents(activeSessionId);
+          }}
+          onEfficiencyChange={async (value) => {
+            const next = isTauriRuntime()
+              ? await invoke<typeof value>("set_efficiency_config", { value })
+              : value;
+            setConfig((current) => ({ ...current, efficiency: next }));
+          }}
           onCheckForUpdates={() => void checkForUpdatesWithFeedback()}
           onUpdateAction={runUpdateAction}
           onCliLaunchPresetChange={(preset: CliLaunchPreset) =>
@@ -16999,10 +18835,12 @@ export function App() {
           }}
           onSelectProviderDefaultModel={selectProviderDefaultModel}
           onSignInProvider={signInProvider}
+          onInstallProvider={installProvider}
           {...providerApiKeyProps}
           onTestProvider={testProvider}
           onToggleProvider={toggleProvider}
           providerStatuses={workbench.providerStatuses}
+          providerUsageByProvider={providerUsageByProvider}
           selectedUsageProviderId={selectedUsageProviderId}
           usageVisualization={workbench.preferences.usageVisualization}
           dailyPaceWarning={workbench.preferences.dailyPaceWarning}
@@ -17239,33 +19077,10 @@ export function App() {
           selectedAutomationId={workbench.selectedAutomationId}
         />
       ) : null}
-      {activeDestination === "providers" ? (
-        <ProvidersSurface
-          config={config}
-          onAddCustomProfile={() => {
-            const customProfile = {
-              id: `custom-${Date.now()}`,
-              displayName: "Custom Agent",
-              command: "./agent.sh",
-              args: [],
-              workingDirectory: "Workspace",
-            };
-            void persistConfig({
-              ...config,
-              commandProfiles: [...commandProfiles, customProfile],
-            });
-          }}
-          onQueueProviderHandoff={queueProviderHandoff}
-          {...providerApiKeyProps}
-          onTestProvider={testProvider}
-          onToggleProvider={toggleProvider}
-          providerHandoffs={workbench.providerHandoffs}
-          providerSessions={workbench.providerSessions}
-          providerStatuses={workbench.providerStatuses}
-        />
-      ) : null}
       {activeDestination === "onboarding" ? (
         <ChatSurface
+          {...projectImport.chatProps(activeSession)}
+          {...taskHandoff.chatProps(activeSession)}
           activeChatPanel={activeChatPanel}
           paneKey={activeDraftKey}
           onSelectChatPanel={selectSoloChatPanel}
@@ -17299,8 +19114,9 @@ export function App() {
           }
           isEnvironmentRailOpen={activeChatPanel === "environment"}
           isGoalComposerActive={isGoalComposerActive}
+          isGoalModeActive={activeGoalMode}
           isComposerSending={isActiveSessionSending}
-          isCliUpdating={cliUpdatePhase === "updating"}
+          isCliUpdating={activeComposerCliUpdating}
           shellReady={!isShellOptimizing}
           isBranchLoading={isBranchLoading}
           isToolPanelOpen={workbench.isToolPanelOpen}
@@ -17308,6 +19124,11 @@ export function App() {
           maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
           canAttachEditorSnapshot={canAttachEditorSnapshot}
           onAttachMediaFiles={attachDroppedMedia}
+      onAttachMediaPaths={(paths) => {
+        void (async () => {
+          for (const path of paths) await selectChatAttachment("media", path);
+        })();
+      }}
           onMediaDropError={(message) =>
             notify("command-failed", "Image could not be attached", message)
           }
@@ -17316,7 +19137,7 @@ export function App() {
           onRemoveAttachment={removeChatAttachment}
           onReusePrompt={updateActiveChatDraft}
           onStopChat={stopActiveChat}
-          onContinueChat={() => void sendDraft("Continue")}
+          onContinueChat={continueChat}
           onCouncilAction={handleCouncilAction}
           onOpenToolPanel={openToolPanel}
           onToggleToolPanel={toggleChatToolPanel}
@@ -17327,7 +19148,8 @@ export function App() {
           onPlanEditorRequestHandled={() => setPlanEditorRequest(undefined)}
           onGoalAction={changeGoal}
           onStartGoalChat={startNewGoalChat}
-          onCancelGoalComposer={() => setIsGoalComposerActive(false)}
+          onCancelGoalComposer={dismissGoalComposer}
+          onCloseGoalComposer={closeGoalComposer}
           onEditQueuedMessage={editQueuedChatMessage}
           onRemoveQueuedMessage={removeQueuedChatMessage}
           onSteerQueuedMessage={steerQueuedChatMessage}
@@ -17357,9 +19179,44 @@ export function App() {
           savedProjects={savedProjects}
           sessionPlan={activeSessionPlan}
           sessionGoal={activeSessionGoal}
-          sourceControl={workbench.ide.sourceControl}
+          sourceControl={scopedIde.sourceControl}
           turnSourceControlBaselines={turnSourceControlBaselines}
           workspacePath={workspacePath}
+        />
+      ) : null}
+      {workspaceRename.draft ? (
+        <WorkspaceRenameDialog
+          name={workspaceRename.draft.name}
+          files={workspaceRename.draft.plan?.files}
+          busy={workspaceRename.draft.busy}
+          error={workspaceRename.draft.error}
+          onPreview={(name) => void workspaceRename.preview(name)}
+          onApply={() => void workspaceRename.apply()}
+          onCancel={workspaceRename.cancel}
+          renderDiff={(file) => (
+            <ManagedDiffEditor
+              height="100%"
+              original={file.before}
+              modified={file.after}
+              language={
+                resolveLanguage({ path: file.path }).syntax.type === "monaco"
+                  ? (
+                      resolveLanguage({ path: file.path }).syntax as {
+                        language: string;
+                      }
+                    ).language
+                  : "plaintext"
+              }
+              theme={resolvedTheme === "light" ? "gyro-light" : "gyro-dark"}
+              options={{
+                readOnly: true,
+                originalEditable: false,
+                minimap: { enabled: false },
+                automaticLayout: true,
+                renderSideBySide: false,
+              }}
+            />
+          )}
         />
       ) : null}
       {branchNameRequest ? (
@@ -17370,14 +19227,21 @@ export function App() {
           onFinish={finishBranchNameRequest}
         />
       ) : null}
-      {modelStandardPrompt ? (
+      {quitConfirmation.requested ? (
+        <QuitConfirmDialog onResolve={quitConfirmation.resolve} />
+      ) : null}
+      {modelStandardPrompt && canShowModelDefaultSuggestion ? (
         <ModelStandardPromptOverlay
           modelLabel={modelStandardPrompt.modelLabel}
           onAccept={acceptModelStandardPrompt}
-          onDismiss={dismissModelStandardPrompt}
+          onDismiss={() => dismissModelStandardPrompt()}
+          onNeverSuggest={() => dismissModelStandardPrompt(true)}
+          isSaving={isModelDefaultSaving}
+          error={modelDefaultSaveError}
           providerId={modelStandardPrompt.providerId}
           providerLabel={modelStandardPrompt.providerLabel}
-          selectionCount={modelStandardPrompt.count}
+          usageCount={modelStandardPrompt.usageCount}
+          chatCount={modelStandardPrompt.chatCount}
         />
       ) : null}
       {projectRemoveCandidate ? (
@@ -17457,2873 +19321,82 @@ export function App() {
       ) : null}
     </AppChrome>
   );
+  const workspacePathUndoValue = useMemo(
+    () => ({
+      offer: workspacePathUndo,
+      roots: workspaceRoots,
+      undo: () => {
+        void undoWorkspacePathChange();
+      },
+    }),
+    [undoWorkspacePathChange, workspacePathUndo, workspaceRoots],
+  );
   return (
-    <TerminalAttachmentActionsContext.Provider
-      value={terminalAttachmentActions}
-    >
-      <ComposerContextCandidates.Provider
-        value={[
-          ...visibleWorkspaceFiles
-            .filter((file) => file.kind === "file")
-            .map((file) => ({
-              path: file.path,
-              label: file.relativePath ?? file.path,
-              workspacePath: file.workspacePath,
-              kind: "file" as const,
-            })),
-          ...workbench.ide.tabs.map((tab) => ({
-            path: tab.path,
-            label: tab.path,
-            workspacePath: workspaceRootForPath(workspaceRoots, tab.path),
-            kind: "open-tab" as const,
-          })),
-        ]}
-      >
-        <AppearanceContext.Provider value={appearance}>{appChrome}</AppearanceContext.Provider>
-      </ComposerContextCandidates.Provider>
-    </TerminalAttachmentActionsContext.Provider>
+    <ChatRetryContext.Provider value={chatAutoRetry}>
+    <ProviderSignInContext.Provider value={providerSignInState}>
+      <WorkspacePathUndoContext.Provider value={workspacePathUndoValue}>
+      <ChatFileActionsContext.Provider value={chatFileActions}>
+      <ChatFileScopeContext.Provider value={{ sessionId: activeSessionId, workspacePath: activeSession?.workspacePath ?? workspacePath }}>
+        <TerminalAttachmentActionsContext.Provider
+          value={terminalAttachmentActions}
+        >
+          <ComposerContextCandidates.Provider
+            value={[
+              ...visibleWorkspaceFiles
+                .filter((file) => file.kind === "file")
+                .map((file) => ({
+                  path: file.path,
+                  label: file.relativePath ?? file.path,
+                  workspacePath: file.workspacePath,
+                  kind: "file" as const,
+                })),
+              ...workbench.ide.tabs.map((tab) => ({
+                path: tab.path,
+                label: tab.path,
+                workspacePath: workspaceRootForPath(workspaceRoots, tab.path),
+                kind: "open-tab" as const,
+              })),
+            ]}
+          >
+            <AppearanceContext.Provider value={appearance}>
+              <LocalCheckHost sessions={sessions} reminders={checkReminders.reminders} onDismissReminder={checkReminders.dismiss}>
+              {appChrome}
+              <FirstRunTour
+                destination={activeDestination}
+                onActiveChange={setIsFirstRunTourActive}
+                providerConfigured={workbench.providerStatuses.some(
+                  (provider) => provider.connectionStatus === "connected",
+                )}
+                onNavigate={(destination) =>
+                  dispatchWorkbench({ type: "select-destination", destination })
+                }
+                onOpenSettings={(section) => {
+                  dispatchWorkbench({
+                    type: "select-destination",
+                    destination: "settings",
+                  });
+                  dispatchWorkbench({ type: "set-settings-section", section });
+                }}
+              />
+              </LocalCheckHost>
+            </AppearanceContext.Provider>
+          </ComposerContextCandidates.Provider>
+        </TerminalAttachmentActionsContext.Provider>
+      </ChatFileScopeContext.Provider>
+      </ChatFileActionsContext.Provider>
+      </WorkspacePathUndoContext.Provider>
+    </ProviderSignInContext.Provider>
+    </ChatRetryContext.Provider>
   );
 }
+
 
 function loadInitialWorkbenchState(): WorkbenchState {
-  const base = createInitialWorkbenchState({
-    tasks: Object.values(loadChatTaskMetadata()),
-  });
-  const legacyTheme = storedThemeMode(
-    readBoundedLocalStorage(THEME_STORAGE_KEY, 16),
-  );
-  const stored = readBoundedLocalStorage(
-    WORKBENCH_STORAGE_KEY,
-    MAX_STORED_WORKBENCH_STATE_CHARS,
-  );
-  if (!stored) {
-    return {
-      ...base,
-      preferences: {
-        ...base.preferences,
-        theme: legacyTheme ?? base.preferences.theme,
-      },
-    };
-  }
-  try {
-    const parsed = JSON.parse(stored) as Partial<WorkbenchState>;
-    const legacyDestination = (parsed as { activeDestination?: unknown })
-      .activeDestination;
-    const storedLayout = normalizeStoredWorkspaceLayout(
-      (parsed as { activeWorkspaceLayout?: unknown }).activeWorkspaceLayout,
-      base.activeWorkspaceLayout,
-    );
-    const storedPaneTab = normalizeStoredPaneTab(
-      (parsed as { activePaneTab?: unknown }).activePaneTab,
-      base.activePaneTab,
-    );
-    let activeDestination = normalizeStoredDestination(
-      legacyDestination,
-      base.activeDestination,
-    );
-    let activeWorkspaceLayout = storedLayout;
-    let activePaneTab = storedPaneTab;
-    let isToolPanelOpen =
-      typeof parsed.isToolPanelOpen === "boolean"
-        ? parsed.isToolPanelOpen
-        : base.isToolPanelOpen;
-
-    if (legacyDestination === "chat") {
-      activeDestination = "workspace";
-      activeWorkspaceLayout = "thread";
-    } else if (legacyDestination === "cli") {
-      activeDestination = "workspace";
-      activeWorkspaceLayout = "terminal-grid";
-      activePaneTab = "terminal";
-      isToolPanelOpen = true;
-    } else if (legacyDestination === "ide") {
-      activeDestination = "workspace";
-      activeWorkspaceLayout = "code";
-    } else if (legacyDestination === "diff") {
-      activeDestination = "workspace";
-      activePaneTab = "diff";
-      isToolPanelOpen = true;
-    } else if (legacyDestination === "browser") {
-      activeDestination = "workspace";
-      activePaneTab = "browser";
-      isToolPanelOpen = true;
-    }
-    if (activeWorkspaceLayout === "thread") {
-      isToolPanelOpen = false;
-    }
-    const lastSessionsLayout = normalizeStoredSessionsLayout(
-      parsed.lastSessionsLayout,
-      activeWorkspaceLayout === "code"
-        ? base.lastSessionsLayout
-        : activeWorkspaceLayout,
-    );
-
-    const terminalPanes = sanitizeStoredTerminalPanes(parsed.terminalPanes);
-    const legacyTasks = sanitizeStoredTasks(parsed.tasks);
-    const metadata = loadChatTaskMetadata();
-    const tasks = [
-      ...Object.values(metadata),
-      ...legacyTasks.filter(
-        (task) => !task.sessionId || !metadata[task.sessionId],
-      ),
-    ];
-    const automations = sanitizeStoredAutomations(parsed.automations);
-    const diffReview = sanitizeStoredDiffReview(parsed.diffReview, base);
-    const browserPreview = sanitizeStoredBrowserPreview(
-      parsed.browserPreview,
-      base,
-    );
-    const hasSeededDemoState =
-      terminalPanes.length !== (parsed.terminalPanes?.length ?? 0) ||
-      tasks.length !== (parsed.tasks?.length ?? 0) ||
-      parsed.diffReview?.commitMessage ===
-        "Upgrade Gyro agent workbench UI surfaces";
-    const selectedTerminalPaneId = terminalPanes.some(
-      (pane) => pane.id === parsed.selectedTerminalPaneId,
-    )
-      ? parsed.selectedTerminalPaneId
-      : undefined;
-    const selectedTaskId = tasks.some(
-      (task) => task.id === parsed.selectedTaskId,
-    )
-      ? parsed.selectedTaskId
-      : undefined;
-    const selectedAutomationId = automations.some(
-      (automation) => automation.id === parsed.selectedAutomationId,
-    )
-      ? parsed.selectedAutomationId
-      : undefined;
-
-    return createInitialWorkbenchState({
-      ...parsed,
-      activeDestination,
-      activePaneTab,
-      activeWorkspaceLayout,
-      lastSessionsLayout,
-      automations,
-      browserPreview,
-      browserPreviewsBySession: undefined,
-      diffReview,
-      ide: sanitizeStoredIdeState(parsed.ide, base.ide),
-      isToolPanelOpen,
-      modelFocus: undefined,
-      modelFocusHistory: [],
-      notifications: Array.isArray(parsed.notifications)
-        ? parsed.notifications.filter(
-            (notification) =>
-              notification.id !== "note-approval" &&
-              notification.id !== "note-tests",
-          )
-        : base.notifications,
-      onboarding: {
-        ...base.onboarding,
-        ...parsed.onboarding,
-      },
-      preferences: {
-        ...base.preferences,
-        ...parsed.preferences,
-        activeChatPanel: undefined,
-        // A restart returns the chat to its resting state: no panel on the
-        // rail, and the Environment showing beneath where one was.
-        chatEnvironmentRailOpen: true,
-        theme:
-          legacyTheme ??
-          storedThemeMode(parsed.preferences?.theme) ??
-          base.preferences.theme,
-      },
-      providerStatuses: Array.isArray(parsed.providerStatuses)
-        ? hasSeededDemoState
-          ? parsed.providerStatuses
-              .map((provider) =>
-                provider.id === "openai" ||
-                provider.id === "anthropic" ||
-                provider.id === "kimi" ||
-                provider.id === "xai" ||
-                provider.id === "gemini"
-                  ? { ...provider, connectionStatus: "not-configured" as const }
-                  : provider,
-              )
-              .filter((provider) => isProviderId(provider.id))
-          : parsed.providerStatuses.filter((provider) =>
-              isProviderId(provider.id),
-            )
-        : base.providerStatuses,
-      providerReadiness: parsed.providerReadiness ?? base.providerReadiness,
-      selectedTaskId,
-      selectedAutomationId,
-      selectedTerminalPaneId,
-      tasks,
-      terminalPanes,
-    });
-  } catch {
-    return base;
-  }
-}
-
-function normalizeStoredDestination(
-  destination: unknown,
-  fallback: AppDestination,
-): AppDestination {
-  if (destination === "tasks") return "automations";
-  if (
-    destination === "workspace" ||
-    destination === "tools" ||
-    destination === "settings" ||
-    destination === "automations" ||
-    destination === "providers" ||
-    destination === "onboarding"
-  ) {
-    return destination;
-  }
-  return fallback;
-}
-
-function normalizeStoredWorkspaceLayout(
-  layout: unknown,
-  fallback: WorkspaceLayoutId,
-): WorkspaceLayoutId {
-  if (layout === "thread" || layout === "terminal-grid" || layout === "code") {
-    return layout;
-  }
-  return fallback;
-}
-
-function normalizeStoredSessionsLayout(
-  layout: unknown,
-  fallback: SessionsLayoutId,
-): SessionsLayoutId {
-  return layout === "thread" || layout === "terminal-grid" ? layout : fallback;
-}
-
-function normalizeStoredPaneTab(
-  tab: unknown,
-  fallback: WorkbenchPaneTab,
-): WorkbenchPaneTab {
-  if (tab === "terminal" || tab === "diff" || tab === "browser") {
-    return tab;
-  }
-  return fallback;
-}
-
-function sanitizeStoredTerminalPanes(
-  panes: Partial<WorkbenchState>["terminalPanes"],
-): WorkbenchState["terminalPanes"] {
-  if (!Array.isArray(panes)) {
-    return [];
-  }
-  const demoPaneIds = new Set([
-    "pane-shell",
-    "pane-codex",
-    "pane-claude",
-    "pane-checks",
-  ]);
-  return panes.filter((pane) => !demoPaneIds.has(pane.id));
-}
-
-function loadChatTaskMetadata(): Record<string, Task> {
-  try {
-    const value: unknown = JSON.parse(
-      readBoundedLocalStorage(CHAT_TASK_METADATA_KEY, 2_000_000) ?? "{}",
-    );
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    return Object.fromEntries(
-      Object.entries(value).filter(
-        ([id, task]) =>
-          task &&
-          typeof task === "object" &&
-          task.sessionId === id &&
-          task.id === id &&
-          typeof task.title === "string" &&
-          typeof task.prompt === "string",
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function sanitizeStoredTasks(
-  tasks: Partial<WorkbenchState>["tasks"],
-): WorkbenchState["tasks"] {
-  if (!Array.isArray(tasks)) {
-    return [];
-  }
-  const demoTaskIds = new Set([
-    "task-onboarding",
-    "task-providers",
-    "task-terminal-workbench",
-    "task-diff-review",
-    "task-browser-preview",
-  ]);
-  return tasks.filter((task) => !demoTaskIds.has(task.id));
-}
-
-function sanitizeStoredAutomations(
-  automations: Partial<WorkbenchState>["automations"],
-): WorkbenchState["automations"] {
-  if (!Array.isArray(automations)) {
-    return [];
-  }
-  return automations;
-}
-
-function sanitizeStoredDiffReview(
-  diffReview: Partial<WorkbenchState>["diffReview"],
-  base: WorkbenchState,
-): WorkbenchState["diffReview"] {
-  if (!diffReview) {
-    return base.diffReview;
-  }
-  if (diffReview.commitMessage === "Upgrade Gyro agent workbench UI surfaces") {
-    return base.diffReview;
-  }
-  return {
-    ...base.diffReview,
-    ...diffReview,
-    files: (diffReview.files ?? []).map((file) =>
-      file.countsKnown === undefined
-        ? { ...file, additions: 0, deletions: 0, countsKnown: false, lines: [] }
-        : file,
-    ),
-    collapsedDirectories: Array.isArray(diffReview.collapsedDirectories)
-      ? diffReview.collapsedDirectories
-      : base.diffReview.collapsedDirectories,
-    gitActions: Array.isArray(diffReview.gitActions)
-      ? // A git action that was in flight when the app closed has no process to
-        // resume; restore it as runnable rather than spinning forever.
-        diffReview.gitActions.map((action) =>
-          action.status === "running"
-            ? { ...action, status: "ready" as const }
-            : action,
-        )
-      : base.diffReview.gitActions,
-  };
-}
-
-function sanitizeStoredBrowserPreview(
-  browserPreview: Partial<WorkbenchState>["browserPreview"],
-  base: WorkbenchState,
-): WorkbenchState["browserPreview"] {
-  if (!browserPreview) {
-    return base.browserPreview;
-  }
-  if (
-    browserPreview.verificationMessage === "Agent verification passed" ||
-    browserPreview.url?.includes("localhost:1420") ||
-    browserPreview.url?.includes("127.0.0.1:1420")
-  ) {
-    return base.browserPreview;
-  }
-  const diagnostics = Array.isArray(browserPreview.diagnostics)
-    ? browserPreview.diagnostics
-        .filter((diagnostic): diagnostic is BrowserPreviewDiagnostic =>
-          Boolean(
-            diagnostic &&
-            ["console-error", "page-error", "unhandled-rejection"].includes(
-              diagnostic.kind,
-            ) &&
-            typeof diagnostic.message === "string",
-          ),
-        )
-        .slice(0, 8)
-        .map((diagnostic) => ({
-          ...diagnostic,
-          message: truncatePersistedText(diagnostic.message, 400),
-          source:
-            typeof diagnostic.source === "string"
-              ? truncatePersistedText(diagnostic.source, 400)
-              : undefined,
-          line:
-            typeof diagnostic.line === "number" &&
-            Number.isFinite(diagnostic.line)
-              ? diagnostic.line
-              : undefined,
-          column:
-            typeof diagnostic.column === "number" &&
-            Number.isFinite(diagnostic.column)
-              ? diagnostic.column
-              : undefined,
-        }))
-    : [];
-  return {
-    ...base.browserPreview,
-    ...browserPreview,
-    consoleErrors: diagnostics.length,
-    diagnostics,
-    diagnosticsSupported: browserPreview.diagnosticsSupported === true,
-    diagnosticsCaptured: browserPreview.diagnosticsCaptured === true,
-    captureStatus: "idle",
-    captureError: undefined,
-    latestCapture: undefined,
-  };
-}
-
-function withCouncilConfig(config: GyroConfig): GyroConfig {
-  const base = normalizedConfig(config);
-  return {
-    ...base,
-    council: normalizedCouncilConfig(base.council ?? config.council),
-  };
-}
-
-function loadPreviewConfig(): GyroConfig {
-  const stored = readBoundedLocalStorage(
-    PREVIEW_CONFIG_STORAGE_KEY,
-    MAX_STORED_PREVIEW_CONFIG_CHARS,
-  );
-  if (!stored) {
-    return withCouncilConfig(EMPTY_CONFIG);
-  }
-  try {
-    return withCouncilConfig({
-      ...EMPTY_CONFIG,
-      ...(JSON.parse(stored) as Partial<GyroConfig>),
-    });
-  } catch {
-    return withCouncilConfig(EMPTY_CONFIG);
-  }
-}
-
-function loadPinnedSessionIds(): string[] {
-  const stored = readBoundedLocalStorage(
-    PINNED_SESSIONS_STORAGE_KEY,
-    MAX_STORED_PREVIEW_CONFIG_CHARS,
-  );
-  if (!stored) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(stored);
-    return Array.isArray(parsed)
-      ? parsed
-          .filter((id): id is string => typeof id === "string")
-          .slice(0, MAX_PINNED_SESSIONS)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function loadChatDrafts(): Record<string, string> {
-  const stored = readBoundedLocalStorage(CHAT_DRAFTS_STORAGE_KEY, 256_000);
-  if (!stored) return {};
-  try {
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return {};
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, string] =>
-          typeof entry[0] === "string" &&
-          typeof entry[1] === "string" &&
-          entry[1].length <= MAX_CHAT_MESSAGE_CHARS,
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function loadChatDraftModes(): Record<string, ChatMode> {
-  const stored = readBoundedLocalStorage(CHAT_DRAFT_MODES_STORAGE_KEY, 64_000);
-  if (!stored) return {};
-  try {
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, ChatMode] =>
-          typeof entry[0] === "string" &&
-          (entry[1] === "plan" || entry[1] === "council"),
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function loadChatAttachments(): Record<string, ChatAttachment[]> {
-  const stored = readBoundedLocalStorage(CHAT_ATTACHMENTS_STORAGE_KEY, 512_000);
-  if (!stored) return {};
-  try {
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return {};
-    return Object.fromEntries(
-      Object.entries(parsed).map(([key, value]) => [
-        key,
-        Array.isArray(value)
-          ? value
-              .filter(
-                (item): item is ChatAttachment =>
-                  Boolean(item) &&
-                  typeof item === "object" &&
-                  typeof (item as ChatAttachment).id === "string" &&
-                  typeof (item as ChatAttachment).path === "string",
-              )
-              .slice(0, 12)
-          : [],
-      ]),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function loadChatGridState(): ChatGridState {
-  const stored = readBoundedLocalStorage(CHAT_GRID_STORAGE_KEY, 512_000);
-  if (!stored) return createInitialChatGridState();
-  try {
-    return sanitizeStoredChatGridState(JSON.parse(stored));
-  } catch {
-    return createInitialChatGridState();
-  }
-}
-
-// IPC header values must be ASCII; file names and paths may not be.
-function base64Utf8(value: string) {
-  let binary = "";
-  for (const byte of new TextEncoder().encode(value)) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
-}
-
-function loadRemovedProjectPaths(): string[] {
-  const stored = readBoundedLocalStorage(
-    REMOVED_PROJECTS_STORAGE_KEY,
-    MAX_STORED_PREVIEW_CONFIG_CHARS,
-  );
-  if (!stored) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(stored);
-    return Array.isArray(parsed)
-      ? parsed
-          .filter((path): path is string => typeof path === "string")
-          .map(normalizeProjectPath)
-          .filter(Boolean)
-          .slice(0, MAX_REMOVED_PROJECTS)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function loadRecentProjectPaths(): string[] {
-  const stored = readBoundedLocalStorage(
-    RECENT_PROJECTS_STORAGE_KEY,
-    MAX_STORED_PREVIEW_CONFIG_CHARS,
-  );
-  if (!stored) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(stored);
-    return Array.isArray(parsed)
-      ? [
-          ...new Set(
-            parsed
-              .filter((path): path is string => typeof path === "string")
-              .map(normalizeProjectPath)
-              .filter(Boolean),
-          ),
-        ].slice(0, MAX_RECENT_PROJECTS)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function chatPaneForSession(session: Session): ChatPaneRef {
-  return {
-    paneId: `session:${session.id}`,
-    kind: "session",
-    sessionId: session.id,
-    workspacePath: session.workspacePath,
-  };
-}
-
-function readBoundedLocalStorage(key: string, maxChars: number) {
-  try {
-    const stored = window.localStorage.getItem(key);
-    if (!stored || stored.length > maxChars) {
-      return undefined;
-    }
-    return stored;
-  } catch {
-    return undefined;
-  }
-}
-
-function safeSetLocalStorage(key: string, value: string) {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // Local storage can be unavailable or quota-limited in preview contexts.
-  }
-}
-
-function flushPersistedWorkbenchState(ref: { current?: WorkbenchState }) {
-  const pending = ref.current;
-  if (!pending) {
-    return;
-  }
-  ref.current = undefined;
-  safeSetLocalStorage(WORKBENCH_STORAGE_KEY, JSON.stringify(pending));
-}
-
-function schedulePersistedWorkbenchStateFlush(
-  pendingRef: { current?: WorkbenchState },
-  idleRef: { current?: number },
-) {
-  if (idleRef.current !== undefined) {
-    return;
-  }
-  const idleWindow = window as Window & {
-    cancelIdleCallback?: (handle: number) => void;
-    requestIdleCallback?: (
-      callback: () => void,
-      options?: { timeout?: number },
-    ) => number;
-  };
-  if (idleWindow.requestIdleCallback) {
-    idleRef.current = idleWindow.requestIdleCallback(
-      () => {
-        idleRef.current = undefined;
-        flushPersistedWorkbenchState(pendingRef);
-      },
-      { timeout: WORKBENCH_PERSIST_IDLE_TIMEOUT_MS },
-    );
-    return;
-  }
-  idleRef.current = window.setTimeout(() => {
-    idleRef.current = undefined;
-    flushPersistedWorkbenchState(pendingRef);
-  }, 0);
-}
-
-function cancelPersistedWorkbenchStateFlush(ref: { current?: number }) {
-  if (ref.current === undefined) {
-    return;
-  }
-  const idleWindow = window as Window & {
-    cancelIdleCallback?: (handle: number) => void;
-  };
-  if (idleWindow.cancelIdleCallback) {
-    idleWindow.cancelIdleCallback(ref.current);
-  }
-  window.clearTimeout(ref.current);
-  ref.current = undefined;
-}
-
-function persistableWorkbenchState(workbench: WorkbenchState): WorkbenchState {
-  return {
-    ...workbench,
-    activeTurn: undefined,
-    browserPreviewsBySession: undefined,
-    terminalPanes: workbench.terminalPanes
-      .filter((pane) => pane.owner?.kind !== "model")
-      .map((pane) => ({
-        ...pane,
-        attention: undefined,
-        output: truncatePersistedText(
-          pane.output,
-          MAX_PERSISTED_TERMINAL_OUTPUT_CHARS,
-        ),
-      })),
-    providerReadiness: {
-      status: "idle",
-      message: "",
-    },
-    providerStatuses: workbench.providerStatuses.map((provider) => ({
-      ...provider,
-      healthOutput: undefined,
-    })),
-    ide: {
-      ...workbench.ide,
-      buffers: persistableDirtyEditorBuffers(workbench.ide.buffers),
-      selection: undefined,
-      outputChannels: workbench.ide.outputChannels.map(
-        persistableOutputChannel,
-      ),
-    },
-  };
-}
-
-function persistableDirtyEditorBuffers(
-  buffers: WorkbenchState["ide"]["buffers"],
-) {
-  const persisted: WorkbenchState["ide"]["buffers"] = {};
-  let remainingChars = MAX_PERSISTED_DIRTY_BUFFERS_TOTAL_CHARS;
-  for (const buffer of Object.values(buffers)) {
-    if (buffer.status !== "dirty") continue;
-    const chars = buffer.content.length + buffer.savedContent.length;
-    if (chars > MAX_PERSISTED_DIRTY_BUFFER_CHARS || chars > remainingChars) {
-      continue;
-    }
-    persisted[buffer.path] = buffer;
-    remainingChars -= chars;
-  }
-  return persisted;
-}
-
-function persistableOutputChannel(channel: OutputChannel): OutputChannel {
-  return {
-    ...channel,
-    lines: channel.lines.slice(-MAX_PERSISTED_OUTPUT_CHANNEL_LINES),
-  };
-}
-
-function truncatePersistedText(value: string, maxChars: number) {
-  if (value.length <= maxChars) {
-    return value;
-  }
-  return `...${value.slice(-maxChars)}`;
-}
-
-function normalizeChatMessage(value: string) {
-  return value.replace(/\u0000/g, "").trim();
-}
-
-function normalizeSessionTitleInput(value: string) {
-  const normalized = value
-    .replace(/\u0000/g, "")
-    .replace(/[`*_#[\](){}<>|\\]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^[\s:;,.!?'"-]+|[\s:;,.!?'"-]+$/g, "");
-  if (!normalized) {
-    return undefined;
-  }
-  const chars = Array.from(normalized);
-  return chars.length > 80 ? `${chars.slice(0, 77).join("")}...` : normalized;
-}
-
-function sessionTitleFromMessage(message: string) {
-  const cleaned = normalizeChatMessage(message)
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/^\/\w+\s+/, "")
-    .split(/[.!?\n]/)[0]
-    ?.replace(
-      /^(please\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+to\s+|i\s+need\s+to\s+|help\s+me\s+|let'?s\s+)/i,
-      "",
-    )
-    .trim();
-  const words = (cleaned ?? "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 6)
-    .map((word) => {
-      if (/^[A-Z0-9]{2,}$/.test(word)) {
-        return word;
-      }
-      return word.charAt(0).toUpperCase() + word.slice(1);
-    });
-  return normalizeSessionTitleInput(words.join(" ")) ?? "New chat";
-}
-
-function shouldSuggestSessionTitle(
-  session: Session | undefined,
-  hasTranscriptEvents: boolean,
-) {
-  if (!session) {
-    return true;
-  }
-  if (!isGenericSessionTitle(session.title)) {
-    return false;
-  }
-  return !hasTranscriptEvents;
-}
-
-function isGenericSessionTitle(title: string) {
-  return [
-    "Desktop session",
-    "New chat",
-    "Worktree session",
-    "Agent workspace",
-    "CLI workspace",
-    "Worktree CLI workspace",
-    "Agent workspace CLI",
-  ].includes(title.trim());
-}
-
-function chatMessageLength(value: string) {
-  return Array.from(value).length;
-}
-
-function chatMessagePreview(value: string) {
-  const normalized = normalizeChatMessage(value).replace(/\s+/g, " ");
-  const chars = Array.from(normalized);
-  if (chars.length <= 160) {
-    return normalized;
-  }
-  return `${chars.slice(0, 160).join("")}...`;
-}
-
-function languageServerDescriptorForPath(path: string, override?: string) {
-  if (path.startsWith("gyro-diff:")) return undefined;
-  const language = resolveLanguage({ path, override });
-  return language.lsp
-    ? {
-        languageId: language.lsp.languageId ?? language.id,
-        command: language.lsp.command,
-      }
-    : undefined;
-}
-
-function workspaceFileUri(workspacePath: string, relativePath: string) {
-  const fullPath = absoluteWorkspaceFilePath(workspacePath, relativePath)
-    .replaceAll("\\", "/")
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `file://${fullPath}`;
-}
-
-function diagnosticsFromLspMessages(
-  messages: unknown[] | undefined,
-  workspacePath: string,
-): ProblemDiagnostic[] | undefined {
-  if (!messages) {
-    return undefined;
-  }
-  let sawDiagnostics = false;
-  const diagnostics: ProblemDiagnostic[] = [];
-  for (const message of messages) {
-    if (
-      !isRecord(message) ||
-      message.method !== "textDocument/publishDiagnostics"
-    ) {
-      continue;
-    }
-    const params = isRecord(message.params) ? message.params : undefined;
-    if (!params || typeof params.uri !== "string") {
-      continue;
-    }
-    sawDiagnostics = true;
-    const path = lspRelativePath(params.uri, workspacePath);
-    const values = Array.isArray(params.diagnostics) ? params.diagnostics : [];
-    values.forEach((value, index) => {
-      if (!isRecord(value) || typeof value.message !== "string") {
-        return;
-      }
-      const range = isRecord(value.range) ? value.range : undefined;
-      const start = range && isRecord(range.start) ? range.start : undefined;
-      const end = range && isRecord(range.end) ? range.end : undefined;
-      const severityValue =
-        typeof value.severity === "number" ? value.severity : 3;
-      const severity: ProblemDiagnostic["severity"] =
-        severityValue === 1
-          ? "error"
-          : severityValue === 2
-            ? "warning"
-            : severityValue === 4
-              ? "hint"
-              : "info";
-      diagnostics.push({
-        id: `${path}:${numberField(start, "line")}:${index}:${value.message}`,
-        path,
-        message: value.message,
-        severity,
-        source: typeof value.source === "string" ? value.source : undefined,
-        startLineNumber: numberField(start, "line") + 1,
-        startColumn: numberField(start, "character") + 1,
-        endLineNumber: numberField(end, "line") + 1,
-        endColumn: numberField(end, "character") + 1,
-      });
-    });
-  }
-  return sawDiagnostics ? diagnostics : undefined;
-}
-
-function lspRelativePath(uri: string, workspacePath: string) {
-  try {
-    const absolutePath = decodeURIComponent(uri.replace(/^file:\/\//, ""));
-    return absoluteWorkspaceFilePath(workspacePath, absolutePath);
-  } catch {
-    return uri;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function numberField(value: Record<string, unknown> | undefined, key: string) {
-  return typeof value?.[key] === "number" ? value[key] : 0;
-}
-
-function getCommandProfile(
-  profiles: CommandProfile[],
-  preferredId?: string,
-): CommandProfile {
-  const [fallback] = defaultCommandProfiles();
-  if (!fallback) {
-    throw new Error("Gyro requires at least one command profile");
-  }
-  return (
-    profiles.find((profile) => profile.id === preferredId) ??
-    profiles[0] ??
-    fallback
-  );
-}
-
-/**
- * Whether a pane profile can run under Gyro's approval policy.
- *
- * Mirrors `governable_pane_provider` in the Tauri backend, which is the
- * authority — this only avoids asking for governance the backend will refuse.
- * Governance needs an interactive permission hook, which today means Claude
- * Code; Codex approves through the app-server path a raw PTY cannot speak.
- */
-function profileSupportsGovernance(profile: CommandProfile) {
-  const command = profile.command.trim().split("/").pop() ?? "";
-  return (
-    profile.id === "claude" ||
-    profile.id === "claude-code" ||
-    command === "claude"
-  );
-}
-
-function terminalProcessForProfile(
-  profile: CommandProfile,
-  commandOverride?: string,
-) {
-  if (commandOverride) {
-    return {
-      args: ["-lc", commandOverride],
-      command: "zsh",
-      displayCommand: commandOverride,
-    };
-  }
-  return {
-    args: profile.args,
-    command: profile.command,
-    displayCommand: [profile.command, ...profile.args]
-      .filter(Boolean)
-      .join(" "),
-  };
-}
-
-/** Preserve discovered task arguments when a task is launched through zsh. */
-function terminalCommandLine(task: TaskDefinition) {
-  return [task.command, ...task.args]
-    .map((part) => `'${part.replace(/'/g, "'\\''")}'`)
-    .join(" ");
-}
-
-function workspaceTaskTerminalPaneId(taskId: string) {
-  return `workspace-task-${encodeURIComponent(taskId)}`;
-}
-
-function terminalStatusFromSnapshot(
-  status: TerminalPaneSnapshot["status"],
-): TerminalPaneStatus {
-  if (status === "done") {
-    return "done";
-  }
-  if (status === "failed") {
-    return "failed";
-  }
-  return "running";
-}
-
-function terminalPaneFromSnapshot(
-  snapshot: TerminalPaneSnapshot,
-  mode: WorkbenchState["workspaceMode"],
-) {
-  const profile = {
-    id: snapshot.profileId ?? inferredTerminalProfileId(snapshot),
-    displayName: snapshot.title,
-    command: snapshot.command.split(" ")[0] ?? "sh",
-    args: [],
-    workingDirectory: "Workspace",
-  };
-  return {
-    ...createTerminalPane(
-      snapshot.paneId,
-      profile,
-      terminalStatusFromSnapshot(snapshot.status),
-      workspaceRunMetadata(mode, snapshot.title, snapshot.workingDirectory),
-    ),
-    projectPath: snapshot.workspacePath,
-    command: snapshot.command,
-    lastEvent:
-      snapshot.exitCode === null || snapshot.exitCode === undefined
-        ? snapshot.status
-        : `${snapshot.status} (${snapshot.exitCode})`,
-    output: snapshot.output ?? "",
-    hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
-  };
-}
-
-function terminalSnapshotFromCapabilityData(
-  value: unknown,
-): TerminalPaneSnapshot | undefined {
-  const data = recordFromUnknown(value);
-  const pane = recordFromUnknown(data?.pane);
-  const paneId = stringFromRecord(pane, "paneId");
-  const title = stringFromRecord(pane, "title");
-  const command = stringFromRecord(pane, "command");
-  const status = stringFromRecord(pane, "status");
-  const outputRevision = pane?.outputRevision;
-  if (
-    !paneId ||
-    !title ||
-    !command ||
-    !["running", "done", "failed"].includes(status ?? "") ||
-    typeof outputRevision !== "number"
-  ) {
-    return undefined;
-  }
-  return {
-    paneId,
-    title,
-    profileId: stringFromRecord(pane, "profileId"),
-    command,
-    output: stringFromRecord(pane, "output"),
-    outputRevision,
-    status: status as TerminalPaneSnapshot["status"],
-    hasForegroundJob:
-      typeof pane?.hasForegroundJob === "boolean"
-        ? pane.hasForegroundJob
-        : undefined,
-    exitCode: typeof pane?.exitCode === "number" ? pane.exitCode : undefined,
-    workspacePath: stringFromRecord(pane, "workspacePath"),
-    workingDirectory: stringFromRecord(pane, "workingDirectory"),
-    cols: typeof pane?.cols === "number" ? pane.cols : 120,
-    rows: typeof pane?.rows === "number" ? pane.rows : 32,
-  };
-}
-
-/**
- * Project a capability call onto the Workspace AI view's tool-call row.
- *
- * The capability status vocabulary is wider than the view's, so waiting and
- * requested both read as queued, and every terminal-but-unsuccessful status
- * reads as failed.
- */
-function ideAiToolCallFromActivity(
-  activity: CapabilityActivity,
-): IdeAiToolCall {
-  const status: IdeAiToolCall["status"] =
-    activity.status === "completed"
-      ? "done"
-      : activity.status === "running"
-        ? "running"
-        : activity.status === "denied"
-          ? "blocked"
-          : activity.status === "requested" || activity.status === "waiting"
-            ? "queued"
-            : "failed";
-  return {
-    id: activity.callId,
-    name: activity.capabilityId,
-    status,
-    summary: activity.summary,
-    createdAt: activity.createdAt,
-    finishedAt:
-      status === "done" || status === "failed" || status === "blocked"
-        ? activity.createdAt
-        : undefined,
-  };
-}
-
-function capabilityActivityFromSessionEvent(
-  event: SessionEvent,
-): CapabilityActivity | undefined {
-  const payload = recordFromUnknown(event.payload);
-  if (
-    stringFromRecord(payload, "schema") !== "gyro.capability.v1" ||
-    stringFromRecord(payload, "kind") !== "capability-call"
-  ) {
-    return undefined;
-  }
-  const callId = stringFromRecord(payload, "callId");
-  const capabilityId = stringFromRecord(payload, "capabilityId");
-  const status = stringFromRecord(payload, "status");
-  const providerId = stringFromRecord(payload, "providerId");
-  const summary = stringFromRecord(payload, "summary");
-  const policyRevision = payload?.policyRevision;
-  if (
-    !callId ||
-    !capabilityId ||
-    !status ||
-    !providerId ||
-    !summary ||
-    typeof policyRevision !== "number"
-  ) {
-    return undefined;
-  }
-  const resourceRecord = recordFromUnknown(payload?.resource);
-  const resourceId = stringFromRecord(resourceRecord, "id");
-  const resourceKind = stringFromRecord(resourceRecord, "kind");
-  const resourceLabel = stringFromRecord(resourceRecord, "label");
-  const resource =
-    resourceId &&
-    resourceLabel &&
-    ["workspace", "ide", "terminal", "browser"].includes(resourceKind ?? "")
-      ? {
-          id: resourceId,
-          kind: resourceKind as CapabilityResourceRef["kind"],
-          label: resourceLabel,
-        }
-      : undefined;
-  return {
-    schema: "gyro.capability.v1",
-    kind: "capability-call",
-    callId,
-    capabilityId: capabilityId as CapabilityCallEvent["capabilityId"],
-    status: status as CapabilityCallEvent["status"],
-    providerId,
-    policyRevision,
-    summary,
-    resource,
-    target: stringFromRecord(payload, "target"),
-    sessionId: event.sessionId,
-    turnId: event.turnId,
-    createdAt: event.createdAt,
-  };
-}
-
-function markInactiveCapabilityResources(
-  events: SessionEvent[],
-  liveResourceIds: ReadonlySet<string>,
-) {
-  return events.map((event) => {
-    const payload = recordFromUnknown(event.payload);
-    if (
-      stringFromRecord(payload, "schema") !== "gyro.capability.v1" ||
-      stringFromRecord(payload, "kind") !== "capability-call" ||
-      stringFromRecord(payload, "status") !== "completed"
-    ) {
-      return event;
-    }
-    const resource = recordFromUnknown(payload?.resource);
-    const resourceId = stringFromRecord(resource, "id");
-    const resourceKind = stringFromRecord(resource, "kind");
-    if (
-      !resourceId ||
-      !["terminal", "browser"].includes(resourceKind ?? "") ||
-      liveResourceIds.has(resourceId)
-    ) {
-      return event;
-    }
-    return {
-      ...event,
-      payload: {
-        ...payload,
-        status: "inactive",
-        summary: `${stringFromRecord(payload, "summary") ?? event.message} · inactive after restart`,
-      },
-    };
-  });
-}
-
-function capabilityApprovalFromSessionEvent(
-  event: SessionEvent,
-): CapabilityApprovalEvent | undefined {
-  const payload = recordFromUnknown(event.payload);
-  if (
-    event.kind !== "approval-requested" ||
-    stringFromRecord(payload, "schema") !== "gyro.capability.v1" ||
-    stringFromRecord(payload, "kind") !== "capability-approval"
-  ) {
-    return undefined;
-  }
-  const approvalId = stringFromRecord(payload, "approvalId");
-  const callId = stringFromRecord(payload, "callId");
-  const capabilityId = stringFromRecord(payload, "capabilityId");
-  const capabilityClass = stringFromRecord(payload, "capabilityClass");
-  const providerId = stringFromRecord(payload, "providerId");
-  const scopeKind = stringFromRecord(payload, "scopeKind");
-  const scopeValue = stringFromRecord(payload, "scopeValue");
-  if (
-    !approvalId ||
-    !callId ||
-    !capabilityId ||
-    !capabilityClass ||
-    !providerId ||
-    !scopeKind ||
-    !scopeValue
-  ) {
-    return undefined;
-  }
-  return {
-    schema: "gyro.capability.v1",
-    kind: "capability-approval",
-    approvalId,
-    callId,
-    capabilityId: capabilityId as CapabilityApprovalEvent["capabilityId"],
-    capabilityClass:
-      capabilityClass as CapabilityApprovalEvent["capabilityClass"],
-    providerId,
-    status: "waiting",
-    scopeKind,
-    scopeValue,
-    choices:
-      capabilityId === "workspace-read-editor"
-        ? ["deny", "allow-once"]
-        : ["deny", "allow-once", "allow-project"],
-  };
-}
-
-function inferredTerminalProfileId(snapshot: TerminalPaneSnapshot): string {
-  const command = snapshot.command.trim().split(/\s+/, 1)[0] ?? "";
-  const executable = command.split("/").pop()?.toLowerCase();
-  if (
-    snapshot.title.trim().toLowerCase() === "shell" &&
-    executable &&
-    ["sh", "bash", "zsh", "fish"].includes(executable)
-  ) {
-    return "shell";
-  }
-  return `restored-${snapshot.paneId}`;
-}
-
-function isPlainShellTerminal(pane: TerminalPane): boolean {
-  if (pane.profileId === "shell") {
-    return true;
-  }
-  const command = pane.command.trim().split(/\s+/, 1)[0] ?? "";
-  const executable = command.split("/").pop()?.toLowerCase();
-  return (
-    pane.title.trim().toLowerCase() === "shell" &&
-    executable !== undefined &&
-    ["sh", "bash", "zsh", "fish"].includes(executable)
-  );
-}
-
-function terminalPaneProcessIsMissing(error: unknown): boolean {
-  return String(error).toLowerCase().includes("terminal pane not found");
-}
-
-function terminalSizeForTemplate(template: TerminalTemplate) {
-  if (template <= 1) {
-    return { cols: 132, rows: 36 };
-  }
-  if (template <= 4) {
-    return { cols: 110, rows: 30 };
-  }
-  if (template <= 8) {
-    return { cols: 92, rows: 24 };
-  }
-  return { cols: 80, rows: 20 };
-}
-
-function pathFromSessionEvent(
-  event: SessionEvent,
-  workspacePath?: string,
-): string {
-  const payload = recordFromUnknown(event.payload);
-  const directPath = stringFromRecord(payload, "path");
-  const dataPath = stringFromRecord(recordFromUnknown(payload?.data), "path");
-  const rawPath = (() => {
-    if (directPath || dataPath) {
-      return directPath ?? dataPath ?? "packages/ui/src/surfaces.tsx";
-    }
-    const explicitPath = event.message.match(/(?:file|path):\s*([^\s]+)/i)?.[1];
-    if (explicitPath) {
-      return explicitPath;
-    }
-    return (
-      event.message.match(/[\w./-]+\.(?:css|json|md|rs|ts|tsx)/)?.[0] ??
-      "packages/ui/src/surfaces.tsx"
-    );
-  })();
-  return workspaceRelativeFilePath(rawPath, workspacePath);
-}
-
-function deriveActiveTurn(
-  events: SessionEvent[],
-  sessionTitle = "Desktop session",
-  workspacePath?: string,
-): WorkbenchTurn | undefined {
-  let latestUserEvent: SessionEvent | undefined;
-  let latestUserIndex = -1;
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event?.kind === "user-message") {
-      latestUserEvent = event;
-      latestUserIndex = index;
-      break;
-    }
-  }
-  if (!latestUserEvent) {
-    return undefined;
-  }
-
-  const turnId = turnIdFromSessionEvent(latestUserEvent) ?? latestUserEvent.id;
-  const changedFiles = new Set<string>();
-  let genericApprovalsPending = 0;
-  const mutationApprovalStatuses = new Map<string, string>();
-  let lastEvent = latestUserEvent;
-  let hasCommandRequest = false;
-  let hasCommandOutput = false;
-  let hasStreamingAssistant = false;
-  let hasProviderActivity = false;
-  let providerStatus: string | undefined;
-  /** Heartbeats refresh the status event's createdAt; that is the live clock. */
-  let providerStatusCreatedAt: string | undefined;
-
-  for (
-    let index = Math.max(0, latestUserIndex);
-    index < events.length;
-    index += 1
-  ) {
-    const event = events[index];
-    if (!event) {
-      continue;
-    }
-    const eventTurnId = turnIdFromSessionEvent(event);
-    const isTurnEvent =
-      (eventTurnId ?? event.id) === turnId ||
-      (event.kind !== "user-message" &&
-        !eventTurnId &&
-        event.createdAt >= latestUserEvent.createdAt);
-    if (!isTurnEvent) {
-      continue;
-    }
-    lastEvent = event;
-    if (event.kind === "file-edit-proposed") {
-      changedFiles.add(pathFromSessionEvent(event, workspacePath));
-    } else if (event.kind === "approval-requested") {
-      const payload = recordFromUnknown(event.payload);
-      const proposalId = stringFromRecord(payload, "proposalId");
-      if (
-        proposalId &&
-        stringFromRecord(payload, "kind") === "mutation-approval"
-      ) {
-        mutationApprovalStatuses.set(
-          proposalId,
-          stringFromRecord(payload, "status") ?? "pending",
-        );
-      } else {
-        genericApprovalsPending += 1;
-      }
-    } else if (event.kind === "system-event") {
-      const payload = recordFromUnknown(event.payload);
-      const payloadKind = stringFromRecord(payload, "kind");
-      const proposalId = stringFromRecord(payload, "proposalId");
-      const status = stringFromRecord(payload, "status");
-      if (proposalId && status && payloadKind === "mutation-approval") {
-        mutationApprovalStatuses.set(proposalId, status);
-      }
-      // Backend status is the source of truth for whether the turn is still
-      // open. Heuristics below only fill gaps when no status event exists yet.
-      if (payloadKind === "provider-status" && status) {
-        providerStatus = status;
-        providerStatusCreatedAt = event.createdAt;
-      }
-      if (payloadKind === "provider-activity") {
-        hasProviderActivity = true;
-      }
-    } else if (event.kind === "command-requested") {
-      hasCommandRequest = true;
-    } else if (event.kind === "command-output") {
-      hasCommandOutput = true;
-    } else if (isStreamingAssistantSessionEvent(event)) {
-      hasStreamingAssistant = true;
-    }
-  }
-
-  const approvalsPending =
-    genericApprovalsPending +
-    Array.from(mutationApprovalStatuses.values()).filter(
-      (status) => status === "pending",
-    ).length;
-
-  // Prefer the durable/streamed provider status so a mid-turn assistant bubble
-  // never settles the workbench turn to "done" while the backend is still live.
-  const status =
-    approvalsPending > 0
-      ? "waiting"
-      : providerStatus === "running" ||
-          providerStatus === "queued" ||
-          providerStatus === "waiting"
-        ? providerStatus
-        : providerStatus === "done" ||
-            providerStatus === "failed" ||
-            providerStatus === "cancelled" ||
-            providerStatus === "blocked"
-          ? providerStatus === "cancelled" || providerStatus === "blocked"
-            ? "failed"
-            : providerStatus
-          : hasStreamingAssistant || hasProviderActivity
-            ? "running"
-            : hasCommandOutput ||
-                (!hasCommandRequest && lastEvent.kind === "assistant-message")
-              ? "done"
-              : hasCommandRequest
-                ? "running"
-                : "queued";
-
-  // While the provider is still open, use the later of the last timeline beat
-  // and the status event (which heartbeats touch). Otherwise quiet tool stretches
-  // after early activity leave a stale updatedAt and the idle watchdog fires.
-  const isLiveProviderStatus =
-    status === "running" || status === "queued" || status === "waiting";
-  const updatedAt =
-    isLiveProviderStatus && providerStatusCreatedAt
-      ? laterIsoTimestamp(lastEvent.createdAt, providerStatusCreatedAt)
-      : lastEvent.createdAt;
-
-  return {
-    id: turnId,
-    sessionId: latestUserEvent.sessionId,
-    sessionTitle,
-    status,
-    startedAt: latestUserEvent.createdAt,
-    updatedAt,
-    lastEvent:
-      lastEvent.kind === "assistant-message"
-        ? "Assistant response received"
-        : lastEvent.message,
-    changedFiles: changedFiles.size,
-    approvalsPending,
-  };
-}
-
-function isStreamingAssistantSessionEvent(event: SessionEvent) {
-  const payload = recordFromUnknown(event.payload);
-  return (
-    event.kind === "assistant-message" &&
-    payload?.kind === "provider-stream" &&
-    payload.streaming === true
-  );
-}
-
-function areWorkbenchTurnsEqual(
-  current: WorkbenchTurn | undefined,
-  next: WorkbenchTurn | undefined,
-) {
-  if (!current || !next) {
-    return current === next;
-  }
-  return (
-    current.id === next.id &&
-    current.sessionId === next.sessionId &&
-    current.sessionTitle === next.sessionTitle &&
-    current.status === next.status &&
-    current.startedAt === next.startedAt &&
-    current.updatedAt === next.updatedAt &&
-    current.lastEvent === next.lastEvent &&
-    current.changedFiles === next.changedFiles &&
-    current.approvalsPending === next.approvalsPending
-  );
-}
-
-function workspaceContentToEditorBuffer(
-  content: WorkspaceFileContent,
-): EditorBuffer {
-  return {
-    path: content.path,
-    content: content.content,
-    savedContent: content.content,
-    contentHash: content.contentHash,
-    sizeBytes: content.sizeBytes,
-    truncated: content.truncated,
-    status: "ready",
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function untrackedWorkspaceFileDiff(path: string, file: WorkspaceFileContent) {
-  const lines = file.content.length > 0 ? file.content.split("\n") : [];
-  return [
-    `diff --git a/${path} b/${path}`,
-    "new file mode 100644",
-    "--- /dev/null",
-    `+++ b/${path}`,
-    `@@ -0,0 +1,${lines.length} @@`,
-    ...lines.map((line) => `+${line}`),
-    ...(file.truncated ? ["+… file preview truncated …"] : []),
-  ].join("\n");
-}
-
-function sourceControlLineStats(sourceControl: SourceControlState) {
-  return Object.fromEntries(
-    sourceControl.files.map((file) => [
-      file.path.replaceAll("\\", "/"),
-      { additions: file.additions, deletions: file.deletions },
-    ]),
-  );
-}
-
-function workspaceName(path?: string) {
-  return path?.split("/").filter(Boolean).at(-1) ?? "Untitled";
-}
-
-function savedProjectsFromSessions(
-  sessions: Session[],
-  currentWorkspacePath?: string,
-  removedProjectPaths: string[] = [],
-  recentProjectPaths: string[] = [],
-): SavedProject[] {
-  const projects = new Map<
-    string,
-    { path: string; label: string; lastUsedAt: number; sessionCount: number }
-  >();
-  const removed = new Set(removedProjectPaths.map(normalizeProjectPath));
-
-  const upsertProject = (
-    path: string | undefined,
-    updatedAt?: string,
-    options: { includeRemoved?: boolean; countSession?: boolean } = {},
-  ) => {
-    if (!path) {
-      return;
-    }
-    const normalizedPath = normalizeProjectPath(path);
-    if (!normalizedPath) {
-      return;
-    }
-    if (removed.has(normalizedPath) && !options.includeRemoved) {
-      return;
-    }
-    const existing = projects.get(normalizedPath);
-    const lastUsedAt = updatedAt
-      ? new Date(updatedAt).getTime() || 0
-      : Date.now();
-    projects.set(normalizedPath, {
-      path: normalizedPath,
-      label: workspaceName(normalizedPath),
-      lastUsedAt: Math.max(existing?.lastUsedAt ?? 0, lastUsedAt),
-      sessionCount:
-        (existing?.sessionCount ?? 0) +
-        (updatedAt && options.countSession !== false ? 1 : 0),
-    });
-  };
-
-  upsertProject(currentWorkspacePath, undefined, { includeRemoved: true });
-  recentProjectPaths.forEach((path, index) =>
-    upsertProject(path, new Date(Date.now() - index).toISOString(), {
-      countSession: false,
+  const stored = loadStoredWorkbenchState();
+  return applyLaunchView(
+    recoverWorkspaceBuffers({
+      ...stored,
+      preferences: { ...stored.preferences, ...readStoredAppearance() },
     }),
   );
-  sessions.forEach((session) =>
-    upsertProject(session.workspacePath, session.updatedAt),
-  );
-
-  const currentPath = normalizeProjectPath(currentWorkspacePath);
-  return [...projects.values()]
-    .sort((first, second) => {
-      if (first.path === currentPath) {
-        return -1;
-      }
-      if (second.path === currentPath) {
-        return 1;
-      }
-      return second.lastUsedAt - first.lastUsedAt;
-    })
-    .map((project) => ({
-      path: project.path,
-      label: project.label,
-      detail:
-        project.path === currentPath
-          ? "Current project"
-          : project.sessionCount > 0
-            ? `${project.sessionCount} chat${
-                project.sessionCount === 1 ? "" : "s"
-              }`
-            : "Recent project",
-      sessionCount: project.sessionCount,
-    }));
-}
-
-function parentDirectory(path: string) {
-  const normalized = path.replaceAll("\\", "/");
-  const index = normalized.lastIndexOf("/");
-  return index > 0 ? normalized.slice(0, index) : normalized;
-}
-
-function relativeFilePath(path: string, parent: string) {
-  const normalizedPath = path.replaceAll("\\", "/");
-  const normalizedParent = parent.replaceAll("\\", "/").replace(/\/+$/, "");
-  const prefix = `${normalizedParent}/`;
-  return normalizedPath.startsWith(prefix)
-    ? normalizedPath.slice(prefix.length)
-    : workspaceName(normalizedPath);
-}
-
-function workspaceContextRelativePath(path: string, root: string) {
-  const normalizedPath = path.replaceAll("\\", "/").replace(/^\.\//, "");
-  const normalizedRoot = root.replaceAll("\\", "/").replace(/\/+$/, "");
-  if (normalizedPath === normalizedRoot) return ".";
-  const prefix = `${normalizedRoot}/`;
-  return normalizedPath.startsWith(prefix)
-    ? normalizedPath.slice(prefix.length)
-    : normalizedPath;
-}
-
-function workspaceContextWithLiveEditor(
-  context: WorkspaceContextSnapshot,
-  activePath: string | undefined,
-  buffer: EditorBuffer | undefined,
-  selection: EditorSelection | undefined,
-  tabs: string[],
-): WorkspaceContextSnapshot {
-  const root = context.workspaceKey.replace(/\/+$/, "");
-  const belongsToRoot = (path: string) => path.startsWith(`${root}/`);
-  const visibleTabs = tabs
-    .filter(belongsToRoot)
-    .slice(0, 64)
-    .map((path) => workspaceContextRelativePath(path, root));
-  if (!activePath || !belongsToRoot(activePath) || !buffer) {
-    return { ...context, visibleTabs };
-  }
-  const path = workspaceContextRelativePath(activePath, root);
-  const maxText = 48_000;
-  const clipped = (value: string) => value.slice(0, maxText);
-  return {
-    ...context,
-    revision: Date.now(),
-    activePath: path,
-    visibleTabs,
-    selection:
-      selection?.path === activePath
-        ? {
-            ...selection,
-            path,
-            text: clipped(selection.text),
-            truncated: selection.text.length > maxText,
-          }
-        : undefined,
-    buffers: [
-      {
-        path,
-        dirty: buffer.content !== buffer.savedContent,
-        content: clipped(buffer.content),
-        truncated: buffer.content.length > maxText,
-        diskHash: buffer.contentHash,
-        documentVersion: buffer.updatedAt,
-      },
-    ],
-  };
-}
-
-function workspaceFailedTests(items: TestTreeItem[]): TestTreeItem[] {
-  return items.flatMap((item) => [
-    ...(item.status === "failed" ? [item] : []),
-    ...workspaceFailedTests(item.children ?? []),
-  ]);
-}
-
-function editorPathMatches(path: string, root: string) {
-  return path === root || path.startsWith(`${root}/`);
-}
-
-function renameEditorPath(path: string, fromPath: string, toPath: string) {
-  return editorPathMatches(path, fromPath)
-    ? `${toPath}${path.slice(fromPath.length)}`
-    : path;
-}
-
-function workspaceTreeSignature(files: WorkspaceFile[]) {
-  return files
-    .map((file) => `${file.kind}:${file.path}:${file.depth ?? ""}`)
-    .join("\n");
-}
-
-function disposeEditorModels(paths: string[]) {
-  const uniquePaths = [...new Set(paths.filter(Boolean))];
-  if (uniquePaths.length === 0) {
-    return;
-  }
-  void import("./monaco-editor")
-    .then(({ disposeMonacoModel }) => {
-      uniquePaths.forEach(disposeMonacoModel);
-    })
-    .catch(() => undefined);
-}
-
-function MonacoEditorPane({
-  buffer,
-  fileContent,
-  loadState,
-  minimapEnabled,
-  onChange,
-  onLspRequest,
-  onSelectionChange,
-  path,
-  revealTarget,
-  theme,
-  languageOverride,
-  semanticReady,
-  fileError,
-}: {
-  languageOverride?: string;
-  semanticReady?: string;
-  fileError?: string;
-  buffer?: EditorBuffer;
-  fileContent?: WorkspaceFileContent;
-  loadState: "idle" | "loading" | "ready" | "error";
-  minimapEnabled: boolean;
-  onChange: (value: string) => void;
-  onLspRequest?: (
-    path: string,
-    method: string,
-    params: Record<string, unknown>,
-  ) => Promise<unknown>;
-  onSelectionChange: (selection?: EditorSelection) => void;
-  path?: string;
-  revealTarget?: EditorRevealTarget;
-  theme: ResolvedTheme;
-}) {
-  const syntax = useSyntax(
-    path ?? "",
-    buffer?.content ?? fileContent?.content ?? "",
-    languageOverride,
-    buffer?.sizeBytes ?? fileContent?.sizeBytes,
-    buffer?.truncated ?? fileContent?.truncated,
-  );
-  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
-  const languageRegistrationsRef = useRef<Array<{ dispose: () => void }>>([]);
-  const hasMountedRef = useRef(false);
-  const [mounted, setMounted] = useState(false);
-  const revealEditorTarget = useCallback(
-    (editor: Parameters<OnMount>[0]) => {
-      if (!revealTarget || revealTarget.path !== path) {
-        return;
-      }
-      const position = {
-        lineNumber: revealTarget.lineNumber,
-        column: revealTarget.column,
-      };
-      editor.setPosition(position);
-      editor.revealPositionInCenter(position);
-      editor.focus();
-    },
-    [path, revealTarget],
-  );
-  useEffect(() => {
-    if (editorRef.current) {
-      revealEditorTarget(editorRef.current);
-    }
-  }, [revealEditorTarget, revealTarget?.nonce]);
-  useEffect(
-    () => () => {
-      languageRegistrationsRef.current.forEach((registration) =>
-        registration.dispose(),
-      );
-      languageRegistrationsRef.current = [];
-    },
-    [],
-  );
-
-  // @monaco-editor/react calls editor.updateOptions() whenever this object
-  // changes identity. A literal here re-configures the editor on every render,
-  // which on a keystroke means a full options + layout recompute.
-  const { scale, reduceMotion } = useAppearance();
-  const editorOptions = useMemo(
-    () => workspaceEditorOptions({ scale, reduceMotion, minimapEnabled, limited: syntax.policy.limited, readOnly: syntax.policy.readOnly }),
-    [minimapEnabled, syntax.policy.limited, syntax.policy.readOnly, scale, reduceMotion],
-  );
-
-  useEffect(() => {
-    if (!mounted) return;
-    let disposed = false;
-    void import("monaco-editor").then((monaco) => {
-      if (disposed) return;
-      languageRegistrationsRef.current.forEach((registration) =>
-        registration.dispose(),
-      );
-      languageRegistrationsRef.current = [];
-      if (
-        path &&
-        onLspRequest &&
-        !syntax.policy.limited &&
-        syntax.language !== "plaintext"
-      ) {
-        const language = syntax.language;
-        const completionRegistration =
-          monaco.languages.registerCompletionItemProvider(language, {
-            triggerCharacters: [".", '"', "'", "/", "<", ":"],
-            provideCompletionItems: async (model, position, context) => {
-              if (model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return { suggestions: [] };
-              try {
-                const result = await onLspRequest(
-                  path,
-                  "textDocument/completion",
-                  {
-                    position: {
-                      line: position.lineNumber - 1,
-                      character: position.column - 1,
-                    },
-                    context: {
-                      triggerKind: context.triggerKind,
-                      triggerCharacter: context.triggerCharacter,
-                    },
-                  },
-                );
-                const resultRecord = isRecord(result) ? result : undefined;
-                const items = Array.isArray(result)
-                  ? result
-                  : Array.isArray(resultRecord?.items)
-                    ? resultRecord.items
-                    : [];
-                const word = model.getWordUntilPosition(position);
-                const fallbackRange = new monaco.Range(
-                  position.lineNumber,
-                  word.startColumn,
-                  position.lineNumber,
-                  word.endColumn,
-                );
-                return {
-                  suggestions: items.flatMap((value) => {
-                    if (!isRecord(value)) {
-                      return [];
-                    }
-                    const label = completionLabel(value.label);
-                    if (!label) {
-                      return [];
-                    }
-                    const textEdit = isRecord(value.textEdit)
-                      ? value.textEdit
-                      : undefined;
-                    const rangeValue = textEdit?.range ?? value.range;
-                    const range =
-                      monacoRangeFromLsp(monaco, rangeValue) ?? fallbackRange;
-                    const insertText =
-                      typeof textEdit?.newText === "string"
-                        ? textEdit.newText
-                        : typeof value.insertText === "string"
-                          ? value.insertText
-                          : label;
-                    return [
-                      {
-                        label,
-                        detail:
-                          typeof value.detail === "string"
-                            ? value.detail
-                            : undefined,
-                        documentation: completionDocumentation(
-                          value.documentation,
-                        ),
-                        insertText,
-                        kind: monacoCompletionKind(monaco, value.kind),
-                        range,
-                      },
-                    ];
-                  }),
-                };
-              } catch {
-                return { suggestions: [] };
-              }
-            },
-          });
-        const hoverRegistration = monaco.languages.registerHoverProvider(
-          language,
-          {
-            provideHover: async (_model, position) => {
-              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return null;
-              try {
-                const result = await onLspRequest(path, "textDocument/hover", {
-                  position: {
-                    line: position.lineNumber - 1,
-                    character: position.column - 1,
-                  },
-                });
-                if (!isRecord(result)) {
-                  return null;
-                }
-                const markdown = lspMarkdown(result.contents);
-                if (!markdown) {
-                  return null;
-                }
-                return {
-                  contents: [{ value: markdown }],
-                  range: monacoRangeFromLsp(monaco, result.range),
-                };
-              } catch {
-                return null;
-              }
-            },
-          },
-        );
-        const definitionRegistration =
-          monaco.languages.registerDefinitionProvider(language, {
-            provideDefinition: async (_model, position) => {
-              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return null;
-              try {
-                const result = await onLspRequest(
-                  path,
-                  "textDocument/definition",
-                  {
-                    position: {
-                      line: position.lineNumber - 1,
-                      character: position.column - 1,
-                    },
-                  },
-                );
-                return monacoLocationsFromLsp(monaco, result);
-              } catch {
-                return [];
-              }
-            },
-          });
-        const referencesRegistration =
-          monaco.languages.registerReferenceProvider(language, {
-            provideReferences: async (_model, position) => {
-              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return null;
-              try {
-                const result = await onLspRequest(
-                  path,
-                  "textDocument/references",
-                  {
-                    position: {
-                      line: position.lineNumber - 1,
-                      character: position.column - 1,
-                    },
-                    context: { includeDeclaration: true },
-                  },
-                );
-                return monacoLocationsFromLsp(monaco, result);
-              } catch {
-                return [];
-              }
-            },
-          });
-        const renameRegistration = monaco.languages.registerRenameProvider(
-          language,
-          {
-            provideRenameEdits: async (_model, position, newName) => {
-              if (_model.uri.toString() !== monaco.Uri.parse(path).toString())
-                return null;
-              try {
-                const result = await onLspRequest(path, "textDocument/rename", {
-                  position: {
-                    line: position.lineNumber - 1,
-                    character: position.column - 1,
-                  },
-                  newName,
-                });
-                return monacoWorkspaceEditFromLsp(monaco, result);
-              } catch (error) {
-                return {
-                  edits: [],
-                  rejectReason: String(error),
-                };
-              }
-            },
-          },
-        );
-        const semanticRegistration =
-          monaco.languages.registerDocumentSemanticTokensProvider(language, {
-            getLegend: () => semanticLegend,
-            provideDocumentSemanticTokens: async (model, _previous, token) => {
-              if (
-                !semanticReady ||
-                model.uri.toString() !== monaco.Uri.parse(path).toString() ||
-                token.isCancellationRequested
-              )
-                return null;
-              const version = model.getVersionId();
-              try {
-                const legend = await onLspRequest(
-                  path,
-                  "$/gyro/semanticTokensLegend",
-                  {},
-                );
-                if (
-                  !legend ||
-                  token.isCancellationRequested ||
-                  model.isDisposed() ||
-                  model.getVersionId() !== version
-                )
-                  return null;
-                await onLspRequest(path, "textDocument/didChange", {
-                  textDocument: { version: Date.now() },
-                  contentChanges: [{ text: model.getValue() }],
-                });
-                if (
-                  token.isCancellationRequested ||
-                  model.isDisposed() ||
-                  model.getVersionId() !== version
-                )
-                  return null;
-                const response = await onLspRequest(
-                  path,
-                  "textDocument/semanticTokens/full",
-                  {},
-                );
-                if (
-                  token.isCancellationRequested ||
-                  model.isDisposed() ||
-                  model.getVersionId() !== version
-                )
-                  return null;
-                const data = decodeSemanticTokens(
-                  response,
-                  legend,
-                  model.getLinesContent().map((line) => line.length),
-                );
-                return data ? { data } : null;
-              } catch {
-                return null;
-              }
-            },
-            releaseDocumentSemanticTokens: () => {},
-          });
-        languageRegistrationsRef.current = [
-          semanticRegistration,
-          completionRegistration,
-          hoverRegistration,
-          definitionRegistration,
-          referencesRegistration,
-          renameRegistration,
-        ];
-      }
-    });
-    return () => {
-      disposed = true;
-      languageRegistrationsRef.current.forEach((item) => item.dispose());
-      languageRegistrationsRef.current = [];
-    };
-  }, [
-    mounted,
-    path,
-    syntax.language,
-    syntax.policy.limited,
-    onLspRequest,
-    semanticReady,
-  ]);
-
-  const handleMount: OnMount = (editor, monaco) => {
-    editorRef.current = editor;
-    hasMountedRef.current = true;
-    setMounted(true);
-    void import("./monaco-editor").then(({ remeasureMonacoFonts }) =>
-      remeasureMonacoFonts(),
-    );
-    revealEditorTarget(editor);
-    editor.onDidChangeCursorSelection((event) => {
-      const model = editor.getModel();
-      if (!model) {
-        onSelectionChange(undefined);
-        return;
-      }
-      const text = model.getValueInRange(event.selection);
-      if (!text) {
-        onSelectionChange(undefined);
-        return;
-      }
-      onSelectionChange({
-        path: model.uri.path,
-        startLineNumber: event.selection.startLineNumber,
-        startColumn: event.selection.startColumn,
-        endLineNumber: event.selection.endLineNumber,
-        endColumn: event.selection.endColumn,
-        text,
-      });
-    });
-  };
-
-  if (!path) {
-    return <div className="gyro-code-empty">Select a workspace file.</div>;
-  }
-  // Only swap the placeholder in before the first mount. Doing it on every load
-  // tears the editor down and rebuilds it — including the font measurement —
-  // each time a tab is opened.
-  if (loadState === "loading" && !hasMountedRef.current) {
-    return <div className="gyro-code-empty">Loading file preview...</div>;
-  }
-
-  if (syntax.policy.binary || loadState === "error")
-    return (
-      <div className="gyro-code-empty" role="status">
-        {syntax.policy.reason ?? fileError ?? "This file cannot be displayed."}
-      </div>
-    );
-  return (
-    <div className="gyro-syntax-editor">
-      {syntax.notice && (
-        <div className="gyro-syntax-notice" role="status">
-          {syntax.notice}
-        </div>
-      )}
-      <Suspense
-        fallback={<div className="gyro-code-empty">Loading editor...</div>}
-      >
-        <MonacoEditor
-          height="100%"
-          keepCurrentModel
-          language={syntax.language}
-          onChange={(value) => onChange(value ?? "")}
-          onMount={handleMount}
-          options={editorOptions}
-          path={path}
-          theme={theme === "light" ? "gyro-light" : "gyro-dark"}
-          value={buffer?.content ?? fileContent?.content ?? ""}
-        />
-      </Suspense>
-    </div>
-  );
-}
-
-function monacoRangeFromLsp(monaco: Parameters<OnMount>[1], value: unknown) {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-  const start = isRecord(value.start) ? value.start : undefined;
-  const end = isRecord(value.end) ? value.end : undefined;
-  if (!start || !end) {
-    return undefined;
-  }
-  return new monaco.Range(
-    numberField(start, "line") + 1,
-    numberField(start, "character") + 1,
-    numberField(end, "line") + 1,
-    numberField(end, "character") + 1,
-  );
-}
-
-function monacoLocationsFromLsp(
-  monaco: Parameters<OnMount>[1],
-  value: unknown,
-) {
-  const locations = Array.isArray(value) ? value : value ? [value] : [];
-  return locations.flatMap((location) => {
-    if (!isRecord(location)) return [];
-    const uri =
-      typeof location.uri === "string"
-        ? location.uri
-        : typeof location.targetUri === "string"
-          ? location.targetUri
-          : undefined;
-    const range = monacoRangeFromLsp(
-      monaco,
-      location.range ?? location.targetSelectionRange ?? location.targetRange,
-    );
-    return uri && range ? [{ uri: monaco.Uri.parse(uri), range }] : [];
-  });
-}
-
-function monacoWorkspaceEditFromLsp(
-  monaco: Parameters<OnMount>[1],
-  value: unknown,
-) {
-  if (!isRecord(value) || !isRecord(value.changes)) return { edits: [] };
-  const edits = Object.entries(value.changes).flatMap(([uri, changes]) =>
-    Array.isArray(changes)
-      ? changes.flatMap((change) => {
-          if (!isRecord(change) || typeof change.newText !== "string")
-            return [];
-          const range = monacoRangeFromLsp(monaco, change.range);
-          return range
-            ? [
-                {
-                  resource: monaco.Uri.parse(uri),
-                  textEdit: { range, text: change.newText },
-                  versionId: undefined,
-                },
-              ]
-            : [];
-        })
-      : [],
-  );
-  return { edits };
-}
-
-function monacoCompletionKind(monaco: Parameters<OnMount>[1], value: unknown) {
-  const kinds = monaco.languages.CompletionItemKind;
-  switch (value) {
-    case 2:
-      return kinds.Method;
-    case 3:
-      return kinds.Function;
-    case 4:
-      return kinds.Constructor;
-    case 5:
-      return kinds.Field;
-    case 6:
-      return kinds.Variable;
-    case 7:
-      return kinds.Class;
-    case 8:
-      return kinds.Interface;
-    case 9:
-      return kinds.Module;
-    case 10:
-      return kinds.Property;
-    case 13:
-      return kinds.Enum;
-    case 14:
-      return kinds.Keyword;
-    case 15:
-      return kinds.Snippet;
-    case 21:
-      return kinds.Constant;
-    default:
-      return kinds.Text;
-  }
-}
-
-function completionLabel(value: unknown) {
-  if (typeof value === "string") {
-    return value;
-  }
-  return isRecord(value) && typeof value.label === "string"
-    ? value.label
-    : undefined;
-}
-
-function completionDocumentation(value: unknown) {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (isRecord(value) && typeof value.value === "string") {
-    return { value: value.value };
-  }
-  return undefined;
-}
-
-function lspMarkdown(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map(lspMarkdown).filter(Boolean).join("\n\n");
-  }
-  if (!isRecord(value)) {
-    return "";
-  }
-  if (typeof value.language === "string" && typeof value.value === "string") {
-    return `\`\`\`${value.language}\n${value.value}\n\`\`\``;
-  }
-  return typeof value.value === "string" ? value.value : "";
-}
-
-function createTurnId() {
-  return globalThis.crypto?.randomUUID?.() ?? `turn-${Date.now()}`;
-}
-
-/** Later of two ISO timestamps; falls back to the first parseable value. */
-function laterIsoTimestamp(first: string, second: string) {
-  const firstMs = Date.parse(first);
-  const secondMs = Date.parse(second);
-  if (!Number.isFinite(firstMs)) {
-    return Number.isFinite(secondMs) ? second : first;
-  }
-  if (!Number.isFinite(secondMs)) {
-    return first;
-  }
-  return secondMs >= firstMs ? second : first;
-}
-
-function providerLabelForId(
-  providers: ModelProviderConfig[],
-  statuses: WorkbenchState["providerStatuses"],
-  providerId: string,
-) {
-  return (
-    providers.find((provider) => provider.id === providerId)?.displayName ??
-    statuses.find((provider) => provider.id === providerId)?.displayName ??
-    providerId
-  );
-}
-
-function selectedSessionModelFromConfig(config: GyroConfig) {
-  const provider = providersForConfig(config).find(
-    (item) => item.id === config.selectedProviderId,
-  );
-  const model = provider ? getProviderModel(provider) : undefined;
-  return {
-    providerId: provider?.id,
-    providerLabel: provider?.displayName,
-    modelId: model?.id ?? provider?.selectedModelId,
-    modelLabel: model?.displayName ?? provider?.selectedModelId,
-    reasoningEffort: provider ? selectedReasoningEffort(provider) : undefined,
-  };
-}
-
-/** Model fields stored on a session, for per-pane composer binding. */
-function sessionModelSelectionFromSession(
-  session?: Pick<
-    Session,
-    | "providerId"
-    | "providerLabel"
-    | "modelId"
-    | "modelLabel"
-    | "reasoningEffort"
-  > | null,
-): SessionModelSelection | undefined {
-  if (!session?.providerId && !session?.modelId && !session?.modelLabel) {
-    return undefined;
-  }
-  return {
-    providerId:
-      session.providerId && isProviderId(session.providerId)
-        ? session.providerId
-        : undefined,
-    providerLabel: session.providerLabel,
-    modelId: session.modelId,
-    modelLabel: session.modelLabel,
-    reasoningEffort: session.reasoningEffort,
-  };
-}
-
-/**
- * Model a brand-new session opens on.
- *
- * Deliberately reads the provider's configured default rather than
- * `selectedModelId`: the latter tracks whichever session was last active, so
- * without this a new chat would silently inherit the previous thread's model
- * and the Settings default would never take effect.
- */
-function newSessionModelFromConfig(config: GyroConfig) {
-  const provider = providersForConfig(config).find(
-    (item) => item.id === config.selectedProviderId,
-  );
-  if (!provider) {
-    return selectedSessionModelFromConfig(config);
-  }
-  const modelId = providerDefaultModelId(provider);
-  const model = getProviderModel(provider, modelId);
-  return {
-    providerId: provider.id,
-    providerLabel: provider.displayName,
-    modelId: model?.id ?? modelId,
-    modelLabel: model?.displayName ?? modelId,
-    reasoningEffort:
-      model?.defaultReasoningEffort ?? model?.supportedReasoningEfforts?.[0],
-  };
-}
-
-function approvalNotificationCopy(
-  config: GyroConfig,
-  mode: "auto" | "direct" | "gated",
-) {
-  const providerName =
-    config.selectedProviderId === "anthropic"
-      ? "Claude"
-      : config.selectedProviderId === "kimi"
-        ? "Kimi"
-        : config.selectedProviderId === "xai"
-          ? "Grok"
-          : config.selectedProviderId === "gemini"
-            ? "Gemini"
-            : "Codex";
-  if (mode === "gated") {
-    return {
-      title: "Ask for approval",
-      detail: `${providerName} will ask before commands and file edits.`,
-    };
-  }
-
-  if (mode === "auto") {
-    return {
-      title: "Approve for me",
-      detail: `${providerName} can work without prompts inside the workspace boundary.`,
-    };
-  }
-
-  return {
-    title: "Full access",
-    detail: `${providerName} can run commands and apply edits without prompts.`,
-  };
-}
-
-function createProviderHealthOutput(
-  providerId: string,
-  provider?: ModelProviderConfig,
-) {
-  if (!provider?.enabled) {
-    return `${provider?.displayName ?? providerId}: not configured`;
-  }
-
-  switch (providerId) {
-    case "openai":
-      return "codex auth status: authenticated; model probe ok";
-    case "anthropic":
-      return "claude auth status: authenticated; local credential metadata verified";
-    case "kimi":
-      return "Kimi Code ACP authenticated; provider-owned token value was not read by Gyro.";
-    case "xai":
-      return "Grok Build ACP authenticated; provider-owned credentials were not read by Gyro.";
-    case "cursor":
-      return "cursor-agent: logged in; command available";
-    case "gemini":
-      return "Gemini CLI ACP authenticated; provider-owned credentials were not read by Gyro.";
-    case "opencode":
-      return "opencode: local config available";
-    case "custom":
-      return "custom command failed: executable not found";
-    default:
-      return `${provider.displayName}: health output inconclusive`;
-  }
-}
-
-const previewFiles: WorkspaceFile[] = [
-  { path: "apps", kind: "directory", depth: 1 },
-  { path: "apps/desktop", kind: "directory", depth: 2 },
-  { path: "apps/desktop/src", kind: "directory", depth: 3 },
-  { path: "apps/desktop/src/App.tsx", kind: "file", depth: 4 },
-  { path: "apps/desktop/src-tauri", kind: "directory", depth: 3 },
-  { path: "apps/desktop/src-tauri/src", kind: "directory", depth: 4 },
-  {
-    path: "apps/desktop/src-tauri/src/lib.rs",
-    kind: "file",
-    depth: 5,
-  },
-  { path: "crates", kind: "directory", depth: 1 },
-  { path: "crates/gyro-core", kind: "directory", depth: 2 },
-  { path: "crates/gyro-core/src", kind: "directory", depth: 3 },
-  { path: "crates/gyro-core/src/sessions.rs", kind: "file", depth: 4 },
-  { path: "docs", kind: "directory", depth: 1 },
-  { path: "docs/architecture.md", kind: "file", depth: 2 },
-  { path: "packages", kind: "directory", depth: 1 },
-  { path: "packages/ui", kind: "directory", depth: 2 },
-  { path: "packages/ui/src", kind: "directory", depth: 3 },
-  { path: "packages/ui/src/styles.css", kind: "file", depth: 4 },
-  { path: "packages/ui/src/surfaces.tsx", kind: "file", depth: 4 },
-];
-
-function createPreviewWorkspaceFileContent(path: string): WorkspaceFileContent {
-  const content = `// ${path}
-// File preview is connected through the desktop workspace bridge.
-// Open the Tauri app with a local workspace to read real file contents.`;
-  return {
-    path,
-    content,
-    contentHash: `preview-${content.length}`,
-    truncated: false,
-    sizeBytes: new TextEncoder().encode(content).length,
-  };
-}
-
-function createPreviewSession(
-  layout: WorkspaceLayoutId,
-  mode: WorkbenchState["workspaceMode"] = "local",
-  model: Partial<
-    Pick<
-      Session,
-      | "modelId"
-      | "modelLabel"
-      | "providerId"
-      | "providerLabel"
-      | "reasoningEffort"
-    >
-  > = {},
-  workspacePath = "",
-  titleOverride?: string,
-  sessionId = `preview-${Date.now()}`,
-): Session {
-  const now = new Date().toISOString();
-  const metadata = workspaceRunMetadata(mode, layout);
-  const defaultTitle =
-    layout === "terminal-grid"
-      ? mode === "worktree"
-        ? "Agent workspace CLI"
-        : "CLI workspace"
-      : mode === "worktree"
-        ? "Agent workspace"
-        : "Desktop session";
-  return {
-    id: sessionId,
-    title: normalizeSessionTitleInput(titleOverride ?? "") ?? defaultTitle,
-    workspacePath,
-    origin: layout === "terminal-grid" ? "cli" : "desktop",
-    workspaceMode: metadata.workspaceMode,
-    branch: metadata.branch,
-    worktreeName: metadata.worktreeName,
-    providerId: model.providerId,
-    providerLabel: model.providerLabel,
-    modelId: model.modelId,
-    modelLabel: model.modelLabel,
-    reasoningEffort: model.reasoningEffort,
-    createdAt: now,
-    updatedAt: now,
-    eventsPath: "preview://events",
-  };
-}
-
-async function createTauriThreadSession(
-  workspacePath: string | undefined,
-  mode: WorkbenchState["workspaceMode"],
-  model: ReturnType<typeof selectedSessionModelFromConfig>,
-  titleOverride?: string,
-): Promise<Session> {
-  const workspace = workspacePath ?? "";
-  const shouldCreateWorktree = mode === "worktree" && workspace.length > 0;
-  const title =
-    normalizeSessionTitleInput(titleOverride ?? "") ??
-    (shouldCreateWorktree ? "Agent workspace" : "Desktop session");
-  const metadata = workspaceRunMetadata(
-    shouldCreateWorktree ? "worktree" : "local",
-    `${title}-${Date.now()}`,
-  );
-
-  if (shouldCreateWorktree) {
-    return invoke<Session>("create_worktree_session", {
-      branch: metadata.branch,
-      ...model,
-      title,
-      worktreeName: metadata.worktreeName,
-      workspacePath: workspace,
-    });
-  }
-
-  return invoke<Session>("create_desktop_session", {
-    ...model,
-    title,
-    workspacePath: workspace,
-  });
-}
-
-function createAutomationDraft(
-  mode: WorkbenchState["workspaceMode"],
-  workspacePath: string,
-  provider: ModelProviderConfig,
-  details: {
-    title: string;
-    prompt: string;
-    schedule: Automation["schedule"];
-    calendar?: import("@gyro-dev/ui").CalendarSchedule;
-    stopCondition?: string;
-  },
-): AutomationDraft {
-  const metadata = workspaceRunMetadata(mode, details.title);
-  if (mode === "worktree") {
-    const suffix = crypto.randomUUID().slice(0, 8);
-    metadata.branch = `${metadata.branch}-${suffix}`;
-    metadata.worktreeName = `${metadata.worktreeName}-${suffix}`;
-  }
-  const model = getProviderModel(provider);
-  return {
-    title: details.title,
-    prompt: details.prompt,
-    schedule: details.schedule,
-    project: workspaceName(workspacePath),
-    provider: provider.displayName,
-    branch: metadata.branch,
-    workspaceMode: metadata.workspaceMode,
-    worktreeName: metadata.worktreeName,
-    stopCondition: details.stopCondition,
-    execution: {
-      calendar: details.calendar,
-      workspacePath,
-      providerId: provider.id,
-      providerLabel: provider.displayName,
-      modelId: model?.id ?? provider.selectedModelId,
-      modelLabel: model?.displayName,
-      reasoningEffort: selectedReasoningEffort(provider),
-    },
-  };
-}
-
-function createPreviewAutomation(draft: AutomationDraft): Automation {
-  const now = new Date().toISOString();
-  const nextRunDelay =
-    draft.schedule === "manual"
-      ? 0
-      : draft.schedule === "weekly"
-        ? 7 * 24 * 60 * 60 * 1000
-        : draft.schedule === "daily"
-          ? 24 * 60 * 60 * 1000
-          : 60 * 60 * 1000;
-  return {
-    ...draft,
-    nextRunAt: nextRunDelay
-      ? new Date(Date.now() + nextRunDelay).toISOString()
-      : undefined,
-    id: `automation-${Date.now()}`,
-    status: "current",
-    triageState: "none",
-    lastResult: "Waiting for first local run",
-    unreadResults: 0,
-    runHistory: [],
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-function workspaceRunMetadata(
-  mode: WorkbenchState["workspaceMode"],
-  label: string,
-  workingDirectory?: string,
-) {
-  if (mode === "local") {
-    return { workspaceMode: mode, branch: "main", workingDirectory };
-  }
-  const slug = slugify(label || "task");
-  return {
-    workspaceMode: mode,
-    branch: `gyro/${slug}`,
-    worktreeName: `gyro-${slug}`,
-    workingDirectory,
-  };
-}
-
-function createOptimisticTurnEvents(
-  sessionId: string,
-  message: string,
-  turnId: string,
-  provider?: ModelProviderConfig,
-  attachments: ChatAttachment[] = [],
-): SessionEvent[] {
-  const now = new Date().toISOString();
-  return [
-    {
-      id: `${sessionId}-user-${Date.now()}`,
-      sessionId,
-      turnId,
-      createdAt: now,
-      kind: "user-message",
-      message,
-      payload: { optimistic: true, turnId, attachments },
-    },
-    {
-      id: `${sessionId}-provider-${Date.now()}`,
-      sessionId,
-      turnId,
-      createdAt: now,
-      kind: "system-event",
-      message: providerStatusMessage("running", provider),
-      payload: providerStatusPayload("running", message, turnId, provider),
-    },
-  ];
-}
-
-type OptimisticProviderStatus = HarnessRunStatus | "ready";
-
-function providerStatusPayload(
-  status: OptimisticProviderStatus,
-  userMessage: string,
-  turnId: string,
-  provider?: ModelProviderConfig,
-  error?: string,
-) {
-  const model = provider ? getProviderModel(provider) : undefined;
-  return {
-    kind: "provider-status",
-    error,
-    modelId: model?.id,
-    modelLabel: model?.displayName,
-    messagePreview: chatMessagePreview(userMessage),
-    providerId: provider?.id,
-    providerLabel: provider?.displayName ?? "Provider",
-    status,
-    turnId,
-  };
-}
-
-// Kept in step with `PROVIDER_STOP_MARKER` in the Tauri crate, which every stop
-// message opens with so a stop can be told from a genuine failure.
-const PROVIDER_STOP_MARKER = "chat cancelled by";
-const PROVIDER_SELF_STOP_MARKER = "chat cancelled by Gyro: ";
-
-function isProviderStop(errorMessage: string) {
-  return errorMessage.includes(PROVIDER_STOP_MARKER);
-}
-
-// What to tell someone about a turn that stopped. Gyro stops turns of its own
-// accord — at the per-call token ceiling, for one — so a stop is not always
-// something the person did. Reporting every one of them as "cancelled" and
-// nothing further is how a ceiling stop reads as the app breaking for no reason.
-function providerStopDetail(errorMessage: string) {
-  const at = errorMessage.indexOf(PROVIDER_SELF_STOP_MARKER);
-  if (at < 0) {
-    return "The provider process was stopped";
-  }
-  return `Gyro stopped this turn: ${errorMessage.slice(at + PROVIDER_SELF_STOP_MARKER.length)}`;
-}
-
-function providerStatusMessage(
-  status: OptimisticProviderStatus,
-  provider?: ModelProviderConfig,
-) {
-  const providerLabel = provider?.displayName ?? "Provider";
-  if (status === "failed") {
-    return `${providerLabel} send needs attention`;
-  }
-  if (status === "blocked") {
-    return `${providerLabel} is not available for chat yet`;
-  }
-  if (status === "cancelled") {
-    return `${providerLabel} was cancelled`;
-  }
-  if (status === "waiting") {
-    return `${providerLabel} is waiting`;
-  }
-  if (status === "done") {
-    return `${providerLabel} answered`;
-  }
-  if (status === "ready") {
-    return `${providerLabel} is ready for the next step`;
-  }
-  if (status === "running") {
-    return `${providerLabel} is working`;
-  }
-  return `${providerLabel} queued this request`;
-}
-
-function rekeySessionEvents(events: SessionEvent[], sessionId: string) {
-  return events.map((event) => ({
-    ...event,
-    id: event.id.replace(event.sessionId, sessionId),
-    sessionId,
-  }));
-}
-
-function providerStreamBatchKey(sessionId: string, turnId: string) {
-  return `${sessionId}:${turnId}`;
-}
-
-function applyProviderChatStreamEvent(
-  optimisticEventsRef: { current: Map<string, SessionEvent[]> },
-  setEvents: (
-    value: SessionEvent[] | ((current: SessionEvent[]) => SessionEvent[]),
-  ) => void,
-  streamEvent: ProviderChatStreamEvent,
-) {
-  const turnId = streamEvent.turnId ?? undefined;
-  if (!streamEvent.sessionId || !turnId) {
-    return;
-  }
-  // Heartbeats keep a quiet-but-alive run marked running and refresh the status
-  // event's timestamp so the idle watchdog does not settle the turn early.
-  if (
-    streamEvent.phase === "started" ||
-    streamEvent.phase === "completed" ||
-    streamEvent.phase === "heartbeat"
-  ) {
-    updateOptimisticProviderStatus(
-      optimisticEventsRef,
-      setEvents,
-      streamEvent.sessionId,
-      turnId,
-      streamEvent.status ??
-        (streamEvent.phase === "completed" ? "done" : "running"),
-      undefined,
-      streamEvent.phase === "heartbeat",
-    );
-    return;
-  }
-  if (streamEvent.phase === "failed" || streamEvent.phase === "cancelled") {
-    updateOptimisticProviderStatus(
-      optimisticEventsRef,
-      setEvents,
-      streamEvent.sessionId,
-      turnId,
-      streamEvent.status ??
-        (streamEvent.phase === "cancelled" ? "cancelled" : "failed"),
-      streamEvent.error ?? undefined,
-    );
-    return;
-  }
-  const textDelta = streamEvent.textDelta ?? "";
-  if (streamEvent.phase !== "delta" || textDelta === "") {
-    return;
-  }
-  const updateEvents = (items: SessionEvent[]) =>
-    upsertStreamingAssistantEvent(items, streamEvent, turnId, textDelta);
-  optimisticEventsRef.current.set(
-    streamEvent.sessionId,
-    limitSessionEventsForUi(
-      updateEvents(
-        optimisticEventsRef.current.get(streamEvent.sessionId) ?? [],
-      ),
-    ),
-  );
-  setEvents((current) => {
-    if (!current.some((event) => event.sessionId === streamEvent.sessionId)) {
-      return current;
-    }
-    return limitSessionEventsForUi(updateEvents(current));
-  });
-}
-
-function updateOptimisticProviderStatus(
-  optimisticEventsRef: { current: Map<string, SessionEvent[]> },
-  setEvents: (
-    value: SessionEvent[] | ((current: SessionEvent[]) => SessionEvent[]),
-  ) => void,
-  sessionId: string,
-  turnId: string,
-  status: OptimisticProviderStatus,
-  error?: string,
-  /** Move createdAt forward so idle watches see the run is still alive. */
-  touchTimestamp = false,
-) {
-  const updateEvents = (items: SessionEvent[]) => {
-    const targetIndex = items.findLastIndex(
-      (event) => isProviderStatusEvent(event) && event.turnId === turnId,
-    );
-    if (targetIndex < 0) {
-      return items;
-    }
-    const next = items.slice();
-    const target = items[targetIndex];
-    if (target) {
-      next[targetIndex] = updateEvent(target);
-    }
-    return next;
-  };
-  const updateEvent = (event: SessionEvent): SessionEvent => {
-    if (!isProviderStatusEvent(event) || event.turnId !== turnId) {
-      return event;
-    }
-    const payload = recordFromUnknown(event.payload);
-    const providerLabel =
-      stringFromRecord(payload, "providerLabel") ?? "Provider";
-    const now = new Date().toISOString();
-    const previousStatus = stringFromRecord(payload, "status");
-    const previousStartedAt = stringFromRecord(payload, "startedAt");
-    const isActiveStatus = ["queued", "running", "waiting"].includes(status);
-    const wasActiveStatus =
-      previousStatus !== undefined &&
-      ["queued", "running", "waiting"].includes(previousStatus);
-    const startedAt = isActiveStatus
-      ? wasActiveStatus
-        ? (previousStartedAt ?? event.createdAt)
-        : now
-      : (previousStartedAt ?? event.createdAt);
-    const startedAtMs = Date.parse(startedAt);
-    const completedAtMs = Date.parse(now);
-    return {
-      ...event,
-      // Heartbeats only move the timestamp; they do not invent a new status event.
-      createdAt: touchTimestamp ? now : event.createdAt,
-      message: providerStatusMessage(status, {
-        id: stringFromRecord(payload, "providerId") ?? "openai",
-        displayName: providerLabel,
-      } as ModelProviderConfig),
-      payload: {
-        ...payload,
-        completedAt: isActiveStatus ? undefined : now,
-        durationMs:
-          !isActiveStatus &&
-          Number.isFinite(startedAtMs) &&
-          Number.isFinite(completedAtMs)
-            ? Math.max(0, completedAtMs - startedAtMs)
-            : undefined,
-        error,
-        startedAt,
-        status,
-      },
-    };
-  };
-  const optimisticEvents = optimisticEventsRef.current.get(sessionId);
-  if (optimisticEvents) {
-    optimisticEventsRef.current.set(
-      sessionId,
-      limitSessionEventsForUi(updateEvents(optimisticEvents)),
-    );
-  }
-  setEvents((current) => {
-    if (!current.some((event) => event.sessionId === sessionId)) {
-      return current;
-    }
-    return limitSessionEventsForUi(updateEvents(current));
-  });
 }

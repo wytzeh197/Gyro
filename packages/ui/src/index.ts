@@ -1,6 +1,68 @@
+export { applyGoogleModelDiscovery } from "./google-models";
+export type { GoogleModelDiscovery } from "./google-models";
+export {
+  applyModelContextWindows,
+  liveModelContextTokens,
+} from "./live-model-context";
+export type {
+  ModelContextWindow,
+  LiveModelContext,
+} from "./live-model-context";
+export { EfficiencyDetails } from "./efficiency-details";
+export { CodeModeActivityCard } from "./code-mode-card";
+export { ChatArtifacts } from "./chat-artifacts";
+export { groupWorkflowEvents } from "./code-mode";
+export type { TurnTokens, UsageAccounting } from "./turn-tokens";
+export { SizingMotionFixture } from "./sizing-motion-fixture";
+export { ComposerEffortSelector } from "./composer-effort-selector";
+export { MotionDisclosure } from "./motion-disclosure";
+export { UsageCard } from "./settings-presentation";
+export { useDialogDismiss } from "./use-dialog-dismiss";
+export {
+  browserConfirm,
+  confirmAction,
+  setConfirmActionHandler,
+} from "./confirm-action";
+export { askTextValue, type TextPromptOptions } from "./text-prompt";
+export {
+  validateWorkspaceEntryName,
+  workspaceEntryName,
+} from "./workspace-names";
+export {
+  focusedElement,
+  isTextInput,
+  surfaceOwnsFocus,
+  userIsTypingElsewhere,
+} from "./focus-intent";
+export {
+  externalLinkIntent,
+  openExternalLink,
+  openReplyLink,
+  registerExternalLinkOpener,
+  replyLinkHint,
+  replyLinkMark,
+} from "./external-links";
+export type { ExternalLinkOpener, LinkClickIntent, ReplyLinkMark } from "./external-links";
+export { ChatFileActionsContext, ChatFileScopeContext } from "./chat-file-card";
+export { CliSessionList } from "./cli-session-list";
 export { AppearanceContext, useAppearance } from "./appearance-context";
 export { applyAppearancePreferences } from "./appearance-runtime";
 export { interfaceScales } from "./appearance";
+export {
+  ProjectImportSettings,
+  ProjectImportCallout,
+  ImportedChatRecoveryNotice,
+} from "./project-import-settings";
+export type { ProjectImportSettingsProps } from "./project-import-settings";
+export type {
+  ProjectImportSourceKind,
+  ProjectImportSource,
+  SessionImportSource,
+  ProjectImportCandidate,
+  ProjectImportScan,
+  ProjectImportResult,
+  ProjectImportJob,
+} from "./project-import-types";
 export type { InterfaceSize, MotionSpeed } from "./types";
 export type {
   Automation,
@@ -12,6 +74,7 @@ export type {
   CommandProfile,
   CustomTaskDraft,
   AppDestination,
+  LaunchView,
   BrowserHostBounds,
   BrowserPreview,
   BrowserPreviewCapture,
@@ -19,6 +82,8 @@ export type {
   BrowserFeedback,
   BrowserPreviewDiagnostic,
   BrowserPreviewDevice,
+  BrowserViewportMode,
+  BrowserViewportState,
   BrowserPreviewStatus,
   CapabilityAccess,
   CapabilityActivity,
@@ -67,6 +132,7 @@ export type {
   CliLaunchPreset,
   CliLaunchPresetEntry,
   CliLaunchPresetFocus,
+  DesktopNotificationPreferences,
   DiffApprovalState,
   DiffFile,
   DiffFileState,
@@ -111,6 +177,7 @@ export type {
   IdeContribution,
   IdeLayoutState,
   LanguageServerState,
+  MenuBarApproval,
   MenuBarJob,
   MenuBarJobKind,
   MenuBarJobStatus,
@@ -272,7 +339,8 @@ export type {
   ReviewScope,
   ReviewScopeListing,
 } from "./review-scope";
-export { default as gyroLogoMark } from "./assets/gyro-logo-mark.png";
+export { default as gyroLogoMark } from "./assets/gyro-logo.svg";
+export { AntigravityMark } from "./antigravity-mark";
 export {
   createInitialWorkbenchState,
   createNotification,
@@ -289,7 +357,14 @@ export {
   isUserSelectedWorkspacePath,
   parseProviderHealthOutput,
   sanitizeStoredIdeState,
+  editorBufferRecoveryCapacity,
+  persistableDirtyEditorBuffers,
+  prepareEditorBufferBatch,
+  EDITOR_RECOVERY_MAX_BUFFERS,
+  EDITOR_RECOVERY_MAX_BUFFER_CHARS,
+  EDITOR_RECOVERY_MAX_TOTAL_CHARS,
   workbenchReducer,
+  applyLaunchView,
   CLI_LAUNCH_PRESET_MAX_PANES,
   CHAT_GRID_MAX_SLOTS,
   chatProjectKey,
@@ -399,6 +474,7 @@ export {
   getProviderCatalogEntry,
   getProviderModel,
   isCustomProviderId,
+  isPickerHiddenModel,
   isProviderId,
   isProviderExecutable,
   isProviderRuntimeUsable,
@@ -419,6 +495,13 @@ export {
   selectedModelLabel,
   selectedReasoningEffort,
 } from "./provider-catalog";
+export {
+  supportsFastMode,
+  fastModeModelKey,
+  fastModeConfigFromAction,
+  pickerModelId,
+  pickerModelLabel,
+} from "./provider-fast-mode";
 export {
   councilPreflightLabel,
   COUNCIL_COMING_SOON,
@@ -453,7 +536,11 @@ export type {
   TurnCostEstimate,
   UsageSafetyNotice,
 } from "./usage-ledger";
-export type { ChatGridAction, WorkbenchAction } from "./workbench-state";
+export type {
+  ChatGridAction,
+  WorkbenchAction,
+  EditorBufferBatchUpdate,
+} from "./workbench-state";
 export {
   promoteQueuedMessage,
   selectQueuedMessageDelivery,
@@ -512,12 +599,33 @@ export {
   normalizedWorkspaceFolderPath,
   workspaceFolderPaths,
   workspaceFilesForRoot,
+  formatExplorerAskListing,
+  planWorkspaceMove,
   workspaceRelativeFilePath,
   workspaceRootForPath,
   parseGyroWorkspaceFile,
   serializeGyroWorkspaceFile,
+  normalizedWorkspaceFolderList,
 } from "./workspace-project";
 export type { GyroWorkspaceFile } from "./workspace-project";
+export {
+  assessWorkspaceRoots,
+  relocateWorkspaceFolderPreferences,
+  validateWorkspaceRoots,
+  workspaceRootIdentity,
+  workspaceRootIssueIsTransient,
+  workspaceRootIssueMessage,
+  workspaceRootIssueSummary,
+} from "./workspace-roots";
+export type { WorkspaceRootIssuesModel } from "./workspace-root-issues";
+export type {
+  WorkspaceRootHealth,
+  WorkspaceRootInspection,
+  WorkspaceRootIssue,
+  WorkspaceRootIssueCode,
+  WorkspaceRootStatus,
+  WorkspaceRootValidation,
+} from "./workspace-roots";
 export {
   defaultWorkspaceUserSettings,
   normalizedWorkspaceScopedSettings,
@@ -544,6 +652,7 @@ export {
   ChatThread,
   ChatGridSurface,
   ChatSurface,
+  ChatEnvironmentPopover,
   NEW_CHAT_DRAFT_KEY,
   CliUpdateBanner,
   ChatUtilityBar,
@@ -559,7 +668,6 @@ export {
   SessionDeleteConfirmOverlay,
   ProjectRemoveConfirmOverlay,
   providerNeedsSignIn,
-  ProvidersSurface,
   SettingsSurface,
   SettingsPanel,
   TerminalTerminateConfirmOverlay,
@@ -568,10 +676,48 @@ export {
   WorkspaceToolPanel,
   WorkspaceHeader,
 } from "./surfaces";
-export { latestChatQuestions, parseChatQuestions } from "./chat-questions";
-export type { ChatQuestion, ChatQuestionRequest } from "./chat-questions";
+export {
+  formatChatAnswers,
+  latestChatQuestions,
+  parseChatAnswers,
+  parseChatQuestions,
+  questionsFromPayload,
+} from "./chat-questions";
+export type {
+  ChatQuestion,
+  ChatQuestionAnswer,
+  ChatQuestionRequest,
+} from "./chat-questions";
 export { ChatQuestionPopup } from "./chat-question-popup";
-export { sendableChatImage } from "./chat-media-transfer";
+export {
+  ChatTaskSuggestions,
+  ChatTaskSuggestionsContext,
+  chatTaskSuggestionsFromEvent,
+  type ChatStartTaskSuggestion,
+  type ChatStartTaskSuggestionsSource,
+  type ChatTaskOrigin,
+  type ChatTaskStart,
+  type ChatTaskStatus,
+  type ChatTaskSuggestion,
+  type ChatTaskSuggestionHandlers,
+  type ChatTaskSuggestionsController,
+} from "./chat-task-suggestions";
+export { ChatQuestionAnswers, ImplementPlanDock, PlanCard } from "./plan-mode";
+export {
+  droppedFileUrls,
+  fileUrlToPath,
+  sendableChatImage,
+  setOpenDroppedWorkspaceHandler,
+  workspaceDropFromTransfer,
+} from "./chat-media-transfer";
+export {
+  browserDictation,
+  dictationAccessError,
+  dictationDraft,
+  setDictationAccessRequest,
+  setSharedDictation,
+} from "./dictation";
+export type { DictationController, DictationListener } from "./dictation";
 export type {
   ChatRailDiffTools,
   ChatRailTerminalTools,
@@ -612,6 +758,19 @@ export {
 } from "./terminal-profiles";
 
 export { ChatRun } from "./chat-run-view";
+export { ChatRetryContext } from "./chat-retry-context";
+export { ProviderSignInContext } from "./provider-sign-in-context";
+export type {
+  ProviderSignIn,
+  ProviderSignInPhase,
+  ProviderSignInState,
+} from "./provider-sign-in-context";
+export { WorkspacePathUndoContext } from "./workspace-path-undo";
+export type {
+  WorkspacePathUndoOffer,
+  WorkspacePathUndoValue,
+} from "./workspace-path-undo";
+export type { ChatRetryState } from "./chat-retry-context";
 export type { RunModel } from "./chat-run";
 export {
   decideKeepAlive,
@@ -641,3 +800,38 @@ export {
 export type { CalendarSchedule } from "./types.ts";
 
 export { ComposerContextCandidates } from "./composer-context.ts";
+
+export {
+  isSubagentLive,
+  subagentElapsedMs,
+  subagentTokensLabel,
+  sortedSubagents,
+  pendingSubagentApprovals,
+  mergeSubagentSnapshot,
+  openSubagentTab,
+  closeSubagentTab,
+  nativeSubagentParents,
+} from "./subagents";
+export type {
+  SubagentSnapshot,
+  SubagentSurfaceState,
+  SubagentTabState,
+} from "./subagents";
+export {
+  sessionApprovalCounts,
+  sessionQuestionCounts,
+} from "./session-approvals";
+
+export {
+  WorkspaceRenameDialog,
+  WorkspaceEditBar,
+  type RenamePreviewFile,
+} from "./workspace-rename";
+
+export { currentChatDrag } from "./chat-session-drag";
+export { CheckWorkContext, CheckWorkActivityContext, CheckWorkStatus, type CheckWorkActivity } from "./check-work-context";
+
+export {
+  FirstRunTour,
+  type FirstRunTourProps,
+} from "./first-run-tour-overlay";

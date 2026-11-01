@@ -6,6 +6,7 @@ import {
 } from "../packages/ui/src/workbench-state.ts";
 import {
   sourceControlTotals,
+  sourceControlHistoryMessage,
   sourceControlTotalsBadge,
   sourceControlTotalsLabel,
   sourceControlTotalsScope,
@@ -156,12 +157,66 @@ assert.deepEqual(
   "a repository Gyro cannot read has no count to show",
 );
 assert.equal(sourceControlTotalsLabel({ kind: "clean" }), "Clean");
+const preparing = repo({
+  additions: 0,
+  deletions: 0,
+  statsPartial: true,
+  detailsLoaded: false,
+  history: [],
+  files: [{ path: "file.ts", state: "modified", additions: 0, deletions: 0 }],
+});
+assert.deepEqual(sourceControlTotals(preparing), { kind: "loading" });
+assert.equal(sourceControlHistoryMessage(preparing), "Loading history…");
+assert.equal(sourceControlHistoryMessage(), "History unavailable.");
+assert.equal(
+  sourceControlHistoryMessage(repo({ available: false, history: [] })),
+  "History unavailable.",
+);
+assert.equal(
+  sourceControlHistoryMessage(repo({ detailsLoaded: true, history: [] })),
+  "No commits yet.",
+);
+assert.match(
+  sourceControlHistoryMessage(
+    repo({ detailsLoaded: true, historyError: "read failed", history: [] }),
+  ),
+  /Could not load history/,
+);
+assert.equal(
+  sourceControlHistoryMessage(
+    repo({ detailsLoaded: true, history: [{ hash: "fixture" }] }),
+  ),
+  undefined,
+);
+assert.equal(
+  sourceControlTotalsLabel(sourceControlTotals(preparing)),
+  "Loading changes…",
+);
+assert.equal(
+  sourceControlTotalsScope(sourceControlTotals(preparing)),
+  "Loading change counts.",
+);
+assert.equal(sourceControlTotalsBadge(sourceControlTotals(preparing)), "");
+assert.deepEqual(
+  sourceControlTotals(
+    repo({ detailsLoaded: true, additions: 0, deletions: 0 }),
+  ),
+  { kind: "clean" },
+);
+assert.deepEqual(
+  sourceControlTotals(repo({ detailsLoaded: true, statsPartial: true })),
+  { kind: "unavailable" },
+);
 assert.equal(
   sourceControlTotalsBadge({ kind: "branch", additions: 1, deletions: 0 }),
   "vs main",
 );
 assert.equal(
-  sourceControlTotalsBadge({ kind: "working-tree", additions: 1, deletions: 0 }),
+  sourceControlTotalsBadge({
+    kind: "working-tree",
+    additions: 1,
+    deletions: 0,
+  }),
   "uncommitted",
 );
 

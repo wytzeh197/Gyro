@@ -1,0 +1,21 @@
+{
+  "recordedAt": "2026-10-08T11:10:51.725681+00:00",
+  "build": "cargo build --offline -p gyro-desktop --features tauri/custom-protocol",
+  "frontendURL": "tauri://localhost",
+  "fixtureRoot": "/private/tmp/gyro-backend-ui-2026-10-08",
+  "persistentUIOptIn": "GYRO_TEST_PERSIST_UI=1",
+  "hashes": {
+    "target/debug/gyro-desktop": "60084342afa66ce1774ef08382a5e282109413ee721ea6d810a84593e1116267",
+    "apps/desktop/dist/index.html": "3f052e20980206646bbca525c7877ed941f98f73ebda1e20730ee168c4c7f43c",
+    "apps/desktop/src/App.tsx": "1e86c1f199c0fbe009c0e6c2ecef05b3efc51640e1fad06fb36792b5256c1c40",
+    "apps/desktop/src-tauri/src/lib.rs": "361b8db508e867fee0cf26f69d327e1f3d9ab30dd7acdd069406cf94b6cfe3ef",
+    "apps/desktop/src/ui-storage.ts": "08b72992d71b4deb53a18f406c8e9545f6f052b2e05821a73567da02a01d0cbd",
+    "apps/desktop/src/turn-timing.ts": "16fcb4532637650615cc1828582abf003b514be20d14162eb36776157d3ce0a2"
+  },
+  "bundleExecutableHash": "1122b921bbe8f598d40b6d9184e61230c796e37bc684151820d48a1072d0afd9",
+  "bundleNote": "Copied the compiled executable into a temporary app with unique bundle identity, then ad-hoc signed; signing changes executable bytes.",
+  "updatedAt": "2026-10-08T11:37:04.194186+00:00",
+  "workspaceRestartTestStore": "/private/tmp/gyro-backend-ui-2026-10-08/ui-store-root-check",
+  "resumeTestStore": "/private/tmp/gyro-backend-ui-2026-10-08/ui-store",
+  "includesTerminalResponsePriorityFix": true
+}

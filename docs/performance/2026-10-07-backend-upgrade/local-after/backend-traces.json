@@ -1,0 +1,479 @@
+[
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "1d8d27a2-a00d-41cc-b066-737062782e8e",
+    "turnId": "4e640d88-49db-4c3d-972e-e49884dcde4c",
+    "sessionId": "87c8fbfd-8ebf-4e01-850e-dc07bee88a02",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.049166999999999995,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 7.9982500000000005,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 76.385417,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 93.30725,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 181.031875,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 60022.832917,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 60207.840542,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 60245.489959,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "cancelled",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 1,
+      "completed": 0,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 11832,
+        "cachedInputTokens": 0,
+        "outputTokens": 0,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 11832,
+        "measured": false
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "7319f811-5e5c-4d3c-aba8-aeb95a356982",
+    "turnId": "d29d7845-862d-41e1-83c7-bdceb0bd1202",
+    "sessionId": "9dbf3b07-2414-4f29-bde4-f8f70fe0f007",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.030583000000000003,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 3.6948329999999996,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 40.36975,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 53.458375000000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 95.965666,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 28662.829791,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 28670.420625,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 28681.981625,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "broker-tool-start",
+        "elapsedMs": 28773.404415999998,
+        "attempt": 1,
+        "toolIndex": 0
+      },
+      {
+        "stage": "broker-tool-end",
+        "elapsedMs": 28783.838541,
+        "attempt": 1,
+        "toolIndex": 0,
+        "outcome": "failed"
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 28797.324290999997,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 2
+      },
+      {
+        "stage": "first-token",
+        "elapsedMs": 59103.990291,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 59105.682375000004,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 60010.605708,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 2
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 60302.012958,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 60322.708083000005,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "cancelled",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 2,
+      "completed": 1,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 26496,
+        "cachedInputTokens": 0,
+        "outputTokens": 628,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 27124,
+        "measured": false
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "37c43e74-0220-409f-bc6e-7e0c2df455af",
+    "turnId": "eb939aa9-5b27-42f6-ac22-ef1afba24c33",
+    "sessionId": "a7b5fd25-ef93-49f4-8110-d87ede3ae27a",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.028959,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 3.8809169999999997,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 39.841625,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 51.953417,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 113.093167,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 21680.81925,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "process-start",
+        "elapsedMs": 21686.479084,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "process-spawned",
+        "elapsedMs": 21698.843291999998,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 21729.073583999998,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 2
+      },
+      {
+        "stage": "first-token",
+        "elapsedMs": 28692.986125,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "first-activity",
+        "elapsedMs": 28692.993417,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 30337.944209,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 2
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 30549.386209,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 30570.178125,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "completed",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 2,
+      "completed": 2,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 18073,
+        "cachedInputTokens": 0,
+        "outputTokens": 546,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 18619,
+        "measured": true
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  },
+  {
+    "schema": "gyro.timing.v1",
+    "traceId": "c31c2cfc-64f5-4278-9f29-02f7346b1220",
+    "turnId": "3f8d0536-4297-4dca-adc4-181a7fbb5471",
+    "sessionId": "19ac7cb2-9986-44a2-aafe-3791622fad9e",
+    "points": [
+      {
+        "stage": "backend-received",
+        "elapsedMs": 0.021124999999999998,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-start",
+        "elapsedMs": 3.227834,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "workspace-ready",
+        "elapsedMs": 34.40775,
+        "attempt": 0,
+        "toolIndex": null
+      },
+      {
+        "stage": "attempt-start",
+        "elapsedMs": 44.788834,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 60.080124999999995,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 7462.665542,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 1
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 7467.442792,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 2
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 13993.487167,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 2
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 13997.88525,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 3
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 38238.967209,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 3
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 38245.383541999996,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 4
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 44328.813959,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 4
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 44333.801792000006,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 5
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 52545.617792000005,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 5
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 52550.349709,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 6
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 59815.943584,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 6
+      },
+      {
+        "stage": "request-start",
+        "elapsedMs": 59821.563417,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 7
+      },
+      {
+        "stage": "request-end",
+        "elapsedMs": 60004.354667,
+        "attempt": 1,
+        "toolIndex": null,
+        "requestIndex": 7
+      },
+      {
+        "stage": "provider-complete",
+        "elapsedMs": 60240.583917,
+        "attempt": 1,
+        "toolIndex": null
+      },
+      {
+        "stage": "complete",
+        "elapsedMs": 60257.205875,
+        "attempt": 1,
+        "toolIndex": null
+      }
+    ],
+    "outcome": "cancelled",
+    "truncated": false,
+    "providerRequests": {
+      "requests": 7,
+      "completed": 6,
+      "rejected": 0,
+      "retries": 0,
+      "tokens": {
+        "inputTokens": 67897,
+        "cachedInputTokens": 0,
+        "outputTokens": 1442,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 69339,
+        "measured": false
+      },
+      "unmeasuredContent": false,
+      "providerAttempts": 1
+    }
+  }
+]

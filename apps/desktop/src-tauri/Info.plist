@@ -14,5 +14,9 @@
     <string>Gyro needs access to network volumes so you can work on repositories kept on shared drives.</string>
     <key>NSFileProviderDomainUsageDescription</key>
     <string>Gyro needs access to cloud-synced folders such as iCloud Drive so you can open projects stored there.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Gyro uses the microphone to dictate into the composer.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Gyro converts speech into text in the composer.</string>
   </dict>
 </plist>

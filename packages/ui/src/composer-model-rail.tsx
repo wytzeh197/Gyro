@@ -1,5 +1,14 @@
-import { Check, Plus, Settings2, TriangleAlert } from "lucide-react";
 import {
+  Check,
+  CircleDashed,
+  Copy,
+  ExternalLink,
+  Plus,
+  Settings2,
+  TriangleAlert,
+} from "lucide-react";
+import {
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -8,10 +17,17 @@ import {
   type ReactNode,
 } from "react";
 import { groupModelsByClass } from "./model-classes";
+import { clippingBounds } from "./composer-popover-bounds";
+import {
+  ProviderSignInContext,
+  type ProviderSignIn,
+} from "./provider-sign-in-context";
 
 export type ModelRailProvider = {
   id: string;
   label: string;
+  /** The connection this catalog entry launches. CLI and API are not one list. */
+  connection: "CLI" | "API" | "Local";
   connected: boolean;
   models: {
     id: string;
@@ -31,6 +47,224 @@ function contextLabel(tokens?: number) {
   return `${Math.round(tokens / 1000)}K`;
 }
 
+/** Marks which ends of a scroller hide content, so CSS fades only those ends. */
+function useScrollEdges(
+  ref: { current: HTMLElement | null },
+  contentKey?: string,
+) {
+  useLayoutEffect(() => {
+    const scroller = ref.current;
+    if (!scroller) return;
+    const update = () => {
+      scroller.dataset.overflowStart = String(scroller.scrollTop > 1);
+      scroller.dataset.overflowEnd = String(
+        scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 1,
+      );
+    };
+    update();
+    scroller.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(scroller);
+    return () => {
+      scroller.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, [ref, contentKey]);
+}
+
+/** Whose account a CLI provider signs in with, in the words its sign-in page uses. */
+const SIGN_IN_ACCOUNTS: Record<string, string> = {
+  anthropic: "Claude",
+  cursor: "Cursor",
+  gemini: "Google",
+  kimi: "Kimi",
+  openai: "ChatGPT",
+  xai: "xAI",
+};
+
+function connectPrompt(provider: ModelRailProvider) {
+  if (provider.connection === "API") {
+    return `Add a ${provider.label} API key to use its models here.`;
+  }
+  if (provider.connection === "Local") {
+    return `Start ${provider.label} on this computer to use its models here.`;
+  }
+  const account = SIGN_IN_ACCOUNTS[provider.id];
+  return account
+    ? `Sign in with your ${account} account to use ${provider.label} models here.`
+    : `Sign in to ${provider.label} to use its models here.`;
+}
+
+function copyText(value: string) {
+  void navigator.clipboard?.writeText(value).catch(() => undefined);
+}
+
+/**
+ * Sign-in progress for a provider that is not connected yet. The login CLI
+ * runs out of sight; this shows only what the person has to do next, and the
+ * terminal stays one click away for anything the parse did not catch.
+ */
+function SignInProgress({
+  provider,
+  signIn,
+  onConnect,
+}: {
+  provider: ModelRailProvider;
+  signIn: ProviderSignIn;
+  onConnect: (providerId: string) => void;
+}) {
+  const actions = useContext(ProviderSignInContext);
+  const [code, setCode] = useState("");
+  const [copied, setCopied] = useState<string>();
+  const copy = (key: string, value: string) => {
+    copyText(value);
+    setCopied(key);
+    window.setTimeout(
+      () => setCopied((current) => (current === key ? undefined : current)),
+      1600,
+    );
+  };
+  const secondary = (
+    <div className="gyro-model-rail-signin-links">
+      {signIn.phase === "failed" || signIn.phase === "not-installed" ? null : (
+        <button onClick={() => actions.cancel(provider.id)} type="button">
+          Cancel
+        </button>
+      )}
+      <button onClick={() => actions.showDetails(provider.id)} type="button">
+        Show details
+      </button>
+    </div>
+  );
+
+  if (signIn.phase === "not-installed") {
+    return (
+      <>
+        <p>
+          {signIn.message ?? `${provider.label} needs its CLI installed first.`}
+        </p>
+        {signIn.installCommand ? (
+          <>
+            <button
+              className="gyro-model-rail-signin-command"
+              onClick={() => copy("install", signIn.installCommand ?? "")}
+              title={`Copy: ${signIn.installCommand}`}
+              type="button"
+            >
+              <code>{signIn.installCommand}</code>
+              {copied === "install" ? <Check size={12} /> : <Copy size={12} />}
+            </button>
+            <button
+              className="is-primary"
+              onClick={() => actions.install(provider.id)}
+              type="button"
+            >
+              Install and sign in
+            </button>
+          </>
+        ) : (
+          <button onClick={() => onConnect(provider.id)} type="button">
+            Try again
+          </button>
+        )}
+      </>
+    );
+  }
+
+  if (signIn.phase === "failed") {
+    return (
+      <>
+        <p>{signIn.message ?? `${provider.label} sign-in didn't finish.`}</p>
+        <button
+          className="is-primary"
+          onClick={() => onConnect(provider.id)}
+          type="button"
+        >
+          Try again
+        </button>
+        {secondary}
+      </>
+    );
+  }
+
+  if (signIn.phase === "starting" || signIn.phase === "installing") {
+    return (
+      <>
+        <p className="gyro-model-rail-signin-status" role="status">
+          <CircleDashed aria-hidden="true" className="is-spinning" size={13} />
+          {signIn.phase === "installing"
+            ? "Installing…"
+            : "Checking for an existing sign-in…"}
+        </p>
+        {signIn.phase === "installing" ? secondary : null}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <p className="gyro-model-rail-signin-status" role="status">
+        <CircleDashed aria-hidden="true" className="is-spinning" size={13} />
+        {signIn.deviceCode
+          ? "Enter this code on the sign-in page"
+          : "Waiting for browser sign-in"}
+      </p>
+      {signIn.deviceCode ? (
+        <button
+          aria-label={`Copy code ${signIn.deviceCode}`}
+          className="gyro-model-rail-signin-code"
+          onClick={() => copy("code", signIn.deviceCode ?? "")}
+          type="button"
+        >
+          <code>{signIn.deviceCode}</code>
+          {copied === "code" ? <Check size={13} /> : <Copy size={13} />}
+        </button>
+      ) : null}
+      {signIn.url ? (
+        <div className="gyro-model-rail-signin-row">
+          <button onClick={() => actions.openLink(provider.id)} type="button">
+            <ExternalLink aria-hidden="true" size={12} />
+            {signIn.deviceCode ? "Open page" : "Reopen page"}
+          </button>
+          <button onClick={() => copy("url", signIn.url ?? "")} type="button">
+            {copied === "url" ? (
+              <Check aria-hidden="true" size={12} />
+            ) : (
+              <Copy aria-hidden="true" size={12} />
+            )}
+            {copied === "url" ? "Copied" : "Copy link"}
+          </button>
+        </div>
+      ) : null}
+      {signIn.acceptsCode ? (
+        <form
+          className="gyro-model-rail-signin-paste"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const value = code.trim();
+            if (!value) return;
+            actions.submitCode(provider.id, value);
+            setCode("");
+          }}
+        >
+          <input
+            aria-label="Authorization code"
+            autoComplete="off"
+            onChange={(event) => setCode(event.target.value)}
+            placeholder="Paste code"
+            spellCheck={false}
+            value={code}
+          />
+          <button disabled={!code.trim()} type="submit">
+            Submit
+          </button>
+        </form>
+      ) : null}
+      {secondary}
+    </>
+  );
+}
+
 /**
  * Providers down a rail of their own marks, the previewed provider's models
  * beside it. A provider's models show only once its mark is clicked (or
@@ -40,6 +274,7 @@ function contextLabel(tokens?: number) {
 export function ComposerModelRail({
   id,
   placement,
+  align = "end",
   providers,
   activeProviderId,
   activeModelId,
@@ -51,6 +286,8 @@ export function ComposerModelRail({
 }: {
   id: string;
   placement: "up" | "down";
+  /** Which chip edge the panel hangs from; a chip on the left opens rightward. */
+  align?: "start" | "end";
   providers: ModelRailProvider[];
   activeProviderId?: string;
   activeModelId?: string;
@@ -70,9 +307,15 @@ export function ComposerModelRail({
       providers[0]?.id,
   );
   const preview = providers.find((provider) => provider.id === previewId);
+  const { signIns } = useContext(ProviderSignInContext);
+  const previewSignIn =
+    preview && !preview.connected ? signIns[preview.id] : undefined;
   const panelRef = useRef<HTMLDivElement>(null);
+  const [resolvedPlacement, setResolvedPlacement] = useState(placement);
   const railRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  useScrollEdges(railRef);
+  useScrollEdges(listRef, previewId);
 
   // Land on the model in use so Enter re-confirms and arrows start from it.
   useEffect(() => {
@@ -85,28 +328,72 @@ export function ComposerModelRail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep the panel inside the window when the chip sits near an edge.
+  // Anchor to this composer's chip, then fit inside its split pane or clipping
+  // container. Re-measure on pane resize, not only when the window resizes.
   useLayoutEffect(() => {
     const panel = panelRef.current;
-    if (!panel) return;
-    const position = () => {
-      panel.style.translate = "";
-      const rect = panel.getBoundingClientRect();
-      const shift = Math.max(
-        12 - rect.left,
-        Math.min(0, window.innerWidth - 12 - rect.right),
+    const control = panel?.parentElement;
+    if (!panel || !control) return;
+    const position = (event?: Event) => {
+      if (event?.target instanceof Node && panel.contains(event.target)) return;
+      const listScroll = listRef.current?.scrollTop ?? 0;
+      const railScroll = railRef.current?.scrollTop ?? 0;
+      const bounds = clippingBounds(panel);
+      const pad = 12;
+      const gap = 6;
+      const anchor = control.getBoundingClientRect();
+      // Gyro's interface zoom scales CSS pixels; bounds are viewport pixels.
+      const controlStyle = window.getComputedStyle(control);
+      const scaleX = anchor.width / parseFloat(controlStyle.width) || 1;
+      const scaleY = anchor.height / parseFloat(controlStyle.height) || 1;
+      const availableWidth =
+        Math.max(0, bounds.right - bounds.left - pad * 2) / scaleX;
+      panel.style.maxWidth = `${availableWidth}px`;
+      panel.style.maxHeight = "";
+      const above = Math.max(0, anchor.top - bounds.top - pad - gap);
+      const below = Math.max(0, bounds.bottom - anchor.bottom - pad - gap);
+      const preferred = placement === "up" ? above : below;
+      const opposite = placement === "up" ? below : above;
+      const direction =
+        panel.offsetHeight * scaleY > preferred && opposite > preferred
+          ? placement === "up"
+            ? "down"
+            : "up"
+          : placement;
+      panel.style.top = direction === "down" ? "calc(100% + 6px)" : "auto";
+      panel.style.bottom = direction === "up" ? "calc(100% + 6px)" : "auto";
+      panel.style.maxHeight = `${(direction === "up" ? above : below) / scaleY}px`;
+      // Use layout dimensions so the opening animation cannot skew the anchor.
+      const width = panel.offsetWidth * scaleX;
+      const naturalLeft = align === "start" ? anchor.left : anchor.right - width;
+      const left = Math.min(
+        Math.max(naturalLeft, bounds.left + pad),
+        bounds.right - pad - width,
       );
-      panel.style.translate = `${shift}px 0`;
+      panel.style.translate = `${(left - naturalLeft) / scaleX}px 0`;
+      setResolvedPlacement(direction);
+      if (listRef.current) listRef.current.scrollTop = listScroll;
+      if (railRef.current) railRef.current.scrollTop = railScroll;
     };
     position();
-    const observer = new ResizeObserver(position);
-    observer.observe(panel.parentElement!);
+    const observer = new ResizeObserver(() => position());
+    // A companion dock can resize an inner container while the pane and chip
+    // keep their dimensions. Observe the whole layout path to the window.
+    for (
+      let ancestor: HTMLElement | null = control;
+      ancestor && ancestor !== document.body;
+      ancestor = ancestor.parentElement
+    ) {
+      observer.observe(ancestor);
+    }
     window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
     };
-  }, [placement]);
+  }, [placement, align]);
 
   const focusIn = (container: HTMLElement | null, selector: string) =>
     Array.from(container?.querySelectorAll<HTMLElement>(selector) ?? []);
@@ -227,29 +514,32 @@ export function ComposerModelRail({
     <div
       aria-label="Choose a model"
       className="gyro-composer-popover gyro-model-rail"
-      data-align="end"
-      data-placement={placement}
+      data-align={align}
+      data-placement={resolvedPlacement}
       id={id}
       ref={panelRef}
       role="dialog"
     >
-      <div
-        aria-label="Providers"
-        aria-orientation="vertical"
-        className="gyro-model-rail-providers"
-        onKeyDown={onRailKeyDown}
-        ref={railRef}
-        role="tablist"
-      >
-        {connected.map(railTile)}
-        {available.length > 0 ? (
-          <>
-            {connected.length > 0 ? (
-              <span aria-hidden="true" className="gyro-model-rail-divider" />
-            ) : null}
-            {available.map(railTile)}
-          </>
-        ) : null}
+      <div className="gyro-model-rail-side">
+        <div
+          aria-label="Providers"
+          aria-orientation="vertical"
+          className="gyro-model-rail-providers"
+          onKeyDown={onRailKeyDown}
+          ref={railRef}
+          role="tablist"
+        >
+          {connected.map(railTile)}
+          {available.length > 0 ? (
+            <>
+              {connected.length > 0 ? (
+                <span aria-hidden="true" className="gyro-model-rail-divider" />
+              ) : null}
+              {available.map(railTile)}
+            </>
+          ) : null}
+        </div>
+        {/* Outside the scroller, so the gear never sits on half a logo. */}
         <button
           aria-label="Manage providers"
           className="gyro-model-rail-tile is-utility"
@@ -272,12 +562,24 @@ export function ComposerModelRail({
           <>
             <header className="gyro-model-rail-head">
               <strong id={`${id}-heading`}>{preview.label}</strong>
-              <small>
-                {!preview.connected
-                  ? "Not connected"
-                  : isPreviewInUse
-                    ? "In use"
-                    : `${preview.models.length} ${preview.models.length === 1 ? "model" : "models"}`}
+              <small className="gyro-model-rail-status">
+                <span className="gyro-model-rail-connection">
+                  {preview.connected
+                    ? preview.connection
+                    : previewSignIn?.phase === "installing"
+                      ? "Installing…"
+                      : previewSignIn?.phase === "starting" ||
+                          previewSignIn?.phase === "waiting"
+                        ? "Signing in…"
+                        : "Not connected"}
+                </span>
+                {preview.connected ? (
+                  <span className={isPreviewInUse ? "is-in-use" : undefined}>
+                    {isPreviewInUse
+                      ? "In use"
+                      : `${preview.models.length} ${preview.models.length === 1 ? "model" : "models"}`}
+                  </span>
+                ) : null}
               </small>
             </header>
             {showWarning ? (
@@ -324,19 +626,33 @@ export function ComposerModelRail({
                 </button>
               </div>
             ) : (
-              <div className="gyro-model-rail-empty" ref={listRef}>
+              <div
+                className="gyro-model-rail-empty"
+                key={preview.id}
+                ref={listRef}
+              >
                 <span aria-hidden="true" className="gyro-model-rail-empty-mark">
                   {renderLogo(preview)}
                 </span>
-                <p>Connect {preview.label} to use its models here.</p>
-                <button
-                  className="is-primary"
-                  onClick={() => onConnect(preview.id)}
-                  type="button"
-                >
-                  <Plus aria-hidden="true" size={13} />
-                  Connect
-                </button>
+                {previewSignIn ? (
+                  <SignInProgress
+                    onConnect={onConnect}
+                    provider={preview}
+                    signIn={previewSignIn}
+                  />
+                ) : (
+                  <>
+                    <p>{connectPrompt(preview)}</p>
+                    <button
+                      className="is-primary"
+                      onClick={() => onConnect(preview.id)}
+                      type="button"
+                    >
+                      <Plus aria-hidden="true" size={13} />
+                      Connect
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </>

@@ -7,6 +7,12 @@ import type {
   UsageOriginTotals,
   UsageSafetySnapshot,
 } from "./types";
+import { remainingUsage } from "./usage-remaining.ts";
+import {
+  formatCompactTokenCount as formatTokenCount,
+  isTokenCount,
+} from "./token-count.ts";
+export { formatTokenCount };
 
 /** The session cost line, as the chat surface renders it. */
 export type SessionCostSummary = {
@@ -15,11 +21,8 @@ export type SessionCostSummary = {
   /** `4 council seats · 1 synthesis`, or undefined when there is nothing to split. */
   breakdown?: string;
   /**
-   * `1.1M re-read`, or undefined when cached context is not most of the total.
-   *
-   * A tool-using turn bills the whole conversation once per call, so the raw
-   * total reads far larger than the work the turn actually did. This names the
-   * re-read share rather than quietly removing it.
+   * `1.1M cached input`, or undefined when the cached share is small.
+   * Cached input is included in the total; it is not additional consumption.
    */
   cachedNote?: string;
   /** Set when any part of the total was estimated rather than reported. */
@@ -29,27 +32,6 @@ export type SessionCostSummary = {
   /** Whether the surface should render anything at all. */
   isEmpty: boolean;
 };
-
-function trimTrailingZeros(value: string) {
-  return value.includes(".") ? value.replace(/\.?0+$/, "") : value;
-}
-
-/**
- * Compact token counts, matching the composer context meter's unit choice so
- * the two never disagree about what "1.2M" means.
- */
-export function formatTokenCount(tokens: number) {
-  if (!Number.isFinite(tokens) || tokens <= 0) return "0";
-  if (tokens >= 999_500) {
-    const millions = (tokens / 1_000_000).toFixed(tokens >= 10_000_000 ? 0 : 2);
-    return `${trimTrailingZeros(millions)}M`;
-  }
-  if (tokens >= 1_000) {
-    const thousands = (tokens / 1_000).toFixed(tokens >= 10_000 ? 0 : 1);
-    return `${trimTrailingZeros(thousands)}K`;
-  }
-  return String(Math.round(tokens));
-}
 
 function pluralize(count: number, singular: string, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
@@ -87,7 +69,14 @@ const CACHED_SHARE_WORTH_NAMING = 0.4;
  */
 function cachedShare(totals: SessionUsageTotals) {
   const cached = totals.cachedInputTokens;
-  if (!Number.isFinite(cached) || cached <= 0 || totals.totalTokens <= 0) {
+  if (
+    !isTokenCount(cached) ||
+    !isTokenCount(totals.totalTokens) ||
+    cached <= 0 ||
+    totals.totalTokens <= 0 ||
+    cached > totals.inputTokens ||
+    cached > totals.totalTokens
+  ) {
     return 0;
   }
   return cached / totals.totalTokens >= CACHED_SHARE_WORTH_NAMING ? cached : 0;
@@ -96,9 +85,9 @@ function cachedShare(totals: SessionUsageTotals) {
 /**
  * Turn a session's ledger totals into the one line the chat surface shows.
  *
- * Measured and estimated calls are never blended into a single confident
- * number: when any call was estimated, the line says so. An unmeasured
- * provider is counted, but it is not presented as if it had been measured.
+ * Chat shows provider observations only. An incomplete aggregate can expose a
+ * separately recorded provider subtotal as a lower bound; estimated totals
+ * remain in the ledger without appearing as chat consumption.
  */
 export function summarizeSessionCost(
   totals: SessionUsageTotals | undefined,
@@ -111,39 +100,92 @@ export function summarizeSessionCost(
     };
   }
 
-  const tokenLabel = formatTokenCount(totals.totalTokens);
-  const label = `${tokenLabel} tokens · ${pluralize(totals.calls, "call")}`;
-  const breakdown = breakdownLabel(totals.byOrigin);
-  const cachedTokens = cachedShare(totals);
-  const cachedNote = cachedTokens
-    ? `${formatTokenCount(cachedTokens)} re-read`
+  const partial = totals.partialCalls ?? 0;
+  const unavailable = totals.unavailableCalls ?? 0;
+  const classifiedCalls =
+    totals.measuredCalls + totals.estimatedCalls + partial + unavailable;
+  const knownCoverage =
+    [
+      totals.calls,
+      totals.measuredCalls,
+      totals.estimatedCalls,
+      partial,
+      unavailable,
+    ].every(isTokenCount) && classifiedCalls === totals.calls;
+  const reportedSubtotal = isTokenCount(totals.reportedTotalTokens)
+    ? totals.reportedTotalTokens
     : undefined;
-  const estimateNote =
-    totals.estimatedCalls > 0
+  const useReportedSubtotal =
+    reportedSubtotal !== undefined &&
+    (!knownCoverage || totals.estimatedCalls > 0 || partial + unavailable > 0);
+  const displayedTokens = useReportedSubtotal
+    ? reportedSubtotal
+    : totals.totalTokens;
+  const tokenLabel = formatTokenCount(displayedTokens);
+  const allUnavailable =
+    !isTokenCount(displayedTokens) ||
+    (!useReportedSubtotal &&
+      (!knownCoverage ||
+        totals.estimatedCalls > 0 ||
+        totals.measuredCalls + partial === 0));
+  const prefix = useReportedSubtotal || partial + unavailable > 0 ? "≥" : "";
+  const label = allUnavailable
+    ? `Usage unavailable · ${pluralize(totals.calls, "call")}`
+    : `${prefix}${tokenLabel} tokens · ${pluralize(totals.calls, "call")}`;
+  const breakdown = breakdownLabel(totals.byOrigin);
+  const cachedTokens =
+    allUnavailable || useReportedSubtotal ? 0 : cachedShare(totals);
+  const cachedNote = cachedTokens
+    ? `${formatTokenCount(cachedTokens)} cached input`
+    : undefined;
+  const estimateNote = useReportedSubtotal
+    ? "incomplete coverage"
+    : totals.estimatedCalls > 0
       ? totals.measuredCalls > 0
         ? `${totals.estimatedCalls} estimated`
         : "estimated"
-      : undefined;
+      : partial + unavailable > 0
+        ? "incomplete coverage"
+        : undefined;
 
   const titleParts = [
-    `This chat: ${tokenLabel} tokens across ${pluralize(totals.calls, "provider call")}.`,
+    allUnavailable
+      ? `Usage is unavailable for ${pluralize(totals.calls, "provider call")}.`
+      : useReportedSubtotal
+        ? `This chat: at least ${displayedTokens.toLocaleString()} provider-reported tokens observed across ${pluralize(totals.calls, "provider call")}. Coverage is incomplete; the complete total cannot be verified.`
+        : `This chat: ${prefix}${displayedTokens.toLocaleString()} tokens across ${pluralize(totals.calls, "provider call")}.`,
   ];
   if (breakdown) {
     titleParts.push(`Breakdown: ${breakdown}.`);
   }
   if (cachedTokens) {
     titleParts.push(
-      `${formatTokenCount(cachedTokens)} of that was context re-read on each call rather than sent fresh, so the total is larger than the work these calls did.`,
+      `Includes ${cachedTokens.toLocaleString()} cached input tokens, already part of the total. Cached tokens are not additional tokens or a measure of monetary cost.`,
     );
   }
-  if (estimateNote) {
+  if (totals.estimatedCalls > 0) {
     titleParts.push(
-      totals.measuredCalls > 0
-        ? `${totals.estimatedCalls} of those calls came from providers that report no token counts, so their share is estimated.`
-        : "This provider reports no token counts, so the total is estimated.",
+      useReportedSubtotal
+        ? `${pluralize(totals.estimatedCalls, "call")} used estimated or unverified counts; those estimates are excluded from the displayed provider subtotal.`
+        : `${pluralize(totals.estimatedCalls, "call")} used estimated or unverified counts, so the total is estimated.`,
     );
   }
 
+  if (totals.estimatedCalls > 0 && !useReportedSubtotal) {
+    titleParts.push(
+      "A provider-reported subtotal cannot be isolated from this aggregate; its numeric total is not shown in chat.",
+    );
+  } else if (!knownCoverage && !useReportedSubtotal) {
+    titleParts.push(
+      "The saved call coverage is incomplete or unverified, so a reliable provider total cannot be established.",
+    );
+  }
+
+  if (partial + unavailable > 0) {
+    titleParts.push(
+      `${partial} calls have partial usage and ${unavailable} calls have unavailable usage; the complete total cannot be verified.`,
+    );
+  }
   return {
     breakdown,
     cachedNote,
@@ -309,10 +351,13 @@ export function ledgerWindows(
       Math.round((totals.totalTokens / limit) * 100),
     );
     return {
-      detail: `${formatTokenCount(totals.totalTokens)} of ${formatTokenCount(limit)}`,
+      detail: `${formatTokenCount(Math.max(0, limit - totals.totalTokens))} of ${formatTokenCount(limit)} tokens left`,
       hasBudget,
       id: spec.id,
-      isEstimated: totals.estimatedCalls > 0,
+      isEstimated:
+        totals.estimatedCalls > 0 ||
+        (totals.partialCalls ?? 0) > 0 ||
+        (totals.unavailableCalls ?? 0) > 0,
       label: spec.label,
       origins: totals.byOrigin.slice(0, 4).map((origin) => ({
         label: origin.label,
@@ -473,10 +518,12 @@ export function dailyPaceNotice(
 }
 
 function budgetHeadline(budget: BudgetState) {
-  const used = formatTokenCount(budget.usedTokens);
+  const left = formatTokenCount(
+    Math.max(0, budget.maxTokens - budget.usedTokens),
+  );
   const cap = formatTokenCount(budget.maxTokens);
   const estimate = budget.hasEstimates ? ", partly estimated" : "";
-  return `${budget.providerId}: ${budget.percent}% of budget used (${used} of ${cap}${estimate})`;
+  return `${budget.providerId}: ${remainingUsage(budget.percent).percentLabel} of budget left (${left} of ${cap} tokens left${estimate})`;
 }
 
 /**

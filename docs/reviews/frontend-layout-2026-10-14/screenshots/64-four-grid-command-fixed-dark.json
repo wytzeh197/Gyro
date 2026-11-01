@@ -1,0 +1,701 @@
+{
+  "bodyWidth": 860,
+  "controls": [
+    {
+      "className": "",
+      "label": "1 pane",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 357.625,
+        "width": 54.765625,
+        "x": 302.859375,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "2 panes",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 428.34375,
+        "width": 62.71875,
+        "x": 365.625,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "3 panes",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 499.34375,
+        "width": 63,
+        "x": 436.34375,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "4 panes",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 570.546875,
+        "width": 63.203125,
+        "x": 507.34375,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "columns",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 644.125,
+        "width": 65.578125,
+        "x": 578.546875,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "grid",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 692.34375,
+        "width": 40.21875,
+        "x": 652.125,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "rows",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 745,
+        "width": 44.65625,
+        "x": 700.34375,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "Toggle theme",
+      "rect": {
+        "bottom": 39,
+        "height": 27,
+        "right": 848,
+        "width": 95,
+        "x": 753,
+        "y": 12
+      }
+    },
+    {
+      "className": "",
+      "label": "Fixture width",
+      "rect": {
+        "bottom": 65,
+        "height": 16,
+        "right": 222.171875,
+        "width": 129,
+        "x": 93.171875,
+        "y": 49
+      }
+    },
+    {
+      "className": "is-selected",
+      "label": "/helpShow command help",
+      "rect": {
+        "bottom": 209.078125,
+        "height": 32.296875,
+        "right": 391.203125,
+        "width": 233.921875,
+        "x": 157.28125,
+        "y": 176.78125
+      }
+    },
+    {
+      "className": "",
+      "label": "/compactCompact context?Compact this chat after the first reply.",
+      "rect": {
+        "bottom": 243.265625,
+        "height": 32.296875,
+        "right": 391.203125,
+        "width": 233.921875,
+        "x": 157.28125,
+        "y": 210.96875
+      }
+    },
+    {
+      "className": "",
+      "label": "/goalSave goal?Say what a good result looks like, and Gyro keeps it in",
+      "rect": {
+        "bottom": 277.453125,
+        "height": 32.296875,
+        "right": 391.203125,
+        "width": 233.921875,
+        "x": 157.28125,
+        "y": 245.15625
+      }
+    },
+    {
+      "className": "",
+      "label": "/planPlan mode?Gyro works out the steps and shows them to you first. N",
+      "rect": {
+        "bottom": 311.640625,
+        "height": 32.296875,
+        "right": 391.203125,
+        "width": 233.921875,
+        "x": 157.28125,
+        "y": 279.34375
+      }
+    },
+    {
+      "className": "",
+      "label": "/editorAttach editor snapshot?Sends a copy of the file you have open, ",
+      "rect": {
+        "bottom": 345.828125,
+        "height": 32.296875,
+        "right": 391.203125,
+        "width": 233.921875,
+        "x": 157.28125,
+        "y": 313.53125
+      }
+    },
+    {
+      "className": "",
+      "label": "/imageAttach image",
+      "rect": {
+        "bottom": 380.015625,
+        "height": 32.296875,
+        "right": 391.203125,
+        "width": 233.921875,
+        "x": 157.28125,
+        "y": 347.71875
+      }
+    },
+    {
+      "className": "",
+      "label": "/videoAttach video",
+      "rect": {
+        "bottom": 414.203125,
+        "height": 32.296875,
+        "right": 391.203125,
+        "width": 233.921875,
+        "x": 157.28125,
+        "y": 381.90625
+      }
+    },
+    {
+      "className": "",
+      "label": "/fileAttach file",
+      "rect": {
+        "bottom": 448.390625,
+        "height": 32.296875,
+        "right": 391.203125,
+        "width": 233.921875,
+        "x": 157.28125,
+        "y": 416.09375
+      }
+    },
+    {
+      "className": "",
+      "label": "/folderChoose folder?Pick the project folder this chat is allowed to w",
+      "rect": {
+        "bottom": 482.578125,
+        "height": 32.296875,
+        "right": 391.203125,
+        "width": 233.921875,
+        "x": 157.28125,
+        "y": 450.28125
+      }
+    },
+    {
+      "className": "",
+      "label": "/searchSearch workspace",
+      "rect": {
+        "bottom": 516.765625,
+        "height": 32.296875,
+        "right": 391.203125,
+        "width": 233.921875,
+        "x": 157.28125,
+        "y": 484.46875
+      }
+    },
+    {
+      "className": "",
+      "label": "/modelChoose model",
+      "rect": {
+        "bottom": 550.953125,
+        "height": 32.296875,
+        "right": 391.203125,
+        "width": 233.921875,
+        "x": 157.28125,
+        "y": 518.65625
+      }
+    },
+    {
+      "className": "",
+      "label": "/permissionsChange permissions?Choose how often Gyro checks with you b",
+      "rect": {
+        "bottom": 585.140625,
+        "height": 32.296875,
+        "right": 391.203125,
+        "width": 233.921875,
+        "x": 157.28125,
+        "y": 552.84375
+      }
+    },
+    {
+      "className": "",
+      "label": "/newNew chat",
+      "rect": {
+        "bottom": 619.328125,
+        "height": 32.296875,
+        "right": 391.203125,
+        "width": 233.921875,
+        "x": 157.28125,
+        "y": 587.03125
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 282.515625,
+        "height": 49.390625,
+        "right": 416.5,
+        "width": 273.5,
+        "x": 143,
+        "y": 233.125
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 312.90625,
+        "height": 28.5,
+        "right": 177.1875,
+        "width": 26.59375,
+        "x": 150.59375,
+        "y": 284.40625
+      }
+    },
+    {
+      "className": "gyro-composer-chip",
+      "label": "Approval mode: Ask for approval",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 238.03125,
+        "width": 54.203125,
+        "x": 183.828125,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: GPT-5.6 Sol",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 338.546875,
+        "width": 62.5625,
+        "x": 275.984375,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger",
+      "label": "Reasoning effort: Low",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 375.671875,
+        "width": 30.484375,
+        "x": 345.1875,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 408.90625,
+        "width": 26.59375,
+        "x": 382.3125,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 282.515625,
+        "height": 49.390625,
+        "right": 717,
+        "width": 273.5,
+        "x": 443.5,
+        "y": 233.125
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 312.90625,
+        "height": 28.5,
+        "right": 477.6875,
+        "width": 26.59375,
+        "x": 451.09375,
+        "y": 284.40625
+      }
+    },
+    {
+      "className": "gyro-composer-chip",
+      "label": "Approval mode: Ask for approval",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 538.53125,
+        "width": 54.203125,
+        "x": 484.328125,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: GPT-5.6 Sol",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 639.046875,
+        "width": 62.5625,
+        "x": 576.484375,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger",
+      "label": "Reasoning effort: Low",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 676.171875,
+        "width": 30.484375,
+        "x": 645.6875,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 311.953125,
+        "height": 26.59375,
+        "right": 709.40625,
+        "width": 26.59375,
+        "x": 682.8125,
+        "y": 285.359375
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 537.015625,
+        "height": 49.390625,
+        "right": 416.5,
+        "width": 273.5,
+        "x": 143,
+        "y": 487.625
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 567.40625,
+        "height": 28.5,
+        "right": 177.1875,
+        "width": 26.59375,
+        "x": 150.59375,
+        "y": 538.90625
+      }
+    },
+    {
+      "className": "gyro-composer-chip",
+      "label": "Approval mode: Ask for approval",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 238.03125,
+        "width": 54.203125,
+        "x": 183.828125,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: GPT-5.6 Sol",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 338.546875,
+        "width": 62.5625,
+        "x": 275.984375,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger",
+      "label": "Reasoning effort: Low",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 375.671875,
+        "width": 30.484375,
+        "x": 345.1875,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 408.90625,
+        "width": 26.59375,
+        "x": 382.3125,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "",
+      "label": "Message Gyro",
+      "rect": {
+        "bottom": 537.015625,
+        "height": 49.390625,
+        "right": 717,
+        "width": 273.5,
+        "x": 443.5,
+        "y": 487.625
+      }
+    },
+    {
+      "className": "gyro-composer-tool",
+      "label": "Add context",
+      "rect": {
+        "bottom": 567.40625,
+        "height": 28.5,
+        "right": 477.6875,
+        "width": 26.59375,
+        "x": 451.09375,
+        "y": 538.90625
+      }
+    },
+    {
+      "className": "gyro-composer-chip",
+      "label": "Approval mode: Ask for approval",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 538.53125,
+        "width": 54.203125,
+        "x": 484.328125,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-model-chip gyro-composer-model-trigger",
+      "label": "Model: GPT-5.6 Sol",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 639.046875,
+        "width": 62.5625,
+        "x": 576.484375,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger",
+      "label": "Reasoning effort: Low",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 676.171875,
+        "width": 30.484375,
+        "x": 645.6875,
+        "y": 539.859375
+      }
+    },
+    {
+      "className": "gyro-send-button",
+      "label": "Send message",
+      "rect": {
+        "bottom": 566.453125,
+        "height": 26.59375,
+        "right": 709.40625,
+        "width": 26.59375,
+        "x": 682.8125,
+        "y": 539.859375
+      }
+    }
+  ],
+  "htmlWidth": 860,
+  "overlaps": [
+    {
+      "a": "/compactCompact context?Compact this chat after the first re",
+      "b": "Message Gyro",
+      "height": 10.140625,
+      "width": 233.921875
+    },
+    {
+      "a": "/goalSave goal?Say what a good result looks like, and Gyro k",
+      "b": "Message Gyro",
+      "height": 32.296875,
+      "width": 233.921875
+    },
+    {
+      "a": "/planPlan mode?Gyro works out the steps and shows them to yo",
+      "b": "Message Gyro",
+      "height": 3.171875,
+      "width": 233.921875
+    },
+    {
+      "a": "/planPlan mode?Gyro works out the steps and shows them to yo",
+      "b": "Add context",
+      "height": 27.234375,
+      "width": 19.90625
+    },
+    {
+      "a": "/planPlan mode?Gyro works out the steps and shows them to yo",
+      "b": "Approval mode: Ask for approval",
+      "height": 26.28125,
+      "width": 54.203125
+    },
+    {
+      "a": "/planPlan mode?Gyro works out the steps and shows them to yo",
+      "b": "Model: GPT-5.6 Sol",
+      "height": 26.28125,
+      "width": 62.5625
+    },
+    {
+      "a": "/planPlan mode?Gyro works out the steps and shows them to yo",
+      "b": "Reasoning effort: Low",
+      "height": 26.28125,
+      "width": 30.484375
+    },
+    {
+      "a": "/planPlan mode?Gyro works out the steps and shows them to yo",
+      "b": "Send message",
+      "height": 26.28125,
+      "width": 8.890625
+    },
+    {
+      "a": "/searchSearch workspace",
+      "b": "Message Gyro",
+      "height": 29.140625,
+      "width": 233.921875
+    },
+    {
+      "a": "/modelChoose model",
+      "b": "Message Gyro",
+      "height": 18.359375,
+      "width": 233.921875
+    },
+    {
+      "a": "/modelChoose model",
+      "b": "Add context",
+      "height": 12.046875,
+      "width": 19.90625
+    },
+    {
+      "a": "/modelChoose model",
+      "b": "Approval mode: Ask for approval",
+      "height": 11.09375,
+      "width": 54.203125
+    },
+    {
+      "a": "/modelChoose model",
+      "b": "Model: GPT-5.6 Sol",
+      "height": 11.09375,
+      "width": 62.5625
+    },
+    {
+      "a": "/modelChoose model",
+      "b": "Reasoning effort: Low",
+      "height": 11.09375,
+      "width": 30.484375
+    },
+    {
+      "a": "/modelChoose model",
+      "b": "Send message",
+      "height": 11.09375,
+      "width": 8.890625
+    },
+    {
+      "a": "/permissionsChange permissions?Choose how often Gyro checks ",
+      "b": "Add context",
+      "height": 14.5625,
+      "width": 19.90625
+    },
+    {
+      "a": "/permissionsChange permissions?Choose how often Gyro checks ",
+      "b": "Approval mode: Ask for approval",
+      "height": 13.609375,
+      "width": 54.203125
+    },
+    {
+      "a": "/permissionsChange permissions?Choose how often Gyro checks ",
+      "b": "Model: GPT-5.6 Sol",
+      "height": 13.609375,
+      "width": 62.5625
+    },
+    {
+      "a": "/permissionsChange permissions?Choose how often Gyro checks ",
+      "b": "Reasoning effort: Low",
+      "height": 13.609375,
+      "width": 30.484375
+    },
+    {
+      "a": "/permissionsChange permissions?Choose how often Gyro checks ",
+      "b": "Send message",
+      "height": 13.609375,
+      "width": 8.890625
+    }
+  ],
+  "popovers": [
+    {
+      "className": "gyro-composer-slash-menu is-commands",
+      "clientHeight": 197,
+      "label": "Chat commands",
+      "rect": {
+        "bottom": 326.421875,
+        "height": 189.328125,
+        "right": 408.890625,
+        "width": 258.296875,
+        "x": 150.59375,
+        "y": 137.09375
+      },
+      "scrollHeight": 454
+    }
+  ],
+  "theme": "dark",
+  "viewport": {
+    "height": 620,
+    "width": 860
+  }
+}

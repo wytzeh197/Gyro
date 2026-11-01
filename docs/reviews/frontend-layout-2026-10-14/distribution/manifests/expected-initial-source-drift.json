@@ -1,0 +1,7 @@
+{
+  "changed": [
+    "packages/ui/src/composer-completion-menu.tsx"
+  ],
+  "initialDigest": "efa9880aa238fd286a6aaa9c0d2c50de8123176c75ef619b62742193ef94f155",
+  "finalDigest": "ab016019059603d324f0bf32bf2d329e3c9568970797094c8e28832eeb9f7560"
+}

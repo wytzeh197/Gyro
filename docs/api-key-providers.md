@@ -12,7 +12,10 @@ Three providers ship as presets, and you can add your own endpoint.
 | Mistral | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` |
 | OpenRouter | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 
-These are **experimental** in this release.
+DeepSeek, Mistral, OpenRouter, and custom OpenAI-compatible endpoints are
+**experimental** in this release. They run in the desktop app. The standalone
+CLI can configure them while its chat loop runs subprocess adapters and
+Ollama, not OpenAI-compatible API providers yet.
 
 ## Add a key to a preset
 
@@ -48,10 +51,15 @@ gyro config add-provider custom:my-gateway \
 gyro config set-provider-key custom:my-gateway --env MY_GATEWAY_KEY
 
 gyro config remove-provider custom:my-gateway
+gyro config remove-provider deepseek
+gyro config restore-provider deepseek
 ```
 
-`remove-provider` drops the config entry, clears the stored key, and clears the
-provider as the default for new chats if it was selected.
+`remove-provider` works for every provider. A `custom:` id is deleted. A
+provider Gyro ships is hidden until `restore-provider`. Either way a stored
+API key is deleted, and the provider is cleared as the default for new chats
+if it was selected. The vendor CLI on this Mac stays signed in. A deleted
+custom provider has to be added again.
 
 ## Local servers
 

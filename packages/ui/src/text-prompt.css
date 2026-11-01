@@ -1,0 +1,60 @@
+/* In-app text prompt: the replacement for `window.prompt`, which the macOS
+   WebView suppresses outright. Tokens match .gyro-workspace-rename so the two
+   dialogs read as one surface. */
+.gyro-text-prompt {
+  background: var(--gyro-surface-raised);
+  color: var(--gyro-text);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  padding: var(--gyro-space-card);
+  font-family: var(--gyro-font-sans);
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+.gyro-text-prompt::backdrop {
+  background: var(--gyro-scrim);
+}
+.gyro-text-prompt form {
+  display: grid;
+  gap: var(--gyro-space-group);
+}
+.gyro-text-prompt-title {
+  margin: 0;
+  font-size: var(--gyro-font-heading);
+}
+.gyro-text-prompt-message {
+  margin: 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+.gyro-text-prompt-field {
+  display: grid;
+  gap: var(--gyro-space-compact);
+  font-size: var(--gyro-font-support);
+}
+.gyro-text-prompt-field input {
+  width: 100%;
+  min-height: var(--gyro-control-height);
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  padding: var(--gyro-space-standard);
+  font: inherit;
+}
+.gyro-text-prompt-error {
+  margin: 0;
+  color: var(--gyro-danger);
+  font-size: var(--gyro-font-support);
+}
+.gyro-text-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gyro-space-standard);
+}
+.gyro-text-prompt button:focus-visible,
+.gyro-text-prompt input:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}

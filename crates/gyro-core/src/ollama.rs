@@ -4,12 +4,15 @@
 //! local. This module accepts only loopback HTTP endpoints and keeps runtime
 //! discovery separate from persisted provider configuration.
 
+use crate::usage::{UsageReason, UsageTokens};
 use crate::CancellationToken;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::io::BufReader;
 use std::time::Duration;
 use url::{Host, Url};
+mod context;
+use context::{context_overflow_message, request_context_window, OllamaContextOverflow};
 
 pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/api";
 pub const OLLAMA_CANCELLED_MESSAGE: &str = "Ollama chat cancelled";
@@ -46,6 +49,7 @@ pub struct OllamaChatRequest<'a> {
     pub model: &'a str,
     pub system: &'a str,
     pub user: &'a str,
+    pub context_window_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -53,7 +57,13 @@ pub struct OllamaChatResponse {
     pub content: String,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
+    pub accounted_usage: UsageTokens,
     pub tool_calls: Vec<OllamaToolCall>,
+    /// Ollama stopped at its output-token cap. `content` is the text it managed
+    /// to write; tool calls from that answer were dropped because their
+    /// arguments may be cut off.
+    pub truncated: bool,
+    pub context_window_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -62,6 +72,12 @@ pub struct OllamaToolChatRequest<'a> {
     pub model: &'a str,
     pub messages: Vec<serde_json::Value>,
     pub tools: Vec<serde_json::Value>,
+    /// The selected model's maximum window. Allocation is sized to the request;
+    /// an explicit context rejection may grow it within this limit.
+    pub context_window_tokens: Option<u64>,
+    /// Keep the allocation stable through one tool loop instead of reloading
+    /// the runtime whenever compaction or an exchange makes the prompt smaller.
+    pub minimum_context_window_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -146,33 +162,96 @@ pub fn discover_ollama_models(base_url: Option<&str>) -> Result<OllamaDiscovery>
 /// Resolve only the selected model before a turn. Full catalog enrichment is
 /// reserved for Settings; unrelated installed models must not delay a send.
 pub fn discover_ollama_model(base_url: Option<&str>, model: &str) -> Result<Option<OllamaModel>> {
+    discover_ollama_model_with_cancellation(base_url, model, &CancellationToken::default())
+}
+
+pub fn discover_ollama_model_with_cancellation(
+    base_url: Option<&str>,
+    model: &str,
+    cancellation: &CancellationToken,
+) -> Result<Option<OllamaModel>> {
+    let result = discover_selected_model(base_url, model, cancellation);
+    if cancellation.is_cancelled() {
+        Err(anyhow!(OLLAMA_CANCELLED_MESSAGE))
+    } else {
+        result
+    }
+}
+
+fn discover_selected_model(
+    base_url: Option<&str>,
+    model: &str,
+    cancellation: &CancellationToken,
+) -> Result<Option<OllamaModel>> {
+    if cancellation.is_cancelled() {
+        return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
+    }
     let endpoint = ollama_endpoint(base_url)?;
-    let response = agent()
-        .get(endpoint.join("tags")?.as_str())
-        .call()
+    let response = crate::chat_http::get(&endpoint.join("tags")?, cancellation, REQUEST_TIMEOUT)
         .map_err(ollama_http_error)?;
-    ensure_loopback_response(&response, &endpoint)?;
-    let tags: OllamaTagsResponse = response.into_json().context("invalid Ollama model list")?;
-    Ok(tags
-        .models
-        .into_iter()
-        .find(|tag| tag.name == model)
-        .map(|tag| enrich_model(&endpoint, tag)))
+    ensure_loopback_response_url(response.get_url(), &endpoint)?;
+    let tags: OllamaTagsResponse = read_metadata(response.into_reader())?;
+    if cancellation.is_cancelled() {
+        return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
+    }
+    let Some(tag) = tags.models.into_iter().find(|tag| tag.name == model) else {
+        return Ok(None);
+    };
+    let show = crate::chat_http::post_with_deadline(
+        &endpoint.join("show")?,
+        &ureq::json!({ "model": tag.name }),
+        cancellation,
+        REQUEST_TIMEOUT,
+    )
+    .ok()
+    .and_then(|response| {
+        ensure_loopback_response_url(response.get_url(), &endpoint).ok()?;
+        read_metadata::<OllamaShowResponse>(response.into_reader()).ok()
+    });
+    if cancellation.is_cancelled() {
+        return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
+    }
+    Ok(Some(model_from_show(tag, show)))
+}
+
+fn read_metadata<T: serde::de::DeserializeOwned>(reader: impl std::io::Read) -> Result<T> {
+    use std::io::Read;
+    const LIMIT: u64 = 4 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    reader.take(LIMIT + 1).read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= LIMIT,
+        "Ollama metadata exceeded its size limit"
+    );
+    serde_json::from_slice(&bytes).context("invalid Ollama metadata")
 }
 
 /// Submit one text-only Ollama chat turn. The caller owns session history and
 /// capability execution; keeping that state in Gyro is what makes runs
 /// resumable even though Ollama itself has no durable conversation cursor.
 pub fn ollama_chat(request: OllamaChatRequest<'_>) -> Result<OllamaChatResponse> {
-    ollama_tool_chat(OllamaToolChatRequest {
-        base_url: request.base_url,
-        model: request.model,
-        messages: vec![
-            serde_json::json!({ "role": "system", "content": request.system }),
-            serde_json::json!({ "role": "user", "content": request.user }),
-        ],
-        tools: Vec::new(),
-    })
+    ollama_chat_with_cancellation(request, &CancellationToken::default())
+}
+
+pub fn ollama_chat_with_cancellation(
+    request: OllamaChatRequest<'_>,
+    cancellation: &CancellationToken,
+) -> Result<OllamaChatResponse> {
+    ollama_tool_chat_with_progress(
+        OllamaToolChatRequest {
+            base_url: request.base_url,
+            model: request.model,
+            messages: vec![
+                serde_json::json!({ "role": "system", "content": request.system }),
+                serde_json::json!({ "role": "user", "content": request.user }),
+            ],
+            tools: Vec::new(),
+            context_window_tokens: request.context_window_tokens,
+            minimum_context_window_tokens: None,
+        },
+        cancellation,
+        |_| {},
+    )
 }
 
 /// Run a single model turn with optional native function tools. Callers retain
@@ -195,9 +274,46 @@ pub fn ollama_tool_chat_with_progress<F>(
 where
     F: FnMut(&str),
 {
+    ollama_tool_chat_with_updates(request, cancellation, on_delta, |_, _| {})
+}
+
+/// Stream measured request counts alongside text, using the allocated window.
+pub fn ollama_tool_chat_with_updates<F, U>(
+    request: OllamaToolChatRequest<'_>,
+    cancellation: &CancellationToken,
+    on_delta: F,
+    mut on_usage: U,
+) -> Result<OllamaChatResponse>
+where
+    F: FnMut(&str),
+    U: FnMut(UsageTokens, Option<u64>),
+{
+    let mut window = request_context_window(&request)?;
     crate::provider_retry::stream_response(
         cancellation,
-        |emit| ollama_tool_chat_once(&request, cancellation, emit),
+        |mut emit| loop {
+            match ollama_tool_chat_once_with_updates(
+                &request,
+                window,
+                cancellation,
+                &mut emit,
+                &mut on_usage,
+            ) {
+                Err(error) if error.is::<OllamaContextOverflow>() => {
+                    let can_grow = window
+                        .zip(request.context_window_tokens)
+                        .is_some_and(|(allocated, maximum)| allocated < maximum);
+                    if !can_grow || !crate::provider_retry::compatibility_retry() {
+                        return Err(error);
+                    }
+                    // A tokenizer-confirmed rejection happened before any
+                    // published output or tool calls. One bounded retry uses
+                    // the model's capacity, with identical messages and tools.
+                    window = request.context_window_tokens;
+                }
+                result => return result,
+            }
+        },
         on_delta,
     )
     .map_err(|error| {
@@ -209,14 +325,31 @@ where
     })
 }
 
+#[cfg(test)]
 fn ollama_tool_chat_once<F>(
     request: &OllamaToolChatRequest<'_>,
+    window: Option<u64>,
     cancellation: &CancellationToken,
-    mut on_delta: F,
+    on_delta: F,
 ) -> Result<OllamaChatResponse>
 where
     F: FnMut(&str),
 {
+    ollama_tool_chat_once_with_updates(request, window, cancellation, on_delta, |_, _| {})
+}
+
+fn ollama_tool_chat_once_with_updates<F, U>(
+    request: &OllamaToolChatRequest<'_>,
+    window: Option<u64>,
+    cancellation: &CancellationToken,
+    mut on_delta: F,
+    mut on_usage: U,
+) -> Result<OllamaChatResponse>
+where
+    F: FnMut(&str),
+    U: FnMut(UsageTokens, Option<u64>),
+{
+    let mut last_live_usage = None;
     if cancellation.is_cancelled() {
         return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
     }
@@ -226,19 +359,34 @@ where
     }
     let endpoint = ollama_endpoint(request.base_url)?;
     let url = endpoint.join("chat")?;
-    let payload = ureq::json!({"model": model, "stream": true,
-        "messages": request.messages, "tools": request.tools});
+    let mut payload = ureq::json!({"model": model, "stream": true,
+        "messages": request.messages, "tools": request.tools,
+        "truncate": false, "shift": false});
+    if let Some(window) = window {
+        anyhow::ensure!(
+            window > 0 && window <= i32::MAX as u64,
+            "Ollama model returned an invalid context window"
+        );
+        payload["options"] = ureq::json!({ "num_ctx": window });
+    }
     let mut observation = None;
+    let mut receipt = crate::openai_compatible::UsageReceipt::start(cancellation);
     let response = crate::provider_retry::http_response(cancellation, || {
         observation = Some(crate::provider_observation::Request::start(&payload));
-        let response =
-            crate::chat_http::post(&url, "", &payload, cancellation, CHAT_IDLE_TIMEOUT, true);
+        let response = crate::chat_http::post(
+            &url,
+            "",
+            &payload,
+            &receipt.transport,
+            CHAT_IDLE_TIMEOUT,
+            true,
+        );
         if matches!(&response, Err(ureq::Error::Status(400..=499, _))) {
             observation.as_mut().unwrap().rejected();
         }
         response
     })
-    .map_err(ollama_http_error)?;
+    .map_err(ollama_generation_error)?;
     if (300..400).contains(&response.status()) {
         anyhow::bail!("Ollama redirected the chat request");
     }
@@ -250,89 +398,229 @@ where
     let mut tool_calls = Vec::new();
     let mut input_tokens = None;
     let mut output_tokens = None;
+    let mut cached_input_tokens = None;
+    let mut thinking_chars = 0usize;
     let mut line = String::new();
     let mut remaining = crate::provider_retry::MAX_CHAT_RESPONSE_BYTES;
     let mut completed = false;
+    let mut receipt_completed = false;
+    let mut final_usage = false;
+    let mut usage_regressed = false;
+    let mut truncated = false;
+    let mut terminal_error = None;
     loop {
         if cancellation.is_cancelled() {
             return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
         }
-        let read = crate::provider_retry::read_chat_line(&mut reader, &mut line, &mut remaining)
-            .context("invalid Ollama chat stream")?;
+        let read =
+            match crate::provider_retry::read_chat_line(&mut reader, &mut line, &mut remaining) {
+                Ok(read) => read,
+                Err(_) if receipt.draining() && !cancellation.is_cancelled() => break,
+                Err(error) => return Err(error).context("invalid Ollama chat stream"),
+            };
         if read == 0 {
+            receipt_completed = true;
             break;
         }
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        let frame: OllamaChatStreamFrame =
-            serde_json::from_str(trimmed).context("invalid Ollama chat response")?;
-        observation.reported(frame.prompt_eval_count, frame.eval_count);
-        anyhow::ensure!(
-            frame.error.is_none(),
-            "Ollama reported a generation error; no tool calls were executed"
-        );
-        anyhow::ensure!(
-            frame.done_reason.as_deref() != Some("length"),
-            "Ollama reached its output token limit; the response is incomplete and no tool calls from this response were executed"
-        );
-        // Some gateways label NDJSON as JSON. An explicit incomplete frame
-        // still requires a final done marker before tool calls can be used.
-        is_stream |= frame.done == Some(false);
-        if !frame.message.content.is_empty() {
-            observation.delta(&frame.message.content);
-            on_delta(&frame.message.content);
-            content.push_str(&frame.message.content);
+        let frame: OllamaChatStreamFrame = match serde_json::from_str(trimmed) {
+            Ok(frame) => frame,
+            Err(_) if receipt.draining() => break,
+            Err(error) => return Err(error).context("invalid Ollama chat response"),
+        };
+        final_usage |= (completed || frame.done == Some(true))
+            && (frame.prompt_eval_count.is_some() || frame.eval_count.is_some());
+        // Metrics are cumulative snapshots; a lower snapshot cannot erase
+        // consumption already observed or establish a fresh zero receipt.
+        usage_regressed |= retain_usage_snapshot(&mut input_tokens, frame.prompt_eval_count);
+        usage_regressed |= retain_usage_snapshot(&mut output_tokens, frame.eval_count);
+        usage_regressed |=
+            retain_usage_snapshot(&mut cached_input_tokens, frame.prompt_eval_cached_count);
+        observation.reported(input_tokens, output_tokens);
+        observation.details(cached_input_tokens, None);
+        if usage_regressed {
+            observation.accounted_usage(regressed_usage(UsageTokens::measured(
+                input_tokens,
+                cached_input_tokens,
+                output_tokens,
+                None,
+                None,
+            )));
         }
-        for call in frame.message.tool_calls {
-            if call.function.name.trim().is_empty() {
-                continue;
+        if input_tokens.is_some() || output_tokens.is_some() {
+            let mut tokens =
+                UsageTokens::measured(input_tokens, cached_input_tokens, output_tokens, None, None)
+                    .partial(crate::usage::UsageReason::ProviderIncomplete);
+            if usage_regressed {
+                tokens = regressed_usage(tokens);
             }
-            anyhow::ensure!(
-                tool_calls.len() < crate::provider_retry::MAX_CHAT_TOOL_CALLS,
-                "Ollama returned too many tool calls; no tool calls were executed"
-            );
-            tool_calls.push(OllamaToolCall {
-                name: call.function.name,
-                arguments: call.function.arguments,
+            if last_live_usage != Some(tokens) {
+                last_live_usage = Some(tokens);
+                on_usage(tokens, window);
+            }
+        }
+        if let Some(error) = frame.error {
+            if content.is_empty()
+                && thinking_chars == 0
+                && tool_calls.is_empty()
+                && context_overflow_message(&error)
+            {
+                observation.rejected();
+                return Err(OllamaContextOverflow.into());
+            }
+            terminal_error.get_or_insert_with(|| {
+                anyhow!("Ollama reported a generation error; no tool calls were executed")
             });
         }
-        if frame.prompt_eval_count.is_some() {
-            input_tokens = frame.prompt_eval_count;
+        if frame.done_reason.as_deref() == Some("length") {
+            // The cap can fall between tool calls. Drop every call from this
+            // answer; the finished response fails below even when some text
+            // already arrived.
+            truncated = true;
+            tool_calls.clear();
         }
-        if frame.eval_count.is_some() {
-            output_tokens = frame.eval_count;
+        // Some gateways label NDJSON as JSON. Incomplete frames still require
+        // the terminal done marker before any tool call can be used.
+        is_stream |= frame.done == Some(false);
+        if !completed && terminal_error.is_none() {
+            if !frame.message.thinking.is_empty() {
+                thinking_chars =
+                    thinking_chars.saturating_add(frame.message.thinking.chars().count());
+                observation.delta(&frame.message.thinking);
+            }
+            if !frame.message.content.is_empty() {
+                observation.delta(&frame.message.content);
+                on_delta(&frame.message.content);
+                content.push_str(&frame.message.content);
+            }
+            for call in frame.message.tool_calls {
+                if truncated {
+                    break;
+                }
+                if call.function.name.trim().is_empty() {
+                    continue;
+                }
+                if tool_calls.len() >= crate::provider_retry::MAX_CHAT_TOOL_CALLS {
+                    terminal_error = Some(anyhow!(
+                        "Ollama returned too many tool calls; no tool calls were executed"
+                    ));
+                    break;
+                }
+                tool_calls.push(OllamaToolCall {
+                    name: call.function.name,
+                    arguments: call.function.arguments,
+                });
+            }
         }
-        if frame.done == Some(true) {
-            completed = true;
-            break;
+        completed |= frame.done == Some(true);
+        if completed || terminal_error.is_some() {
+            receipt.begin(&mut remaining);
         }
     }
+    if cancellation.is_cancelled() {
+        return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
+    }
     anyhow::ensure!(
-        completed || !is_stream,
+        completed || !is_stream || terminal_error.is_some(),
         "Ollama stream ended before completion; partial tool calls were not executed"
     );
     let content = content.trim().to_string();
-    if content.is_empty() && tool_calls.is_empty() {
-        return Err(anyhow!("Ollama finished without a text response"));
-    }
-    let output_chars = content.chars().count()
+    let output_chars = content.chars().count().saturating_add(thinking_chars)
         + tool_calls
             .iter()
             .map(|call| call.name.chars().count() + call.arguments.to_string().chars().count())
             .sum::<usize>();
-    observation.complete(input_tokens, output_tokens, output_chars);
+    let mut accounted_usage = ollama_accounted_usage(
+        input_tokens,
+        output_tokens,
+        cached_input_tokens,
+        crate::provider_observation::text_size(&payload).0,
+        output_chars,
+        receipt_completed && (final_usage || !is_stream),
+    );
+    if usage_regressed {
+        accounted_usage = regressed_usage(accounted_usage);
+    }
+    observation.accounted_usage(accounted_usage);
+    if terminal_error.is_none() || (receipt_completed && completed) {
+        observation.complete(input_tokens, output_tokens, output_chars);
+    }
+    if let Some(error) = terminal_error {
+        return Err(error);
+    }
+    // An output cap is an incomplete answer. Returning the partial text would
+    // let a later tool round treat it as the model's finished decision.
+    if truncated {
+        return Err(anyhow!(
+            "Ollama reached its output token limit; no tool calls from this response were executed"
+        ));
+    }
+    if content.is_empty() && tool_calls.is_empty() {
+        return Err(anyhow!("Ollama finished without a text response"));
+    }
     Ok(OllamaChatResponse {
         content,
         input_tokens,
         output_tokens,
+        accounted_usage,
         tool_calls,
+        truncated,
+        context_window_tokens: window,
     })
 }
 
+fn retain_usage_snapshot(current: &mut Option<u64>, incoming: Option<u64>) -> bool {
+    let regressed = current.zip(incoming).is_some_and(|(old, new)| new < old);
+    *current = match (*current, incoming) {
+        (Some(old), Some(new)) => Some(old.max(new)),
+        (old, new) => old.or(new),
+    };
+    regressed
+}
+
+fn regressed_usage(mut tokens: UsageTokens) -> UsageTokens {
+    let mut accounting = tokens.effective_accounting();
+    accounting.coverage = crate::usage::UsageCoverage::Estimated;
+    accounting.reason = Some(crate::usage::UsageReason::InconsistentCounts);
+    tokens.accounting = Some(accounting);
+    tokens.measured = false;
+    tokens
+}
+
+fn ollama_accounted_usage(
+    input: Option<u64>,
+    output: Option<u64>,
+    cached: Option<u64>,
+    input_chars: usize,
+    output_chars: usize,
+    receipt_complete: bool,
+) -> UsageTokens {
+    let mut tokens = if input.is_none() && output.is_none() && cached.is_none() {
+        UsageTokens::estimated(input_chars, output_chars)
+    } else {
+        // Retain only provider-observed buckets when the receipt is partial.
+        UsageTokens::measured(input, cached, output, None, None)
+    };
+    // eval_count includes the generated response, including thinking. Ollama
+    // reports no separate token count for the thinking text: keep that bucket
+    // unknown rather than substituting characters for the model's tokenizer.
+    if input.is_none() || output.is_none() {
+        tokens = tokens.partial(UsageReason::MissingUsage);
+    } else if !receipt_complete {
+        tokens = tokens.partial(UsageReason::ProviderIncomplete);
+    }
+    tokens
+}
+
 fn agent() -> ureq::Agent {
-    agent_with_read_timeout(REQUEST_TIMEOUT)
+    // Discovery and health share one pooled agent; generation uses chat_http.
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT
+        .get_or_init(|| agent_with_read_timeout(REQUEST_TIMEOUT))
+        .clone()
 }
 
 /// Short discovery probes have a total deadline; generation uses chat_http.
@@ -370,6 +658,27 @@ fn ollama_http_error(error: ureq::Error) -> anyhow::Error {
     }
 }
 
+fn ollama_generation_error(error: ureq::Error) -> anyhow::Error {
+    match error {
+        ureq::Error::Status(400, response) => {
+            use std::io::Read;
+            let value =
+                serde_json::from_reader::<_, serde_json::Value>(response.into_reader().take(8192))
+                    .ok();
+            if value
+                .as_ref()
+                .and_then(|value| value.get("error"))
+                .is_some_and(context_overflow_message)
+            {
+                OllamaContextOverflow.into()
+            } else {
+                anyhow!("Ollama returned HTTP 400")
+            }
+        }
+        error => ollama_http_error(error),
+    }
+}
+
 #[derive(Deserialize)]
 struct OllamaTagsResponse {
     #[serde(default)]
@@ -402,7 +711,7 @@ struct OllamaShowResponse {
 struct OllamaChatStreamFrame {
     #[serde(default)]
     error: Option<serde_json::Value>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_message")]
     message: OllamaChatWireMessage,
     #[serde(default)]
     done: Option<bool>,
@@ -411,15 +720,36 @@ struct OllamaChatStreamFrame {
     #[serde(default)]
     prompt_eval_count: Option<u64>,
     #[serde(default)]
+    prompt_eval_cached_count: Option<u64>,
+    #[serde(default)]
     eval_count: Option<u64>,
 }
 
 #[derive(Default, Deserialize)]
 struct OllamaChatWireMessage {
     #[serde(default)]
+    #[serde(deserialize_with = "nullable_text")]
     content: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_text")]
+    thinking: String,
+    #[serde(default, deserialize_with = "nullable_calls")]
     tool_calls: Vec<OllamaToolCallWire>,
+}
+
+fn nullable_message<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<OllamaChatWireMessage, D::Error> {
+    Ok(Option::<OllamaChatWireMessage>::deserialize(deserializer)?.unwrap_or_default())
+}
+fn nullable_text<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
+}
+fn nullable_calls<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Vec<OllamaToolCallWire>, D::Error> {
+    Ok(Option::<Vec<OllamaToolCallWire>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Deserialize)]
@@ -436,12 +766,6 @@ struct OllamaToolFunctionWire {
 }
 
 fn enrich_model(endpoint: &Url, tag: OllamaTag) -> OllamaModel {
-    let fallback_description = tag
-        .details
-        .family
-        .as_deref()
-        .map(|family| format!("Local {family} model through Ollama."))
-        .unwrap_or_else(|| "Local model through Ollama.".into());
     let show = endpoint.join("show").ok().and_then(|url| {
         let response = agent()
             .post(url.as_str())
@@ -450,6 +774,16 @@ fn enrich_model(endpoint: &Url, tag: OllamaTag) -> OllamaModel {
         ensure_loopback_response(&response, endpoint).ok()?;
         response.into_json::<OllamaShowResponse>().ok()
     });
+    model_from_show(tag, show)
+}
+
+fn model_from_show(tag: OllamaTag, show: Option<OllamaShowResponse>) -> OllamaModel {
+    let fallback_description = tag
+        .details
+        .family
+        .as_deref()
+        .map(|family| format!("Local {family} model through Ollama."))
+        .unwrap_or_else(|| "Local model through Ollama.".into());
     let supports_tools = show.as_ref().is_some_and(|value| {
         value
             .capabilities
@@ -492,8 +826,118 @@ fn model_context_window(value: &serde_json::Value) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::usage::UsageSource;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{Shutdown, TcpListener};
+
+    fn read_payload(stream: &mut std::net::TcpStream) -> serde_json::Value {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut header = String::new();
+        reader.read_line(&mut header).unwrap();
+        let mut length = 0;
+        loop {
+            header.clear();
+            reader.read_line(&mut header).unwrap();
+            if header == "\r\n" {
+                break;
+            }
+            if let Some((name, value)) = header.split_once(':') {
+                if name.eq_ignore_ascii_case("content-length") {
+                    length = value.trim().parse().unwrap();
+                }
+            }
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        if body.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&body).unwrap()
+        }
+    }
+
+    #[test]
+    fn a_context_rejection_grows_once_without_discarding_the_prompt_or_tools() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for (status, body) in [
+                (
+                    400,
+                    r#"{"error":"the input length exceeds the context length"}"#,
+                ),
+                (
+                    200,
+                    r#"{"message":{"content":"ready"},"done":true,"prompt_eval_count":5,"eval_count":2}"#,
+                ),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                requests.push(read_payload(&mut stream));
+                write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+            assert_eq!(requests[0]["options"]["num_ctx"], 4096);
+            assert_eq!(requests[1]["options"]["num_ctx"], 32768);
+            for key in ["messages", "tools", "model", "truncate", "shift"] {
+                assert_eq!(requests[0][key], requests[1][key], "{key}");
+            }
+            assert_eq!(requests[0]["truncate"], false);
+            assert_eq!(requests[0]["shift"], false);
+        });
+        let _scope = crate::provider_observation::Scope::start();
+        let response = ollama_tool_chat_with_progress(OllamaToolChatRequest {
+            base_url: Some(&format!("http://{address}/api")), model: "fixture",
+            messages: vec![serde_json::json!({"role":"user", "content":"Keep this original request."})],
+            tools: vec![serde_json::json!({"function":{"name":"read_file", "parameters":{"type":"object"}}})],
+            context_window_tokens: Some(32768), minimum_context_window_tokens: None,
+        }, &CancellationToken::default(), |_| {}).unwrap();
+        server.join().unwrap();
+        assert_eq!(response.context_window_tokens, Some(32768));
+        let summary = crate::provider_observation::snapshot().unwrap();
+        assert_eq!(
+            (summary.requests, summary.rejected, summary.retries),
+            (2, 1, 1)
+        );
+        assert_eq!(summary.tokens.unwrap().total_tokens, 7);
+    }
+
+    #[test]
+    fn context_errors_never_replay_published_text_or_partial_tool_calls() {
+        for first in [
+            r#"{"message":{"content":"visible"},"done":false}"#,
+            r#"{"message":{"tool_calls":[{"function":{"name":"read_file","arguments":{}}}]},"done":false}"#,
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let body =
+                format!("{first}\n{{\"error\":\"the input length exceeds the context length\"}}\n");
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                read_payload(&mut stream);
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            });
+            let _scope = crate::provider_observation::Scope::start();
+            let result = ollama_tool_chat_with_progress(
+                OllamaToolChatRequest {
+                    base_url: Some(&format!("http://{address}/api")),
+                    model: "fixture",
+                    messages: Vec::new(),
+                    tools: Vec::new(),
+                    context_window_tokens: Some(32768),
+                    minimum_context_window_tokens: None,
+                },
+                &CancellationToken::default(),
+                |_| {},
+            );
+            server.join().unwrap();
+            assert!(result.is_err());
+            let summary = crate::provider_observation::snapshot().unwrap();
+            assert_eq!((summary.requests, summary.retries), (1, 0));
+        }
+    }
 
     fn chat_once_from_body(body: String, content_type: &'static str) -> Result<OllamaChatResponse> {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -531,12 +975,190 @@ mod tests {
                 model: "test",
                 messages: Vec::new(),
                 tools: Vec::new(),
+                context_window_tokens: None,
+                minimum_context_window_tokens: None,
             },
+            None,
             &CancellationToken::default(),
             |_| {},
         );
         server.join().unwrap();
         response
+    }
+
+    #[test]
+    fn thinking_keeps_real_output_totals_without_inventing_a_reasoning_count() {
+        let _scope = crate::provider_observation::Scope::start();
+        let response = chat_once_from_body(concat!(
+            "{\"message\":{\"content\":null,\"thinking\":\"reasoning\",\"tool_calls\":null},\"done\":false}\n",
+            "{\"message\":{\"content\":\"done\"},\"done\":false,\"prompt_eval_count\":100,\"eval_count\":10}\n",
+            "{\"message\":null,\"done\":true,\"prompt_eval_count\":100,\"prompt_eval_cached_count\":80,\"eval_count\":20}\n",
+            "{\"done\":true,\"prompt_eval_count\":100,\"prompt_eval_cached_count\":80,\"eval_count\":20}\n"
+        ).to_string(), "application/x-ndjson").unwrap();
+        assert_eq!(response.content, "done");
+        let tokens = response.accounted_usage;
+        assert_eq!(
+            (
+                tokens.input_tokens,
+                tokens.output_tokens,
+                tokens.cached_input_tokens,
+                tokens.total_tokens
+            ),
+            (100, 20, 80, 120)
+        );
+        assert_eq!(tokens.reasoning_output_tokens, 0);
+        let accounting = tokens.accounting.unwrap();
+        assert_eq!(accounting.source, UsageSource::Provider);
+        assert!(accounting.known.cache_read);
+        assert!(!accounting.known.reasoning);
+        assert!(tokens.measured);
+        assert_eq!(accounting.coverage, crate::usage::UsageCoverage::Complete);
+        assert_eq!(
+            crate::provider_observation::snapshot()
+                .unwrap()
+                .tokens
+                .unwrap(),
+            tokens.with_scope(crate::usage::UsageScope::Turn)
+        );
+    }
+
+    #[test]
+    fn regressing_snapshots_keep_consumption_and_demote_the_collector_receipt() {
+        let _scope = crate::provider_observation::Scope::start();
+        let response = chat_once_from_body(concat!(
+            "{\"message\":{\"content\":\"done\"},\"done\":false,\"prompt_eval_count\":100,\"eval_count\":20,\"prompt_eval_cached_count\":80}\n",
+            "{\"done\":true,\"prompt_eval_count\":0,\"eval_count\":0,\"prompt_eval_cached_count\":0}\n"
+        ).to_string(), "application/x-ndjson").unwrap();
+        assert_eq!(response.accounted_usage.total_tokens, 120);
+        assert!(!response.accounted_usage.measured);
+        assert_eq!(
+            response.accounted_usage.effective_accounting().coverage,
+            crate::usage::UsageCoverage::Estimated
+        );
+        assert_eq!(
+            response.accounted_usage.effective_accounting().reason,
+            Some(UsageReason::InconsistentCounts)
+        );
+        assert_eq!(
+            crate::provider_observation::snapshot()
+                .unwrap()
+                .tokens
+                .unwrap(),
+            response
+                .accounted_usage
+                .with_scope(crate::usage::UsageScope::Turn)
+        );
+    }
+
+    #[test]
+    fn error_then_final_metrics_preserves_counts_and_refuses_tools() {
+        for terminal in [
+            "{\"error\":\"generation failed\"}\n",
+            "{\"done\":true,\"done_reason\":\"length\"}\n",
+        ] {
+            let _scope = crate::provider_observation::Scope::start();
+            let body = format!(
+                "{{\"message\":{{\"tool_calls\":[{{\"function\":{{\"name\":\"write_file\",\"arguments\":{{}}}}}}]}},\"done\":false}}\n{terminal}{{\"done\":true,\"prompt_eval_count\":40,\"eval_count\":5}}\n"
+            );
+            assert!(chat_once_from_body(body, "application/x-ndjson").is_err());
+            let tokens = crate::provider_observation::snapshot()
+                .unwrap()
+                .tokens
+                .unwrap();
+            assert_eq!(
+                (
+                    tokens.input_tokens,
+                    tokens.output_tokens,
+                    tokens.total_tokens
+                ),
+                (40, 5, 45)
+            );
+        }
+    }
+
+    #[test]
+    fn missing_buckets_preserve_only_provider_observed_counts() {
+        let tokens = ollama_accounted_usage(None, Some(5), Some(100), 80_000, 40_000, true);
+        assert_eq!(tokens.input_tokens, 100);
+        assert_eq!(tokens.total_tokens, 105);
+        assert_eq!(
+            tokens.effective_accounting().coverage,
+            crate::usage::UsageCoverage::Partial
+        );
+        assert_eq!(tokens.effective_accounting().source, UsageSource::Provider);
+        assert!(!tokens.effective_accounting().known.input);
+        assert!(tokens.effective_accounting().known.output);
+        assert!(tokens.effective_accounting().known.cache_read);
+        let cache_only = ollama_accounted_usage(None, None, Some(100), 80_000, 40_000, true);
+        assert_eq!(
+            (
+                cache_only.input_tokens,
+                cache_only.output_tokens,
+                cache_only.total_tokens
+            ),
+            (100, 0, 100)
+        );
+        assert_eq!(
+            cache_only.effective_accounting().coverage,
+            crate::usage::UsageCoverage::Partial
+        );
+        assert_eq!(
+            cache_only.effective_accounting().source,
+            UsageSource::Provider
+        );
+    }
+
+    #[test]
+    fn partial_final_metrics_reach_the_request_collector_without_character_substitutes() {
+        for (metrics, expected) in [
+            ("\"prompt_eval_count\":7", 7),
+            ("\"eval_count\":3", 3),
+            ("\"prompt_eval_cached_count\":5", 5),
+        ] {
+            let _scope = crate::provider_observation::Scope::start();
+            let response = chat_once_from_body(
+                format!(
+                    "{{\"message\":{{\"content\":\"{}\"}},\"done\":true,{metrics}}}\n",
+                    "x".repeat(4000),
+                ),
+                "application/x-ndjson",
+            )
+            .unwrap();
+            let tokens = response.accounted_usage;
+            assert_eq!(tokens.total_tokens, expected);
+            assert_eq!(
+                tokens.effective_accounting().coverage,
+                crate::usage::UsageCoverage::Partial
+            );
+            assert_eq!(tokens.effective_accounting().source, UsageSource::Provider);
+            assert_eq!(
+                crate::provider_observation::snapshot()
+                    .unwrap()
+                    .tokens
+                    .unwrap(),
+                tokens.with_scope(crate::usage::UsageScope::Turn)
+            );
+        }
+    }
+
+    #[test]
+    fn missing_metrics_and_explicit_zero_remain_distinct() {
+        let missing = chat_once_from_body(
+            "{\"message\":{\"content\":\"done\"},\"done\":true}\n".to_string(),
+            "application/x-ndjson",
+        )
+        .unwrap()
+        .accounted_usage;
+        assert_eq!(
+            missing.accounting.unwrap().source,
+            UsageSource::CharacterEstimate
+        );
+        assert!(!missing.measured);
+        let zero = chat_once_from_body(
+            "{\"message\":{\"content\":\"done\"},\"done\":true,\"prompt_eval_count\":0,\"prompt_eval_cached_count\":0,\"eval_count\":0}\n".to_string(),"application/x-ndjson"
+        ).unwrap().accounted_usage;
+        assert_eq!(zero.total_tokens, 0);
+        assert!(zero.measured && zero.accounting.unwrap().known.cache_read);
     }
 
     #[test]
@@ -662,6 +1284,7 @@ mod tests {
             model: "test-local-model",
             system: "Be concise",
             user: "Hello",
+            context_window_tokens: None,
         })
         .unwrap();
         server.join().unwrap();
@@ -699,6 +1322,11 @@ mod tests {
                 r#"{"message":{"content":"lo"},"done":true,"prompt_eval_count":3,"eval_count":2}"#,
                 "\n"
             );
+            let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(request["options"]["num_ctx"], 4096);
+            assert_eq!(request["truncate"], false);
+            assert_eq!(request["shift"], false);
+            assert_eq!(request["model"], "test-local-model");
             write!(
                 stream,
                 "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -714,6 +1342,8 @@ mod tests {
                 model: "test-local-model",
                 messages: vec![serde_json::json!({ "role": "user", "content": "Hi" })],
                 tools: Vec::new(),
+                context_window_tokens: Some(32768),
+                minimum_context_window_tokens: None,
             },
             &CancellationToken::default(),
             |delta| deltas.push(delta.to_string()),
@@ -733,6 +1363,8 @@ mod tests {
                 model: "test-local-model",
                 messages: Vec::new(),
                 tools: Vec::new(),
+                context_window_tokens: None,
+                minimum_context_window_tokens: None,
             },
             &cancellation,
             |_| {},
@@ -740,6 +1372,139 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert_eq!(error, OLLAMA_CANCELLED_MESSAGE);
+    }
+
+    #[test]
+    fn rejects_invalid_context_windows_before_sending() {
+        for window in [0, i32::MAX as u64 + 1, u64::MAX] {
+            let error = ollama_tool_chat_once(
+                &OllamaToolChatRequest {
+                    base_url: Some("http://127.0.0.1:9/api"),
+                    model: "test",
+                    messages: Vec::new(),
+                    tools: Vec::new(),
+                    context_window_tokens: Some(window),
+                    minimum_context_window_tokens: None,
+                },
+                Some(window),
+                &CancellationToken::default(),
+                |_| {},
+            )
+            .unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "Ollama model returned an invalid context window"
+            );
+        }
+    }
+
+    #[test]
+    fn text_chat_cancellation_closes_an_in_flight_silent_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sent, received) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut reader = BufReader::new(&mut stream);
+            let mut header = String::new();
+            reader.read_line(&mut header).unwrap();
+            let mut length = 0;
+            loop {
+                header.clear();
+                reader.read_line(&mut header).unwrap();
+                if header == "\r\n" {
+                    break;
+                }
+                if let Some((name, value)) = header.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        length = value.trim().parse().unwrap();
+                    }
+                }
+            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(request["options"]["num_ctx"], 4096);
+            sent.send(()).unwrap();
+            // No headers or body arrive: cancellation must interrupt the IO,
+            // rather than merely rejecting a response minutes later.
+            let mut byte = [0];
+            assert_eq!(reader.read(&mut byte).unwrap(), 0);
+        });
+        let cancellation = CancellationToken::default();
+        let worker_token = cancellation.clone();
+        let (finished, result) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            finished
+                .send(ollama_chat_with_cancellation(
+                    OllamaChatRequest {
+                        base_url: Some(&format!("http://{address}/api")),
+                        model: "test-local-model",
+                        system: "Be concise",
+                        user: "Hello",
+                        context_window_tokens: Some(40960),
+                    },
+                    &worker_token,
+                ))
+                .unwrap();
+        });
+        received.recv_timeout(Duration::from_secs(2)).unwrap();
+        cancellation.cancel();
+        let error = result
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.to_string(), OLLAMA_CANCELLED_MESSAGE);
+        worker.join().unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn selected_model_discovery_cancels_during_tags_or_show() {
+        for hang_on_show in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let (started, ready) = std::sync::mpsc::channel();
+            let server = std::thread::spawn(move || {
+                if hang_on_show {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    read_payload(&mut stream);
+                    let body = r#"{"models":[{"name":"fixture"}]}"#;
+                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                }
+                let (mut stream, _) = listener.accept().unwrap();
+                read_payload(&mut stream);
+                started.send(()).unwrap();
+                let mut byte = [0];
+                assert_eq!(stream.read(&mut byte).unwrap(), 0);
+            });
+            let token = CancellationToken::default();
+            let worker_token = token.clone();
+            let (done, result) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                done.send(discover_ollama_model_with_cancellation(
+                    Some(&format!("http://{address}/api")),
+                    "fixture",
+                    &worker_token,
+                ))
+                .unwrap();
+            });
+            ready.recv_timeout(Duration::from_secs(2)).unwrap();
+            token.cancel();
+            assert_eq!(
+                result
+                    .recv_timeout(Duration::from_secs(1))
+                    .unwrap()
+                    .unwrap_err()
+                    .to_string(),
+                OLLAMA_CANCELLED_MESSAGE
+            );
+            worker.join().unwrap();
+            server.join().unwrap();
+        }
     }
 
     #[test]

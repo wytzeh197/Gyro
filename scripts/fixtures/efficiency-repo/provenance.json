@@ -1,0 +1,44 @@
+{
+  "schema": "gyro.efficiency-repo-sources.v1",
+  "frozenDate": "2026-10-31",
+  "repositoryHead": "e5d3c64ad000d6b76f9dcf275f86d2c4e3fdbd23",
+  "description": "Frozen local Gyro modules. Tasks inject regressions into these snapshots; they are not claims of historical production bugs. HEAD alone does not reproduce modified or untracked sources; the file hashes below identify the exact bytes.",
+  "files": [
+    {
+      "path": "apps/desktop/src/chat-auto-retry.ts",
+      "sha256": "06f91f9e91a862e127829f5c8f332e70259641ada529af1e5169a2c85cfe2096",
+      "sourceState": "working-tree-modified",
+      "headSha256": "f13676529d9c8278871829a0aff2f7f8e197e8c673a931409e2f57b63f023ca7"
+    },
+    {
+      "path": "apps/desktop/src/workspace-search-run.ts",
+      "sha256": "1929c928612b56beb428777bbee271f3b44bed7e88c02d6c96920e93e367bfda",
+      "sourceState": "untracked",
+      "headSha256": null
+    },
+    {
+      "path": "packages/ui/src/turn-tokens.ts",
+      "sha256": "946ffbd8f596e92eb1e89098185626e7466b5efda2cddc768d2fd2ee27c27ef3",
+      "sourceState": "committed",
+      "headSha256": "946ffbd8f596e92eb1e89098185626e7466b5efda2cddc768d2fd2ee27c27ef3"
+    },
+    {
+      "path": "packages/ui/src/usage-ledger.ts",
+      "sha256": "29cd9c6beb481f653c0d2b8b4fbbd435fb2d1bec3d3488d86dca3f8fb81883a4",
+      "sourceState": "committed",
+      "headSha256": "29cd9c6beb481f653c0d2b8b4fbbd435fb2d1bec3d3488d86dca3f8fb81883a4"
+    },
+    {
+      "path": "packages/ui/src/token-count.ts",
+      "sha256": "ff5e1374650b05b0cb6e0dc0ec7b5d67acc7ed6cb68757cbeffcc197d95b52ff",
+      "sourceState": "committed",
+      "headSha256": "ff5e1374650b05b0cb6e0dc0ec7b5d67acc7ed6cb68757cbeffcc197d95b52ff"
+    },
+    {
+      "path": "packages/ui/src/usage-remaining.ts",
+      "sha256": "638c59e48dfb93773c91ee01512f92ce80bd13225b943e95201441677c48fd70",
+      "sourceState": "committed",
+      "headSha256": "638c59e48dfb93773c91ee01512f92ce80bd13225b943e95201441677c48fd70"
+    }
+  ]
+}

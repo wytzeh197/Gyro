@@ -51,7 +51,7 @@ export const DEFAULT_COUNCIL_PRESETS: CouncilPreset[] = [
     id: "cheap-local",
     name: "Cheap + local council",
     description: "Lower-cost and local-capable seats when available.",
-    seatProviderIds: ["kimi", "gemini"],
+    seatProviderIds: ["kimi", "antigravity"],
     synthesizerProviderId: "kimi",
     toolPolicy: "none",
     builtIn: true,

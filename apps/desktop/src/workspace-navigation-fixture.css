@@ -1,0 +1,72 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+.workspace-fixture {
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: var(--gyro-app);
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-sans);
+}
+.workspace-fixture header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--gyro-border);
+  font-size: 13px;
+}
+.workspace-fixture header span {
+  margin-right: auto;
+  color: var(--gyro-muted);
+}
+.workspace-fixture header button {
+  font: inherit;
+  color: var(--gyro-text);
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  padding: 6px 10px;
+}
+.workspace-fixture-editors {
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.workspace-fixture-editors.is-split {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.workspace-fixture-main,
+.workspace-fixture-split {
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.workspace-fixture-split {
+  border-left: 1px solid var(--gyro-border);
+}
+.workspace-fixture-tab {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 8px 12px;
+  font-size: 12px;
+  background: var(--gyro-pane);
+  border-bottom: 1px solid var(--gyro-border);
+}
+.workspace-fixture output {
+  padding: 8px 16px;
+  color: var(--gyro-muted);
+  font-size: 12px;
+  border-top: 1px solid var(--gyro-border);
+}
+.workspace-fixture .gyro-syntax-editor {
+  min-height: 0;
+}

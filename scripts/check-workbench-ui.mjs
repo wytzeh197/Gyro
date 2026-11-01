@@ -1,9 +1,20 @@
 #!/usr/bin/env node
+import { readFileSync } from "./read-product-source.mjs";
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
+import { formatCompactTokenCount } from "../packages/ui/src/token-count.ts";
 import { workspaceEditorOptions } from "../apps/desktop/src/editor-presentation.ts";
+import { completionMenuGeometry } from "../packages/ui/src/composer-completion-geometry.ts";
+import {
+  providerLoginProfile,
+  providerLoginCommandText,
+} from "../apps/desktop/src/provider-login-profile.ts";
 import { workspaceEditorColors } from "../packages/ui/src/editor/themes/workspace-colors.ts";
-import { appearanceAccentProperties, colorContrast, interfaceScales } from "../packages/ui/src/appearance.ts";
+import {
+  appearanceAccentProperties,
+  colorContrast,
+  interfaceScales,
+} from "../packages/ui/src/appearance.ts";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -56,6 +67,7 @@ import {
   serializeGyroWorkspaceFile,
   workspaceFolderPaths,
   workspaceFilesForRoot,
+  planWorkspaceMove,
   workspaceRelativeFilePath,
   workspaceRootForPath,
 } from "../packages/ui/src/workspace-project.ts";
@@ -196,6 +208,18 @@ expect(
     testedGridLayout.focusedPaneId === "pane:two",
   "Chat grid state should add, focus, and reorder four stable project slots.",
 );
+// A chat from another project must never enter this project's grid, and the
+// refused insert must not displace the pane the user already had open.
+const crossProjectGrid = chatGridReducer(chatGridState, {
+  type: "select-pane",
+  projectKey: "/Users/example/Gyro",
+  pane: gridPane("stranger", "/private/tmp/gyro-alpha45-smoke"),
+  mode: "replace",
+});
+expect(
+  crossProjectGrid === chatGridState,
+  "Chat grid must refuse a pane whose chat belongs to another project.",
+);
 // Dropping a sidebar chat already open in the split moves its existing pane,
 // preserving the React key, draft ownership and every other conversation.
 let reorderedGrid = chatGridReducer(chatGridState, {
@@ -231,8 +255,10 @@ for (const sessionId of ["three", "four"]) {
 const fullRow = reorderedGrid.layouts["/Users/example/Gyro"];
 expect(
   chatGridDropZones(fullRow.slots, "columns").length === 0 &&
-    chatGridDropZones(fullRow.slots, "columns", true).length === 5,
-  "A full row should expose boundaries only when rearranging one of its chats.",
+    chatGridDropZones(fullRow.slots, "columns", true).length === 5 &&
+    chatGridDropZones(fullRow.slots, "grid").length === 0 &&
+    chatGridDropZones(fullRow.slots, "grid", true).length === 4,
+  "A full row or grid should expose destinations only when rearranging one of its chats.",
 );
 reorderedGrid = chatGridReducer(reorderedGrid, {
   type: "select-pane",
@@ -451,8 +477,12 @@ expect(
     chatGridDropZones(
       [gridPane("one"), gridPane("two"), null, null],
       "rows",
-    ).every((zone) => zone.position.startsWith("position-")),
-  "A full row of four should offer no target, while a stack and a 2×2 grid keep their quadrants.",
+    ).every(
+      (zone) =>
+        zone.position.startsWith("stack-") &&
+        zone.placement?.arrangement === "rows",
+    ),
+  "A full row rejects new chats; stacks use horizontal insertion boundaries and grids use quadrants.",
 );
 const sanitizedChatGrid = sanitizeStoredChatGridState({
   activeProjectKey: "/Users/example/Gyro",
@@ -516,6 +546,7 @@ expect(
 );
 
 const appSource = [
+  readRepoFile("apps/desktop/src/provider-login-profile.ts"),
   readRepoFile("apps/desktop/src/App.tsx"),
   readRepoFile("apps/desktop/src/use-workbench-appearance.ts"),
   readRepoFile("apps/desktop/src/editor-presentation.ts"),
@@ -535,6 +566,18 @@ const captureFixtureSource = readRepoFile(
 );
 const workbenchSource = readRepoFile("packages/ui/src/workbench-state.ts");
 const monacoEditorSource = readRepoFile("apps/desktop/src/monaco-editor.ts");
+const workspaceCodeEditorSource = readRepoFile(
+  "apps/desktop/src/editor/workspace-code-editor.tsx",
+);
+const languageSessionsHookSource = readRepoFile(
+  "apps/desktop/src/editor/use-language-sessions.ts",
+);
+const languageSessionsSource = readRepoFile(
+  "apps/desktop/src/editor/language-sessions.ts",
+);
+const workspaceRenameSource = readRepoFile(
+  "apps/desktop/src/editor/use-workspace-rename.ts",
+);
 const providerStreamSource = readRepoFile(
   "apps/desktop/src/provider-stream-events.ts",
 );
@@ -566,12 +609,23 @@ const readinessAuditSource = readLocalOnlyFile(
   "docs/product-readiness-audit.md",
 );
 const surfaceSource = [
+  readRepoFile("packages/ui/src/diff-file-tree.ts"),
   readRepoFile("packages/ui/src/surfaces.tsx"),
+  readRepoFile("packages/ui/src/cli-session-list.tsx"),
+  readRepoFile("packages/ui/src/chat-session-drag.ts"),
+  readRepoFile("packages/ui/src/workspace-header.tsx"),
   readRepoFile("packages/ui/src/browser-capture-view.tsx"),
+  readRepoFile("packages/ui/src/browser-viewport-controls.tsx"),
   readRepoFile("packages/ui/src/settings-controls.tsx"),
+  readRepoFile("packages/ui/src/menu-dismiss.ts"),
+  readRepoFile("packages/ui/src/provider-settings-fields.tsx"),
+  readRepoFile("packages/ui/src/settings-presentation.tsx"),
   readRepoFile("packages/ui/src/appearance-settings.tsx"),
+  readRepoFile("packages/ui/src/desktop-notification-settings.tsx"),
   readRepoFile("packages/ui/src/use-chat-transcript-scroll.ts"),
   readRepoFile("packages/ui/src/chat-run-view.tsx"),
+  readRepoFile("packages/ui/src/settings-disclosure.tsx"),
+  readRepoFile("packages/ui/src/efficiency-settings.tsx"),
 ].join("\n");
 const chatGridDropSource = readRepoFile("packages/ui/src/chat-grid-drop.ts");
 const modelRailSource = readRepoFile("packages/ui/src/composer-model-rail.tsx");
@@ -585,13 +639,31 @@ const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const runSource = readRepoFile("packages/ui/src/chat-run.ts");
 const runViewSource = readRepoFile("packages/ui/src/chat-run-view.tsx");
 const styleSource = [
+  readRepoFile("packages/ui/src/styles-foundation.css"),
   readRepoFile("packages/ui/src/styles.css"),
   readRepoFile("packages/ui/src/appearance.css"),
+  readRepoFile("packages/ui/src/cli-view.css"),
+  readRepoFile("packages/ui/src/composer-effort-selector.css"),
+  readRepoFile("packages/ui/src/interaction-motion.css"),
+  readRepoFile("packages/ui/src/press-feedback.css"),
   readRepoFile("packages/ui/src/chat-design.css"),
+  readRepoFile("packages/ui/src/navigation-design.css"),
+  readRepoFile("packages/ui/src/ui-upgrade.css"),
   readRepoFile("packages/ui/src/browser-capture.css"),
   readRepoFile("packages/ui/src/installed-update.css"),
+  readRepoFile("packages/ui/src/chat-shell-design.css"),
+  readRepoFile("packages/ui/src/companion-design.css"),
 ].join("\n");
 const chatDesignSource = readRepoFile("packages/ui/src/chat-design.css");
+const planModeSource = [
+  readRepoFile("packages/ui/src/plan-mode.tsx"),
+  readRepoFile("packages/ui/src/chat-question-popup.tsx"),
+  readRepoFile("packages/ui/src/chat-questions.ts"),
+].join("\n");
+const planModeStyleSource = [
+  readRepoFile("packages/ui/src/plan-mode.css"),
+  readRepoFile("packages/ui/src/chat-question-popup.css"),
+].join("\n");
 const workspaceModeSource = readRepoFile("packages/ui/src/workspace-mode.ts");
 const desktopMainSource = readRepoFile("apps/desktop/src/main.tsx");
 const desktopIndexSource = readRepoFile("apps/desktop/index.html");
@@ -603,23 +675,26 @@ const desktopRustSource = [
   readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
   readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
+  readRepoFile("crates/gyro-core/src/provider_permissions.rs"),
 ].join("\n");
 expect(
   // Row heights live in tokens on the surface root and menu_bar.rs mirrors
   // them; the point of the check is that the two still agree, so it asserts
   // the tokens and the Rust constants rather than literals in each rule.
   // Everything on the surface is border-box, so these are the whole row.
-  menuBarStyleSource.includes("--menu-header: 64px") &&
-    menuBarStyleSource.includes("--menu-row: 60px") &&
-    menuBarStyleSource.includes("--menu-footer: 44px") &&
+  menuBarStyleSource.includes("--menu-header: 52px") &&
+    menuBarStyleSource.includes("--menu-row: 44px") &&
+    menuBarStyleSource.includes("--menu-approval: 92px") &&
+    menuBarStyleSource.includes("--menu-footer: 40px") &&
     menuBarStyleSource.includes("--menu-gutter-top: 8px") &&
     menuBarStyleSource.includes("--menu-gutter-bottom: 24px") &&
-    cssRules(menuBarStyleSource, ".gyro-menu-bar-idle p").some((rule) =>
-      rule.includes("margin: 0"),
+    cssRules(menuBarStyleSource, ".gyro-menu-bar-approval").some((rule) =>
+      rule.includes("height: var(--menu-approval)"),
     ) &&
-    menuBarRustSource.includes("const MENU_BAR_HEADER_HEIGHT: f64 = 64.0") &&
-    menuBarRustSource.includes("const MENU_BAR_ROW_HEIGHT: f64 = 60.0") &&
-    menuBarRustSource.includes("const MENU_BAR_FOOTER_HEIGHT: f64 = 44.0") &&
+    menuBarRustSource.includes("const MENU_BAR_HEADER_HEIGHT: f64 = 52.0") &&
+    menuBarRustSource.includes("const MENU_BAR_ROW_HEIGHT: f64 = 44.0") &&
+    menuBarRustSource.includes("const MENU_BAR_APPROVAL_HEIGHT: f64 = 92.0") &&
+    menuBarRustSource.includes("const MENU_BAR_FOOTER_HEIGHT: f64 = 40.0") &&
     menuBarRustSource.includes("const MENU_BAR_GUTTER_TOP: f64 = 8.0") &&
     menuBarRustSource.includes("const MENU_BAR_GUTTER_BOTTOM: f64 = 24.0") &&
     // The gutter exists so the CSS drop shadow is not clipped by the window.
@@ -693,7 +768,7 @@ expect(
   "Chat headers should keep the title clean and move workspace context into the Environment control.",
 );
 expect(
-  /className="gyro-chat-thread-identity"[\s\S]{0,900}?className="gyro-thread-project-icon"[\s\S]{0,260}?<strong>\{sessionTitle \?\? "Gyro session"\}<\/strong>/.test(
+  /className="gyro-chat-thread-identity"[\s\S]{0,900}?className="gyro-thread-project-icon"[\s\S]{0,600}?<strong[\s\S]{0,600}?data-chat-pane-drag=\{paneKey\}[\s\S]{0,600}?\{sessionTitle \?\? "Gyro session"\}\s*<\/strong>/.test(
     surfaceSource,
   ) &&
     !surfaceSource.includes("items={threadWorkspaceItems}") &&
@@ -745,10 +820,8 @@ expect(
     surfaceSource.includes('className="gyro-chat-grid-empty"') &&
     surfaceSource.includes("occupiedCount === 0 && children") &&
     surfaceSource.includes('className="gyro-chat-grid-drop-tile"') &&
-    chatGridDropSource.includes("function chatGridRowDropZones") &&
-    chatDesignSource.includes(
-      '.gyro-chat-grid-drop-zone[data-position="row-seam-1"]',
-    ) &&
+    chatGridDropSource.includes("function chatGridLinearDropZones") &&
+    chatDesignSource.includes("--gyro-chat-drop-zone-count") &&
     chatDesignSource.includes('[data-layout="row"]') &&
     chatGridDropSource.includes('label: "Open here"') &&
     chatGridDropSource.includes('label: "Left"') &&
@@ -757,20 +830,21 @@ expect(
     chatGridDropSource.includes('"Top right"') &&
     chatGridDropSource.includes('"Bottom left"') &&
     chatGridDropSource.includes('"Bottom right"') &&
+    surfaceSource.includes("const dropZones = zonesForDrag(dragIdentity)") &&
     surfaceSource.includes(
-      "chatGridDropZones(slots, arrangement, reorderingSession)",
+      "point && bounds ? { ...point, bounds, sourceSlotIndex }",
     ) &&
     surfaceSource.includes(
       "const dropLayout = chatGridDropLayout(dropZones)",
     ) &&
     surfaceSource.includes("data-layout={dropLayout}") &&
-    surfaceSource.includes('window.addEventListener("blur", finishDrag)') &&
-    surfaceSource.includes('window.addEventListener("dragend", finishDrag)') &&
+    surfaceSource.includes("subscribeChatDrag(observe)") &&
+    surfaceSource.includes("endChatDragForTransfer(event.dataTransfer)") &&
     surfaceSource.includes("didDrop && maximizedPaneId") &&
     appSource.includes("const displayedChatLayout =") &&
     appSource.includes("createChatProjectLayout(currentChatProjectKey)") &&
     appSource.includes("!activeChatLayout?.slots.some(Boolean)") &&
-    appSource.includes("sourceProjectKey !== displayedChatLayout.projectKey") &&
+    appSource.includes("projectKey !== displayedChatLayout.projectKey") &&
     !surfaceSource.includes("Drag another chat here") &&
     !surfaceSource.includes("Choose one of four chat slots") &&
     styleSource.includes(".gyro-chat-grid-empty") &&
@@ -787,7 +861,7 @@ expect(
   chatGridDropSource.includes("function nearestChatGridDropZone") &&
     surfaceSource.includes("nearestChatGridDropZone(") &&
     surfaceSource.includes("highlightZoneUnderPointer") &&
-    surfaceSource.includes("isChatDragging && dropTargetId === undefined") &&
+    surfaceSource.includes("if (isChatDragging) highlightZoneUnderPointer()") &&
     surfaceSource.includes("paneElementCache") &&
     surfaceSource.includes("cached.renderPane === renderPane") &&
     surfaceSource.includes("cached.isTiled === isTiled") &&
@@ -798,7 +872,8 @@ expect(
   !surfaceSource.includes('className="gyro-chat-pane-drag-handle"') &&
     !surfaceSource.includes("Drag chat to rearrange split") &&
     !styleSource.includes(".gyro-chat-pane-drag-handle") &&
-    !appSource.includes("onPaneDragStart={options.onPaneDragStart}") &&
+    appSource.includes("onPaneDragStart={options.onPaneDragStart}") &&
+    surfaceSource.includes("data-chat-pane-drag={paneKey}") &&
     surfaceSource.includes("CHAT_SESSION_DRAG_MIME") &&
     surfaceSource.includes("onDropSession(") &&
     surfaceSource.includes("function dataTransferHasType") &&
@@ -810,11 +885,13 @@ expect(
     surfaceSource.includes("event.clientX < bounds.left") &&
     surfaceSource.includes("Updating a provider CLI. Sending will unlock") &&
     surfaceSource.includes("!isCliUpdating &&") &&
-    appSource.includes('isCliUpdating={cliUpdatePhase === "updating"}') &&
+    appSource.includes("isCliUpdating={paneComposerCliUpdating}") &&
+    appSource.includes("isCliUpdating={activeComposerCliUpdating}") &&
+    !appSource.includes('isCliUpdating={cliUpdatePhase === "updating"}') &&
     styleSource.includes("Sessions/Workspace is navigation") &&
     styleSource.includes("var(--gyro-sidebar-mode-active)") &&
     surfaceSource.includes("{zone.label}"),
-  "Split placement comes from dragging a sidebar chat onto the grid. The chat header has no pane drag handle.",
+  "Sidebar chats and pane titles can rearrange splits; toolbar controls stay separate from draggable titles.",
 );
 expect(
   surfaceSource.includes('className="gyro-sidebar-scm-identity"') &&
@@ -956,7 +1033,9 @@ expect(
     if (end < 0) return false;
     const rail = styleSource
       .slice(styleSource.indexOf("*/", start), end)
-      .replace(/\/\*[\s\S]*?\*\//g, "");
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      // Mask color determines alpha, not theme paint.
+      .replace(/(?:-webkit-)?mask-image:[^;]+;/g, "");
     return (
       !/(?<![\w-])(#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\))/i.test(
         rail,
@@ -977,8 +1056,8 @@ expect(
   "The full chat row should remain directly draggable without a separate dotted grip.",
 );
 expect(
-  surfaceSource.includes(
-    "title={`${attachment.name} · ${formatAttachmentSize(attachment.size)}`}",
+  readRepoFile("packages/ui/src/transcript-attachments.tsx").includes(
+    "title={`${attachment.name} · ${formatSize(attachment.size)}`}",
   ) &&
     cssRules(
       styleSource,
@@ -995,21 +1074,19 @@ expect(
   "Linked screenshots should use a contained preview tray inside the composer.",
 );
 expect(
-  surfaceSource.includes('className="gyro-transcript-image-preview"') &&
-    cssRules(styleSource, ".gyro-transcript-image-preview").some(
-      (rule) =>
-        rule.includes("height: 32px") &&
-        rule.includes("overflow: hidden") &&
-        rule.includes("width: 32px"),
+  surfaceSource.includes("<ChatFileCard") &&
+    readRepoFile("packages/ui/src/chat-file-card.tsx").includes(
+      "{file.name}",
     ) &&
-    cssRules(styleSource, ".gyro-transcript-image-preview > img").some(
-      (rule) =>
-        rule.includes("height: 100%") &&
-        rule.includes("object-fit: cover") &&
-        rule.includes("width: 100%"),
+    readRepoFile("packages/ui/src/chat-file-card.css").includes(
+      "object-fit: contain",
+    ) &&
+    readRepoFile("packages/ui/src/chat-file-card.css").includes(
+      "text-overflow: ellipsis",
     ),
-  "Linked screenshots in restored transcripts should stay inside their thumbnail boundary.",
+  "Linked files and restored media should show contained previews with visible, truncated titles.",
 );
+
 expect(
   surfaceSource.includes("buildRunModel(turn.timelineEvents, {") &&
     runSource.includes("export function buildRunModel") &&
@@ -1102,18 +1179,17 @@ expect(
   "Workspace preparation should expose honest native stages, bound Git inspect, and disable steady polling when the event watcher is healthy.",
 );
 expect(
-  desktopRustSource.includes("MAX_UNTRACKED_LINE_COUNT_BYTES") &&
-    desktopRustSource.includes("MAX_UNTRACKED_LINE_COUNT_FILES") &&
+  desktopRustSource.includes("untracked_lines_before(&path, deadline)") &&
     desktopRustSource.includes("fn cached_git_status") &&
     desktopRustSource.includes("fn git_status_stamp") &&
     desktopRustSource.includes("--untracked-files=normal") &&
-    !desktopRustSource.includes("--untracked-files=all") &&
+    desktopRustSource.includes("--untracked-files=all") &&
     appSource.includes("workspaceChangeGeneration === 0") &&
     appSource.includes(
       'if (workspaceWatchMode === "event") {\n      return;',
     ) &&
     !appSource.includes("refreshIdeSourceControl(root),\n      800"),
-  "Git status should reuse porcelain stamps, cap untracked line counts, and not poll a full scan every 800ms.",
+  "Git status should reuse porcelain stamps, count all untracked files within its deadline, and not poll a full scan every 800ms.",
 );
 expect(
   surfaceSource.includes("function clampWorkspacePreparationPopover") &&
@@ -1127,7 +1203,7 @@ expect(
 );
 const composerSourceStart = surfaceSource.indexOf("function Composer({");
 const composerSourceEnd = surfaceSource.indexOf(
-  "\nfunction ",
+  "export function ComposerMediaPreview",
   composerSourceStart + 1,
 );
 const composerSource = surfaceSource.slice(
@@ -1200,14 +1276,17 @@ const kimiAcpSource = readRepoFile("crates/gyro-core/src/kimi_acp.rs");
 // source that holds the code, not on where it used to live.
 const tauriSource = [
   readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/desktop_notifications.rs"),
   readRepoFile("apps/desktop/src-tauri/src/automation_scheduler.rs"),
   readRepoFile("apps/desktop/src-tauri/src/browser_pointer.rs"),
   readRepoFile("apps/desktop/src-tauri/src/browser_smoke.rs"),
   readRepoFile("apps/desktop/src-tauri/src/context_compaction.rs"),
   readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
   readRepoFile("apps/desktop/src-tauri/src/language_server.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/terminal_process.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_activity.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
+  readRepoFile("crates/gyro-core/src/provider_permissions.rs"),
   readRepoFile("apps/desktop/src-tauri/src/ollama_runner.rs"),
   readRepoFile("apps/desktop/src-tauri/src/capability_workspace_helpers.rs"),
   readRepoFile("apps/desktop/src-tauri/src/session_browser.rs"),
@@ -1221,6 +1300,9 @@ const languageServerRustSource = readRepoFile(
 );
 const turnTimingRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/turn_timing.rs",
+);
+const delegatedAgentRustSource = readRepoFile(
+  "apps/desktop/src-tauri/src/delegated_agents.rs",
 );
 const subagentRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/subagent_capability.rs",
@@ -1273,7 +1355,7 @@ expect(
     !surfaceSource.includes("workspaceContext") &&
     appSource.includes("activePath: undefined") &&
     appSource.includes("buffers: []") &&
-    appSource.includes('selectChatAttachment("workspace-file")') &&
+    /selectChatAttachment\(\s*"workspace-file"/.test(appSource) &&
     appSource.includes("attachEditorSnapshot") &&
     tauriSource.includes("Gyro does not attach the user's open editor file"),
   "The file open in Workspace should never become chat context on its own; only composer attachments and editor AI actions may put a file in a turn.",
@@ -1303,15 +1385,14 @@ expect(
     (rule) =>
       rule.includes("height: 48px") &&
       rule.includes("min-height: 48px") &&
-      rule.includes("padding-inline: max(") &&
-      rule.includes("var(--gyro-chat-content-width)"),
+      rule.includes("padding-inline: 12px"),
   ) &&
     cssRules(
       styleSource,
       ".gyro-chat-grid.has-multiple-panes > .gyro-chat-grid-slot",
     ).some((rule) => rule.includes("border: 0")) &&
-    !styleSource.includes("padding-right: 96px;"),
-  "Grid chat headers should share the 48px title row, align to the conversation column, and meet at one clean seam.",
+    !cssRules(styleSource, ".gyro-chat-thread-topbar").some(rule => rule.includes("padding-right: 96px")),
+  "Grid chat headers should share the 48px title row, keep compact edge insets, and meet at one clean seam.",
 );
 
 const emittedComposerActions = new Set([
@@ -1351,7 +1432,7 @@ expect(
 const profiles = defaultCommandProfiles();
 expect(
   providerCatalog.map((provider) => provider.id).join(",") ===
-    "openai,anthropic,kimi,xai,gemini,cursor,opencode,deepseek,mistral,openrouter,ollama",
+    "openai,anthropic,kimi,xai,antigravity,cursor,opencode,deepseek,mistral,openrouter,ollama",
   "Provider catalog should include executable local Ollama after the CLI-backed providers.",
 );
 const orderedStreamState = new Map();
@@ -1545,19 +1626,23 @@ const openAiCatalog = providerCatalog.find(
 );
 expect(
   openAiCatalog?.models
-    .slice(0, 4)
+    .slice(0, 5)
     .map((model) => model.id)
-    .join(",") === "gpt-6-astra,gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna" &&
+    .join(",") ===
+    "gpt-6.1-sol,gpt-6-astra,gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna" &&
     openAiCatalog.selectedModelId === "gpt-5.6-sol" &&
     openAiCatalog.models
-      .slice(1, 4)
+      .slice(0, 5)
       .every(
         (model) =>
           model.supportedReasoningEfforts?.join(",") ===
-            "low,medium,high,xhigh,max,ultra" &&
-          model.contextWindowTokens === 272_000,
+            (model.id === "gpt-5.6-luna"
+              ? "low,medium,high,xhigh,max"
+              : "low,medium,high,xhigh,max,ultra") &&
+          model.contextWindowTokens ===
+            (model.id === "gpt-6.1-sol" ? 500_000 : 272_000),
       ),
-  "OpenAI should expose GPT-6 Astra and all GPT-5.6 variants with their supported effort levels.",
+  "OpenAI should expose GPT-6.1 Sol, GPT-6 Astra, and all GPT-5.6 variants with their supported effort levels.",
 );
 const restoredEnabledConfig = normalizedConfig({
   telemetryEnabled: false,
@@ -1577,9 +1662,10 @@ const restoredEnabledConfig = normalizedConfig({
 expect(
   restoredEnabledConfig.modelProviders
     .find((provider) => provider.id === "openai")
-    ?.models.slice(0, 4)
+    ?.models.slice(0, 5)
     .map((model) => model.id)
-    .join(",") === "gpt-6-astra,gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna",
+    .join(",") ===
+    "gpt-6.1-sol,gpt-6-astra,gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna",
   "Saved legacy provider configs should merge in the current OpenAI catalog.",
 );
 expect(
@@ -1593,14 +1679,17 @@ expect(
   "A restored config with an enabled provider should select it for new chats instead of falsely blocking the composer.",
 );
 const kimiCatalog = providerCatalog.find((provider) => provider.id === "kimi");
+const kimiK3 = kimiCatalog?.models.find((model) => model.id === "k3");
 expect(
   // The Kimi Code service provisions k3 with low/high/max thinking efforts
-  // (default high); anything else is rejected at turn time.
+  // (default high); anything else is rejected at turn time. K3.1 is listed
+  // above it, and the default stays k3.
   KIMI_K3_REASONING_EFFORTS.join(",") === "low,high,max" &&
+    kimiCatalog?.defaultModelId === "k3" &&
     kimiCatalog?.selectedModelId === "k3" &&
-    kimiCatalog.models[0]?.displayName === "Kimi K3" &&
-    kimiCatalog.models[0]?.defaultReasoningEffort === "high" &&
-    kimiCatalog.models[0]?.supportedReasoningEfforts?.join(",") ===
+    kimiK3?.displayName === "Kimi K3" &&
+    kimiK3?.defaultReasoningEffort === "high" &&
+    kimiK3?.supportedReasoningEfforts?.join(",") ===
       KIMI_K3_REASONING_EFFORTS.join(",") &&
     isProviderExecutable("kimi"),
   "Kimi should default to K3 with the low/high/max effort levels it accepts.",
@@ -1613,11 +1702,11 @@ expect(
     xaiCatalog?.defaultModelId === "grok-4.7" &&
     xaiCatalog.selectedModelId === "grok-4.7" &&
     grok47?.displayName === "Grok 4.7" &&
-    grok47.contextWindowTokens === 500_000 &&
+    grok47.contextWindowTokens === 256_000 &&
     grok47.defaultReasoningEffort === "high" &&
     grok47.supportedReasoningEfforts?.join(",") ===
       GROK_46_REASONING_EFFORTS.join(",") &&
-    grok46?.contextWindowTokens === 500_000 &&
+    grok46?.contextWindowTokens === 256_000 &&
     xaiCatalog.models.some((model) => model.id === "grok-4.5"),
   "xAI should expose Grok 4.7 as the default while retaining Grok 4.6 and 4.5.",
 );
@@ -1719,13 +1808,15 @@ expect(
   streamRegressionSetCalls === 1,
   "Provider stream deltas should be applied in one state update per flushed batch.",
 );
-// Stream helpers leave windowing to the app store so load-earlier history is
-// not snapped back to 400 on every delta. Bound the list the same way the
-// session store does for a default open window.
 streamRegressionState = limitSessionEventsForUi(streamRegressionState);
 expect(
-  streamRegressionState.length === MAX_CHAT_EVENT_RENDER_COUNT,
-  "Provider stream delta batches should keep the rendered event list bounded.",
+  streamRegressionState.length === streamRegressionEvents.length + 1,
+  "Provider stream delta batches must retain the entire displayed history.",
+);
+expect(
+  limitSessionEventsForUi(streamRegressionState, MAX_CHAT_EVENT_RENDER_COUNT)
+    .length === MAX_CHAT_EVENT_RENDER_COUNT,
+  "Explicit transient buffers remain bounded.",
 );
 expect(
   streamRegressionState[0]?.kind === "session-created",
@@ -2084,14 +2175,35 @@ expect(
 );
 
 for (const scale of Object.values(interfaceScales)) {
-  const options = workspaceEditorOptions({ scale, reduceMotion: true, minimapEnabled: true, limited: true, readOnly: true });
-  expect(options.fontSize === 13.5 * scale && options.lineHeight >= options.fontSize && options.readOnly === true && options.minimap.enabled === false && options.smoothScrolling === false && options.cursorBlinking === "solid",
-    "Shared sizing must retain readable editor lines, reduced motion, and large-file safety settings.");
-  expect(styleSource.includes(`--gyro-ui-scale: ${scale};`), "Canvas font scaling and CSS must use the same size factors.");
+  const options = workspaceEditorOptions({
+    scale,
+    reduceMotion: true,
+    minimapEnabled: true,
+    limited: true,
+    readOnly: true,
+  });
+  expect(
+    options.fontSize === 13.5 * scale &&
+      options.lineHeight >= options.fontSize &&
+      options.readOnly === true &&
+      options.minimap.enabled === false &&
+      options.smoothScrolling === false &&
+      options.cursorBlinking === "solid",
+    "Shared sizing must retain readable editor lines, reduced motion, and large-file safety settings.",
+  );
+  expect(
+    styleSource.includes(`--gyro-ui-scale: ${scale};`),
+    "Canvas font scaling and CSS must use the same size factors.",
+  );
 }
 for (const theme of ["dark", "light"]) {
-  expect(colorContrast(workspaceEditorColors[theme]["editorLineNumber.foreground"], workspaceEditorColors[theme]["editorGutter.background"]) >= 4.5,
-    `${theme} editor line numbers must remain readable.`);
+  expect(
+    colorContrast(
+      workspaceEditorColors[theme]["editorLineNumber.foreground"],
+      workspaceEditorColors[theme]["editorGutter.background"],
+    ) >= 4.5,
+    `${theme} editor line numbers must remain readable.`,
+  );
 }
 
 // Appearance migrations accept only supported values and leave other state alone.
@@ -2101,30 +2213,81 @@ for (const [field, action, values] of [
 ]) {
   for (const value of [undefined, null, "invalid", 99, ...values]) {
     const expected = values.includes(value) ? value : "default";
-    const restored = createInitialWorkbenchState({ preferences: { [field]: value } });
-    expect(restored.preferences[field] === expected, `Restoring ${field} must validate ${value}.`);
-    const changed = workbenchReducer(initialState, { type: action, [field]: value });
-    expect(changed.preferences[field] === expected, `${field} actions must normalize invalid values.`);
-    const roundTrip = createInitialWorkbenchState(JSON.parse(JSON.stringify(changed)));
-    expect(roundTrip.preferences[field] === expected, `${field} must survive serialization and restore.`);
-    expect(changed.preferences.density === initialState.preferences.density && changed.preferences.mainColor === initialState.preferences.mainColor,
-      "Changing size or motion must preserve density and the user's palette.");
+    const restored = createInitialWorkbenchState({
+      preferences: { [field]: value },
+    });
+    expect(
+      restored.preferences[field] === expected,
+      `Restoring ${field} must validate ${value}.`,
+    );
+    const changed = workbenchReducer(initialState, {
+      type: action,
+      [field]: value,
+    });
+    expect(
+      changed.preferences[field] === expected,
+      `${field} actions must normalize invalid values.`,
+    );
+    const roundTrip = createInitialWorkbenchState(
+      JSON.parse(JSON.stringify(changed)),
+    );
+    expect(
+      roundTrip.preferences[field] === expected,
+      `${field} must survive serialization and restore.`,
+    );
+    expect(
+      changed.preferences.density === initialState.preferences.density &&
+        changed.preferences.mainColor === initialState.preferences.mainColor,
+      "Changing size or motion must preserve density and the user's palette.",
+    );
     const reset = workbenchReducer(changed, { type: "reset-ui-preferences" });
-    expect(reset.preferences[field] === "default", `Reset must restore ${field}.`);
+    expect(
+      reset.preferences[field] === "default",
+      `Reset must restore ${field}.`,
+    );
   }
 }
-expect(interfaceScales.small < 1 && interfaceScales.default === 1 && interfaceScales.large > 1,
-  "Default size must preserve the existing scale, with smaller and larger choices.");
+expect(
+  interfaceScales.small < 1 &&
+    interfaceScales.default === 1 &&
+    interfaceScales.large > 1,
+  "Default size must preserve the existing scale, with smaller and larger choices.",
+);
 for (const theme of ["dark", "light"]) {
-  for (const color of ["#000000", "#ffffff", "#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff", "#00ffff", "#0874df", "#8b6fcb", "#888888"]) {
+  for (const color of [
+    "#000000",
+    "#ffffff",
+    "#ff0000",
+    "#00ff00",
+    "#0000ff",
+    "#ffff00",
+    "#ff00ff",
+    "#00ffff",
+    "#0874df",
+    "#8b6fcb",
+    "#888888",
+  ]) {
     const palette = appearanceAccentProperties(color, color, theme);
-    for (const surface of theme === "dark" ? ["#181818", "#383c41"] : ["#ffffff", "#e7ebf0"]) {
-      for (const role of ["--gyro-accent", "--gyro-accent-strong", "--gyro-secondary-accent", "--gyro-secondary-accent-strong"]) {
-        expect(colorContrast(palette[role], surface) >= 4.5, `${theme} ${color} ${role} must remain readable on ${surface}.`);
+    for (const surface of theme === "dark"
+      ? ["#181818", "#383c41"]
+      : ["#ffffff", "#e7ebf0"]) {
+      for (const role of [
+        "--gyro-accent",
+        "--gyro-accent-strong",
+        "--gyro-secondary-accent",
+        "--gyro-secondary-accent-strong",
+      ]) {
+        expect(
+          colorContrast(palette[role], surface) >= 4.5,
+          `${theme} ${color} ${role} must remain readable on ${surface}.`,
+        );
       }
     }
     for (const role of ["--gyro-primary-bg", "--gyro-primary-hover"]) {
-      expect(colorContrast(palette[role], palette["--gyro-primary-text"]) >= 4.5, `${theme} ${color} buttons must retain readable text.`);
+      expect(
+        colorContrast(palette[role], palette["--gyro-primary-text"]) >= 4.5,
+        `${theme} ${color} buttons must retain readable text.`,
+      );
     }
   }
 }
@@ -2319,8 +2482,66 @@ expect(
     surfaceSource.includes('aria-label="Add folder to workspace"') &&
     surfaceSource.includes("selectedExplorerPaths") &&
     surfaceSource.includes("gyro-explorer-context-menu") &&
-    surfaceSource.includes('"Remove folder from workspace"'),
+    surfaceSource.includes('"Remove folder from workspace"') &&
+    surfaceSource.includes("Move…") &&
+    surfaceSource.includes("application/x-gyro-explorer-path") &&
+    appSource.includes("planWorkspaceMove("),
   "Multi-root workspaces should persist folder membership, expose root identity in Explorer, and resolve file actions to the owning root.",
+);
+const sameFolderMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/notes.md",
+  "/Users/example/Gyro",
+);
+const nestedMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/docs",
+  "/Users/example/Gyro/docs/api",
+);
+const crossRootMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/notes.md",
+  "/Users/example/Shared/inbox",
+);
+const relativeMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/notes.md",
+  "docs",
+);
+const rootMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Shared/src/index.ts",
+  "",
+);
+const parentEscapeMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/notes.md",
+  "../Shared/inbox",
+);
+const dottedAbsoluteMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/notes.md",
+  "/Users/example/Gyro/../Shared/inbox",
+);
+const dottedInsideMove = planWorkspaceMove(
+  testedWorkspaceRoots,
+  "/Users/example/Gyro/notes.md",
+  "docs/../archive",
+);
+expect(
+  sameFolderMove.kind === "noop" &&
+    nestedMove.kind === "noop" &&
+    crossRootMove.kind === "blocked" &&
+    relativeMove.kind === "move" &&
+    relativeMove.toPath === "/Users/example/Gyro/docs/notes.md" &&
+    rootMove.kind === "move" &&
+    rootMove.toPath === "/Users/example/Shared/index.ts" &&
+    parentEscapeMove.kind === "blocked" &&
+    dottedAbsoluteMove.kind === "blocked" &&
+    dottedInsideMove.kind === "move" &&
+    dottedInsideMove.toPath === "/Users/example/Gyro/archive/notes.md" &&
+    surfaceSource.includes("planWorkspaceMove("),
+  "Explorer moves stay in the source workspace, skip same-folder and descendant drops, and keep the entry name.",
 );
 state = workbenchReducer(state, {
   type: "set-workspace-settings",
@@ -2375,9 +2596,17 @@ expect(
     workspacePanelContributions.some(
       (panel) => panel.id === "test-results" && panel.label === "Test Results",
     ) &&
-    appSource.includes('"textDocument/definition"') &&
-    appSource.includes('"textDocument/references"') &&
-    appSource.includes('"textDocument/rename"'),
+    workspaceCodeEditorSource.includes("registerDefinitionProvider") &&
+    workspaceCodeEditorSource.includes('"textDocument/definition"') &&
+    workspaceCodeEditorSource.includes("registerReferenceProvider") &&
+    workspaceCodeEditorSource.includes('"textDocument/references"') &&
+    appSource.includes("onRenameSymbol={workspaceRename.begin}") &&
+    workspaceCodeEditorSource.includes('id: "gyro.workspace.renameSymbol"') &&
+    workspaceCodeEditorSource.includes(
+      "propsRef.current.onRenameSymbol?.(path, position)",
+    ) &&
+    workspaceRenameSource.includes('"textDocument/rename"') &&
+    workspaceRenameSource.includes("prepareWorkspaceEdit(raw, snapshots)"),
   "Developer workflows should include batch SCM, structured test results, and LSP definition, reference, and rename providers.",
 );
 state = workbenchReducer(state, {
@@ -2558,6 +2787,15 @@ expect(
     sessionsState.activePaneTab === "terminal" &&
     sessionsState.isToolPanelOpen === true,
   "Sessions should restore the last-used CLI layout and terminal focus.",
+);
+const defaultDrawerState = workbenchReducer(
+  { ...state, activePaneTab: "diff", isToolPanelOpen: false },
+  { type: "open-tool-panel" },
+);
+expect(
+  defaultDrawerState.isToolPanelOpen &&
+    defaultDrawerState.activePaneTab === "terminal",
+  "Opening the drawer without choosing a tool should default to Shell.",
 );
 state = workbenchReducer(state, { type: "open-tool-panel", tab: "browser" });
 expect(
@@ -4033,7 +4271,7 @@ expect(
       'invoke<NotificationPermissionState>("test_notification")',
     ) &&
     surfaceSource.includes("Test notification") &&
-    surfaceSource.includes("Gyro asks only when you run the test") &&
+    surfaceSource.includes("Send a test to request access") &&
     !tauriSource.includes("body(automation.prompt)") &&
     !tauriSource.includes("body(automation.last_result)"),
   "Background automation outcomes should require explicit native permission and use generic notices without exposing prompts or results.",
@@ -4118,7 +4356,6 @@ expect(
 for (const readinessCall of [
   'checkProviderReadiness("chat")',
   'checkProviderReadiness("chat", sessionModel.providerId)',
-  'checkProviderReadiness("handoff", toProviderId)',
 ]) {
   expect(
     appSource.includes(readinessCall),
@@ -4133,11 +4370,11 @@ expect(
     appSource.includes("optimisticEventsRef") &&
     appSource.includes("mergePersistedAndOptimisticEvents") &&
     appAndStreamSource.includes(
-      "const merged = limitSessionEventsForUi(persistedEvents)",
+      "const merged = limitSessionEventsForUi(persistedEvents, maxEvents)",
     ) &&
     appAndStreamSource.includes("const seenEventIds = new Set<string>()") &&
     appSource.includes(
-      "limitSessionEventsForUi(updateEvents(optimisticEvents))",
+      "limitOptimisticSessionEvents(updateEvents(optimisticEvents))",
     ) &&
     appSource.includes("items.findLastIndex(") &&
     appSource.includes("updateOptimisticProviderStatus") &&
@@ -4278,7 +4515,11 @@ expect(
     appSource.includes("areWorkbenchTurnsEqual") &&
     appSource.includes("const eventsRef = useRef<SessionEvent[]>([])") &&
     appSource.includes("eventsRef.current = events") &&
-    appSource.includes("eventsRef.current.find(") &&
+    appSource.includes("eventSessionEvents.find(") &&
+    appSource.includes(
+      "sessionEventsById[event.sessionId] ?? eventsRef.current",
+    ) &&
+    appSource.includes("item.sessionId === event.sessionId &&") &&
     !appSource.includes("[connectProvider, events, sendDraft]") &&
     providerStreamSource.includes('kind: "provider-stream"') &&
     providerStreamSource.includes('kind: "provider-activity"') &&
@@ -4359,7 +4600,8 @@ expect(
     appSource.includes("sendingSessionIdsRef.current.has(turn.sessionId)") &&
     // Composer/transcript gutters follow the pane, not the window width.
     styleSource.includes("padding: 10px clamp(24px, 8%, 120px) 16px") &&
-    styleSource.includes("padding: 18px clamp(24px, 8%, 120px) 22px") &&
+    // The transcript's live gutter is the shared chat column in chat-design.css.
+    chatDesignSource.includes("clamp(20px, 4%, 64px)") &&
     // Backend reliability: ACP wall clock is 24h; chat CLIs ignore stdout silence.
     tauriSource.includes("PROVIDER_CHAT_MAX_RUNTIME_SECS") &&
     tauriSource.includes(
@@ -4441,7 +4683,10 @@ expect(
     surfaceSource.includes("files.slice(0, 6)") &&
     appSource.includes("refreshedFileActivityKeysRef") &&
     appSource.includes("setTurnSourceControlBaselines") &&
-    appSource.includes("sourceControlLineStats(workbench.ide.sourceControl)") &&
+    appSource.includes("sourceControlLineStats(scopedIde.sourceControl)") &&
+    appSource.includes(
+      "useScopedIdeState(workbench.ide, workspaceActionRoot)",
+    ) &&
     appSource.includes('payload.activityKind !== "file"') &&
     appSource.includes("refreshIdeSourceControl(root)") &&
     appSource.includes("refreshedFileActivityKeysRef.current.clear()") &&
@@ -4481,15 +4726,17 @@ expect(
     runSource.includes("steps.length === 0") &&
     styleSource.includes(".gyro-run-header") &&
     // Completed chats lead with the final answer; the work stays expandable.
-    // Live work and failures remain visible.
+    // Live work, failures, and unresolved approvals remain visible.
     runViewSource.includes("showThinkingPulse") &&
     runViewSource.includes(
-      "const [isCollapsed, setIsCollapsed] = useState(isDone)",
+      "const [isCollapsed, setIsCollapsed] = useState(isDone && !needsApproval)",
     ) &&
     !runViewSource.includes("hasAutoCollapsed") &&
     runViewSource.includes('const isDone = model.phase.name === "done"') &&
-    runViewSource.includes("setIsCollapsed(isDone)") &&
-    runViewSource.includes("const showSteps = isLive || !isCollapsed") &&
+    runViewSource.includes("setIsCollapsed(isDone && !needsApproval)") &&
+    runViewSource.includes(
+      "const showSteps = isLive || needsApproval || !isCollapsed",
+    ) &&
     surfaceSource.includes("responseEvent") &&
     surfaceSource.includes("canContinue") &&
     styleSource.includes(".gyro-run-row") &&
@@ -4542,11 +4789,17 @@ expect(
     tauriSource.includes("async fn run_provider_chat") &&
     // Interactive sends must be tagged as chat for the usage ledger, so an
     // automation can never be counted against the person at the keyboard.
-    /spawn_blocking\(move \|\|\s*\{?\s*(?:turn_timing::run_timed_provider_chat|run_provider_chat_blocking)\((?:app|worker_app),\s*request,\s*UsageOrigin::Chat\)/.test(
+    (/spawn_blocking\(move \|\|\s*\{?\s*(?:turn_timing::run_timed_provider_chat|run_provider_chat_blocking)\((?:app|worker_app),\s*request,\s*UsageOrigin::Chat\)/.test(
       tauriSource,
-    ) &&
-    turnTimingRustSource.includes(
-      "run_provider_chat_blocking(app, request, origin)",
+    ) ||
+      (tauriSource.includes(
+        "goal_runner::run(app, request, expected_run)",
+      ) &&
+        /run_timed_provider_chat_in_lease\(\s*app\.clone\(\),\s*request\.clone\(\),\s*UsageOrigin::Chat,\s*Some\(&lease\)/.test(
+          readRepoFile("apps/desktop/src-tauri/src/goal_runner.rs"),
+        ))) &&
+    /run_provider_chat_blocking(?:_in_lease)?\(app, request, origin(?:, lease)?\)/.test(
+      turnTimingRustSource,
     ) &&
     tauriSource.includes("async fn save_config") &&
     tauriSource.includes("config save worker failed") &&
@@ -4788,7 +5041,9 @@ expect(
     surfaceSource.includes('aria-label="Terminals"') &&
     surfaceSource.includes("gyro-companion-launcher gyro-terminal-launcher") &&
     surfaceSource.includes('aria-label="Start a CLI"') &&
-    surfaceSource.includes("<span>New terminal</span>") &&
+    surfaceSource.includes(
+      'onShowToolLauncher ? "Add drawer tab" : "New terminal"',
+    ) &&
     styleSource.includes(
       ".gyro-terminal-workspace.is-empty .gyro-terminal-empty",
     ) &&
@@ -4919,7 +5174,9 @@ expect(
     appSource.includes(
       "sessionEventsRequestRef.current[sessionId] === requestId",
     ) &&
-    appSource.includes("optimisticEvents && optimisticEvents.length > 0") &&
+    /optimisticEvents\?\.length|optimisticEvents && optimisticEvents.length > 0/.test(
+      appSource,
+    ) &&
     appSource.includes("workspaceSearchRequestRef") &&
     appSource.includes("workspaceTreeRequestRef") &&
     appSource.includes("ideSourceControlRootRef.current === root") &&
@@ -5055,8 +5312,8 @@ expect(
     typeSource.includes("GyroAccountStatus") &&
     typeSource.includes("GyroAccountOidcConfig") &&
     reducerSource.includes('"account"') &&
-    surfaceSource.includes("Gyro local access") &&
-    surfaceSource.includes("Gyro local access stays separate") &&
+    appSource.includes("<SettingsSurface") &&
+    !appSource.includes("<ProvidersSurface") &&
     !appSource.includes("GyroAccountGate") &&
     !appSource.includes("gyro-account-gate") &&
     !appSource.includes("Use Gyro on this Mac") &&
@@ -5112,8 +5369,34 @@ expect(
     tauriConfigSource.includes('"titleBarStyle": "Overlay"') &&
     tauriConfigSource.includes('"hiddenTitle": true') &&
     tauriConfigSource.includes('"trafficLightPosition"') &&
-    tauriConfig.app.windows[0].trafficLightPosition.x === 16 &&
-    tauriConfig.app.windows[0].trafficLightPosition.y === 17 &&
+    (() => {
+      // Every copy of the native traffic-light geometry must agree: the Rust
+      // constant the app applies, the packaged config, and the CSS tokens the
+      // title bar and its screenshot fixture read.
+      const rustChrome = readRepoFile("apps/desktop/src-tauri/src/window_controls.rs");
+      const rustNumber = (name) => {
+        const declaration = rustChrome
+          .split("\n")
+          .find((line) => line.includes(`${name}: f64`));
+        return Number.parseFloat((declaration ?? "").split("=")[1] ?? "");
+      };
+      const nativeX = rustNumber("MAIN_TRAFFIC_LIGHT_X");
+      const nativeY = rustNumber("MAIN_TRAFFIC_LIGHT_Y");
+      const tokensCss = readRepoFile("packages/ui/src/styles-foundation.css");
+      const barCss = readRepoFile("packages/ui/src/styles.css");
+      const conf = tauriConfig.app.windows[0].trafficLightPosition;
+      return (
+        Number.isFinite(nativeX) &&
+        Number.isFinite(nativeY) &&
+        conf.x === nativeX &&
+        conf.y === nativeY &&
+        tokensCss.includes(`--gyro-traffic-light-inset-x: ${nativeX}px`) &&
+        tokensCss.includes(`--gyro-traffic-light-inset-y: ${nativeY}px`) &&
+        barCss.includes(
+          "calc(var(--gyro-traffic-light-inset-y) + (var(--gyro-traffic-light-size) / 2) - 14px)",
+        )
+      );
+    })() &&
     desktopRustSource.includes("apply_macos_traffic_light_position") &&
     readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes(
       "inset_macos_traffic_lights",
@@ -5133,7 +5416,7 @@ expect(
       "crate::apply_macos_traffic_light_position(&main)",
     ) &&
     surfaceSource.includes("New Chat") &&
-    surfaceSource.includes('aria-label="Primary surfaces"') &&
+    surfaceSource.includes('label="Primary surfaces"') &&
     surfaceSource.includes("function restingSidebarWidth()") &&
     surfaceSource.includes("ideSidebarMinimumWidth * 2") &&
     surfaceSource.includes('aria-label="Resize Workspace sidebar"') &&
@@ -5153,7 +5436,7 @@ expect(
     surfaceSource.includes('label="Sessions"') &&
     surfaceSource.includes('label="Workspace"') &&
     !surfaceSource.includes('label="IDE"') &&
-    surfaceSource.indexOf('aria-label="Primary surfaces"') <
+    surfaceSource.indexOf('label="Primary surfaces"') <
       surfaceSource.indexOf('className="gyro-sidebar-actions"') &&
     surfaceSource.includes("gyro-sidebar-project-chat-list") &&
     surfaceSource.includes("gyro-sidebar-small-title") &&
@@ -5172,7 +5455,8 @@ expect(
     !surfaceSource.includes("meta={String(commandProfiles.length)}") &&
     !surfaceSource.includes("visibleCommandProfiles") &&
     surfaceSource.includes('title="Explorer"') &&
-    appSource.includes('aria-label="Workspace tools"') &&
+    surfaceSource.includes('className="gyro-editor-statusbar-panel-toggle"') &&
+    appSource.includes("onTogglePanel={toggleChatToolPanel}") &&
     !surfaceSource.includes('className="gyro-ide-panel-shortcuts"') &&
     surfaceSource.includes("headerActions={") &&
     styleSource.includes(".gyro-sidebar-section-heading") &&
@@ -5192,7 +5476,9 @@ expect(
   surfaceSource.includes("onAddTerminalPane?.(launchOptions)") &&
     surfaceSource.includes("function TerminalActionsMenu") &&
     surfaceSource.includes("onRunCommandProfile(profile.id, launchOptions)") &&
-    surfaceSource.includes("<span>New terminal</span>") &&
+    surfaceSource.includes(
+      'onShowToolLauncher ? "Add drawer tab" : "New terminal"',
+    ) &&
     surfaceSource.includes("cliProfileShortLabel") &&
     !surfaceSource.includes(
       'className="gyro-agent-launcher-heading">Start a terminal',
@@ -5272,12 +5558,11 @@ expect(
     /data-theme="dark"[\s\S]{0,160}gyro-chat-thread-topbar,[\s\S]{0,500}background: var\(--gyro-app\);/.test(
       chatDesignSource,
     ) &&
-    // Only the composer is solid; the changes pill and queue float over the
-    // transcript, which runs down behind them.
-    /gyro-chat-composer-dock \{\n  background: linear-gradient\([\s\S]{0,120}var\(--gyro-chat-dock-solid\) var\(--gyro-composer-solid-height/.test(
+    // The composer card is the only solid surface. The dock stays clear.
+    /gyro-chat-composer-dock \{\n  background: transparent;/.test(
       chatDesignSource,
     ),
-  "The chat thread topbar should match the conversation: pane in light, the start-chat app canvas in dark, with only the composer solid in the dock.",
+  "The chat thread topbar should match the conversation: pane in light, the start-chat app canvas in dark, and the composer dock stays clear.",
 );
 
 expect(
@@ -5293,11 +5578,13 @@ expect(
 
 expect(
   surfaceSource.includes('"has-environment-popover"') &&
-    styleSource.includes("--gyro-environment-popover-gutter: 322px") &&
+    styleSource.includes("--gyro-environment-popover-gutter: 342px") &&
     styleSource.includes(
       "> .gyro-chat-thread-canvas\n    > .gyro-chat-composer-dock",
     ) &&
-    styleSource.includes("right: var(--gyro-environment-popover-gutter)") &&
+    styleSource.includes(
+      "width: calc(100% - var(--gyro-environment-popover-gutter))",
+    ) &&
     styleSource.includes("width: auto;"),
   "The temporary Environment popover should reserve the conversation canvas so the transcript and composer shift left without narrowing the top bar.",
 );
@@ -5406,8 +5693,13 @@ expect(
   cssRules(styleSource, ".gyro-sidebar-new-session-menu").some(
     (rule) =>
       rule.includes("border: 1px solid var(--gyro-premium-hairline-soft)") &&
-      rule.includes("box-shadow: 0 8px 20px var(--gyro-premium-shadow-soft)") &&
-      rule.includes("padding: 8px"),
+      /box-shadow:\s*0\s+\d+px\s+\d+px\s+var\(--gyro-premium-shadow-soft\)/.test(
+        rule,
+      ) &&
+      /padding:\s*[4-8]px\s*;/.test(rule) &&
+      /display:\s*grid\s*;/.test(rule) &&
+      /left:\s*0\s*;/.test(rule) &&
+      /right:\s*0\s*;/.test(rule),
   ) &&
     surfaceSource.includes("gyro-sidebar-session-group is-chat") &&
     surfaceSource.includes("gyro-sidebar-session-group is-cli") &&
@@ -5447,7 +5739,7 @@ expect(
     chatSidebarSource.includes("Projects") &&
     chatSidebarSource.includes("Recents") &&
     chatSidebarSource.includes("gyro-sidebar-recents") &&
-    chatSidebarSource.includes("No chats") &&
+    chatSidebarSource.includes("No standalone chats yet") &&
     chatSidebarSource.includes(
       "pinnedSessions.map((session) => renderSessionRow(session))",
     ) &&
@@ -5576,16 +5868,16 @@ expect(
     surfaceSource.includes("gyro-settings-sidebar-group") &&
     surfaceSource.includes("aria-label={`Back to ${backLabel}`}") &&
     surfaceSource.includes("gyro-settings-back-button") &&
-    surfaceSource.includes("<h2>{label}</h2>") &&
+    surfaceSource.includes("aria-expanded={open}") && surfaceSource.includes("<strong>{title}</strong>") && surfaceSource.includes("aria-controls={bodyId}") &&
     surfaceSource.includes("aria-pressed={themeMode === mode}") &&
     surfaceSource.includes('onOpenSettingsSection("general")') &&
     surfaceSource.includes('activeDestination !== "settings"') &&
     surfaceSource.includes("General") &&
     surfaceSource.includes("Appearance") &&
-    surfaceSource.includes("Editor & Search") &&
-    surfaceSource.includes("Tools & Contributions") &&
-    surfaceSource.includes("Usage Limits") &&
-    surfaceSource.includes("Providers") &&
+    surfaceSource.includes('label: "Workspace"') &&
+    surfaceSource.includes('label: "Tools"') &&
+    surfaceSource.includes('label: "Models & accounts"') &&
+    surfaceSource.includes('id: "usage-limits"') &&
     surfaceSource.includes("CLI Profiles") &&
     surfaceSource.includes("Permissions") &&
     surfaceSource.includes("Updates") &&
@@ -5596,6 +5888,9 @@ expect(
     surfaceSource.includes('activeSection === "editor-workspace"') &&
     surfaceSource.includes('activeSection === "tools-contributions"') &&
     surfaceSource.includes('activeSection === "providers"') &&
+    surfaceSource.includes('label: "Usage & limits"') &&
+    surfaceSource.includes('activeSection === "efficiency"') &&
+    surfaceSource.includes('title="Usage & limits"') &&
     !surfaceSource.includes("isAccountMenuOpen") &&
     !surfaceSource.includes("gyro-account-menu") &&
     !surfaceSource.includes('<nav className="gyro-settings-nav"') &&
@@ -5641,7 +5936,9 @@ expect(
     appSource.includes("DEFAULT_TOOL_PANEL_HEIGHT = 280") &&
     surfaceSource.includes("TOOL_PANEL_DEFAULT_HEIGHT = 280") &&
     surfaceSource.includes("data-active-tab={activePaneTab}") &&
-    surfaceSource.includes("terminalTitle={activeTerminalPane?.title}") &&
+    surfaceSource.includes(
+      'terminalTitle={activeTerminalPane?.title ?? "Shell"}',
+    ) &&
     surfaceSource.includes("gyro-tool-panel-resize-handle") &&
     surfaceSource.includes("TOOL_PANEL_COLLAPSE_HEIGHT") &&
     surfaceSource.includes('tab.id === "terminal"') &&
@@ -5669,7 +5966,7 @@ expect(
 );
 const chatSurfaceSource = surfaceSource.slice(
   surfaceSource.indexOf("export function ChatSurface"),
-  surfaceSource.indexOf("function PlanDecisionCard"),
+  surfaceSource.indexOf("function PlanDocument("),
 );
 expect(
   typeSource.includes('| "plan-updated"') &&
@@ -5681,7 +5978,7 @@ expect(
     surfaceSource.includes("ChatSurfaceControls") &&
     surfaceSource.includes("ChatSidePanel") &&
     surfaceSource.includes("function PlanDocument") &&
-    surfaceSource.includes("function PlanDecisionCard") &&
+    planModeSource.includes("export function ImplementPlanDock") &&
     typeSource.includes("content?: string") &&
     appSource.includes("assistantContentByTurnId") &&
     surfaceSource.includes("gyro-plan-inline-editor") &&
@@ -5720,9 +6017,12 @@ expect(
     chatSurfaceSource.includes(
       "const [goalDraft, setGoalDraft] = useState<string>();",
     ) &&
+    chatSurfaceSource.includes("const composerDraft =") &&
     chatSurfaceSource.includes(
-      'draft={\n              isGoalComposerActive\n                ? (goalDraft ?? sessionGoal?.text ?? "")\n                : localDraft\n            }',
+      "isGoalComposerActive && sessionGoal?.text\n      ? (goalDraft ?? sessionGoal.text)\n      : localDraft",
     ) &&
+    chatSurfaceSource.includes("draft={composerDraft}") &&
+    /estimateComposerContextUsage\(\s*transcriptEvents,\s*composerDraft,\s*contextModel/.test(chatSurfaceSource) &&
     chatSurfaceSource.includes("handleComposerDraftChange") &&
     chatSurfaceSource.includes("cancelGoalComposer") &&
     chatSurfaceSource.includes("onStartGoalChat(goal)") &&
@@ -5751,12 +6051,16 @@ expect(
     appSource.includes('kind: "goal-updated"') &&
     styleSource.includes(".gyro-plan-inline-editor") &&
     styleSource.includes('.gyro-composer-chip.is-goal[aria-pressed="true"]') &&
-    styleSource.includes(".gyro-plan-decision-card") &&
+    planModeStyleSource.includes(".gyro-plan-card") &&
     styleSource.includes(".gyro-plan-harness") &&
     styleSource.includes(".gyro-plan-progress") &&
     surfaceSource.includes('aria-label="Plan harness"') &&
-    surfaceSource.includes('role="progressbar"') &&
-    surfaceSource.includes("model-managed checklist") &&
+    planModeSource.includes('role="progressbar"') &&
+    planModeSource.includes("export function PlanPanelHeader") &&
+    surfaceSource.includes('className="gyro-plan-harness gyro-plan-steps"') &&
+    surfaceSource.includes("<EnvironmentPlanSteps") &&
+    planModeSource.includes("export function EnvironmentPlanSteps") &&
+    planModeSource.includes("export function PlanStepStatus") &&
     surfaceSource.includes(
       'activeRailPanel === "plan" && sessionPlan?.content ? "has-plan" : ""',
     ) &&
@@ -5774,16 +6078,12 @@ expect(
 const chatCompanionSource = readRepoFile("packages/ui/src/chat-companion.ts");
 expect(
   surfaceSource.includes('aria-label="Chat companion"') &&
-    surfaceSource.includes(
-      'const isCompanionPanel = Boolean(activeCompanionTab) || railPanel === "tools"',
-    ) &&
-    surfaceSource.includes(
-      'activePanel={railPanel === "review" ? "changes" : railPanel}',
-    ) &&
-    surfaceSource.includes("chromeless={isCompanionPanel}") &&
-    surfaceSource.includes('railPanel === "files" ? (') &&
+    /const isCompanionPanel =\s*isChatCompanionTab\(railPanel\) \|\| railPanel === "tools"/.test(surfaceSource) &&
+    /activePanel=\{\s*displayedRailPanel === "review" \? "changes" : displayedRailPanel\s*\}/.test(surfaceSource) &&
+    surfaceSource.includes("chromeless={hasCompanion}") &&
+    surfaceSource.includes('displayedRailPanel === "files" ? (') &&
     surfaceSource.includes("<CompanionFiles") &&
-    surfaceSource.includes('railPanel === "side-chat" ? (') &&
+    surfaceSource.includes('displayedRailPanel === "side-chat" ? (') &&
     surfaceSource.includes("<SideChatPanel") &&
     surfaceSource.includes("onOpenFile={onOpenCompanionFile}") &&
     surfaceSource.includes('className="gyro-chat-companion-tab-list"') &&
@@ -5830,9 +6130,8 @@ expect(
       'await invoke<boolean>("delete_session", { sessionId })',
     ) &&
     workbenchSource.includes("sideChatSessionIds") &&
-    surfaceSource.includes(
-      "Temporary chat · Cleared when you close this tab",
-    ) &&
+    surfaceSource.includes("Side chat · Cleared when you close this tab") &&
+    !surfaceSource.includes('className="gyro-side-chat-note"') &&
     styleSource.includes(".gyro-side-chat-composer {"),
   "Side chat should inherit project and model without the parent transcript, stay out of history, and be swept on close and relaunch.",
 );
@@ -5871,7 +6170,7 @@ expect(
     surfaceSource.includes("<span>Bottom drawer</span>") &&
     surfaceSource.includes("aria-pressed={isToolPanelOpen}") &&
     appSource.includes("const toggleChatToolPanel = useCallback") &&
-    appSource.includes("openToolPanel(workbench.activePaneTab)") &&
+    appSource.includes('openToolPanel("terminal")') &&
     appSource.includes('openToolPanel("terminal")') &&
     !surfaceSource.includes('"Open last used panel"') &&
     surfaceSource.includes("onToggleToolPanel?.();") &&
@@ -5905,6 +6204,12 @@ expect(
     styleSource.includes(".gyro-thread-diff-pill em.is-added") &&
     styleSource.includes(".gyro-thread-diff-pill em.is-removed") &&
     appSource.includes("savedProjectsFromSessions") &&
+    appSource.includes(
+      "!isTransientWorkspacePath(session.workspacePath),\n    )\n    .forEach((session) =>",
+    ) &&
+    appSource.includes(
+      'activeChatPane?.kind === "draft"\n          ? activeChatPane.workspacePath',
+    ) &&
     appSource.includes('"gyro.recent-project-paths"') &&
     appSource.includes("loadRecentProjectPaths") &&
     appSource.includes("setRecentProjectPaths((current)") &&
@@ -6018,7 +6323,7 @@ expect(
     ) &&
     styleSource.includes("grid-template-rows: minmax(0, 1fr) auto") &&
     threadSurfaceRules.some((rule) =>
-      rule.includes("grid-template-rows: 48px minmax(0, 1fr)"),
+      rule.includes("grid-template-rows: var(--gyro-chat-header-height, 48px) minmax(0, 1fr)"),
     ) &&
     threadTopbarRules.some(
       (rule) =>
@@ -6077,9 +6382,10 @@ expect(
 expect(
   surfaceSource.includes("function safeAssistantLinkUrl") &&
     surfaceSource.includes("onOpenBrowserUrl={onBrowserNavigate}") &&
-    surfaceSource.includes("onOpenBrowserUrl(href)") &&
-    surfaceSource.includes('target={onOpenBrowserUrl ? undefined : "_blank"}'),
-  "Reply links should open Gyro's Browser rail instead of navigating the app webview.",
+    surfaceSource.includes("openReplyLink(event, href, onOpenBrowserUrl)") &&
+    surfaceSource.includes("function renderBareReplyUrls") &&
+    surfaceSource.includes("title={replyLinkHint}"),
+  "Reply links should open Gyro's Browser rail on a click and the device browser on a modifier click, including bare URLs.",
 );
 expect(
   /:root\[data-theme="dark"\] \.gyro-chat-surface:not\(\.is-empty\),[\s\S]*?\.gyro-chat-composer-dock \{\s*background: var\(--gyro-app\);\s*\}/.test(
@@ -6165,7 +6471,7 @@ expect(
     styleSource.includes("display: inline-flex") &&
     styleSource.includes("justify-content: center") &&
     styleSource.includes("grid-template-columns: none") &&
-    styleSource.includes("border-radius: 999px") &&
+    styleSource.includes("border-radius: var(--gyro-radius-pill)") &&
     styleSource.includes("min-height: 30px") &&
     styleSource.includes(".gyro-sidebar-update-label") &&
     !styleSource.includes(".gyro-sidebar-update-indicator") &&
@@ -6190,7 +6496,7 @@ expect(
       "https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json",
     ) &&
     !tauriConfigSource.includes("GYRO_DEV_UPDATER_PUBKEY") &&
-    releaseWorkflowSource.includes("needs: macos") &&
+    releaseWorkflowSource.includes("needs: [signing, macos]") &&
     releaseWorkflowSource.includes("merge-multiple: true") &&
     releaseWorkflowSource.includes("scripts/create-updater-manifest.mjs") &&
     releaseWorkflowSource.includes('gh release create "$GITHUB_REF_NAME"') &&
@@ -6227,9 +6533,10 @@ expect(
     updatesSectionSource.includes(
       'className="gyro-primary-button gyro-update-card-primary"',
     ) &&
-    // The workspace-preparation popover owns .gyro-update-primary and its
-    // hardcoded blue; the card must not borrow it.
+    // .gyro-update-primary and its hardcoded blue are retired; every update
+    // action uses the shared primary button.
     !updatesSectionSource.includes("gyro-update-primary") &&
+    !styleSource.includes(".gyro-update-primary") &&
     updatesSectionSource.includes('aria-live="polite"') &&
     !updatesSectionSource.includes("Unknown") &&
     !updatesSectionSource.includes("gyro-update-pill") &&
@@ -6287,7 +6594,7 @@ expect(
     appSource.includes('case "select-no-folder":') &&
     appSource.includes('startNewChat({ workspacePath: "" })') &&
     appSource.includes("void openWorkspace();") &&
-    appSource.includes('void selectChatAttachment("workspace-file");') &&
+    /void selectChatAttachment\(\s*"workspace-file",/.test(appSource) &&
     appSource.includes('action.startsWith("start-new-chat-mode:")') &&
     appSource.includes('type: "set-workbench-mode"') &&
     appSource.includes('type: "close-tool-panel"') &&
@@ -6305,7 +6612,7 @@ expect(
     // The composer measure lives in one token now, not in an inline style that
     // silently outranked the stylesheet.
     !surfaceSource.includes('"min(820px, 100%)"') &&
-    styleSource.includes("--gyro-composer-width: 820px") &&
+    styleSource.includes("--gyro-composer-width: 720px") &&
     styleSource.includes("grid-template-columns: minmax(0, 1fr)") &&
     styleSource.includes("width: min(860px, 100%)") &&
     !surfaceSource.includes("calc(100vw - 96px)") &&
@@ -6421,13 +6728,13 @@ expect(
   tauriSource.includes(
     "CapabilityId::ResearchRun => subagent_capability::execute",
   ) &&
-    subagentRustSource.includes("ChildRunControl::claim(") &&
+    delegatedAgentRustSource.includes("ChildRunControl::claim(") &&
     subagentRustSource.includes("claim_child_run_control(") &&
     subagentRustSource.includes("release_child_run_control(") &&
-    subagentRustSource.includes("ParentStopWatcher::start(") &&
+    subagentRustSource.includes("ParentStopWatcher::start_until(") &&
     subagentRustSource.includes("ProviderCancellationManager") &&
     subagentRustSource.includes("MAX_CONCURRENT_PROVIDER_RUNS") &&
-    subagentRustSource.includes("drop(run);"),
+    delegatedAgentRustSource.includes("drop(control);"),
   "A research sub-agent should claim its own provider run control, watch its parent chat's stop, and release the control when the child turn ends.",
 );
 // A sub-agent run belongs to the chat that started it. The child session
@@ -6437,7 +6744,7 @@ expect(
 // its completion as a chat of its own; and the call card that reports the
 // research is the way the transcript is opened.
 expect(
-  subagentRustSource.includes("create_subagent_session(") &&
+  delegatedAgentRustSource.includes("create_subagent_session(") &&
     coreSessionsSource.includes("create_subagent_session(") &&
     coreSessionsSource.includes("parent_session_id") &&
     coreSessionsSource.includes("where parent_session_id = ?1") &&
@@ -6499,9 +6806,20 @@ expect(
     surfaceSource.includes(
       "providerSignInLabel(providerStatus.recoveryKind)",
     ) &&
-    appSource.includes(
-      "connectProvider(providerId, { forceLogin: needsSignIn })",
+    /connectProvider\(providerId,\s*\{\s*forceLogin:\s*needsSignIn,\s*importedSessionId:\s*event\.sessionId,\s*\}\)/.test(
+      appSource,
     ) &&
+    /const retryContext:\s*ChatTurnContextSnapshot\s*=\s*\{\s*sessionId:\s*event\.sessionId,\s*preserveDraft:\s*true,\s*retryTurnId:\s*turnId/.test(
+      appSource,
+    ) &&
+    appSource.includes("retryDispatchRef.current") &&
+    /sendDraftRef\.current\(userMessage,\s*\{\s*\.\.\.retryContext,\s*retryDispatchGuard/.test(
+      appSource,
+    ) &&
+    appSource.includes(
+      "sessionEventsById[event.sessionId] ?? eventsRef.current",
+    ) &&
+    appSource.includes("item.sessionId === event.sessionId &&") &&
     appSource.includes("if (connected && needsSignIn) replayFailedTurn();") &&
     appSource.includes("if (!forceLogin && result.connectionStatus"),
   "A send rejected over an expired sign-in should offer sign-in, skip the health shortcut that still passes on a stale token, and resend the message once the login succeeds.",
@@ -6590,13 +6908,25 @@ expect(
   "Start composer context row should wrap without rendering a horizontal scrollbar.",
 );
 expect(
-  appSource.includes("function providerLoginProfile") &&
-    appSource.includes('args: ["login", "--device-auth"]') &&
-    appSource.includes('args: ["auth", "login"]') &&
-    appSource.includes('command: "kimi"') &&
-    appSource.includes('args: ["login"]') &&
-    appSource.includes('command: "cursor-agent"') &&
-    appSource.includes('command: "opencode"') &&
+  [
+    ["openai", "codex", ["login", "--device-auth"]],
+    ["anthropic", "claude", ["auth", "login"]],
+    ["kimi", "kimi", ["login"]],
+    ["cursor", "cursor-agent", ["login"]],
+    ["opencode", "opencode", ["auth", "login"]],
+  ].every(([id, command, args]) => {
+    const profile = providerLoginProfile(id);
+    return (
+      profile.command === command &&
+      JSON.stringify(profile.args) === JSON.stringify(args) &&
+      providerLoginCommandText(profile) === [command, ...args].join(" ")
+    );
+  }) &&
+    appSource.includes('from "./provider-login-profile"') &&
+    appSource.includes("const profile = providerLoginProfile(providerId)") &&
+    appSource.includes(
+      "const commandText = providerLoginCommandText(profile)",
+    ) &&
     appSource.includes('"check_provider_health"') &&
     appSource.includes("providerHealthRequest(provider, providerId)") &&
     appSource.includes("configSaveQueueRef.current") &&
@@ -6608,11 +6938,11 @@ expect(
     appSource.includes('layout: "terminal-grid"') &&
     appSource.includes('tab: "terminal"') &&
     coreProviderHealthSource.includes("pub struct ProviderHealthService") &&
-    coreProviderHealthSource.includes(
-      'command: "codex",\n            args: &["login", "status"]',
+    /command:\s*"codex",\s*args:\s*&\["login", "status"\]/.test(
+      coreProviderHealthSource,
     ) &&
-    coreProviderHealthSource.includes(
-      'command: "claude",\n                    args: &["auth", "status"]',
+    /command:\s*"claude",\s*args:\s*&\["auth", "status"\]/.test(
+      coreProviderHealthSource,
     ) &&
     coreProviderHealthSource.includes('"xai"') &&
     coreProviderHealthSource.includes('"XAI_API_KEY"') &&
@@ -6629,8 +6959,8 @@ expect(
     coreCliPathSource.includes(".npm-global/bin") &&
     appSource.includes('destination: "providers"') &&
     appSource.includes("completeProviderLogin") &&
-    surfaceSource.includes("Gyro local access stays separate") &&
-    surfaceSource.includes("Provider event logs are sensitive and opt-in") &&
+    workbenchSource.includes('action.destination === "providers"') &&
+    !surfaceSource.includes("export function ProvidersSurface") &&
     surfaceSource.includes("Claude Code login and claude auth status") &&
     surfaceSource.includes("Codex sign-in with ChatGPT") &&
     surfaceSource.includes("XAI_API_KEY") &&
@@ -6638,7 +6968,7 @@ expect(
     surfaceSource.includes("onToggleProvider?.(provider.id)") &&
     surfaceSource.includes("function ProviderApiKeyField") &&
     surfaceSource.includes("Paste API key") &&
-    surfaceSource.includes("Kept in the macOS Keychain") &&
+    surfaceSource.includes("Kept on this Mac.") &&
     providerApiKeysSource.includes("set_provider_api_key") &&
     providerApiKeysSource.includes("clear_provider_api_key") &&
     providerApiKeysSource.includes("provider_api_key_status") &&
@@ -6648,7 +6978,7 @@ expect(
     coreCredentialsSource.includes("pub fn set_stored_provider_api_key") &&
     surfaceSource.includes("onTestProvider?.(provider.id)") &&
     surfaceSource.includes("gyro-settings-provider-actions") &&
-    surfaceSource.includes("providerAuthSummary(provider.id)") &&
+    surfaceSource.includes("providerNeedsSignInRepair(provider, health)") &&
     !surfaceSource.includes('label="Selected model"') &&
     !surfaceSource.includes('className="gyro-provider-model-picker"') &&
     surfaceSource.includes("Refresh models") &&
@@ -6690,7 +7020,12 @@ expect(
     ) &&
     surfaceSource.includes('if (event.key === "Escape")') &&
     surfaceSource.includes("openMenus.at(-1) !== menu") &&
-    surfaceSource.includes("returnFocus.focus()"),
+    /const focusTarget =\s*triggerRef\?\.current \?\?\s*element\.querySelector<HTMLElement>\(\s*'\[aria-haspopup\]\[aria-expanded="true"\]',?\s*\) \?\?\s*returnFocus;/.test(
+      surfaceSource,
+    ) &&
+    /if \(focusTarget\?\.isConnected\)\s*focusTarget\.focus\(\{ preventScroll: true \}\)/.test(
+      surfaceSource,
+    ),
   "Open composer menus should close with Escape even when the macOS webview does not retain trigger focus.",
 );
 // Model rail: provider marks down the left, the previewed provider's models
@@ -6736,7 +7071,7 @@ expect(
 // draft must not rewrite the model chip on every other open pane.
 expect(
   surfaceSource.includes("const boundToSession = Boolean(") &&
-    surfaceSource.includes("const effectiveModelId = boundToSession") &&
+    surfaceSource.includes("const rawModelId = boundToSession") && surfaceSource.includes("const effectiveModelId = pickerModelId(modelProviderId, rawModelId)") &&
     surfaceSource.includes("const providerModelLabel = boundToSession") &&
     appSource.includes("chatDraftModels") &&
     appSource.includes("setChatDraftModels") &&
@@ -6809,20 +7144,27 @@ expect(
     !surfaceSource.includes("modelFlyoutShiftX"),
   "Every model/provider pane should open the model rail.",
 );
-// One chip carries model and effort together, still under the provider's own
-// brand mark. It opens a drill-down menu that names each setting's current
-// value, with the provider switch folded under Advanced — and no second effort
-// chip beside it.
+// Model and effort have independent composer chips with direct menu access.
 expect(
-  /const modelChipLabel =\s*hasSelectedProvider\s*\?\s*providerModelLabel\s*:\s*"Choose model"/.test(
-    surfaceSource,
-  ) &&
+  /const modelChipLabel = hasSelectedProvider/.test(surfaceSource) && surfaceSource.includes("pickerModelLabel(modelProviderId, rawModelId, providerModelLabel)") && surfaceSource.includes(': "Choose model"') &&
     surfaceSource.includes("sessionModel?.modelLabel") &&
     surfaceSource.includes("{modelChipLabel}") &&
-    surfaceSource.includes('className="gyro-model-chip-effort"') &&
+    surfaceSource.includes('className="gyro-effort-chip-label"') &&
     surfaceSource.includes("reasoningEffortLabel(providerReasoningEffort)") &&
-    !surfaceSource.includes(
-      'className="gyro-composer-chip gyro-effort-chip"',
+    surfaceSource.includes(
+      'className="gyro-composer-chip gyro-model-chip gyro-composer-model-trigger"',
+    ) &&
+    surfaceSource.includes(
+      'className="gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger"',
+    ) &&
+    surfaceSource.includes(
+      'toggleProviderPopover("model", event.currentTarget)',
+    ) &&
+    surfaceSource.includes(
+      'toggleProviderPopover("root", event.currentTarget)',
+    ) &&
+    surfaceSource.includes(
+      'className="gyro-composer-control gyro-composer-control-effort"',
     ) &&
     surfaceSource.includes(
       "<ProviderLogo providerId={displayProvider.id} />",
@@ -6843,7 +7185,7 @@ expect(
     !styleSource.includes(
       ".gyro-model-chip:has(.gyro-provider-logo.is-anthropic):hover",
     ),
-  "Composer should expose one model chip whose menu opens effort first and the model rail from there.",
+  "Composer should expose separate model and effort controls with direct access.",
 );
 
 // Drilling should feel like one card changing its mind, not a stack of
@@ -6874,40 +7216,58 @@ expect(
     ),
   "The model menu should hold one width, animate from its anchor, keep carets neutral, and flip when it cannot open down.",
 );
+const modelDefaultAcceptSource = appSource.slice(
+  appSource.indexOf("const acceptModelStandardPrompt ="),
+  appSource.indexOf("const dismissModelStandardPrompt ="),
+);
 expect(
   indexSource.includes("ModelStandardPromptOverlay") &&
     surfaceSource.includes("export function ModelStandardPromptOverlay") &&
-    surfaceSource.includes("You use {modelLabel} a lot.") &&
-    surfaceSource.includes("Yes, make standard") &&
-    surfaceSource.includes("No, not now") &&
-    styleSource.includes(".gyro-model-standard-overlay") &&
-    appSource.includes("MODEL_STANDARD_PROMPT_THRESHOLD = 3") &&
-    appSource.includes("MODEL_USAGE_STORAGE_KEY") &&
-    appSource.includes("recordModelSelection") &&
-    appSource.includes("acceptModelStandardPrompt") &&
-    appSource.includes("dismissModelStandardPrompt") &&
+    surfaceSource.includes("Use {modelLabel} by default?") &&
+    surfaceSource.includes("Used successfully {usageCount}") &&
+    surfaceSource.includes("onNeverSuggest") &&
+    surfaceSource.includes('className="gyro-model-default-suggestion"') &&
+    styleSource.includes('@import "./model-default-suggestion.css"') &&
+    appSource.includes("isSuccessfulModelUseResponse(response)") &&
+    (appSource.match(/recordCompletedModelChoice\(/g)?.length ?? 0) === 2 &&
+    !appSource.includes("recordModelSelection") &&
+    appSource.includes("modelDefaultSuggestionFor(") &&
+    appSource.includes("canShowModelDefaultSuggestion") &&
+    appSource.includes("dismissModelDefaultSuggestion(") &&
+    modelDefaultAcceptSource.includes("await persistConfig(") &&
+    modelDefaultAcceptSource.includes("defaultModelId: model.id") &&
+    modelDefaultAcceptSource.includes("if (!saved)") &&
+    !modelDefaultAcceptSource.includes("saveSessionModel(") &&
+    !modelDefaultAcceptSource.includes("selectedProviderId:") &&
     appSource.includes("<ModelStandardPromptOverlay"),
-  "Repeated model selections should trigger a polished standard-model confirmation overlay.",
+  "Default suggestions should use completed native chat evidence, support decline, and save future defaults without changing active chats.",
 );
 expect(
   surfaceSource.includes("function useOutsidePointerDismiss") &&
     surfaceSource.includes('document.addEventListener("pointerdown"') &&
     surfaceSource.includes("const path = event.composedPath()") &&
     surfaceSource.includes("path.includes(element)") &&
+    surfaceSource.includes("focused.contains(element)") &&
     surfaceSource.includes("const menuRef = useOutsidePointerDismiss") &&
     surfaceSource.includes("event.target === event.currentTarget") &&
     surfaceSource.includes("ref={detailRef}"),
-  "Menus, popovers, command palette, and detail panels should dismiss on outside pointer clicks.",
+  "Menus, popovers, command palette, and detail panels should dismiss on outside pointer clicks, but a focus move onto an ancestor that still contains the menu must not close it.",
 );
 expect(
   surfaceSource.includes("triggerRef?: RefObject<HTMLElement | null>") &&
     surfaceSource.includes("path.includes(triggerRef.current)") &&
     // The dismiss scope is the open control itself, not a whole composer, row,
     // or message, so a press on any neighbouring control still closes it.
-    ["context", "approval", "provider"].every((popover) =>
+    ["context", "approval"].every((popover) =>
       surfaceSource.includes(
         `activePopover === "${popover}" ? popoverScopeRef : undefined`,
       ),
+    ) &&
+    /activePopover === "provider" && modelMenuPane !== "root"\s*\? popoverScopeRef/.test(
+      surfaceSource,
+    ) &&
+    /activePopover === "provider" && modelMenuPane === "root"\s*\? popoverScopeRef/.test(
+      surfaceSource,
     ) &&
     // The slash menu scope is attached through a callback ref because the same
     // node is also the composer shell the goal editor measures.
@@ -6934,10 +7294,10 @@ expect(
 expect(
   surfaceSource.includes("const contextItems: ComposerPopoverItem[]") &&
     surfaceSource.includes('action: "attach-files"') &&
-    surfaceSource.includes('label: "Attach"') &&
+    surfaceSource.includes('label: "Attach files"') &&
     surfaceSource.includes("...(canAttachEditorSnapshot") &&
     surfaceSource.includes('label: "Editor"') &&
-    surfaceSource.includes('label: "Goal"') &&
+    surfaceSource.includes('label: sessionGoal?.text ? "Edit goal" : "Save goal"') &&
     surfaceSource.includes('label: "Plan"') &&
     !surfaceSource.includes('label: "Image"') &&
     !surfaceSource.includes('label: "File"') &&
@@ -6945,7 +7305,7 @@ expect(
     !surfaceSource.includes('label: "Search"') &&
     surfaceSource.includes('action: "set-chat-mode-plan"') &&
     surfaceSource.includes("icon: ListChecks") &&
-    !surfaceSource.includes('title="Add"') &&
+    !surfaceSource.includes('label: "Website"') &&
     !surfaceSource.includes('label: "Photos"') &&
     !surfaceSource.includes('label: "Spreadsheet"') &&
     !surfaceSource.includes('label: "Slides"') &&
@@ -6999,6 +7359,55 @@ expect(
     ),
   "Chat composer should expose a filtered, keyboard-accessible slash command menu whose actions are wired.",
 );
+const completionMenuSource = readRepoFile(
+  "packages/ui/src/composer-completion-menu.tsx",
+);
+const heroCompletionMenu = completionMenuGeometry({
+  bounds: { left: 0, right: 860, top: 0, bottom: 620 },
+  anchor: { left: 270, right: 790, top: 312, bottom: 400 },
+  naturalHeight: 418,
+  minimumHeight: 110,
+  gap: 8,
+});
+expect(
+  heroCompletionMenu.direction === "up" &&
+    heroCompletionMenu.height === 296 &&
+    (
+      surfaceSource.match(
+        /<ComposerCompletionMenu[\s\S]*?className="gyro-composer-slash-menu(?: is-commands)?"/g,
+      ) ?? []
+    ).length === 2 &&
+    completionMenuSource.includes(
+      "clippingBounds(panel, popoverViewportRect)",
+    ) &&
+    completionMenuSource.includes('[role="option"][aria-selected="true"]') &&
+    completionMenuSource.includes('scrollIntoView({ block: "nearest" })'),
+  "Slash and context completions must stay within the owning pane, with keyboard-selected context options visible.",
+);
+for (const scale of [0.8, 1, 1.15, 1.5]) {
+  for (const height of [180, 260, 620]) {
+    for (const anchorTop of [20, 70, 150]) {
+      const top = Math.min(anchorTop, height - 100);
+      const menu = completionMenuGeometry({
+        bounds: { left: 0, right: 320, top: 0, bottom: height },
+        anchor: { left: 8, right: 312, top, bottom: top + 90 },
+        naturalHeight: 418 * scale,
+        minimumHeight: 110 * scale,
+        gap: 8 * scale,
+      });
+      const menuTop =
+        menu.direction === "overlay"
+          ? menu.top
+          : menu.direction === "up"
+            ? top - 8 * scale - menu.height
+            : top + 90 + 8 * scale;
+      expect(
+        menuTop >= 8 && menuTop + menu.height <= height - 8 && menu.height > 0,
+        `Completion menus must fit a ${height}px pane at ${scale} scale with anchor ${anchorTop}.`,
+      );
+    }
+  }
+}
 expect(
   ["/help", "/branch", "/review", "/test", "/diff", "/compact"].every(
     (command) => surfaceSource.includes(`command: "${command}"`),
@@ -7064,9 +7473,11 @@ expect(
     /\.gyro-composer-context-wheel\s*\{[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/.test(
       styleSource,
     ) &&
-    /\.gyro-composer-context-wheel\s*>\s*span\s*\{[\s\S]*?height:\s*12px;[\s\S]*?width:\s*12px;/.test(
+    /\.gyro-composer-context-wheel\s*>\s*svg\s*\{[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/.test(
       styleSource,
-    ),
+    ) &&
+    surfaceSource.includes('r="6.5"') &&
+    surfaceSource.includes('pathLength="100"'),
   "Composer context wheel should stay compact while remaining legible.",
 );
 expect(
@@ -7087,33 +7498,47 @@ expect(
 );
 expect(
   tauriSource.includes("fn normal_chat_requests_plan(message: &str)") &&
-    tauriSource.includes(
-      "request.mode == ChatMode::Normal && normal_chat_requests_plan(&request.message)",
+    /let automatically_entered_plan\s*=\s*request\.mode == ChatMode::Normal\s*&&\s*lease\.is_none\(\)\s*&&\s*normal_chat_requests_plan\(&request\.message\)/.test(
+      tauriSource,
     ) &&
-    tauriSource.includes("request.mode = ChatMode::Plan") &&
+    /if automatically_entered_plan\s*\{[\s\S]*?request\.mode = ChatMode::Plan/.test(
+      tauriSource,
+    ) &&
     tauriSource.includes('"source": "message-intent"') &&
     tauriSource.includes('"plan-mode-fallback"'),
   "Explicit plan requests in Normal chat should enter the real read-only Plan mode and always produce a plan document.",
 );
+
 expect(
-  surfaceSource.includes("function PlanDecisionCard") &&
-    surfaceSource.includes('aria-label="Plan ready for approval"') &&
-    surfaceSource.includes('onDecision("reject")') &&
-    surfaceSource.includes('onDecision("approve")') &&
-    surfaceSource.includes("onPlanDecision={handlePlanDecision}") &&
-    surfaceSource.includes(
-      "onDecision={(decision) => onPlanDecision?.(decision)}",
+  // The decision takes the composer's place, like a question: approve, type a
+  // change (which stays in Plan mode), or keep planning.
+  planModeSource.includes("export function ImplementPlanDock") &&
+    planModeSource.includes('aria-label="Implement this plan?"') &&
+    planModeSource.includes('onDecision("reject")') &&
+    planModeSource.includes('onDecision("approve")') &&
+    planModeSource.includes("Yes, implement this plan") &&
+    chatSurfaceSource.includes("<ImplementPlanDock") &&
+    chatSurfaceSource.includes(
+      "onDecision={(decision) => void handlePlanDecision(decision)}",
     ) &&
-    surfaceSource.includes(
-      "autoOpenedPlanDecisionKeyRef.current = planDecisionKey",
+    chatSurfaceSource.includes(
+      "setDismissedPlanDecisionKey(planDecisionKey);",
     ) &&
+    // The plan lands in the transcript as a card holding the same document the
+    // panel renders, and folds to one line while the panel shows it.
+    planModeSource.includes("export function PlanCard") &&
+    planModeSource.includes("Showing in panel") &&
+    chatTurnSource.includes("{isPlanResponseTurn && plan?.content ? (") &&
+    chatTurnSource.includes("<PlanCard") &&
+    chatTurnSource.includes("isOpenInPanel={isPlanInPanel}") &&
+    surfaceSource.includes('isPlanInPanel={activeRailPanel === "plan"}') &&
+    !surfaceSource.includes("autoOpenedPlanDecisionKeyRef") &&
+    !surfaceSource.includes("function PlanDecisionCard") &&
     surfaceSource.includes("!isPlanResponseTurn ? (") &&
-    !surfaceSource.includes("function PlanArtifactCard") &&
-    !chatSurfaceSource.includes("<PlanDecisionCard") &&
-    !chatSurfaceSource.includes("<SessionGoalBand") &&
     /activePanel === "plan" &&\s*sessionPlan\?\.content/.test(surfaceSource) &&
     surfaceSource.includes('planView === "document"') &&
-    surfaceSource.includes('aria-label="Plan view"') &&
+    planModeSource.includes('aria-label="Plan view"') &&
+    surfaceSource.includes("<PlanPanelHeader") &&
     surfaceSource.includes("content={sessionPlan.content}") &&
     surfaceSource.includes("title={sessionPlan.title}") &&
     surfaceSource.includes("const isPlanReadyForDecision = Boolean(") &&
@@ -7127,10 +7552,33 @@ expect(
     appSource.includes('mode: "normal"') &&
     appSource.includes("const plan = target?.plan ?? activeSessionPlan") &&
     appSource.includes("preserveDraft: true") &&
-    styleSource.includes(".gyro-plan-decision-card") &&
+    // Questions arrive one at a time with a recommended pick, and the answers
+    // fold into an "Asked N questions" run row.
+    tauriSource.includes(
+      'const GYRO_QUESTIONS_MARKER: &str = "GYRO_QUESTIONS:";',
+    ) &&
+    tauriSource.includes('object.insert("questions".into(), questions);') &&
+    planModeSource.includes("export function questionsFromPayload") &&
+    planModeSource.includes("export function formatChatAnswers") &&
+    planModeSource.includes("No, and tell Gyro what to do instead") &&
+    planModeSource.includes("gyro-question-option-badge") &&
+    planModeSource.includes("export function ChatQuestionAnswers") &&
+    chatTurnSource.includes("<ChatQuestionAnswers {...questionAnswers} />") &&
+    planModeStyleSource.includes(".gyro-question-dock") &&
+    styleSource.includes(
+      ".gyro-composer-shell.has-overlay > :not(.gyro-question-dock)",
+    ) &&
+    styleSource.includes(
+      ".gyro-composer-shell.has-overlay > .gyro-composer-bar",
+    ) &&
+    styleSource.includes(
+      ".gyro-composer-shell.has-overlay > .gyro-composer-bar > *",
+    ) &&
+    styleSource.includes("> .gyro-composer-control-effort {") &&
+    !styleSource.includes(".gyro-plan-decision-card") &&
     !styleSource.includes(".gyro-plan-artifact-card") &&
     styleSource.includes(".gyro-plan-rail.is-document"),
-  "Completed Plan-mode output should open the right panel with approval controls and keep the plan out of the transcript.",
+  "Plan mode should ask one question at a time, land the plan as a card in the transcript, keep the model and effort chips above the implement decision, and put that decision where the composer sits.",
 );
 
 expect(
@@ -7148,7 +7596,7 @@ expect(
       ':root[data-theme="light"]\n  .gyro-chat-thread-topbar\n  .gyro-thread-pill-button',
     ) &&
     styleSource.includes("backdrop-filter: none") &&
-    surfaceSource.includes(") : sessionGoal?.text ? (") &&
+    surfaceSource.includes(") : !hasGoalCaption && sessionGoal?.text ? (") &&
     appSource.includes("const changeChatMode = useCallback") &&
     // A goal is the outcome and a mode is how the turn runs, so neither
     // cancels the other. Planning toward a stated outcome is the case the
@@ -7322,9 +7770,7 @@ expect(
     appSource.includes("const suppressSessionAutoSelectRef = useRef(true)") &&
     appSource.includes("suppressSessionAutoSelectRef.current = true") &&
     appSource.includes("setActiveSessionId(undefined)") &&
-    appSource.includes(
-      'dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });',
-    ) &&
+    appSource.includes("draftWorkspaceModes.current[draftKey] ?? workbench.preferences.defaultWorkspaceMode") && appSource.includes('dispatchWorkbench({ type: "set-workbench-mode", mode: draftWorkspaceMode });') &&
     appSource.includes("onCreateSession={startNewChat}") &&
     surfaceSource.includes("const transcriptState = useMemo") &&
     surfaceSource.includes(
@@ -7336,7 +7782,7 @@ expect(
     surfaceSource.includes(
       '!isEmptyStart && activeRailPanel === "environment" && !isCompanionPanel',
     ),
-  "Cold launch and New chat should keep recent sessions unselected, reset to local mode, and render the start screen from transcript events.",
+  "Cold launch and New chat should keep recent sessions unselected, honor per-draft workspace defaults, and render the start screen from transcript events.",
 );
 expect(
   !surfaceSource.includes("pane-shell") &&
@@ -7352,13 +7798,15 @@ expect(
     ) &&
     tauriSource.includes("write_workspace_file") &&
     appSource.includes("<MonacoEditorPane") &&
-    appSource.includes('lazy(() => import("./monaco-editor"))') &&
+    workspaceCodeEditorSource.includes(
+      'lazy(() => import("../monaco-editor"))',
+    ) &&
     monacoEditorSource.includes("loader.config({ monaco })") &&
     monacoEditorSource.includes("MonacoEnvironment") &&
     monacoEditorSource.includes("export function disposeMonacoModel") &&
     monacoEditorSource.includes("new EditorWorker()") &&
     monacoEditorSource.includes("new TypeScriptWorker()") &&
-    appSource.includes("keepCurrentModel") &&
+    workspaceCodeEditorSource.includes("keepCurrentModel") &&
     appSource.includes("function disposeEditorModels") &&
     surfaceSource.includes("renderEditor") &&
     !surfaceSource.includes("gyro-editor-ai-bar") &&
@@ -7389,8 +7837,14 @@ expect(
     appSource.includes("const stopIdeDebugSession = useCallback") &&
     appSource.includes("const closesLastReference") &&
     appSource.includes("Discard unsaved changes in") &&
-    appSource.includes('method: "textDocument/didOpen"') &&
-    appSource.includes('method: "textDocument/didChange"') &&
+    appSource.includes("useLanguageSessions({") &&
+    languageSessionsHookSource.includes("getManager().reconcile(documents)") &&
+    languageSessionsHookSource.includes('"lsp_start"') &&
+    languageSessionsHookSource.includes('"lsp_request"') &&
+    languageSessionsHookSource.includes('"lsp_stop"') &&
+    languageSessionsSource.includes('"textDocument/didOpen"') &&
+    languageSessionsSource.includes('"textDocument/didChange"') &&
+    languageSessionsSource.includes('"textDocument/didClose"') &&
     reducerSource.includes('case "ide-select-group"') &&
     reducerSource.includes('case "ide-rename-path"') &&
     reducerSource.includes('case "ide-delete-path"') &&
@@ -7426,14 +7880,20 @@ for (const surface of [
   "IdeSurface",
   "SettingsSurface",
   "AutomationsSurface",
-  "ProvidersSurface",
   "ToolsSurface",
   "WorkspaceToolPanel",
 ]) {
   expect(appSource.includes(`<${surface}`), `Surface not routed: ${surface}`);
 }
 
+expect(
+  !appSource.includes("const queueProviderHandoff") &&
+    !surfaceSource.includes("onQueueProviderHandoff"),
+  "The removed legacy provider screen must not retain its handoff action entry point.",
+);
+
 for (const surface of [
+  "ProvidersSurface",
   "CliWorkspaceSurface",
   "DiffReviewSurface",
   "BrowserPreviewSurface",
@@ -7521,8 +7981,8 @@ for (const className of [
 expect(
   liveTerminalPaneSource.includes("drawBoldTextInBrightColors: true") &&
     liveTerminalPaneSource.includes("minimumContrastRatio: 4.5") &&
-    liveTerminalPaneSource.includes('brightMagenta: "#f08cff"') &&
-    liveTerminalPaneSource.includes('magenta: "#d86cff"') &&
+    liveTerminalPaneSource.includes('brightMagenta: "#d19aff"') &&
+    liveTerminalPaneSource.includes('magenta: "#be83ff"') &&
     liveTerminalPaneSource.includes('brightYellow: "#ffd166"'),
   "Embedded CLI terminals should preserve visible ANSI accent colors.",
 );
@@ -7543,9 +8003,14 @@ expect(
   "Terminal Grid should use the shared panel body without the IDE tool-tab header.",
 );
 expect(
-  surfaceSource.includes('activeTab === "terminal" && onAddPane') &&
-    surfaceSource.includes('aria-label="New terminal"'),
-  "The add control should appear only beside the terminal panel that it affects.",
+  surfaceSource.includes(
+    '(compact || activeTab === "terminal") && onAddPane',
+  ) &&
+    surfaceSource.includes(
+      'aria-label={compact ? "Add drawer tab" : "New terminal"}',
+    ) &&
+    surfaceSource.includes('aria-label="Drawer tools"'),
+  "The IDE drawer add control should open its tool picker while other terminal surfaces keep direct creation.",
 );
 expect(
   surfaceSource.includes("showEmbeddedPanel = true") &&
@@ -7624,12 +8089,10 @@ for (const secretPattern of [
 }
 
 expect(
-  surfaceSource.includes(
-    'data-active-mode={isIdeSidebar ? "workspace" : "sessions"}',
-  ) &&
+  surfaceSource.includes('value={isIdeSidebar ? "workspace" : "sessions"}') &&
     styleSource.includes(".gyro-titlebar-switch-option.is-active") &&
     styleSource.includes("justify-content: center") &&
-    styleSource.includes("font-weight: 450") &&
+    styleSource.includes("font-weight: 400") &&
     styleSource.includes("font-weight: 500") &&
     styleSource.includes("line-height: calc(16px * var(--gyro-ui-scale, 1))") &&
     styleSource.includes("transition: transform var(--gyro-premium-motion)") &&
@@ -7642,22 +8105,24 @@ expect(
     styleSource.includes(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
-    styleSource.includes("--gyro-premium-radius-md: 9px") &&
-    styleSource.includes("--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))") &&
+    styleSource.includes("--gyro-radius-md: 6px") &&
+    styleSource.includes(
+      "--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))",
+    ) &&
     styleSource.includes("--gyro-app: #181818") &&
-    styleSource.includes("--gyro-pane: #1e1e1e") &&
+    styleSource.includes("--gyro-pane: #1c1c1c") &&
     styleSource.includes("--gyro-hero-composer: var(--gyro-surface)") &&
     styleSource.includes("--gyro-user-main: #0874df") &&
     styleSource.includes("--gyro-user-secondary: #8b6fcb") &&
     styleSource.includes("var(--gyro-user-main) 86%") &&
     styleSource.includes(':root[data-theme="light"]') &&
-    styleSource.includes("--gyro-app: #f7f9fc") &&
-    styleSource.includes("--gyro-sidebar: #edf1f6") &&
-    styleSource.includes("--gyro-premium-hairline: rgba(32, 36, 42, 0.11)") &&
+    styleSource.includes("--gyro-app: #f7f7f7") &&
+    styleSource.includes("--gyro-sidebar: #ffffff") &&
+    styleSource.includes("--gyro-premium-hairline: rgba(32, 32, 32, 0.1)") &&
     styleSource.includes("var(--gyro-user-main) 82%") &&
     styleSource.includes("--gyro-secondary-accent") &&
-    surfaceSource.includes('label="Main color"') &&
-    surfaceSource.includes('label="Secondary color"') &&
+    surfaceSource.includes('label="Primary accent"') &&
+    surfaceSource.includes('label="Secondary accent"') &&
     surfaceSource.includes(
       'detail="Supporting icons, badges, and quiet highlights."',
     ) &&
@@ -7911,9 +8376,9 @@ expect(
     liveTerminalPaneSource.includes(
       "terminal.options.theme = terminalThemeFor(theme)",
     ) &&
-    liveTerminalPaneSource.includes('background: "#ffffff"') &&
-    liveTerminalPaneSource.includes('background: "#0c0c0c"') &&
-    liveTerminalPaneSource.includes('brightMagenta: "#f08cff"') &&
+    liveTerminalPaneSource.includes('background: "#f5f5f5"') &&
+    liveTerminalPaneSource.includes('background: "#141414"') &&
+    liveTerminalPaneSource.includes('brightMagenta: "#d19aff"') &&
     liveTerminalPaneSource.includes('brightYellow: "#ffd166"'),
   "System, dark, and light preferences should resolve before live terminals update their palette in place.",
 );
@@ -7977,15 +8442,15 @@ expect(
 expect(
   monacoEditorSource.includes("createMonacoTheme(mode)") &&
     readRepoFile("packages/ui/src/editor/themes/workspace-colors.ts").includes(
-      '"editor.background": "#0C0C0C"',
+      '"editor.background": "#141414"',
     ) &&
     readRepoFile("packages/ui/src/editor/themes/workspace-colors.ts").includes(
-      '"editor.lineHighlightBackground": "#161616"',
+      '"editor.lineHighlightBackground": "#1C1C1C"',
     ) &&
     appSource.includes(
       "stickyScroll: { enabled: !limited, maxLineCount: 3 }",
     ) &&
-    appSource.includes(
+    workspaceCodeEditorSource.includes(
       'theme={theme === "light" ? "gyro-light" : "gyro-dark"}',
     ),
   "The IDE editor should match the Sessions neutral palette and retain built-in navigation aids.",
@@ -8120,9 +8585,11 @@ expect(
     surfaceSource.includes('aria-label="Usage provider"') &&
     surfaceSource.includes('aria-label="Refresh provider usage"') &&
     surfaceSource.includes('label="Usage visualization"') &&
-    surfaceSource.includes("`${usedLabel}% used`") &&
-    surfaceSource.includes("<small>used</small>") &&
-    surfaceSource.includes('"--usage": `${(used ?? 0) * 3.6}deg`') &&
+    surfaceSource.includes("`${remaining.percentLabel} left`") &&
+    surfaceSource.includes("<small>left</small>") &&
+    surfaceSource.includes(
+      '"--usage": `${(remaining.percent ?? 0) * 3.6}deg`',
+    ) &&
     surfaceSource.includes("No plan window API on this provider") &&
     surfaceSource.includes("level not reported") &&
     surfaceSource.includes('aria-label="Plan usage limits"') &&
@@ -8175,12 +8642,40 @@ expect(
       ':root[data-density="comfortable"] .gyro-sidebar-action',
     ) &&
     styleSource.includes(".gyro-composer-context-row") &&
-    styleSource.includes("--gyro-ide-tab-height: calc(30px * var(--gyro-ui-scale, 1))") &&
-    styleSource.includes("--gyro-ide-tab-height: calc(38px * var(--gyro-ui-scale, 1))") &&
+    styleSource.includes(
+      "--gyro-ide-tab-height: calc(28px * var(--gyro-ui-scale, 1))",
+    ) &&
+    styleSource.includes(
+      "--gyro-ide-tab-height: calc(32px * var(--gyro-ui-scale, 1))",
+    ) &&
     styleSource.includes(
       ':root[data-density="comfortable"] .gyro-workspace-route.is-code',
     ),
   "Density should apply across navigation, chats, Settings, and editor chrome instead of only enlarging Settings rows.",
+);
+
+const windowMaterialSource = readRepoFile(
+  "packages/ui/src/window-material.css",
+);
+expect(
+  surfaceSource.includes('key={`rename:${file.path}`}') &&
+    surfaceSource.includes("file.path === explorerDraft.renamePath") &&
+    surfaceSource.includes("acceptBlur.current") &&
+    styleSource.includes(
+      "--gyro-ide-tab-control-height: calc(35px * var(--gyro-ui-scale, 1))",
+    ) &&
+    styleSource.includes(
+      "--gyro-ide-tab-control-height: calc(28px * var(--gyro-ui-scale, 1))",
+    ) &&
+    !windowMaterialSource.includes("--gyro-ide-tab-height: 48px") &&
+    windowMaterialSource.includes("compact editor-tab height") &&
+    surfaceSource.includes("workspaceCopyAbsolutePath") &&
+    surfaceSource.includes("workspaceCopyRelativePath") &&
+    surfaceSource.includes("explorerDraft.parentPath === file.path") &&
+    surfaceSource.includes('event.key === "F2"') &&
+    !surfaceSource.includes("entry?.workspacePath ?? entry?.path") &&
+    !appSource.includes("revealItemInDir(`${root}/${path}`)"),
+  "Explorer rename should keep a single inline field, workspace file tabs should stay compact inside the title band, and copy/reveal should use the file path.",
 );
 
 for (const settingsSelector of [
@@ -8208,7 +8703,8 @@ expect(
 );
 
 expect(
-  tauriSource.includes('summary("Gyro has a question")') &&
+  tauriSource.includes('"Gyro has a question"') &&
+    tauriSource.includes("notification.summary(&title)") &&
     tauriSource.includes('"gyro://provider-approval-notification-open"') &&
     tauriSource.includes("notify_provider_approval_question") &&
     tauriSource.includes('"developerInstructions": approval_instructions') &&
@@ -8253,20 +8749,22 @@ expect(
 
 expect(
   surfaceSource.includes("estimateComposerContextUsage") &&
-    surfaceSource.includes("contextUsage.remainingLabel") &&
+    surfaceSource.includes("contextUsage.usedLabel") &&
+    surfaceSource.includes("contextUsage.windowLabel") &&
+    surfaceSource.includes("contextUsage.percentLabel") &&
     surfaceSource.includes("composerModelPickerItem") &&
     // Hovering a model in the picker must not open the context card over it.
     !surfaceSource.includes("previewComposerContextModel") &&
     !styleSource.includes(".gyro-composer-context-meter.is-previewing") &&
     // Occupancy survives a model switch; only the window is model-scoped.
     readRepoFile("packages/ui/src/context-usage.ts").includes(
-      "reportedModelId !== model.modelId",
+      "const matchesModel =",
     ) &&
     readRepoFile("packages/ui/src/context-usage.ts").includes(
       "const matchesModel =",
     ) &&
     readRepoFile("packages/ui/src/context-usage.ts").includes(
-      "reportedTokens + liveEstimatedTokens",
+      "reportedInputTokens + reportedOutputTokens",
     ) &&
     surfaceSource.includes("gyro-composer-context-bar") &&
     styleSource.includes(
@@ -8277,8 +8775,7 @@ expect(
     ) &&
     cssRules(styleSource, ".gyro-composer-context-bar").some(
       (rule) =>
-        rule.includes("height: 5px") &&
-        rule.includes("var(--gyro-premium-hairline-soft)"),
+        rule.includes("height: 3px"),
     ) &&
     styleSource.includes("var(--gyro-accent-strong)") &&
     styleSource.includes("min-width: 316px") &&
@@ -8305,15 +8802,15 @@ expect(
     // the meter measures Grok's 131K against a default it never had.
     desktopRustSource.includes("fn provider_model_context_window") &&
     desktopRustSource.includes("fn provider_context_usage_with_window") &&
-    readRepoFile("packages/ui/src/context-usage.ts").includes(
-      "COMPACT_MILLIONS_THRESHOLD",
-    ) &&
+    formatCompactTokenCount(999_500) === "1M" &&
+    formatCompactTokenCount(13_980_000) === "13.98M" &&
     providerCatalog.every((provider) =>
       provider.models.every((model) =>
         // CLI default aliases resolve the actual model at runtime. They must
         // not advertise a made-up catalog context window.
         (provider.id === "cursor" && model.id === "cursor-default") ||
-        (provider.id === "opencode" && model.id === "opencode-default")
+        (provider.id === "opencode" && model.id === "opencode-default") ||
+        (provider.id === "antigravity" && model.id === "antigravity-default")
           ? model.contextWindowTokens === undefined
           : (model.contextWindowTokens ?? 0) > 0,
       ),
@@ -8377,10 +8874,12 @@ expect(
   CLAUDE_REASONING_EFFORTS.join(",") === "low,medium,high,xhigh,max" &&
     providerCatalog
       .find((provider) => provider.id === "anthropic")
-      ?.models.every(
-        (model) =>
-          model.supportedReasoningEfforts?.join(",") ===
-          CLAUDE_REASONING_EFFORTS.join(","),
+      ?.models.every((model) =>
+        model.id === "claude-haiku-4-5"
+          ? model.supportedReasoningEfforts === undefined &&
+            model.defaultReasoningEffort === undefined
+          : model.supportedReasoningEfforts?.join(",") ===
+            CLAUDE_REASONING_EFFORTS.join(","),
       ) === true &&
     desktopRustSource.includes("fn claude_reasoning_effort_arg") &&
     desktopRustSource.includes('args.push("--effort".into())'),
@@ -8389,7 +8888,9 @@ expect(
 
 expect(
   styleSource.includes("Conversation text shares the body scale") &&
-    styleSource.includes("--gyro-font-body: calc(14px * var(--gyro-ui-scale, 1));") &&
+    styleSource.includes(
+      "--gyro-font-body: calc(14px * var(--gyro-ui-scale, 1));",
+    ) &&
     styleSource.includes(
       "font-size: var(--gyro-font-body);\n  line-height: 1.6;",
     ) &&
@@ -8426,28 +8927,65 @@ expect(
   "Live file changes lead the composer dock above queued turns, without negative-margin overlap, and completed edits retain their file review card.",
 );
 
+const goalStripSource = surfaceSource.slice(
+  surfaceSource.indexOf("function SessionGoalStrip("),
+);
+const goalWorkingExpression = goalStripSource.match(
+  /const isWorking\s*=([\s\S]*?);/,
+)?.[1];
+const goalWorkingState = goalWorkingExpression
+  ? new Function(
+      "isActive",
+      "isRunning",
+      "runStatus",
+      `return (${goalWorkingExpression});`,
+    )
+  : undefined;
+const goalWorkingStatesCorrect =
+  Boolean(goalWorkingState) &&
+  [false, true].every((active) =>
+    [false, true].every((running) =>
+      [
+        undefined,
+        "queued",
+        "running",
+        "waiting-approval",
+        "blocked",
+        "paused",
+        "complete",
+      ].every(
+        (status) =>
+          goalWorkingState(active, running, status) ===
+          (active &&
+            running &&
+            (status === undefined ||
+              ["queued", "running", "waiting-approval"].includes(status))),
+      ),
+    ),
+  );
 expect(
   // The outcome is drawn on the composer, where the next message is typed,
   // instead of at the top of the transcript where it scrolled out of sight.
   // Nothing announces a save: a saved goal is simply the goal on screen.
   surfaceSource.includes("function SessionGoalStrip") &&
     surfaceSource.includes('className="gyro-goal-strip"') &&
-    surfaceSource.includes(
-      'data-running={isActive && isRunning ? "true" : undefined}',
-    ) &&
+    goalWorkingStatesCorrect &&
+    goalStripSource.includes('data-running={isWorking ? "true" : undefined}') &&
     surfaceSource.includes("isRunning={isSending}") &&
-    surfaceSource.includes("sessionGoal?.text && !isGoalComposerActive") &&
+    surfaceSource.includes(
+      'sessionGoal?.status === "active" &&\n      sessionGoal.text &&\n      !isGoalComposerActive',
+    ) &&
     !surfaceSource.includes("Send a message to start work") &&
     styleSource.includes(".gyro-goal-strip {") &&
     styleSource.includes(
-      '.gyro-goal-strip[data-running="true"] .gyro-goal-strip-mark svg',
+      '.gyro-goal-strip[data-running="true"] .gyro-goal-strip-mark',
     ) &&
-    styleSource.includes(".gyro-chat-start .gyro-goal-strip") &&
-    styleSource.includes(".gyro-goal-strip-text::before") &&
+    styleSource.includes(".gyro-composer-shell.has-goal-caption") &&
+    styleSource.includes(".gyro-goal-strip-text") &&
     // Opening the editor from `/goal` or the "+" menu puts this chip under
     // the pointer, so a native title surfaces an OS tooltip nobody asked
     // for. The draft promise lives in the accessible name instead.
-    surfaceSource.includes('aria-label="Close goal editor — draft is kept"') &&
+    surfaceSource.includes('"Close goal editor — draft is kept"') && surfaceSource.includes("onClick={onCancelGoalComposer}") &&
     !surfaceSource.includes('title="Close goal editor'),
   "The goal rides on the composer as a one-line strip with its clock and controls, its mark rotates only while a turn is running, no save is announced in prose, and closing the goal editor never fires a stray hover tooltip.",
 );

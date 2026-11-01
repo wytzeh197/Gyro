@@ -10,19 +10,20 @@
       /* Quiet themed canvas only — no boot gate. First paint is the early
          chat shell from main.tsx. */
       html,
-      body {
+      body,
+      #root {
         background: #181818;
-        color: #f0f0f0;
+        color: #ededed;
         height: 100%;
         margin: 0;
-      }
-      #root {
-        min-height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
       }
       html[data-theme="light"],
-      html[data-theme="light"] body {
-        background: #f7f9fc;
-        color: #161b23;
+      html[data-theme="light"] body,
+      html[data-theme="light"] #root {
+        background: #f7f7f7;
+        color: #252525;
       }
     </style>
     <script>
@@ -32,7 +33,7 @@
         document.documentElement.dataset.theme = theme;
         document
           .querySelector('meta[name="theme-color"]')
-          ?.setAttribute("content", theme === "light" ? "#f7f9fc" : "#181818");
+          ?.setAttribute("content", theme === "light" ? "#f7f7f7" : "#181818");
       } catch (_) {}
     </script>
   </head>

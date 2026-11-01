@@ -1,0 +1,110 @@
+[
+  {
+    "theme": "dark",
+    "density": "compact",
+    "size": "small",
+    "animation": "1e-05s",
+    "copy": true,
+    "emulatedCss": true,
+    "transition": "0s"
+  },
+  {
+    "theme": "dark",
+    "density": "compact",
+    "size": "default",
+    "animation": "1e-05s",
+    "copy": true,
+    "emulatedCss": true,
+    "transition": "0s"
+  },
+  {
+    "theme": "dark",
+    "density": "compact",
+    "size": "large",
+    "animation": "1e-05s",
+    "copy": true,
+    "emulatedCss": true,
+    "transition": "0s"
+  },
+  {
+    "theme": "dark",
+    "density": "comfortable",
+    "size": "small",
+    "animation": "1e-05s",
+    "copy": true,
+    "emulatedCss": true,
+    "transition": "0s"
+  },
+  {
+    "theme": "dark",
+    "density": "comfortable",
+    "size": "default",
+    "animation": "1e-05s",
+    "copy": true,
+    "emulatedCss": true,
+    "transition": "0s"
+  },
+  {
+    "theme": "dark",
+    "density": "comfortable",
+    "size": "large",
+    "animation": "1e-05s",
+    "copy": true,
+    "emulatedCss": true,
+    "transition": "0s"
+  },
+  {
+    "theme": "light",
+    "density": "compact",
+    "size": "small",
+    "animation": "1e-05s",
+    "copy": true,
+    "emulatedCss": true,
+    "transition": "0s"
+  },
+  {
+    "theme": "light",
+    "density": "compact",
+    "size": "default",
+    "animation": "1e-05s",
+    "copy": true,
+    "emulatedCss": true,
+    "transition": "0s"
+  },
+  {
+    "theme": "light",
+    "density": "compact",
+    "size": "large",
+    "animation": "1e-05s",
+    "copy": true,
+    "emulatedCss": true,
+    "transition": "0s"
+  },
+  {
+    "theme": "light",
+    "density": "comfortable",
+    "size": "small",
+    "animation": "1e-05s",
+    "copy": true,
+    "emulatedCss": true,
+    "transition": "0s"
+  },
+  {
+    "theme": "light",
+    "density": "comfortable",
+    "size": "default",
+    "animation": "1e-05s",
+    "copy": true,
+    "emulatedCss": true,
+    "transition": "0s"
+  },
+  {
+    "theme": "light",
+    "density": "comfortable",
+    "size": "large",
+    "animation": "1e-05s",
+    "copy": true,
+    "emulatedCss": true,
+    "transition": "0s"
+  }
+]

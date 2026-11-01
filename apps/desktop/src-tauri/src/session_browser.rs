@@ -5,6 +5,7 @@
 //! tools via native evaluation callbacks. The custom URI scheme carries only
 //! best-effort console/network events; tool results do not depend on page fetch.
 
+use crate::browser_viewport::{self, BrowserViewportRequest, BrowserViewportState};
 use gyro_core::security::redact_secrets;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -12,7 +13,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, Runtime, WebviewUrl};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Runtime, WebviewUrl};
 use uuid::Uuid;
 
 const MAX_CONSOLE_ENTRIES: usize = 100;
@@ -45,6 +46,13 @@ pub const BACKGROUND_BROWSER_BOUNDS: SessionBrowserBounds = SessionBrowserBounds
     height: 800.0,
 };
 
+// Create agent webviews outside the window before hiding them, so creation
+// cannot briefly cover the frontend. They retain a full desktop viewport.
+const AGENT_BROWSER_BOUNDS: SessionBrowserBounds = SessionBrowserBounds {
+    x: -1281.0,
+    ..BACKGROUND_BROWSER_BOUNDS
+};
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionBrowserOpenRequest {
@@ -66,7 +74,9 @@ pub struct SessionBrowserSnapshot {
     pub url: String,
     pub title: String,
     pub visible: bool,
+    pub background_only: bool,
     pub label: String,
+    pub viewport: BrowserViewportState,
 }
 
 #[derive(Clone, Debug)]
@@ -119,6 +129,10 @@ struct SessionBrowserSlot {
     url: String,
     title: String,
     visible: bool,
+    background_only: bool,
+    host_bounds: SessionBrowserBounds,
+    viewport_request: BrowserViewportRequest,
+    viewport: BrowserViewportState,
     approved_origins: HashSet<String>,
     pointer_reference: Option<BrowserPointerReference>,
     console: VecDeque<BrowserConsoleEntry>,
@@ -128,6 +142,7 @@ struct SessionBrowserSlot {
 #[derive(Default)]
 pub struct SessionBrowserManager {
     inner: Mutex<HashMap<String, SessionBrowserSlot>>,
+    layout: Mutex<()>,
 }
 
 impl SessionBrowserManager {
@@ -154,7 +169,9 @@ impl SessionBrowserManager {
             url: slot.url.clone(),
             title: slot.title.clone(),
             visible: slot.visible,
+            background_only: slot.background_only,
             label: slot.webview_label.clone(),
+            viewport: slot.viewport,
         }
     }
 
@@ -240,24 +257,6 @@ impl SessionBrowserManager {
         })
     }
 
-    pub fn network_entries(
-        &self,
-        session_id: &str,
-        limit: usize,
-    ) -> Result<Vec<BrowserNetworkEntry>, String> {
-        self.with_slot_mut(session_id, |slot| {
-            slot.network
-                .iter()
-                .rev()
-                .take(limit.clamp(1, MAX_NETWORK_ENTRIES))
-                .cloned()
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect()
-        })
-    }
-
     fn push_console(&self, session_id: &str, entry: BrowserConsoleEntry) {
         let _ = self.with_slot_mut(session_id, |slot| {
             if slot.console.len() >= MAX_CONSOLE_ENTRIES {
@@ -280,6 +279,10 @@ impl SessionBrowserManager {
         self.with_slot_mut(session_id, |slot| slot.webview_label.clone())
     }
 
+    fn background_only(&self, session_id: &str) -> Result<bool, String> {
+        self.with_slot_mut(session_id, |slot| slot.background_only)
+    }
+
     fn set_url(&self, session_id: &str, url: &str) -> Result<(), String> {
         self.with_slot_mut(session_id, |slot| {
             if slot.url != url {
@@ -297,8 +300,12 @@ impl SessionBrowserManager {
 
     fn set_visible_flag(&self, session_id: &str, visible: bool) -> Result<(), String> {
         self.with_slot_mut(session_id, |slot| {
-            slot.visible = visible;
+            slot.visible = browser_visibility(slot.background_only, visible);
         })
+    }
+
+    fn visible_flag(&self, session_id: &str) -> Result<bool, String> {
+        self.with_slot_mut(session_id, |slot| slot.visible)
     }
 
     fn remove_slot(&self, session_id: &str) -> Result<Option<SessionBrowserSlot>, String> {
@@ -310,6 +317,80 @@ impl SessionBrowserManager {
     }
 }
 
+/// A child webview shares the window with the chat UI, so the browser steals
+/// the keyboard while it is being driven: AppKit makes a newly shown webview
+/// first responder and leaves first responder on a view that is hidden. The
+/// user keeps typing in a chat the model is not working in, so those keystrokes
+/// disappear into a native view nobody is looking at. Give the keyboard back to
+/// the app webview whenever a browser visibility change moved it.
+fn restore_main_webview_focus<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(main) = app.get_webview(MAIN_WINDOW_LABEL) {
+        let _ = main.set_focus();
+    }
+}
+
+/// A hidden chat's browser can still end up holding the keyboard: WebKit moves
+/// first responder while the model types into a field, takes a snapshot, or
+/// loads a page with autofocus, and a child created hidden never handed it
+/// back. The person is meanwhile typing in another chat, and every keystroke
+/// lands in a view nobody can see. Unlike `restore_main_webview_focus`, this
+/// only acts when the keyboard is stranded — on a hidden view, on the window
+/// itself, or nowhere — so it never takes focus from a browser on screen.
+fn reclaim_stranded_keyboard<R: Runtime>(app: &AppHandle<R>) {
+    #[cfg(target_os = "macos")]
+    if let Some(main) = app.get_webview(MAIN_WINDOW_LABEL) {
+        let _ = main.with_webview(|platform| unsafe {
+            use objc2_app_kit::NSView;
+            let main_view: &NSView = &*platform.inner().cast();
+            let Some(window) = main_view.window() else {
+                return;
+            };
+            let stranded = match window.firstResponder() {
+                None => true,
+                // The window itself, the one non-view responder here, takes no
+                // typing either.
+                Some(responder) => responder
+                    .downcast_ref::<NSView>()
+                    .is_none_or(|view| view.isHiddenOrHasHiddenAncestor()),
+            };
+            if stranded {
+                window.makeFirstResponder(Some(main_view));
+            }
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+}
+
+/// Only a visibility change can move the window's keyboard focus; repeated
+/// requests for the state the browser is already in must leave the user alone.
+fn visibility_moves_keyboard_focus(was_visible: bool, visible: bool) -> bool {
+    was_visible != visible
+}
+
+fn browser_visibility(background_only: bool, requested_visible: bool) -> bool {
+    !background_only && requested_visible
+}
+
+fn session_browser_is_background_only(
+    store: &gyro_core::SessionStore,
+    session_id: &str,
+) -> Result<bool, String> {
+    let session = store
+        .get_session(super::parse_uuid(session_id)?)
+        .map_err(super::to_string)?
+        .ok_or_else(|| "browser chat no longer exists".to_string())?;
+    Ok(session.parent_session_id.is_some())
+}
+
+pub fn is_background_browser<R: Runtime>(app: &AppHandle<R>, session_id: &str) -> bool {
+    app.state::<SessionBrowserManager>()
+        .get_snapshot(session_id)
+        .ok()
+        .flatten()
+        .is_some_and(|snapshot| snapshot.background_only)
+}
+
 pub fn browser_url_is_navigable(url: &url::Url) -> bool {
     if !matches!(url.scheme(), "http" | "https")
         || !url.username().is_empty()
@@ -319,6 +400,11 @@ pub fn browser_url_is_navigable(url: &url::Url) -> bool {
         return false;
     }
     true
+}
+
+fn resource_navigation_allowed(url: &url::Url, fixed_origin: Option<&str>) -> bool {
+    browser_url_is_navigable(url)
+        && fixed_origin.is_none_or(|origin| url.origin().ascii_serialization() == origin)
 }
 
 pub fn browser_url_is_loopback(url: &url::Url) -> bool {
@@ -364,6 +450,12 @@ fn sanitize_text(value: &str) -> String {
 
 fn agent_initialization_script(bridge_nonce: &str) -> String {
     let nonce = serde_json::to_string(bridge_nonce).unwrap_or_else(|_| "\"\"".into());
+    let background_pointer = include_str!("browser_background_pointer.js")
+        .trim()
+        .trim_end_matches(';');
+    let pointer_feedback = include_str!("browser_pointer_feedback.js")
+        .trim()
+        .trim_end_matches(';');
     format!(
         r#"(function() {{
   if (window.__gyroBrowserAgentInstalled) return;
@@ -585,7 +677,8 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
 
   const pageState = () => ({{
     url: location.href,
-    title: document.title || "",
+    title: (document.title || "").slice(0, 400),
+    titleTruncated: (document.title || "").length > 400,
     readyState: document.readyState,
     viewport: {{
       width: Math.max(0, Math.round(window.innerWidth || 0)),
@@ -648,8 +741,9 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     el.dispatchEvent(event);
   }};
 
-  const clickEl = (el) => {{
+  const clickEl = (el, options) => {{
     el.scrollIntoView({{ block: "center", inline: "nearest", behavior: "instant" }});
+    flashTarget(el, Object.assign({{}}, options, {{ action: "click" }}));
     ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach((type) => {{
       const EventClass = type.startsWith("pointer") ? PointerEvent : MouseEvent;
       el.dispatchEvent(new EventClass(type, {{ bubbles: true, cancelable: true, view: window }}));
@@ -688,106 +782,88 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     return {{ ok: true }};
   }};
 
-  // Show the person watching which element the agent just touched. An inert
-  // overlay on the root element keeps page layout, focus, hit-testing, and the
-  // body-rooted accessibility read untouched.
-  let highlight = null;
-  let highlightTimer = 0;
-  const clearHighlight = () => {{
-    window.clearTimeout(highlightTimer);
-    if (highlight) highlight.remove();
-    highlight = null;
-  }};
-  const flashTarget = (el, options = {{}}) => {{
-    try {{
-      clearHighlight();
-      const rect = el.getBoundingClientRect();
-      if (!rect.width && !rect.height) return;
-      const box = document.createElement("div");
-      box.setAttribute("aria-hidden", "true");
-      box.style.cssText = [
-        "position:fixed",
-        "pointer-events:none",
-        "z-index:2147483647",
-        "left:" + (rect.left - 3) + "px",
-        "top:" + (rect.top - 3) + "px",
-        "width:" + (rect.width + 6) + "px",
-        "height:" + (rect.height + 6) + "px",
-        "box-sizing:border-box",
-        "border:2px solid #0874df",
-        "border-radius:6px",
-        "box-shadow:0 0 0 4px rgba(8,116,223,0.18)",
-        "transition:opacity 180ms ease",
-      ].join(";");
-      // A model cursor is separate from the user's system pointer. Keep it
-      // inert and inside the viewport, even for partially visible targets.
-      const cursor = document.createElement("div");
-      cursor.style.cssText = [
-        "position:fixed", "pointer-events:none", "display:flex",
-        "align-items:center", "gap:4px",
-        "left:" + Math.max(0, Math.min(window.innerWidth - 76, (options.x ?? (rect.left + rect.width / 2)))) + "px",
-        "top:" + Math.max(0, Math.min(window.innerHeight - 32, (options.y ?? (rect.top + rect.height / 2)))) + "px",
-        "font:600 11px system-ui", "color:#fff",
-        "filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))",
-      ].join(";");
-      const arrow = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      arrow.setAttribute("width", "24");
-      arrow.setAttribute("height", "28");
-      arrow.setAttribute("viewBox", "0 0 24 28");
-      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", "M2 2 L21 16 L13 17 L9 25 Z");
-      path.setAttribute("fill", "rgb(8, 116, 223)");
-      path.setAttribute("stroke", "white");
-      path.setAttribute("stroke-width", "2");
-      path.setAttribute("stroke-linejoin", "round");
-      arrow.appendChild(path);
-      const label = document.createElement("span");
-      label.textContent = String(options.actor || "Model").slice(0, 32);
-      label.style.cssText = "background:#0874df;border-radius:4px;padding:2px 5px";
-      cursor.append(arrow, label);
-      box.appendChild(cursor);
-      if (options.action === "drag" && !matchMedia("(prefers-reduced-motion: reduce)").matches) {{
-        cursor.animate([
-          {{ transform: "translate(0,0)" }},
-          {{ transform: "translate(" + (options.toX - options.x) + "px," + (options.toY - options.y) + "px)" }},
-        ], {{ duration: 240, fill: "forwards", easing: "ease-out" }});
-      }}
-      document.documentElement.appendChild(box);
-      highlight = box;
-      highlightTimer = window.setTimeout(() => {{
-        box.style.opacity = "0";
-        highlightTimer = window.setTimeout(clearHighlight, 200);
-      }}, 900);
-    }} catch (error) {{}}
-  }};
+  const pointerFeedback = {pointer_feedback}(window, document);
+  const clearHighlight = () => pointerFeedback.clear();
+  const flashTarget = (el, options = {{}}) => pointerFeedback.show(el, options);
 
   window.__gyroBrowserAgent = {{
     clearHighlight() {{
       clearHighlight();
       return {{ ok: true }};
     }},
+    hidePointer() {{
+      pointerFeedback.setHidden(true);
+      return {{ ok: true }};
+    }},
+    restorePointer() {{
+      pointerFeedback.setHidden(false);
+      return {{ ok: true }};
+    }},
     showPointer(options) {{
       // A click may already have navigated. Never paint old coordinates on a new page.
       if (options.url !== location.href) return {{ ok: true }};
-      const el = document.elementFromPoint(options.x, options.y);
+      const dragging = options.action === "drag" && options.phase !== "move";
+      const el = document.elementFromPoint(dragging ? options.toX : options.x, dragging ? options.toY : options.y);
       if (el) flashTarget(el, options);
       return {{ ok: true }};
     }},
     readPage(options) {{
+      const root = options && options.ref ? resolveRef(options.ref) : (document.body || document.documentElement);
+      if (!root) return {{ ok: false, error: "element ref is stale; use find to locate it again" }};
       refMap.clear();
       const maxDepth = Math.min(8, Math.max(1, (options && options.maxDepth) || 4));
-      const budget = {{ left: {MAX_TREE_CHARS} }};
-      const tree = serializeTree(document.body || document.documentElement, 0, maxDepth, budget);
+      const maxChars = Math.min({MAX_TREE_CHARS}, Math.max(1024, (options && options.maxChars) || 6000));
+      const budget = {{ left: maxChars }};
+      const tree = serializeTree(root, 0, maxDepth, budget);
       return Object.assign({{
         ok: true,
         framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED",
         tree,
+        truncated: budget.left <= 0,
       }}, pageState());
+    }},
+    // Local Check reads only the explicitly reviewed visible text/count/height.
+    // There is no user-supplied JavaScript and no input value/HTML reader.
+    checkRead(options) {{
+      const reads = options && options.reads;
+      if (!Array.isArray(reads) || reads.length < 1 || reads.length > 4) return {{ ok:false, error:"invalid Check reads" }};
+      const values = Object.create(null);
+      let roots;
+      try {{ roots = Array.from(document.querySelectorAll(options.readySelector)).filter(isVisible); }}
+      catch (_) {{ return {{ok:false,error:"invalid Check ready selector"}}; }}
+      if (roots.length !== 1) return {{ok:false,error:"expected Check page is unavailable"}};
+      for (const read of reads) {{
+        let matches;
+        try {{ matches = Array.from(document.querySelectorAll(read.selector)).filter(isVisible); }}
+        catch (_) {{ return {{ ok:false, error:"invalid Check selector" }}; }}
+        if (matches.length > 1000 || matches.some(isCredentialField)) return {{ ok:false, error:"Check read is protected or too large" }};
+        if (read.kind === "count") values[read.key] = matches.length;
+        else if (read.kind === "texts") {{
+          if (matches.length > 20) return {{ok:false,error:"too many Check text elements"}};
+          const texts = matches.map(el => (el.innerText || "").trim());
+          if (JSON.stringify(texts).length > 2000) return {{ok:false,error:"Check text is too large"}};
+          values[read.key] = texts;
+        }}
+        else if (read.kind === "height" && matches.length === 1) {{
+          const height = matches[0].getBoundingClientRect().height;
+          if (!Number.isFinite(height) || height <= 0 || height > 100000) return {{ok:false,error:"invalid Check height"}};
+          values[read.key] = height;
+        }}
+        else if (read.kind === "text" && matches.length === 1) {{
+          const text = (matches[0].innerText || "").trim();
+          if (text.length > 2000) return {{ ok:false, error:"Check text is too large" }};
+          values[read.key] = text;
+        }} else return {{ ok:false, error:"Check text/height read needs exactly one visible element and a supported kind" }};
+      }}
+      return Object.assign({{ok:true, values}},pageState());
     }},
     find(options) {{
       const query = ((options && options.query) || "").trim();
       const selector = ((options && options.selector) || "").trim();
       const results = [];
+      const limit = Math.min({MAX_FIND_RESULTS}, Math.max(1, (options && options.limit) || 20));
+      const offset = Math.max(0, (options && options.offset) || 0);
+      let matched = 0;
       let candidates = [];
       if (selector) {{
         try {{ candidates = Array.from(document.querySelectorAll(selector)); }}
@@ -802,6 +878,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         if (needle && !name.toLowerCase().includes(needle) && !(el.innerText || "").toLowerCase().includes(needle)) {{
           continue;
         }}
+        if (matched++ < offset) continue;
         const rect = el.getBoundingClientRect();
         results.push({{
           ref: assignRef(el),
@@ -815,9 +892,11 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
             height: Math.round(rect.height),
           }},
         }});
-        if (results.length >= {MAX_FIND_RESULTS}) break;
+        if (results.length > limit) break;
       }}
-      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", results }};
+      const hasMore = results.length > limit;
+      if (hasMore) results.pop();
+      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", results, offset, hasMore, nextOffset: hasMore ? offset + results.length : null }};
     }},
     pointerTarget(options) {{
       const x = Number(options && options.x);
@@ -850,8 +929,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         click(options) {{
       const el = resolveRef(options && options.ref);
       if (!el) return {{ ok: false, error: "unknown or stale ref" }};
-      clickEl(el);
-      flashTarget(el, options);
+      clickEl(el, options);
       return {{ ok: true, ref: options.ref, name: targetName(el) }};
     }},
     type(options) {{
@@ -900,17 +978,22 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       return {{ ok: true, dx, dy }};
     }},
     console(options) {{
-      const limit = Math.min(MAX_CONSOLE, Math.max(1, (options && options.limit) || 50));
-      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", entries: consoleBuf.slice(-limit) }};
+      const limit = Math.min(MAX_CONSOLE, Math.max(1, (options && options.limit) || 20));
+      const offset = Math.max(0, (options && options.offset) || 0);
+      const entries = consoleBuf.slice().reverse().slice(offset, offset + limit);
+      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", entries, offset, total: consoleBuf.length, order: "newest-first" }};
     }},
     network(options) {{
-      const limit = Math.min(MAX_NETWORK, Math.max(1, (options && options.limit) || 50));
-      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", entries: networkBuf.slice(-limit) }};
+      const limit = Math.min(MAX_NETWORK, Math.max(1, (options && options.limit) || 20));
+      const offset = Math.max(0, (options && options.offset) || 0);
+      const entries = networkBuf.slice().reverse().slice(offset, offset + limit);
+      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", entries, offset, total: networkBuf.length, order: "newest-first" }};
     }},
     status() {{
       return Object.assign({{ ok: true }}, pageState());
     }},
   }};
+  window.__gyroBrowserAgent.backgroundPointer = {background_pointer}(window.__gyroBrowserAgent, window, document);
 }})();"#
     )
 }
@@ -946,7 +1029,9 @@ pub fn register_bridge_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri
         }
         let app = ctx.app_handle().clone();
         let body = request.into_body();
-        std::thread::spawn(move || {
+        // Chatty pages post a message per log line and request; the shared
+        // blocking pool reuses threads instead of spawning one per message.
+        tauri::async_runtime::spawn_blocking(move || {
             let result = handle_bridge_body(&app, &body);
             match result {
                 Ok(()) => responder.respond(cors_response(200, br#"{"ok":true}"#.to_vec())),
@@ -1041,10 +1126,14 @@ fn handle_bridge_body<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<(),
         }
         _ => {}
     }
-    let _ = app.emit(
-        "session-browser-event",
-        serde_json::json!({ "sessionId": session_id, "kind": kind }),
-    );
+    // Console and network entries are read on demand from the buffers above;
+    // broadcasting each one only wakes every window for nothing.
+    if !matches!(kind, "console" | "network") && !is_background_browser(app, &session_id) {
+        let _ = app.emit(
+            "session-browser-event",
+            serde_json::json!({ "sessionId": session_id, "kind": kind }),
+        );
+    }
     Ok(())
 }
 
@@ -1053,26 +1142,160 @@ fn get_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<tauri::Window<R>, S
         .ok_or_else(|| "main window is not available".to_string())
 }
 
-fn apply_bounds<R: Runtime>(
-    webview: &tauri::Webview<R>,
-    bounds: &SessionBrowserBounds,
-) -> Result<(), String> {
-    if bounds.width < 1.0 || bounds.height < 1.0 {
-        let _ = webview.hide();
-        return Ok(());
+fn apply_session_browser_layout<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    host: Option<SessionBrowserBounds>,
+    request: Option<BrowserViewportRequest>,
+) -> Result<SessionBrowserSnapshot, String> {
+    let manager = app.state::<SessionBrowserManager>();
+    // Serialize load events, model choices, and UI resize reports so an older
+    // layout cannot overwrite a newer request after its native apply completes.
+    let _layout = manager
+        .layout
+        .lock()
+        .map_err(|_| "browser layout is unavailable")?;
+    let (label, host, request, url, previous) = manager.with_slot_mut(session_id, |slot| {
+        (
+            slot.webview_label.clone(),
+            host.unwrap_or_else(|| slot.host_bounds.clone()),
+            request.unwrap_or(slot.viewport_request),
+            slot.url.clone(),
+            slot.viewport,
+        )
+    })?;
+    let geometry = browser_viewport::geometry(request, &url, &host)?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or("browser webview is not available")?;
+    browser_viewport::apply(&webview, &geometry, Some(previous))?;
+    let changed = manager.with_slot_mut(session_id, |slot| {
+        let changed = slot.viewport != geometry.state;
+        if slot.viewport.width != geometry.state.width
+            || slot.viewport.height != geometry.state.height
+        {
+            slot.pointer_reference = None;
+        }
+        slot.host_bounds = host;
+        slot.viewport_request = request;
+        slot.viewport = geometry.state;
+        changed
+    })?;
+    let snapshot = manager
+        .get_snapshot(session_id)?
+        .ok_or("browser disappeared during resize")?;
+    if changed && !snapshot.background_only {
+        let _ = app.emit(
+            "session-browser-event",
+            serde_json::json!({
+                "sessionId":session_id,"kind":"viewport","viewport":snapshot.viewport,
+            }),
+        );
     }
-    webview
-        .set_bounds(Rect {
-            position: LogicalPosition::new(bounds.x.max(0.0), bounds.y.max(0.0)).into(),
-            size: LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)).into(),
-        })
-        .map_err(|error| format!("could not position browser webview: {error}"))?;
-    Ok(())
+    Ok(snapshot)
+}
+
+pub fn set_session_browser_viewport<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    request: BrowserViewportRequest,
+) -> Result<SessionBrowserSnapshot, String> {
+    request.validate()?;
+    apply_session_browser_layout(app, session_id, None, Some(request))
 }
 
 pub fn open_session_browser<R: Runtime>(
     app: &AppHandle<R>,
+    mut request: SessionBrowserOpenRequest,
+) -> Result<SessionBrowserSnapshot, String> {
+    // Ownership comes from the durable chat relationship, never a tool/UI
+    // argument. A restored agent gets the same private browser on follow-up.
+    let store = super::open_store()?;
+    let background_only = session_browser_is_background_only(&store, &request.session_id)?;
+    drop(store);
+    if background_only {
+        request.bounds = None;
+        request.visible = Some(false);
+    }
+    open_browser_resource(app, request, background_only, None)
+}
+
+/// Only the human Check resolver calls this, after consuming approval and
+/// revalidating workspace/files. It cannot reuse or replace a chat browser.
+pub(crate) fn open_check_browser<R: Runtime>(
+    app: &AppHandle<R>,
+    plan: &gyro_core::local_check::CheckPlan,
+) -> Result<String, String> {
+    plan.draft.validate().map_err(|error| error.to_string())?;
+    let id = format!("check-{}", plan.id);
+    let url = parse_navigable_url(&plan.draft.preview_url)?;
+    if !browser_url_is_loopback(&url) {
+        return Err("Check requires a loopback page".into());
+    }
+    let opened = open_browser_resource(
+        app,
+        SessionBrowserOpenRequest {
+            session_id: id.clone(),
+            workspace_key: plan.snapshot.workspace.display().to_string(),
+            url: plan.draft.preview_url.clone(),
+            bounds: plan
+                .draft
+                .browser
+                .as_ref()
+                .and_then(|browser| browser.viewport.as_ref())
+                .map(|viewport| SessionBrowserBounds {
+                    x: -(viewport.width as f64) - 1.0,
+                    y: AGENT_BROWSER_BOUNDS.y,
+                    width: viewport.width as f64,
+                    height: viewport.height as f64,
+                }),
+            visible: Some(false),
+        },
+        true,
+        Some(url.origin().ascii_serialization()),
+    );
+    if let Err(error) = opened {
+        if let Some(view) = app.get_webview(&format!("session-browser-{}", id.replace('-', ""))) {
+            let _ = view.close();
+        }
+        return Err(error);
+    }
+    Ok(id)
+}
+
+pub(crate) fn close_check_browser<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<(), String> {
+    let manager = app.state::<SessionBrowserManager>();
+    let label = manager.webview_label_for(id)?;
+    if let Some(view) = app.get_webview(&label) {
+        view.close()
+            .map_err(|e| format!("could not close Check browser: {e}"))?;
+    }
+    manager.remove_slot(id)?;
+    Ok(())
+}
+
+fn resource_viewport_request(
+    check_only: bool,
+    bounds: &SessionBrowserBounds,
+) -> BrowserViewportRequest {
+    if check_only {
+        // Auto resolves loopback pages to 1280x800 even in a larger host.
+        // Preserve reviewed Check dimensions explicitly, including on reload.
+        BrowserViewportRequest {
+            mode: browser_viewport::BrowserViewportMode::Desktop,
+            width: Some(bounds.width as u32),
+            height: Some(bounds.height as u32),
+        }
+    } else {
+        BrowserViewportRequest::default()
+    }
+}
+
+fn open_browser_resource<R: Runtime>(
+    app: &AppHandle<R>,
     request: SessionBrowserOpenRequest,
+    background_only: bool,
+    fixed_origin: Option<String>,
 ) -> Result<SessionBrowserSnapshot, String> {
     let url = parse_navigable_url(&request.url)?;
     let origin = url.origin().ascii_serialization();
@@ -1087,10 +1310,11 @@ pub fn open_session_browser<R: Runtime>(
             webview
                 .navigate(url.clone())
                 .map_err(|error| format!("could not navigate browser: {error}"))?;
-            if let Some(bounds) = request.bounds.as_ref() {
-                apply_bounds(&webview, bounds)?;
-            }
-            let visible = request.visible.unwrap_or(existing.visible);
+            manager.set_url(&request.session_id, url.as_str())?;
+            apply_session_browser_layout(app, &request.session_id, request.bounds.clone(), None)?;
+            let visible =
+                browser_visibility(background_only, request.visible.unwrap_or(existing.visible));
+            let was_visible = existing.visible;
             if visible {
                 let _ = webview.show();
             } else {
@@ -1098,6 +1322,9 @@ pub fn open_session_browser<R: Runtime>(
             }
             manager.set_url(&request.session_id, url.as_str())?;
             manager.set_visible_flag(&request.session_id, visible)?;
+            if visibility_moves_keyboard_focus(was_visible, visible) {
+                restore_main_webview_focus(app);
+            }
             let _ = manager.approve_origin(&request.session_id, &origin);
             return manager
                 .get_snapshot(&request.session_id)?
@@ -1131,50 +1358,87 @@ pub fn open_session_browser<R: Runtime>(
     let bounds = requested_bounds
         .clone()
         .unwrap_or(BACKGROUND_BROWSER_BOUNDS);
+    let bounds = if background_only {
+        if fixed_origin.is_some() {
+            requested_bounds.clone().unwrap_or(AGENT_BROWSER_BOUNDS)
+        } else {
+            AGENT_BROWSER_BOUNDS
+        }
+    } else {
+        bounds
+    };
     let visible = request.visible.unwrap_or(
         requested_bounds.is_some_and(|bounds| bounds.width >= 2.0 && bounds.height >= 2.0),
     );
+    let check_only = fixed_origin.is_some();
+    let viewport_request = resource_viewport_request(check_only, &bounds);
+    let geometry = browser_viewport::geometry(viewport_request, url.as_str(), &bounds)?;
 
-    let builder = tauri::WebviewBuilder::new(&webview_label, WebviewUrl::External(url.clone()))
+    let mut builder = tauri::WebviewBuilder::new(&webview_label, WebviewUrl::External(url.clone()))
         .initialization_script(script)
         .incognito(true)
         .devtools(false)
-        .on_navigation(browser_url_is_navigable)
+        .on_navigation(move |candidate| {
+            resource_navigation_allowed(candidate, fixed_origin.as_deref())
+        })
         .on_page_load(move |_webview, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
-                let url = payload.url().as_str();
-                let manager = app_for_load.state::<SessionBrowserManager>();
-                let _ = manager.set_url(&session_for_load, url);
-                let _ = app_for_load.emit(
-                    "session-browser-event",
-                    serde_json::json!({
-                        "sessionId": session_for_load,
-                        "kind": "loaded",
-                        "url": url,
-                    }),
-                );
+                let app = app_for_load.clone();
+                let session_id = session_for_load.clone();
+                let url = payload.url().as_str().to_string();
+                let _ = app
+                    .state::<SessionBrowserManager>()
+                    .set_url(&session_id, &url);
+                // Native layout work waits for the main thread; never block the
+                // WebKit load callback itself. Redirects re-resolve Auto mode.
+                std::thread::spawn(move || {
+                    let snapshot = apply_session_browser_layout(&app, &session_id, None, None);
+                    if !background_only {
+                        let _ = app.emit(
+                            "session-browser-event",
+                            serde_json::json!({
+                                "sessionId": session_id, "kind": "loaded", "url": url,
+                                "viewport": snapshot.ok().map(|snapshot| snapshot.viewport),
+                            }),
+                        );
+                    }
+                });
             }
         })
         .on_document_title_changed(move |_webview, title| {
             let manager = app_for_title.state::<SessionBrowserManager>();
             let _ = manager.set_title(&session_for_title, &sanitize_text(&title));
-            let _ = app_for_title.emit(
-                "session-browser-event",
-                serde_json::json!({
-                    "sessionId": session_for_title,
-                    "kind": "title",
-                    "title": sanitize_text(&title),
-                }),
-            );
+            if !background_only {
+                let _ = app_for_title.emit(
+                    "session-browser-event",
+                    serde_json::json!({
+                        "sessionId": session_for_title,
+                        "kind": "title",
+                        "title": sanitize_text(&title),
+                    }),
+                );
+            }
         });
+    if check_only {
+        builder = builder
+            .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+            .on_download(|_, _| false);
+    }
+    if background_only {
+        // A hidden agent page must keep running during a long task.
+        builder = builder
+            .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
+    }
 
     let webview = window
         .add_child(
             builder,
-            LogicalPosition::new(bounds.x.max(0.0), bounds.y.max(0.0)),
-            LogicalSize::new(bounds.width.max(1.0), bounds.height.max(1.0)),
+            LogicalPosition::new(geometry.frame.x, geometry.frame.y),
+            LogicalSize::new(geometry.frame.width, geometry.frame.height),
         )
         .map_err(|error| format!("could not create session browser webview: {error}"))?;
+
+    browser_viewport::apply(&webview, &geometry, None)?;
 
     // Child webviews are the unstable-path trigger that leaves native window
     // controls at (0, 0). Re-apply the overlay inset on the parent window.
@@ -1184,7 +1448,14 @@ pub fn open_session_browser<R: Runtime>(
     }
 
     if !visible {
-        let _ = webview.hide();
+        webview
+            .hide()
+            .map_err(|error| format!("could not hide browser: {error}"))?;
+        reclaim_stranded_keyboard(app);
+    } else if !background_only {
+        // A child webview created visible becomes first responder, so a model
+        // opening a page must not pull the keyboard out of the user's chat.
+        restore_main_webview_focus(app);
     }
 
     let mut approved = HashSet::new();
@@ -1205,6 +1476,10 @@ pub fn open_session_browser<R: Runtime>(
             url: url.to_string(),
             title: String::new(),
             visible,
+            background_only,
+            host_bounds: bounds,
+            viewport_request,
+            viewport: geometry.state,
             approved_origins: approved,
             pointer_reference: None,
             console: VecDeque::new(),
@@ -1224,11 +1499,11 @@ pub fn set_session_browser_bounds<R: Runtime>(
     bounds: SessionBrowserBounds,
 ) -> Result<(), String> {
     let manager = app.state::<SessionBrowserManager>();
-    let label = manager.webview_label_for(session_id)?;
-    let webview = app
-        .get_webview(&label)
-        .ok_or_else(|| "browser webview is not available".to_string())?;
-    apply_bounds(&webview, &bounds)?;
+    if manager.background_only(session_id)? {
+        // No frontend host can resize or move an agent's independent viewport.
+        return Ok(());
+    }
+    apply_session_browser_layout(app, session_id, Some(bounds), None)?;
     // Positioning is independent of visibility: only the mounted UI host may
     // reveal the child, after confirming its bounds report is still current.
     Ok(())
@@ -1240,10 +1515,12 @@ pub fn set_session_browser_visible<R: Runtime>(
     visible: bool,
 ) -> Result<(), String> {
     let manager = app.state::<SessionBrowserManager>();
+    let visible = browser_visibility(manager.background_only(session_id)?, visible);
     let label = manager.webview_label_for(session_id)?;
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "browser webview is not available".to_string())?;
+    let was_visible = manager.visible_flag(session_id)?;
     if visible {
         webview
             .show()
@@ -1254,6 +1531,9 @@ pub fn set_session_browser_visible<R: Runtime>(
             .map_err(|error| format!("could not hide browser: {error}"))?;
     }
     manager.set_visible_flag(session_id, visible)?;
+    if visibility_moves_keyboard_focus(was_visible, visible) {
+        restore_main_webview_focus(app);
+    }
     Ok(())
 }
 
@@ -1272,6 +1552,7 @@ pub fn navigate_session_browser<R: Runtime>(
         .navigate(url.clone())
         .map_err(|error| format!("could not navigate browser: {error}"))?;
     manager.set_url(session_id, url.as_str())?;
+    apply_session_browser_layout(app, session_id, None, None)?;
     let _ = manager.approve_origin(session_id, &url.origin().ascii_serialization());
     manager
         .get_snapshot(session_id)?
@@ -1370,7 +1651,9 @@ pub fn call_agent<R: Runtime>(
         .map_err(|error| format!("could not run browser agent: {error}"))?;
     let encoded = receiver
         .recv_timeout(AGENT_CALL_TIMEOUT)
-        .map_err(|_| "browser agent call timed out".to_string())?;
+        .map_err(|_| "browser agent call timed out".to_string());
+    reclaim_stranded_keyboard(app);
+    let encoded = encoded?;
     let response: Value = serde_json::from_str(&encoded)
         .map_err(|error| format!("invalid browser agent result: {error}"))?;
     if let Some(error) = response.get("error").and_then(Value::as_str) {
@@ -1394,7 +1677,7 @@ pub fn call_agent<R: Runtime>(
     if let Some(title) = value.get("title").and_then(Value::as_str) {
         manager.set_title(session_id, &sanitize_text(title))?;
     }
-    sanitize_agent_result(value)
+    sanitize_agent_result(method, value)
 }
 
 pub fn mouse_session_browser<R: Runtime>(
@@ -1416,8 +1699,16 @@ pub fn mouse_session_browser<R: Runtime>(
     let snapshot = manager
         .get_snapshot(session_id)?
         .ok_or_else(|| "this chat has no open browser".to_string())?;
-    if !snapshot.visible {
-        return Err("show this chat's Browser before using the mouse".into());
+    if snapshot.background_only || !snapshot.visible {
+        return call_agent(
+            app,
+            session_id,
+            "backgroundPointer",
+            serde_json::json!({
+                "action": action, "x": x, "y": y, "toX": to_x, "toY": to_y,
+            }),
+        )
+        .map(|_| ());
     }
     let label = manager.webview_label_for(session_id)?;
     let webview = app
@@ -1455,6 +1746,8 @@ pub fn mouse_session_browser<R: Runtime>(
                     let width = bounds.size.width;
                     let height = bounds.size.height;
                     let point = |px: f64, py: f64| -> Result<NSPoint, String> {
+                        let px = px * webview.pageZoom();
+                        let py = py * webview.pageZoom();
                         if px < 0.0 || py < 0.0 || px >= width || py >= height {
                             return Err(
                                 "pointer coordinates are outside the browser viewport".into()
@@ -1470,6 +1763,9 @@ pub fn mouse_session_browser<R: Runtime>(
                     };
                     let start = point(x, y)?;
                     let end = point(to_x, to_y)?;
+                    if !objc2_core_graphics::CGPreflightPostEventAccess() {
+                        return Err("Gyro needs macOS Accessibility permission to send browser mouse input".into());
+                    }
                     let mtm = objc2::MainThreadMarker::new()
                         .ok_or_else(|| "browser mouse action left the main thread".to_string())?;
                     let main_screen = NSScreen::mainScreen(mtm)
@@ -1535,7 +1831,7 @@ pub fn mouse_session_browser<R: Runtime>(
     }
 }
 
-fn sanitize_agent_result(value: Value) -> Result<Value, String> {
+fn sanitize_agent_result(method: &str, value: Value) -> Result<Value, String> {
     fn walk(value: Value) -> Value {
         match value {
             Value::String(text) => Value::String(sanitize_text(&text)),
@@ -1550,7 +1846,17 @@ fn sanitize_agent_result(value: Value) -> Result<Value, String> {
             other => other,
         }
     }
+    let check_values = if method == "checkRead" {
+        value.get("values").cloned()
+    } else {
+        None
+    };
     let sanitized = walk(value);
+    // Filtering protects privacy, but its replacement text is not observed
+    // evidence. Never let a redaction/truncation collision create a verdict.
+    if method == "checkRead" && check_values.as_ref() != sanitized.get("values") {
+        return Err("Browser evidence changed during privacy filtering; the original observed values cannot be verified".into());
+    }
     let encoded = serde_json::to_vec(&sanitized).map_err(|error| error.to_string())?;
     if encoded.len() > gyro_core::MAX_CAPABILITY_RESULT_BYTES {
         return Err("browser agent result exceeded the capability size limit".into());
@@ -1578,8 +1884,8 @@ pub fn capture_session_browser_png<R: Runtime>(
                 use objc2_app_kit::{
                     NSBitmapImageFileType, NSBitmapImageRep, NSBitmapImageRepPropertyKey, NSImage,
                 };
-                use objc2_foundation::{NSDictionary, NSError};
-                use objc2_web_kit::WKWebView;
+                use objc2_foundation::{NSDictionary, NSError, NSNumber};
+                use objc2_web_kit::{WKSnapshotConfiguration, WKWebView};
 
                 let view: &WKWebView = &*platform.inner().cast();
                 let completion = RcBlock::new(move |image: *mut NSImage, _error: *mut NSError| {
@@ -1612,13 +1918,26 @@ pub fn capture_session_browser_png<R: Runtime>(
                     })();
                     let _ = sender.send(snapshot);
                 });
-                view.takeSnapshotWithConfiguration_completionHandler(None, &completion);
+                // Request the unscaled CSS width, preserving desktop evidence
+                // even while the person sees a fitted page in a narrow panel.
+                let configuration = WKSnapshotConfiguration::new(
+                    objc2::MainThreadMarker::new().expect("snapshot runs on the main thread"),
+                );
+                let width = view.bounds().size.width / view.pageZoom();
+                configuration.setSnapshotWidth(Some(&NSNumber::new_f64(width)));
+                view.takeSnapshotWithConfiguration_completionHandler(
+                    Some(&configuration),
+                    &completion,
+                );
             })
             .map_err(|error| format!("could not request native browser snapshot: {error}"))?;
 
-        receiver
+        let capture = receiver
             .recv_timeout(Duration::from_secs(8))
-            .map_err(|_| "native browser screenshot timed out".to_string())?
+            .map_err(|_| "native browser screenshot timed out".to_string())
+            .and_then(|capture| capture);
+        reclaim_stranded_keyboard(app);
+        capture
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -1666,6 +1985,15 @@ pub async fn session_browser_set_bounds(
     bounds: SessionBrowserBounds,
 ) -> Result<(), String> {
     set_session_browser_bounds(&app, &session_id, bounds)
+}
+
+#[tauri::command]
+pub async fn session_browser_set_viewport(
+    app: AppHandle,
+    session_id: String,
+    request: BrowserViewportRequest,
+) -> Result<SessionBrowserSnapshot, String> {
+    set_session_browser_viewport(&app, &session_id, request)
 }
 
 #[tauri::command]
@@ -1743,6 +2071,151 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_browser_visibility_change_gives_the_keyboard_back_to_the_chat() {
+        // Showing or hiding the child webview moves first responder in the
+        // window, so the app webview has to reclaim it or keystrokes stop
+        // reaching the chat the user is typing in.
+        assert!(visibility_moves_keyboard_focus(false, true));
+        assert!(visibility_moves_keyboard_focus(true, false));
+        // Re-sending the state the browser is already in must leave typing alone.
+        assert!(!visibility_moves_keyboard_focus(true, true));
+        assert!(!visibility_moves_keyboard_focus(false, false));
+    }
+
+    fn browser_slot(session_id: &str, background_only: bool) -> SessionBrowserSlot {
+        SessionBrowserSlot {
+            session_id: session_id.into(),
+            workspace_key: "shared-workspace".into(),
+            resource_id: Uuid::new_v4().to_string(),
+            webview_label: format!("session-browser-{session_id}"),
+            bridge_nonce: Uuid::new_v4().to_string(),
+            url: "https://example.com/".into(),
+            title: String::new(),
+            visible: false,
+            background_only,
+            host_bounds: BACKGROUND_BROWSER_BOUNDS.clone(),
+            viewport_request: BrowserViewportRequest::default(),
+            viewport: browser_viewport::geometry(
+                BrowserViewportRequest::default(),
+                "https://example.com/",
+                &BACKGROUND_BROWSER_BOUNDS,
+            )
+            .unwrap()
+            .state,
+            approved_origins: HashSet::new(),
+            pointer_reference: None,
+            console: VecDeque::new(),
+            network: VecDeque::new(),
+        }
+    }
+
+    #[test]
+    fn restored_subagents_get_private_browsers_from_durable_ownership() {
+        use gyro_core::{CreateSessionContext, GyroPaths, SessionOrigin, SessionStore};
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("store"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let parent = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "Parent")
+            .unwrap();
+        let child = store
+            .create_subagent_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "Research",
+                CreateSessionContext::default(),
+                parent.id,
+            )
+            .unwrap();
+        drop(store);
+        let store = SessionStore::open(paths).unwrap();
+        assert!(!session_browser_is_background_only(&store, &parent.id.to_string()).unwrap());
+        assert!(session_browser_is_background_only(&store, &child.id.to_string()).unwrap());
+        assert!(session_browser_is_background_only(&store, &Uuid::new_v4().to_string()).is_err());
+    }
+
+    #[test]
+    fn agent_browser_cannot_be_revealed_but_parent_browser_can() {
+        let manager = SessionBrowserManager::default();
+        for (id, private) in [("parent", false), ("agent", true)] {
+            manager
+                .inner
+                .lock()
+                .unwrap()
+                .insert(id.into(), browser_slot(id, private));
+            manager.set_visible_flag(id, true).unwrap();
+            let snapshot = manager.get_snapshot(id).unwrap().unwrap();
+            assert_eq!(snapshot.visible, !private);
+            assert_eq!(snapshot.background_only, private);
+            manager.set_visible_flag(id, false).unwrap();
+            manager.set_visible_flag(id, true).unwrap();
+            assert_eq!(manager.get_snapshot(id).unwrap().unwrap().visible, !private);
+        }
+        assert_eq!(AGENT_BROWSER_BOUNDS.width, 1280.0);
+        assert_eq!(AGENT_BROWSER_BOUNDS.height, 800.0);
+        assert!(AGENT_BROWSER_BOUNDS.x + AGENT_BROWSER_BOUNDS.width < 0.0);
+    }
+
+    #[test]
+    fn agent_browsers_keep_resources_page_state_and_grants_independent() {
+        let manager = SessionBrowserManager::default();
+        for (id, private) in [("parent", false), ("agent-a", true), ("agent-b", true)] {
+            manager
+                .inner
+                .lock()
+                .unwrap()
+                .insert(id.into(), browser_slot(id, private));
+        }
+        manager
+            .set_url("agent-a", "https://example.com/research")
+            .unwrap();
+        manager.set_title("agent-a", "Research").unwrap();
+        manager
+            .approve_origin("agent-a", "https://example.com")
+            .unwrap();
+        manager.push_console(
+            "agent-a",
+            BrowserConsoleEntry {
+                kind: "log".into(),
+                message: "ready".into(),
+                source: None,
+                line: None,
+                column: None,
+            },
+        );
+        manager
+            .remember_pointer_capture(
+                "agent-a",
+                "capture-a".into(),
+                "https://example.com/research".into(),
+                serde_json::json!({}),
+            )
+            .unwrap();
+        let a = manager
+            .require_owned("agent-a", "shared-workspace")
+            .unwrap();
+        for id in ["parent", "agent-b"] {
+            let other = manager.require_owned(id, "shared-workspace").unwrap();
+            assert_ne!(a.resource_id, other.resource_id);
+            assert_ne!(a.label, other.label);
+            assert_eq!(other.url, "https://example.com/");
+            assert!(other.title.is_empty());
+            assert!(!manager
+                .is_origin_approved(id, "https://example.com")
+                .unwrap());
+            assert!(manager.console_entries(id, 10).unwrap().is_empty());
+            assert!(manager.pointer_reference(id, "capture-a").is_err());
+        }
+        assert_eq!(manager.console_entries("agent-a", 10).unwrap().len(), 1);
+        assert!(manager.pointer_reference("agent-a", "capture-a").is_ok());
+        assert!(manager.require_owned("agent-a", "other-workspace").is_err());
+        manager.remove_slot("agent-a").unwrap();
+        assert!(manager.get_snapshot("agent-a").unwrap().is_none());
+        assert!(manager.get_snapshot("agent-b").unwrap().is_some());
+        assert!(manager.get_snapshot("parent").unwrap().is_some());
+    }
+
+    #[test]
     fn navigable_urls_accept_public_https_and_reject_credentials() {
         assert!(browser_url_is_navigable(
             &url::Url::parse("https://example.com/path").unwrap()
@@ -1772,5 +2245,143 @@ mod tests {
         assert!(script.contains("readPage"));
         assert!(script.contains("credential fields"));
         assert!(script.contains("OBSERVED_PAGE_CONTENT_UNTRUSTED"));
+    }
+
+    #[test]
+    fn reviewed_check_viewport_overrides_loopback_auto_without_changing_normal_browsers() {
+        let bounds = SessionBrowserBounds {
+            x: -1441.0,
+            y: 0.0,
+            width: 1440.0,
+            height: 1080.0,
+        };
+        let request = resource_viewport_request(true, &bounds);
+        let layout = browser_viewport::geometry(request, "http://127.0.0.1:4319", &bounds).unwrap();
+        assert_eq!((layout.state.width, layout.state.height), (1440.0, 1080.0));
+        assert_eq!(layout.state.display_scale, 1.0);
+        assert!(layout.frame.x + layout.frame.width < 0.0);
+        let ordinary = resource_viewport_request(false, &bounds);
+        assert!(ordinary.width.is_none() && ordinary.height.is_none());
+        let layout =
+            browser_viewport::geometry(ordinary, "http://127.0.0.1:4319", &bounds).unwrap();
+        assert_eq!((layout.state.width, layout.state.height), (1280.0, 800.0));
+    }
+
+    #[test]
+    fn browser_paging_script_is_valid_javascript() {
+        let script = agent_initialization_script("test-nonce");
+        let mut command = crate::command_with_gui_path("node");
+        command
+            .args(["-e", "new Function(process.env.GYRO_BROWSER_TEST_SCRIPT)"])
+            .env("GYRO_BROWSER_TEST_SCRIPT", script);
+        let output = command
+            .output()
+            .expect("Node is required by the desktop frontend tests");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    #[test]
+    fn a_check_resource_never_navigates_to_an_unreviewed_origin_or_file() {
+        let origin = Some("http://127.0.0.1:4317");
+        assert!(resource_navigation_allowed(
+            &url::Url::parse("http://127.0.0.1:4317/todos").unwrap(),
+            origin
+        ));
+        for denied in [
+            "http://127.0.0.1:4318/",
+            "http://localhost:4317/",
+            "https://example.com/",
+            "file:///tmp/private",
+            "javascript:alert(1)",
+            "http://user:pass@127.0.0.1:4317/",
+        ] {
+            assert!(!resource_navigation_allowed(
+                &url::Url::parse(denied).unwrap(),
+                origin
+            ));
+        }
+        assert!(resource_navigation_allowed(
+            &url::Url::parse("https://example.com/").unwrap(),
+            None
+        ));
+    }
+
+    #[test]
+    fn check_must_not_pass_when_redaction_replaces_the_observed_value() {
+        use gyro_core::local_check::{self as check, browser::BrowserDriver, CheckStatus};
+        // Synthetic token, not a credential. The requirement is that the page
+        // displays a redacted label. A page exposing this value must not pass
+        // merely because Gyro's transport redacts it after the observation.
+        let token = "sk-abcdefghijklmnopqrstuvwxyz123456";
+        struct Driver {
+            text: String,
+        }
+        impl BrowserDriver for Driver {
+            fn call(&mut self, method: &str, _args: Value) -> anyhow::Result<Value> {
+                let value = match method {
+                    "status" => {
+                        serde_json::json!({"url":"http://127.0.0.1:4317/","readyState":"complete"})
+                    }
+                    "find" => serde_json::json!({"results":[{"ref":"1"}],"hasMore":false}),
+                    "checkRead" => {
+                        serde_json::json!({"ok":true,"url":"http://127.0.0.1:4317/","readyState":"complete","values":{"text":self.text}})
+                    }
+                    _ => unreachable!(),
+                };
+                sanitize_agent_result(method, value).map_err(anyhow::Error::msg)
+            }
+        }
+        let plan: check::CheckPlan = serde_json::from_value(serde_json::json!({
+            "id":Uuid::new_v4(),"createdAt":"2026-10-30T00:00:00Z","workspaceRevision":1,
+            "draft":{"sessionId":Uuid::new_v4(),"previewUrl":"http://127.0.0.1:4317","command":"","dataChanges":"Synthetic observation only","files":["page.html"],
+            "criteria":[{"id":"redacted-label","requirement":"The page displays a redacted label","scope":"browser","expected":{"text":"[REDACTED]"}}],
+            "browser":{"readySelector":"body","steps":[{"action":"observe","criterionId":"redacted-label","waitMs":0,"reads":[{"key":"text","selector":"#label","kind":"text"}]}]}},
+            "snapshot":{"workspace":"/tmp","gitHead":null,"files":[]}
+        })).unwrap();
+        for (text, expected) in [
+            (token, CheckStatus::NotChecked),
+            ("[REDACTED]", CheckStatus::Passed),
+            ("ordinary visible text", CheckStatus::Failed),
+        ] {
+            let mut driver = Driver { text: text.into() };
+            let output = check::browser::run(&plan, &mut driver, Default::default()).unwrap();
+            let report = check::report_from_output(plan.clone(), output);
+            assert_eq!(report.results[0].status, expected);
+            if expected == CheckStatus::NotChecked {
+                assert!(report.results[0].actual.is_none());
+                assert!(report.results[0].reason.contains("privacy filtering"));
+            }
+            assert!(!serde_json::to_string(&report).unwrap().contains(token));
+        }
+    }
+
+    #[test]
+    fn check_reads_require_unchanged_values_without_disabling_browser_redaction() {
+        let token = "sk-abcdefghijklmnopqrstuvwxyz123456";
+        for values in [
+            serde_json::json!({"text": " padded "}),
+            serde_json::json!({"text": "x".repeat(MAX_ENTRY_CHARS + 1)}),
+            serde_json::json!({"texts": [token]}),
+        ] {
+            let error = sanitize_agent_result("checkRead", serde_json::json!({"values":values}))
+                .unwrap_err();
+            assert!(error.contains("privacy filtering"));
+            assert!(!error.contains(token));
+        }
+        let values = serde_json::json!({"text":"[REDACTED]","texts":["okay"],"items":0});
+        let result = sanitize_agent_result(
+            "checkRead",
+            serde_json::json!({"values":values,"title":token}),
+        )
+        .unwrap();
+        assert_eq!(result["values"], values);
+        assert_eq!(result["title"], "[REDACTED]");
+        // Ordinary browser tooling retains its existing privacy filtering.
+        let ordinary =
+            sanitize_agent_result("readPage", serde_json::json!({"tree":token})).unwrap();
+        assert_eq!(ordinary["tree"], "[REDACTED]");
     }
 }

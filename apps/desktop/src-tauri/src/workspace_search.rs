@@ -1,9 +1,290 @@
-use super::{WorkspaceSearchRange, WorkspaceSearchResult};
+use super::*;
 use serde::Deserialize;
+
+pub(super) struct WorkspaceSearchScan {
+    pub results: Vec<WorkspaceSearchResult>,
+    pub incomplete: bool,
+}
+
+pub(super) fn run_workspace_rg_search(
+    root: &Path,
+    query: &str,
+    globs: Option<&Vec<String>>,
+    max_results: usize,
+    use_regex: bool,
+) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
+    Ok(run_workspace_rg_search_scan(root, query, globs, max_results, use_regex)?.results)
+}
+
+pub(super) fn run_workspace_rg_search_scan(
+    root: &Path,
+    query: &str,
+    globs: Option<&Vec<String>>,
+    max_results: usize,
+    use_regex: bool,
+) -> anyhow::Result<WorkspaceSearchScan> {
+    run_scoped_workspace_rg_search(root, ".", query, globs, max_results, use_regex)
+}
+
+/// `directory` is workspace-relative. `.` searches the root. Callers confine it first.
+pub(super) fn run_scoped_workspace_rg_search(
+    root: &Path,
+    directory: &str,
+    query: &str,
+    globs: Option<&Vec<String>>,
+    max_results: usize,
+    use_regex: bool,
+) -> anyhow::Result<WorkspaceSearchScan> {
+    let mut command = command_with_gui_path("rg");
+    command
+        .current_dir(root)
+        .args(["--json", "--line-buffered"]);
+    command.arg("--max-count").arg(max_results.to_string());
+    command.args(["--max-filesize", "4M"]);
+    if !use_regex {
+        command.arg("--fixed-strings");
+    }
+    if let Some(globs) = globs {
+        for glob in globs {
+            command.arg("--glob").arg(glob);
+        }
+    }
+    command.arg("--").arg(query).arg(directory);
+
+    let mut request = ExecutionRequest::new(command.get_program().to_os_string());
+    request.args = command
+        .get_args()
+        .map(std::ffi::OsStr::to_os_string)
+        .collect();
+    request.current_dir = Some(root.to_path_buf());
+    request.env = command
+        .get_envs()
+        .map(|(key, value)| (key.to_os_string(), value.map(std::ffi::OsStr::to_os_string)))
+        .collect();
+    request.timeout = Duration::from_secs(120);
+    request.inactivity_timeout = Some(Duration::from_secs(60));
+    request.max_stdout_chars = 8 * 1024 * 1024;
+    request.max_stderr_chars = 64 * 1024;
+    request.max_total_output_bytes = 8 * 1024 * 1024;
+    let cancellation = CancellationToken::default();
+    let mut progress = SearchOutputProgress::default();
+    let output = gyro_core::run_command(request, cancellation.clone(), |chunk| {
+        if chunk.stream == ExecutionStream::Stdout && progress.push(&chunk.text, max_results) {
+            // --max-count limits each file. Stop the whole process as soon as
+            // the global result count is met instead of scanning the rest.
+            cancellation.cancel();
+        }
+    })?;
+    let results = results_from_search(
+        &mut progress,
+        &output.stdout,
+        output.stdout_truncated,
+        max_results,
+    );
+    if output.succeeded() || output.exit_code() == Some(1) {
+        return Ok(WorkspaceSearchScan {
+            results,
+            incomplete: false,
+        });
+    }
+    // An invalid regex, malformed glob, or permission error is not a successful
+    // empty search merely because ripgrep emitted a begin/summary record.
+    if output.exit_code().is_some() || results.is_empty() {
+        return Err(bounded_command_error("workspace search failed", &output));
+    }
+    Ok(WorkspaceSearchScan {
+        results,
+        incomplete: true,
+    })
+}
+
+/// Resolve a workspace-relative search directory. Absolute paths, `..`, and
+/// links whose target leaves the workspace are refused.
+pub(super) fn confine_search_directory(root: &Path, path: &str) -> anyhow::Result<String> {
+    let relative = gyro_core::normalize_capability_relative_path(path)?;
+    let resolved = gyro_core::security::assert_path_inside_workspace(root, Path::new(&relative))?;
+    if !resolved.is_dir() {
+        anyhow::bail!("Workspace search path must be an existing directory");
+    }
+    Ok(relative)
+}
+
+#[derive(Default)]
+struct SearchOutputProgress {
+    pending: String,
+    results: Vec<WorkspaceSearchResult>,
+}
+
+impl SearchOutputProgress {
+    fn push(&mut self, chunk: &str, max_results: usize) -> bool {
+        if self.results.len() >= max_results {
+            return true;
+        }
+        self.pending.push_str(chunk);
+        if let Some(last_newline) = self.pending.rfind('\n') {
+            let remainder = self.pending.split_off(last_newline + 1);
+            let complete = std::mem::replace(&mut self.pending, remainder);
+            self.ingest_lines(&complete, max_results);
+        }
+        self.results.len() >= max_results
+    }
+
+    fn ingest_lines(&mut self, complete: &str, max_results: usize) {
+        for record in complete.lines() {
+            if self.results.len() >= max_results {
+                break;
+            }
+            if let Some(result) = parse_rg_record(record) {
+                self.results.push(result);
+            }
+        }
+    }
+
+    /// Parse a final record that the process wrote without a trailing newline.
+    fn finish(&mut self, max_results: usize) -> Vec<WorkspaceSearchResult> {
+        if self.results.len() < max_results && !self.pending.is_empty() {
+            if let Some(result) = parse_rg_record(&self.pending) {
+                self.results.push(result);
+            }
+        }
+        self.pending.clear();
+        self.results.truncate(max_results);
+        std::mem::take(&mut self.results)
+    }
+}
+
+/// Results for one search.
+///
+/// The callback sees each stdout chunk before it is stored. A chunk that does
+/// not fit the output cap is only partly stored (`stdout_truncated`), so those
+/// results have to be read from the retained text. Otherwise the chunk stream
+/// is the retained stdout, and parsing it again would repeat the JSON and
+/// column work.
+fn results_from_search(
+    progress: &mut SearchOutputProgress,
+    stdout: &str,
+    stdout_truncated: bool,
+    max_results: usize,
+) -> Vec<WorkspaceSearchResult> {
+    if stdout_truncated {
+        parse_rg_output(stdout, max_results)
+    } else {
+        progress.finish(max_results)
+    }
+}
+
+pub(super) fn bound_model_search_results(
+    results: Vec<WorkspaceSearchResult>,
+    max_bytes: usize,
+) -> anyhow::Result<(Vec<serde_json::Value>, bool)> {
+    let results = results
+        .into_iter()
+        .map(model_search_preview)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let original_count = results.len();
+    // Encode each match once. A compact JSON array is `[` + items joined by
+    // `,` + `]`, so the longest fitting prefix is a running sum — not a fresh
+    // serialization of the whole prefix at every binary-search step.
+    let mut item_lengths = Vec::with_capacity(original_count);
+    for result in &results {
+        item_lengths.push(serde_json::to_vec(result)?.len());
+    }
+    let keep = longest_json_array_prefix(&item_lengths, max_bytes);
+    if keep == 0 && original_count > 0 {
+        anyhow::bail!("A Workspace search match exceeds maxBytes; narrow the query or increase the byte budget");
+    }
+    let mut results = results;
+    results.truncate(keep);
+    Ok((results, keep < original_count))
+}
+
+/// How many leading items fit in a compact JSON array of at most `max_bytes`.
+fn longest_json_array_prefix(item_lengths: &[usize], max_bytes: usize) -> usize {
+    let mut used = 2usize; // `[]`
+    let mut keep = 0usize;
+    for (index, size) in item_lengths.iter().copied().enumerate() {
+        let Some(with_item) = used.checked_add(size) else {
+            break;
+        };
+        let Some(next) = with_item.checked_add(usize::from(index > 0)) else {
+            break;
+        };
+        if next > max_bytes {
+            break;
+        }
+        used = next;
+        keep = index + 1;
+    }
+    keep
+}
+
+fn model_search_preview(result: WorkspaceSearchResult) -> anyhow::Result<serde_json::Value> {
+    const PREVIEW_COLUMNS: usize = 512;
+    const LEADING_CONTEXT_COLUMNS: usize = 80;
+    const MAX_PREVIEW_RANGES: usize = 50;
+    // Mask the full line first: a snippet beginning within a credential must
+    // not disclose its suffix, and match ranges keep their source coordinates.
+    let line = gyro_core::security::redact_secrets_preserving_positions(&result.line);
+    let first_match = result
+        .ranges
+        .first()
+        .map(|range| range.start_column.saturating_sub(1))
+        .unwrap_or(0);
+    let desired_start = first_match.saturating_sub(LEADING_CONTEXT_COLUMNS);
+    let mut units = 0;
+    let mut start = None;
+    let mut end = line.len();
+    for (offset, character) in line.char_indices() {
+        if start.is_none() && units >= desired_start {
+            start = Some((offset, units));
+        }
+        if start.is_some_and(|(_, start)| units + character.len_utf16() > start + PREVIEW_COLUMNS) {
+            end = offset;
+            break;
+        }
+        units += character.len_utf16();
+    }
+    let (start, start_column) = start.unwrap_or((0, 0));
+    let end_column = units;
+    let visible = result
+        .ranges
+        .iter()
+        .filter(|range| range.end_column > start_column + 1 && range.start_column <= end_column + 1)
+        .collect::<Vec<_>>();
+    let mut data = serde_json::json!({
+        "path": result.path, "lineNumber": result.line_number,
+        "line": &line[start..end],
+        "ranges": visible.iter().take(MAX_PREVIEW_RANGES).collect::<Vec<_>>(),
+    });
+    if start != 0 || end != line.len() {
+        data["lineStartColumn"] = serde_json::json!(start_column + 1);
+        data["lineTruncated"] = serde_json::json!(true);
+    }
+    if visible.len() > MAX_PREVIEW_RANGES {
+        data["rangesTruncated"] = serde_json::json!(true);
+    }
+    if line != result.line {
+        data["redacted"] = serde_json::json!(true);
+    }
+    // Preserve the positional line mask while scrubbing path metadata.
+    let displayed_line = data.as_object_mut().unwrap().remove("line").unwrap();
+    data = redact_json_strings(data);
+    data["line"] = displayed_line;
+    Ok(data)
+}
 
 #[derive(Deserialize)]
 struct RgText {
     text: String,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", content = "data")]
+enum RgRecord {
+    #[serde(rename = "match")]
+    Match(RgMatch),
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Deserialize)]
@@ -22,63 +303,257 @@ struct RgRange {
 
 // Ripgrep reports byte offsets; the editor and JavaScript use UTF-16 columns.
 fn search_range(line: &str, start: usize, end: usize) -> Option<WorkspaceSearchRange> {
-    if start > end {
-        return None;
-    }
-    Some(WorkspaceSearchRange {
-        start_column: line.get(..start)?.encode_utf16().count() + 1,
-        end_column: line.get(..end)?.encode_utf16().count() + 1,
-    })
+    columns_for_byte_spans(line, &[(start, end)])
+        .into_iter()
+        .next()
 }
 
 pub(super) fn literal_search_ranges(line: &str, query: &str) -> Vec<WorkspaceSearchRange> {
     if query.is_empty() {
         return Vec::new();
     }
-    line.match_indices(query)
-        .filter_map(|(offset, matched)| search_range(line, offset, offset + matched.len()))
-        .collect()
+    let spans = line
+        .match_indices(query)
+        .map(|(offset, matched)| (offset, offset + matched.len()))
+        .collect::<Vec<_>>();
+    columns_for_byte_spans(line, &spans)
+}
+
+/// Map byte spans to 1-based UTF-16 columns in one forward pass.
+///
+/// Counting `line[..offset].encode_utf16()` once per match walks the same
+/// prefix again for every hit. A long line with a hit every few bytes made
+/// result parsing quadratic. Spans that are inverted, past the end, or not on
+/// a char boundary are skipped, matching the old per-span `get` check.
+fn columns_for_byte_spans(line: &str, spans: &[(usize, usize)]) -> Vec<WorkspaceSearchRange> {
+    let mut ranges = Vec::with_capacity(spans.len());
+    let mut units = 0usize;
+    let mut cursor = 0usize;
+    let mut chars = line.char_indices();
+    let mut pending = chars.next();
+    for &(start, end) in spans {
+        if start > end || end > line.len() || start < cursor {
+            if start < cursor && start <= end && end <= line.len() {
+                units = 0;
+                cursor = 0;
+                chars = line.char_indices();
+                pending = chars.next();
+            } else {
+                continue;
+            }
+        }
+        let Some(start_column) =
+            column_at(start, &mut units, &mut cursor, &mut chars, &mut pending)
+        else {
+            continue;
+        };
+        let Some(end_column) = column_at(end, &mut units, &mut cursor, &mut chars, &mut pending)
+        else {
+            continue;
+        };
+        ranges.push(WorkspaceSearchRange {
+            start_column,
+            end_column,
+        });
+    }
+    ranges
+}
+
+/// UTF-16 column (1-based) of `target`, advancing the cursor. `None` when
+/// `target` is not a char boundary at or after the cursor.
+fn column_at(
+    target: usize,
+    units: &mut usize,
+    cursor: &mut usize,
+    chars: &mut std::str::CharIndices<'_>,
+    pending: &mut Option<(usize, char)>,
+) -> Option<usize> {
+    if target < *cursor {
+        return None;
+    }
+    while *cursor < target {
+        let (index, character) = pending.take()?;
+        let next = index + character.len_utf8();
+        if target < next {
+            // Landed inside a character. Put it back so a later span can
+            // still be measured from this boundary.
+            *pending = Some((index, character));
+            return None;
+        }
+        *units += character.len_utf16();
+        *cursor = next;
+        *pending = chars.next();
+    }
+    Some(*units + 1)
+}
+
+fn parse_rg_record(record: &str) -> Option<WorkspaceSearchResult> {
+    let record = record.trim_end_matches(['\r', ' ', '\t']);
+    if record.is_empty() {
+        return None;
+    }
+    // Decode match fields once. A generic Value tree allocated a map and
+    // numbers for every submatch before rebuilding the same typed record.
+    let RgRecord::Match(data) = serde_json::from_str(record).ok()? else {
+        return None;
+    };
+    Some(search_result_from_rg_match(data))
+}
+
+fn search_result_from_rg_match(data: RgMatch) -> WorkspaceSearchResult {
+    let line = data
+        .lines
+        .text
+        .strip_suffix('\n')
+        .unwrap_or(&data.lines.text);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    let spans = data
+        .submatches
+        .iter()
+        .map(|range| (range.start, range.end))
+        .collect::<Vec<_>>();
+    let ranges = columns_for_byte_spans(line, &spans);
+    WorkspaceSearchResult {
+        path: data
+            .path
+            .text
+            .strip_prefix("./")
+            .unwrap_or(&data.path.text)
+            .to_owned(),
+        line_number: data.line_number,
+        line: line.to_owned(),
+        ranges,
+    }
 }
 
 pub(super) fn parse_rg_output(output: &str, max_results: usize) -> Vec<WorkspaceSearchResult> {
-    output
-        .lines()
-        .filter_map(|record| {
-            let record: serde_json::Value = serde_json::from_str(record).ok()?;
-            if record.get("type")?.as_str()? != "match" {
-                return None;
-            }
-            let data: RgMatch = serde_json::from_value(record.get("data")?.clone()).ok()?;
-            let line = data
-                .lines
-                .text
-                .strip_suffix('\n')
-                .unwrap_or(&data.lines.text);
-            let line = line.strip_suffix('\r').unwrap_or(line);
-            let ranges = data
-                .submatches
-                .iter()
-                .filter_map(|range| search_range(line, range.start, range.end))
-                .collect();
-            Some(WorkspaceSearchResult {
-                path: data
-                    .path
-                    .text
-                    .strip_prefix("./")
-                    .unwrap_or(&data.path.text)
-                    .to_owned(),
-                line_number: data.line_number,
-                line: line.to_owned(),
-                ranges,
-            })
-        })
-        .take(max_results)
-        .collect()
+    let mut results = Vec::new();
+    for record in output.lines() {
+        if results.len() == max_results {
+            break;
+        }
+        if let Some(result) = parse_rg_record(record) {
+            results.push(result);
+        }
+    }
+    results
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pre-change decoding path, retained only for equivalence and opt-in timing.
+    fn parse_rg_record_via_value(record: &str) -> Option<WorkspaceSearchResult> {
+        let record = record.trim_end_matches(['\r', ' ', '\t']);
+        let mut record: serde_json::Value = serde_json::from_str(record).ok()?;
+        if record.get("type")?.as_str()? != "match" {
+            return None;
+        }
+        let data: RgMatch = serde_json::from_value(record.get_mut("data")?.take()).ok()?;
+        Some(search_result_from_rg_match(data))
+    }
+
+    fn decoding_fixture(records: usize, matches_per_line: usize) -> Vec<String> {
+        let line = format!("🦀{}\r\n", " needle".repeat(matches_per_line));
+        let spans: Vec<_> = line.match_indices("needle")
+            .map(|(start, text)| serde_json::json!({"match":{"text":text},"start":start,"end":start + text.len()}))
+            .collect();
+        (0..records)
+            .map(|index| {
+                // Ripgrep emits the type before its data. Preserve that order
+                // rather than serde_json::Value's alphabetical object order.
+                let data = serde_json::json!({
+                        "path":{"text":format!("./src/café-{index}.rs")},
+                        "lines":{"text":line}, "line_number":index + 1,
+                        "absolute_offset":index * line.len(), "submatches":spans,
+                });
+                format!(r#"{{"type":"match","data":{data}}}"#)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn typed_ripgrep_decoding_preserves_match_and_nonmatch_records() {
+        let mut records = decoding_fixture(3, 200);
+        records.extend([
+            r#"{"type":"begin","data":{"path":{"text":"./file.rs"}}}"#,
+            r#"{"type":"summary","data":{"elapsed_total":{"secs":0,"nanos":42}}}"#,
+            r#"{"type":"context","data":{"lines":{"text":"context"}}}"#,
+            r#"{"type":"future-record","data":[1,2,3]}"#,
+            r#"{"type":"match","data":{"path":{"bytes":"AA=="}}}"#,
+            r#"{"type":"match","data":null}"#,
+            r#"{"type":"match"}"#,
+            r#"{"data":{"path":{"text":"x"},"lines":{"text":"🦀x\n"},"line_number":1,"submatches":[{"start":4,"end":5}]},"type":"match"}"#,
+            r#"{"type":"match","data":{"path":{"text":"x"},"lines":{"text":"x\n"},"line_number":1,"submatches":[]},"extra":true}"#,
+            "not json", "", "{",
+        ].into_iter().map(str::to_owned));
+        for record in records {
+            assert_eq!(
+                serde_json::to_value(parse_rg_record(&record)).unwrap(),
+                serde_json::to_value(parse_rg_record_via_value(&record)).unwrap(),
+                "record: {record}",
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "explicit local performance measurement"]
+    fn workspace_search_decode_benchmark() {
+        let mut results = Vec::new();
+        for (name, records, matches_per_line) in [("small", 4, 1), ("dense", 300, 200)] {
+            let fixture = decoding_fixture(records, matches_per_line);
+            let before = fixture
+                .iter()
+                .filter_map(|record| parse_rg_record_via_value(record))
+                .collect::<Vec<_>>();
+            let after = fixture
+                .iter()
+                .filter_map(|record| parse_rg_record(record))
+                .collect::<Vec<_>>();
+            let output = serde_json::to_vec(&after).unwrap();
+            assert_eq!(serde_json::to_vec(&before).unwrap(), output);
+            let mut before_samples = Vec::new();
+            let mut after_samples = Vec::new();
+            let measure = |decode: fn(&str) -> Option<WorkspaceSearchResult>| {
+                let started = Instant::now();
+                for record in &fixture {
+                    std::hint::black_box(decode(std::hint::black_box(record))).unwrap();
+                }
+                started.elapsed().as_secs_f64() * 1000.0
+            };
+            // Alternate order so machine load does not consistently favour one path.
+            for iteration in 0..10 {
+                let (before, after) = if iteration % 2 == 0 {
+                    (measure(parse_rg_record_via_value), measure(parse_rg_record))
+                } else {
+                    let after = measure(parse_rg_record);
+                    (measure(parse_rg_record_via_value), after)
+                };
+                if iteration != 0 {
+                    before_samples.push(before);
+                    after_samples.push(after);
+                }
+            }
+            before_samples.sort_by(f64::total_cmp);
+            after_samples.sort_by(f64::total_cmp);
+            results.push(serde_json::json!({
+                "fixture":name, "records":records, "matchesPerLine":matches_per_line,
+                "inputBytes":fixture.iter().map(String::len).sum::<usize>(),
+                "outputSha256":content_hash(&output),
+                "beforeMedianMs":before_samples[4], "afterMedianMs":after_samples[4],
+                "beforeSamplesMs":before_samples, "afterSamplesMs":after_samples,
+            }));
+        }
+        println!(
+            "WORKSPACE_SEARCH_DECODE_BENCHMARK {}",
+            serde_json::json!({
+                "schema":"gyro.backend-performance.v1",
+                "evidence":"local debug ripgrep record decoding; no native UI or process timing",
+                "results":results,
+            })
+        );
+    }
 
     #[test]
     fn workspace_search_preserves_paths_and_exact_unicode_ranges() {
@@ -125,5 +600,259 @@ mod tests {
         assert_eq!(results[0].ranges[0].start_column, 6);
         assert_eq!(results[0].ranges[0].end_column, 12);
         assert_eq!(results[0].ranges[1].end_column, 20);
+    }
+
+    #[test]
+    fn search_stops_at_a_global_limit_across_split_records() {
+        let record = serde_json::json!({"type":"match","data":{
+            "path":{"text":"file.txt"},"lines":{"text":"needle\n"},"line_number":1,
+            "submatches":[{"start":0,"end":6}]
+        }})
+        .to_string();
+        let mut progress = SearchOutputProgress::default();
+        assert!(!progress.push("{\"type\":\"begin\"}\n", 2));
+        let split = record.len() / 2;
+        assert!(!progress.push(&record[..split], 2));
+        assert!(!progress.push(&format!("{}\n", &record[split..]), 2));
+        assert!(progress.push(&format!("{record}\n"), 2));
+        assert_eq!(progress.results.len(), 2);
+    }
+
+    #[test]
+    fn streamed_records_match_one_parse_of_the_same_stdout() {
+        let record = serde_json::json!({
+            "type": "match",
+            "data": {
+                "path": {"text": "./café.txt"},
+                "lines": {"text": "é 🦀 needle\n"},
+                "line_number": 3,
+                "submatches": [{"start": 8, "end": 14}]
+            }
+        })
+        .to_string();
+        let stdout = format!(
+            "{{\"type\":\"begin\"}}\r\n{{\"type\":\"match\"}}\n{record}\nnot json\n\n{record}"
+        );
+        let mut progress = SearchOutputProgress::default();
+        let mut offset = 0;
+        while offset < stdout.len() {
+            let mut end = (offset + 17).min(stdout.len());
+            while end < stdout.len() && !stdout.is_char_boundary(end) {
+                end += 1;
+            }
+            assert!(!progress.push(&stdout[offset..end], 10));
+            offset = end;
+        }
+        let streamed = results_from_search(&mut progress, &stdout, false, 10);
+        assert_eq!(
+            serde_json::to_value(&streamed).unwrap(),
+            serde_json::to_value(&parse_rg_output(&stdout, 10)).unwrap()
+        );
+        assert_eq!(streamed.len(), 2);
+        assert_eq!(streamed[0].path, "café.txt");
+        assert_eq!(streamed[0].line, "é 🦀 needle");
+        let mut capped = SearchOutputProgress::default();
+        capped.push(&stdout, 1);
+        let capped = results_from_search(&mut capped, &stdout, false, 1);
+        assert_eq!(
+            serde_json::to_value(&capped).unwrap(),
+            serde_json::to_value(&parse_rg_output(&stdout, 1)).unwrap()
+        );
+    }
+
+    #[test]
+    fn truncated_stdout_is_parsed_from_the_retained_text() {
+        let record = serde_json::json!({"type":"match","data":{
+            "path":{"text":"file.txt"},"lines":{"text":"needle\n"},"line_number":1,
+            "submatches":[{"start":0,"end":6}]
+        }})
+        .to_string();
+        let stdout = format!("{record}\n");
+        let mut progress = SearchOutputProgress::default();
+        assert!(!progress.push(&stdout, 10));
+        assert!(!progress.push(&stdout, 10));
+        assert_eq!(progress.results.len(), 2);
+        // The stream saw a second match that the capped stdout no longer holds.
+        let retained = results_from_search(&mut progress, &stdout, true, 10);
+        assert_eq!(retained.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&retained).unwrap(),
+            serde_json::to_value(&parse_rg_output(&stdout, 10)).unwrap()
+        );
+    }
+
+    #[test]
+    fn search_does_not_report_bad_globs_as_empty_success() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::write(workspace.path().join("file.txt"), "needle\n").unwrap();
+        assert!(run_workspace_rg_search(
+            workspace.path(),
+            "needle",
+            Some(&vec!["[".to_owned()]),
+            50,
+            true
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn search_scan_reports_a_global_limit_as_incomplete() {
+        let workspace = tempfile::tempdir().unwrap();
+        for index in 0..100 {
+            fs::write(
+                workspace.path().join(format!("file-{index:03}.txt")),
+                "needle\n".repeat(20),
+            )
+            .unwrap();
+        }
+        let scan =
+            run_workspace_rg_search_scan(workspace.path(), "needle", None, 10, true).unwrap();
+        assert_eq!(scan.results.len(), 10);
+        // Very small scans can naturally finish before cancellation is polled.
+        // The model also marks results.len() == maxResults as a limit hit.
+        assert!(scan.incomplete || scan.results.len() == 10);
+    }
+
+    #[test]
+    fn search_respects_the_serialized_response_budget() {
+        let results = (0..100)
+            .map(|index| WorkspaceSearchResult {
+                path: format!("file-{index}.txt"),
+                line_number: 1,
+                line: "\"🦀".repeat(100),
+                ranges: Vec::new(),
+            })
+            .collect();
+        let (bounded, limited) = bound_model_search_results(results, 1024).unwrap();
+        assert!(limited);
+        assert!(!bounded.is_empty());
+        assert!(serde_json::to_vec(&bounded).unwrap().len() <= 1024);
+    }
+
+    #[test]
+    fn search_budget_keeps_the_longest_prefix_that_fits() {
+        let inputs: Vec<_> = (0..30)
+            .map(|index| WorkspaceSearchResult {
+                path: format!("f{index}.txt"),
+                line_number: index + 1,
+                line: "x".repeat(40 + index),
+                ranges: vec![WorkspaceSearchRange {
+                    start_column: 1,
+                    end_column: 2,
+                }],
+            })
+            .collect();
+        let previews = inputs
+            .iter()
+            .cloned()
+            .map(model_search_preview)
+            .collect::<anyhow::Result<Vec<_>>>()
+            .unwrap();
+        let budget = 900usize;
+        let mut expected = 0usize;
+        for count in 0..=previews.len() {
+            if serde_json::to_vec(&previews[..count]).unwrap().len() <= budget {
+                expected = count;
+            } else {
+                break;
+            }
+        }
+        assert!(expected > 0 && expected < previews.len());
+        let (bounded, limited) = bound_model_search_results(inputs, budget).unwrap();
+        assert!(limited);
+        assert_eq!(bounded.len(), expected);
+        assert_eq!(
+            serde_json::to_vec(&bounded).unwrap().len(),
+            serde_json::to_vec(&previews[..expected]).unwrap().len()
+        );
+    }
+
+    #[test]
+    fn many_literal_matches_keep_utf16_columns_after_a_wide_character() {
+        let line = format!("🦀{}", " needle".repeat(200));
+        let ranges = literal_search_ranges(&line, "needle");
+        assert_eq!(ranges.len(), 200);
+        // 🦀 is two UTF-16 units and the following space is the third.
+        assert_eq!(ranges[0].start_column, 4);
+        assert_eq!(ranges[0].end_column, 10);
+        for pair in ranges.windows(2) {
+            assert!(pair[1].start_column > pair[0].start_column);
+            assert_eq!(pair[1].start_column - pair[0].start_column, 7);
+            assert_eq!(pair[0].end_column - pair[0].start_column, 6);
+        }
+        assert!(search_range("🦀", 1, 2).is_none());
+        assert_eq!(
+            search_range("🦀", 0, 4).unwrap().end_column,
+            3,
+            "a single wide character still occupies two UTF-16 columns"
+        );
+    }
+
+    #[test]
+    fn model_search_previews_keep_late_unicode_matches_and_source_ranges() {
+        let line = format!("{}🦀 needle {}", "x".repeat(5000), "y".repeat(1000));
+        let ranges = literal_search_ranges(&line, "needle");
+        let start_column = ranges[0].start_column;
+        let end_column = ranges[0].end_column;
+        let preview = model_search_preview(WorkspaceSearchResult {
+            path: "long.txt".into(),
+            line_number: 42,
+            line,
+            ranges,
+        })
+        .unwrap();
+        assert!(preview["line"].as_str().unwrap().contains("🦀 needle"));
+        assert!(preview["line"].as_str().unwrap().encode_utf16().count() <= 512);
+        assert_eq!(preview["lineNumber"], 42);
+        assert_eq!(preview["lineTruncated"], true);
+        assert!(preview["lineStartColumn"].as_u64().unwrap() > 4000);
+        assert_eq!(preview["ranges"][0]["startColumn"], start_column);
+        assert_eq!(preview["ranges"][0]["endColumn"], end_column);
+    }
+
+    #[test]
+    fn model_search_previews_bound_dense_match_metadata() {
+        let line = "needle ".repeat(1000);
+        let ranges = literal_search_ranges(&line, "needle");
+        let preview = model_search_preview(WorkspaceSearchResult {
+            path: "dense.txt".into(),
+            line_number: 1,
+            line,
+            ranges,
+        })
+        .unwrap();
+        assert_eq!(preview["ranges"].as_array().unwrap().len(), 50);
+        assert_eq!(preview["rangesTruncated"], true);
+        assert!(serde_json::to_vec(&preview).unwrap().len() < DEFAULT_WORKSPACE_RESULT_BYTES);
+    }
+
+    #[test]
+    fn scoped_search_skips_sibling_directories() {
+        let workspace = tempfile::tempdir().unwrap();
+        let src = workspace.path().join("src");
+        let other = workspace.path().join("other");
+        fs::create_dir(&src).unwrap();
+        fs::create_dir(&other).unwrap();
+        fs::write(src.join("hit.txt"), "needle\n").unwrap();
+        fs::write(other.join("hit.txt"), "needle\n").unwrap();
+        let directory = confine_search_directory(workspace.path(), "src").unwrap();
+        let results =
+            run_scoped_workspace_rg_search(workspace.path(), &directory, "needle", None, 10, true)
+                .unwrap();
+        assert_eq!(results.results.len(), 1);
+        assert_eq!(results.results[0].path, "src/hit.txt");
+    }
+
+    #[test]
+    fn search_directory_refuses_escape_and_outbound_links() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::create_dir(workspace.path().join("src")).unwrap();
+        assert!(confine_search_directory(workspace.path(), "../outside").is_err());
+        assert!(confine_search_directory(workspace.path(), "/tmp").is_err());
+
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("secret.txt"), "needle\n").unwrap();
+        std::os::unix::fs::symlink(outside.path(), workspace.path().join("link")).unwrap();
+        assert!(confine_search_directory(workspace.path(), "link").is_err());
     }
 }

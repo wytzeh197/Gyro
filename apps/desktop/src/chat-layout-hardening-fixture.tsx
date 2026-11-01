@@ -315,6 +315,12 @@ function Fixture() {
         onDraftChange={(draft) =>
           setDrafts((current) => ({ ...current, [key]: draft }))
         }
+        onAttachMediaFiles={(files) => {
+          // Read by capture scripts to prove a drop reached exactly one pane.
+          const log = ((window as { __gyroMediaDrops?: string[] })
+            .__gyroMediaDrops ??= []);
+          log.push(...files.map((file) => `${key}:${file.name}`));
+        }}
         isEnvironmentRailOpen={environment === key}
         onToggleEnvironmentRail={() =>
           setEnvironment((current) => (current === key ? undefined : key))
@@ -402,6 +408,27 @@ function Fixture() {
         </button>
         <button onClick={restoreDuplicates}>
           Restore duplicate stored chats
+        </button>
+        <button
+          onClick={() =>
+            setDrafts((current) => ({
+              ...current,
+              [layout.focusedPaneId ?? "empty"]:
+                "Check the composer after opening Browser beside this chat. ".repeat(4),
+            }))
+          }
+        >
+          Wrapped draft
+        </button>
+        <button
+          onClick={() =>
+            setDrafts((current) => ({
+              ...current,
+              [layout.focusedPaneId ?? "empty"]: "",
+            }))
+          }
+        >
+          Clear draft
         </button>
         <button aria-pressed={long} onClick={() => setLong(!long)}>
           Long transcript
@@ -523,6 +550,9 @@ function Fixture() {
 }
 
 if (import.meta.env.DEV) {
-  document.documentElement.dataset.theme = "dark";
+  document.documentElement.dataset.theme =
+    new URLSearchParams(location.search).get("theme") === "light"
+      ? "light"
+      : "dark";
   createRoot(document.getElementById("root")!).render(<Fixture />);
 }

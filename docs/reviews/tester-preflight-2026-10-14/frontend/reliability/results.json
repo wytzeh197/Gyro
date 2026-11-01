@@ -1,0 +1,390 @@
+[
+  {
+    "name": "check-code-mode",
+    "exit": 0
+  },
+  {
+    "name": "check-workflow-upgrades",
+    "exit": 0
+  },
+  {
+    "name": "check-model-catalog",
+    "exit": 0
+  },
+  {
+    "name": "check-google-models",
+    "exit": 0
+  },
+  {
+    "name": "check-model-catalog-cadence",
+    "exit": 0
+  },
+  {
+    "name": "check-terminal-layout",
+    "exit": 0
+  },
+  {
+    "name": "check-terminal-profiles",
+    "exit": 0
+  },
+  {
+    "name": "check-terminal-output",
+    "exit": 0
+  },
+  {
+    "name": "check-terminal-failure",
+    "exit": 0
+  },
+  {
+    "name": "check-desktop-dev",
+    "exit": 0
+  },
+  {
+    "name": "check-startup-performance",
+    "exit": 0
+  },
+  {
+    "name": "check-appearance-persistence",
+    "exit": 0
+  },
+  {
+    "name": "check-backend-responsiveness",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-history-efficiency",
+    "exit": 0
+  },
+  {
+    "name": "check-page-reliability",
+    "exit": 1
+  },
+  {
+    "name": "check-architecture-boundaries",
+    "exit": 1
+  },
+  {
+    "name": "check-command-blocking",
+    "exit": 0
+  },
+  {
+    "name": "check-syntax-highlighting",
+    "exit": 0
+  },
+  {
+    "name": "check-textmate-assets",
+    "exit": 0
+  },
+  {
+    "name": "check-textmate-runtime",
+    "exit": 0
+  },
+  {
+    "name": "check-source-control-review",
+    "exit": 0
+  },
+  {
+    "name": "check-review-scope",
+    "exit": 0
+  },
+  {
+    "name": "check-environment-actions",
+    "exit": 0
+  },
+  {
+    "name": "check-provider-stream-ordering",
+    "exit": 0
+  },
+  {
+    "name": "check-github-reliability",
+    "exit": 0
+  },
+  {
+    "name": "check-provider-capability-manifest",
+    "exit": 0
+  },
+  {
+    "name": "check-composer-context-usage",
+    "exit": 1
+  },
+  {
+    "name": "check-live-model-context",
+    "exit": 0
+  },
+  {
+    "name": "check-turn-tokens",
+    "exit": 0
+  },
+  {
+    "name": "check-menu-bar-state",
+    "exit": 0
+  },
+  {
+    "name": "check-session-listing",
+    "exit": 0
+  },
+  {
+    "name": "check-imported-session-order",
+    "exit": 0
+  },
+  {
+    "name": "check-unread-completed-chats",
+    "exit": 0
+  },
+  {
+    "name": "check-global-search",
+    "exit": 0
+  },
+  {
+    "name": "check-model-classes",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-timeline",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-run",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-keep-alive",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-hardening",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-drag",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-pointer-drag",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-drop-geometry",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-grid-drag-state",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-drop-project",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-scroll",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-network",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-persistence",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-message-queue",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-auto-retry",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-auto-retry-hook",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-retry-dispatch",
+    "exit": 0
+  },
+  {
+    "name": "check-native-retry-stream",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-file-links",
+    "exit": 0
+  },
+  {
+    "name": "check-file-review",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-companion",
+    "exit": 0
+  },
+  {
+    "name": "check-subagents",
+    "exit": 0
+  },
+  {
+    "name": "check-subagent-browsers",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-pane-close",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-split-new-session",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-close-target",
+    "exit": 0
+  },
+  {
+    "name": "check-usage-ledger",
+    "exit": 0
+  },
+  {
+    "name": "check-provider-identity",
+    "exit": 0
+  },
+  {
+    "name": "check-provider-allowance",
+    "exit": 0
+  },
+  {
+    "name": "check-council-freeze",
+    "exit": 0
+  },
+  {
+    "name": "check-clean-machine-path",
+    "exit": 0
+  },
+  {
+    "name": "check-browser-pointer-feedback",
+    "exit": 0
+  },
+  {
+    "name": "check-browser-capability",
+    "exit": 0
+  },
+  {
+    "name": "check-browser-viewport",
+    "exit": 0
+  },
+  {
+    "name": "check-browser-navigation",
+    "exit": 0
+  },
+  {
+    "name": "check-browser-host-visibility",
+    "exit": 0
+  },
+  {
+    "name": "check-browser-host-bounds",
+    "exit": 0
+  },
+  {
+    "name": "check-browser-reveal",
+    "exit": 0
+  },
+  {
+    "name": "check-surface-boundaries",
+    "exit": 1
+  },
+  {
+    "name": "check-model-file-visibility",
+    "exit": 0
+  },
+  {
+    "name": "check-workspace-capability-sync",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-side-panel",
+    "exit": 0
+  },
+  {
+    "name": "check-turn-timing",
+    "exit": 0
+  },
+  {
+    "name": "check-surface-timing",
+    "exit": 0
+  },
+  {
+    "name": "check-plan-document",
+    "exit": 0
+  },
+  {
+    "name": "check-provider-benchmark-summary",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-canvas",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-questions",
+    "exit": 0
+  },
+  {
+    "name": "check-chat-media-transfer",
+    "exit": 0
+  },
+  {
+    "name": "check-workspace-explorer",
+    "exit": 0
+  },
+  {
+    "name": "check-workspace-search",
+    "exit": 0
+  },
+  {
+    "name": "check-goal-plan",
+    "exit": 0
+  },
+  {
+    "name": "check-goal-runner",
+    "exit": 0
+  },
+  {
+    "name": "check-context-compaction",
+    "exit": 0
+  },
+  {
+    "name": "check-browser-observation-cost",
+    "exit": 0
+  },
+  {
+    "name": "check-appearance-persistence",
+    "exit": 0
+  },
+  {
+    "name": "check-guard-registry",
+    "exit": 1
+  },
+  {
+    "name": "check-code-intelligence",
+    "exit": 0
+  },
+  {
+    "name": "check-workspace-document-uri",
+    "exit": 0
+  },
+  {
+    "name": "check-workspace-edits",
+    "exit": 0
+  },
+  {
+    "name": "check-editor-language-sessions",
+    "exit": 0
+  },
+  {
+    "name": "check-editor-recovery",
+    "exit": 0
+  },
+  {
+    "name": "check-language-server-registry",
+    "exit": 0
+  }
+]

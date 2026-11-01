@@ -4,6 +4,7 @@ import {
   chatTurnTimelineSections,
   interleaveModelSwitches,
   isModelSwitchEvent,
+  modelSwitchLogoProvider,
 } from "../packages/ui/src/chat-timeline.ts";
 
 let sequence = 0;
@@ -43,6 +44,33 @@ assert.equal(
   isModelSwitchEvent(event("system-event", "Other status", {}, 2)),
   false,
 );
+// Marks follow model identity, including models run through other providers.
+for (const [providerId, modelId, expected] of [
+  ["xai", "grok-4.20", "xai"],
+  ["openai", "gpt-6.1-sol", "openai"],
+  ["openai", "gpt-6.1-astra", "openai"],
+  ["cursor", "claude-sonnet-4.6", "anthropic"],
+  ["openrouter", "openai/gpt-6.1-sol", "openai"],
+  ["openrouter", "x-ai/grok-4.20", "xai"],
+  ["ollama", "deepseek-r1:latest", "deepseek"],
+  ["antigravity", "gemini-3.8-flash", "gemini"],
+  ["kimi", "kimi-k2.5", "kimi"],
+  ["mistral", "codestral-latest", "mistral"],
+  ["openai", "o3", "openai"],
+  ["custom:studio", "unrecognized-model", "custom:studio"],
+  ["openrouter", "some-vendor/new-model", "openrouter"],
+  ["gemini", undefined, "gemini"],
+  [undefined, "gpt-6-sol", "openai"],
+  [undefined, undefined, undefined],
+  [{}, [], undefined],
+  ["removed-provider", "unknown", undefined],
+]) {
+  assert.equal(
+    modelSwitchLogoProvider(providerId, modelId),
+    expected,
+    `model mark for ${String(providerId)}/${String(modelId)}`,
+  );
+}
 const modelTimeline = interleaveModelSwitches(
   [
     { id: "first", startedAt: "2026-07-27T09:00:00.000Z" },

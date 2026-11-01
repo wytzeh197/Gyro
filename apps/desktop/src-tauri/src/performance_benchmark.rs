@@ -9,13 +9,15 @@ struct Spec {
     providers: Vec<Provider>,
     trials: usize,
     timeout_seconds: u64,
+    #[serde(default)]
+    tasks: Option<Vec<String>>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Provider {
-    id: String,
-    model: String,
-    effort: String,
+pub(super) struct Provider {
+    pub(super) id: String,
+    pub(super) model: String,
+    pub(super) effort: String,
 }
 
 pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
@@ -32,13 +34,28 @@ pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>>
     {
         return Err("benchmark data must be in an absolute temporary directory".into());
     }
-    let spec: Spec = serde_json::from_slice(&fs::read(spec_path)?)?;
+    let raw: serde_json::Value = serde_json::from_slice(&fs::read(&spec_path)?)?;
+    if raw["schema"] == "gyro.efficiency-benchmark.v2" {
+        return super::efficiency_benchmark::start(app, root, raw).map_err(Into::into);
+    }
+    let spec: Spec = serde_json::from_value(raw)?;
     if !(1..=5).contains(&spec.trials)
         || !(10..=300).contains(&spec.timeout_seconds)
         || spec.providers.is_empty()
         || spec.providers.len() > 3
     {
         return Err("invalid benchmark bounds".into());
+    }
+    if let Some(tasks) = &spec.tasks {
+        if tasks.is_empty()
+            || tasks.len() > 4
+            || tasks
+                .iter()
+                .any(|task| !matches!(task.as_str(), "readme" | "code" | "follow-up" | "no-tool"))
+            || tasks.iter().collect::<HashSet<_>>().len() != tasks.len()
+        {
+            return Err("invalid benchmark task selection".into());
+        }
     }
     for provider in &spec.providers {
         if !GyroConfig::default()
@@ -84,6 +101,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>>
                 .map(|provider| {
                     let app = &app;
                     let root = &root;
+                    let tasks = spec.tasks.clone();
                     scope.spawn(move || {
                         run(
                             app,
@@ -92,6 +110,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>>
                                 providers: vec![provider],
                                 trials: spec.trials,
                                 timeout_seconds: spec.timeout_seconds,
+                                tasks,
                             },
                         )
                     })
@@ -161,7 +180,9 @@ fn fixture(path: &Path) -> anyhow::Result<()> {
 fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
     let store = open_store().map_err(anyhow::Error::msg)?;
     let started = Instant::now();
-    let tasks = ["readme", "code", "follow-up"];
+    let tasks = spec
+        .tasks
+        .unwrap_or_else(|| vec!["readme".into(), "code".into(), "follow-up".into()]);
     let report_path = root.join(format!("benchmark-{}.json", spec.providers[0].id));
     let mut records: Vec<serde_json::Value> = fs::read(&report_path)
         .ok()
@@ -174,14 +195,14 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
         .unwrap_or_default();
     for provider in spec.providers {
         let mut unavailable: Option<String> = None;
-        for task in tasks {
+        for task in &tasks {
             for resumed in [false, true] {
                 for trial in 1..=spec.trials {
                     if records.iter().any(|record| {
                         record["provider"] == provider.id
                             && record["model"] == provider.model
                             && record["effort"] == provider.effort
-                            && record["task"] == task
+                            && record["task"] == task.as_str()
                             && record["resumedRequested"] == resumed
                             && record["trial"] == trial
                     }) {
@@ -233,10 +254,23 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                             None,
                             Some(provider.model.clone()),
                             None,
-                            Some(provider.effort.clone()),
+                            selected_effort(&provider).map(str::to_owned),
                         )?;
                         let bootstrap = if resumed {
-                            Some(turn(app, &store, session.id, &workspace, &provider, "Read README.md and src/clamp.mjs. Remember that the project mascot is heron for my next request. Do not modify files. Reply in one sentence.", spec.timeout_seconds))
+                            let prompt = if task == "no-tool" {
+                                "Remember the exact test keyword GYRO_OK for my next request. Reply exactly MEMORIZED. Do not use any tools."
+                            } else {
+                                "Read README.md and src/clamp.mjs. Remember that the project mascot is heron for my next request. Do not modify files. Reply in one sentence."
+                            };
+                            Some(turn(
+                                app,
+                                &store,
+                                session.id,
+                                &workspace,
+                                &provider,
+                                prompt,
+                                spec.timeout_seconds,
+                            ))
                         } else {
                             None
                         };
@@ -256,7 +290,9 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                                 unavailable = Some(class.into());
                             }
                         } else {
-                            let prompt = match task {
+                            let prompt = match task.as_str() {
+                                "no-tool" if resumed => "Reply with the exact test keyword I asked you to remember. Do not use any tools or change any files. Reply with only that keyword.",
+                                "no-tool" => "Reply exactly GYRO_OK. Do not use any tools or change any files.",
                                 "readme" => "Shorten README.md from 267 lines to at most 85 lines. Preserve the project name, install requirements, usage, development command, and docs/guide.md link. Edit only README.md.",
                                 "code" => "Fix clamp in src/clamp.mjs so it enforces both inclusive bounds. Add exactly one upper-bound regression test in clamp.test.mjs. Run node --test. Edit only these two files.",
                                 _ if resumed => "Append exactly one line to README.md with the mascot I asked you to remember, in the form Mascot: name. Edit only README.md.",
@@ -290,7 +326,33 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                                         .cloned()
                                         .unwrap_or(serde_json::Value::Null);
                                     record["outcome"] = "completed".into();
-                                    record["correct"] = verify(&workspace, task).into();
+                                    record["correct"] = if task == "no-tool" {
+                                        let calls = store
+                                            .read_events(session.id)?
+                                            .iter()
+                                            .filter(|event| event.turn_id == Some(turn_id))
+                                            .filter(|event| {
+                                                event.payload.get("capabilityId").is_some()
+                                                    || matches!(
+                                                        event.payload["activityKind"].as_str(),
+                                                        Some(
+                                                            "tool"
+                                                                | "command"
+                                                                | "file"
+                                                                | "browser"
+                                                                | "agent"
+                                                        )
+                                                    )
+                                            })
+                                            .count();
+                                        record["toolActivityRecords"] = calls.into();
+                                        (response.assistant_event.message.trim() == "GYRO_OK"
+                                            && calls == 0
+                                            && verify(&workspace, &task))
+                                        .into()
+                                    } else {
+                                        verify(&workspace, &task).into()
+                                    };
                                     record["responsePresent"] =
                                         (!response.assistant_event.message.trim().is_empty())
                                             .into();
@@ -305,7 +367,8 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                                             .take(1200)
                                             .collect::<String>()
                                             .into();
-                                    record["correct"] = verify(&workspace, task).into();
+                                    record["correct"] =
+                                        (task != "no-tool" && verify(&workspace, &task)).into();
                                     if matches!(
                                         class,
                                         "authentication"
@@ -339,7 +402,7 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
     }
     Ok(())
 }
-fn turn(
+pub(super) fn turn(
     app: &tauri::AppHandle,
     store: &SessionStore,
     session: Uuid,
@@ -348,13 +411,35 @@ fn turn(
     prompt: &str,
     timeout_seconds: u64,
 ) -> Result<(Uuid, ProviderChatResponse), String> {
-    let turn_id = Uuid::new_v4();
+    turn_with_id(
+        app,
+        store,
+        session,
+        workspace,
+        provider,
+        prompt,
+        timeout_seconds,
+        Uuid::new_v4(),
+    )
+}
+
+/// A known ID lets an evaluator correlate even a failed turn with its own receipts.
+pub(super) fn turn_with_id(
+    app: &tauri::AppHandle,
+    store: &SessionStore,
+    session: Uuid,
+    workspace: &Path,
+    provider: &Provider,
+    prompt: &str,
+    timeout_seconds: u64,
+    turn_id: Uuid,
+) -> Result<(Uuid, ProviderChatResponse), String> {
     store
         .append_user_turn_message_with_turn_id(session, prompt, json!({}), turn_id)
         .map_err(to_string)?;
     let request: ProviderChatRequest = serde_json::from_value(json!({
         "sessionId":session,"turnId":turn_id,"workspacePath":workspace,"providerId":provider.id,
-        "modelId":provider.model,"reasoningEffort":provider.effort,"message":prompt,
+        "modelId":provider.model,"reasoningEffort":selected_effort(provider),"message":prompt,
         "requireCommandApproval":false,"requireFileEditApproval":false,"fullAccess":false,"mode":"normal"
     })).map_err(to_string)?;
     let watcher_app = app.clone();
@@ -372,7 +457,12 @@ fn turn(
     let _ = watchdog.join();
     result.map(|response| (turn_id, response))
 }
-fn failure_class(error: &str) -> &'static str {
+fn selected_effort(provider: &Provider) -> Option<&str> {
+    let effort = provider.effort.trim();
+    (!effort.is_empty()).then_some(effort)
+}
+
+pub(super) fn failure_class(error: &str) -> &'static str {
     let e = error.to_lowercase();
     if [
         "not logged in",
@@ -418,6 +508,13 @@ fn verify_files(workspace: &Path, task: &str) -> anyhow::Result<bool> {
         .current_dir(workspace)
         .output()?;
     let changed = String::from_utf8_lossy(&changed.stdout);
+    if task == "no-tool" {
+        let output = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(workspace)
+            .output()?;
+        return Ok(output.status.success() && output.stdout.is_empty());
+    }
     let allowed = if task == "code" {
         vec!["src/clamp.mjs", "clamp.test.mjs"]
     } else {
@@ -452,6 +549,25 @@ fn verify_files(workspace: &Path, task: &str) -> anyhow::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn absent_benchmark_effort_uses_the_provider_default() {
+        let mut provider = Provider {
+            id: "openai".into(),
+            model: "fixture".into(),
+            effort: "".into(),
+        };
+        assert_eq!(selected_effort(&provider), None);
+        provider.effort = "high".into();
+        assert_eq!(selected_effort(&provider), Some("high"));
+    }
+    #[test]
+    fn a_no_tool_trial_rejects_any_workspace_mutation() {
+        let root = tempfile::tempdir().unwrap();
+        fixture(root.path()).unwrap();
+        assert!(verify(root.path(), "no-tool"));
+        fs::write(root.path().join("unexpected.txt"), "mutation").unwrap();
+        assert!(!verify(root.path(), "no-tool"));
+    }
     #[test]
     fn missing_output_is_incorrect_and_does_not_abort_the_matrix() {
         let root = tempfile::tempdir().unwrap();

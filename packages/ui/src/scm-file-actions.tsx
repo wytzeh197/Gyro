@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { MoreHorizontal, Trash2 } from "lucide-react";
 
+import { confirmAction } from "./confirm-action";
+
 export function ScmFileActions({
   path,
   onDiscard,
@@ -93,11 +95,11 @@ export function ScmFileActions({
               type="button"
               role="menuitem"
               disabled={!onDiscard}
-              onClick={() => {
+              onClick={async () => {
                 close();
                 trigger.current?.focus();
                 if (
-                  window.confirm(
+                  await confirmAction(
                     `Discard all local changes in ${path}? This cannot be undone.`,
                   )
                 )

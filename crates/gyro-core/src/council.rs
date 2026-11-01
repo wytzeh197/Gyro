@@ -279,7 +279,7 @@ pub fn built_in_council_presets() -> Vec<CouncilPreset> {
             id: "cheap-local".into(),
             name: "Cheap + local council".into(),
             description: Some("Lower-cost and local-capable seats when available.".into()),
-            seat_provider_ids: vec!["kimi".into(), "gemini".into()],
+            seat_provider_ids: vec!["kimi".into(), "antigravity".into()],
             seat_model_ids: BTreeMap::new(),
             synthesizer_provider_id: "kimi".into(),
             synthesizer_model_id: None,

@@ -1,13 +1,20 @@
 // Development-only preview of the post-restart notice in the real sidebar.
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { AppChrome, type Session, type UpdateState } from "@gyro-dev/ui";
+import {
+  AppChrome,
+  type Session,
+  type UpdateState,
+  type WorkspacePreparationProgress,
+} from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
 import "@gyro-dev/ui/installed-update.css";
 
 const query = new URLSearchParams(location.search);
 document.documentElement.dataset.theme =
   query.get("theme") === "light" ? "light" : "dark";
+// `?material=1` matches the macOS window, where the main pane clips its seam.
+if (query.has("material")) document.documentElement.dataset.nativeMaterial = "sidebar";
 
 const sessions: Session[] = [
   {
@@ -50,6 +57,26 @@ const updateState: UpdateState = query.has("pendingUpdate")
       currentVersion: "0.1.0-alpha.50",
     };
 
+// `?preparation=failed` also opens the footer status beside the notice.
+const workspacePreparation: WorkspacePreparationProgress | undefined =
+  query.get("preparation") === "failed"
+    ? {
+        runId: "preview",
+        workspacePath: "/Users/dev/keyframe",
+        phase: "catalog",
+        status: "failed",
+        completedSteps: 1,
+        totalSteps: 5,
+        message: "Workspace preparation failed",
+        errors: [
+          {
+            phase: "catalog",
+            message: "No such file or directory (os error 2)",
+          },
+        ],
+      }
+    : undefined;
+
 function Preview() {
   const [visible, setVisible] = useState(true);
   const installedState: UpdateState = visible
@@ -84,6 +111,7 @@ function Preview() {
       sessions={sessions}
       updateState={installedState}
       workspacePath="/Users/dev/Gyro"
+      workspacePreparation={workspacePreparation}
     >
       <div
         style={{

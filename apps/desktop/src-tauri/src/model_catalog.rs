@@ -10,7 +10,7 @@ const MAX_CATALOG_BYTES: u64 = 256 * 1024;
 const CATALOG_SCHEMA: &str = "gyro.model-catalog.v1";
 /// Must match `MODEL_CATALOG_CLIENT_REVISION` in packages/ui, so the runner
 /// and the picker agree on which entries this build can execute.
-const CLIENT_REVISION: u64 = 2;
+const CLIENT_REVISION: u64 = 3;
 const EFFORTS: [&str; 6] = ["low", "medium", "high", "xhigh", "max", "ultra"];
 
 /// What the published catalog says about running one model.
@@ -80,6 +80,29 @@ pub(crate) fn catalog_reasoning_efforts(
     model_id: Option<&str>,
 ) -> Option<Vec<String>> {
     catalog_model_profile(provider_id, model_id)?.supported_reasoning_efforts
+}
+
+/// Models the installed catalog can run, for the external-agent choice list.
+pub(crate) fn catalog_choice_models() -> Vec<(String, String, Vec<String>)> {
+    profiles()
+        .read()
+        .ok()
+        .map(|guard| {
+            guard
+                .iter()
+                .map(|((provider_id, model_id), profile)| {
+                    (
+                        provider_id.clone(),
+                        model_id.clone(),
+                        profile
+                            .supported_reasoning_efforts
+                            .clone()
+                            .unwrap_or_default(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn profiles() -> &'static RwLock<Profiles> {
@@ -438,7 +461,11 @@ mod tests {
             r#"{"providerId":"openai","id":"catalog-test-gpt","displayName":"T","minClientRevision":2,
                 "contextWindowTokens":123456,"supportedReasoningEfforts":["low","ultra"]},
                {"providerId":"xai","id":"catalog-test-grok","displayName":"T","minClientRevision":1,
-                "supportedReasoningEfforts":["low","xhigh"]}"#,
+                "supportedReasoningEfforts":["low","xhigh"]},
+               {"providerId":"anthropic","id":"catalog-test-claude","displayName":"T","minClientRevision":2,
+                "supportedReasoningEfforts":["low","max"]},
+               {"providerId":"anthropic","id":"catalog-test-no-effort","displayName":"T","minClientRevision":2,
+                "supportedReasoningEfforts":[]}"#,
         ));
         let codex =
             |effort| crate::codex_reasoning_effort_arg(Some("catalog-test-gpt"), Some(effort));
@@ -448,6 +475,14 @@ mod tests {
             |effort| crate::grok_reasoning_effort_arg(Some("catalog-test-grok"), Some(effort));
         assert_eq!(grok("xhigh").as_deref(), Some("xhigh"));
         assert_eq!(grok("high"), None);
+        let claude =
+            |effort| crate::claude_reasoning_effort_arg(Some("catalog-test-claude"), Some(effort));
+        assert_eq!(claude("max").as_deref(), Some("max"));
+        assert_eq!(claude("high"), None);
+        assert_eq!(
+            crate::claude_reasoning_effort_arg(Some("catalog-test-no-effort"), Some("high")),
+            None
+        );
         assert_eq!(
             crate::provider_context::provider_model_context_window(
                 "openai",

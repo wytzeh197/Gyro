@@ -1,0 +1,190 @@
+/* Quiet, neutral tour surfaces. Blue is reserved for the primary action. */
+.gyro-tour {
+  --gyro-tour-accent: var(--gyro-blue);
+  --gyro-tour-on-accent: #06111f;
+  --gyro-tour-dimmer: rgba(0, 0, 0, 0.48);
+  color: var(--gyro-text);
+  font-family: inherit;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: auto;
+  position: fixed;
+  z-index: 12000;
+}
+
+:root[data-theme="light"] .gyro-tour {
+  --gyro-tour-on-accent: #ffffff;
+  --gyro-tour-dimmer: rgba(0, 0, 0, 0.28);
+}
+
+.gyro-tour[data-has-anchor="false"] {
+  background: var(--gyro-tour-dimmer);
+}
+
+/* Keep the actual control visible through a neutral cut-out, without a glow. */
+.gyro-tour-spotlight {
+  border-radius: var(--gyro-radius-xl);
+  box-shadow:
+    0 0 0 1px var(--gyro-border-strong),
+    0 0 0 9999px var(--gyro-tour-dimmer);
+  pointer-events: none;
+  position: absolute;
+}
+
+.gyro-tour-card {
+  animation: gyro-tour-arrive 160ms ease-out;
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border);
+  border-radius: 12px;
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.24),
+    0 2px 8px rgba(0, 0, 0, 0.12);
+  max-height: calc(100% - 24px);
+  max-width: calc(100% - 24px);
+  outline: none;
+  overflow: auto;
+  padding: 18px;
+  position: absolute;
+  visibility: hidden;
+  width: 340px;
+}
+
+.gyro-tour-card[data-positioned="true"] {
+  visibility: visible;
+}
+
+.gyro-tour-progress {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.gyro-tour-step-count {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.gyro-tour-dots {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.gyro-tour-dots span {
+  background: var(--gyro-border);
+  border-radius: var(--gyro-radius-pill);
+  height: 4px;
+  width: 12px;
+}
+
+.gyro-tour-dots span.is-done {
+  background: var(--gyro-faint);
+}
+
+.gyro-tour-dots span.is-active {
+  background: var(--gyro-text);
+}
+
+.gyro-tour-title {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-lead);
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  line-height: 1.3;
+  margin: 0 0 8px;
+}
+
+.gyro-tour-body {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  line-height: 1.55;
+  margin: 0;
+}
+
+.gyro-tour-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 20px;
+}
+
+.gyro-tour-nav {
+  display: flex;
+  gap: 8px;
+}
+
+.gyro-tour button {
+  border-radius: var(--gyro-radius-md);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--gyro-font-micro);
+  line-height: 18px;
+  min-height: 32px;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.gyro-tour button:focus-visible {
+  outline: 2px solid var(--gyro-text);
+  outline-offset: 3px;
+}
+
+.gyro-tour-primary {
+  background: var(--gyro-tour-accent);
+  border: 1px solid transparent;
+  color: var(--gyro-tour-on-accent);
+  font-weight: 600;
+  min-width: 60px;
+  padding: 6px 14px;
+}
+
+.gyro-tour-primary:hover {
+  background: color-mix(in srgb, var(--gyro-tour-accent) 88%, var(--gyro-text));
+}
+
+.gyro-tour-secondary {
+  background: transparent;
+  border: 1px solid var(--gyro-border);
+  color: var(--gyro-text);
+  font-weight: 500;
+  padding: 6px 12px;
+}
+
+.gyro-tour-secondary:hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+
+.gyro-tour-skip {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--gyro-muted);
+  padding: 6px 0;
+}
+
+.gyro-tour-skip:hover {
+  color: var(--gyro-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@keyframes gyro-tour-arrive {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-tour-card {
+    animation: none;
+  }
+}

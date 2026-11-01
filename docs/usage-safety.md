@@ -98,9 +98,11 @@ already estimates from characters when nothing is reported. The work is
 persisting a row per call and tagging it with an origin, so a council turn
 shows up as five rows rather than one.
 
-`measured: false` rows are shown in the UI in a distinct, muted style with the
-word "estimated". They still count against budgets — an unmeasured provider is
-not a free one — but the user is never told a guess is a fact.
+Chat token readings show provider-reported totals, `≥` observed partial counts,
+or “Usage unavailable.” Character estimates, mixed totals, contradictory counts,
+and unverified legacy records do not display a numeric chat total. Explicitly
+reported zero remains zero. Stored estimates still count conservatively against
+budgets; the composer context estimate is a separate reading.
 
 ## Layer 1 — Budgets
 
@@ -171,9 +173,11 @@ each round. `usageGuard.autoCompactPercent` (80 by default, `0` off, adjustable
 in Settings → Usage Limits → Auto Context Compact) is the fill at which the loop
 replaces its oldest tool exchanges with one note: local, so no provider call, no
 change to the stored chat, and the newest exchange plus the prompt head always
-stay. A provider whose window Gyro cannot resolve never auto-compacts, because a
-share of an unknown window is not a measurement — the same rule the live context
-note follows.
+stay. A resumed session is judged before its next prompt by the same share, from
+the provider's reported prompt count when it gives one and, when it reports
+nothing, from the text the session would carry into that prompt. A share of an
+unknown window is not a measurement, so a model whose window Gyro cannot resolve
+still never auto-compacts — the same rule the live context note follows.
 
 A ledger the guard cannot read is not treated as proof of safety, but blocking
 on a read failure would strand the user with no way to work, so the call runs

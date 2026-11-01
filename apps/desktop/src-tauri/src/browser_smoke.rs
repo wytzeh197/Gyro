@@ -2,6 +2,8 @@
 //! GYRO_BROWSER_SMOKE_URL must point to scripts/fixtures/browser-observation.html
 //! served on loopback; GYRO_TEST_DATA_DIR receives the report and native PNG.
 use crate::browser_pointer;
+#[path = "browser_viewport_smoke.rs"]
+mod viewport;
 use crate::session_browser::*;
 use serde_json::{json, Value};
 use std::{
@@ -21,6 +23,15 @@ pub fn start(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&output)?;
     // The test explicitly owns this isolated window. Production mouse actions
     // refuse to activate Gyro, so establish their foreground precondition here.
+    #[cfg(target_os = "macos")]
+    {
+        let mtm = objc2::MainThreadMarker::new()
+            .ok_or("native browser smoke must start on the main thread")?;
+        // Test-only: a bare debug binary does not receive Launch Services'
+        // activation. Focusing its window alone leaves NSApp inactive.
+        #[allow(deprecated)]
+        objc2_app_kit::NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
+    }
     if let Some(window) = app.get_webview_window("main") {
         window.show()?;
         window.set_focus()?;
@@ -41,7 +52,16 @@ pub fn start(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
 }
 
 fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<String>, String> {
-    let session = "native-browser-smoke";
+    let store = super::open_store()?;
+    let parent = store
+        .create_session(
+            output,
+            gyro_core::SessionOrigin::Desktop,
+            "Native browser smoke",
+        )
+        .map_err(super::to_string)?;
+    let session_id = parent.id.to_string();
+    let session = session_id.as_str();
     let mut steps = Vec::new();
     open_session_browser(
         app,
@@ -122,6 +142,8 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
             .ok_or_else(|| format!("missing {selector} height"))?;
         Ok((x + width / 2.0, y + height / 2.0))
     };
+    let mouse_enabled = std::env::var("GYRO_BROWSER_SMOKE_SKIP_MOUSE").as_deref() != Ok("1");
+    steps.extend(viewport::run(app, session, url, output, mouse_enabled)?);
     wait_page("Browser observation ready")?;
     steps.push("open/read".into());
     // A second read used to clear the map but retain invalid refs on elements.
@@ -131,6 +153,18 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
     if clicked["name"] != "Change visible state" {
         return Err(format!("click did not name its element: {clicked}"));
     }
+    find("[data-gyro-browser-pointer]")?;
+    call("hidePointer", json!({}))?;
+    let hidden = call("find", json!({"selector":"[data-gyro-browser-pointer]"}))?;
+    if hidden["results"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty())
+    {
+        return Err("AI cursor was not hidden for capture".into());
+    }
+    call("restorePointer", json!({}))?;
+    find("[data-gyro-browser-pointer]")?;
+    steps.push("AI cursor visible after click; capture hide/restore".into());
     // The action highlight is for the person watching; capture it, then clear.
     let highlighted = capture_session_browser_png(app, session)?;
     std::fs::write(output.join("browser-smoke-highlight.png"), highlighted.png)
@@ -141,76 +175,80 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
         return Err("click fired twice".into());
     }
     steps.push("repeat read/find/click exactly once/read changed state".into());
-    let _pointer_capture = capture_session_browser_png(app, session)?;
-    let pointer_status = call("status", json!({}))?;
-    let pointer_url = pointer_status["url"]
-        .as_str()
-        .ok_or("missing pointer URL")?;
-    let pointer_viewport = pointer_status["viewport"]
-        .as_object()
-        .ok_or("missing pointer viewport")?;
-    app.state::<SessionBrowserManager>()
-        .remember_pointer_capture(
-            session,
-            "native-smoke-pointer.png".into(),
-            pointer_url.into(),
-            Value::Object(pointer_viewport.clone()),
-        )?;
-    let mouse = |action: &str, x: f64, y: f64, to_x: f64, to_y: f64| -> Result<(), String> {
-        let outcome = browser_pointer::execute(
+    if mouse_enabled {
+        let _pointer_capture = capture_session_browser_png(app, session)?;
+        let pointer_status = call("status", json!({}))?;
+        let pointer_url = pointer_status["url"]
+            .as_str()
+            .ok_or("missing pointer URL")?;
+        let pointer_viewport = pointer_status["viewport"]
+            .as_object()
+            .ok_or("missing pointer viewport")?;
+        app.state::<SessionBrowserManager>()
+            .remember_pointer_capture(
+                session,
+                "native-smoke-pointer.png".into(),
+                pointer_url.into(),
+                Value::Object(pointer_viewport.clone()),
+            )?;
+        let mouse = |action: &str, x: f64, y: f64, to_x: f64, to_y: f64| -> Result<(), String> {
+            let outcome = browser_pointer::execute(
+                app,
+                session,
+                "Claude",
+                &json!({
+                    "action": action,
+                    "captureId": "native-smoke-pointer.png",
+                    "x": x,
+                    "y": y,
+                    "toX": to_x,
+                    "toY": to_y,
+                }),
+            )?;
+            if outcome.action != action {
+                return Err("browser mouse returned the wrong action".into());
+            }
+            Ok(())
+        };
+        let (hover_x, hover_y) = point("#hover-trigger")?;
+        let pointer_target = call("pointerTarget", json!({"x":hover_x,"y":hover_y}))?;
+        if pointer_target["name"] != "Hover target" {
+            return Err(format!(
+                "pointer coordinates missed hover target: {pointer_target}"
+            ));
+        }
+        if browser_pointer::execute(
             app,
             session,
-            "Claude",
-            &json!({
-                "action": action,
-                "captureId": "native-smoke-pointer.png",
-                "x": x,
-                "y": y,
-                "toX": to_x,
-                "toY": to_y,
-            }),
-        )?;
-        if outcome.action != action {
-            return Err("browser mouse returned the wrong action".into());
+            "Model",
+            &json!({"action":"hover","captureId":"stale","x":hover_x,"y":hover_y}),
+        )
+        .is_ok()
+        {
+            return Err("stale pointer capture was accepted".into());
         }
-        Ok(())
-    };
-    let (hover_x, hover_y) = point("#hover-trigger")?;
-    let pointer_target = call("pointerTarget", json!({"x":hover_x,"y":hover_y}))?;
-    if pointer_target["name"] != "Hover target" {
-        return Err(format!(
-            "pointer coordinates missed hover target: {pointer_target}"
-        ));
+        mouse("hover", hover_x, hover_y, hover_x, hover_y)?;
+        wait_page("Hover: open")?;
+        let pointer_highlight = capture_session_browser_png(app, session)?;
+        std::fs::write(
+            output.join("browser-smoke-mouse-highlight.png"),
+            pointer_highlight.png,
+        )
+        .map_err(|e| e.to_string())?;
+        call("clearHighlight", json!({}))?;
+        mouse("secondary-click", hover_x, hover_y, hover_x, hover_y)?;
+        wait_page("Context: opened")?;
+        let (canvas_x, canvas_y) = point("#pointer-canvas")?;
+        mouse("click", canvas_x, canvas_y, canvas_x, canvas_y)?;
+        wait_page("Canvas: clicked")?;
+        let (drag_x, drag_y) = point("#drag-handle")?;
+        let (drop_x, drop_y) = point("#drop-zone")?;
+        mouse("drag", drag_x, drag_y, drop_x, drop_y)?;
+        wait_page("Drag: completed")?;
+        steps.push("native hover/secondary-click/canvas click/drag".into());
+    } else {
+        steps.push("SKIPPED native OS mouse: GYRO_BROWSER_SMOKE_SKIP_MOUSE=1 (macOS Accessibility permission unavailable)".into());
     }
-    if browser_pointer::execute(
-        app,
-        session,
-        "Model",
-        &json!({"action":"hover","captureId":"stale","x":hover_x,"y":hover_y}),
-    )
-    .is_ok()
-    {
-        return Err("stale pointer capture was accepted".into());
-    }
-    mouse("hover", hover_x, hover_y, hover_x, hover_y)?;
-    wait_page("Hover: open")?;
-    let pointer_highlight = capture_session_browser_png(app, session)?;
-    std::fs::write(
-        output.join("browser-smoke-mouse-highlight.png"),
-        pointer_highlight.png,
-    )
-    .map_err(|e| e.to_string())?;
-    call("clearHighlight", json!({}))?;
-    mouse("secondary-click", hover_x, hover_y, hover_x, hover_y)?;
-    wait_page("Context: opened")?;
-    let (canvas_x, canvas_y) = point("#pointer-canvas")?;
-    mouse("click", canvas_x, canvas_y, canvas_x, canvas_y)?;
-    wait_page("Canvas: clicked")?;
-    let (drag_x, drag_y) = point("#drag-handle")?;
-    let (drop_x, drop_y) = point("#drop-zone")?;
-    mouse("drag", drag_x, drag_y, drop_x, drop_y)?;
-    wait_page("Drag: completed")?;
-    steps.push("native hover/secondary-click/canvas click/drag".into());
     let input = find("#project-name")?;
     let typed = call(
         "type",
@@ -314,7 +352,7 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
         return Err("browser did not close".into());
     }
     steps.push("close".into());
-    steps.push(run_background(app, url, output)?);
+    steps.push(run_background(app, url, output, parent.id)?);
     Ok(steps)
 }
 
@@ -322,8 +360,24 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
 /// through the agent bridge. This is how a model browses while the chat is in
 /// split view, so the whole observe/act/capture loop has to work with nothing
 /// on screen — a 1x1 child webview used to make every one of these steps lie.
-fn run_background(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<String, String> {
-    let session = "native-browser-smoke-background";
+fn run_background(
+    app: &AppHandle,
+    url: &str,
+    output: &std::path::Path,
+    parent_id: uuid::Uuid,
+) -> Result<String, String> {
+    let store = super::open_store()?;
+    let child = store
+        .create_subagent_session(
+            output,
+            gyro_core::SessionOrigin::Desktop,
+            "Native background browser smoke",
+            gyro_core::CreateSessionContext::default(),
+            parent_id,
+        )
+        .map_err(super::to_string)?;
+    let session_id = child.id.to_string();
+    let session = session_id.as_str();
     let snapshot = open_session_browser(
         app,
         SessionBrowserOpenRequest {

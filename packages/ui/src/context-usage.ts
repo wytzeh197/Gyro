@@ -1,4 +1,7 @@
 import type { ProviderId, ProviderUsageWindow, SessionEvent } from "./types";
+import { providerCatalog } from "./provider-catalog.ts";
+import { remainingUsage } from "./usage-remaining.ts";
+import { formatCompactTokenCount, isTokenCount } from "./token-count.ts";
 
 export type ContextModelSelection = {
   providerId?: ProviderId;
@@ -15,12 +18,17 @@ export type ComposerLimitWindow = {
   percent?: number;
   /** `<1%`, `84%`, or an em dash when the level is unknown. */
   percentLabel: string;
+  remainingPercent?: number;
+  remainingPercentLabel: string;
   resetsLabel?: string;
   severity: "normal" | "warning" | "critical";
   status: "ok" | "warning" | "exhausted" | "unknown";
 };
 
 export type ComposerContextUsage = {
+  providerId?: ProviderId;
+  modelId?: string;
+  reportedContextWindowTokens?: number;
   detail: string;
   label: string;
   modelLabel: string;
@@ -30,18 +38,12 @@ export type ComposerContextUsage = {
   contextWindowTokens: number;
   percentLabel: string;
   remainingLabel: string;
+  remainingPercent?: number;
+  remainingPercentLabel: string;
   source: "estimated" | "reported";
   title: string;
   usedLabel: string;
   windowLabel: string;
-};
-
-const PROVIDER_CONTEXT_WINDOW_FALLBACKS: Partial<Record<ProviderId, number>> = {
-  anthropic: 200_000,
-  gemini: 1_000_000,
-  kimi: 262_144,
-  openai: 128_000,
-  xai: 500_000,
 };
 
 function recordFromUnknown(value: unknown) {
@@ -85,74 +87,75 @@ export function estimatedEventCharacters(event: SessionEvent) {
     : event.message.length;
 }
 
-function estimateTokens(characters: number) {
-  return Math.ceil(Math.max(0, characters) / 4);
-}
-
-function trimTrailingZeros(value: string) {
-  return value.includes(".") ? value.replace(/\.?0+$/, "") : value;
-}
-
-/**
- * Tokens above which rounding to the nearest thousand reaches four digits.
- *
- * The unit is chosen from the rounded value, not the raw one. Picking it from
- * the raw value let 999,666 remaining tokens round up inside the thousands
- * branch and print "1000K remaining" against a 1M window — more headroom than
- * the window holds, written in a unit the meter never otherwise uses.
- */
-const COMPACT_MILLIONS_THRESHOLD = 999_500;
-
-function formatCompactTokenCount(tokens: number) {
-  if (tokens >= COMPACT_MILLIONS_THRESHOLD) {
-    const millions = (tokens / 1_000_000).toFixed(tokens >= 10_000_000 ? 0 : 2);
-    return `${trimTrailingZeros(millions)}M`;
-  }
-  if (tokens >= 1_000) {
-    const thousands = (tokens / 1_000).toFixed(tokens >= 10_000 ? 0 : 1);
-    return `${trimTrailingZeros(thousands)}K`;
-  }
-  return String(tokens);
+function tokenCount(record: Record<string, unknown> | undefined, key: string) {
+  const value = record?.[key];
+  return isTokenCount(value) ? value : undefined;
 }
 
 /**
  * The window the next send will actually have.
  *
- * Gyro's catalog answers for the model that is selected *now*, so it leads. A
- * reported window is a record of what some earlier turn ran with: a chat that
- * spoke to Claude Code before it served Opus 5 its full window carries a 200K
- * reading forever, and the meter would keep measuring a 1M model against it.
- * The reported figure still answers for models the catalog does not list.
+ * A runtime report for the selected provider and model leads: CLI settings,
+ * account entitlements, and local allocations can differ from the catalog.
+ * The caller excludes reports from other models before resolving the window.
+ * Until a session reports its window, use the selected model's catalog value.
  */
 function resolveContextWindow(
   reportedContextWindow: number | undefined,
   model: ContextModelSelection,
 ) {
   return (
-    (model.contextWindowTokens && model.contextWindowTokens > 0
-      ? model.contextWindowTokens
-      : undefined) ??
     (reportedContextWindow && reportedContextWindow > 0
       ? reportedContextWindow
       : undefined) ??
-    PROVIDER_CONTEXT_WINDOW_FALLBACKS[model.providerId ?? "openai"] ??
-    128_000
+    (model.contextWindowTokens && model.contextWindowTokens > 0
+      ? model.contextWindowTokens
+      : undefined) ??
+    providerCatalog
+      .find((provider) => provider.id === model.providerId)
+      ?.models.find((entry) => entry.id === model.modelId)?.contextWindowTokens
   );
 }
 
 /**
  * The tokens a usage record says the conversation occupies.
  *
- * `totalTokens` and the input/output pair disagree often enough that the
- * larger of the two is the honest reading.
+ * Reject malformed or contradictory counts rather than label them measured.
+ * Repeated request consumption is kept separate from this occupancy reading.
  */
 function occupiedTokens(usage: Record<string, unknown>) {
-  const inputTokens = finiteNumber(usage, "inputTokens") ?? 0;
-  const outputTokens = finiteNumber(usage, "outputTokens") ?? 0;
-  return Math.max(
-    inputTokens + outputTokens,
-    finiteNumber(usage, "totalTokens") ?? 0,
-  );
+  for (const key of [
+    "inputTokens",
+    "outputTokens",
+    "totalTokens",
+    "modelContextWindow",
+  ]) {
+    if (usage[key] != null && !isTokenCount(usage[key])) return undefined;
+  }
+  const input = tokenCount(usage, "inputTokens");
+  const output = tokenCount(usage, "outputTokens");
+  const total = tokenCount(usage, "totalTokens");
+  if (input === undefined) return undefined;
+  const sum = input + (output ?? 0);
+  if (
+    !isTokenCount(sum) ||
+    (total !== undefined &&
+      (total < sum || (output !== undefined && total !== sum)))
+  )
+    return undefined;
+  return total ?? sum;
+}
+
+function usableOccupancy(usage: Record<string, unknown>) {
+  const occupancy = occupiedTokens(usage);
+  if (occupancy === undefined) return undefined;
+  const namedWindow = tokenCount(usage, "modelContextWindow");
+  // The count belongs to the thread, whichever model or provider measured it.
+  // Only the window on this same reading can show the count is a bill. The
+  // model selected in the composer never discards it.
+  return namedWindow === undefined || occupancy <= namedWindow
+    ? occupancy
+    : undefined;
 }
 
 /**
@@ -180,20 +183,64 @@ export function isManualCompaction(
   );
 }
 
+/**
+ * What a finished `/compact` may claim it did.
+ *
+ * A Codex session compacts itself, so its earlier conversation really is
+ * summarized. Every other provider rewrites the transcript locally, where the
+ * only honest outcomes are "condensed" (full turns replaced by a digest) and
+ * "kept" (the history already fit). Events recorded before the marker existed
+ * are read from the checkpoint payload: only the local path ever wrote one.
+ */
+export type ManualCompactionMode = "summarized" | "condensed" | "kept";
+
+export function manualCompactionMode(
+  events: SessionEvent[],
+  event: SessionEvent,
+): ManualCompactionMode | null {
+  if (!isManualCompaction(events, event)) return null;
+  const payload = eventPayload(event);
+  const mode = stringValue(payload, "compactionMode");
+  if (mode === "summarized" || mode === "condensed" || mode === "kept") {
+    return mode;
+  }
+  return stringValue(payload, "contextSummary") ? "condensed" : "summarized";
+}
+
+/**
+ * The sentence a finished `/compact` turn shows in the transcript.
+ *
+ * Each mode says only what happened: a model summary, a local digest, or a
+ * history that already fit. An unmarked event is described without claiming
+ * either, so a turn recorded by an older build cannot assert a summary.
+ */
+export function manualCompactionResultText(
+  mode: ManualCompactionMode | null,
+): string {
+  switch (mode) {
+    case "summarized":
+      return "Context compacted. Earlier conversation was summarized so this chat has room to continue.";
+    case "condensed":
+      return "Context compacted. Earlier turns were condensed into a short digest \u2014 their full text is no longer sent, so this chat has room to continue.";
+    case "kept":
+      return "Context compacted. This chat already fit its window, so no earlier turn was dropped.";
+    default:
+      return "Context compacted.";
+  }
+}
+
 export function estimateComposerContextUsage(
   events: SessionEvent[],
   draft: string,
   model: ContextModelSelection,
 ): ComposerContextUsage {
-  let reportedEventIndex = -1;
+  // A draft and stored message text are not token counts. The meter shows a
+  // provider measurement or nothing.
+  void draft;
   let reportedUsage: Record<string, unknown> | undefined;
-  let reportedModelId: string | undefined;
-  // The window and the token counts come from different places. Every provider
-  // reports the window Gyro resolved for its model, but only some report what
-  // the turn spent, so a run that carries a window and no counts still has to
-  // size the meter correctly while the estimate fills in the usage.
+  // The window and the token counts come from different places. A run can
+  // name its window without naming what the conversation occupies.
   let reportedContextWindow: number | undefined;
-  let compactedSummaryCharacters = 0;
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -201,24 +248,24 @@ export function estimateComposerContextUsage(
     const payload = eventPayload(event);
     const usage = recordFromUnknown(payload?.contextUsage);
     // A manual compaction replaced the thread's history. Any reading taken
-    // before it measures a conversation the provider no longer holds, so when
-    // the compaction did not report its own, the estimate starts over here.
+    // before it measures a conversation the provider no longer holds.
     if (!usage && !reportedUsage && isManualCompaction(events, event)) {
-      reportedEventIndex = index;
-      compactedSummaryCharacters =
-        stringValue(payload, "contextSummary")?.length ?? 0;
       break;
     }
-    if (!usage) continue;
-    // A completed response replaces the live checkpoint even when its streamed
-    // assistant row has retained an earlier position in the event array.
+    if (!usage || usage.estimated === true) continue;
+    // A completed response replaces the live checkpoint only when it contains
+    // a usable observation. Some runtimes publish occupancy in a stream frame
+    // but omit it from the closing response.
     if (
       payload?.kind === "provider-context-usage" &&
       events.some(
         (item) =>
           item.turnId === event.turnId &&
           item.sessionId === event.sessionId &&
-          eventPayload(item)?.kind === "provider-response",
+          eventPayload(item)?.kind === "provider-response" &&
+          usableOccupancy(
+            recordFromUnknown(eventPayload(item)?.contextUsage) ?? {},
+          ) !== undefined,
       )
     )
       continue;
@@ -229,94 +276,48 @@ export function estimateComposerContextUsage(
         stringValue(payload, "providerId") === model.providerId) &&
       (!model.modelId || eventModelId === model.modelId);
     // The window is only meaningful for the model that reported it.
-    if (matchesModel && reportedContextWindow === undefined) {
-      reportedContextWindow = finiteNumber(usage, "modelContextWindow");
+    if (
+      matchesModel &&
+      reportedContextWindow === undefined &&
+      payload?.contextWindowSource !== "catalog"
+    ) {
+      reportedContextWindow = tokenCount(usage, "modelContextWindow");
     }
     if (reportedUsage) continue;
-    if (finiteNumber(usage, "inputTokens") === undefined) continue;
+    const occupancy = usableOccupancy(usage);
+    if (occupancy === undefined) continue;
     // A run that used tools bills the re-sent conversation once per request, so
-    // some CLIs report a turn total several times the window. Nothing can
-    // occupy more of the window than it holds, so a reading that large is
-    // ignored and the thread estimate stands in — including for turns recorded
-    // before Gyro stopped storing those totals.
-    if (
-      occupiedTokens(usage) > resolveContextWindow(reportedContextWindow, model)
-    ) {
-      continue;
-    }
-
-    // How full the thread is belongs to the conversation, not to the model that
-    // last read it: switching model or provider mid-chat does not empty it. The
-    // newest reading therefore stands even when another model produced it,
-    // rather than dropping the meter back to an estimate that counts only the
-    // text Gyro stored and reads as near-empty.
-    reportedEventIndex = index;
+    // some CLIs report a turn total several times the window on that reading.
+    // That count is dropped. How full the thread is belongs to the conversation:
+    // switching model or provider mid-chat does not empty it.
     reportedUsage = usage;
-    reportedModelId = eventModelId;
     if (matchesModel) break;
   }
 
-  const reportedInputTokens = finiteNumber(reportedUsage, "inputTokens");
-  const reportedOutputTokens = finiteNumber(reportedUsage, "outputTokens") ?? 0;
-  const reportedTotalTokens = finiteNumber(reportedUsage, "totalTokens");
-  const contextWindowTokens = resolveContextWindow(
-    reportedContextWindow,
-    model,
-  );
-
-  const checkpoint =
-    reportedEventIndex >= 0 && reportedUsage
-      ? recordFromUnknown(
-          eventPayload(events[reportedEventIndex]!)?.contextCharacterBaseline,
-        )
-      : undefined;
-  let estimatedCharacters = draft.length + compactedSummaryCharacters;
-  for (
-    let index = checkpoint
-      ? 0
-      : reportedEventIndex >= 0
-        ? reportedEventIndex + 1
-        : 0;
-    index < events.length;
-    index += 1
-  ) {
-    const event = events[index];
-    if (event) {
-      const previous = checkpoint
-        ? (finiteNumber(checkpoint, event.id) ?? 0)
-        : 0;
-      estimatedCharacters += Math.max(
-        0,
-        estimatedEventCharacters(event) - previous,
-      );
-    }
-  }
-  const liveEstimatedTokens = estimateTokens(estimatedCharacters);
-  const reportedTokens =
+  const reportedInputTokens = tokenCount(reportedUsage, "inputTokens");
+  const reportedOutputTokens = tokenCount(reportedUsage, "outputTokens") ?? 0;
+  const reportedTotalTokens = tokenCount(reportedUsage, "totalTokens");
+  const contextWindowTokens =
+    resolveContextWindow(reportedContextWindow, model) ?? 0;
+  const usedTokens =
     reportedInputTokens === undefined
       ? 0
       : Math.max(
           reportedInputTokens + reportedOutputTokens,
           reportedTotalTokens ?? 0,
         );
-  const usedTokens = Math.max(0, reportedTokens + liveEstimatedTokens);
   const isReported = reportedInputTokens !== undefined;
   const modelLabel = model.modelLabel ?? model.modelId ?? "Selected model";
-  const isOtherModelReading = Boolean(
-    isReported &&
-    reportedModelId &&
-    model.modelId &&
-    reportedModelId !== model.modelId,
-  );
+  // The count is the conversation's, whichever model or provider measured it.
+  // The selected model only chooses the window shown beside it.
   const detail = isReported
-    ? isOtherModelReading
-      ? `Measured on the last turn, which ran on ${reportedModelId}; the thread carries the same content into this model.`
-      : liveEstimatedTokens > 0
-        ? "Provider-reported usage plus an estimate for newer thread content and this draft."
-        : "Latest context usage reported by the provider."
-    : "Estimated from context-bearing thread content and this draft; provider usage is not available yet.";
+    ? "Latest context usage reported by the provider."
+    : "The provider has not reported window occupancy.";
 
   return finishComposerContextUsage({
+    providerId: model.providerId,
+    modelId: model.modelId,
+    reportedContextWindowTokens: reportedContextWindow,
     contextWindowTokens,
     detail,
     modelLabel,
@@ -336,15 +337,31 @@ export function composerContextUsageForModel(
   usage: ComposerContextUsage,
   model: ContextModelSelection,
 ): ComposerContextUsage {
-  const contextWindowTokens = resolveContextWindow(undefined, model);
+  const matchesModel = Boolean(
+    model.modelId &&
+    model.modelId === usage.modelId &&
+    model.providerId === usage.providerId,
+  );
+  const contextWindowTokens =
+    resolveContextWindow(
+      matchesModel ? usage.reportedContextWindowTokens : undefined,
+      model,
+    ) ?? 0;
   const modelLabel = model.modelLabel ?? model.modelId ?? usage.modelLabel;
   if (
+    model.providerId === usage.providerId &&
+    model.modelId === usage.modelId &&
     contextWindowTokens === usage.contextWindowTokens &&
     modelLabel === usage.modelLabel
   ) {
     return usage;
   }
   return finishComposerContextUsage({
+    providerId: model.providerId,
+    modelId: model.modelId,
+    reportedContextWindowTokens: matchesModel
+      ? usage.reportedContextWindowTokens
+      : undefined,
     contextWindowTokens,
     detail: `Thread occupancy shown against ${modelLabel}'s context window.`,
     modelLabel,
@@ -354,19 +371,49 @@ export function composerContextUsageForModel(
 }
 
 function finishComposerContextUsage({
+  providerId,
+  modelId,
+  reportedContextWindowTokens,
   contextWindowTokens,
   detail,
   modelLabel,
   source,
   usedTokens,
 }: {
+  providerId?: ProviderId;
+  modelId?: string;
+  reportedContextWindowTokens?: number;
   contextWindowTokens: number;
   detail: string;
   modelLabel: string;
   source: ComposerContextUsage["source"];
   usedTokens: number;
 }): ComposerContextUsage {
+  // Zero is an unknown window, never a token limit. Adapter defaults and
+  // hand-entered endpoints have no published model-specific size to assume.
+  if (contextWindowTokens <= 0) {
+    return {
+      providerId,
+      modelId,
+      reportedContextWindowTokens,
+      contextWindowTokens: 0,
+      detail: `${detail} The selected model's context window is not available.`,
+      label: `${modelLabel} context: ${formatCompactTokenCount(usedTokens)} tokens used; context window unknown`,
+      modelLabel,
+      percent: 0,
+      usedTokens,
+      percentLabel: "—",
+      remainingLabel: "Unknown",
+      remainingPercent: undefined,
+      remainingPercentLabel: "—",
+      source,
+      title: `${modelLabel} context`,
+      usedLabel: formatCompactTokenCount(usedTokens),
+      windowLabel: "Unknown",
+    };
+  }
   const remainingTokens = Math.max(0, contextWindowTokens - usedTokens);
+  const remaining = remainingUsage((usedTokens / contextWindowTokens) * 100);
   const percent = Math.min(
     100,
     Math.max(0, Math.round((usedTokens / contextWindowTokens) * 100)),
@@ -376,14 +423,19 @@ function finishComposerContextUsage({
   const remainingLabel = formatCompactTokenCount(remainingTokens);
   const windowLabel = formatCompactTokenCount(contextWindowTokens);
   return {
+    providerId,
+    modelId,
+    reportedContextWindowTokens,
     contextWindowTokens,
     detail,
-    label: `${modelLabel} context: ${usedLabel} used, ${remainingLabel} remaining of ${windowLabel} tokens (${percentLabel})`,
+    label: `${modelLabel} context: ${usedLabel} of ${windowLabel} tokens used (${percentLabel} used)`,
     modelLabel,
     percent,
     usedTokens,
     percentLabel,
     remainingLabel,
+    remainingPercent: remaining.percent,
+    remainingPercentLabel: remaining.percentLabel,
     source,
     title: `${modelLabel} context`,
     usedLabel,
@@ -463,6 +515,81 @@ export function providerResetSummary(
     .join(" · ");
 }
 
+/**
+ * The chat, plus the releases that have reset its thread.
+ *
+ * A reading only describes the thread it measured, so a compaction has to
+ * invalidate every reading from before it. The newest completed compaction is
+ * enough to identify that boundary: nothing else releases context inside one
+ * session, and a new chat arrives with a different session id.
+ */
+export function contextOccupancyEpoch(events: SessionEvent[]): string {
+  let release = "";
+  for (const event of events) {
+    const payload = eventPayload(event);
+    if (payload?.kind !== "provider-activity") continue;
+    if (payload.activityKind !== "context") continue;
+    const activityId: unknown = payload.activityId;
+    if (typeof activityId !== "string") continue;
+    if (!activityId.startsWith("context-compaction-")) continue;
+    // A failed compaction released nothing, so the peak stands.
+    if (payload.status === "failed") continue;
+    release = activityId;
+  }
+  return `${events[0]?.sessionId ?? ""}#${release}`;
+}
+
+/** The highest occupancy one epoch of one chat has shown. */
+export type ContextOccupancyPeak = { epoch: string; usedTokens: number };
+
+/**
+ * The composer meter shows the highest occupancy this chat has reached since
+ * its last release, not the newest single reading.
+ *
+ * A reading measures one request. Resending, stopping, or retrying abandons
+ * the attempt that was running, so the next reading describes a much smaller
+ * prompt while the conversation itself is untouched — and a context bar that
+ * falls reads as history going missing. Holding the peak answers the question
+ * the meter is asked ("how close is this chat to the window?") and never
+ * reports a drop that no release explains. A compaction or a new chat changes
+ * the epoch, which starts the peak over.
+ *
+ * The rule compares reported numbers and never inspects a provider, so a
+ * hosted API, a local model, and a CLI harness all behave the same way.
+ */
+export function holdContextOccupancyPeak(
+  peak: ContextOccupancyPeak | undefined,
+  usage: ComposerContextUsage,
+  epoch: string,
+): { peak: ContextOccupancyPeak; usage: ComposerContextUsage } {
+  const held = peak?.epoch === epoch ? peak.usedTokens : 0;
+  const highest = Math.max(held, usage.usedTokens);
+  const nextPeak = { epoch, usedTokens: highest };
+  // A peak that does not fit the selected window belongs to a model this chat
+  // has moved away from. Pinning the bar at 100% there would claim a window is
+  // full when the thread is not, so the live reading wins until a model large
+  // enough to hold the peak is selected again.
+  if (
+    highest === usage.usedTokens ||
+    (usage.contextWindowTokens > 0 && highest > usage.contextWindowTokens)
+  ) {
+    return { peak: nextPeak, usage };
+  }
+  return {
+    peak: nextPeak,
+    usage: finishComposerContextUsage({
+      providerId: usage.providerId,
+      modelId: usage.modelId,
+      reportedContextWindowTokens: usage.reportedContextWindowTokens,
+      contextWindowTokens: usage.contextWindowTokens,
+      detail: `${usage.detail} This is the highest occupancy this chat has reached since its last compaction; the newest request is smaller because it no longer carries the attempt that was abandoned.`,
+      modelLabel: usage.modelLabel,
+      source: usage.source,
+      usedTokens: highest,
+    }),
+  };
+}
+
 function limitSeverity(percent: number | undefined, status: string) {
   if (status === "exhausted" || (percent !== undefined && percent >= 95)) {
     return "critical" as const;
@@ -483,6 +610,7 @@ function toLimitWindow(
       ? Math.min(100, Math.max(0, Math.round(window.usedPercent)))
       : undefined;
   const status = window.status ?? (percent === undefined ? "unknown" : "ok");
+  const remaining = remainingUsage(window.usedPercent, status === "exhausted");
   return {
     id: window.id,
     label: window.label,
@@ -495,6 +623,8 @@ function toLimitWindow(
         : percent === 0 && window.usedPercent
           ? "<1%"
           : `${percent}%`,
+    remainingPercent: remaining.percent,
+    remainingPercentLabel: remaining.percentLabel,
     resetsLabel: formatLimitReset(window.resetsAt, now),
     severity: limitSeverity(percent, status),
     status,
@@ -556,9 +686,19 @@ export function composerLimitWindows(
     });
   }
 
-  // Cached readings and thread events must not survive their allowance reset.
+  // A reset has passed, so the stored level describes an allowance that no
+  // longer exists. The plan still meters the window, but this process has not
+  // measured the new one. Keep the row and wait for the next live reading
+  // instead of claiming the allowance is empty.
   for (const [id, window] of byId) {
-    if (window.resetsAt && Date.parse(window.resetsAt) <= now) byId.delete(id);
+    if (window.resetsAt && Date.parse(window.resetsAt) <= now) {
+      byId.set(id, {
+        ...window,
+        usedPercent: undefined,
+        status: undefined,
+        resetsAt: undefined,
+      });
+    }
   }
 
   // Only show allowances actually reported for this account. Provider identity

@@ -245,6 +245,28 @@ mod tests {
     }
 
     #[test]
+    fn mixed_anthropic_formats_fill_each_missing_window_without_overwriting_measured_keys() {
+        let windows = provider_usage_windows_from_anthropic_usage(&serde_json::json!({
+            "five_hour": null,
+            "seven_day": {"utilization": 52},
+            "limits": [
+                {"kind": "session", "percent": 8, "resets_at": "2026-11-01T15:00:00Z"},
+                {"kind": "weekly_all", "percent": 91},
+                {"kind": "weekly_opus", "percent": 12}
+            ]
+        }));
+        assert_eq!(windows.len(), 3);
+        assert_eq!(windows[0].id, "five-hour");
+        assert_eq!(windows[0].used_percent, Some(8));
+        assert_eq!(
+            windows[0].resets_at.as_deref(),
+            Some("2026-11-01T15:00:00Z")
+        );
+        assert_eq!(windows[1].used_percent, Some(52));
+        assert_eq!(windows[2].id, "weekly-opus");
+    }
+
+    #[test]
     fn the_limits_list_answers_when_the_keyed_windows_are_gone() {
         let windows = provider_usage_windows_from_anthropic_usage(&serde_json::json!({
             "five_hour": null,

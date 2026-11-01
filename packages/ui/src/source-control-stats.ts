@@ -16,6 +16,7 @@ export type SourceControlTotals =
   | { kind: "branch"; additions: number; deletions: number }
   | { kind: "working-tree"; additions: number; deletions: number }
   | { kind: "clean" }
+  | { kind: "loading" }
   | { kind: "unavailable" };
 
 /**
@@ -28,6 +29,7 @@ export function sourceControlTotals(
   sourceControl?: SourceControlState,
 ): SourceControlTotals {
   if (!sourceControl?.available) return { kind: "unavailable" };
+  if (sourceControl.detailsLoaded === false) return { kind: "loading" };
   const branch = sourceControl.comparedToMain;
   if (branch && !branch.partial) {
     return branch.additions === 0 && branch.deletions === 0
@@ -59,12 +61,18 @@ export function sourceControlTotalsScope(totals: SourceControlTotals) {
       return "No changes compared to main";
     case "unavailable":
       return "Could not finish counting changes. Refresh to retry.";
+    case "loading":
+      return "Loading change counts.";
   }
 }
 
 /** The row's own text when there is no pair of numbers to draw. */
 export function sourceControlTotalsLabel(totals: SourceControlTotals) {
-  return totals.kind === "clean" ? "Clean" : "Count unavailable";
+  return totals.kind === "clean"
+    ? "Clean"
+    : totals.kind === "loading"
+      ? "Loading changes…"
+      : "Count unavailable";
 }
 
 /** Short visible scope, so the pair is never only explained by a tooltip. */
@@ -76,6 +84,19 @@ export function sourceControlTotalsBadge(totals: SourceControlTotals) {
     case "working-tree":
       return "uncommitted";
     case "unavailable":
+    case "loading":
       return "";
   }
+}
+
+/** Empty history is meaningful only after a repository's detailed read. */
+export function sourceControlHistoryMessage(
+  sourceControl?: SourceControlState,
+) {
+  if (!sourceControl?.available) return "History unavailable.";
+  if (sourceControl.detailsLoaded === false) return "Loading history…";
+  if (sourceControl.historyError)
+    return "Could not load history. Refresh source control to retry.";
+  if (!sourceControl.history?.length) return "No commits yet.";
+  return undefined;
 }

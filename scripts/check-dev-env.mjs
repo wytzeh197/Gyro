@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -46,6 +46,18 @@ if (process.platform === "darwin") {
     failures.push(
       "Xcode command line tools are missing. Install with: xcode-select --install",
     );
+  }
+}
+
+// macOS Spotlight re-indexes `target/` (several GB of build output) after every
+// build, burning mdworker CPU for minutes. The marker file below tells it to
+// skip the directory. `cargo clean` removes it, so the doctor recreates it.
+if (process.platform === "darwin") {
+  try {
+    mkdirSync(resolve(repoRoot, "target"), { recursive: true });
+    writeFileSync(resolve(repoRoot, "target/.metadata_never_index"), "");
+  } catch {
+    // Best effort: a read-only checkout must not fail the doctor.
   }
 }
 

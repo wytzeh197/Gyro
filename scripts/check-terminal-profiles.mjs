@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { terminalLaunchProfiles, terminalDefaultProfiles } from '../packages/ui/src/terminal-profiles.ts';
 const providers = terminalDefaultProfiles().filter(p => p.providerId).map(p => ({id: p.providerId, enabled: true, authStatus: 'connected', defaultModelId: p.providerId === 'ollama' ? 'local-model:8b' : undefined}));
 const connected = terminalLaunchProfiles([], providers, []);
-assert.equal(connected.length, 9);
+assert.equal(connected.length, 8);
+assert.ok(!terminalLaunchProfiles([
+  {id: 'gemini-cli', command: 'gemini', args: [], providerId: 'gemini'},
+  {id: 'gemini', command: 'gemini', args: []},
+], providers, []).some(profile => profile.providerId === 'gemini' || profile.command === 'gemini'));
 assert.ok(connected.every(p => p.readiness === 'ready'));
 assert.deepEqual(connected.find(p => p.id === 'ollama').args, ['run', 'local-model:8b']);
 const disconnected = terminalLaunchProfiles([], [], []);

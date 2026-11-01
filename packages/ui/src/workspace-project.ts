@@ -1,6 +1,12 @@
 import type { WorkspaceFile, WorkspaceScopedSettings } from "./types";
 
 export const MAX_WORKSPACE_FOLDERS = 20;
+/**
+ * Folders read from one workspace file. Larger than the workspace cap on
+ * purpose: the import reports the overflow as `cap-exceeded` instead of
+ * trimming it here, where nobody would hear about it.
+ */
+const MAX_WORKSPACE_FILE_FOLDERS = 64;
 
 export type GyroWorkspaceFile = {
   version: 1;
@@ -51,6 +57,34 @@ export function normalizedWorkspaceFolderPath(path: string) {
   return normalized || "/";
 }
 
+/**
+ * The one normalizer for a stored list of extra roots.
+ *
+ * Reducers and the persisted-preference loader share it, so a list loaded
+ * from disk can never hold something an action would refuse. Policy
+ * rejections happen earlier, in `validateWorkspaceRoots` (workspace-roots.ts).
+ * Reaching the cap here means a caller skipped validation, and the overflow
+ * is dropped rather than persisted.
+ */
+export function normalizedWorkspaceFolderList(
+  workspacePath: string,
+  paths: readonly unknown[],
+) {
+  const workspace = normalizedWorkspaceFolderPath(workspacePath);
+  return paths
+    .filter(
+      (path): path is string =>
+        typeof path === "string" &&
+        path.trim().length > 0 &&
+        path.length <= 4096,
+    )
+    .map(normalizedWorkspaceFolderPath)
+    .filter(
+      (path, index, all) => path !== workspace && all.indexOf(path) === index,
+    )
+    .slice(0, MAX_WORKSPACE_FOLDERS - 1);
+}
+
 export function workspaceFolderPaths(
   primaryPath: string | undefined,
   foldersByWorkspace: Readonly<Record<string, readonly string[]>> | undefined,
@@ -58,19 +92,137 @@ export function workspaceFolderPaths(
 ) {
   if (!primaryPath) return [];
   const primary = normalizedWorkspaceFolderPath(primaryPath);
-  const configured = foldersByWorkspace?.[primary] ?? [];
-  const roots = [primary, ...configured]
-    .map(normalizedWorkspaceFolderPath)
-    .filter(
-      (path, index, paths) => Boolean(path) && paths.indexOf(path) === index,
-    )
-    .slice(0, MAX_WORKSPACE_FOLDERS);
+  const roots = [
+    primary,
+    ...normalizedWorkspaceFolderList(
+      primary,
+      foldersByWorkspace?.[primary] ?? [],
+    ),
+  ];
   const preferred = preferredPrimary
     ? normalizedWorkspaceFolderPath(preferredPrimary)
     : undefined;
   return preferred && roots.includes(preferred)
     ? [preferred, ...roots.filter((root) => root !== preferred)]
     : roots;
+}
+
+export type WorkspaceMovePlan =
+  | { kind: "move"; root: string; fromPath: string; toPath: string }
+  | { kind: "noop" }
+  | { kind: "blocked"; reason: string };
+
+/**
+ * Where an Explorer drag or Move… should land.
+ *
+ * Same-folder drops and moves into a folder's own contents do nothing.
+ * A destination in another workspace root is refused. `..` is collapsed
+ * before that check, so a typed path cannot look local and then leave the
+ * root. The caller still has to confirm when the destination name already exists.
+ */
+export function planWorkspaceMove(
+  roots: readonly string[],
+  fromPath: string,
+  destinationDirectory: string,
+): WorkspaceMovePlan {
+  const source = trimPath(fromPath);
+  if (!source) return { kind: "noop" };
+  const root = workspaceRootForPath(roots, source);
+  if (!root) {
+    return {
+      kind: "blocked",
+      reason: "Move stays inside this workspace folder",
+    };
+  }
+  const requested = trimPath(destinationDirectory);
+  const destination = !requested
+    ? root
+    : collapseWorkspacePath(
+        requested.startsWith("/") || /^[a-z]:\//i.test(requested)
+          ? requested
+          : `${root}/${requested.replace(/^\/+/, "")}`,
+      );
+  if (!destination || destination.split("/").includes("..")) {
+    return {
+      kind: "blocked",
+      reason: "Move stays inside this workspace folder",
+    };
+  }
+  const destinationRoot = workspaceRootForPath(roots, destination);
+  if (!destinationRoot || destinationRoot !== root) {
+    return {
+      kind: "blocked",
+      reason: "Move stays inside this workspace folder",
+    };
+  }
+  if (destination === source || destination.startsWith(`${source}/`)) {
+    return { kind: "noop" };
+  }
+  const name = source.slice(source.lastIndexOf("/") + 1);
+  if (!name) return { kind: "noop" };
+  const toPath = `${destination}/${name}`;
+  if (toPath === source) return { kind: "noop" };
+  return { kind: "move", root, fromPath: source, toPath };
+}
+
+function trimPath(path: string) {
+  return path.trim().replaceAll("\\", "/").replace(/\/+$/, "");
+}
+
+/** Resolve `.` and `..` without leaving a typed destination as a string prefix. */
+function collapseWorkspacePath(path: string) {
+  const normalized = trimPath(path);
+  if (!normalized) return "";
+  const drive = normalized.match(/^[a-z]:/i)?.[0];
+  const absolute = /^(?:[a-z]:)?\//i.test(normalized);
+  const resolved: string[] = [];
+  for (const segment of normalized.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (drive && segment.toLowerCase() === drive.toLowerCase()) {
+      resolved.push(drive);
+      continue;
+    }
+    if (segment === "..") {
+      const top = resolved[resolved.length - 1];
+      if (top && top.toLowerCase() !== drive?.toLowerCase()) resolved.pop();
+      continue;
+    }
+    resolved.push(segment);
+  }
+  const joined = resolved.join("/");
+  if (absolute && !drive) return joined ? `/${joined}` : "/";
+  return joined;
+}
+
+/** How many names Ask Gyro includes before it says the rest were left out. */
+export const EXPLORER_ASK_LISTING_LIMIT = 80;
+
+/**
+ * A short folder listing for the composer.
+ *
+ * One or two levels, names only. The caller passes a bounded `list_workspace_tree`
+ * result so this never walks the disk itself.
+ */
+export function formatExplorerAskListing(
+  folderName: string,
+  entries: readonly { path: string; kind: string }[],
+  limit = EXPLORER_ASK_LISTING_LIMIT,
+): string {
+  const name = folderName.trim() || "folder";
+  const lines = [`${name}/`];
+  const visible = entries.slice(0, Math.max(0, limit));
+  for (const entry of visible) {
+    const parts = entry.path.replaceAll("\\", "/").split("/").filter(Boolean);
+    const depth = Math.max(1, parts.length);
+    const label = parts.at(-1) ?? entry.path;
+    lines.push(
+      `${"  ".repeat(depth)}${label}${entry.kind === "directory" ? "/" : ""}`,
+    );
+  }
+  if (entries.length > visible.length) {
+    lines.push(`  … ${entries.length - visible.length} more`);
+  }
+  return lines.join("\n");
 }
 
 export function workspaceRootForPath(
@@ -146,6 +298,29 @@ export function absoluteWorkspaceFilePath(root: string, path: string) {
     return normalizedPath;
   }
   return `${normalizedRoot}/${normalizedPath.replace(/^\/+/, "")}`;
+}
+
+/** Absolute path for Copy Path and Reveal. Explorer rows already store it on `path`. */
+export function workspaceCopyAbsolutePath(file: Pick<WorkspaceFile, "path">) {
+  return file.path;
+}
+
+/**
+ * Path relative to the workspace root.
+ *
+ * `path` on an explorer row is absolute, so copying that string makes
+ * "Copy Relative Path" identical to an absolute copy. Prefer the stored
+ * relative path, then strip the root.
+ */
+export function workspaceCopyRelativePath(
+  file: Pick<WorkspaceFile, "path" | "workspacePath" | "relativePath">,
+) {
+  const stored = file.relativePath
+    ?.replaceAll("\\", "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+  if (stored) return stored;
+  return workspaceRelativeFilePath(file.path, file.workspacePath);
 }
 
 export function workspaceFilesForRoot(
@@ -260,7 +435,7 @@ export function parseGyroWorkspaceFile(content: string, filePath: string) {
       (folder, index, all) =>
         all.findIndex((candidate) => candidate.path === folder.path) === index,
     )
-    .slice(0, MAX_WORKSPACE_FOLDERS);
+    .slice(0, MAX_WORKSPACE_FILE_FOLDERS);
   if (folders.length === 0) {
     throw new Error("Workspace file does not contain any valid folders");
   }

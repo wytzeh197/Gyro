@@ -1,0 +1,83 @@
+{
+  "recordedAt": "2026-10-08T13:22:08.618913+00:00",
+  "snapshot": "../native-ui-snapshot.json",
+  "bundleExecutableHash": "9948f78489c2274a35915d5f0774c0cc3fb7f7d9e0800f70a270c429dd10938b",
+  "fixture": "/private/tmp/gyro-backend-ui-2026-10-08/large-project",
+  "fixtureSize": {
+    "trackedChangedFiles": 1000,
+    "expectedAdditions": 1000,
+    "expectedDeletions": 0,
+    "commits": 1
+  },
+  "deliberateFaults": [
+    "Initial fifteen-second fsmonitor delays exercised missing first snapshot and general navigation.",
+    "Final fsmonitor helper delayed only Git diff parents by forty-five seconds; status/preparation remained fast. Helper logged only fast/diff labels."
+  ],
+  "observations": [
+    {
+      "check": "before first owned result",
+      "result": "passed",
+      "text": "History unavailable.",
+      "excluded": "No commits yet."
+    },
+    {
+      "check": "preparation details",
+      "result": "passed",
+      "text": "Loading changes\u2026",
+      "knownChangedFiles": 1000
+    },
+    {
+      "check": "forced detailed-read timeout",
+      "result": "passed for fault presentation",
+      "texts": [
+        "Count unavailable",
+        "Could not load history. Refresh source control to retry."
+      ],
+      "changedFilesRetained": 1000
+    },
+    {
+      "check": "recovery after removing delay and refreshing",
+      "result": "passed",
+      "additions": 1000,
+      "deletions": 0,
+      "historyCount": 1,
+      "historySubject": "Large disposable verification fixture"
+    },
+    {
+      "check": "bounded presentation",
+      "result": "passed",
+      "lastPresentedFile": "file-0059.txt",
+      "notShown": 940,
+      "cap": 60
+    },
+    {
+      "check": "late preparation navigation",
+      "result": "passed",
+      "observed": "Folder selection started the chosen chat while Inspecting Git was at 40%; after switching to Workspace, Source Control remained selected through failure and recovery."
+    },
+    {
+      "check": "source/build validation",
+      "result": "passed",
+      "desktopPassed": 510,
+      "desktopIgnored": 5,
+      "gitTargetedPassed": 6,
+      "reliabilityGuards": 78,
+      "typecheck": true,
+      "productionFrontendBuild": true,
+      "staticNativeBuild": true,
+      "architecture": true
+    },
+    {
+      "check": "cleanup",
+      "result": "passed",
+      "observed": "Fixture-only fsmonitor config removed; verification app quit. lsof found no owned executable, and process inspection found no fixture-path Git/helper process."
+    }
+  ],
+  "limits": [
+    "No before/after native latency, continuous frame-rate or billing/quality claim.",
+    "Loading-history branch has behavioral helper coverage; native sampled history was unavailable, explicitly failed and recovered with one commit.",
+    "The old README tab from the other fixture was left open; this sample validates Source Control and navigation, not editor restoration across folders.",
+    "Longer resource soak and expanded/imported chat-history restart remain open.",
+    "No live provider requests in this follow-through."
+  ]
+}

@@ -18,9 +18,23 @@ function argument(name) {
 const assetsDirectory = resolve(argument("--assets") ?? "release-assets");
 const tag = argument("--tag") ?? process.env.GITHUB_REF_NAME;
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const signingDisclosures = {
+  adhoc:
+    "Updater archives are signed; app bundles and DMGs are not Apple-signed or notarized.",
+  "developer-id":
+    "Updater archives are signed; app bundles and DMGs are signed with Gyro's Developer ID and notarized by Apple.",
+};
+const signing = argument("--signing") ?? "adhoc";
 
 if (!tag?.startsWith("v") || tag.length === 1) {
   throw new Error("Provide a version tag such as v0.1.0-alpha.7 with --tag.");
+}
+
+if (!Object.hasOwn(signingDisclosures, signing)) {
+  throw new Error(`Unsupported --signing ${signing}; use adhoc or developer-id.`);
+}
+if (/^v\d+\.\d+\.\d+$/.test(tag) && signing !== "developer-id") {
+  throw new Error(`Stable release ${tag} must be Developer ID signed and notarized.`);
 }
 
 if (!existsSync(assetsDirectory)) {
@@ -77,7 +91,7 @@ if (releaseSummary.length < 40) {
 }
 const manifest = {
   version: tag.slice(1),
-  notes: `${releaseSummary} Updater archives are signed; app bundles and DMGs are not Apple-signed or notarized.`,
+  notes: `${releaseSummary} ${signingDisclosures[signing]}`,
   pub_date: new Date().toISOString(),
   platforms: {
     "darwin-aarch64": appleSilicon,

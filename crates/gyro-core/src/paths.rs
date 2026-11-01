@@ -74,12 +74,74 @@ impl GyroPaths {
             .canonicalize()
             .context("resolve private chat workspace")
     }
+
+    /// Remove the private workspace [`Self::ensure_chat_workspace`] gave a
+    /// chat. Only that exact directory goes, and only while it is a real
+    /// directory inside the Gyro data root: a symlink planted in its place is
+    /// refused rather than followed. Returns false when there was none.
+    pub fn remove_chat_workspace(&self, session_id: uuid::Uuid) -> Result<bool> {
+        let root = self.sessions_dir.join("workspaces");
+        let workspace = root.join(session_id.to_string());
+        let metadata = match std::fs::symlink_metadata(&workspace) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(error).with_context(|| format!("inspect {}", workspace.display()))
+            }
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(anyhow!(
+                "private chat workspace is not a regular directory: {}",
+                workspace.display()
+            ));
+        }
+        let root_metadata = std::fs::symlink_metadata(&root)
+            .with_context(|| format!("inspect {}", root.display()))?;
+        if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+            return Err(anyhow!(
+                "private Gyro data path is not a regular directory: {}",
+                root.display()
+            ));
+        }
+        let base = self
+            .base_dir
+            .canonicalize()
+            .context("resolve Gyro data root")?;
+        let canonical_root = root
+            .canonicalize()
+            .context("resolve private chat workspaces")?;
+        let canonical = workspace
+            .canonicalize()
+            .context("resolve private chat workspace")?;
+        if !canonical_root.starts_with(&base)
+            || canonical != canonical_root.join(session_id.to_string())
+        {
+            return Err(anyhow!(
+                "private chat workspace is outside the Gyro data root: {}",
+                workspace.display()
+            ));
+        }
+        // `remove_dir_all` removes symlinks inside the tree without following
+        // them, so nothing outside the workspace can be reached through it.
+        std::fs::remove_dir_all(&canonical)
+            .with_context(|| format!("remove {}", canonical.display()))?;
+        Ok(true)
+    }
 }
 
-fn ensure_private_directory(path: &Path) -> Result<()> {
-    std::fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))?;
-    let metadata =
-        std::fs::symlink_metadata(path).with_context(|| format!("inspect {}", path.display()))?;
+/// Every store open runs this for each data directory, so the settled case is
+/// one `lstat`: an existing private directory is neither re-created nor
+/// re-chmodded (a chmod still writes the inode's change time).
+pub(crate) fn ensure_private_directory(path: &Path) -> Result<()> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))?;
+            std::fs::symlink_metadata(path)
+                .with_context(|| format!("inspect {}", path.display()))?
+        }
+        Err(error) => return Err(error).with_context(|| format!("inspect {}", path.display())),
+    };
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(anyhow!(
             "private Gyro data path is not a regular directory: {}",
@@ -89,8 +151,10 @@ fn ensure_private_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-            .with_context(|| format!("secure {}", path.display()))?;
+        if metadata.permissions().mode() & 0o7777 != 0o700 {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+                .with_context(|| format!("secure {}", path.display()))?;
+        }
     }
     Ok(())
 }
@@ -112,8 +176,12 @@ pub(crate) fn secure_private_file(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("secure {}", path.display()))?;
+        let already_private = std::fs::metadata(path)
+            .is_ok_and(|metadata| metadata.permissions().mode() & 0o7777 == 0o600);
+        if !already_private {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("secure {}", path.display()))?;
+        }
     }
     Ok(())
 }
@@ -171,6 +239,51 @@ mod tests {
             .unwrap();
             assert!(paths.ensure_chat_workspace(other_id).is_err());
         }
+    }
+
+    #[test]
+    fn removes_only_the_chat_workspace_it_was_asked_for() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let id = uuid::Uuid::new_v4();
+        let kept = uuid::Uuid::new_v4();
+        let workspace = paths.ensure_chat_workspace(id).unwrap();
+        let other = paths.ensure_chat_workspace(kept).unwrap();
+        std::fs::create_dir_all(workspace.join("nested")).unwrap();
+        std::fs::write(workspace.join("nested/notes.txt"), b"scratch").unwrap();
+
+        assert!(paths.remove_chat_workspace(id).unwrap());
+        assert!(!workspace.exists());
+        assert!(other.is_dir());
+        // A chat that never had one, or a repeated delete, is not an error.
+        assert!(!paths.remove_chat_workspace(id).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chat_workspace_removal_never_follows_a_symlink_out_of_the_data_root() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("keep.txt"), b"not Gyro's").unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let planted = uuid::Uuid::new_v4();
+        let workspace = paths.ensure_chat_workspace(uuid::Uuid::new_v4()).unwrap();
+        symlink(
+            outside.path(),
+            workspace.parent().unwrap().join(planted.to_string()),
+        )
+        .unwrap();
+        assert!(paths.remove_chat_workspace(planted).is_err());
+        assert!(outside.path().join("keep.txt").exists());
+
+        // A link inside a real workspace is removed as a link, not followed.
+        let id = uuid::Uuid::new_v4();
+        let workspace = paths.ensure_chat_workspace(id).unwrap();
+        symlink(outside.path(), workspace.join("escape")).unwrap();
+        assert!(paths.remove_chat_workspace(id).unwrap());
+        assert!(outside.path().join("keep.txt").exists());
     }
 
     #[test]

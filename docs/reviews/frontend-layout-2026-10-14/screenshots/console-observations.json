@@ -1,0 +1,8 @@
+[
+  {
+    "level": "error",
+    "message": "Warning: You are calling ReactDOMClient.createRoot() on a container that has already been passed to createRoot() before. Instead, call root.render() on the existing root instead if you want to update it.",
+    "timestamp": "2026-10-14T09:40:16.791Z",
+    "url": "http://127.0.0.1:1420/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2"
+  }
+]

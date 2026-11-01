@@ -1,3 +1,4 @@
+import { SettingsDisclosure } from "./settings-disclosure";
 import { useId, useState } from "react";
 import { ArrowRight, ArrowUpRight, ChevronDown, Search, X } from "lucide-react";
 import type { SettingsSectionId } from "./types";
@@ -7,15 +8,21 @@ type HelpArticle = {
   answer: string;
   section?: SettingsSectionId;
 };
-const helpTopics: { label: string; articles: HelpArticle[] }[] = [
+const helpArticleGroups: { label: string; articles: HelpArticle[] }[] = [
   {
     label: "Getting started",
     articles: [
       {
         title: "How do I connect a provider?",
         answer:
-          "Open Settings → Providers to connect your account or configure a local model, then choose a model for your chat.",
+          "Open Settings → Models & accounts to connect your account or configure a local model, then choose a model for your chat.",
         section: "providers",
+      },
+      {
+        title: "How do I control how hard Gyro works?",
+        answer:
+          "Open Settings → Chat & agents to tune context efficiency, experiments, auto-compact, and parallel agents. Token budgets stay on Usage & limits.",
+        section: "efficiency",
       },
       {
         title: "How do I start a task?",
@@ -61,7 +68,7 @@ const helpTopics: { label: string; articles: HelpArticle[] }[] = [
       {
         title: "How do I manage usage and budgets?",
         answer:
-          "Open Settings → Usage Limits to review provider allowances, set token budgets, or pause provider runs, including automations. A daily pace warning fires when usage runs more than a day's share (about 14%) ahead of an even weekly pace. Estimated usage is labelled; billing and account allowances are managed by your provider.",
+          "Open Settings → Usage & limits to review provider allowances, set token budgets, or pause provider runs, including automations. A daily pace warning fires when usage runs more than a day's share (about 14%) ahead of an even weekly pace. Token budgets use observed usage and an in-flight request can exceed them; they are not invoice limits. Estimated usage is labelled; billing and account allowances are managed by your provider.",
         section: "usage-limits",
       },
       {
@@ -77,7 +84,7 @@ const helpTopics: { label: string; articles: HelpArticle[] }[] = [
       {
         title: "Why is my provider not ready?",
         answer:
-          "Check Settings → Providers for connection status and available setup actions. Confirm that your provider is signed in and that the selected model is available.",
+          "Check Settings → Models & accounts for connection status and available setup actions. Confirm that your provider is signed in and that the selected model is available.",
         section: "providers",
       },
       {
@@ -89,7 +96,7 @@ const helpTopics: { label: string; articles: HelpArticle[] }[] = [
       {
         title: "How do I report a problem?",
         answer:
-          "Search existing issues first. Include your Gyro version, macOS version, and steps to reproduce the problem. Export diagnostics from Settings → Advanced and review them before sharing; never include credentials or private project content. Gyro is alpha software with community support.",
+          "Search existing issues first. Include your Gyro version, macOS version, and steps to reproduce the problem. Export diagnostics from Settings → Data & privacy and review them before sharing; never include credentials or private project content. Gyro is alpha software with community support.",
         section: "advanced",
       },
       {
@@ -101,6 +108,14 @@ const helpTopics: { label: string; articles: HelpArticle[] }[] = [
   },
 ];
 
+const helpTopics = [
+  { id: "getting-started", label: "Getting started", articles: [...helpArticleGroups[0]!.articles.slice(1), ...helpArticleGroups[2]!.articles] },
+  { id: "providers", label: "Providers", articles: [helpArticleGroups[0]!.articles[0]!, helpArticleGroups[3]!.articles[0]!] },
+  { id: "permissions", label: "Permissions", articles: helpArticleGroups[1]!.articles },
+  { id: "troubleshooting", label: "Troubleshooting", articles: [helpArticleGroups[3]!.articles[1]!] },
+  { id: "support", label: "Support", articles: helpArticleGroups[3]!.articles.slice(2) },
+];
+
 const resources = [
   ["Getting started", "README.md"],
   ["Local models", "docs/local-models.md"],
@@ -109,11 +124,11 @@ const resources = [
   ["Security policy", "SECURITY.md"],
 ] as const;
 const sectionLabels: Partial<Record<SettingsSectionId, string>> = {
-  providers: "Providers",
+  providers: "Models & accounts",
+  efficiency: "Chat & agents",
   permissions: "Permissions",
-  "usage-limits": "Usage Limits",
   updates: "Updates",
-  advanced: "Advanced",
+  advanced: "Data & privacy",
 };
 
 export function SettingsHelp({
@@ -165,7 +180,7 @@ export function SettingsHelp({
       </div>
       {onSectionChange && (
         <nav className="gyro-help-shortcuts" aria-label="Settings shortcuts">
-          {(["providers", "permissions", "usage-limits"] as const).map(
+          {(["providers", "permissions", "advanced"] as const).map(
             (section) => (
               <button
                 type="button"
@@ -204,12 +219,7 @@ export function SettingsHelp({
       </p>
       <div className="gyro-help-answers">
         {filtered.map((group) => (
-          <section
-            key={group.label}
-            className="gyro-help-topic"
-            aria-label={group.label}
-          >
-            <h2>{group.label}</h2>
+          <SettingsDisclosure key={group.label} id={`help-${group.id}`} title={group.label} summary={`${group.articles.length} answers`} attention={terms.length > 0}>
             {group.articles.map((article) => (
               <details
                 key={`${article.title}:${query}:${topic}`}
@@ -233,7 +243,7 @@ export function SettingsHelp({
                 </div>
               </details>
             ))}
-          </section>
+          </SettingsDisclosure>
         ))}
         {!count && (
           <div className="gyro-help-empty">

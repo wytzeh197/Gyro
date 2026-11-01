@@ -1,4 +1,5 @@
 mod codex_app_server;
+mod provider_deadline;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, CommandFactory, Parser, Subcommand};
@@ -13,19 +14,21 @@ use gyro_core::{
     config::CommandProfile,
     create_worktree,
     doctor::run_doctor,
-    ipc::{app_ipc_listener_ready, notify_running_app_with_status, AppNotificationResult},
-    ollama_chat, prepare_claude_provider_mutation_transaction,
-    prepare_provider_mutation_transaction, provider_descriptor,
-    recover_provider_mutation_transactions, run_kimi_acp, slugify_worktree_name, AppNotification,
-    AppNotificationKind, ApprovalRequestPayload, CancellationToken, CreateSessionContext,
-    CredentialPolicy, DoctorStatus, ExecutionRequest, ExecutionStream, ExecutionTermination,
-    GyroConfig, GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind,
-    KimiAcpApprovalRequest, KimiAcpMode, KimiAcpRequest, MutationDecision, MutationProposal,
-    MutationProposalOperation, MutationProposalStatus, OllamaChatRequest,
-    PendingProviderMutationCommit, ProviderFileChange, ProviderHealthRequest,
-    ProviderHealthService, ProviderMutationJournalContext, ProviderRunPayload, ProviderTextChunk,
-    Session, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode,
-    TerminalRequestPayload,
+    ipc::{
+        app_ipc_listener_ready, notify_running_app_with_status, request_app_automate,
+        AppNotificationResult, AutomateAction, AutomateRequest, AutomateSummary,
+    },
+    prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
+    provider_descriptor, recover_provider_mutation_transactions, run_kimi_acp,
+    slugify_worktree_name, AppNotification, AppNotificationKind, ApprovalRequestPayload,
+    CancellationToken, CreateSessionContext, CredentialPolicy, DoctorStatus, ExecutionRequest,
+    ExecutionStream, ExecutionTermination, GyroConfig, GyroPaths, HarnessRunStatus,
+    KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpApprovalRequest, KimiAcpMode,
+    KimiAcpRequest, MutationDecision, MutationProposal, MutationProposalOperation,
+    MutationProposalStatus, OllamaChatRequest, PendingProviderMutationCommit, ProviderFileChange,
+    ProviderHealthRequest, ProviderHealthService, ProviderMutationJournalContext,
+    ProviderRunPayload, ProviderTextChunk, Session, SessionEventKind, SessionOrigin, SessionStore,
+    SessionWorkspaceMode, TerminalRequestPayload,
 };
 use serde::Serialize;
 use std::error::Error as StdError;
@@ -91,6 +94,8 @@ enum Commands {
     Setup(SetupArgs),
     /// Open or attach sessions in Gyro.app.
     App(AppArgs),
+    /// List, run, pause, or resume automations in the running Gyro app.
+    Automate(AutomateArgs),
     /// Validate local setup.
     Doctor(DoctorArgs),
     /// Manage local Gyro configuration.
@@ -99,9 +104,17 @@ enum Commands {
     Completions(CompletionsArgs),
     /// Review and decide pending workspace file approvals.
     Approvals(ApprovalsArgs),
+    /// Read a spilled context copy back through its `spill://` address.
+    Spill(SpillArgs),
     /// Internal MCP permission bridge used by Claude Code.
     #[command(hide = true)]
     ProviderPermissionServer,
+    /// Allow a workspace, pair a relay, print the local endpoint, or revoke it.
+    #[command(hide = true)]
+    AgentSession(AgentSessionArgs),
+    /// Serve the agent relay over HTTP. Put HTTPS in front of this process.
+    #[command(hide = true)]
+    Relay(RelayArgs),
 }
 
 #[derive(Debug, Args)]
@@ -109,6 +122,24 @@ struct CompletionsArgs {
     /// Shell to generate completions for.
     #[arg(value_enum)]
     shell: Shell,
+}
+
+#[derive(Debug, Args)]
+struct SpillArgs {
+    /// The `spill://` address a preview quoted.
+    address: String,
+
+    /// Emit versioned JSON instead of text.
+    #[arg(long, global = true)]
+    json: bool,
+
+    /// Byte offset to start the window at.
+    #[arg(long, global = true, default_value_t = 0)]
+    offset: usize,
+
+    /// Bytes to print. One window by default.
+    #[arg(long, global = true)]
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Args)]
@@ -324,6 +355,24 @@ enum AppCommand {
 }
 
 #[derive(Debug, Args)]
+struct AutomateArgs {
+    #[command(subcommand)]
+    command: AutomateCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AutomateCommand {
+    /// Print each automation's title, schedule, last run, and status.
+    List,
+    /// Queue one run in the open app. Ask-first still applies there.
+    Run { id: String },
+    /// Pause an automation. Uses the status the scheduler already stores.
+    Pause { id: String },
+    /// Resume a paused automation.
+    Resume { id: String },
+}
+
+#[derive(Debug, Args)]
 struct DoctorArgs {
     /// Emit JSON instead of text.
     #[arg(long)]
@@ -358,7 +407,7 @@ enum ConfigCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Store a provider API key in macOS Keychain.
+    /// Store a provider API key on this Mac.
     SetProviderKey {
         provider_id: String,
         /// API key value. Prefer --env for shell-history safety.
@@ -388,9 +437,20 @@ enum ConfigCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Remove a custom provider and its stored API key.
+    /// Remove a provider from Gyro.
+    ///
+    /// A `custom:` provider is deleted. A provider Gyro ships is hidden until
+    /// `restore-provider`. A stored API key is deleted. A vendor CLI stays signed in.
     RemoveProvider {
-        /// Provider id. Must start with `custom:`.
+        /// Provider id, for example `openai` or `custom:my-gateway`.
+        provider_id: String,
+        /// Emit versioned JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a shipped provider again after `remove-provider`.
+    RestoreProvider {
+        /// Provider id Gyro ships, for example `deepseek`.
         provider_id: String,
         /// Emit versioned JSON instead of text.
         #[arg(long)]
@@ -731,7 +791,10 @@ impl Cli {
             Some(Commands::App(args)) => args.json,
             Some(Commands::Doctor(args)) => args.json,
             Some(Commands::Approvals(args)) => args.json,
+            Some(Commands::Spill(args)) => args.json,
             Some(Commands::ProviderPermissionServer) => false,
+            Some(Commands::AgentSession(_)) => true,
+            Some(Commands::Relay(_)) => true,
             Some(Commands::Config(ConfigArgs {
                 command: ConfigCommand::Show { json },
             })) => *json,
@@ -749,6 +812,9 @@ impl Cli {
             }))
             | Some(Commands::Config(ConfigArgs {
                 command: ConfigCommand::RemoveProvider { json, .. },
+            }))
+            | Some(Commands::Config(ConfigArgs {
+                command: ConfigCommand::RestoreProvider { json, .. },
             })) => *json,
             _ => false,
         }
@@ -756,6 +822,13 @@ impl Cli {
 }
 
 fn main() {
+    if let Some(code) = gyro_core::process_guard::run_crash_helper() {
+        std::process::exit(code);
+    }
+    if let Some(code) = gyro_core::keychain::run_read_helper() {
+        std::process::exit(code);
+    }
+    gyro_core::process_guard::enable_crash_cleanup();
     let cli = Cli::parse();
     let json = cli.wants_json();
     if let Err(error) = run_cli(cli) {
@@ -784,6 +857,7 @@ fn main() {
 }
 
 fn run_cli(cli: Cli) -> Result<()> {
+    let _process_scope = gyro_core::process_guard::ProcessLeaseScope::unleased();
     recover_provider_mutations_on_startup()?;
     match cli.command {
         Some(Commands::Chat(args)) => interactive_chat(args),
@@ -792,13 +866,147 @@ fn run_cli(cli: Cli) -> Result<()> {
         Some(Commands::Sessions(args)) => sessions_command(args),
         Some(Commands::Setup(args)) => setup_command(args),
         Some(Commands::App(args)) => app_command(args),
+        Some(Commands::Automate(args)) => automate_command(args),
         Some(Commands::Doctor(args)) => doctor(args),
         Some(Commands::Config(args)) => config_command(args),
         Some(Commands::Completions(args)) => completions_command(args),
         Some(Commands::Approvals(args)) => approvals_command(args),
+        Some(Commands::Spill(args)) => spill_command(args),
         Some(Commands::ProviderPermissionServer) => provider_permission_server(),
+        Some(Commands::AgentSession(args)) => agent_session_command(args),
+        Some(Commands::Relay(args)) => relay_command(args),
         None => interactive_chat(ChatArgs::default()),
     }
+}
+
+#[derive(Debug, Args)]
+struct RelayArgs {
+    /// Local HTTP address. This process does not terminate TLS.
+    #[arg(long, default_value = "127.0.0.1:8787")]
+    bind: String,
+    /// Directory for the relay database.
+    #[arg(long)]
+    data_dir: Option<PathBuf>,
+    /// Pairing code the Mac sends. Generated and saved when omitted.
+    #[arg(long)]
+    code: Option<String>,
+}
+
+fn relay_command(args: RelayArgs) -> Result<()> {
+    let data_dir = match args.data_dir {
+        Some(dir) => dir,
+        None => GyroPaths::for_current_user()?.base_dir.join("agent-relay"),
+    };
+    let server = gyro_core::agent_relay::AgentRelayServer::start(data_dir, args.bind, args.code)?;
+    println!(
+        "{}",
+        serde_json::json!({
+            "schema": "gyro.agent-relay.v1",
+            "bind": server.origin(),
+            "mcpPath": "/mcp",
+            "pairingCode": server.pairing_code(),
+            "agentToken": server.agent_token(),
+        })
+    );
+    let flag = server.shutdown_flag();
+    let _ = ctrlc::set_handler(move || {
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    server.wait()
+}
+
+#[derive(Debug, Args)]
+struct AgentSessionArgs {
+    #[command(subcommand)]
+    command: AgentSessionCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum AgentSessionCommand {
+    /// Allow one workspace to accept sessions from a local agent.
+    Allow { workspace: PathBuf },
+    /// Print the loopback endpoint and the local bearer token.
+    Endpoint,
+    /// Rotate the local token and drop queued agent work.
+    Revoke,
+    /// Pair this Mac with a public relay. The credential stays on the Mac.
+    Pair {
+        /// Public relay URL.
+        #[arg(long)]
+        relay: String,
+        /// One-time pairing code from the relay.
+        #[arg(long)]
+        code: String,
+    },
+    /// Forget the relay credential and drop queued agent work.
+    Unpair,
+}
+
+fn agent_session_command(args: AgentSessionArgs) -> Result<()> {
+    let paths = GyroPaths::for_current_user()?;
+    let store = gyro_core::agent_sessions::AgentSessionStore::open(paths.clone())?;
+    match args.command {
+        AgentSessionCommand::Allow { workspace } => {
+            let allowed = store.allow_workspace(&workspace)?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": "gyro.agent-session.v1",
+                    "allowed": allowed,
+                    "listening": gyro_core::agent_sessions::listening_endpoint(&paths)?.is_some(),
+                })
+            );
+        }
+        AgentSessionCommand::Endpoint => {
+            let url = gyro_core::agent_sessions::listening_endpoint(&paths)?;
+            let token = url
+                .as_ref()
+                .map(|_| gyro_core::agent_sessions::ensure_local_token(&paths))
+                .transpose()?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": "gyro.agent-session.v1",
+                    "listening": url.is_some(),
+                    "url": url,
+                    "token": token,
+                })
+            );
+        }
+        AgentSessionCommand::Revoke => {
+            gyro_core::agent_sessions::revoke_local_link(&paths)?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": "gyro.agent-session.v1",
+                    "revoked": true,
+                })
+            );
+        }
+        AgentSessionCommand::Pair { relay, code } => {
+            let pairing = gyro_core::agent_sessions::pair_outbound(&paths, &relay, &code)?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": "gyro.agent-session.v1",
+                    "deviceId": pairing.device_id,
+                    "relay": pairing.relay_url,
+                    "workspaces": store.list_workspaces()?,
+                })
+            );
+        }
+        AgentSessionCommand::Unpair => {
+            gyro_core::agent_sessions::unpair(&paths)?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": "gyro.agent-session.v1",
+                    "unpaired": true,
+                })
+            );
+        }
+    }
+    Ok(())
 }
 
 fn recover_provider_mutations_on_startup() -> Result<()> {
@@ -811,6 +1019,55 @@ fn recover_provider_mutations_on_startup() -> Result<()> {
 fn completions_command(args: CompletionsArgs) -> Result<()> {
     let mut command = Cli::command();
     generate(args.shell, &mut command, "gyro", &mut io::stdout());
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SpillReadOutput {
+    address: String,
+    offset: usize,
+    total_bytes: usize,
+    truncated: bool,
+    next_offset: Option<usize>,
+    text: String,
+}
+
+/// Print one window of a spilled copy. The window is what keeps this from being a second way to
+/// flood a terminal: the address was handed out because the value was too big to carry.
+fn spill_command(args: SpillArgs) -> Result<()> {
+    const MAX_LIMIT: usize = 64 * 1024;
+    let limit = args
+        .limit
+        .unwrap_or(gyro_core::efficiency::spill::SPILL_READ_WINDOW);
+    if limit == 0 || limit > MAX_LIMIT {
+        return Err(cli_failure(
+            CliErrorCategory::InvalidInput,
+            format!("--limit must be between 1 and {MAX_LIMIT} bytes"),
+        ));
+    }
+    let window = gyro_core::efficiency::spill::read_window(&args.address, args.offset, limit)
+        .map_err(|error| cli_failure(CliErrorCategory::InvalidInput, error.to_string()))?;
+    let Some(window) = window else {
+        return Err(cli_failure(
+            CliErrorCategory::ExecutionFailed,
+            format!(
+                "no stored copy at {}; the sweep may have evicted it, or this machine never wrote one",
+                args.address
+            ),
+        ));
+    };
+    if args.json {
+        return print_json(&SpillReadOutput {
+            address: window.address.clone(),
+            offset: window.offset,
+            total_bytes: window.total_bytes,
+            truncated: window.truncated(),
+            next_offset: window.next_offset(),
+            text: window.text.clone(),
+        });
+    }
+    println!("{}", window.render());
     Ok(())
 }
 
@@ -1855,6 +2112,7 @@ struct CliProviderExecution {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CliProviderFailureKind {
+    AccessRestricted,
     Authentication,
     Network,
     Other,
@@ -1869,6 +2127,8 @@ struct CliProviderFailure {
 #[derive(Default)]
 struct CliStreamDecoder {
     line_buffer: String,
+    /// The provider's own copy of the message, reconciled frame by frame.
+    text: gyro_core::text_stream::TextStreamAssembler,
     response: String,
     provider_session_id: Option<String>,
     provider_failure: Option<CliProviderFailure>,
@@ -1912,32 +2172,20 @@ impl CliStreamDecoder {
         let Some(chunk) = gyro_core::extract_provider_text_chunk(&value) else {
             return;
         };
-        let delta = match chunk {
-            ProviderTextChunk::Delta(delta) => delta,
-            ProviderTextChunk::Snapshot(snapshot) => {
-                if self.response.is_empty() {
-                    snapshot
-                } else {
-                    snapshot
-                        .strip_prefix(&self.response)
-                        .unwrap_or_default()
-                        .to_string()
-                }
-            }
-            ProviderTextChunk::Final(final_text) => {
-                if self.response.is_empty() {
-                    final_text
-                } else {
-                    final_text
-                        .strip_prefix(&self.response)
-                        .unwrap_or_default()
-                        .to_string()
-                }
-            }
+        // Reconcile against the assembler rather than the accumulated string.
+        // A cumulative frame that did not literally extend `response` used to
+        // become "" through `unwrap_or_default`, so the rest of the answer was
+        // silently dropped instead of appended.
+        let advance = match chunk {
+            ProviderTextChunk::Delta(delta) => self.text.push_delta(&delta),
+            ProviderTextChunk::Snapshot(snapshot) => self.text.push_snapshot(&snapshot),
+            ProviderTextChunk::Final(final_text) => self.text.finish(&final_text),
         };
-        if !delta.is_empty() {
-            self.response.push_str(&delta);
-            deltas.push(delta);
+        if let Some(advance) = advance {
+            if !advance.text.is_empty() {
+                self.response.push_str(&advance.text);
+                deltas.push(advance.text);
+            }
         }
     }
 
@@ -1955,6 +2203,7 @@ impl CliStreamDecoder {
 
 fn cli_provider_failure_priority(kind: CliProviderFailureKind) -> u8 {
     match kind {
+        CliProviderFailureKind::AccessRestricted => 3,
         CliProviderFailureKind::Other => 0,
         CliProviderFailureKind::Network => 1,
         CliProviderFailureKind::Authentication => 2,
@@ -1962,6 +2211,12 @@ fn cli_provider_failure_priority(kind: CliProviderFailureKind) -> u8 {
 }
 
 fn cli_provider_failure_from_event(value: &serde_json::Value) -> Option<CliProviderFailure> {
+    if gyro_core::provider_stream::claude_subscription_access_refusal_event(value) {
+        return Some(CliProviderFailure {
+            kind: CliProviderFailureKind::AccessRestricted,
+            message: gyro_core::provider_stream::CLAUDE_SUBSCRIPTION_ACCESS_DETAIL.into(),
+        });
+    }
     let event_type = value
         .get("type")
         .or_else(|| value.get("event"))
@@ -2173,6 +2428,15 @@ fn cli_provider_kind(profile: &CommandProfile) -> Result<CliProviderKind> {
         Some(gyro_core::ProviderExecutionKind::KimiAcp) => Ok(CliProviderKind::Kimi),
         Some(gyro_core::ProviderExecutionKind::AcpCli) => Ok(CliProviderKind::Acp),
         Some(gyro_core::ProviderExecutionKind::OllamaApi) => Ok(CliProviderKind::Ollama),
+        // Antigravity's `agy` runner lives in the desktop app. The CLI chat
+        // loop has no invocation for it yet, so say so instead of panicking.
+        Some(gyro_core::ProviderExecutionKind::AntigravityCli) => Err(cli_failure(
+            CliErrorCategory::ProviderUnavailable,
+            format!(
+                "provider `{}` runs through the Gyro desktop app; the CLI chat runner does not support Antigravity yet",
+                profile.provider_id.as_deref().unwrap_or("antigravity")
+            ),
+        )),
         // The HTTPS runner exists in gyro-core, but wiring it into the CLI chat
         // loop needs its own approval bridge. Until then, say so rather than
         // reporting the provider as unconfigured.
@@ -2236,6 +2500,8 @@ fn build_cli_provider_invocation(
     resume_cursor: Option<(&str, &str)>,
     permission_mcp_config: Option<&str>,
     timeout_seconds: u64,
+    posture: gyro_core::ApprovalPosture,
+    plan_mode: bool,
 ) -> Result<CliProviderInvocation> {
     let provider_kind = cli_provider_kind(profile)?;
     let mut args = profile.args.clone();
@@ -2279,12 +2545,20 @@ fn build_cli_provider_invocation(
             "--mcp-config".into(),
             permission_mcp_config.into(),
             "--strict-mcp-config".into(),
+        ]);
+    }
+    if plan_mode {
+        args.extend(["--permission-mode".into(), "plan".into()]);
+    } else if posture == gyro_core::ApprovalPosture::FullAccess {
+        args.push("--dangerously-skip-permissions".into());
+    } else if permission_mcp_config.is_some() {
+        args.extend([
             "--permission-prompt-tool".into(),
             "mcp__gyro_approval__approve".into(),
             "--allowedTools".into(),
             "mcp__gyro_approval__approve".into(),
             "--permission-mode".into(),
-            "default".into(),
+            gyro_core::claude_permission_mode(posture).into(),
         ]);
     }
     args.push(prompt.into());
@@ -2295,8 +2569,11 @@ fn build_cli_provider_invocation(
     // environment, so it keeps only the provider's own auth.
     request.credentials =
         CredentialPolicy::for_provider(profile.provider_id.as_deref().unwrap_or_default());
-    if let Some((name, value)) =
-        gyro_core::stored_provider_api_key_env(profile.provider_id.as_deref().unwrap_or_default())
+    #[cfg(not(test))]
+    if let Some((name, value)) = gyro_core::try_stored_provider_api_key_env(
+        profile.provider_id.as_deref().unwrap_or_default(),
+    )
+    .map_err(|error| cli_failure(CliErrorCategory::ProviderUnavailable, error.to_string()))?
     {
         request.env.push((name, Some(value)));
     }
@@ -2502,6 +2779,8 @@ fn execute_codex_app_server_provider(
             resume_session_id,
             require_command_approval: config.require_command_approval,
             require_file_edit_approval: config.require_file_edit_approval,
+            full_access: config.full_access,
+            advisory: matches!(mode, "plan" | "council"),
             timeout: Duration::from_secs(timeout_seconds),
             cancellation: cancellation.clone(),
         },
@@ -3135,16 +3414,28 @@ fn decide_kimi_provider_approval(
         payload.clone(),
         Some(turn_id),
     )?;
-    let required = match approval.kind {
-        KimiAcpApprovalKind::Command => config.require_command_approval,
-        KimiAcpApprovalKind::FileChange => config.require_file_edit_approval,
-        KimiAcpApprovalKind::Other => true,
+    let posture = gyro_core::approval_posture(
+        config.full_access,
+        config.require_command_approval,
+        config.require_file_edit_approval,
+    );
+    let provider_id = profile.provider_id.as_deref().unwrap_or("");
+    // Grok `auto` and Kimi `--yolo` already let the safe set through. A
+    // request that still arrives is outside that set.
+    let required = if posture == gyro_core::ApprovalPosture::ApproveForMe
+        && gyro_core::approve_for_me_keeps_escalations(provider_id)
+    {
+        true
+    } else {
+        match approval.kind {
+            KimiAcpApprovalKind::Command => config.require_command_approval,
+            KimiAcpApprovalKind::FileChange => config.require_file_edit_approval,
+            KimiAcpApprovalKind::Other => true,
+        }
     };
-    let denied_by_plan = plan_mode
-        && matches!(
-            approval.kind,
-            KimiAcpApprovalKind::Command | KimiAcpApprovalKind::FileChange
-        );
+    // File writes stay blocked. Commands do not: Grok treats a shell
+    // reject_once as the user declining the tool and cancels the turn.
+    let denied_by_plan = plan_mode && gyro_core::plan_mode_denies_approval(approval.kind);
     let allowed = if denied_by_plan {
         false
     } else if !required || approved {
@@ -3190,6 +3481,61 @@ fn decide_kimi_provider_approval(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn record_cli_collected_usage(
+    store: &SessionStore,
+    session: Uuid,
+    turn: Uuid,
+    provider: &str,
+    model: Option<String>,
+    succeeded: bool,
+    cancelled: bool,
+    wall_ms: u64,
+) {
+    let summary = gyro_core::provider_observation::snapshot().unwrap_or_default();
+    let tokens = summary.tokens.unwrap_or_else(|| {
+        gyro_core::UsageTokens::unavailable(gyro_core::usage::UsageReason::MissingUsage)
+    });
+    let entry = gyro_core::UsageEntry {
+        session_id: session,
+        turn_id: Some(turn),
+        seat_id: None,
+        provider_id: provider.into(),
+        model_id: model,
+        reasoning_effort: None,
+        origin: gyro_core::UsageOrigin::Chat,
+        outcome: if cancelled {
+            gyro_core::UsageOutcome::Cancelled
+        } else if succeeded {
+            gyro_core::UsageOutcome::Done
+        } else {
+            gyro_core::UsageOutcome::Failed
+        },
+        tokens,
+        wall_ms,
+        retry_count: summary.retries,
+    };
+    if let Err(error) = store.record_usage(&entry) {
+        eprintln!(
+            "could not record usage: {}",
+            gyro_core::security::redact_secrets(&error.to_string())
+        );
+    }
+    let total = store
+        .task_usage_tokens(session, turn)
+        .ok()
+        .flatten()
+        .unwrap_or(tokens);
+    let _ = store.append_event_with_turn_id(
+        session,
+        SessionEventKind::SystemEvent,
+        "",
+        serde_json::json!({"kind": "provider-turn-tokens", "accountingVersion": 1,
+            "turnTokens": total, "usageObservations": summary.usage_observations}),
+        Some(turn),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
 fn execute_kimi_acp_provider(
     store: &SessionStore,
     mutation_journal_dir: &Path,
@@ -3216,13 +3562,44 @@ fn execute_kimi_acp_provider(
     })?;
     let provider_label = runtime.label;
     let plan_mode = mode == "plan";
+    let selected_model = if provider_id == "xai" {
+        gyro_core::fast_mode::launch_model_id(config, "xai", model.as_deref())
+    } else {
+        model
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let posture = gyro_core::approval_posture(
+        config.full_access,
+        config.require_command_approval,
+        config.require_file_edit_approval,
+    );
     let mut program_args = profile
         .args
         .iter()
         .cloned()
         .map(Into::into)
         .collect::<Vec<_>>();
-    program_args.extend(runtime.args.iter().map(Into::into));
+    if provider_id == "xai" {
+        // Grok ignores session/set_model. The process flag is the selection,
+        // and the permission mode has to be one too.
+        program_args.extend(gyro_core::grok::acp_program_args(
+            selected_model
+                .as_deref()
+                .filter(|value| *value != runtime.default_model),
+            None,
+            posture,
+        ));
+    } else if let Some(args) = gyro_core::acp_permission_args(&provider_id, posture) {
+        program_args.extend(args.iter().copied().map(Into::into));
+    } else {
+        program_args.extend(runtime.args.iter().map(Into::into));
+    }
+    let _usage_scope = gyro_core::provider_observation::Scope::start();
+    let _ = store.note_usage_call(session.id, turn_id);
+    let usage_started = std::time::Instant::now();
     let result = run_kimi_acp(
         KimiAcpRequest {
             opened_session: None,
@@ -3237,7 +3614,7 @@ fn execute_kimi_acp_provider(
             conversation_history_text: None,
             // The CLI has no desktop capability bridge to attach.
             mcp_servers: Vec::new(),
-            model: model
+            model: selected_model
                 .clone()
                 .filter(|model| !(provider_id == "xai" && model == runtime.default_model))
                 .unwrap_or_else(|| {
@@ -3253,6 +3630,9 @@ fn execute_kimi_acp_provider(
             } else {
                 KimiAcpMode::Normal
             },
+            // Full access answers permission requests inside the core, so the
+            // CLI cannot be stopped by a tool permission it never meant to ask.
+            auto_allow_permissions: posture == gyro_core::ApprovalPosture::FullAccess,
             resume_session_id: resume_cursor
                 .filter(|(kind, _)| *kind == runtime.cursor_kind)
                 .map(|(_, session_id)| session_id.to_string()),
@@ -3360,6 +3740,19 @@ fn execute_kimi_acp_provider(
         },
     );
 
+    record_cli_collected_usage(
+        store,
+        session.id,
+        turn_id,
+        &provider_id,
+        model.clone(),
+        result.is_ok(),
+        cancellation.is_cancelled(),
+        usage_started
+            .elapsed()
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64,
+    );
     let output = match result {
         Ok(output) => output,
         Err(error) => {
@@ -3472,6 +3865,78 @@ fn execute_ollama_provider(
     turn_id: Uuid,
     attempt_id: Uuid,
     cancellation: &CancellationToken,
+    timeout_seconds: u64,
+) -> Result<CliRunOutput> {
+    let started = std::time::Instant::now();
+    let mut deadline = provider_deadline::ProviderDeadline::start(
+        cancellation.clone(),
+        Duration::from_secs(timeout_seconds),
+    );
+    let result = execute_ollama_provider_inner(
+        store,
+        session,
+        profile,
+        model.clone(),
+        prompt,
+        mode,
+        config,
+        turn_id,
+        attempt_id,
+        cancellation,
+        &mut deadline,
+    );
+    deadline.finish();
+    match result {
+        Ok(output) => Ok(output),
+        Err(error) => {
+            let (category, detail, status) = if deadline.expired() {
+                (
+                    CliErrorCategory::ExecutionFailed,
+                    format!("Ollama run timed out after {timeout_seconds} seconds"),
+                    HarnessRunStatus::Failed,
+                )
+            } else if cancellation.is_cancelled() {
+                (
+                    CliErrorCategory::Cancelled,
+                    "Ollama run cancelled".into(),
+                    HarnessRunStatus::Cancelled,
+                )
+            } else {
+                let category = cli_failure_details(&error).0;
+                let detail = gyro_core::sanitize_harness_text(&error.to_string());
+                (category, detail, HarnessRunStatus::Failed)
+            };
+            append_cli_run_status(
+                store,
+                session,
+                turn_id,
+                attempt_id,
+                mode,
+                status,
+                profile,
+                model,
+                &detail,
+                Some(&detail),
+                Some(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64),
+            )?;
+            Err(cli_failure(category, detail))
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_ollama_provider_inner(
+    store: &SessionStore,
+    session: &Session,
+    profile: &CommandProfile,
+    model: Option<String>,
+    prompt: &str,
+    mode: &str,
+    config: &GyroConfig,
+    turn_id: Uuid,
+    attempt_id: Uuid,
+    cancellation: &CancellationToken,
+    deadline: &mut provider_deadline::ProviderDeadline,
 ) -> Result<CliRunOutput> {
     let started = std::time::Instant::now();
     let provider = config
@@ -3494,20 +3959,20 @@ fn execute_ollama_provider(
                 "select an installed model with `--model <ollama-model>`",
             )
         })?;
-    let selected = gyro_core::discover_ollama_model(provider.base_url.as_deref(), model).map_err(|error| {
+    let selected = gyro_core::discover_ollama_model_with_cancellation(provider.base_url.as_deref(), model, cancellation).map_err(|error| {
         cli_failure(
             CliErrorCategory::ProviderUnavailable,
             format!("Ollama is unavailable: {error}. Start Ollama and run `ollama pull <model>` if needed."),
         )
     })?;
-    if selected.is_none() {
-        return Err(cli_failure(
+    let selected = selected.ok_or_else(|| {
+        cli_failure(
             CliErrorCategory::InvalidInput,
             format!(
                 "Ollama model `{model}` is not installed; run `ollama pull {model}` and retry."
             ),
-        ));
-    }
+        )
+    })?;
     if cancellation.is_cancelled() {
         return Err(cli_failure(
             CliErrorCategory::Cancelled,
@@ -3521,29 +3986,33 @@ fn execute_ollama_provider(
     } else {
         format!("Prior conversation in this Gyro session:\n{history}\n\nUser message:\n{prompt}")
     };
-    let result = ollama_chat(OllamaChatRequest {
-        base_url: provider.base_url.as_deref(),
-        model,
-        system,
-        user: &user,
-    });
+    let _usage_scope = gyro_core::provider_observation::Scope::start();
+    let _ = store.note_usage_call(session.id, turn_id);
+    let result = gyro_core::ollama_chat_with_cancellation(
+        OllamaChatRequest {
+            base_url: provider.base_url.as_deref(),
+            model,
+            system,
+            user: &user,
+            context_window_tokens: selected.context_window_tokens,
+        },
+        cancellation,
+    );
+    deadline.finish();
     let duration_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    record_cli_collected_usage(
+        store,
+        session.id,
+        turn_id,
+        "ollama",
+        Some(model.to_string()),
+        result.is_ok(),
+        cancellation.is_cancelled(),
+        duration_ms,
+    );
     let response = match result {
         Ok(result) if !cancellation.is_cancelled() => result.content,
         Ok(_) => {
-            append_cli_run_status(
-                store,
-                session,
-                turn_id,
-                attempt_id,
-                mode,
-                HarnessRunStatus::Cancelled,
-                profile,
-                Some(model.to_string()),
-                "Ollama run cancelled.",
-                None,
-                Some(duration_ms),
-            )?;
             return Err(cli_failure(
                 CliErrorCategory::Cancelled,
                 "Ollama run cancelled",
@@ -3551,19 +4020,6 @@ fn execute_ollama_provider(
         }
         Err(error) => {
             let detail = gyro_core::sanitize_harness_text(&error.to_string());
-            append_cli_run_status(
-                store,
-                session,
-                turn_id,
-                attempt_id,
-                mode,
-                HarnessRunStatus::Failed,
-                profile,
-                Some(model.to_string()),
-                "Ollama run failed.",
-                Some(&detail),
-                Some(duration_ms),
-            )?;
             return Err(cli_failure(CliErrorCategory::ExecutionFailed, detail));
         }
     };
@@ -3696,6 +4152,7 @@ fn execute_cli_provider(
             turn_id,
             attempt_id,
             &cancellation,
+            timeout_seconds,
         );
     }
     if provider_kind == CliProviderKind::Codex {
@@ -3787,7 +4244,7 @@ fn execute_cli_provider(
         claude_permission_mcp_config(session, profile, turn_id, config, approved, json)?;
     let active_attempt_id = attempt_id;
     let resumed = resume_cursor.is_some();
-    let invocation = build_cli_provider_invocation(
+    let invocation = match build_cli_provider_invocation(
         profile,
         &session.workspace_path,
         prompt,
@@ -3795,7 +4252,39 @@ fn execute_cli_provider(
         resume_cursor,
         Some(&permission_mcp_config),
         timeout_seconds,
-    )?;
+        gyro_core::approval_posture(
+            config.full_access,
+            config.require_command_approval,
+            config.require_file_edit_approval,
+        ),
+        mode == "plan" || mode == "council",
+    ) {
+        Ok(invocation) => invocation,
+        Err(error) => {
+            let detail = gyro_core::sanitize_harness_text(&error.to_string());
+            update_cli_provider_binding_status(
+                store,
+                session.id,
+                &provider_id,
+                "failed",
+                Some(&detail),
+            )?;
+            append_cli_run_status(
+                store,
+                session,
+                turn_id,
+                attempt_id,
+                mode,
+                HarnessRunStatus::Failed,
+                profile,
+                model.clone(),
+                "CLI provider setup failed.",
+                Some(&detail),
+                None,
+            )?;
+            return Err(error);
+        }
+    };
     if let Some(provider_session_id) = invocation.proposed_session_id.as_deref() {
         store.upsert_provider_session_binding(
             session.id,
@@ -3898,7 +4387,12 @@ fn execute_cli_provider(
         && turn_has_provider_action_status(store, session.id, turn_id, "failed")?;
     let status = if approval_rejected {
         HarnessRunStatus::Blocked
-    } else if approval_failed {
+    } else if approval_failed
+        || decoder
+            .provider_failure
+            .as_ref()
+            .is_some_and(|failure| failure.kind == CliProviderFailureKind::AccessRestricted)
+    {
         HarnessRunStatus::Failed
     } else {
         match outcome.termination {
@@ -3952,6 +4446,10 @@ fn execute_cli_provider(
                         };
                         let resume = format!("`gyro resume {}`", session.id);
                         match failure.kind {
+                            CliProviderFailureKind::AccessRestricted => (
+                                CliErrorCategory::ProviderUnavailable,
+                                format!("{}. The Gyro session was saved; retry with {resume} after access is restored.", failure.message),
+                            ),
                             CliProviderFailureKind::Authentication => (
                                 CliErrorCategory::ProviderUnavailable,
                                 format!(
@@ -4843,9 +5341,11 @@ fn setup_command(args: SetupArgs) -> Result<()> {
             next: if command_in_path(agent).is_some() {
                 None
             } else {
-                Some(format!(
-                    "install {agent} before selecting it with `gyro run --profile {profile_hint}`"
-                ))
+                Some(gyro_core::provider_install::install_hint_for_binary(agent).unwrap_or_else(|| {
+                    format!(
+                        "install {agent} before selecting it with `gyro run --profile {profile_hint}`"
+                    )
+                }))
             },
         });
     }
@@ -5134,6 +5634,56 @@ fn truncate_cli_text(value: &str, width: usize) -> String {
         return value.chars().take(width).collect();
     }
     value.chars().take(width - 3).collect::<String>() + "..."
+}
+
+fn automate_command(args: AutomateArgs) -> Result<()> {
+    let (action, id) = match args.command {
+        AutomateCommand::List => (AutomateAction::List, None),
+        AutomateCommand::Run { id } => (AutomateAction::Run, Some(id)),
+        AutomateCommand::Pause { id } => (AutomateAction::Pause, Some(id)),
+        AutomateCommand::Resume { id } => (AutomateAction::Resume, Some(id)),
+    };
+    let listing = matches!(action, AutomateAction::List);
+    if let Some(id) = id.as_deref() {
+        Uuid::parse_str(id.trim()).map_err(|_| anyhow!("automation id must be a UUID"))?;
+    }
+    let paths = GyroPaths::for_current_user()?;
+    let response = request_app_automate(&paths, &AutomateRequest::new(action, id))?;
+    if response.status != "ok" {
+        return Err(anyhow!(response.message));
+    }
+    if listing {
+        print_automations(&response.automations);
+    } else {
+        println!("{}", response.message);
+    }
+    Ok(())
+}
+
+fn print_automations(automations: &[AutomateSummary]) {
+    if automations.is_empty() {
+        println!("No automations.");
+        return;
+    }
+    println!(
+        "{:<28}  {:<12}  {:<25}  {:<10}  {}",
+        "title", "schedule", "last run", "status", "id"
+    );
+    for automation in automations {
+        let title = if automation.title.chars().count() > 28 {
+            format!("{}…", automation.title.chars().take(27).collect::<String>())
+        } else {
+            automation.title.clone()
+        };
+        println!(
+            "{:<28}  {:<12}  {:<25}  {:<10}  {}",
+            title,
+            automation.schedule,
+            automation.last_run_at.as_deref().unwrap_or("never"),
+            automation.status,
+            automation.id,
+        );
+    }
 }
 
 fn app_command(args: AppArgs) -> Result<()> {
@@ -5519,14 +6069,14 @@ fn config_command(args: ConfigArgs) -> Result<()> {
             gyro_core::set_stored_provider_api_key(&provider_id, &value).map_err(|error| {
                 cli_failure(
                     CliErrorCategory::ExecutionFailed,
-                    format!("store provider key in macOS Keychain: {error}"),
+                    format!("store provider key on this Mac: {error}"),
                 )
             })?;
             let output = ConfigMutationOutput {
                 status: CliStatus::Done,
                 action: "set-provider-key",
                 target: provider_id,
-                message: format!("stored {} API key in macOS Keychain", provider.display_name),
+                message: format!("stored {} API key on this Mac", provider.display_name),
             };
             if json {
                 print_json(&output)?;
@@ -5607,45 +6157,45 @@ fn config_command(args: ConfigArgs) -> Result<()> {
             }
         }
         ConfigCommand::RemoveProvider { provider_id, json } => {
-            if !gyro_core::is_custom_provider_id(&provider_id) {
-                return Err(cli_failure(
-                    CliErrorCategory::InvalidInput,
-                    format!(
-                        "`{provider_id}` is a provider Gyro ships; only `{}` providers can be removed",
-                        gyro_core::CUSTOM_PROVIDER_PREFIX
-                    ),
-                ));
-            }
-            let display_name = GyroConfig::update(&paths, |config| {
-                let index = config
-                    .model_providers
-                    .iter()
-                    .position(|provider| provider.id == provider_id)
-                    .ok_or_else(|| {
-                        cli_failure(
-                            CliErrorCategory::InvalidInput,
-                            format!("unknown provider `{provider_id}`"),
-                        )
-                    })?;
-                let removed = config.model_providers.remove(index);
-                // A removed provider cannot stay the default for new chats.
-                if config.selected_provider_id.as_deref() == Some(provider_id.as_str()) {
-                    config.selected_provider_id = None;
-                }
-                Ok(removed.display_name)
+            let removed = GyroConfig::update(&paths, |config| {
+                config
+                    .remove_provider(&provider_id)
+                    .map_err(|error| cli_failure(CliErrorCategory::InvalidInput, error))
             })?;
-            // The config entry is gone either way; a key that was never stored
-            // is not a failure.
-            let cleared = gyro_core::clear_stored_provider_api_key(&provider_id).is_ok();
+            // A key that was never stored is not a failure.
+            let cleared = removed.clears_api_key
+                && gyro_core::clear_stored_provider_api_key(&provider_id).is_ok();
+            let mut message = if cleared {
+                format!("removed {} and its stored API key", removed.display_name)
+            } else {
+                format!("removed {}", removed.display_name)
+            };
+            if removed.keeps_cli_sign_in {
+                message.push_str(". The CLI sign-in on this Mac is unchanged");
+            }
             let output = ConfigMutationOutput {
                 status: CliStatus::Done,
                 action: "remove-provider",
                 target: provider_id,
-                message: if cleared {
-                    format!("removed {display_name} and its stored API key")
-                } else {
-                    format!("removed {display_name}")
-                },
+                message,
+            };
+            if json {
+                print_json(&output)?;
+            } else {
+                println!("{}", output.message);
+            }
+        }
+        ConfigCommand::RestoreProvider { provider_id, json } => {
+            let display_name = GyroConfig::update(&paths, |config| {
+                config
+                    .restore_provider(&provider_id)
+                    .map_err(|error| cli_failure(CliErrorCategory::InvalidInput, error))
+            })?;
+            let output = ConfigMutationOutput {
+                status: CliStatus::Done,
+                action: "restore-provider",
+                target: provider_id,
+                message: format!("restored {display_name}"),
             };
             if json {
                 print_json(&output)?;
@@ -6049,7 +6599,7 @@ done
             status: CliStatus::Done,
             action: "set-provider-key",
             target: "openai".into(),
-            message: "stored OpenAI API key in macOS Keychain".into(),
+            message: "stored OpenAI API key on this Mac".into(),
         };
         let mutation_value = serde_json::to_value(CliJsonEnvelope {
             schema: CLI_JSON_SCHEMA_V1,
@@ -6059,6 +6609,74 @@ done
         assert_eq!(mutation_value["target"], "openai");
         assert!(mutation_value.get("value").is_none());
         assert!(mutation_value.get("apiKey").is_none());
+    }
+
+    #[test]
+    fn cli_receipts_preserve_failed_usage_and_unavailable_counts_after_reopen() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Cli, "Usage fixture")
+            .unwrap();
+        let turn = Uuid::new_v4();
+        {
+            let _scope = gyro_core::provider_observation::Scope::start();
+            let tokens =
+                gyro_core::UsageTokens::measured(Some(100), Some(60), Some(20), Some(5), None)
+                    .with_cache_write(Some(10))
+                    .partial(gyro_core::usage::UsageReason::Interrupted);
+            gyro_core::provider_observation::native_usage(tokens);
+            store.note_usage_call(session.id, turn).unwrap();
+            record_cli_collected_usage(
+                &store,
+                session.id,
+                turn,
+                "grok",
+                Some("fixture".into()),
+                false,
+                true,
+                1,
+            );
+        }
+        let unavailable_turn = Uuid::new_v4();
+        {
+            let _scope = gyro_core::provider_observation::Scope::start();
+            store.note_usage_call(session.id, unavailable_turn).unwrap();
+            record_cli_collected_usage(
+                &store,
+                session.id,
+                unavailable_turn,
+                "kimi",
+                None,
+                false,
+                false,
+                1,
+            );
+        }
+        drop(store);
+        let store = SessionStore::open(paths).unwrap();
+        let result = store.task_usage_tokens(session.id, turn).unwrap().unwrap();
+        assert_eq!((result.total_tokens, result.cache_write_tokens), (120, 10));
+        assert_eq!(
+            result.effective_accounting().coverage,
+            gyro_core::usage::UsageCoverage::Partial
+        );
+        let unavailable = store
+            .task_usage_tokens(session.id, unavailable_turn)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            unavailable.effective_accounting().coverage,
+            gyro_core::usage::UsageCoverage::Unavailable
+        );
+        let events = store.read_events(session.id).unwrap();
+        assert!(events
+            .iter()
+            .any(|event| event.payload["turnTokens"]["accounting"]["coverage"] == "partial"));
+        assert!(events
+            .iter()
+            .any(|event| event.payload["turnTokens"]["accounting"]["coverage"] == "unavailable"));
     }
 
     #[test]
@@ -6402,6 +7020,8 @@ done
             None,
             Some(r#"{"mcpServers":{}}"#),
             5,
+            gyro_core::ApprovalPosture::Ask,
+            false,
         )
         .unwrap();
         let args = invocation
@@ -6415,6 +7035,9 @@ done
         assert!(args.contains(&"mcp__gyro_approval__approve".into()));
         assert!(args.contains(&"--setting-sources".into()));
         assert!(args.contains(&"--verbose".into()));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--permission-mode", "manual"]));
         assert!(!args.contains(&"--dangerously-skip-permissions".into()));
     }
 
@@ -6438,6 +7061,8 @@ done
             None,
             Some(r#"{"mcpServers":{}}"#),
             5,
+            gyro_core::ApprovalPosture::FullAccess,
+            false,
         )
         .err()
         .expect("permission bypass must fail");

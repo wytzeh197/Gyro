@@ -1,0 +1,850 @@
+[
+  {
+    "name": "welcome-dark-1440-default",
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "scrollHeight": 900,
+      "send": {
+        "x": 1146.8125,
+        "y": 506.640625,
+        "width": 26.59375,
+        "height": 26.59375,
+        "top": 506.640625,
+        "right": 1173.40625,
+        "bottom": 533.234375,
+        "left": 1146.8125
+      },
+      "composer": {
+        "x": 498,
+        "y": 452.453125,
+        "width": 684,
+        "height": 91.28125,
+        "top": 452.453125,
+        "right": 1182,
+        "bottom": 543.734375,
+        "left": 498
+      },
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "welcome-dark-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": {
+        "x": 742.09375,
+        "y": 366.109375,
+        "width": 30.578125,
+        "height": 30.578125,
+        "top": 366.109375,
+        "right": 772.671875,
+        "bottom": 396.6875,
+        "left": 742.09375
+      },
+      "composer": {
+        "x": 267.59375,
+        "y": 311.359375,
+        "width": 514.8125,
+        "height": 97.265625,
+        "top": 311.359375,
+        "right": 782.40625,
+        "bottom": 408.625,
+        "left": 267.59375
+      },
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "chat-dark-1440-default",
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "scrollHeight": 900,
+      "send": {
+        "x": 985.8125,
+        "y": 844.859375,
+        "width": 26.59375,
+        "height": 26.59375,
+        "top": 844.859375,
+        "right": 1012.40625,
+        "bottom": 871.453125,
+        "left": 985.8125
+      },
+      "composer": {
+        "x": 337,
+        "y": 791.625,
+        "width": 684,
+        "height": 89.375,
+        "top": 791.625,
+        "right": 1021,
+        "bottom": 881,
+        "left": 337
+      },
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "chat-dark-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": {
+        "x": 791.96875,
+        "y": 560.671875,
+        "width": 30.578125,
+        "height": 30.578125,
+        "top": 560.671875,
+        "right": 822.546875,
+        "bottom": 591.25,
+        "left": 791.96875
+      },
+      "composer": {
+        "x": 217.71875,
+        "y": 508.109375,
+        "width": 614.5625,
+        "height": 92.890625,
+        "top": 508.109375,
+        "right": 832.28125,
+        "bottom": 601,
+        "left": 217.71875
+      },
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "appearance-dark-1440-default",
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "scrollHeight": 900,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "appearance-dark-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "providers-dark-1440-default",
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "scrollHeight": 900,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "providers-dark-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "workspace-dark-1440-default",
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "scrollHeight": 900,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "workspace-dark-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "automations-dark-1440-default",
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "scrollHeight": 900,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "automations-dark-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "general-dark-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "keyboard-dark-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "usage-dark-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "tools-dark-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "updates-dark-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "search-dark-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": {
+        "x": 742.09375,
+        "y": 366.109375,
+        "width": 30.578125,
+        "height": 30.578125,
+        "top": 366.109375,
+        "right": 772.671875,
+        "bottom": 396.6875,
+        "left": 742.09375
+      },
+      "composer": {
+        "x": 267.59375,
+        "y": 311.359375,
+        "width": 514.8125,
+        "height": 97.265625,
+        "top": 311.359375,
+        "right": 782.40625,
+        "bottom": 408.625,
+        "left": 267.59375
+      },
+      "menu": null,
+      "search": {
+        "x": 90,
+        "y": 54,
+        "width": 680,
+        "height": 513.796875,
+        "top": 54,
+        "right": 770,
+        "bottom": 567.796875,
+        "left": 90
+      }
+    },
+    "errors": []
+  },
+  {
+    "name": "session-menu-dark-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": {
+        "x": 742.09375,
+        "y": 366.109375,
+        "width": 30.578125,
+        "height": 30.578125,
+        "top": 366.109375,
+        "right": 772.671875,
+        "bottom": 396.6875,
+        "left": 742.09375
+      },
+      "composer": {
+        "x": 267.59375,
+        "y": 311.359375,
+        "width": 514.8125,
+        "height": 97.265625,
+        "top": 311.359375,
+        "right": 782.40625,
+        "bottom": 408.625,
+        "left": 267.59375
+      },
+      "menu": {
+        "x": 18,
+        "y": 269.59375,
+        "width": 163,
+        "height": 110.5625,
+        "top": 269.59375,
+        "right": 181,
+        "bottom": 380.15625,
+        "left": 18
+      },
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "welcome-dark-1024-small-accent",
+    "geometry": {
+      "width": 1024,
+      "scrollWidth": 1024,
+      "height": 700,
+      "scrollHeight": 700,
+      "send": {
+        "x": 903.484375,
+        "y": 406.625,
+        "width": 24.6875,
+        "height": 24.6875,
+        "top": 406.625,
+        "right": 928.171875,
+        "bottom": 431.3125,
+        "left": 903.484375
+      },
+      "composer": {
+        "x": 312,
+        "y": 352.625,
+        "width": 624,
+        "height": 88.421875,
+        "top": 352.625,
+        "right": 936,
+        "bottom": 441.046875,
+        "left": 312
+      },
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "welcome-light-1440-default",
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "scrollHeight": 900,
+      "send": {
+        "x": 1146.8125,
+        "y": 506.640625,
+        "width": 26.59375,
+        "height": 26.59375,
+        "top": 506.640625,
+        "right": 1173.40625,
+        "bottom": 533.234375,
+        "left": 1146.8125
+      },
+      "composer": {
+        "x": 498,
+        "y": 452.453125,
+        "width": 684,
+        "height": 91.28125,
+        "top": 452.453125,
+        "right": 1182,
+        "bottom": 543.734375,
+        "left": 498
+      },
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "welcome-light-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": {
+        "x": 742.09375,
+        "y": 366.109375,
+        "width": 30.578125,
+        "height": 30.578125,
+        "top": 366.109375,
+        "right": 772.671875,
+        "bottom": 396.6875,
+        "left": 742.09375
+      },
+      "composer": {
+        "x": 267.59375,
+        "y": 311.359375,
+        "width": 514.8125,
+        "height": 97.265625,
+        "top": 311.359375,
+        "right": 782.40625,
+        "bottom": 408.625,
+        "left": 267.59375
+      },
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "chat-light-1440-default",
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "scrollHeight": 900,
+      "send": {
+        "x": 985.8125,
+        "y": 844.859375,
+        "width": 26.59375,
+        "height": 26.59375,
+        "top": 844.859375,
+        "right": 1012.40625,
+        "bottom": 871.453125,
+        "left": 985.8125
+      },
+      "composer": {
+        "x": 337,
+        "y": 791.625,
+        "width": 684,
+        "height": 89.375,
+        "top": 791.625,
+        "right": 1021,
+        "bottom": 881,
+        "left": 337
+      },
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "chat-light-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": {
+        "x": 791.96875,
+        "y": 560.671875,
+        "width": 30.578125,
+        "height": 30.578125,
+        "top": 560.671875,
+        "right": 822.546875,
+        "bottom": 591.25,
+        "left": 791.96875
+      },
+      "composer": {
+        "x": 217.71875,
+        "y": 508.109375,
+        "width": 614.5625,
+        "height": 92.890625,
+        "top": 508.109375,
+        "right": 832.28125,
+        "bottom": 601,
+        "left": 217.71875
+      },
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "appearance-light-1440-default",
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "scrollHeight": 900,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "appearance-light-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "providers-light-1440-default",
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "scrollHeight": 900,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "providers-light-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "workspace-light-1440-default",
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "scrollHeight": 900,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "workspace-light-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "automations-light-1440-default",
+    "geometry": {
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "scrollHeight": 900,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "automations-light-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "general-light-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "keyboard-light-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "usage-light-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "tools-light-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "updates-light-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": null,
+      "composer": null,
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "search-light-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": {
+        "x": 742.09375,
+        "y": 366.109375,
+        "width": 30.578125,
+        "height": 30.578125,
+        "top": 366.109375,
+        "right": 772.671875,
+        "bottom": 396.6875,
+        "left": 742.09375
+      },
+      "composer": {
+        "x": 267.59375,
+        "y": 311.359375,
+        "width": 514.8125,
+        "height": 97.265625,
+        "top": 311.359375,
+        "right": 782.40625,
+        "bottom": 408.625,
+        "left": 267.59375
+      },
+      "menu": null,
+      "search": {
+        "x": 90,
+        "y": 54,
+        "width": 680,
+        "height": 513.796875,
+        "top": 54,
+        "right": 770,
+        "bottom": 567.796875,
+        "left": 90
+      }
+    },
+    "errors": []
+  },
+  {
+    "name": "session-menu-light-860-large",
+    "geometry": {
+      "width": 860,
+      "scrollWidth": 860,
+      "height": 620,
+      "scrollHeight": 620,
+      "send": {
+        "x": 742.09375,
+        "y": 366.109375,
+        "width": 30.578125,
+        "height": 30.578125,
+        "top": 366.109375,
+        "right": 772.671875,
+        "bottom": 396.6875,
+        "left": 742.09375
+      },
+      "composer": {
+        "x": 267.59375,
+        "y": 311.359375,
+        "width": 514.8125,
+        "height": 97.265625,
+        "top": 311.359375,
+        "right": 782.40625,
+        "bottom": 408.625,
+        "left": 267.59375
+      },
+      "menu": {
+        "x": 18,
+        "y": 269.59375,
+        "width": 163,
+        "height": 110.5625,
+        "top": 269.59375,
+        "right": 181,
+        "bottom": 380.15625,
+        "left": 18
+      },
+      "search": null
+    },
+    "errors": []
+  },
+  {
+    "name": "welcome-light-1024-small-accent",
+    "geometry": {
+      "width": 1024,
+      "scrollWidth": 1024,
+      "height": 700,
+      "scrollHeight": 700,
+      "send": {
+        "x": 903.484375,
+        "y": 406.625,
+        "width": 24.6875,
+        "height": 24.6875,
+        "top": 406.625,
+        "right": 928.171875,
+        "bottom": 431.3125,
+        "left": 903.484375
+      },
+      "composer": {
+        "x": 312,
+        "y": 352.625,
+        "width": 624,
+        "height": 88.421875,
+        "top": 352.625,
+        "right": 936,
+        "bottom": 441.046875,
+        "left": 312
+      },
+      "menu": null,
+      "search": null
+    },
+    "errors": []
+  }
+]

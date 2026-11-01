@@ -39,13 +39,83 @@ export function trackPendingMedia(
   });
 }
 
-/** Swap every placeholder for its stored file, dropping any that failed. */
+// One decoder/raw IPC upload at a time, shared by all chat panes.
+const mediaUploadQueue: Array<() => void> = [];
+let mediaUploadActive = false;
+export function queueMediaUpload<T>(
+  run: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (signal?.aborted)
+    return Promise.reject(new Error("Media upload cancelled"));
+  return new Promise<T>((resolve, reject) => {
+    let started = false;
+    const abort = () => {
+      if (!started) {
+        const index = mediaUploadQueue.indexOf(start);
+        if (index >= 0) mediaUploadQueue.splice(index, 1);
+      }
+      signal?.removeEventListener("abort", abort);
+      reject(new Error("Media upload cancelled"));
+    };
+    const start = () => {
+      started = true;
+      mediaUploadActive = true;
+      // A timed-out native call can still be finishing. Keep its slot until
+      // the underlying work settles, so retries cannot accumulate workers.
+      Promise.resolve()
+        .then(run)
+        .then(resolve, reject)
+        .finally(() => {
+          signal?.removeEventListener("abort", abort);
+          const next = mediaUploadQueue.shift();
+          if (next) next();
+          else mediaUploadActive = false;
+        });
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (mediaUploadActive) mediaUploadQueue.push(start);
+    else start();
+  });
+}
+
+/** Bound a stalled decoder or native upload so sending cannot wait forever. */
+export function withMediaUploadTimeout<T>(
+  upload: Promise<T>,
+  onTimeout?: () => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      onTimeout?.();
+      reject(
+        new Error("Media upload timed out. Drop the file again to retry."),
+      );
+    }, 60_000);
+    upload.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/** Wait for every selected upload; a failed image must never be silently sent away. */
 export async function settlePendingMedia(attachments: ChatAttachment[]) {
   const settled = await Promise.all(
     attachments.map((attachment) =>
       attachment.pending ? uploads.get(attachment.id) : attachment,
     ),
   );
+  if (settled.some((attachment) => !attachment)) {
+    throw new Error(
+      "An attachment could not be uploaded. Your message is preserved; attach the file again before sending.",
+    );
+  }
   const seen = new Set<string>();
   return settled.filter((attachment): attachment is ChatAttachment => {
     if (!attachment || seen.has(attachment.path)) return false;

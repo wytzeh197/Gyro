@@ -13,7 +13,13 @@ import type { ChatSidePanelId } from "./types.ts";
  */
 export type ChatCompanionTabId = Extract<
   ChatSidePanelId,
-  "review" | "terminal" | "browser" | "files" | "side-chat" | "canvas"
+  | "review"
+  | "terminal"
+  | "browser"
+  | "files"
+  | "side-chat"
+  | "canvas"
+  | "agents"
 >;
 
 export const chatCompanionTabIds: ChatCompanionTabId[] = [
@@ -23,6 +29,7 @@ export const chatCompanionTabIds: ChatCompanionTabId[] = [
   "browser",
   "files",
   "side-chat",
+  "agents",
 ];
 
 export const chatCompanionTabLabels: Record<ChatCompanionTabId, string> = {
@@ -32,6 +39,7 @@ export const chatCompanionTabLabels: Record<ChatCompanionTabId, string> = {
   browser: "Browser",
   files: "Files",
   "side-chat": "Side chat",
+  agents: "Agents",
 };
 
 export function isChatCompanionTabId(
@@ -47,6 +55,8 @@ export type ChatCompanionPaneState = {
   openTabs: ChatCompanionTabId[];
   /** Undefined shows the picker when isOpen, or hides the panel otherwise. */
   activeTab?: ChatCompanionTabId;
+  /** Last viewed tool, retained while the dock is hidden or showing its picker. */
+  lastActiveTab?: ChatCompanionTabId;
   /**
    * Transient session backing the Side chat tab, when one is live. It is
    * created on open and destroyed on close, so it never reaches the sidebar,
@@ -86,13 +96,19 @@ export function clampChatPanelWidth(width: number, available?: number) {
   });
 }
 
-/** The transcript remains the primary work surface for compact tools. */
+/**
+ * Every dock tab drags between the same two limits. The ceiling only stops a
+ * drag from swallowing the window; what actually keeps the conversation
+ * readable is the transcript reserve inside `clampCompanionWidth`. Giving the
+ * Browser a higher ceiling than the compact tools made the same gesture stop in
+ * a different place depending on which tab happened to be open.
+ */
 export const CHAT_COMPANION_MIN_WIDTH = 320;
-export const CHAT_COMPANION_MAX_WIDTH = 720;
+export const CHAT_COMPANION_MAX_WIDTH = 1_040;
+/** Compact tools open narrow; the Browser opens wide enough to read a page. */
 export const CHAT_COMPANION_DEFAULT_WIDTH = 420;
-/** Leave room to read the conversation while inspecting the page. */
-export const BROWSER_COMPANION_MIN_WIDTH = 440;
-export const BROWSER_COMPANION_MAX_WIDTH = 1_040;
+export const BROWSER_COMPANION_MIN_WIDTH = CHAT_COMPANION_MIN_WIDTH;
+export const BROWSER_COMPANION_MAX_WIDTH = CHAT_COMPANION_MAX_WIDTH;
 export const BROWSER_COMPANION_DEFAULT_WIDTH = 720;
 /** One deliberate keyboard nudge, large enough to be useful without jumping. */
 export const CHAT_COMPANION_KEYBOARD_STEP = 24;
@@ -112,6 +128,25 @@ export function shouldOverlayChatCompanion(availableWidth?: number) {
     availableWidth !== undefined &&
     availableWidth < CHAT_COMPANION_OVERLAY_BELOW
   );
+}
+
+/** Split panes keep a narrower reading column beside their own panel. */
+export const CHAT_PANE_TRANSCRIPT_MIN_WIDTH = 320;
+
+/** The reading width a pane keeps beside its panel. */
+export function chatPaneTranscriptMinimum(isTiled: boolean) {
+  return isTiled ? CHAT_PANE_TRANSCRIPT_MIN_WIDTH : CHAT_TRANSCRIPT_MIN_WIDTH;
+}
+
+/** A pane too narrow for both columns lets its panel cover its own chat. */
+export function shouldOverlayPaneChatCompanion(
+  availableWidth: number | undefined,
+  isTiled: boolean,
+) {
+  return isTiled
+    ? availableWidth !== undefined &&
+        availableWidth < CHAT_PANE_TRANSCRIPT_MIN_WIDTH + CHAT_COMPANION_MIN_WIDTH
+    : shouldOverlayChatCompanion(availableWidth);
 }
 
 export type ChatCompanionAction =
@@ -367,6 +402,7 @@ export function chatCompanionReducer(
         isOpen: true,
         openTabs: isOpen ? pane.openTabs : [...pane.openTabs, action.tab],
         activeTab: action.tab,
+        lastActiveTab: action.tab,
       });
     }
     case "close-tab": {
@@ -382,6 +418,10 @@ export function chatCompanionReducer(
         ...pane,
         openTabs,
         activeTab,
+        lastActiveTab:
+          pane.lastActiveTab === action.tab
+            ? neighbourTab(pane.openTabs, action.tab)
+            : pane.lastActiveTab,
         // Closing Side chat ends its transient session; the binding goes with
         // it so nothing later mistakes a dead id for a live one.
         sideChatSessionId:
@@ -390,15 +430,28 @@ export function chatCompanionReducer(
     }
     case "close-dock": {
       if (!pane.isOpen && pane.activeTab === undefined) return state;
-      return withPane({ ...pane, isOpen: false, activeTab: undefined });
+      return withPane({
+        ...pane,
+        isOpen: false,
+        activeTab: undefined,
+        lastActiveTab: pane.activeTab ?? pane.lastActiveTab,
+      });
     }
     case "reopen-dock": {
       if (pane.isOpen || pane.activeTab !== undefined) return state;
-      const activeTab = pane.openTabs.at(-1);
+      const activeTab =
+        pane.lastActiveTab && pane.openTabs.includes(pane.lastActiveTab)
+          ? pane.lastActiveTab
+          : pane.openTabs.at(-1);
       return withPane({ ...pane, isOpen: true, activeTab });
     }
     case "show-launcher":
-      return withPane({ ...pane, isOpen: true, activeTab: undefined });
+      return withPane({
+        ...pane,
+        isOpen: true,
+        activeTab: undefined,
+        lastActiveTab: pane.activeTab ?? pane.lastActiveTab,
+      });
     case "bind-side-chat":
       if (pane.sideChatSessionId === action.sessionId) return state;
       return withPane({ ...pane, sideChatSessionId: action.sessionId });
@@ -480,12 +533,28 @@ export function restoreCompanionPanes(
           ),
         ),
       ];
+      // Older layouts used only activeTab to indicate an open dock.
+      const isOpen =
+        typeof value.isOpen === "boolean"
+          ? value.isOpen
+          : value.activeTab !== undefined;
+      const lastActiveTab = openTabs.includes(value.lastActiveTab)
+        ? value.lastActiveTab
+        : openTabs.includes(value.activeTab)
+          ? value.activeTab
+          : undefined;
       result[key] = {
         openTabs,
-        isOpen: Boolean(value.isOpen),
-        activeTab: openTabs.includes(value.activeTab)
-          ? value.activeTab
-          : openTabs[0],
+        isOpen,
+        // A hidden dock must stay hidden after restart. An open picker also
+        // keeps its place; only a removed/invalid active tool needs a fallback.
+        activeTab:
+          !isOpen || value.activeTab === undefined
+            ? undefined
+            : openTabs.includes(value.activeTab)
+              ? value.activeTab
+              : openTabs[0],
+        ...(lastActiveTab ? { lastActiveTab } : {}),
       };
     }
     return result;

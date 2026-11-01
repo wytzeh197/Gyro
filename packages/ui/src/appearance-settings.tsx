@@ -1,5 +1,5 @@
-import type { CSSProperties } from "react";
-import { RotateCcw } from "lucide-react";
+import { useState, type CSSProperties, type SyntheticEvent } from "react";
+import { Check, RotateCcw } from "lucide-react";
 import type {
   InterfaceSize,
   MotionSpeed,
@@ -11,9 +11,6 @@ import {
   SettingsRow,
   SettingsSegmented,
 } from "./settings-controls";
-import themePreviewSystem from "./assets/theme-preview-system.png";
-import themePreviewLight from "./assets/theme-preview-light.png";
-import themePreviewDark from "./assets/theme-preview-dark.png";
 
 type AppearanceSettingsProps = {
   themeMode: ThemeMode;
@@ -28,6 +25,8 @@ type AppearanceSettingsProps = {
   onInterfaceSizeChange?: (size: InterfaceSize) => void;
   onMotionSpeedChange?: (speed: MotionSpeed) => void;
   onAppearanceColorsChange?: (main: string, secondary: string) => void;
+  saveStatus?: "saving" | "saved" | "error";
+  onRetrySave?: () => void;
 };
 
 export function AppearanceSettings({
@@ -43,10 +42,52 @@ export function AppearanceSettings({
   onInterfaceSizeChange,
   onMotionSpeedChange,
   onAppearanceColorsChange,
+  saveStatus,
+  onRetrySave,
 }: AppearanceSettingsProps) {
+  const [lastEditedSection, setLastEditedSection] = useState<string>();
+  const rememberEditedSection = (event: SyntheticEvent) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || target.closest("button[aria-expanded]")) return;
+    const section = target.closest<HTMLElement>("[data-settings-disclosure]")?.dataset.settingsDisclosure;
+    if (section) setLastEditedSection(section);
+  };
   return (
-    <>
-      <SettingsGroup label="Theme">
+    <div className="gyro-appearance-settings" onClickCapture={rememberEditedSection} onChangeCapture={rememberEditedSection}>
+      <div className="gyro-appearance-scope">
+        <span>Applies across Gyro</span>
+        <span
+          aria-live="polite"
+          aria-atomic="true"
+          className={`gyro-appearance-save-status${saveStatus === "error" ? " is-error" : ""}`}
+          role={saveStatus === "error" ? "alert" : "status"}
+        >
+          {saveStatus === "saving"
+            ? "Saving…"
+            : saveStatus === "saved"
+              ? "Saved"
+              : saveStatus === "error"
+                ? "Couldn’t save changes."
+                : "Changes apply immediately"}
+          {saveStatus === "error" && onRetrySave ? (
+            <button onClick={onRetrySave} type="button">
+              Retry save
+            </button>
+          ) : null}
+        </span>
+      </div>
+      <SettingsGroup
+        attention={saveStatus === "error" && lastEditedSection === "theme"} id="theme" label="Theme" summary={themeMode === "system" ? "Follows macOS" : `${themeMode === "dark" ? "Dark" : "Light"} theme`}
+        description="Follow your Mac’s appearance or choose your own."
+        actions={
+          <AppearanceReset
+            label="Reset theme"
+            detail="Follow your Mac’s appearance."
+            disabled={themeMode === "system"}
+            onClick={() => onThemeChange("system")}
+          />
+        }
+      >
         <div
           className="gyro-theme-picker"
           data-setting-key="theme"
@@ -59,32 +100,55 @@ export function AppearanceSettings({
               {
                 mode: "system",
                 label: "System",
-                image: themePreviewSystem,
+                detail: "Match your Mac",
               },
-              { mode: "light", label: "Light", image: themePreviewLight },
-              { mode: "dark", label: "Dark", image: themePreviewDark },
+              { mode: "light", label: "Light", detail: "Always light" },
+              { mode: "dark", label: "Dark", detail: "Always dark" },
             ] as const
-          ).map(({ mode, label, image }) => (
+          ).map(({ mode, label, detail }) => (
             <button
               key={mode}
               aria-pressed={themeMode === mode}
+              aria-label={`${label} theme`}
               className={`is-${mode}${themeMode === mode ? " is-active" : ""}`}
               onClick={() => onThemeChange(mode)}
               type="button"
             >
-              <img src={image} alt="" draggable={false} />
-              <span>{label}</span>
+              <ThemePreview mode={mode} />
+              <span className="gyro-theme-option-label">
+                {label}
+                <Check aria-hidden="true" size={13} />
+              </span>
+              <small>{detail}</small>
             </button>
           ))}
         </div>
       </SettingsGroup>
-      <SettingsGroup label="Interface">
+      <SettingsGroup
+        attention={saveStatus === "error" && lastEditedSection === "text-layout"} id="text-layout" label="Text & spacing" summary={`${interfaceSize.charAt(0).toUpperCase()+interfaceSize.slice(1)} size · ${density.charAt(0).toUpperCase()+density.slice(1)} spacing`}
+        actions={
+          <AppearanceReset
+            label="Reset text & layout"
+            detail="Restore default interface size and comfortable spacing."
+            disabled={
+              !onInterfaceSizeChange ||
+              !onDensityChange ||
+              (interfaceSize === "default" && density === "comfortable")
+            }
+            onClick={() => {
+              onInterfaceSizeChange?.("default");
+              onDensityChange?.("comfortable");
+            }}
+          />
+        }
+      >
         <SettingsRow
           label="Interface size"
           detail="Scale text and controls, including the editor and terminal."
         >
           <SettingsSegmented
             label="Interface size"
+            disabled={!onInterfaceSizeChange}
             value={interfaceSize}
             options={[
               { label: "Small", value: "small" },
@@ -95,11 +159,12 @@ export function AppearanceSettings({
           />
         </SettingsRow>
         <SettingsRow
-          label="Density"
+          label="Spacing"
           detail="Choose tighter rows or more room between controls."
         >
           <SettingsSegmented
-            label="Interface density"
+            label="Interface spacing"
+            disabled={!onDensityChange}
             value={density}
             options={[
               { label: "Compact", value: "compact" },
@@ -108,6 +173,18 @@ export function AppearanceSettings({
             onChange={(value) => onDensityChange?.(value)}
           />
         </SettingsRow>
+      </SettingsGroup>
+      <SettingsGroup
+        attention={saveStatus === "error" && lastEditedSection === "motion"} id="motion" label="Motion" summary={reduceMotion ? "Reduced motion" : `${motionSpeed.charAt(0).toUpperCase()+motionSpeed.slice(1)} speed`}
+        actions={
+          <AppearanceReset
+            label="Reset motion"
+            detail="Restore the default animation speed."
+            disabled={!onMotionSpeedChange || motionSpeed === "default"}
+            onClick={() => onMotionSpeedChange?.("default")}
+          />
+        }
+      >
         <SettingsRow
           label="Animation speed"
           detail={
@@ -118,6 +195,7 @@ export function AppearanceSettings({
         >
           <SettingsSegmented
             label="Animation speed"
+            disabled={!onMotionSpeedChange}
             value={motionSpeed}
             options={[
               { label: "Slower", value: "slower" },
@@ -128,48 +206,104 @@ export function AppearanceSettings({
           />
         </SettingsRow>
       </SettingsGroup>
-      <SettingsGroup label="Colors">
+      <SettingsGroup
+        attention={saveStatus === "error" && lastEditedSection === "colors"} id="colors" label="Accent colors" summary={`${mainColor} · ${secondaryColor}`}
+        description="Choose colors for selection, actions, and supporting highlights."
+        actions={
+          <AppearanceReset
+            label="Reset colors"
+            detail="Restore Gyro blue and violet. Theme, size, spacing, and motion stay as you chose them."
+            disabled={
+              !onAppearanceColorsChange ||
+              (mainColor.toLowerCase() === "#0874df" &&
+                secondaryColor.toLowerCase() === "#8b6fcb")
+            }
+            onClick={() => onAppearanceColorsChange?.("#0874df", "#8b6fcb")}
+          />
+        }
+      >
         <SettingsRow
-          label="Main color"
+          label="Primary accent"
           detail="Selection, focus, and primary action color."
         >
           <AppearanceColorControl
             color={mainColor}
-            label="Main color"
+            label="Primary accent"
             onChange={(color) =>
               onAppearanceColorsChange?.(color, secondaryColor)
             }
           />
         </SettingsRow>
         <SettingsRow
-          label="Secondary color"
+          label="Secondary accent"
           detail="Supporting icons, badges, and quiet highlights."
         >
           <AppearanceColorControl
             color={secondaryColor}
-            label="Secondary color"
+            label="Secondary accent"
             onChange={(color) => onAppearanceColorsChange?.(mainColor, color)}
           />
         </SettingsRow>
-        <SettingsRow
-          label="Default palette"
-          detail="Restore Gyro blue and violet."
-        >
-          <button
-            className="gyro-color-reset"
-            disabled={
-              mainColor.toLowerCase() === "#0874df" &&
-              secondaryColor.toLowerCase() === "#8b6fcb"
-            }
-            onClick={() => onAppearanceColorsChange?.("#0874df", "#8b6fcb")}
-            type="button"
-          >
-            <RotateCcw aria-hidden="true" size={13} />
-            Reset colors
-          </button>
-        </SettingsRow>
       </SettingsGroup>
-    </>
+    </div>
+  );
+}
+
+function AppearanceReset({
+  label,
+  detail,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  detail: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      aria-label={label}
+      className="gyro-settings-group-reset"
+      disabled={disabled}
+      onClick={onClick}
+      title={detail}
+      type="button"
+    >
+      <RotateCcw aria-hidden="true" size={12} />
+      {label}
+    </button>
+  );
+}
+
+function ThemePreview({ mode }: { mode: ThemeMode }) {
+  const palettes = mode === "system" ? ["light", "dark"] : [mode];
+  return (
+    <div className={`gyro-theme-preview is-${mode}`} aria-hidden="true">
+      {palettes.map((palette) => (
+        <div
+          className={`gyro-theme-preview-workspace is-${palette}`}
+          key={palette}
+        >
+          <div className="gyro-theme-preview-sidebar">
+            <i />
+            <i />
+            <i />
+            <i />
+          </div>
+          <div className="gyro-theme-preview-main">
+            <div className="gyro-theme-preview-lines">
+              <i />
+              <i />
+              <i />
+            </div>
+            <div className="gyro-theme-preview-composer">
+              <i />
+              <i />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -63,6 +63,16 @@ assert.equal(envProvider.apiKeyRef, "provider-env:XAI_API_KEY");
 
 assert.equal(providerSupportsApiKey("xai"), true);
 assert.equal(providerApiKeyEnvName("xai"), "XAI_API_KEY");
+const staleAntigravity = resolved("antigravity", {
+  id: "antigravity",
+  authMode: "env",
+  apiKeyRef: "provider-env:GEMINI_API_KEY",
+  enabled: true,
+});
+assert.equal(staleAntigravity.authMode, "cli");
+assert.equal(staleAntigravity.apiKeyRef, "provider-cli:antigravity");
+assert.equal(providerSupportsApiKey("antigravity"), false);
+assert.equal(providerApiKeyEnvName("antigravity"), undefined);
 assert.equal(providerSupportsApiKey("ollama"), false);
 
 console.log("provider identity checks passed");

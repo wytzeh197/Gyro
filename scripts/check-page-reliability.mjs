@@ -13,6 +13,9 @@ const transpile = (path) =>
   }).outputText;
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 const boot = transpile("../apps/desktop/src/main.tsx");
+const appFailure = transpile("../apps/desktop/src/app-failure.tsx");
+const nativeAppearance = transpile("../apps/desktop/src/native-appearance.ts");
+const uiStorage = transpile("../apps/desktop/src/ui-storage.ts");
 const element = (type, props, ...children) => ({
   type,
   props: { ...props, children },
@@ -30,6 +33,7 @@ async function runBoot(surface, failure) {
     self: {},
     location: { search: "", reload: () => reloads++ },
     matchMedia: () => ({ matches: false }),
+    localStorage: { getItem: () => null },
   };
   window.top = window.self;
   runInNewContext(boot, {
@@ -45,6 +49,7 @@ async function runBoot(surface, failure) {
     },
     require: (id) => {
       if (id === "react") return { default: react };
+      if (id === "@tauri-apps/api/core") return { isTauri: () => false };
       if (id === "react-dom/client")
         return {
           default: {
@@ -54,6 +59,43 @@ async function runBoot(surface, failure) {
       if (id === "./surface-boundary")
         return { resolveBootSurface: () => surface };
       if (id === "./early-shell") return { EarlyShell: "early-shell" };
+      if (id === "./native-appearance" || id === "./ui-storage") {
+        const exports = {};
+        runInNewContext(
+          id === "./native-appearance" ? nativeAppearance : uiStorage,
+          {
+            exports,
+            window,
+            document: { documentElement: { dataset: {} } },
+            require: (dependency) => {
+              if (dependency === "@tauri-apps/api/core")
+                return { isTauri: () => false };
+              if (dependency === "@tauri-apps/api/app")
+                return {
+                  setTheme: () => {
+                    throw new Error("Browser boot must not set a native theme");
+                  },
+                };
+              throw new Error("Unexpected appearance import " + dependency);
+            },
+          },
+        );
+        return exports;
+      }
+      if (id === "./app-failure") {
+        const exports = {};
+        runInNewContext(appFailure, {
+          exports,
+          window,
+          require: (dependency) => {
+            if (dependency === "react") return { default: react };
+            throw new Error(
+              "Unexpected failure component import " + dependency,
+            );
+          },
+        });
+        return exports;
+      }
       if (id === failure) throw new Error("failed module");
       if (id === "./App") return { App: "app" };
       if (id === "./MenuBarPopover") return { MenuBarPopover: "menu" };
@@ -153,8 +195,7 @@ runInNewContext(usage, {
           return {};
         },
       };
-    if (id === "@tauri-apps/api/event")
-      return { listen: async () => () => {} };
+    if (id === "@tauri-apps/api/event") return { listen: async () => () => {} };
     if (id === "@gyro-dev/ui") return { providerSupportsUsage: () => true };
     if (id === "./provider-usage-state")
       return {

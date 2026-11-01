@@ -293,6 +293,22 @@ function Fixture() {
         <button
           onClick={() => {
             setKeepAlivePanes([]);
+            setEvents([user, tool, status]);
+          }}
+        >
+          Missing final reply
+        </button>
+        <button
+          onClick={() => {
+            setKeepAlivePanes([]);
+            setEvents([user, { ...answer, message: "" }, status]);
+          }}
+        >
+          Empty final reply
+        </button>
+        <button
+          onClick={() => {
+            setKeepAlivePanes([]);
             setEvents([user, meteredAnswer, status]);
           }}
         >
@@ -378,6 +394,7 @@ function Fixture() {
           draft={draft}
           onDraftChange={setDraft}
           onSend={() => {}}
+          onContinueChat={() => setEvents(freshLongWork())}
           terminalPanes={keepAlivePanes}
         />
       </div>

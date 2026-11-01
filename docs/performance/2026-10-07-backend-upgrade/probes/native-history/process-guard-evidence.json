@@ -1,0 +1,88 @@
+{
+  "recordedAt": "2026-10-08T16:51:55.074607+00:00",
+  "hashes": {
+    "crates/gyro-core/src/process_guard.rs": "f77c7b06ec9efe03fe802919eb48142dc5a89a480a7668748e66d5584c32665c",
+    "crates/gyro-core/src/process_guard/macos.rs": "7f20532d6fc60cb1a7def6b6ebbd757a8cfc9052b690d0a4dd1e655865d63905",
+    "crates/gyro-core/src/execution.rs": "cc7253fcd0813d622157bde76313e07a5e7ef1003ef14065bf15ca4dc7a5ebc2",
+    "crates/gyro-core/src/kimi_acp.rs": "d51e3224f072af811f542b1d855ace1ee056a7c85351428548f8ac3807967e6c",
+    "crates/gyro-core/src/lib.rs": "40cedbbe8766e0fb64263ee4edb808e3cffe0e334f3a6135312aad1a150fa94c",
+    "crates/gyro-cli/src/main.rs": "559da7cdacfc1be1136fac98132fbb87ee9819fb77df0f0f0b0c941955364397",
+    "crates/gyro-cli/src/codex_app_server.rs": "ce3951901896696e5703628722e982df66797626e0c896216326171b5d9df919",
+    "apps/desktop/src-tauri/src/main.rs": "254ac2268ac839615ba007bff630714dab8f63b5ae0d8afdea9b043fea84ff36",
+    "apps/desktop/src-tauri/src/lib.rs": "ec7ae8e58faa9b2720ed690ab3e558b27efdfe73329d95598e10281ab032c534",
+    "apps/desktop/src-tauri/src/provider_session_lifecycle.rs": "1f80bb70b69d9c378bc1a37e4c1cbb92d8091f8ae9a9de9034553f2f1f33423d",
+    "target/debug/gyro-desktop": "61d1f7e1788832bd175cd77e17a4be2c751c5fc62059f6bba559fca6469b3f34",
+    "apps/desktop/dist/index.html": "f8095acd46c50096999e1a8aa9e5e65ddad8fdf58391a3e25b2350b19655ad1b"
+  },
+  "workspaceSuite": {
+    "passed": 1075,
+    "ignored": 7,
+    "breakdown": {
+      "core": 496,
+      "desktop": 516,
+      "cliUnit": 39,
+      "cliIntegration": 23,
+      "fixtureIntegration": 1
+    }
+  },
+  "reliabilitySuite": {
+    "guards": 81,
+    "behavioral": 74,
+    "sourceText": 7,
+    "passed": true
+  },
+  "staticNativeBuild": "passed; existing running verification app was not replaced",
+  "beforeForceQuitProbe": {
+    "ownerForceQuit": true,
+    "childAliveAfterOwnerExit": true,
+    "childWroteFixtureAfterOwnerExit": true,
+    "providerAccountsUsed": false,
+    "groupCleanupOwned": true
+  },
+  "afterForceQuitProbe": {
+    "ownerForceQuit": true,
+    "childAliveAfterCleanupGrace": false,
+    "childWroteFixtureAfterOwnerExit": false,
+    "providerAccountsUsed": false,
+    "groupCleanupOwned": true
+  },
+  "ownedProbeGroupGone": true,
+  "crashProof": [
+    "authenticated private kernel peer and same executable",
+    "direct child and isolated process group verified by kernel",
+    "provider waits for watchdog registration before exec",
+    "owner force-quit exits both TERM-ignoring mock leader and child through kernel exit notifications",
+    "watchdog retains file lease while escalating cleanup",
+    "invalid ownership rejected; startup failure reaps watchdog"
+  ],
+  "launchCost": {
+    "benchmark-plain": {
+      "count": 40,
+      "medianMs": 1.009,
+      "meanMs": 1.056025,
+      "maxMs": 1.988
+    },
+    "benchmark-guarded": {
+      "count": 40,
+      "medianMs": 31.447,
+      "meanMs": 30.870575000000002,
+      "maxMs": 44.705
+    }
+  },
+  "launchCostScope": "standalone probe executable and shared runner; /usr/bin/true, 40 samples each; not native desktop or model response latency",
+  "initialFailures": [
+    "sandbox JS loopback listen denied; final escalated suite passed",
+    "ownership comparison syntax failed formatting/compile; repaired before final workspace run"
+  ],
+  "limitations": [
+    "macOS watchdog implementation verified; other platforms retain existing process-group behavior",
+    "process group cleanup covers children remaining in that group; deliberately detached processes have separate lifetime",
+    "watchdog currently launches for each command; measured fixture overhead warrants reuse within one provider run",
+    "native UI restart/scroll/performance acceptance still pending Mac unlock",
+    "two provider access families still blocked"
+  ],
+  "nativeAcceptanceAvailability": {
+    "checkedAt": "2026-10-08T16:52:34.101189+00:00",
+    "state": "Mac remains locked; manual unlock request still pending"
+  }
+}

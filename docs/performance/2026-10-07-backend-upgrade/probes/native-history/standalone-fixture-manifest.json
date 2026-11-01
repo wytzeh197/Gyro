@@ -1,0 +1,49 @@
+{
+  "fixture": true,
+  "providerRequests": 0,
+  "sessions": [
+    {
+      "events": 3601,
+      "eventsPath": "/private/tmp/gyro-history-acceptance-2026-10-08-v3/store/sessions/e0c66373-c0b4-440c-b0b2-8ec06b72e912.jsonl",
+      "id": "e0c66373-c0b4-440c-b0b2-8ec06b72e912",
+      "olderPageEvents": 400,
+      "recentEvents": 401,
+      "title": "Fixture: long history (1200 turns)",
+      "turns": 1200,
+      "workspacePath": ""
+    },
+    {
+      "events": 901,
+      "eventsPath": "/private/tmp/gyro-history-acceptance-2026-10-08-v3/store/sessions/05fe5d30-06b7-435d-a5e6-ab00b3b06488.jsonl",
+      "id": "05fe5d30-06b7-435d-a5e6-ab00b3b06488",
+      "olderPageEvents": 400,
+      "recentEvents": 401,
+      "title": "Fixture: alternate history (300 turns)",
+      "turns": 300,
+      "workspacePath": ""
+    },
+    {
+      "events": 31,
+      "eventsPath": "/private/tmp/gyro-history-acceptance-2026-10-08-v3/store/sessions/38a0b2ef-33e5-42cd-8a3a-f11959f3eab9.jsonl",
+      "id": "38a0b2ef-33e5-42cd-8a3a-f11959f3eab9",
+      "olderPageEvents": 0,
+      "recentEvents": 31,
+      "title": "Fixture: small history (10 turns)",
+      "turns": 10,
+      "workspacePath": ""
+    },
+    {
+      "events": 1,
+      "eventsPath": "/private/tmp/gyro-history-acceptance-2026-10-08-v3/store/sessions/689765c8-e82a-4023-bc75-d1ff0115e636.jsonl",
+      "id": "689765c8-e82a-4023-bc75-d1ff0115e636",
+      "olderPageEvents": 0,
+      "recentEvents": 1,
+      "title": "Fixture: empty history",
+      "turns": 0,
+      "workspacePath": ""
+    }
+  ],
+  "store": "/private/tmp/gyro-history-acceptance-2026-10-08-v3/store",
+  "toolsExecuted": 0,
+  "workspace": "/private/tmp/gyro-history-acceptance-2026-10-08-v3/history-project"
+}

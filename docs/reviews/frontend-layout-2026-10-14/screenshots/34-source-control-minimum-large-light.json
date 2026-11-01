@@ -1,0 +1,397 @@
+{
+  "bodyWidth": 860,
+  "controls": [
+    {
+      "className": "",
+      "label": "Explorer",
+      "rect": {
+        "bottom": 84,
+        "height": 36,
+        "right": 40,
+        "width": 36,
+        "x": 4,
+        "y": 48
+      }
+    },
+    {
+      "className": "",
+      "label": "Search",
+      "rect": {
+        "bottom": 123,
+        "height": 36,
+        "right": 40,
+        "width": 36,
+        "x": 4,
+        "y": 87
+      }
+    },
+    {
+      "className": "is-active",
+      "label": "Source Control, 9 changes",
+      "rect": {
+        "bottom": 162,
+        "height": 36,
+        "right": 40,
+        "width": 36,
+        "x": 4,
+        "y": 126
+      }
+    },
+    {
+      "className": "",
+      "label": "Run and Test",
+      "rect": {
+        "bottom": 201,
+        "height": 36,
+        "right": 40,
+        "width": 36,
+        "x": 4,
+        "y": 165
+      }
+    },
+    {
+      "className": "",
+      "label": "AI",
+      "rect": {
+        "bottom": 240,
+        "height": 36,
+        "right": 40,
+        "width": 36,
+        "x": 4,
+        "y": 204
+      }
+    },
+    {
+      "className": "",
+      "label": "Settings",
+      "rect": {
+        "bottom": 614,
+        "height": 36,
+        "right": 40,
+        "width": 36,
+        "x": 4,
+        "y": 578
+      }
+    },
+    {
+      "className": "gyro-titlebar-switch-option",
+      "label": "Sessions",
+      "rect": {
+        "bottom": 37.4375,
+        "height": 25.890625,
+        "right": 136,
+        "width": 44,
+        "x": 92,
+        "y": 11.546875
+      }
+    },
+    {
+      "className": "gyro-titlebar-switch-option is-active",
+      "label": "Workspace",
+      "rect": {
+        "bottom": 37.4375,
+        "height": 25.890625,
+        "right": 180,
+        "width": 44,
+        "x": 136,
+        "y": 11.546875
+      }
+    },
+    {
+      "className": "",
+      "label": "Refresh source control and check GitHub",
+      "rect": {
+        "bottom": 136.40625,
+        "height": 22,
+        "right": 172,
+        "width": 22,
+        "x": 150,
+        "y": 114.40625
+      }
+    },
+    {
+      "className": "gyro-scm-branch-trigger",
+      "label": "main",
+      "rect": {
+        "bottom": 138.40625,
+        "height": 26,
+        "right": 387,
+        "width": 208,
+        "x": 179,
+        "y": 112.40625
+      }
+    },
+    {
+      "className": "",
+      "label": "Source control message",
+      "rect": {
+        "bottom": 178.40625,
+        "height": 30,
+        "right": 387,
+        "width": 327,
+        "x": 60,
+        "y": 148.40625
+      }
+    },
+    {
+      "className": "",
+      "label": "Commit",
+      "rect": {
+        "bottom": 212.40625,
+        "height": 28,
+        "right": 387,
+        "width": 327,
+        "x": 60,
+        "y": 184.40625
+      }
+    },
+    {
+      "className": "",
+      "label": "Push1↑",
+      "rect": {
+        "bottom": 251.59375,
+        "height": 32.1875,
+        "right": 387,
+        "width": 100.03125,
+        "x": 286.96875,
+        "y": 219.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-scm-group-toggle",
+      "label": "Collapse Staged Changes",
+      "rect": {
+        "bottom": 322.40625,
+        "height": 20,
+        "right": 78,
+        "width": 20,
+        "x": 58,
+        "y": 302.40625
+      }
+    },
+    {
+      "className": "",
+      "label": "Unstage all staged changes",
+      "rect": {
+        "bottom": 322.40625,
+        "height": 20,
+        "right": 363,
+        "width": 20,
+        "x": 343,
+        "y": 302.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-scm-identity",
+      "label": "Open diff for src/legacy/retry.js",
+      "rect": {
+        "bottom": 347.40625,
+        "height": 21,
+        "right": 344,
+        "width": 284,
+        "x": 60,
+        "y": 326.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-scm-identity",
+      "label": "Open diff for src/sync.js",
+      "rect": {
+        "bottom": 370.40625,
+        "height": 21,
+        "right": 344,
+        "width": 284,
+        "x": 60,
+        "y": 349.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-scm-group-toggle",
+      "label": "Collapse Uncommitted changes",
+      "rect": {
+        "bottom": 399.40625,
+        "height": 20,
+        "right": 78,
+        "width": 20,
+        "x": 58,
+        "y": 379.40625
+      }
+    },
+    {
+      "className": "",
+      "label": "Stage all changes",
+      "rect": {
+        "bottom": 399.40625,
+        "height": 20,
+        "right": 354,
+        "width": 20,
+        "x": 334,
+        "y": 379.40625
+      }
+    },
+    {
+      "className": "",
+      "label": "Select all source control changes",
+      "rect": {
+        "bottom": 399.40625,
+        "height": 20,
+        "right": 374,
+        "width": 20,
+        "x": 354,
+        "y": 379.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-scm-identity",
+      "label": "Open diff for docs/notes.md",
+      "rect": {
+        "bottom": 424.40625,
+        "height": 21,
+        "right": 355,
+        "width": 295,
+        "x": 60,
+        "y": 403.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-scm-identity",
+      "label": "Open diff for package.json",
+      "rect": {
+        "bottom": 447.40625,
+        "height": 21,
+        "right": 355,
+        "width": 295,
+        "x": 60,
+        "y": 426.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-scm-identity",
+      "label": "Open diff for src/app.tsx",
+      "rect": {
+        "bottom": 470.40625,
+        "height": 21,
+        "right": 355,
+        "width": 295,
+        "x": 60,
+        "y": 449.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-scm-identity",
+      "label": "Open diff for src/queue/backoff.js",
+      "rect": {
+        "bottom": 493.40625,
+        "height": 21,
+        "right": 355,
+        "width": 295,
+        "x": 60,
+        "y": 472.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-scm-identity",
+      "label": "Open diff for src/sync.js",
+      "rect": {
+        "bottom": 516.40625,
+        "height": 21,
+        "right": 355,
+        "width": 295,
+        "x": 60,
+        "y": 495.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-scm-identity",
+      "label": "Open diff for src/sync.test.js",
+      "rect": {
+        "bottom": 539.40625,
+        "height": 21,
+        "right": 355,
+        "width": 295,
+        "x": 60,
+        "y": 518.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-scm-identity",
+      "label": "Open diff for src/theme.css",
+      "rect": {
+        "bottom": 562.40625,
+        "height": 21,
+        "right": 355,
+        "width": 295,
+        "x": 60,
+        "y": 541.40625
+      }
+    },
+    {
+      "className": "gyro-sidebar-scm-group-toggle",
+      "label": "Expand GitHub details",
+      "rect": {
+        "bottom": 600,
+        "height": 18,
+        "right": 72,
+        "width": 12,
+        "x": 60,
+        "y": 582
+      }
+    },
+    {
+      "className": "",
+      "label": "Refresh GitHub",
+      "rect": {
+        "bottom": 600,
+        "height": 18,
+        "right": 386,
+        "width": 20,
+        "x": 366,
+        "y": 582
+      }
+    },
+    {
+      "className": "is-empty",
+      "label": "No file selected",
+      "rect": {
+        "bottom": 33.5,
+        "height": 33.5,
+        "right": 542.390625,
+        "width": 138.390625,
+        "x": 404,
+        "y": 0
+      }
+    },
+    {
+      "className": "gyro-scm-branch-trigger",
+      "label": "main",
+      "rect": {
+        "bottom": 615.546875,
+        "height": 20,
+        "right": 484.75,
+        "width": 74.75,
+        "x": 410,
+        "y": 595.546875
+      }
+    },
+    {
+      "className": "gyro-editor-statusbar-panel-toggle",
+      "label": "Open the workspace panel",
+      "rect": {
+        "bottom": 615.890625,
+        "height": 20.6875,
+        "right": 850,
+        "width": 25.296875,
+        "x": 824.703125,
+        "y": 595.203125
+      }
+    }
+  ],
+  "htmlWidth": 860,
+  "overlaps": [],
+  "popovers": [],
+  "theme": "light",
+  "viewport": {
+    "height": 620,
+    "width": 860
+  }
+}

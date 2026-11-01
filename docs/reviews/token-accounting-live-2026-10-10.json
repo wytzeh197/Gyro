@@ -1,0 +1,85 @@
+{
+  "schema": "gyro.token-accounting-evidence.v1",
+  "checkedAt": "2026-10-10T16:37:42.083Z",
+  "runtimePath": "CLI ACP",
+  "providerId": "xai",
+  "requestedModel": "grok-4.7",
+  "generationPassed": true,
+  "receipts": [
+    {
+      "turnId": "49deb7ad-2e2d-49b7-ac5b-bc322c12454e",
+      "payload": {
+        "accountingVersion": 1,
+        "kind": "provider-turn-tokens",
+        "turnTokens": {
+          "accounting": {
+            "coverage": "complete",
+            "known": {
+              "cacheRead": true,
+              "cacheWrite": true,
+              "input": true,
+              "output": true,
+              "reasoning": true
+            },
+            "scope": "task",
+            "source": "provider"
+          },
+          "cacheWriteTokens": 0,
+          "cachedInputTokens": 1664,
+          "inputTokens": 17632,
+          "measured": true,
+          "outputTokens": 40,
+          "reasoningOutputTokens": 36,
+          "totalTokens": 17672
+        },
+        "usageObservations": [
+          {
+            "contract": "grok-prompt",
+            "modelCalls": 1,
+            "modelUsage": [],
+            "provenance": "PromptResponse._meta.usage",
+            "runtime": {
+              "agentName": null,
+              "agentVersion": "1.0.50",
+              "modelId": "grok-4.7",
+              "protocolVersion": 1
+            },
+            "tokens": {
+              "accounting": {
+                "coverage": "complete",
+                "known": {
+                  "cacheRead": true,
+                  "cacheWrite": true,
+                  "input": true,
+                  "output": true,
+                  "reasoning": true
+                },
+                "scope": "turn",
+                "source": "provider"
+              },
+              "cacheWriteTokens": 0,
+              "cachedInputTokens": 1664,
+              "inputTokens": 17632,
+              "measured": true,
+              "outputTokens": 40,
+              "reasoningOutputTokens": 36,
+              "totalTokens": 17672
+            },
+            "usageIsIncomplete": false
+          }
+        ]
+      }
+    }
+  ],
+  "ledger": [
+    {
+      "providerId": "xai",
+      "modelId": "grok-4.7",
+      "turnId": "49deb7ad-2e2d-49b7-ac5b-bc322c12454e",
+      "totalTokens": 17672,
+      "measured": 1,
+      "outcome": "done"
+    }
+  ],
+  "reconciled": true
+}

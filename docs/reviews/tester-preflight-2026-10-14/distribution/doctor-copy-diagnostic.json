@@ -1,0 +1,32 @@
+[
+  {
+    "label": "git",
+    "status": 0,
+    "stdout": "git version 2.50.1 (Apple Git-155)\n",
+    "stderr": ""
+  },
+  {
+    "label": "source-doctor",
+    "status": 0,
+    "stdout": "{\n  \"schema\": \"gyro.cli.v1\",\n  \"checks\": [\n    {\n      \"id\": \"git\",\n      \"label\": \"Git\",\n      \"status\": \"pass\",\n      \"message\": \"git version 2.50.1 (Apple Git-155)\",\n      \"required\": true\n    },\n    {\n      \"id\": \"shell\",\n      \"label\": \"Default shell\",\n      \"status\": \"pass\",\n      \"message\": \"/bin/zsh\",\n      \"required\": false\n    },\n    {\n      \"id\": \"desktop-app\",\n      \"label\": \"Gyro.app\",\n      \"status\": \"warn\",\n      \"message\": \"Gyro.app was not found in /Applications or ~/Applications\",\n      \"required\": false,\n      \"next\": \"install Gyro.app for visual handoff, or continue using the CLI on its own\"\n    },\n    {\n      \"id\": \"update-source\",\n      \"label\": \"Update source\",\n      \"status\": \"pass\",\n      \"message\": \"Stable via GitHub Releases\",\n      \"required\": true\n    },\n    {\n      \"id\": \"model-provider\",\n      \"label\": \"Model provider\",\n      \"status\": \"warn\",\n      \"message\": \"No model provider is enabled yet\",\n      \"required\": false,\n      \"next\": \"run `gyro config enable-provider openai` or connect a provider in Gyro.app\"\n    },\n    {\n      \"id\": \"storage\",\n      \"label\": \"Local storage\",\n      \"status\": \"pass\",\n      \"message\": \"/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-doctor-dist-diag-ixwSJN/home/Library/Application Support/Gyro\",\n      \"required\": true\n    }\n  ]\n}\n",
+    "stderr": ""
+  },
+  {
+    "label": "copy-doctor",
+    "status": 3,
+    "stdout": "{\n  \"schema\": \"gyro.cli.v1\",\n  \"checks\": [\n    {\n      \"id\": \"git\",\n      \"label\": \"Git\",\n      \"status\": \"fail\",\n      \"message\": \"start git\",\n      \"required\": true,\n      \"next\": \"install Git and confirm `git --version` succeeds\"\n    },\n    {\n      \"id\": \"shell\",\n      \"label\": \"Default shell\",\n      \"status\": \"pass\",\n      \"message\": \"/bin/zsh\",\n      \"required\": false\n    },\n    {\n      \"id\": \"desktop-app\",\n      \"label\": \"Gyro.app\",\n      \"status\": \"warn\",\n      \"message\": \"Gyro.app was not found in /Applications or ~/Applications\",\n      \"required\": false,\n      \"next\": \"install Gyro.app for visual handoff, or continue using the CLI on its own\"\n    },\n    {\n      \"id\": \"update-source\",\n      \"label\": \"Update source\",\n      \"status\": \"pass\",\n      \"message\": \"Stable via GitHub Releases\",\n      \"required\": true\n    },\n    {\n      \"id\": \"model-provider\",\n      \"label\": \"Model provider\",\n      \"status\": \"warn\",\n      \"message\": \"No model provider is enabled yet\",\n      \"required\": false,\n      \"next\": \"run `gyro config enable-provider openai` or connect a provider in Gyro.app\"\n    },\n    {\n      \"id\": \"storage\",\n      \"label\": \"Local storage\",\n      \"status\": \"pass\",\n      \"message\": \"/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-doctor-dist-diag-ixwSJN/home/Library/Application Support/Gyro\",\n      \"required\": true\n    }\n  ]\n}\n",
+    "stderr": ""
+  },
+  {
+    "label": "source-signature",
+    "status": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "label": "copy-signature",
+    "status": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+]
