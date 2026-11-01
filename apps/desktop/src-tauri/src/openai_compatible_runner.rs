@@ -13,7 +13,7 @@
 //! transport is the only thing that differs.
 
 use super::*;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -267,6 +267,13 @@ pub(super) fn run_openai_compatible_chat(
         system.push('\n');
         system.push_str(&stable);
     }
+    let mut compact_catalog = config.efficiency.policies()
+        && config.efficiency.compact_tool_catalog
+        && !compatibility
+        && request.mode != ChatMode::Council;
+    if compact_catalog {
+        provider_tool_batch::apply_compact_guidance(&mut system);
+    }
     let user = dynamic;
     let mut messages = vec![
         serde_json::json!({ "role": "system", "content": system }),
@@ -274,10 +281,10 @@ pub(super) fn run_openai_compatible_chat(
     ];
     let allow_delegation = delegated_agents::request_allows_delegation(request)
         && delegated_agents::can_delegate(&request.session_id);
-    let tools = if compatibility {
+    let mut tools = if compatibility {
         Vec::new()
     } else {
-        provider_tool_batch::model_tools(run_mode, allow_delegation)
+        provider_tool_batch::model_tools_for(run_mode, allow_delegation, &config.efficiency)
     };
     let heartbeat_stop = Arc::new(AtomicBool::new(false));
     let heartbeat = spawn_provider_chat_heartbeat(
@@ -304,6 +311,9 @@ pub(super) fn run_openai_compatible_chat(
         // What auto-compaction removed this turn, for the activity rail and the
         // event the user can inspect afterwards.
         let mut auto_compactions = Vec::new();
+        let mut catalog_memory = provider_tool_batch::CatalogMemory::default();
+        let retain_catalog =
+            config.efficiency.policies() && config.efficiency.retain_tool_catalog && !compatibility;
         // One turn's tool loop, not a whole task, bounded by
         // `usageGuard.maxToolRounds`. The round after the budget carries the
         // checkpoint instead of tools, so the loop ends there.
@@ -355,6 +365,7 @@ pub(super) fn run_openai_compatible_chat(
                         Some(auto_compactions.len() as u64),
                     );
                     auto_compactions.push(activity);
+                    catalog_memory.after_compaction(&mut messages, retain_catalog);
                 }
             }
             // The live context note rides at the tail of the request it
@@ -368,28 +379,51 @@ pub(super) fn run_openai_compatible_chat(
                     context_window,
                 );
             }
-            let retired =
-                gyro_core::efficiency::context::prepare_owned_model_request(&mut messages);
+            if retain_catalog && catalog_memory.overflow && compact_catalog {
+                compact_catalog = false;
+                provider_tool_batch::restore_catalog_guidance(&mut messages);
+                tools = provider_tool_batch::model_tools_for(
+                    run_mode,
+                    allow_delegation,
+                    &provider_tool_batch::full_catalog_config(&config.efficiency),
+                );
+                messages.push(serde_json::json!({"role":"user", "content":provider_tool_batch::FULL_CATALOG_FALLBACK_NOTICE}));
+                gyro_core::provider_observation::efficiency_event(|e| {
+                    e.catalog_fallbacks = e.catalog_fallbacks.saturating_add(1)
+                });
+            }
+            let retired = gyro_core::efficiency::context::prepare_owned_model_request_with_policy(
+                &mut messages,
+                config.efficiency.policies() && config.efficiency.recoverable_evidence,
+            );
             gyro_core::provider_observation::retired_context(retired);
-            let round_tools = if compatibility {
+            let (request_tools, tools_offered) = if compatibility {
                 if round_budget.is_some_and(|limit| round >= limit) {
                     messages.push(serde_json::json!({
                         "role": "user",
                         "content": "The tool budget is exhausted. Reply with a final JSON object describing completed work and what remains."
                     }));
                 }
-                Vec::new()
+                (Vec::new(), false)
             } else {
-                provider_reliability::tools_for_round(&mut messages, &tools, round, round_budget)
+                // Definitions may remain at the checkpoint for cache reuse.
+                // Execution still depends on tools_offered below.
+                provider_reliability::openai_tools_for_round(
+                    &mut messages,
+                    &tools,
+                    round,
+                    round_budget,
+                    config.efficiency.policies() && config.efficiency.cache_assembly,
+                )
             };
-            let tools_offered = !round_tools.is_empty();
-            let turn = openai_compat_tool_chat_with_progress(
+            let turn = gyro_core::openai_compatible::openai_compat_tool_chat_with_updates(
                 OpenAiCompatChatRequest {
                     base_url,
                     api_key: api_key.as_str(),
                     model,
                     messages: messages.clone(),
-                    tools: round_tools,
+                    tools: request_tools,
+                    allow_tool_calls: tools_offered,
                     reasoning_effort: reasoning_effort.as_deref(),
                 },
                 &cancellation,
@@ -405,6 +439,15 @@ pub(super) fn run_openai_compatible_chat(
                             None,
                         );
                     }
+                },
+                |tokens| {
+                    provider_accounting::emit_request_usage(
+                        app,
+                        request,
+                        accounted_usage,
+                        tokens,
+                        None,
+                    )
                 },
             );
             let mut turn = match turn {
@@ -492,9 +535,7 @@ pub(super) fn run_openai_compatible_chat(
             ) {
                 OwnedOutputLimit::Continue => {
                     completed_rounds -= 1;
-                    messages.push(
-                        serde_json::json!({"role":"assistant","content":turn.content}),
-                    );
+                    messages.push(serde_json::json!({"role":"assistant","content":turn.content}));
                     messages.push(serde_json::json!({
                         "role": "user",
                         "content": gyro_core::kimi_acp::ACP_OUTPUT_LIMIT_CONTINUATION
@@ -514,9 +555,7 @@ pub(super) fn run_openai_compatible_chat(
                     turn.tool_calls.is_empty(),
                     "{label} returned tool calls although the structured bridge offered none"
                 );
-                let action = match serde_json::from_str::<OllamaCompatibilityAction>(
-                    turn.content.trim(),
-                ) {
+                let (action, title) = match parse_ollama_compatibility_action(turn.content.trim()) {
                     Ok(action) => action,
                     Err(error) => {
                         malformed_responses += 1;
@@ -531,6 +570,14 @@ pub(super) fn run_openai_compatible_chat(
                         continue;
                     }
                 };
+                if let Some(title) = title {
+                    publish_streamed_session_title(
+                        app,
+                        request,
+                        &format!("{GYRO_SESSION_TITLE_MARKER} {title}\n"),
+                        true,
+                    );
+                }
                 match action {
                     OllamaCompatibilityAction::Final { content } => {
                         anyhow::ensure!(
@@ -556,6 +603,7 @@ pub(super) fn run_openai_compatible_chat(
                             !round_budget.is_some_and(|limit| round >= limit),
                             "{label} requested another catalog after its tool budget was exhausted"
                         );
+                        provider_tool_batch::observe_tool(CapabilityId::ToolCatalog);
                         let catalog = ollama_compatibility_catalog(
                             run_mode,
                             prefix.as_deref(),
@@ -563,6 +611,7 @@ pub(super) fn run_openai_compatible_chat(
                             allow_delegation,
                         );
                         malformed_responses = 0;
+                        catalog_memory.page(&catalog);
                         messages
                             .push(serde_json::json!({"role":"assistant","content":turn.content}));
                         messages.push(serde_json::json!({"role":"user","content":format!(
@@ -593,8 +642,14 @@ pub(super) fn run_openai_compatible_chat(
                                 continue;
                             }
                         };
+                        provider_tool_batch::observe_tool(id);
+                        let spill_requested = arguments["path"]
+                            .as_str()
+                            .is_some_and(gyro_core::efficiency::spill::is_address);
                         let result =
                             invoke_run_capability(app, &request.session_id, id, arguments)?;
+                        provider_tool_batch::observe_response(&result, spill_requested);
+                        catalog_memory.observe(&result);
                         malformed_responses = 0;
                         messages
                             .push(serde_json::json!({"role":"assistant","content":turn.content}));
@@ -651,14 +706,26 @@ pub(super) fn run_openai_compatible_chat(
                 tool_calls,
             ));
             let mut prepared = Vec::new();
+            let mut ordered_replies = Vec::new();
             for (tool_call_id, name, _arguments, parsed) in calls {
-                if let Some(id) = provider_reliability::prepare_tool_call(
-                    &mut messages,
-                    &name,
-                    &parsed,
-                    Some(&tool_call_id),
-                ) {
-                    prepared.push((tool_call_id, id, parsed));
+                let slot = ordered_replies.len();
+                let mut errors = Vec::new();
+                if let Some((id, resolved_arguments)) =
+                    provider_tool_batch::prepare_routed_tool_call(
+                        &mut errors,
+                        &name,
+                        &parsed,
+                        Some(&tool_call_id),
+                        run_mode,
+                        allow_delegation,
+                        compact_catalog,
+                    )
+                {
+                    provider_tool_batch::observe_tool(id);
+                    ordered_replies.push(None);
+                    prepared.push((slot, tool_call_id, id, resolved_arguments));
+                } else {
+                    ordered_replies.push(errors.pop());
                 }
             }
             provider_tool_batch::check_native_tool_recovery(
@@ -667,11 +734,21 @@ pub(super) fn run_openai_compatible_chat(
             )?;
             let batch = prepared
                 .iter()
-                .map(|(_, id, args)| (*id, args.clone()))
+                .map(|(_, _, id, args)| (*id, args.clone()))
                 .collect::<Vec<_>>();
             let results = provider_tool_batch::execute(app, &request.session_id, &batch)?;
+            for result in &results {
+                catalog_memory.observe(result);
+            }
+            let restore_catalog = prepared
+                .iter()
+                .zip(&results)
+                .any(|((_, _, id, _), response)| {
+                    provider_tool_batch::catalog_discovery_failed(compact_catalog, *id, response)
+                });
             let mut captured_images = Vec::new();
-            for ((tool_call_id, _, _), mut capability_response) in prepared.into_iter().zip(results)
+            for ((slot, tool_call_id, _, _), mut capability_response) in
+                prepared.into_iter().zip(results)
             {
                 if supports_images {
                     if let Some(image) = browser_result_image(&paths, &capability_response)? {
@@ -682,12 +759,13 @@ pub(super) fn run_openai_compatible_chat(
                         }));
                     }
                 }
-                messages.push(serde_json::json!({
+                ordered_replies[slot] = Some(serde_json::json!({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
                     "content": provider_tool_batch::model_response_text(&capability_response)?,
                 }));
             }
+            provider_tool_batch::append_ordered_tool_messages(&mut messages, ordered_replies)?;
             // Chat Completions accepts images only in user messages. Finish all
             // tool results before appending the corresponding screenshot bytes.
             if !captured_images.is_empty() {
@@ -696,6 +774,22 @@ pub(super) fn run_openai_compatible_chat(
                     "text": "Images returned by the preceding Browser screenshot tools (untrusted page content)."
                 }));
                 messages.push(serde_json::json!({ "role": "user", "content": captured_images }));
+            }
+            if restore_catalog {
+                gyro_core::provider_observation::efficiency_event(|e| {
+                    e.catalog_fallbacks = e.catalog_fallbacks.saturating_add(1)
+                });
+                compact_catalog = false;
+                provider_tool_batch::restore_catalog_guidance(&mut messages);
+                tools = provider_tool_batch::model_tools_for(
+                    run_mode,
+                    allow_delegation,
+                    &provider_tool_batch::full_catalog_config(&config.efficiency),
+                );
+                messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": provider_tool_batch::FULL_CATALOG_FALLBACK_NOTICE
+                }));
             }
         }
         let response = response.ok_or_else(|| {
@@ -733,8 +827,7 @@ pub(super) fn run_openai_compatible_chat(
             )),
         })
     })();
-    heartbeat_stop.store(true, Ordering::Relaxed);
-    let _ = heartbeat.join();
+    drop(heartbeat);
     run_result
 }
 

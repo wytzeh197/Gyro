@@ -83,11 +83,13 @@ assert.equal(
 assert.equal(pending.length, 0);
 
 let config;
+let configLoaded = false;
 let finishDiscovery;
 const refreshConfig = hook("refreshConfig", "selectDestination", {
   setConfig: (value) => {
     config = typeof value === "function" ? value(config) : value;
   },
+  setConfigLoaded: (value) => { configLoaded = value; },
   setActiveProfileId: () => {},
   providersForConfig: (value) => value.modelProviders,
   withCouncilConfig: (value) => value,
@@ -110,6 +112,7 @@ const refreshConfig = hook("refreshConfig", "selectDestination", {
   },
 });
 await refreshConfig();
+assert.equal(configLoaded, true, "startup marks config ready before optional discovery");
 assert.equal(
   config.preference,
   "original",

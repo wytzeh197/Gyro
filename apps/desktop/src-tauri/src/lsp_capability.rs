@@ -748,7 +748,14 @@ mod tests {
             }
         ]);
         let path = std::path::Path::new("src/lib.rs");
-        let (entries, total) = format_entries(path, &result, CodePage { offset: 0, limit: 10 });
+        let (entries, total) = format_entries(
+            path,
+            &result,
+            CodePage {
+                offset: 0,
+                limit: 10,
+            },
+        );
         assert_eq!(total, 2);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0]["startLine"], 1);
@@ -758,7 +765,14 @@ mod tests {
         assert_eq!(entries[1]["startLine"], 5);
         assert_eq!(entries[1]["startColumn"], 3);
 
-        let (paged, total) = format_entries(path, &result, CodePage { offset: 1, limit: 1 });
+        let (paged, total) = format_entries(
+            path,
+            &result,
+            CodePage {
+                offset: 1,
+                limit: 1,
+            },
+        );
         assert_eq!(total, 2);
         assert_eq!(paged.len(), 1);
         assert_eq!(paged[0]["startLine"], 5);
@@ -769,7 +783,10 @@ mod tests {
         let (entries, total) = format_entries(
             std::path::Path::new("src/lib.rs"),
             &serde_json::Value::Null,
-            CodePage { offset: 0, limit: 10 },
+            CodePage {
+                offset: 0,
+                limit: 10,
+            },
         );
         assert!(entries.is_empty());
         assert_eq!(total, 0);

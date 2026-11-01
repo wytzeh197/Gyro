@@ -10,7 +10,7 @@ import {
   type ProviderId,
   type ReasoningEffort,
 } from "@gyro-dev/ui";
-import catalog from "../../../site/model-catalog.json";
+import catalog from "../../../catalog/model-catalog.json";
 import "@gyro-dev/ui/styles.css";
 
 // Restore a local catalog through the same exported client used by the app.

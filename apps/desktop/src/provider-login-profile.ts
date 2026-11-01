@@ -1,6 +1,15 @@
 import type { CommandProfile, ProviderId } from "@gyro-dev/ui";
 
 export function providerLoginProfile(providerId: ProviderId): CommandProfile {
+  if (providerId === "antigravity") {
+    return {
+      args: [],
+      command: "agy",
+      displayName: "Antigravity Login",
+      id: "antigravity-login",
+      workingDirectory: null,
+    };
+  }
   if (providerId === "anthropic") {
     return {
       args: ["auth", "login"],
@@ -98,6 +107,7 @@ export function providerInstallProfile(
 }
 
 const PROVIDER_CLI_NAMES: Partial<Record<ProviderId, string>> = {
+  antigravity: "Antigravity CLI",
   anthropic: "Claude Code",
   cursor: "Cursor Agent",
   gemini: "Gemini CLI",

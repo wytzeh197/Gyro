@@ -1,6 +1,13 @@
 import { FileDiff, Files, GitPullRequest } from "lucide-react";
 import "./review-design.css";
-import { useEffect, useId, useMemo, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ReviewFileNavigator } from "./review-file-navigator";
 import { PlainDiffView } from "./plain-diff-view.tsx";
 import { totalFileChangeCounts } from "./file-change-counts.ts";
@@ -51,7 +58,29 @@ export function GitComparisonReview({
     [scope, sourceControl, turnFiles],
   );
   const [selectedPath, setSelectedPath] = useState<string>();
-  const [showFiles, setShowFiles] = useState(true);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(true);
+  const [filesChoice, setFilesChoice] = useState<boolean | undefined>(() => {
+    try {
+      const saved = localStorage.getItem("gyro.review.show-files");
+      return saved === "true" ? true : saved === "false" ? false : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  const showFiles = filesChoice ?? !compact;
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const measure = () => {
+      const width = root.getBoundingClientRect().width;
+      if (width > 0) setCompact(width < 560);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
   const fileListId = useId();
   const selected =
     listing.files.find((file) => file.path === selectedPath) ??
@@ -71,6 +100,7 @@ export function GitComparisonReview({
 
   return (
     <div
+      ref={rootRef}
       className={[
         "gyro-comparison-review",
         "gyro-git-comparison-review",
@@ -80,22 +110,37 @@ export function GitComparisonReview({
         .join(" ")}
     >
       <header className="gyro-review-scope" aria-label="Comparison scope">
-        <strong>{reviewScopeTitle(scope)}</strong>
-        {hasFiles ? (
-          <span>
-            <FileChangeCountBadges counts={totals} />
-            {" · "}
-            {listing.files.length}{" "}
-            {listing.files.length === 1 ? "file" : "files"}
-          </span>
-        ) : null}
+        <div className="gyro-review-identity">
+          <strong title={selected?.path}>
+            {selected
+              ? workspaceRelativeFilePath(selected.path, workspacePath)
+              : reviewScopeTitle(scope)}
+          </strong>
+          {hasFiles ? (
+            <span>
+              <span>{reviewScopeTitle(scope)}</span>
+              <FileChangeCountBadges counts={totals} />
+              {" · "}
+              {listing.files.length}{" "}
+              {listing.files.length === 1 ? "file" : "files"}
+            </span>
+          ) : null}
+        </div>
         {hasFiles ? (
           <button
             className="gyro-review-files-toggle"
             type="button"
             aria-controls={fileListId}
             aria-expanded={showFiles}
-            onClick={() => setShowFiles((current) => !current)}
+            onClick={() => {
+              const next = !showFiles;
+              setFilesChoice(next);
+              try {
+                localStorage.setItem("gyro.review.show-files", String(next));
+              } catch {
+                // Keep the in-memory choice when storage is unavailable.
+              }
+            }}
             title={showFiles ? "Hide changed files" : "Show changed files"}
           >
             <Files size={14} aria-hidden="true" />
@@ -163,8 +208,8 @@ function ScopedDiffPane({
       <div className="gyro-diff-review-toolbar">
         <strong>
           {showCurrent
-            ? "Current working tree comparison"
-            : "Recorded changes from this turn"}
+            ? "Current working tree"
+            : "Recorded turn"}
         </strong>
         <div className="gyro-recorded-diff-controls">
           {!showCurrent && patches.length > 1 ? (
@@ -195,7 +240,6 @@ function ScopedDiffPane({
         <PlainDiffView
           key={selectedEdit}
           diff={patches[selectedEdit]!}
-          notice={`Recorded edit ${selectedEdit + 1} of ${patches.length}`}
         />
       ) : (
         <div className="gyro-diff-empty-state">

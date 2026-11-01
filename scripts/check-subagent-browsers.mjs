@@ -429,7 +429,7 @@ assert.equal(
   true,
 );
 assert.equal(installedEvents.at(-1).type, "click");
-assert.match(browser, /if snapshot.background_only \{\s*return call_agent\(/);
+assert.match(browser, /if snapshot.background_only \|\| !snapshot.visible \{\s*return call_agent\(/);
 assert.match(browser, /if manager.background_only\(session_id\)\? \{/);
 assert.match(
   browser,

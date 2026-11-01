@@ -364,5 +364,56 @@
   "check-workspace-syntax-browser.mjs": {
     "kind": "behavioral",
     "note": "Drives production Monaco panes in StrictMode; checks rendered themes, local assets, offline edits and fault recovery."
+  },
+  "check-first-run-tour-browser.mjs": {
+    "kind": "behavioral"
+  },
+  "check-companion-polish-browser.mjs": {
+    "kind": "behavioral"
+  },
+  "check-workspace-context-bridge.mjs": {
+    "kind": "behavioral"
+  },
+  "check-local-check-browser.mjs": {
+    "kind": "behavioral"
+  },
+  "check-ide-evidence-push.mjs": {
+    "kind": "behavioral"
+  },
+  "check-capability-labels.mjs": {
+    "kind": "behavioral"
+  },
+  "check-assistant-response-headings.mjs": {
+    "kind": "behavioral"
+  },
+  "check-workspace-roots.mjs": {
+    "kind": "behavioral"
+  },
+  "check-efficiency-repo-pilot.mjs": {
+    "kind": "behavioral"
+  },
+  "check-chat-image-reliability.mjs": {
+    "kind": "behavioral"
+  },
+  "check-workspace-search-run.mjs": {
+    "kind": "behavioral"
+  },
+  "check-settings-upgrade.mjs": {
+    "kind": "behavioral"
+  },
+  "check-provider-login-progress.mjs": {
+    "kind": "behavioral"
+  },
+  "check-dictation.mjs": {
+    "kind": "behavioral"
+  },
+  "check-model-default-suggestion.mjs": {
+    "kind": "behavioral"
+  },
+  "check-webview-dialogs.mjs": {
+    "kind": "behavioral"
+  },
+  "check-workspace-explorer-refresh.mjs": {
+    "kind": "behavioral"
   }
 }

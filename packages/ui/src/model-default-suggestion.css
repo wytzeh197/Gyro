@@ -1,0 +1,151 @@
+/* A local suggestion, not a modal: only the card occupies pointer space. */
+:root[data-theme] .gyro-model-default-suggestion {
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-lg);
+  bottom: var(--gyro-space-section);
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.18),
+    0 2px 8px rgba(0, 0, 0, 0.08);
+  box-sizing: border-box;
+  color: var(--gyro-text);
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  padding: var(--gyro-space-panel);
+  position: fixed;
+  right: var(--gyro-space-section);
+  width: min(380px, calc(100vw - 40px));
+  z-index: 30;
+}
+
+:root[data-theme] .gyro-model-default-provider {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: var(--gyro-font-micro);
+  gap: var(--gyro-space-standard);
+  margin-bottom: var(--gyro-space-standard);
+  padding-right: 28px;
+}
+
+:root[data-theme] .gyro-model-default-provider .gyro-provider-logo {
+  height: 16px;
+  width: 16px;
+}
+
+:root[data-theme] .gyro-model-default-suggestion h2 {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-lead);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  margin: 0 0 var(--gyro-space-standard);
+  overflow-wrap: anywhere;
+}
+
+:root[data-theme] .gyro-model-default-suggestion p {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  line-height: 1.55;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+:root[data-theme] .gyro-model-default-suggestion .gyro-model-default-evidence {
+  margin-bottom: var(--gyro-space-standard);
+}
+
+:root[data-theme] .gyro-model-default-suggestion .gyro-model-default-error {
+  color: var(--gyro-danger);
+  margin-top: var(--gyro-space-standard);
+}
+
+:root[data-theme] .gyro-model-default-suggestion button {
+  border-radius: var(--gyro-radius-md);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--gyro-font-support);
+  line-height: 1.4;
+  min-height: 32px;
+}
+
+:root[data-theme] .gyro-model-default-suggestion button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 3px;
+}
+
+:root[data-theme] .gyro-model-default-suggestion button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+:root[data-theme] .gyro-model-default-suggestion .gyro-model-default-close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--gyro-muted);
+  display: flex;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0;
+  position: absolute;
+  right: var(--gyro-space-standard);
+  top: var(--gyro-space-standard);
+  width: 28px;
+}
+
+:root[data-theme] .gyro-model-default-actions {
+  display: flex;
+  gap: var(--gyro-space-standard);
+  justify-content: flex-end;
+  margin-top: var(--gyro-space-panel);
+}
+
+:root[data-theme] .gyro-model-default-actions button {
+  padding: 6px 12px;
+}
+
+:root[data-theme] .gyro-model-default-later {
+  background: transparent;
+  border: 1px solid var(--gyro-border);
+  color: var(--gyro-text);
+}
+
+:root[data-theme] .gyro-model-default-suggestion .gyro-model-default-accept {
+  background: var(--gyro-blue);
+  border: 1px solid transparent;
+  color: #06111f;
+  font-weight: 600;
+}
+
+:root[data-theme="light"]
+  .gyro-model-default-suggestion
+  .gyro-model-default-accept {
+  color: #ffffff;
+}
+
+:root[data-theme] .gyro-model-default-suggestion .gyro-model-default-never {
+  background: transparent;
+  border: 0;
+  color: var(--gyro-muted);
+  display: block;
+  font-size: var(--gyro-font-micro);
+  margin: var(--gyro-space-standard) 0 -4px;
+  padding: 4px 0;
+  text-align: left;
+}
+
+:root[data-theme] .gyro-model-default-close:hover:not(:disabled),
+:root[data-theme] .gyro-model-default-later:hover:not(:disabled) {
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
+}
+
+:root[data-theme] .gyro-model-default-never:hover:not(:disabled) {
+  color: var(--gyro-text);
+  text-decoration: underline;
+}
+
+:root[data-theme] .gyro-model-default-accept:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-blue) 88%, var(--gyro-text));
+}

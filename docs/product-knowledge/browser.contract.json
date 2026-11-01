@@ -6,6 +6,67 @@
   },
   "commands": [
     {
+      "description": "Discover Web, real macOS windows, and booted iPhone Simulator targets with prerequisite issues. Returns the selected target for this chat.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "gyro_browser_targets"
+    },
+    {
+      "description": "Select a discovered runtime targetId for this chat's Preview. Use web to return to the web page. Selection invalidates earlier framed captures; never presents an old capture as live.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "targetId": {
+            "description": "ID returned by gyro_browser_targets, or web",
+            "type": "string"
+          }
+        },
+        "required": [
+          "targetId"
+        ],
+        "type": "object"
+      },
+      "name": "gyro_browser_select_target"
+    },
+    {
+      "description": "Capture the selected runtime with a surround. PNG pixels include the frame; contentRect maps to the runtime. Returns target, owner, capture time and expiry. Native images are snapshots, not live streams. iPhone Simulator is capture-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "gyro_browser_capture_preview"
+    },
+    {
+      "description": "Click the selected preview using framed-image pixel coordinates and its recent captureId (screenshot filename). Surrounds, stale captures and changed windows are rejected. Native input needs Accessibility permission and an unobscured verified window. Capture again to verify the outcome. Simulator touch input is unsupported.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "captureId": {
+            "type": "string"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "captureId",
+          "x",
+          "y"
+        ],
+        "type": "object"
+      },
+      "name": "gyro_browser_preview_click"
+    },
+    {
       "description": "Open a URL in this chat's app-owned Gyro Browser, in the background by default. Prefer gyro_web_fetch for reading or summarizing a link; use the browser when rendered content, interaction, or visual evidence is needed. Set reveal: true only when the user explicitly asks to see the page or a required manual handoff such as sign-in needs it. Keep implementation checks, interactions, and screenshots in the background. Use this—not OS-level computer control—when the user asks for Gyro's in-app or embedded browser. Any http(s) origin is allowed; navigation is gated by project policy (Ask by default) and remembered per origin for the session.",
       "inputSchema": {
         "additionalProperties": false,

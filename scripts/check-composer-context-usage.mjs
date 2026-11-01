@@ -1139,3 +1139,16 @@ assert.equal(
   longAttempt.usedTokens,
 );
 console.log("Context peak checks passed.");
+
+// A slow poll must not roll back a more recent pushed snapshot, even if the
+// latest reading is stale. Equal timestamps still allow a refresh to recover.
+for (const providerId of ["openai", "anthropic", "xai", "kimi", "gemini", "custom:test"]) {
+  const latest = providerUsageFromSnapshot({ providerId, fetchedAt: "2026-11-01T12:01:00Z", windows: [{ id: "weekly", label: "Weekly", usedPercent: 52 }] });
+  const older = { providerId, fetchedAt: "2026-11-01T12:00:00Z", windows: [{ id: "weekly", label: "Weekly", usedPercent: 20 }] };
+  assert.equal(providerUsageFromSnapshot(older, latest), latest);
+  const stale = { ...latest, stale: true };
+  assert.equal(providerUsageFromSnapshot(older, stale), stale);
+  assert.equal(providerUsageFromSnapshot({ ...older, fetchedAt: "invalid" }, latest), latest);
+  assert.equal(providerUsageFromSnapshot({ ...older, fetchedAt: latest.fetchedAt }, stale).stale, undefined);
+}
+console.log("Provider usage snapshot ordering checks passed.");

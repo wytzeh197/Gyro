@@ -72,10 +72,20 @@ impl AntigravityMode {
 /// `--dangerously-skip-permissions`. Every other posture keeps Google's sandbox
 /// on, which is the containment the CLI offers without a dialog.
 pub fn posture_flags(full_access: bool, mode: AntigravityMode) -> Vec<String> {
-    if full_access {
+    if full_access && mode != AntigravityMode::Plan {
         return vec!["--dangerously-skip-permissions".into()];
     }
     vec!["--sandbox".into(), "--mode".into(), mode.as_str().into()]
+}
+
+/// Headless tools cannot ask Gyro for permission. Keep advisory turns and any
+/// ask-first posture read-only instead of silently accepting edits.
+pub fn execution_mode(advisory: bool, ask_commands: bool, ask_edits: bool) -> AntigravityMode {
+    if advisory || ask_commands || ask_edits {
+        AntigravityMode::Plan
+    } else {
+        AntigravityMode::AcceptEdits
+    }
 }
 
 /// Normalize a requested effort to a value the CLI accepts.
@@ -175,6 +185,7 @@ pub fn conversation_id(value: &Value) -> Option<&str> {
     let (_, payload) = frame(value)?;
     result_payload(payload)
         .get("conversation_id")
+        .or_else(|| value.get("conversation_id"))
         .and_then(Value::as_str)
         .filter(|id| !id.is_empty())
 }
@@ -215,6 +226,65 @@ pub fn usage(value: &Value) -> Option<AntigravityUsage> {
     (!usage.is_empty()).then_some(usage)
 }
 
+/// Step usage belongs to this invocation; result usage can include prior turns.
+/// Keep the latest report for each step so repeated DONE frames are not billed
+/// twice. A resumed run with only cumulative usage cannot prove a turn cost.
+pub fn turn_usage(stdout: &str, resumed: bool) -> Option<AntigravityUsage> {
+    let mut steps = std::collections::BTreeMap::new();
+    let mut total = None;
+    for value in stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+    {
+        let Some((event, payload)) = frame(&value) else {
+            continue;
+        };
+        let Some(usage) = usage(&value) else { continue };
+        if event == "step_update" {
+            if let Some(index) = payload.get("step_index").and_then(Value::as_u64) {
+                steps.insert(index, usage);
+            }
+        } else if event == "result" {
+            total = Some(usage);
+        }
+    }
+    if steps.is_empty() {
+        return if resumed { None } else { total };
+    }
+    Some(
+        steps
+            .values()
+            .fold(AntigravityUsage::default(), |sum, step| AntigravityUsage {
+                input_tokens: sum.input_tokens.saturating_add(step.input_tokens),
+                output_tokens: sum.output_tokens.saturating_add(step.output_tokens),
+                thinking_tokens: sum.thinking_tokens.saturating_add(step.thinking_tokens),
+                cache_read_tokens: sum.cache_read_tokens.saturating_add(step.cache_read_tokens),
+                total_tokens: sum.total_tokens.saturating_add(step.total_tokens),
+            }),
+    )
+}
+
+/// Text alone is not proof that a stream completed. Preserve partial text in
+/// the UI, but require the CLI's terminal success frame before saving success.
+pub fn stream_failure(stdout: &str) -> Option<String> {
+    let mut completed = false;
+    for value in stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+    {
+        if let Some(error) = failure_detail(&value) {
+            return Some(error);
+        }
+        if let Some(("result", payload)) = frame(&value) {
+            completed = result_payload(payload)
+                .get("status")
+                .and_then(Value::as_str)
+                .is_some_and(|status| status.eq_ignore_ascii_case("SUCCESS"));
+        }
+    }
+    (!completed).then(|| "Antigravity stopped before reporting a completed result".into())
+}
+
 /// The failure detail a `result` frame reports, when the turn did not succeed.
 pub fn failure_detail(value: &Value) -> Option<String> {
     let (name, payload) = frame(value)?;
@@ -237,13 +307,67 @@ pub fn failure_detail(value: &Value) -> Option<String> {
 
 /// Whether CLI output means "installed, but no Google account signed in".
 pub fn needs_sign_in(text: &str) -> bool {
-    text.contains(SIGN_IN_MARKER) || text.contains("not signed in")
+    let text = text.to_ascii_lowercase();
+    text.contains("please sign in")
+        || text.contains("not signed in")
+        || text.contains("authentication required")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn resumed_usage_counts_this_turn_once_and_truncated_streams_fail() {
+        let step = json!({"event":"step_update","step_update":{"step_index":8,"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}}).to_string();
+        let result = json!({"event":"result","result":{"status":"SUCCESS","usage":{"input_tokens":100,"output_tokens":20,"total_tokens":120}}}).to_string();
+        let stream = format!("{step}\n{step}\n{result}\n");
+        assert_eq!(turn_usage(&stream, true).unwrap().total_tokens, 12);
+        assert_eq!(turn_usage(&result, true), None);
+        assert_eq!(turn_usage(&result, false).unwrap().total_tokens, 120);
+        assert!(stream_failure(&step).is_some());
+        assert!(stream_failure(&stream).is_none());
+        assert_eq!(
+            stream_failure(
+                r#"{"event":"result","result":{"status":"ERROR","error":"unavailable"}}"#
+            )
+            .as_deref(),
+            Some("unavailable")
+        );
+    }
+
+    #[test]
+    fn ask_first_and_advisory_turns_never_enable_automatic_edits() {
+        for (advisory, commands, edits) in [
+            (true, false, false),
+            (false, true, false),
+            (false, false, true),
+        ] {
+            let mode = execution_mode(advisory, commands, edits);
+            assert_eq!(mode, AntigravityMode::Plan);
+            let args = chat_args(None, None, mode, true, None, "review");
+            assert!(args.windows(2).any(|pair| pair == ["--mode", "plan"]));
+            assert!(!args
+                .iter()
+                .any(|arg| arg == "--dangerously-skip-permissions"));
+        }
+        assert_eq!(
+            execution_mode(false, false, false),
+            AntigravityMode::AcceptEdits
+        );
+    }
+
+    #[test]
+    fn reads_top_level_init_conversation_and_headless_auth_error() {
+        assert_eq!(
+            conversation_id(
+                &json!({"event":"init","conversation_id":"session-1","init":{"cwd":"/tmp"}})
+            ),
+            Some("session-1")
+        );
+        assert!(needs_sign_in("Authentication required"));
+    }
 
     fn step(text: &str) -> Value {
         json!({

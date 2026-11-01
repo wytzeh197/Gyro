@@ -41,7 +41,10 @@ fn git_fork_point(workspace: &Path, base: &str, deadline: Instant) -> Option<Str
 
 /// Compare tracked changes relative to the workspace with the fork from main.
 /// Untracked files remain in the working tree, but are not part of Git's diff.
-pub(crate) fn git_main_comparison(workspace: &Path, deadline: Instant) -> Option<MainComparisonStats> {
+pub(crate) fn git_main_comparison(
+    workspace: &Path,
+    deadline: Instant,
+) -> Option<MainComparisonStats> {
     let main = git_main_comparison_base(workspace, deadline)?;
     let base = git_fork_point(workspace, &main, deadline).unwrap_or(main);
     let mut command = git_command();

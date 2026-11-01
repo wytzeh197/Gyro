@@ -279,6 +279,7 @@ for (const [kind, error] of [
   ["cli-contract", "Try again"],
   ["capacity", "Try again"],
   ["spend-ceiling", "Try again"],
+  ["no-progress", "Repeated unchanged tool results after a network timeout"],
   ["partial-answer", "Try again"],
   ["retry", "HTTP 401, temporarily unavailable"],
   [

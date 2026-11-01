@@ -1156,7 +1156,7 @@ function RunProblem({
   // temporary model-capacity failure shown in the user's recovery notice.
   const isPermanent =
     !isInterrupted &&
-    /^(?:authentication|login-expired|plan-exhausted|provider-config|cli-contract|capacity|spend-ceiling|tool-budget|partial-answer|cancelled|model-unavailable|permission|unsupported|invalid-request|model-capacity-exhausted)$/.test(
+    /^(?:authentication|login-expired|plan-exhausted|provider-config|cli-contract|capacity|spend-ceiling|no-progress|tool-budget|partial-answer|cancelled|model-unavailable|permission|unsupported|invalid-request|model-capacity-exhausted)$/.test(
       phase.recoveryKind ?? "",
     );
   const isInactivityLimit =

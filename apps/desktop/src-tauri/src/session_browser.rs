@@ -402,6 +402,11 @@ pub fn browser_url_is_navigable(url: &url::Url) -> bool {
     true
 }
 
+fn resource_navigation_allowed(url: &url::Url, fixed_origin: Option<&str>) -> bool {
+    browser_url_is_navigable(url)
+        && fixed_origin.is_none_or(|origin| url.origin().ascii_serialization() == origin)
+}
+
 pub fn browser_url_is_loopback(url: &url::Url) -> bool {
     match url.host() {
         Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
@@ -817,6 +822,41 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         truncated: budget.left <= 0,
       }}, pageState());
     }},
+    // Local Check reads only the explicitly reviewed visible text/count/height.
+    // There is no user-supplied JavaScript and no input value/HTML reader.
+    checkRead(options) {{
+      const reads = options && options.reads;
+      if (!Array.isArray(reads) || reads.length < 1 || reads.length > 4) return {{ ok:false, error:"invalid Check reads" }};
+      const values = Object.create(null);
+      let roots;
+      try {{ roots = Array.from(document.querySelectorAll(options.readySelector)).filter(isVisible); }}
+      catch (_) {{ return {{ok:false,error:"invalid Check ready selector"}}; }}
+      if (roots.length !== 1) return {{ok:false,error:"expected Check page is unavailable"}};
+      for (const read of reads) {{
+        let matches;
+        try {{ matches = Array.from(document.querySelectorAll(read.selector)).filter(isVisible); }}
+        catch (_) {{ return {{ ok:false, error:"invalid Check selector" }}; }}
+        if (matches.length > 1000 || matches.some(isCredentialField)) return {{ ok:false, error:"Check read is protected or too large" }};
+        if (read.kind === "count") values[read.key] = matches.length;
+        else if (read.kind === "texts") {{
+          if (matches.length > 20) return {{ok:false,error:"too many Check text elements"}};
+          const texts = matches.map(el => (el.innerText || "").trim());
+          if (JSON.stringify(texts).length > 2000) return {{ok:false,error:"Check text is too large"}};
+          values[read.key] = texts;
+        }}
+        else if (read.kind === "height" && matches.length === 1) {{
+          const height = matches[0].getBoundingClientRect().height;
+          if (!Number.isFinite(height) || height <= 0 || height > 100000) return {{ok:false,error:"invalid Check height"}};
+          values[read.key] = height;
+        }}
+        else if (read.kind === "text" && matches.length === 1) {{
+          const text = (matches[0].innerText || "").trim();
+          if (text.length > 2000) return {{ ok:false, error:"Check text is too large" }};
+          values[read.key] = text;
+        }} else return {{ ok:false, error:"Check text/height read needs exactly one visible element and a supported kind" }};
+      }}
+      return Object.assign({{ok:true, values}},pageState());
+    }},
     find(options) {{
       const query = ((options && options.query) || "").trim();
       const selector = ((options && options.selector) || "").trim();
@@ -1168,9 +1208,6 @@ pub fn open_session_browser<R: Runtime>(
     app: &AppHandle<R>,
     mut request: SessionBrowserOpenRequest,
 ) -> Result<SessionBrowserSnapshot, String> {
-    let url = parse_navigable_url(&request.url)?;
-    let origin = url.origin().ascii_serialization();
-    let manager = app.state::<SessionBrowserManager>();
     // Ownership comes from the durable chat relationship, never a tool/UI
     // argument. A restored agent gets the same private browser on follow-up.
     let store = super::open_store()?;
@@ -1180,6 +1217,89 @@ pub fn open_session_browser<R: Runtime>(
         request.bounds = None;
         request.visible = Some(false);
     }
+    open_browser_resource(app, request, background_only, None)
+}
+
+/// Only the human Check resolver calls this, after consuming approval and
+/// revalidating workspace/files. It cannot reuse or replace a chat browser.
+pub(crate) fn open_check_browser<R: Runtime>(
+    app: &AppHandle<R>,
+    plan: &gyro_core::local_check::CheckPlan,
+) -> Result<String, String> {
+    plan.draft.validate().map_err(|error| error.to_string())?;
+    let id = format!("check-{}", plan.id);
+    let url = parse_navigable_url(&plan.draft.preview_url)?;
+    if !browser_url_is_loopback(&url) {
+        return Err("Check requires a loopback page".into());
+    }
+    let opened = open_browser_resource(
+        app,
+        SessionBrowserOpenRequest {
+            session_id: id.clone(),
+            workspace_key: plan.snapshot.workspace.display().to_string(),
+            url: plan.draft.preview_url.clone(),
+            bounds: plan
+                .draft
+                .browser
+                .as_ref()
+                .and_then(|browser| browser.viewport.as_ref())
+                .map(|viewport| SessionBrowserBounds {
+                    x: -(viewport.width as f64) - 1.0,
+                    y: AGENT_BROWSER_BOUNDS.y,
+                    width: viewport.width as f64,
+                    height: viewport.height as f64,
+                }),
+            visible: Some(false),
+        },
+        true,
+        Some(url.origin().ascii_serialization()),
+    );
+    if let Err(error) = opened {
+        if let Some(view) = app.get_webview(&format!("session-browser-{}", id.replace('-', ""))) {
+            let _ = view.close();
+        }
+        return Err(error);
+    }
+    Ok(id)
+}
+
+pub(crate) fn close_check_browser<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<(), String> {
+    let manager = app.state::<SessionBrowserManager>();
+    let label = manager.webview_label_for(id)?;
+    if let Some(view) = app.get_webview(&label) {
+        view.close()
+            .map_err(|e| format!("could not close Check browser: {e}"))?;
+    }
+    manager.remove_slot(id)?;
+    Ok(())
+}
+
+fn resource_viewport_request(
+    check_only: bool,
+    bounds: &SessionBrowserBounds,
+) -> BrowserViewportRequest {
+    if check_only {
+        // Auto resolves loopback pages to 1280x800 even in a larger host.
+        // Preserve reviewed Check dimensions explicitly, including on reload.
+        BrowserViewportRequest {
+            mode: browser_viewport::BrowserViewportMode::Desktop,
+            width: Some(bounds.width as u32),
+            height: Some(bounds.height as u32),
+        }
+    } else {
+        BrowserViewportRequest::default()
+    }
+}
+
+fn open_browser_resource<R: Runtime>(
+    app: &AppHandle<R>,
+    request: SessionBrowserOpenRequest,
+    background_only: bool,
+    fixed_origin: Option<String>,
+) -> Result<SessionBrowserSnapshot, String> {
+    let url = parse_navigable_url(&request.url)?;
+    let origin = url.origin().ascii_serialization();
+    let manager = app.state::<SessionBrowserManager>();
 
     if let Ok(Some(existing)) = manager.get_snapshot(&request.session_id) {
         if existing.workspace_key != request.workspace_key {
@@ -1239,21 +1359,28 @@ pub fn open_session_browser<R: Runtime>(
         .clone()
         .unwrap_or(BACKGROUND_BROWSER_BOUNDS);
     let bounds = if background_only {
-        AGENT_BROWSER_BOUNDS
+        if fixed_origin.is_some() {
+            requested_bounds.clone().unwrap_or(AGENT_BROWSER_BOUNDS)
+        } else {
+            AGENT_BROWSER_BOUNDS
+        }
     } else {
         bounds
     };
     let visible = request.visible.unwrap_or(
         requested_bounds.is_some_and(|bounds| bounds.width >= 2.0 && bounds.height >= 2.0),
     );
-    let viewport_request = BrowserViewportRequest::default();
+    let check_only = fixed_origin.is_some();
+    let viewport_request = resource_viewport_request(check_only, &bounds);
     let geometry = browser_viewport::geometry(viewport_request, url.as_str(), &bounds)?;
 
     let mut builder = tauri::WebviewBuilder::new(&webview_label, WebviewUrl::External(url.clone()))
         .initialization_script(script)
         .incognito(true)
         .devtools(false)
-        .on_navigation(browser_url_is_navigable)
+        .on_navigation(move |candidate| {
+            resource_navigation_allowed(candidate, fixed_origin.as_deref())
+        })
         .on_page_load(move |_webview, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
                 let app = app_for_load.clone();
@@ -1292,6 +1419,11 @@ pub fn open_session_browser<R: Runtime>(
                 );
             }
         });
+    if check_only {
+        builder = builder
+            .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+            .on_download(|_, _| false);
+    }
     if background_only {
         // A hidden agent page must keep running during a long task.
         builder = builder
@@ -1545,7 +1677,7 @@ pub fn call_agent<R: Runtime>(
     if let Some(title) = value.get("title").and_then(Value::as_str) {
         manager.set_title(session_id, &sanitize_text(title))?;
     }
-    sanitize_agent_result(value)
+    sanitize_agent_result(method, value)
 }
 
 pub fn mouse_session_browser<R: Runtime>(
@@ -1567,7 +1699,7 @@ pub fn mouse_session_browser<R: Runtime>(
     let snapshot = manager
         .get_snapshot(session_id)?
         .ok_or_else(|| "this chat has no open browser".to_string())?;
-    if snapshot.background_only {
+    if snapshot.background_only || !snapshot.visible {
         return call_agent(
             app,
             session_id,
@@ -1577,9 +1709,6 @@ pub fn mouse_session_browser<R: Runtime>(
             }),
         )
         .map(|_| ());
-    }
-    if !snapshot.visible {
-        return Err("show this chat's Browser before using the mouse".into());
     }
     let label = manager.webview_label_for(session_id)?;
     let webview = app
@@ -1702,7 +1831,7 @@ pub fn mouse_session_browser<R: Runtime>(
     }
 }
 
-fn sanitize_agent_result(value: Value) -> Result<Value, String> {
+fn sanitize_agent_result(method: &str, value: Value) -> Result<Value, String> {
     fn walk(value: Value) -> Value {
         match value {
             Value::String(text) => Value::String(sanitize_text(&text)),
@@ -1717,7 +1846,17 @@ fn sanitize_agent_result(value: Value) -> Result<Value, String> {
             other => other,
         }
     }
+    let check_values = if method == "checkRead" {
+        value.get("values").cloned()
+    } else {
+        None
+    };
     let sanitized = walk(value);
+    // Filtering protects privacy, but its replacement text is not observed
+    // evidence. Never let a redaction/truncation collision create a verdict.
+    if method == "checkRead" && check_values.as_ref() != sanitized.get("values") {
+        return Err("Browser evidence changed during privacy filtering; the original observed values cannot be verified".into());
+    }
     let encoded = serde_json::to_vec(&sanitized).map_err(|error| error.to_string())?;
     if encoded.len() > gyro_core::MAX_CAPABILITY_RESULT_BYTES {
         return Err("browser agent result exceeded the capability size limit".into());
@@ -2109,6 +2248,26 @@ mod tests {
     }
 
     #[test]
+    fn reviewed_check_viewport_overrides_loopback_auto_without_changing_normal_browsers() {
+        let bounds = SessionBrowserBounds {
+            x: -1441.0,
+            y: 0.0,
+            width: 1440.0,
+            height: 1080.0,
+        };
+        let request = resource_viewport_request(true, &bounds);
+        let layout = browser_viewport::geometry(request, "http://127.0.0.1:4319", &bounds).unwrap();
+        assert_eq!((layout.state.width, layout.state.height), (1440.0, 1080.0));
+        assert_eq!(layout.state.display_scale, 1.0);
+        assert!(layout.frame.x + layout.frame.width < 0.0);
+        let ordinary = resource_viewport_request(false, &bounds);
+        assert!(ordinary.width.is_none() && ordinary.height.is_none());
+        let layout =
+            browser_viewport::geometry(ordinary, "http://127.0.0.1:4319", &bounds).unwrap();
+        assert_eq!((layout.state.width, layout.state.height), (1280.0, 800.0));
+    }
+
+    #[test]
     fn browser_paging_script_is_valid_javascript() {
         let script = agent_initialization_script("test-nonce");
         let mut command = crate::command_with_gui_path("node");
@@ -2123,5 +2282,106 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+    #[test]
+    fn a_check_resource_never_navigates_to_an_unreviewed_origin_or_file() {
+        let origin = Some("http://127.0.0.1:4317");
+        assert!(resource_navigation_allowed(
+            &url::Url::parse("http://127.0.0.1:4317/todos").unwrap(),
+            origin
+        ));
+        for denied in [
+            "http://127.0.0.1:4318/",
+            "http://localhost:4317/",
+            "https://example.com/",
+            "file:///tmp/private",
+            "javascript:alert(1)",
+            "http://user:pass@127.0.0.1:4317/",
+        ] {
+            assert!(!resource_navigation_allowed(
+                &url::Url::parse(denied).unwrap(),
+                origin
+            ));
+        }
+        assert!(resource_navigation_allowed(
+            &url::Url::parse("https://example.com/").unwrap(),
+            None
+        ));
+    }
+
+    #[test]
+    fn check_must_not_pass_when_redaction_replaces_the_observed_value() {
+        use gyro_core::local_check::{self as check, browser::BrowserDriver, CheckStatus};
+        // Synthetic token, not a credential. The requirement is that the page
+        // displays a redacted label. A page exposing this value must not pass
+        // merely because Gyro's transport redacts it after the observation.
+        let token = "sk-abcdefghijklmnopqrstuvwxyz123456";
+        struct Driver {
+            text: String,
+        }
+        impl BrowserDriver for Driver {
+            fn call(&mut self, method: &str, _args: Value) -> anyhow::Result<Value> {
+                let value = match method {
+                    "status" => {
+                        serde_json::json!({"url":"http://127.0.0.1:4317/","readyState":"complete"})
+                    }
+                    "find" => serde_json::json!({"results":[{"ref":"1"}],"hasMore":false}),
+                    "checkRead" => {
+                        serde_json::json!({"ok":true,"url":"http://127.0.0.1:4317/","readyState":"complete","values":{"text":self.text}})
+                    }
+                    _ => unreachable!(),
+                };
+                sanitize_agent_result(method, value).map_err(anyhow::Error::msg)
+            }
+        }
+        let plan: check::CheckPlan = serde_json::from_value(serde_json::json!({
+            "id":Uuid::new_v4(),"createdAt":"2026-10-30T00:00:00Z","workspaceRevision":1,
+            "draft":{"sessionId":Uuid::new_v4(),"previewUrl":"http://127.0.0.1:4317","command":"","dataChanges":"Synthetic observation only","files":["page.html"],
+            "criteria":[{"id":"redacted-label","requirement":"The page displays a redacted label","scope":"browser","expected":{"text":"[REDACTED]"}}],
+            "browser":{"readySelector":"body","steps":[{"action":"observe","criterionId":"redacted-label","waitMs":0,"reads":[{"key":"text","selector":"#label","kind":"text"}]}]}},
+            "snapshot":{"workspace":"/tmp","gitHead":null,"files":[]}
+        })).unwrap();
+        for (text, expected) in [
+            (token, CheckStatus::NotChecked),
+            ("[REDACTED]", CheckStatus::Passed),
+            ("ordinary visible text", CheckStatus::Failed),
+        ] {
+            let mut driver = Driver { text: text.into() };
+            let output = check::browser::run(&plan, &mut driver, Default::default()).unwrap();
+            let report = check::report_from_output(plan.clone(), output);
+            assert_eq!(report.results[0].status, expected);
+            if expected == CheckStatus::NotChecked {
+                assert!(report.results[0].actual.is_none());
+                assert!(report.results[0].reason.contains("privacy filtering"));
+            }
+            assert!(!serde_json::to_string(&report).unwrap().contains(token));
+        }
+    }
+
+    #[test]
+    fn check_reads_require_unchanged_values_without_disabling_browser_redaction() {
+        let token = "sk-abcdefghijklmnopqrstuvwxyz123456";
+        for values in [
+            serde_json::json!({"text": " padded "}),
+            serde_json::json!({"text": "x".repeat(MAX_ENTRY_CHARS + 1)}),
+            serde_json::json!({"texts": [token]}),
+        ] {
+            let error = sanitize_agent_result("checkRead", serde_json::json!({"values":values}))
+                .unwrap_err();
+            assert!(error.contains("privacy filtering"));
+            assert!(!error.contains(token));
+        }
+        let values = serde_json::json!({"text":"[REDACTED]","texts":["okay"],"items":0});
+        let result = sanitize_agent_result(
+            "checkRead",
+            serde_json::json!({"values":values,"title":token}),
+        )
+        .unwrap();
+        assert_eq!(result["values"], values);
+        assert_eq!(result["title"], "[REDACTED]");
+        // Ordinary browser tooling retains its existing privacy filtering.
+        let ordinary =
+            sanitize_agent_result("readPage", serde_json::json!({"tree":token})).unwrap();
+        assert_eq!(ordinary["tree"], "[REDACTED]");
     }
 }

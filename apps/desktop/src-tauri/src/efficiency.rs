@@ -738,12 +738,17 @@ pub(super) fn observe(
             }
         }
         let message = if decision == Decision::Correct {
-            "Three identical calls returned unchanged evidence. Save a checkpoint and choose a different approach; required verification still applies."
+            "The same tool-call sequence returned unchanged evidence three times. Save a checkpoint and choose a different approach; required verification still applies."
         } else {
-            "Six identical calls returned unchanged evidence. Gyro paused this turn. Review the checkpoint and resume with a changed approach."
+            "The same tool-call sequence returned unchanged evidence six times. Gyro paused this turn. Review the checkpoint and resume with a changed approach."
         };
         if let Some(result) = response.result.as_mut() {
             result.data["progressNotice"] = json!(message);
+            result.data["progressAction"] = json!(if decision == Decision::Correct {
+                "correct"
+            } else {
+                "pause"
+            });
         }
         if let Ok(request) = control.request.lock() {
             if let Some(request) = request.as_ref() {

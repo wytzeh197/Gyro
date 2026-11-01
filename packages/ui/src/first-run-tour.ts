@@ -1,4 +1,5 @@
 import type { AppDestination, SettingsSectionId } from "./types";
+import { popoverViewportRect } from "./composer-popover-bounds";
 
 /**
  * The first-run tour is a versioned catalog, not a scripted walkthrough.
@@ -22,11 +23,7 @@ export type TourAnchorId =
 export type TourPlacement = "top" | "bottom" | "left" | "right";
 
 export type TourStepId =
-  | "project"
-  | "composer"
-  | "models"
-  | "workspace"
-  | "panel";
+  "project" | "composer" | "models" | "workspace" | "panel";
 
 export type TourContext = {
   providerConfigured: boolean;
@@ -69,44 +66,44 @@ export const TOUR_STEPS: readonly TourStep[] = Object.freeze([
     id: "project",
     anchor: "composer.project",
     placement: "top",
-    title: "This is your real folder",
+    title: "Your project folder",
     body: () =>
-      "Gyro works on the folder on your disk — not a sandbox or a copy. This chip names the project the agent can read and change.",
+      "Gyro reads and edits files in this folder. Check the project before starting a task, or use this control to switch folders.",
   },
   {
     id: "composer",
     anchor: "composer.input",
     placement: "top",
-    title: "Ask in plain language",
+    title: "Start with a task",
     body: () =>
-      "Describe the change you want, or point at a file with @. No commands to learn — the composer is the whole interaction.",
+      "Describe what you want to change. Use @ to include files, or attach images for context. Your approval mode controls when Gyro asks before acting.",
   },
   {
     id: "models",
     anchor: "settings.providers",
     placement: "right",
-    title: "Models live in Settings",
+    title: "Accounts and models",
     body: ({ providerConfigured }) =>
       providerConfigured
-        ? "Settings is where you switch the default model, connect another provider, and tune approvals. You're connected — this is the control room."
-        : "Start by connecting a provider and picking a model in Settings. It's also where approvals and model defaults live. We'll take you there.",
+        ? "Your provider is connected. Come here to connect another account, choose default models, and check usage limits."
+        : "Connect a provider here, then choose a model to start chatting. You can return to these settings to manage accounts and usage limits.",
     navigate: { destination: "settings", section: "providers" },
   },
   {
     id: "workspace",
     anchor: "sidebar.ide",
     placement: "right",
-    title: "The workspace IDE is up top",
+    title: "Switch to your workspace",
     body: () =>
-      "The top of the sidebar switches between this chat and the full workspace: files, search, source control, and test runs. Same project, same edits.",
+      "Use code view to explore files, search your project, and review source control. Your conversations stay available in chat view.",
   },
   {
     id: "panel",
     anchor: "panel.tabs",
     placement: "bottom",
-    title: "Browser, diffs, and the rest",
+    title: "Tools beside your chat",
     body: () =>
-      "The right panel holds the browser, review diffs, changes, terminal, canvas, and agents. Edits arrive as diffs — nothing lands until you approve.",
+      "Open Review, Files, Browser, Terminal, and more alongside your conversation. Review shows the changes made during a turn.",
   },
 ]);
 
@@ -200,10 +197,33 @@ export function resolveTourAnchor(
   } catch {
     return null;
   }
-  for (const node of nodes) {
+  const focusedPane =
+    doc.querySelector(
+      ".gyro-chat-grid-slot.is-occupied.is-pane-maximized:not(.is-hidden-by-maximize)",
+    ) ?? doc.querySelector(".gyro-chat-grid-slot.is-current-pane");
+  // An open companion is the actual tool navigation. Its launcher can still
+  // exist earlier in the document (including in another split chat).
+  const candidates = Array.from(nodes).sort((a, b) =>
+    anchor === "panel.tabs"
+      ? Number(b.dataset.tour === "panel.tabs") -
+        Number(a.dataset.tour === "panel.tabs")
+      : 0,
+  );
+  for (const node of candidates) {
     if (!node.isConnected) continue;
-    const rect = node.getBoundingClientRect();
+    const pane = node.closest(".gyro-chat-grid-slot");
+    if (focusedPane && pane && pane !== focusedPane) continue;
+    const rect = popoverViewportRect(node);
     if (rect.width < 2 || rect.height < 2) continue;
+    const view = doc.defaultView;
+    if (
+      view &&
+      (rect.right <= 0 ||
+        rect.bottom <= 0 ||
+        rect.left >= view.innerWidth ||
+        rect.top >= view.innerHeight)
+    )
+      continue;
     const style = doc.defaultView?.getComputedStyle(node);
     if (!style) continue;
     if (
@@ -213,7 +233,7 @@ export function resolveTourAnchor(
     ) {
       continue;
     }
-    if (node.closest('[aria-hidden="true"]')) continue;
+    if (node.closest('[aria-hidden="true"], [inert], [hidden]')) continue;
     return node;
   }
   return null;

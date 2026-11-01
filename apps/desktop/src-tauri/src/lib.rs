@@ -1,5 +1,7 @@
 mod agent_session_worker;
 mod automation_scheduler;
+#[cfg(test)]
+mod backend_performance_tests;
 mod canvas_preview;
 mod chat_images;
 mod chat_media_upload;
@@ -11,12 +13,14 @@ mod efficiency;
 mod git_read;
 mod ide_evidence;
 mod live_model_context;
+mod local_check;
 mod model_catalog;
 mod provider_accounting;
 mod provider_activity;
 mod provider_spend_guard;
 use provider_accounting::*;
 use provider_activity::*;
+mod codex_startup;
 mod codex_turn_completion;
 mod context_compaction;
 mod provider_mcp;
@@ -25,6 +29,8 @@ mod provider_retry_recovery;
 use provider_retry_recovery::{
     run_provider_chat_with_retry_using, run_provider_chat_with_retry_using_with_wait,
 };
+mod provider_run_cleanup;
+use provider_run_cleanup::{ProviderHeartbeat, ProviderRunReservation, ProviderTurnFinalizer};
 mod provider_session_lifecycle;
 use provider_session_lifecycle::{reconcile_interrupted_provider_turns, ProviderSessionLease};
 mod code_mode;
@@ -57,6 +63,7 @@ mod kimi_usage;
 mod performance_benchmark;
 mod session_goal;
 mod session_model;
+mod session_title_stream;
 use session_model::set_session_model;
 mod session_history;
 use session_history::{read_session_events_blocking, SessionEventsReadResult};
@@ -66,11 +73,13 @@ mod turn_timing;
 mod usage_poll;
 use gyro_core::timing::{self, Stage as TimingStage};
 use kimi_usage::*;
+mod app_preview;
 mod browser_knowledge;
 mod browser_pointer;
 mod file_patch_counts;
 mod workspace_roots;
 mod workspace_search;
+mod workspace_tree_order;
 use workspace_search::{
     bound_model_search_results, confine_search_directory, literal_search_ranges,
     run_scoped_workspace_rg_search, run_workspace_rg_search,
@@ -95,37 +104,35 @@ use gyro_core::user_cli_paths;
 use gyro_core::{
     apply_cli_updates, apply_provider_mutation_transaction_with_cancellation, barrier_decision,
     begin_provider_mutation_transaction, build_summary_prompt, build_synthesizer_user_prompt,
-    check_cli_updates, provider_cli_install_plan, CliInstallPlanReport, council_run_dir, create_worktree, decide_mutation_proposal,
+    check_cli_updates, council_run_dir, create_worktree, decide_mutation_proposal,
     discover_ollama_models, fallback_summary, file_review_content_hash, final_run_status,
     ipc::{
         acknowledgement_for, request_desktop_provider_approval,
-        request_desktop_provider_capability, versions_compatible, AppNotification,
-        AutomateAction, AutomateRequest, AutomateResponse, AutomateSummary,
-        DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
-        DesktopProviderApprovalResponse, AUTOMATE_IPC_SCHEMA_V1,
+        request_desktop_provider_capability, versions_compatible, AppNotification, AutomateAction,
+        AutomateRequest, AutomateResponse, AutomateSummary, DesktopProviderApprovalBehavior,
+        DesktopProviderApprovalRequest, DesktopProviderApprovalResponse, AUTOMATE_IPC_SCHEMA_V1,
         DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
     },
     is_openai_compatible_provider, logout_account as account_logout, mutation_approval_payload,
-    ollama_tool_chat_with_progress, openai_compat_endpoint, openai_compat_host_is_loopback,
-    openai_compat_tool_chat_with_progress, parse_council_synthesis, parse_summary_response,
-    prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
-    provider_accepts_images, provider_api_key_env_name, provider_descriptor,
-    recover_provider_mutation_transactions, refresh_account_session as account_refresh_session,
-    run_kimi_acp, seat_label_map, start_account_login as account_start_login,
-    stored_account_session as account_stored_session, successful_seat_answers,
-    write_council_run_manifest, write_council_snapshot, write_seat_artifact,
-    write_synthesis_artifact, AccountSessionState, AppNotificationKind, Automation,
-    AutomationRunStatus, AutomationStatus, AutomationStore, AutomationTriageState,
+    openai_compat_endpoint, openai_compat_host_is_loopback, parse_council_synthesis,
+    parse_summary_response, prepare_claude_provider_mutation_transaction,
+    prepare_provider_mutation_transaction, provider_accepts_images, provider_api_key_env_name,
+    provider_cli_install_plan, provider_descriptor, recover_provider_mutation_transactions,
+    refresh_account_session as account_refresh_session, run_kimi_acp, seat_label_map,
+    start_account_login as account_start_login, stored_account_session as account_stored_session,
+    successful_seat_answers, write_council_run_manifest, write_council_snapshot,
+    write_seat_artifact, write_synthesis_artifact, AccountSessionState, AppNotificationKind,
+    Automation, AutomationRunStatus, AutomationStatus, AutomationStore, AutomationTriageState,
     CancellationToken, CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent,
     CapabilityClass, CapabilityId, CapabilityInvocationContext, CapabilityPolicySnapshot,
     CapabilityRequest, CapabilityResourceRef, CapabilityResponse, CapabilityResult,
-    CapabilityRunMode, CapabilityStatus, CliUpdateApplyResult, CliUpdateCheckReport,
-    CouncilAttachmentRef, CouncilBarrierDecision, CouncilContextSnapshot, CouncilRun,
-    CouncilRunStatus, CouncilSeat, CouncilSeatStatus, CouncilToolPolicy, CreateAutomationRequest,
-    CreateSessionContext, CredentialPolicy, ExecutionRequest, ExecutionStream,
-    ExecutionTermination, FileChangeInput, FileChangeSummary, FileReviewDecision, GyroConfig,
-    GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode,
-    KimiAcpRequest, MutationDecision, MutationProposal, OllamaToolChatRequest,
+    CapabilityRunMode, CapabilityStatus, CliInstallPlanReport, CliUpdateApplyResult,
+    CliUpdateCheckReport, CouncilAttachmentRef, CouncilBarrierDecision, CouncilContextSnapshot,
+    CouncilRun, CouncilRunStatus, CouncilSeat, CouncilSeatStatus, CouncilToolPolicy,
+    CreateAutomationRequest, CreateSessionContext, CredentialPolicy, ExecutionRequest,
+    ExecutionStream, ExecutionTermination, FileChangeInput, FileChangeSummary, FileReviewDecision,
+    GyroConfig, GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind,
+    KimiAcpMode, KimiAcpRequest, MutationDecision, MutationProposal, OllamaToolChatRequest,
     OpenAiCompatChatRequest, PendingProviderMutationCommit, PreparedProviderMutationTransaction,
     ProjectCapabilityGrant, ProjectCapabilityPolicy, ProviderCapabilitySupport,
     ProviderDiagnosticsPayload, ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck,
@@ -187,6 +194,7 @@ mod provider_identity;
 mod session_browser;
 use provider_context::*;
 use provider_identity::provider_model_identity;
+mod commit_suggestion;
 mod dictation_access;
 mod source_control_review;
 mod system_access;
@@ -679,6 +687,7 @@ struct ProviderRunControl {
     next_event_sequence: AtomicU64,
     timeline: Mutex<provider_timeline::ProviderTimeline>,
     suggested_title: Mutex<(Option<String>, bool)>,
+    title_stream: Mutex<session_title_stream::SessionTitleStream>,
     approval_nonce: String,
     capability_context: Mutex<Option<BoundProviderCapabilityContext>>,
     capability_calls: Mutex<HashSet<Uuid>>,
@@ -700,6 +709,7 @@ impl Default for ProviderRunControl {
             next_event_sequence: AtomicU64::new(0),
             timeline: Mutex::new(provider_timeline::ProviderTimeline::default()),
             suggested_title: Mutex::new((None, false)),
+            title_stream: Mutex::new(Default::default()),
             approval_nonce: Uuid::new_v4().to_string(),
             capability_context: Mutex::new(None),
             capability_calls: Mutex::new(HashSet::new()),
@@ -3156,45 +3166,13 @@ async fn run_goal_chat(
     expected_run: Option<Uuid>,
 ) -> Result<ProviderChatResponse, String> {
     request.message = validate_chat_message(&request.message)?;
-    let session_id = request.session_id.clone();
-    {
-        let manager = app.state::<ProviderCancellationManager>();
-        let mut flags = manager
-            .flags
-            .lock()
-            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
-        if flags.contains_key(&session_id) {
-            return Err("a provider turn is already running for this session".into());
-        }
-        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
-            return Err(format!(
-                "Gyro can run at most {MAX_CONCURRENT_PROVIDER_RUNS} provider turns at once"
-            ));
-        }
-        flags.insert(session_id.clone(), Arc::new(ProviderRunControl::default()));
-    }
-    let owner = app
-        .state::<ProviderCancellationManager>()
-        .flags
-        .lock()
-        .map_err(|_| "provider cancellation state is unavailable".to_string())?
-        .get(&session_id)
-        .unwrap()
-        .approval_nonce
-        .clone();
-    let worker_app = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        goal_runner::run(worker_app, request, expected_run)
+    let reservation = ProviderRunReservation::reserve(&app, &request.session_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _reservation = reservation;
+        goal_runner::run(app, request, expected_run)
     })
     .await
-    .map_err(|error| format!("provider chat worker failed: {error}"));
-    app.state::<ProviderCancellationManager>()
-        .flags
-        .lock()
-        .ok()
-        .map(|mut flags| flags.remove(&session_id));
-    goal_runner::finished(&app, &session_id, &owner);
-    result?
+    .map_err(|error| format!("provider chat worker failed: {error}"))?
 }
 
 /// Compact a provider chat. Codex uses its native app-server request; other
@@ -4808,6 +4786,28 @@ fn run_provider_chat_blocking_in_lease(
     let attempt_id = Uuid::new_v4();
     let started_at = chrono::Utc::now();
     let adapter = provider_adapter_for(&request.provider_id);
+    let mut turn_finalizer = ProviderTurnFinalizer::new(
+        &store,
+        &request,
+        session_id,
+        run_id,
+        attempt_id,
+        |status, error| {
+            emit_provider_chat_event(
+                &app,
+                &request,
+                if status == HarnessRunStatus::Done {
+                    "completed"
+                } else {
+                    "failed"
+                },
+                Some(status),
+                None,
+                None,
+                error.map(str::to_string),
+            );
+        },
+    );
     // Mark the turn live before durable workspace-context writes so the first
     // visible provider activity is not gated on JSONL fsync.
     emit_provider_chat_event(
@@ -5114,6 +5114,7 @@ fn run_provider_chat_blocking_in_lease(
             Some(run_id),
         )
         .map_err(to_string)?;
+    turn_finalizer.response_saved();
     if let Err(error) = efficiency::save_checkpoint(&app, &store, &request) {
         eprintln!(
             "Checkpoint save failed: {}",
@@ -5356,6 +5357,7 @@ fn run_provider_chat_blocking_in_lease(
         None,
     );
 
+    turn_finalizer.settled();
     Ok(ProviderChatResponse {
         activity_events,
         assistant_event,
@@ -5966,7 +5968,10 @@ fn provider_approval_instructions(request: &ProviderChatRequest) -> Vec<&'static
     }
     // Always send the current policy on resume. A null instruction override
     // can preserve an earlier turn's Ask first instructions in provider state.
-    let mut instructions = vec!["Use the current turn's configured approval policy. Invoke gyro_* capabilities directly: Gyro's capability broker presents any required approval before execution. Do not ask for duplicate approval in chat before invoking these broker-enforced tools. Approval requirements from an earlier turn do not override the current policy."];
+    let mut instructions = vec!["Use the current turn's configured approval policy. Approval requirements from an earlier turn do not override the current policy."];
+    if gyro_core::provider_capability_support(&request.provider_id).available {
+        instructions.push("Invoke gyro_* capabilities directly: Gyro's capability broker presents any required approval before execution. Do not ask for duplicate approval in chat before invoking these broker-enforced tools.");
+    }
     if request.require_command_approval {
         instructions.push("Gyro requires a fresh, explicit user approval before every command or executable tool action, including commands that appear read-only or trusted. Use the provider's approval request mechanism before execution; never infer approval from the user's message or an earlier action.");
     }
@@ -6168,8 +6173,7 @@ fn provider_context_message_with_capabilities_for_turn(
                 .attachments
                 .iter()
                 .any(|item| item.kind == "browser-snapshot");
-    let surface_needed =
-        browser_task || browser_knowledge::needs_surface_guide(&request.message);
+    let surface_needed = browser_task || browser_knowledge::needs_surface_guide(&request.message);
     if surface_needed {
         context.push(browser_knowledge::context(
             supports_tools,
@@ -6257,9 +6261,7 @@ fn provider_context_message_with_capabilities_for_turn(
             stable.push("When the user asks to open or switch to a local folder, call gyro_workspace_open_folder with its absolute path instead of telling them to use Open workspace. It opens a fresh chat in that folder; this chat's own workspace does not change.".into());
         }
         if !turn.resumed {
-            stable.push(
-                "Deferred tools include a compact argument schema (names, types, and limits). Call them directly. Use gyro_tool_catalog with the tool's domain prefix only when an argument is still unclear or a call is rejected as invalid.".into(),
-            );
+            stable.push(provider_tool_batch::BASELINE_GUIDANCE.into());
         }
     }
     // Any mode can ask. The short form stays in the stable prefix of the opening turn.
@@ -6269,6 +6271,12 @@ fn provider_context_message_with_capabilities_for_turn(
         );
         stable.push(task_suggestions::TASK_SUGGESTION_INSTRUCTION.into());
     }
+    // Resumed threads and Plan -> Normal transitions need this guidance too.
+    stable.extend(commit_suggestion::guidance(
+        request,
+        supports_tools,
+        turn.resumed,
+    ));
     if request.mode == ChatMode::Plan {
         context.push("Plan mode is read-only. Inspect and reason, but do not mutate files, run mutating commands, or start services.".into());
         context.push("When you create or revise the checklist, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"replace\",\"title\":\"Plan\",\"items\":[{\"id\":\"stable-id\",\"title\":\"Step\",\"status\":\"todo\"}]}. Keep the JSON on one line.".into());
@@ -6605,6 +6613,17 @@ async fn prepare_chat_attachment(
     tauri::async_runtime::spawn_blocking(move || prepare_chat_attachment_blocking(request))
         .await
         .map_err(|error| format!("attachment worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn read_cited_chat_image(
+    request: chat_images::ResolveCitedChatImageRequest,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        chat_images::read_cited_chat_image_request(request)
+    })
+    .await
+    .map_err(|error| format!("image preview worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -7569,7 +7588,7 @@ fn scan_workspace_tree(root: &Path, max_depth: usize) -> Result<WorkspaceTreeSna
         });
     }
 
-    entries.sort_by(compare_workspace_tree_entries);
+    workspace_tree_order::sort(&mut entries);
     Ok(WorkspaceTreeSnapshot {
         files: entries,
         directories,
@@ -7578,6 +7597,7 @@ fn scan_workspace_tree(root: &Path, max_depth: usize) -> Result<WorkspaceTreeSna
     })
 }
 
+#[cfg(test)]
 fn compare_workspace_tree_entries(a: &WorkspaceFile, b: &WorkspaceFile) -> std::cmp::Ordering {
     let mut a_components = Path::new(&a.path).components().peekable();
     let mut b_components = Path::new(&b.path).components().peekable();
@@ -8237,10 +8257,7 @@ async fn classify_dropped_path(path: String) -> Result<String, String> {
 mod dropped_path_kind_tests {
     #[test]
     fn directory_file_and_symlink_stay_distinct() {
-        let root = std::env::temp_dir().join(format!(
-            "gyro-drop-kind-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("gyro-drop-kind-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("folder")).unwrap();
         std::fs::write(root.join("notes.md"), b"hi").unwrap();
@@ -10420,9 +10437,7 @@ fn split_duplicate_name(file_name: &str, is_directory: bool) -> (String, String)
         return (file_name.to_string(), String::new());
     }
     match file_name.rsplit_once('.') {
-        Some((stem, extension)) if !stem.is_empty() => {
-            (stem.to_string(), format!(".{extension}"))
-        }
+        Some((stem, extension)) if !stem.is_empty() => (stem.to_string(), format!(".{extension}")),
         _ => (file_name.to_string(), String::new()),
     }
 }
@@ -10518,8 +10533,7 @@ fn apply_path_history_action(
     }
 }
 
-fn undo_workspace_path_impl(
-) -> anyhow::Result<Option<workspace_path_history::PathHistoryAction>> {
+fn undo_workspace_path_impl() -> anyhow::Result<Option<workspace_path_history::PathHistoryAction>> {
     let Some(action) = workspace_path_history::pop_undo() else {
         return Ok(None);
     };
@@ -10535,8 +10549,7 @@ fn undo_workspace_path_impl(
     }
 }
 
-fn redo_workspace_path_impl(
-) -> anyhow::Result<Option<workspace_path_history::PathHistoryAction>> {
+fn redo_workspace_path_impl() -> anyhow::Result<Option<workspace_path_history::PathHistoryAction>> {
     let Some(action) = workspace_path_history::pop_redo() else {
         return Ok(None);
     };
@@ -10553,9 +10566,7 @@ fn redo_workspace_path_impl(
 }
 
 /// The explorer-facing shape of an undone or redone journal entry.
-fn path_history_change(
-    action: &workspace_path_history::PathHistoryAction,
-) -> WorkspacePathChange {
+fn path_history_change(action: &workspace_path_history::PathHistoryAction) -> WorkspacePathChange {
     use workspace_path_history::PathHistoryAction;
     match action {
         PathHistoryAction::Created { path } => WorkspacePathChange {
@@ -12284,7 +12295,6 @@ async fn check_provider_auth(provider_id: String) -> Result<ProviderHealthCheck,
     .map_err(|error| format!("provider auth worker failed: {error}"))?
 }
 
-
 /// What one chat has cost, read from Gyro's own ledger.
 ///
 /// Unlike `get_provider_usage`, this answers for every provider: it counts what
@@ -12340,18 +12350,13 @@ fn publish_settled_provider_usage(app: &tauri::AppHandle, provider_id: &str) {
     spawn_provider_usage_refresh(app, provider_id, false);
 }
 
-fn spawn_provider_usage_refresh(
-    app: &tauri::AppHandle,
-    provider_id: &str,
-    respect_interval: bool,
-) {
+fn spawn_provider_usage_refresh(app: &tauri::AppHandle, provider_id: &str, respect_interval: bool) {
     if !matches!(provider_id, "anthropic" | "openai" | "xai" | "kimi") {
         return;
     }
-    if respect_interval && !provider_usage_refresh_due(provider_id) {
+    if !claim_provider_usage_refresh(provider_id, respect_interval) {
         return;
     }
-    provider_usage_refresh_mark(provider_id);
     let app = app.clone();
     let provider_id = provider_id.to_string();
     std::thread::spawn(move || {
@@ -12361,18 +12366,19 @@ fn spawn_provider_usage_refresh(
     });
 }
 
-fn provider_usage_refresh_due(provider_id: &str) -> bool {
-    provider_usage_refresh_slots()
-        .lock()
-        .ok()
-        .and_then(|slots| slots.get(provider_id).copied())
-        .is_none_or(|at| at.elapsed() >= ANTHROPIC_FRESH_USAGE_MAX_AGE)
-}
-
-fn provider_usage_refresh_mark(provider_id: &str) {
-    if let Ok(mut slots) = provider_usage_refresh_slots().lock() {
-        slots.insert(provider_id.to_string(), Instant::now());
+fn claim_provider_usage_refresh(provider_id: &str, respect_interval: bool) -> bool {
+    let Ok(mut slots) = provider_usage_refresh_slots().lock() else {
+        return false;
+    };
+    if respect_interval
+        && slots
+            .get(provider_id)
+            .is_some_and(|at| at.elapsed() < ANTHROPIC_FRESH_USAGE_MAX_AGE)
+    {
+        return false;
     }
+    slots.insert(provider_id.to_string(), Instant::now());
+    true
 }
 
 fn provider_usage_refresh_slots() -> &'static Mutex<HashMap<String, Instant>> {
@@ -12768,12 +12774,20 @@ fn fetch_anthropic_provider_usage_once(
 fn provider_usage_windows_from_anthropic_usage(
     payload: &serde_json::Value,
 ) -> Vec<ProviderRateLimitWindow> {
-    let windows = anthropic_usage_windows_by_key(payload);
-    if windows.is_empty() {
-        anthropic_usage_windows_from_limits(payload)
-    } else {
-        windows
+    let mut windows = anthropic_usage_windows_by_key(payload);
+    // Accounts can return both shapes with only some keyed windows populated.
+    // Resolve each window independently so a measured weekly key cannot hide
+    // a measured session limit in the list.
+    for incoming in anthropic_usage_windows_from_limits(payload) {
+        if let Some(existing) = windows.iter_mut().find(|window| window.id == incoming.id) {
+            if existing.used_percent.is_none() {
+                *existing = incoming;
+            }
+        } else {
+            windows.push(incoming);
+        }
     }
+    windows
 }
 
 /// The long-standing shape: one object per window, keyed by its name.
@@ -13171,12 +13185,12 @@ fn receive_codex_turn_response(
     deadline: Instant,
 ) -> anyhow::Result<serde_json::Value> {
     let cancelled = || provider_chat_cancelled(app, &request.session_id);
-    receive_codex_app_server_response_until(messages, request_id, deadline, cancelled).map_err(
-        |error| match provider_chat_cancelled(app, &request.session_id) {
+    codex_startup::receive(messages, request_id, deadline, cancelled).map_err(|error| {
+        match provider_chat_cancelled(app, &request.session_id) {
             true => anyhow::anyhow!("{}", provider_stop_message(app, &request.session_id)),
             false => anyhow::Error::msg(error),
-        },
-    )
+        }
+    })
 }
 
 fn codex_app_server_result(response: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -13591,7 +13605,9 @@ fn session_context_signal(event: &SessionEvent) -> provider_context::SessionCont
             })
             .map(|usage| provider_context::AutoCompactReading {
                 input_tokens: usage.get("inputTokens").and_then(serde_json::Value::as_u64),
-                output_tokens: usage.get("outputTokens").and_then(serde_json::Value::as_u64),
+                output_tokens: usage
+                    .get("outputTokens")
+                    .and_then(serde_json::Value::as_u64),
                 model_context_window: usage
                     .get("modelContextWindow")
                     .and_then(serde_json::Value::as_u64),
@@ -13619,11 +13635,7 @@ fn event_text_characters(event: &SessionEvent) -> u64 {
     characters
 }
 
-fn collect_text_characters(
-    value: &serde_json::Value,
-    field: Option<&str>,
-    characters: &mut u64,
-) {
+fn collect_text_characters(value: &serde_json::Value, field: Option<&str>, characters: &mut u64) {
     match value {
         serde_json::Value::String(text) => {
             if !is_encoded_text(field, text) {
@@ -13683,7 +13695,10 @@ fn auto_compact_owned_session(
     let Ok(events) = store.read_events(session_id) else {
         return binding;
     };
-    let signals = events.iter().map(session_context_signal).collect::<Vec<_>>();
+    let signals = events
+        .iter()
+        .map(session_context_signal)
+        .collect::<Vec<_>>();
     let catalog_window = provider_context::provider_model_context_window(
         &request.provider_id,
         request.model_id.as_deref(),
@@ -14492,8 +14507,7 @@ fn run_kimi_acp_chat(
     );
     // Stop heartbeats on every exit path so a finished ACP turn never keeps
     // emitting "still working" after completed/failed/cancelled.
-    heartbeat_stop.store(true, Ordering::Relaxed);
-    let _ = heartbeat.join();
+    drop(heartbeat);
     // Recorded before the error is propagated, as for Claude: a turn stopped
     // after the agent opened its session can still be resumed next time.
     attempt.resume_cursor = opened_session
@@ -15354,8 +15368,7 @@ fn run_openai_codex_app_server_chat(
             )),
         })
     })();
-    heartbeat_stop.store(true, Ordering::Relaxed);
-    let _ = heartbeat.join();
+    drop(heartbeat);
     drop(child);
     if let Some(tokens) = billed.recover() {
         gyro_core::provider_observation::native_usage(tokens);
@@ -16079,10 +16092,7 @@ fn wait_for_provider_approval_with_transaction(
             .and_then(gyro_core::agent_sessions::AgentSessionStore::open)
             .and_then(|store| store.note_command_block(session_id, approval_id, &summary))
             .unwrap_or(false);
-        Some(AgentCommandBlockGuard {
-            session_id,
-            active,
-        })
+        Some(AgentCommandBlockGuard { session_id, active })
     } else {
         None
     };
@@ -16572,7 +16582,6 @@ const ANTIGRAVITY_CURSOR_KIND: &str = "antigravity-conversation";
 
 /// Shown when the official CLI is missing from this machine.
 
-
 /// Google Antigravity through Google's official CLI (`agy`).
 ///
 /// One process per turn. `agy -p <prompt> --output-format stream-json` writes
@@ -16613,11 +16622,24 @@ fn run_antigravity_chat(
     let full_access = request.full_access
         && !request.require_command_approval
         && !request.require_file_edit_approval;
-    let mode = if request.mode == ChatMode::Plan {
-        gyro_core::antigravity_cli::AntigravityMode::Plan
-    } else {
-        gyro_core::antigravity_cli::AntigravityMode::AcceptEdits
-    };
+    let mode = gyro_core::antigravity_cli::execution_mode(
+        matches!(request.mode, ChatMode::Plan | ChatMode::Council),
+        request.require_command_approval,
+        request.require_file_edit_approval,
+    );
+    if mode == gyro_core::antigravity_cli::AntigravityMode::Plan && request.mode == ChatMode::Normal
+    {
+        let activity = ProviderActivity {
+            id: "antigravity-read-only".into(),
+            kind: "tool".into(),
+            label: "Antigravity is planning with read-only access".into(),
+            detail: Some("Antigravity cannot show per-tool approval dialogs. Choose Approve for me to allow workspace edits, or Full access for unrestricted tools.".into()),
+            file_counts: None,
+            note: None,
+            status: "completed".into(),
+        };
+        emit_provider_activity_event(app, request, &activity, None);
+    }
     let conversation_id = resume_cursor.and_then(|cursor| {
         (cursor.kind == ANTIGRAVITY_CURSOR_KIND).then_some(cursor.session_id.as_str())
     });
@@ -16661,7 +16683,7 @@ fn run_antigravity_chat(
         } else {
             error
         }
-    })?;
+    });
 
     // Recorded before any failure propagates: a stopped or failed turn still
     // leaves a conversation the next message can continue.
@@ -16671,13 +16693,22 @@ fn run_antigravity_chat(
             session_id: conversation_id,
         });
     }
+    let output = output?;
     let provider_session_id = observed_session_id.clone().unwrap_or_default();
-    let accounted_usage = antigravity_accounted_usage(&output.stdout);
+    let accounted_usage = antigravity_accounted_usage(&output.stdout, can_resume);
 
     let stdout = gyro_core::security::redact_secrets(output.stdout.trim());
     let stderr = gyro_core::security::redact_secrets(output.stderr.trim());
     if gyro_core::antigravity_cli::needs_sign_in(&format!("{stdout}{stderr}")) {
         anyhow::bail!("{}", gyro_core::antigravity_cli::SIGN_IN_HINT);
+    }
+    if !output.status_success {
+        attempt.activities = output.activities.clone();
+        anyhow::bail!(
+            "Antigravity exited with {}: {}",
+            output.status_label,
+            provider_stream_failure_detail(&stdout, &stderr)
+        );
     }
     if let Some(detail) = antigravity_stream_failure(&stdout) {
         attempt.activities = output.activities.clone();
@@ -16686,7 +16717,6 @@ fn run_antigravity_chat(
 
     if let Some(response) = recover_streamed_provider_answer(&output, "") {
         let response_chars = response.chars().count();
-        let answer_cut_off = !output.status_success;
         return Ok(ProviderRunnerOutput {
             accounted_usage,
             activities: provider_activities_for_response(output.activities, &response),
@@ -16694,14 +16724,14 @@ fn run_antigravity_chat(
             billed_usage: output.billed_usage,
             rate_limits: output.rate_limits,
             paused_at_tool_budget: false,
-            answer_cut_off,
+            answer_cut_off: false,
             response,
-            resume_cursor: Some(ProviderResumeCursor {
+            resume_cursor: observed_session_id.map(|session_id| ProviderResumeCursor {
                 kind: ANTIGRAVITY_CURSOR_KIND.into(),
-                session_id: provider_session_id.clone(),
+                session_id,
             }),
             retry_count: 0,
-            resumed: resume_cursor.is_some(),
+            resumed: can_resume,
             streamed_text: output.assistant_text.clone().map(|text| StreamedText {
                 text,
                 blocks: output.text_blocks.clone(),
@@ -16720,13 +16750,9 @@ fn run_antigravity_chat(
     anyhow::bail!("{}", provider_stream_failure_detail(&stdout, &stderr));
 }
 
-/// The cumulative token count a run reported, for Gyro's accounting.
-fn antigravity_accounted_usage(stdout: &str) -> Option<gyro_core::UsageTokens> {
-    let usage = stdout
-        .lines()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok())
-        .filter_map(|value| gyro_core::antigravity_cli::usage(&value))
-        .max_by_key(|usage| usage.total_tokens)?;
+/// This turn's token counts, excluding prior turns in a resumed conversation.
+fn antigravity_accounted_usage(stdout: &str, resumed: bool) -> Option<gyro_core::UsageTokens> {
+    let usage = gyro_core::antigravity_cli::turn_usage(stdout, resumed)?;
     Some(gyro_core::UsageTokens {
         input_tokens: usage.input_tokens,
         cached_input_tokens: usage.cache_read_tokens,
@@ -16741,10 +16767,7 @@ fn antigravity_accounted_usage(stdout: &str) -> Option<gyro_core::UsageTokens> {
 
 /// The `result` frame's own failure detail, if the turn did not succeed.
 fn antigravity_stream_failure(stdout: &str) -> Option<String> {
-    stdout
-        .lines()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok())
-        .find_map(|value| gyro_core::antigravity_cli::failure_detail(&value))
+    gyro_core::antigravity_cli::stream_failure(stdout)
 }
 
 fn run_anthropic_claude_chat(
@@ -17658,7 +17681,7 @@ const CHAT_IMAGE_REPLY_INSTRUCTION: &str = "To show the user an image you alread
 /// The desktop composer uses the same rules in `sessionTitleFromMessage` so
 /// the sidebar can update before this turn reaches the provider. Keep the two
 /// in step. This local title is the instant provisional one; the model's
-/// `GYRO_SESSION_TITLE` line replaces it when the first turn finishes.
+/// `GYRO_SESSION_TITLE` line replaces it as soon as that line arrives.
 fn session_title_from_message(message: &str) -> Option<String> {
     let without_fences = strip_fenced_code_blocks(&message.replace('\0', ""));
     let without_inline = strip_inline_code_markers(&without_fences);
@@ -17715,9 +17738,7 @@ fn strip_list_marker(text: &str) -> &str {
                     .find(|ch: char| !ch.is_ascii_digit())
                     .unwrap_or(rest.len());
                 let after = &rest[end..];
-                let marked = after
-                    .strip_prefix(['.', ')', ':'])
-                    .unwrap_or(after);
+                let marked = after.strip_prefix(['.', ')', ':']).unwrap_or(after);
                 if marked.len() != after.len() {
                     rest = marked.trim_start();
                     if rest.is_empty() {
@@ -17891,13 +17912,12 @@ fn openai_codex_chat_prompt(
     } else {
         session_title_instruction(suggest_title)
     };
-    let image_instruction = if resumed
-        || message.contains("![short description](/absolute/path.png)")
-    {
-        ""
-    } else {
-        CHAT_IMAGE_REPLY_INSTRUCTION
-    };
+    let image_instruction =
+        if resumed || message.contains("![short description](/absolute/path.png)") {
+            ""
+        } else {
+            CHAT_IMAGE_REPLY_INSTRUCTION
+        };
     if resumed {
         // The resumed thread already holds the style and marker guide from its
         // opening turn; resend only what can change between turns.
@@ -17954,13 +17974,12 @@ fn claude_chat_prompt(
     } else {
         session_title_instruction(suggest_title)
     };
-    let image_instruction = if resumed
-        || message.contains("![short description](/absolute/path.png)")
-    {
-        ""
-    } else {
-        CHAT_IMAGE_REPLY_INSTRUCTION
-    };
+    let image_instruction =
+        if resumed || message.contains("![short description](/absolute/path.png)") {
+            ""
+        } else {
+            CHAT_IMAGE_REPLY_INSTRUCTION
+        };
     if resumed {
         // The resumed session already holds the style and marker guide from its
         // opening turn; resend only what can change between turns.
@@ -18227,12 +18246,7 @@ fn publish_stream_session_title(
         let line = format!("{GYRO_SESSION_TITLE_MARKER} {title}\n");
         publish_streamed_session_title(app, request, &line, true);
     }
-    publish_streamed_session_title(
-        app,
-        request,
-        &stream_state.assistant_text,
-        message_complete,
-    );
+    publish_streamed_session_title(app, request, &stream_state.assistant_text, message_complete);
 }
 
 /// The title control a turn starts with: open, expecting the title Gyro just
@@ -18297,6 +18311,9 @@ fn publish_streamed_session_title(
     let Ok(mut state) = control.suggested_title.lock() else {
         return;
     };
+    if state.1 || state.0.is_none() {
+        return;
+    }
     let Ok(store) = open_store() else {
         return;
     };
@@ -18306,7 +18323,8 @@ fn publish_streamed_session_title(
     let Ok(Some(session)) = store.get_session(session_id) else {
         return;
     };
-    let Some(title) = streamed_title_replacement(&mut state, &session.title, text, message_complete)
+    let Some(title) =
+        streamed_title_replacement(&mut state, &session.title, text, message_complete)
     else {
         return;
     };
@@ -19916,8 +19934,7 @@ fn run_streaming_command(
                 .store(stream_state.has_running_tool(), Ordering::Relaxed);
         }
     });
-    heartbeat_stop.store(true, Ordering::Relaxed);
-    let _ = heartbeat.join();
+    drop(heartbeat);
     // Drain every remaining line and force-flush text before the termination
     // check. Completing with a half-applied buffer is what left the chat looking
     // finished while tokens were still sitting in memory.
@@ -20013,8 +20030,10 @@ fn spawn_provider_chat_heartbeat(
     cancellation: CancellationToken,
     stop: Arc<AtomicBool>,
     liveness: Option<(Arc<ProviderStreamLiveness>, Duration)>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
+) -> ProviderHeartbeat {
+    let worker_stop = stop.clone();
+    let worker = std::thread::spawn(move || {
+        let stop = worker_stop;
         loop {
             // Sleep in short slices so stop/cancel is noticed promptly at the
             // end of a run instead of waiting out a full heartbeat interval.
@@ -20023,7 +20042,7 @@ fn spawn_provider_chat_heartbeat(
                 if stop.load(Ordering::Relaxed) || cancellation.is_cancelled() {
                     return;
                 }
-                std::thread::sleep(Duration::from_millis(250));
+                std::thread::park_timeout(Duration::from_millis(250));
             }
             if stop.load(Ordering::Relaxed) || cancellation.is_cancelled() {
                 return;
@@ -20065,7 +20084,8 @@ fn spawn_provider_chat_heartbeat(
                 None,
             );
         }
-    })
+    });
+    ProviderHeartbeat::new(stop, worker)
 }
 
 /// Wrap a run failure with the provider's sign-in hint, unless it was a stop.
@@ -20140,18 +20160,6 @@ fn handle_provider_stdout_line(
         if let Some(usage) = &stream_state.context_usage {
             emit_provider_context_usage(app, request, usage);
         }
-    }
-    // A new request puts a new prompt in the window and draws on the plan.
-    // Output deltas keep the context meter live without another account read.
-    let previous_input = previous_usage
-        .as_ref()
-        .and_then(|usage| usage.input_tokens);
-    let next_input = stream_state
-        .context_usage
-        .as_ref()
-        .and_then(|usage| usage.input_tokens);
-    if next_input.is_some() && next_input != previous_input {
-        publish_live_provider_usage(app, &request.provider_id);
     }
 }
 
@@ -20694,6 +20702,7 @@ fn emit_provider_chat_event_with_timeline(
     if context_compaction::summary_stream_muted(&request.session_id) {
         return;
     }
+    session_title_stream::observe(app, request, phase, text_delta.as_deref());
     if phase == "delta" && text_delta.as_ref().is_some_and(|text| !text.is_empty()) {
         timing::mark(TimingStage::FirstActivity);
         timing::mark(TimingStage::FirstToken);
@@ -20744,6 +20753,9 @@ fn emit_provider_context_usage(
     if context_compaction::summary_stream_muted(&request.session_id) {
         return;
     }
+    // All adapters reach this boundary, including Codex app-server and ACP.
+    // The shared poll coalesces context frames and respects account cooldowns.
+    publish_live_provider_usage(app, &request.provider_id);
     let context_window_source = if usage.model_context_window.is_some() {
         "runtime"
     } else {
@@ -22096,6 +22108,24 @@ fn execute_provider_capability(
 ) -> anyhow::Result<CapabilityResult> {
     let workspace = bound.workspace.display().to_string();
     let arguments = &request.arguments;
+    if request
+        .capability_id
+        .provider_tool_name()
+        .starts_with("gyro_browser_")
+        && !matches!(
+            request.capability_id,
+            CapabilityId::BrowserTargets
+                | CapabilityId::BrowserSelectTarget
+                | CapabilityId::BrowserCapturePreview
+                | CapabilityId::BrowserPreviewClick
+        )
+        && app_preview::selected(app, &bound.session_id, &bound.workspace_key)
+            .map_err(anyhow::Error::msg)?
+            .kind
+            != "web"
+    {
+        anyhow::bail!("The selected preview is a native runtime. Use capture_preview/preview_click, or select targetId web before using web-page tools.");
+    }
     let (summary, data, resource) = match request.capability_id {
         CapabilityId::CodeModeDiscover | CapabilityId::CodeModeExecute => {
             code_mode::execute(app, bound, request)?
@@ -22651,6 +22681,40 @@ fn execute_provider_capability(
                 }),
                 Some(resource),
             )
+        }
+        CapabilityId::BrowserTargets
+        | CapabilityId::BrowserSelectTarget
+        | CapabilityId::BrowserCapturePreview
+        | CapabilityId::BrowserPreviewClick => {
+            let data = match request.capability_id {
+                CapabilityId::BrowserTargets => {
+                    app_preview::targets(app, &bound.session_id, &bound.workspace_key)
+                }
+                CapabilityId::BrowserSelectTarget => app_preview::select(
+                    app,
+                    &bound.session_id,
+                    &bound.workspace_key,
+                    capability_argument_string(arguments, "targetId")?,
+                )
+                .and_then(|t| serde_json::to_value(t).map_err(|e| e.to_string())),
+                CapabilityId::BrowserCapturePreview => {
+                    app_preview::capture(app, &bound.session_id, &bound.workspace_key)
+                }
+                _ => app_preview::click(
+                    app,
+                    &bound.session_id,
+                    &bound.workspace_key,
+                    capability_argument_string(arguments, "captureId")?,
+                    arguments["x"]
+                        .as_f64()
+                        .ok_or_else(|| anyhow::anyhow!("x is required"))?,
+                    arguments["y"]
+                        .as_f64()
+                        .ok_or_else(|| anyhow::anyhow!("y is required"))?,
+                ),
+            }
+            .map_err(anyhow::Error::msg)?;
+            ("Observed selected app preview".into(), data, None)
         }
         CapabilityId::BrowserViewport => browser_viewport::execute_capability(app, bound, request)?,
         CapabilityId::BrowserInspect => {
@@ -23212,10 +23276,7 @@ fn execute_provider_capability(
                 bound.allow_delegation,
             );
             (
-                format!(
-                    "Listed tools for {}",
-                    prefix.unwrap_or("gyro_")
-                ),
+                format!("Listed tools for {}", prefix.unwrap_or("gyro_")),
                 page,
                 None,
             )
@@ -24061,6 +24122,12 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
                 "description": "Show the Browser panel only when the user explicitly asks to see the page or a required manual handoff such as sign-in needs it. Omit or set false for reading, research, implementation checks, interactions, screenshots, or rendering fallback; these work while hidden."
             }
         }),
+        CapabilityId::BrowserSelectTarget => serde_json::json!({
+            "targetId": {"type":"string","description":"ID returned by gyro_browser_targets, or web"}
+        }),
+        CapabilityId::BrowserPreviewClick => serde_json::json!({
+            "captureId":{"type":"string"},"x":{"type":"number"},"y":{"type":"number"}
+        }),
         CapabilityId::BrowserScreenshot => serde_json::json!({
             "device": { "type": "string", "enum": ["responsive", "desktop", "tablet", "mobile"] }
         }),
@@ -24120,6 +24187,8 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
         CapabilityId::TerminalOpen => vec!["program"],
         CapabilityId::TerminalWait => vec!["resourceId"],
         CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => vec!["url"],
+        CapabilityId::BrowserSelectTarget => vec!["targetId"],
+        CapabilityId::BrowserPreviewClick => vec!["captureId", "x", "y"],
         CapabilityId::BrowserClick => vec!["ref"],
         CapabilityId::BrowserMouse => vec!["action", "captureId", "x", "y"],
         CapabilityId::BrowserType => vec!["text"],
@@ -24194,7 +24263,10 @@ fn browser_result_image(
 ) -> anyhow::Result<Option<String>> {
     let Some(result) = response.result.as_ref().filter(|result| {
         response.status == CapabilityStatus::Completed
-            && result.capability_id == CapabilityId::BrowserScreenshot
+            && matches!(
+                result.capability_id,
+                CapabilityId::BrowserScreenshot | CapabilityId::BrowserCapturePreview
+            )
             && result.data["schema"] == BROWSER_OBSERVATION_SCHEMA_V1
     }) else {
         return Ok(None);
@@ -24395,6 +24467,7 @@ pub fn run() {
         .manage(language_server::LanguageServerManager::default())
         .manage(DebugAdapterManager::default())
         .manage(ProviderCancellationManager::default())
+        .manage(local_check::LocalCheckManager::default())
         .manage(project_import::ProjectImportManager::default())
         .manage(delegated_agents::AgentManager::default())
         .manage(ProviderApprovalManager::default())
@@ -24406,6 +24479,7 @@ pub fn run() {
         .manage(WorkspacePreparationManager::default())
         .manage(AutomationSchedulerControl::default())
         .manage(session_browser::SessionBrowserManager::default())
+        .manage(app_preview::ManagerState::default())
         .manage(menu_bar::MenuBarController::default())
         .manage(quit_confirmation::QuitConfirmation::default())
         .setup(|app| {
@@ -24485,6 +24559,11 @@ pub fn run() {
             canvas_preview::response(request)
         })
         .invoke_handler(tauri::generate_handler![
+            local_check::prepare_local_check,
+            local_check::resolve_local_check,
+            local_check::cancel_local_check,
+            local_check::list_local_checks,
+            local_check::delete_local_check,
             efficiency::set_efficiency_config,
             efficiency::get_efficiency_task_totals,
             efficiency::route_efficiency_phase,
@@ -24526,6 +24605,7 @@ pub fn run() {
             dictation_access::start_dictation,
             dictation_access::stop_dictation,
             capture_browser_preview,
+            app_preview::app_preview_request,
             capture_session_browser_preview,
             session_browser::session_browser_open,
             session_browser::session_browser_set_bounds,
@@ -24614,6 +24694,7 @@ pub fn run() {
             read_terminal_output,
             read_session_events,
             prepare_chat_attachment,
+            read_cited_chat_image,
             resolve_cited_chat_image,
             prepare_chat_media_upload,
             prepare_browser_attachment,
@@ -25167,8 +25248,7 @@ mod automate_resume_guard_tests {
     #[test]
     fn resume_refuses_completed_and_current_automations() {
         assert!(refuse_unpaused_automation_resume(AutomationStatus::Paused).is_ok());
-        let completed =
-            refuse_unpaused_automation_resume(AutomationStatus::Completed).unwrap_err();
+        let completed = refuse_unpaused_automation_resume(AutomationStatus::Completed).unwrap_err();
         assert!(
             completed.contains("Only a paused automation can be resumed"),
             "{completed}"
@@ -25656,6 +25736,32 @@ mod tests {
         );
         assert!(!unrestricted.contains("fresh, explicit user approval"));
         assert!(unrestricted.contains("capability broker"));
+    }
+
+    #[test]
+    fn approval_guidance_omits_unconnected_gyro_tools_for_antigravity() {
+        let mut request = anthropic_provider_request();
+        request.provider_id = "antigravity".into();
+        request.provider_label = Some("Google Antigravity".into());
+        request.model_id = Some("antigravity-default".into());
+        request.message = "Use sub-agents to review this change.".into();
+        request.require_command_approval = true;
+        request.require_file_edit_approval = true;
+        for resumed in [false, true] {
+            let prompt = provider_context_message_for_turn(
+                &request,
+                None,
+                PromptTurn {
+                    resumed,
+                    ..PromptTurn::default()
+                },
+            );
+            assert!(prompt.contains("fresh, explicit user approval before every command"));
+            assert!(prompt.contains("fresh, explicit user approval before every file change"));
+            assert!(!prompt.contains("Invoke gyro_* capabilities directly"));
+            assert!(!prompt.contains("gyro_agent_spawn"));
+            assert!(!prompt.contains("Parallel delegation:"));
+        }
     }
 
     fn anthropic_provider_request() -> ProviderChatRequest {
@@ -26230,7 +26336,10 @@ mod tests {
         let (stable_a, dynamic_a) =
             efficiency::capture_prompt(|| build(&first, "User: one\n\nAssistant: first answer"));
         let (stable_b, dynamic_b) = efficiency::capture_prompt(|| {
-            build(&second, "User: one\n\nAssistant: a different and longer answer")
+            build(
+                &second,
+                "User: one\n\nAssistant: a different and longer answer",
+            )
         });
         assert!(!stable_a.is_empty());
         assert_eq!(stable_a, stable_b);
@@ -27425,6 +27534,13 @@ mod tests {
             result
         );
 
+        response.result.as_mut().unwrap().capability_id = CapabilityId::BrowserCapturePreview;
+        let framed = capability_mcp_response(&paths, response.clone(), true).unwrap();
+        assert_eq!(framed["content"][1]["type"], "image");
+        let framed_bytes = base64::engine::general_purpose::STANDARD
+            .decode(framed["content"][1]["data"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(framed_bytes, png);
         let outside = temp.path().join("outside.png");
         fs::write(&outside, &png).unwrap();
         response.result.as_mut().unwrap().data["screenshot"]["path"] = serde_json::json!(outside);
@@ -28314,7 +28430,7 @@ while True:
         ))
         .unwrap();
         let published: serde_json::Value =
-            serde_json::from_str(include_str!("../../../../site/model-catalog.json")).unwrap();
+            serde_json::from_str(include_str!("../../../../catalog/model-catalog.json")).unwrap();
         for row in facts["models"].as_array().unwrap() {
             let provider = row[0].as_str().unwrap();
             let model = row[1].as_str().unwrap();
@@ -28619,7 +28735,10 @@ while True:
                 "end the turn and wait",
                 "Use gyro_tool_catalog",
             ] {
-                assert!(opening.contains(opening_only), "{provider} lost {opening_only}");
+                assert!(
+                    opening.contains(opening_only),
+                    "{provider} lost {opening_only}"
+                );
                 assert!(
                     !resumed.contains(opening_only),
                     "{provider} repeated {opening_only}"
@@ -28888,7 +29007,14 @@ while True:
             .find(|args| args[0] == "--disallowedTools")
             .map(|args| args[1].split(',').collect::<Vec<_>>())
             .expect("Claude runs always disallow some native tools");
-        for tool in ["Agent", "Task", "Artifact", "DesignSync", "ScheduleWakeup", "EnterWorktree"] {
+        for tool in [
+            "Agent",
+            "Task",
+            "Artifact",
+            "DesignSync",
+            "ScheduleWakeup",
+            "EnterWorktree",
+        ] {
             assert!(disallowed.contains(&tool), "{tool} must stay disallowed");
         }
         // Native file and shell tools remain: they are approval-gated and the
@@ -29827,9 +29953,8 @@ while True:
     fn streaming_state_applies_the_completed_message_to_a_short_stream() {
         let mut state = StreamingCommandState::new();
         state.push_assistant_delta("The plan starts here and stops");
-        state.push_assistant_final(
-            "The plan starts here and stops only when every step is listed.",
-        );
+        state
+            .push_assistant_final("The plan starts here and stops only when every step is listed.");
 
         assert_eq!(
             state.assistant_text,
@@ -30927,8 +31052,14 @@ while True:
 
     #[test]
     fn claude_model_arg_selects_the_1m_window_for_1m_rows() {
-        assert_eq!(claude_model_arg("claude-opus-5-5-1m"), "claude-opus-5-5[1m]");
-        assert_eq!(claude_model_arg("claude-opus-4-8-1m"), "claude-opus-4-8[1m]");
+        assert_eq!(
+            claude_model_arg("claude-opus-5-5-1m"),
+            "claude-opus-5-5[1m]"
+        );
+        assert_eq!(
+            claude_model_arg("claude-opus-4-8-1m"),
+            "claude-opus-4-8[1m]"
+        );
         assert_eq!(claude_model_arg("claude-opus-5-5"), "claude-opus-5-5");
         assert_eq!(claude_model_arg("claude-sonnet-5-5"), "claude-sonnet-5-5");
         assert_eq!(claude_model_arg("my-proxy-1m"), "my-proxy-1m");
@@ -31534,28 +31665,24 @@ while True:
     #[test]
     fn a_title_the_user_renamed_survives_the_model_marker() {
         let mut state = suggested_title_for_turn("We Drew Our Own Traffic Lights");
-        assert!(
-            streamed_title_replacement(
-                &mut state,
-                "My Own Name",
-                "GYRO_SESSION_TITLE: Traffic Light Bug\nWorking on it.",
-                true,
-            )
-            .is_none()
-        );
+        assert!(streamed_title_replacement(
+            &mut state,
+            "My Own Name",
+            "GYRO_SESSION_TITLE: Traffic Light Bug\nWorking on it.",
+            true,
+        )
+        .is_none());
         assert!(
             state.1,
             "a hand rename closes the control for the rest of the run"
         );
-        assert!(
-            streamed_title_replacement(
-                &mut state,
-                "My Own Name",
-                "GYRO_SESSION_TITLE: Late Marker\nWorking on it.",
-                true,
-            )
-            .is_none()
-        );
+        assert!(streamed_title_replacement(
+            &mut state,
+            "My Own Name",
+            "GYRO_SESSION_TITLE: Late Marker\nWorking on it.",
+            true,
+        )
+        .is_none());
     }
 
     #[test]
@@ -31576,26 +31703,42 @@ while True:
         let session = store
             .create_session(temp.path(), SessionOrigin::Desktop, "Untitled chat")
             .unwrap();
-        for provider in [
-            "openai",
-            "anthropic",
-            "xai",
-            "gemini",
-            "kimi",
-            "cursor",
-            "opencode",
-            "antigravity",
-            "deepseek",
-            "ollama",
-        ] {
+        let catalog: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../catalog/model-catalog.json")).unwrap();
+        let models = catalog["models"].as_array().unwrap();
+        let cases = gyro_core::provider_registry()
+            .iter()
+            .map(|provider| (provider.id, None))
+            .chain(
+                models
+                    .iter()
+                    .map(|model| (model["providerId"].as_str().unwrap(), model["id"].as_str())),
+            )
+            .chain([("custom-endpoint", Some("custom-model"))]);
+        for (provider, model) in cases {
             let mut request = provider_chat_request_for(&session, temp.path(), provider);
+            request.model_id = model.map(str::to_string);
             request.suggest_title = true;
-            let context = provider_context_message(&request);
-            assert_eq!(
-                context.matches("GYRO_SESSION_TITLE").count(),
-                1,
-                "{provider} must be asked for exactly one title"
-            );
+            for resumed in [false, true] {
+                let context = provider_context_message_for_turn(
+                    &request,
+                    None,
+                    PromptTurn {
+                        resumed,
+                        ..PromptTurn::default()
+                    },
+                );
+                assert_eq!(
+                    context
+                        .matches(SESSION_TITLE_FIRST_TURN_INSTRUCTION.trim_end())
+                        .count(),
+                    1,
+                    "{provider}/{model:?} must be asked for exactly one title"
+                );
+            }
+            request.suggest_title = false;
+            assert!(!provider_context_message(&request)
+                .contains(SESSION_TITLE_FIRST_TURN_INSTRUCTION.trim_end()));
         }
     }
 
@@ -34378,10 +34521,8 @@ mod workspace_trash_tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let directory = std::env::temp_dir().join(format!(
-            "gyro-trash-{}-{name}",
-            std::process::id()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("gyro-trash-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).unwrap();
         directory
@@ -34460,10 +34601,7 @@ mod workspace_trash_tests {
 
     #[test]
     fn a_relative_path_resolves_against_the_workspace_root() {
-        assert_eq!(
-            absolute_workspace_path("/w", "src/lib.rs"),
-            "/w/src/lib.rs"
-        );
+        assert_eq!(absolute_workspace_path("/w", "src/lib.rs"), "/w/src/lib.rs");
         assert_eq!(
             absolute_workspace_path("/w", "/elsewhere/lib.rs"),
             "/elsewhere/lib.rs"

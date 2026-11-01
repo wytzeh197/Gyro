@@ -34,6 +34,28 @@
   align-items: center;
   gap: 4px;
 }
+.gyro-comparison-review .gyro-review-identity {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+.gyro-comparison-review .gyro-review-identity > strong {
+  color: var(--gyro-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+}
+.gyro-comparison-review .gyro-review-identity > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  white-space: nowrap;
+}
 .gyro-comparison-review.gyro-git-comparison-review:not(.is-empty)
   > .gyro-diff-file-list {
   display: flex;

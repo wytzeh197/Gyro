@@ -12,6 +12,9 @@
 (allow sysctl-read
   (sysctl-name-prefix "hw.")
   (sysctl-name "kern.argmax")
+  ; uname(3), used during Node's node:os module initialization, also reads
+  ; the local hostname. Without this, Node 26 aborts on its uname error path.
+  (sysctl-name "kern.hostname")
   (sysctl-name "kern.maxfilesperproc")
   (sysctl-name "kern.osproductversion")
   (sysctl-name "kern.osrelease")

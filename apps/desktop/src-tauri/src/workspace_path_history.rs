@@ -27,13 +27,38 @@ struct History {
     redo: Vec<PathHistoryAction>,
 }
 
+impl History {
+    fn undo_checked(
+        &mut self,
+        apply: impl FnOnce(&PathHistoryAction) -> anyhow::Result<PathHistoryAction>,
+    ) -> anyhow::Result<Option<PathHistoryAction>> {
+        let Some(action) = self.undo.last() else {
+            return Ok(None);
+        };
+        // Authorization and application concern this exact entry. Keep the
+        // journal locked until both finish so another request cannot swap it.
+        let reversed = apply(action)?;
+        let action = self
+            .undo
+            .pop()
+            .expect("checked undo entry is still present");
+        self.redo.push(reversed);
+        if self.redo.len() > HISTORY_LIMIT {
+            self.redo.remove(0);
+        }
+        Ok(Some(action))
+    }
+}
+
 static HISTORY: Mutex<History> = Mutex::new(History {
     undo: Vec::new(),
     redo: Vec::new(),
 });
 
 fn lock() -> std::sync::MutexGuard<'static, History> {
-    HISTORY.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    HISTORY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Records a completed operation and invalidates the redo stack.
@@ -48,6 +73,14 @@ pub(crate) fn record(action: PathHistoryAction) {
 
 pub(crate) fn pop_undo() -> Option<PathHistoryAction> {
     lock().undo.pop()
+}
+
+/// Apply the inverse of the current entry only after the caller authorizes
+/// it. A refusal or filesystem error leaves both history stacks unchanged.
+pub(crate) fn undo_checked(
+    apply: impl FnOnce(&PathHistoryAction) -> anyhow::Result<PathHistoryAction>,
+) -> anyhow::Result<Option<PathHistoryAction>> {
+    lock().undo_checked(apply)
 }
 
 /// The top undo entry, still on the stack. Chat uses this so a path card can
@@ -145,8 +178,55 @@ mod tests {
     }
 
     #[test]
+    fn checked_undo_keeps_both_stacks_on_refusal_and_records_the_exact_inverse() {
+        let original = PathHistoryAction::Created {
+            path: path("/a/file"),
+        };
+        let previous_redo = PathHistoryAction::Created {
+            path: path("/b/file"),
+        };
+        let inverse = PathHistoryAction::Trashed {
+            original: path("/a/file"),
+            trashed: path("/trash/file"),
+        };
+        let mut history = History {
+            undo: vec![original.clone()],
+            redo: vec![previous_redo.clone()],
+        };
+        let error = history
+            .undo_checked(|action| {
+                assert_eq!(action, &original);
+                anyhow::bail!("outside workspace")
+            })
+            .unwrap_err();
+        assert!(error.to_string().contains("outside workspace"));
+        assert_eq!(history.undo, vec![original.clone()]);
+        assert_eq!(history.redo, vec![previous_redo.clone()]);
+
+        assert_eq!(
+            history
+                .undo_checked(|action| {
+                    assert_eq!(action, &original);
+                    Ok(inverse.clone())
+                })
+                .unwrap(),
+            Some(original)
+        );
+        assert!(history.undo.is_empty());
+        assert_eq!(history.redo, vec![previous_redo, inverse]);
+        assert_eq!(
+            history
+                .undo_checked(|_| panic!("empty history cannot apply"))
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn record_and_pop_round_trip() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         clear();
         record(PathHistoryAction::Moved {
             from: path("/w/a.txt"),
@@ -164,7 +244,9 @@ mod tests {
 
     #[test]
     fn recording_clears_redo() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         clear();
         push_redo(PathHistoryAction::Created {
             path: path("/w/a.txt"),
@@ -177,7 +259,9 @@ mod tests {
 
     #[test]
     fn peek_names_the_top_move_without_removing_it() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         clear();
         record(PathHistoryAction::Moved {
             from: path("/w/drafts/a.txt"),
@@ -202,7 +286,9 @@ mod tests {
 
     #[test]
     fn peek_names_a_same_folder_move_as_a_rename() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         clear();
         record(PathHistoryAction::Moved {
             from: path("/w/draft.md"),
@@ -216,7 +302,9 @@ mod tests {
 
     #[test]
     fn history_is_bounded() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         clear();
         for index in 0..(HISTORY_LIMIT + 5) {
             record(PathHistoryAction::Created {

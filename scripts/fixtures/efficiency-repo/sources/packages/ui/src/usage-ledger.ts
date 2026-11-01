@@ -1,0 +1,683 @@
+import type {
+  BudgetState,
+  ProviderId,
+  ProviderLedgerSummary,
+  ProviderUsageWindow,
+  SessionUsageTotals,
+  UsageOriginTotals,
+  UsageSafetySnapshot,
+} from "./types";
+import { remainingUsage } from "./usage-remaining.ts";
+import {
+  formatCompactTokenCount as formatTokenCount,
+  isTokenCount,
+} from "./token-count.ts";
+export { formatTokenCount };
+
+/** The session cost line, as the chat surface renders it. */
+export type SessionCostSummary = {
+  /** `1.2M tokens across 14 calls`. */
+  label: string;
+  /** `4 council seats · 1 synthesis`, or undefined when there is nothing to split. */
+  breakdown?: string;
+  /**
+   * `1.1M cached input`, or undefined when the cached share is small.
+   * Cached input is included in the total; it is not additional consumption.
+   */
+  cachedNote?: string;
+  /** Set when any part of the total was estimated rather than reported. */
+  estimateNote?: string;
+  /** Full sentence for the tooltip, including the estimate caveat. */
+  title: string;
+  /** Whether the surface should render anything at all. */
+  isEmpty: boolean;
+};
+
+function pluralize(count: number, singular: string, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+/**
+ * The breakdown, biggest spender first.
+ *
+ * A chat that only ever ran ordinary turns has nothing to explain, so a lone
+ * `chat` origin is left out rather than restating the call count.
+ */
+function breakdownLabel(byOrigin: UsageOriginTotals[]) {
+  const meaningful = byOrigin.filter((entry) => entry.calls > 0);
+  if (meaningful.length <= 1 && meaningful[0]?.origin === "chat") {
+    return undefined;
+  }
+  return meaningful
+    .map((entry) => `${entry.label.toLocaleLowerCase()} ${entry.calls}`)
+    .join(" · ");
+}
+
+/**
+ * The proportion of a total that has to be re-read context before saying so.
+ *
+ * Below this the split is noise. Above it the raw number misleads: it is
+ * mostly the same conversation counted once per call.
+ */
+const CACHED_SHARE_WORTH_NAMING = 0.4;
+
+/**
+ * Re-read context, when it is enough of the total to explain the total.
+ *
+ * Estimated calls carry no cache reading at all, so an unmeasured provider
+ * never reaches the threshold and never claims a split it cannot know.
+ */
+function cachedShare(totals: SessionUsageTotals) {
+  const cached = totals.cachedInputTokens;
+  if (
+    !isTokenCount(cached) ||
+    !isTokenCount(totals.totalTokens) ||
+    cached <= 0 ||
+    totals.totalTokens <= 0 ||
+    cached > totals.inputTokens ||
+    cached > totals.totalTokens
+  ) {
+    return 0;
+  }
+  return cached / totals.totalTokens >= CACHED_SHARE_WORTH_NAMING ? cached : 0;
+}
+
+/**
+ * Turn a session's ledger totals into the one line the chat surface shows.
+ *
+ * Chat shows provider observations only. An incomplete aggregate can expose a
+ * separately recorded provider subtotal as a lower bound; estimated totals
+ * remain in the ledger without appearing as chat consumption.
+ */
+export function summarizeSessionCost(
+  totals: SessionUsageTotals | undefined,
+): SessionCostSummary {
+  if (!totals || totals.calls === 0) {
+    return {
+      isEmpty: true,
+      label: "No provider calls yet",
+      title: "This chat has not spent anything yet.",
+    };
+  }
+
+  const partial = totals.partialCalls ?? 0;
+  const unavailable = totals.unavailableCalls ?? 0;
+  const classifiedCalls =
+    totals.measuredCalls + totals.estimatedCalls + partial + unavailable;
+  const knownCoverage =
+    [
+      totals.calls,
+      totals.measuredCalls,
+      totals.estimatedCalls,
+      partial,
+      unavailable,
+    ].every(isTokenCount) && classifiedCalls === totals.calls;
+  const reportedSubtotal = isTokenCount(totals.reportedTotalTokens)
+    ? totals.reportedTotalTokens
+    : undefined;
+  const useReportedSubtotal =
+    reportedSubtotal !== undefined &&
+    (!knownCoverage || totals.estimatedCalls > 0 || partial + unavailable > 0);
+  const displayedTokens = useReportedSubtotal
+    ? reportedSubtotal
+    : totals.totalTokens;
+  const tokenLabel = formatTokenCount(displayedTokens);
+  const allUnavailable =
+    !isTokenCount(displayedTokens) ||
+    (!useReportedSubtotal &&
+      (!knownCoverage ||
+        totals.estimatedCalls > 0 ||
+        totals.measuredCalls + partial === 0));
+  const prefix = useReportedSubtotal || partial + unavailable > 0 ? "≥" : "";
+  const label = allUnavailable
+    ? `Usage unavailable · ${pluralize(totals.calls, "call")}`
+    : `${prefix}${tokenLabel} tokens · ${pluralize(totals.calls, "call")}`;
+  const breakdown = breakdownLabel(totals.byOrigin);
+  const cachedTokens =
+    allUnavailable || useReportedSubtotal ? 0 : cachedShare(totals);
+  const cachedNote = cachedTokens
+    ? `${formatTokenCount(cachedTokens)} cached input`
+    : undefined;
+  const estimateNote = useReportedSubtotal
+    ? "incomplete coverage"
+    : totals.estimatedCalls > 0
+      ? totals.measuredCalls > 0
+        ? `${totals.estimatedCalls} estimated`
+        : "estimated"
+      : partial + unavailable > 0
+        ? "incomplete coverage"
+        : undefined;
+
+  const titleParts = [
+    allUnavailable
+      ? `Usage is unavailable for ${pluralize(totals.calls, "provider call")}.`
+      : useReportedSubtotal
+        ? `This chat: at least ${displayedTokens.toLocaleString()} provider-reported tokens observed across ${pluralize(totals.calls, "provider call")}. Coverage is incomplete; the complete total cannot be verified.`
+        : `This chat: ${prefix}${displayedTokens.toLocaleString()} tokens across ${pluralize(totals.calls, "provider call")}.`,
+  ];
+  if (breakdown) {
+    titleParts.push(`Breakdown: ${breakdown}.`);
+  }
+  if (cachedTokens) {
+    titleParts.push(
+      `Includes ${cachedTokens.toLocaleString()} cached input tokens, already part of the total. Cached tokens are not additional tokens or a measure of monetary cost.`,
+    );
+  }
+  if (totals.estimatedCalls > 0) {
+    titleParts.push(
+      useReportedSubtotal
+        ? `${pluralize(totals.estimatedCalls, "call")} used estimated or unverified counts; those estimates are excluded from the displayed provider subtotal.`
+        : `${pluralize(totals.estimatedCalls, "call")} used estimated or unverified counts, so the total is estimated.`,
+    );
+  }
+
+  if (totals.estimatedCalls > 0 && !useReportedSubtotal) {
+    titleParts.push(
+      "A provider-reported subtotal cannot be isolated from this aggregate; its numeric total is not shown in chat.",
+    );
+  } else if (!knownCoverage && !useReportedSubtotal) {
+    titleParts.push(
+      "The saved call coverage is incomplete or unverified, so a reliable provider total cannot be established.",
+    );
+  }
+
+  if (partial + unavailable > 0) {
+    titleParts.push(
+      `${partial} calls have partial usage and ${unavailable} calls have unavailable usage; the complete total cannot be verified.`,
+    );
+  }
+  return {
+    breakdown,
+    cachedNote,
+    estimateNote,
+    isEmpty: false,
+    label,
+    title: titleParts.join(" "),
+  };
+}
+
+/**
+ * Whether a single turn's spend is worth flagging.
+ *
+ * Used by the composer to notice a turn that cost far more than this chat's
+ * norm — the first signal that something is running away.
+ */
+export function isOutsizedTurn(
+  turnTokens: number,
+  totals: SessionUsageTotals | undefined,
+) {
+  if (!totals || totals.calls < 3 || turnTokens <= 0) return false;
+  const average = totals.totalTokens / totals.calls;
+  return average > 0 && turnTokens > average * 3;
+}
+
+/** One measured window in the Usage Limits panel. */
+export type LedgerWindowView = {
+  id: "five-hour" | "week";
+  label: string;
+  /** Always present: the proportion this window has used of its limit. */
+  percent: number;
+  /** `41%`, or `<1%` when spend has started but rounds to nothing. */
+  percentLabel: string;
+  /** `412K of 2M` — the numbers behind the percentage. */
+  detail: string;
+  /** Whether the limit is a configured budget rather than the reference. */
+  hasBudget: boolean;
+  /** Where the spend went, biggest first, already labelled. */
+  origins: Array<{ label: string; tokens: string; share: number }>;
+  isEstimated: boolean;
+};
+
+type LedgerWindowSpec = {
+  id: "five-hour" | "week";
+  label: string;
+  /** Length of the rolling window, in hours. */
+  hours: number;
+  totalsKey: "fiveHour" | "week";
+};
+
+/**
+ * Which measured windows to show for a provider.
+ *
+ * Matches how that account is actually limited:
+ * - OpenAI / Anthropic: 5-hour session + weekly
+ * - xAI (Grok Build): weekly only
+ * - Kimi / Gemini and others: weekly only (no known 5h plan meter)
+ */
+export function ledgerWindowSpecsForProvider(
+  providerId: string | undefined,
+): LedgerWindowSpec[] {
+  switch (providerId) {
+    case "openai":
+    case "anthropic":
+      return [
+        {
+          hours: 5,
+          id: "five-hour",
+          label: "5-hour window",
+          totalsKey: "fiveHour",
+        },
+        {
+          hours: 24 * 7,
+          id: "week",
+          label: "Weekly window",
+          totalsKey: "week",
+        },
+      ];
+    case "xai":
+      return [
+        {
+          hours: 24 * 7,
+          id: "week",
+          label: "Weekly window",
+          totalsKey: "week",
+        },
+      ];
+    case "kimi":
+    case "gemini":
+    default:
+      return [
+        {
+          hours: 24 * 7,
+          id: "week",
+          label: "Weekly window",
+          totalsKey: "week",
+        },
+      ];
+  }
+}
+
+/** Short copy for the measured panel header, based on which windows apply. */
+export function ledgerWindowsCaption(providerId: string | undefined) {
+  const specs = ledgerWindowSpecsForProvider(providerId);
+  if (specs.length === 0) return "Local spend";
+  if (specs.length === 1) {
+    return `Spend in the ${specs[0]!.label.toLowerCase()}`;
+  }
+  const labels = specs.map((spec) =>
+    spec.id === "five-hour" ? "5-hour" : "weekly",
+  );
+  return `Spend in the ${labels.join(" and ")} windows`;
+}
+
+const WEEK_HOURS = 24 * 7;
+const WEEK_MS = WEEK_HOURS * 60 * 60 * 1000;
+
+/**
+ * Token cap for a measured window: a configured budget scaled to the window,
+ * otherwise the daily display reference scaled the same way.
+ */
+function windowLimitTokens(summary: ProviderLedgerSummary, hours: number) {
+  const budgetHours = Math.max(1, summary.budget?.windowHours ?? 24);
+  const budgetMax = summary.budget?.maxTokens ?? 0;
+  if (budgetMax > 0) {
+    return Math.max(1, Math.round((budgetMax * hours) / budgetHours));
+  }
+  const reference = Math.max(1, summary.dailyReferenceTokens);
+  return Math.max(1, Math.round((reference * hours) / 24));
+}
+
+/** Weekly 100% stop in tokens — the denominator for daily pace. */
+export function weeklyLimitTokens(summary: ProviderLedgerSummary) {
+  return windowLimitTokens(summary, WEEK_HOURS);
+}
+
+function isWeeklyUsageWindow(window: { id: string; label: string }) {
+  return /week/i.test(`${window.id} ${window.label}`);
+}
+
+/**
+ * Turn a provider's ledger totals into the windows Settings shows.
+ *
+ * Window set is provider-specific (see `ledgerWindowSpecsForProvider`). Percent
+ * is spend that builds up in the window (used / limit), not remaining capacity.
+ */
+export function ledgerWindows(
+  summary: ProviderLedgerSummary | undefined,
+  providerId?: ProviderId | string,
+): LedgerWindowView[] {
+  if (!summary) return [];
+  const budgetMax = summary.budget?.maxTokens ?? 0;
+  const resolvedProviderId = providerId ?? summary.providerId;
+
+  return ledgerWindowSpecsForProvider(resolvedProviderId).map((spec) => {
+    const totals =
+      spec.totalsKey === "fiveHour" ? summary.fiveHour : summary.week;
+    const biggest = totals.byOrigin[0]?.totalTokens ?? 0;
+    const hasBudget = budgetMax > 0;
+    const limit = windowLimitTokens(summary, spec.hours);
+    const percent = Math.min(
+      100,
+      Math.round((totals.totalTokens / limit) * 100),
+    );
+    return {
+      detail: `${formatTokenCount(Math.max(0, limit - totals.totalTokens))} of ${formatTokenCount(limit)} tokens left`,
+      hasBudget,
+      id: spec.id,
+      isEstimated:
+        totals.estimatedCalls > 0 ||
+        (totals.partialCalls ?? 0) > 0 ||
+        (totals.unavailableCalls ?? 0) > 0,
+      label: spec.label,
+      origins: totals.byOrigin.slice(0, 4).map((origin) => ({
+        label: origin.label,
+        share:
+          biggest > 0 ? Math.round((origin.totalTokens / biggest) * 100) : 0,
+        tokens: formatTokenCount(origin.totalTokens),
+      })),
+      percent,
+      percentLabel:
+        totals.totalTokens > 0 && percent === 0 ? "<1%" : `${percent}%`,
+    };
+  });
+}
+
+/** The banner shown when Gyro is holding runs or a budget is running out. */
+export type UsageSafetyNotice = {
+  tone: "paused" | "warning";
+  title: string;
+  detail?: string;
+  /** Whether the user can lift this themselves right now. */
+  canResume: boolean;
+};
+
+/** The points at which a measured plan allowance becomes worth interrupting for. */
+export const PLAN_USAGE_NOTICE_THRESHOLDS = [80, 90, 95] as const;
+
+const PLAN_USAGE_CYCLE_BUCKET_MS = 15 * 60 * 1000;
+
+/**
+ * Providers report a window's reset with sub-second jitter between polls, so
+ * the raw value would start a new notification cycle on every refresh. Round it
+ * to a quarter hour: distinct windows stay distinct, repeated polls collapse.
+ */
+function planUsageCycleId(resetsAt: string | undefined) {
+  if (!resetsAt) return "rolling";
+  const time = Date.parse(resetsAt);
+  if (!Number.isFinite(time)) return resetsAt;
+  return new Date(
+    Math.round(time / PLAN_USAGE_CYCLE_BUCKET_MS) * PLAN_USAGE_CYCLE_BUCKET_MS,
+  ).toISOString();
+}
+
+/**
+ * One day's even share of a 100% weekly stop, rounded to the nearest percent.
+ * 100 ÷ 7 ≈ 14.
+ */
+export const DAILY_PACE_NOTICE_PERCENT = Math.round(100 / 7);
+
+export type PlanUsageNotice = {
+  providerId: ProviderId;
+  windowId: string;
+  windowLabel: string;
+  percent: number;
+  threshold: number;
+  /** A new reset timestamp starts a new notification cycle. */
+  cycleId: string;
+};
+
+/**
+ * Return the highest reached threshold for each provider allowance window.
+ * Callers persist the returned cycle/threshold pair after presenting it, which
+ * keeps a refreshed usage response from repeating the same interruption.
+ */
+export function planUsageNotices(
+  providerId: ProviderId,
+  windows: ProviderUsageWindow[],
+): PlanUsageNotice[] {
+  return windows
+    .flatMap((window) => {
+      const percent = window.usedPercent;
+      if (percent === undefined || !Number.isFinite(percent)) return [];
+      const threshold = [...PLAN_USAGE_NOTICE_THRESHOLDS]
+        .reverse()
+        .find((value) => percent >= value);
+      if (!threshold) return [];
+      return [
+        {
+          cycleId: planUsageCycleId(window.resetsAt),
+          percent: Math.min(100, Math.max(0, Math.round(percent))),
+          providerId,
+          threshold,
+          windowId: window.id,
+          windowLabel: window.label,
+        },
+      ];
+    })
+    .sort((left, right) => right.threshold - left.threshold);
+}
+
+/**
+ * Informational warning when usage runs a day's share (~14%) ahead of pace.
+ * Not a hard stop. A pause outranks this notice.
+ *
+ * A provider-measured weekly window is the real plan limit, so it outranks the
+ * local ledger unless the user configured a budget: the ledger's default
+ * reference is a display scale and can read 100% while the plan is barely used.
+ * A weekly window warns only when used% exceeds the even pace for the time
+ * already elapsed by at least one day's share.
+ */
+export function dailyPaceNotice(
+  providerId: ProviderId,
+  input: {
+    enabled: boolean;
+    paused?: boolean;
+    windows?: ProviderUsageWindow[];
+    ledger?: ProviderLedgerSummary;
+    now?: Date;
+  },
+): PlanUsageNotice | undefined {
+  if (!input.enabled || input.paused) return undefined;
+
+  const now = input.now ?? new Date();
+  const day = now.toISOString().slice(0, 10);
+  const ledger = input.ledger;
+  const hasBudget = (ledger?.budget?.maxTokens ?? 0) > 0;
+
+  const weekly = hasBudget
+    ? undefined
+    : (input.windows ?? []).find(
+        (window) =>
+          isWeeklyUsageWindow(window) &&
+          typeof window.usedPercent === "number" &&
+          Number.isFinite(window.usedPercent),
+      );
+  if (weekly) {
+    const resetsAt = weekly.resetsAt ? Date.parse(weekly.resetsAt) : NaN;
+    // Without a reset time the elapsed share of the week is unknown.
+    if (!Number.isFinite(resetsAt)) return undefined;
+    const remaining = Math.min(WEEK_MS, Math.max(0, resetsAt - now.getTime()));
+    const evenPace = ((WEEK_MS - remaining) / WEEK_MS) * 100;
+    const used = weekly.usedPercent!;
+    if (used < evenPace + DAILY_PACE_NOTICE_PERCENT) return undefined;
+    return {
+      cycleId: `day:${day}`,
+      percent: Math.min(100, Math.max(0, Math.round(used))),
+      providerId,
+      threshold: DAILY_PACE_NOTICE_PERCENT,
+      windowId: weekly.id,
+      windowLabel: weekly.label,
+    };
+  }
+
+  if (!ledger?.day) return undefined;
+  const weeklyLimit = weeklyLimitTokens(ledger);
+  const percent = Math.min(
+    100,
+    Math.max(0, Math.round((ledger.day.totalTokens / weeklyLimit) * 100)),
+  );
+  if (percent < DAILY_PACE_NOTICE_PERCENT) return undefined;
+  return {
+    cycleId: `day:${day}`,
+    percent,
+    providerId,
+    threshold: DAILY_PACE_NOTICE_PERCENT,
+    windowId: "day",
+    windowLabel: "Today",
+  };
+}
+
+function budgetHeadline(budget: BudgetState) {
+  const left = formatTokenCount(
+    Math.max(0, budget.maxTokens - budget.usedTokens),
+  );
+  const cap = formatTokenCount(budget.maxTokens);
+  const estimate = budget.hasEstimates ? ", partly estimated" : "";
+  return `${budget.providerId}: ${remainingUsage(budget.percent).percentLabel} of budget left (${left} of ${cap} tokens left${estimate})`;
+}
+
+/**
+ * Turn the pause and the budgets into the one thing worth saying.
+ *
+ * A pause outranks a budget warning, and the worst budget outranks the rest:
+ * the banner exists to explain why work stopped, not to list every number.
+ */
+export function summarizeUsageSafety(
+  snapshot: UsageSafetySnapshot | undefined,
+): UsageSafetyNotice | undefined {
+  if (!snapshot) return undefined;
+
+  const { pause } = snapshot;
+  if (pause.active) {
+    const isBudget = pause.reason?.kind === "budgetExhausted";
+    const resumesAt = pause.autoResumeAt
+      ? new Date(pause.autoResumeAt).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : undefined;
+    return {
+      canResume: true,
+      detail: isBudget
+        ? resumesAt
+          ? `Runs resume on their own at ${resumesAt}, or resume now to keep going.`
+          : "Resume to keep going."
+        : undefined,
+      title:
+        pause.scope === "automations"
+          ? "Automations are paused. Chat still runs."
+          : isBudget && pause.reason?.kind === "budgetExhausted"
+            ? `Paused: the ${pause.reason.providerId} budget is spent.`
+            : "Gyro is paused.",
+      tone: "paused",
+    };
+  }
+
+  const worst = [...snapshot.budgets]
+    .filter(
+      (budget) => budget.level === "throttle" || budget.level === "notify",
+    )
+    .sort((left, right) => right.percent - left.percent)[0];
+  if (!worst) return undefined;
+
+  return {
+    canResume: false,
+    detail:
+      worst.level === "throttle"
+        ? "Council runs and automations are on hold until it frees up. Ordinary turns still work."
+        : undefined,
+    title: budgetHeadline(worst),
+    tone: "warning",
+  };
+}
+
+/** What one press of the send button is about to buy. */
+export type TurnCostEstimate = {
+  /** Provider calls this send will make. A Council turn is its seats plus one. */
+  calls: number;
+  /** Estimated tokens across those calls. */
+  tokens: number;
+  /** `5×` — how this compares with an ordinary single-model turn. */
+  multiplier: number;
+  /** `5 calls · ~900K tokens · 5× a normal turn`. */
+  label: string;
+  /** Whether the user should have to agree before this is spent. */
+  needsConfirm: boolean;
+  /** Plain-language reason, shown on the confirm. */
+  confirmReason?: string;
+};
+
+/**
+ * Tokens above which a single send is large enough to be worth confirming even
+ * when a chat has no history to compare it against.
+ */
+const LARGE_TURN_TOKENS = 400_000;
+
+/** Effort levels that multiply reasoning tokens hardest. */
+const EXPENSIVE_EFFORTS = new Set(["max", "ultra"]);
+
+/**
+ * Estimate what a send will cost, and decide whether to ask first.
+ *
+ * The multiplier is the part that goes unnoticed: a Council send is its seats
+ * plus a synthesis, so one keypress buys five calls at the current context
+ * size. Confirmation is required when the send is large in absolute terms,
+ * when it pairs fan-out with the most expensive effort levels, or when it
+ * dwarfs what this chat has been spending per call so far.
+ */
+export function estimateTurnCost({
+  chatMode,
+  contextTokens,
+  reasoningEffort,
+  seatCount,
+  sessionTotals,
+}: {
+  chatMode: "normal" | "plan" | "council";
+  /** Tokens the next call will carry, from the composer's context meter. */
+  contextTokens: number;
+  reasoningEffort?: string;
+  /** Council seats resolved for this turn. */
+  seatCount?: number;
+  sessionTotals?: SessionUsageTotals;
+}): TurnCostEstimate {
+  const seats = chatMode === "council" ? Math.max(0, seatCount ?? 0) : 0;
+  // Seats each carry the frozen context; the synthesizer then reads their
+  // answers, which is smaller but not free.
+  const calls = seats > 0 ? seats + 1 : 1;
+  const perCallTokens = Math.max(0, Math.round(contextTokens));
+  const tokens =
+    seats > 0
+      ? perCallTokens * seats + Math.round(perCallTokens * 0.4)
+      : perCallTokens;
+  const multiplier = calls;
+
+  const isExpensiveEffort = Boolean(
+    reasoningEffort && EXPENSIVE_EFFORTS.has(reasoningEffort),
+  );
+  const averagePerCall =
+    sessionTotals && sessionTotals.calls > 0
+      ? sessionTotals.totalTokens / sessionTotals.calls
+      : 0;
+  const dwarfsHistory =
+    (sessionTotals?.calls ?? 0) >= 3 &&
+    averagePerCall > 0 &&
+    tokens > averagePerCall * 3;
+
+  let confirmReason: string | undefined;
+  if (seats > 0 && isExpensiveEffort) {
+    confirmReason = `${calls} models at ${reasoningEffort} effort is the most expensive turn Gyro can run.`;
+  } else if (tokens >= LARGE_TURN_TOKENS && calls > 1) {
+    confirmReason = `This one send runs ${calls} provider calls, about ${formatTokenCount(tokens)} tokens.`;
+  } else if (dwarfsHistory) {
+    confirmReason = `This send is about ${Math.round(tokens / averagePerCall)}× what a call in this chat has been costing.`;
+  } else if (tokens >= LARGE_TURN_TOKENS * 2) {
+    confirmReason = `This send carries about ${formatTokenCount(tokens)} tokens.`;
+  }
+
+  const labelParts = [
+    `${calls} ${calls === 1 ? "call" : "calls"}`,
+    `~${formatTokenCount(tokens)} tokens`,
+  ];
+  if (multiplier > 1) {
+    labelParts.push(`${multiplier}× a normal turn`);
+  }
+
+  return {
+    calls,
+    confirmReason,
+    label: labelParts.join(" · "),
+    multiplier,
+    needsConfirm: Boolean(confirmReason),
+    tokens,
+  };
+}

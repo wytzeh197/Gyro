@@ -1,0 +1,687 @@
+/* Companion content shares the shell's quiet material and control rhythm.
+   The dock owns tabs, resizing and visibility; each tool keeps its scroll owner. */
+:root[data-theme]
+  :is(
+    .gyro-chat-companion-content,
+    .gyro-plan-rail,
+    .gyro-chat-environment-popover
+  ) {
+  --gyro-companion-control-height: max(
+    28px,
+    calc(28px * var(--gyro-ui-scale, 1))
+  );
+  --gyro-companion-content-inset: var(--gyro-space-panel);
+}
+
+:root[data-theme] .gyro-chat-companion-content {
+  --gyro-chat-font-response: calc(14px * var(--gyro-ui-scale, 1));
+}
+
+/* Only tool controls are normalized here; editor, terminal and preview content
+   keep their own input and rendering behavior. */
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(
+    .gyro-diff-review-toolbar button,
+    .gyro-plain-diff-toolbar button,
+    .gyro-recorded-diff-controls select,
+    .gyro-canvas-toolbar button,
+    .gyro-canvas-toolbar select,
+    .gyro-canvas-preview-tools button,
+    .gyro-canvas-preview-tools select,
+    .gyro-canvas-request button,
+    .gyro-canvas-request input,
+    .gyro-canvas-draft-status button
+  ) {
+  min-height: var(--gyro-companion-control-height);
+  border-radius: var(--gyro-radius-md);
+  font-size: var(--gyro-font-micro);
+  box-shadow: none;
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(
+    .gyro-review-file-filter,
+    .gyro-response-code-block,
+    .gyro-canvas-preview-stage iframe
+  ) {
+  border-radius: var(--gyro-radius-lg);
+}
+
+/* Review: one scope, one file navigator, one diff. Gutters line up while the
+   existing narrow/wide layout and collapsed file-list behavior stay intact. */
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(.gyro-git-comparison-review, .gyro-diff-review),
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(.gyro-git-comparison-review, .gyro-diff-review)
+  :is(
+    .gyro-review-scope,
+    .gyro-diff-file-list,
+    .gyro-diff-file-list > header,
+    .gyro-diff-main,
+    .gyro-inline-diff,
+    .gyro-diff-review-footer,
+    .gyro-diff-empty-footer,
+    .gyro-plain-diff-hunks,
+    .gyro-plain-diff-notice,
+    .gyro-syntax-notice
+  ) {
+  /* Review belongs to the surround all the way to its bottom edge. Only
+     selected files and added/removed lines carry a distinct semantic fill. */
+  background: transparent;
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-review-scope {
+  align-items: center;
+  flex-wrap: wrap;
+  column-gap: var(--gyro-space-standard);
+  row-gap: var(--gyro-space-compact);
+  min-height: var(--gyro-companion-control-height);
+  padding: var(--gyro-space-standard) var(--gyro-companion-content-inset);
+  border-bottom-color: var(--gyro-border-soft);
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-review-scope > strong {
+  font-weight: 500;
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-review-file-filter {
+  margin: var(--gyro-space-standard) var(--gyro-companion-content-inset);
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  min-height: var(--gyro-companion-control-height);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(.gyro-review-file-tree, .gyro-diff-tree) {
+  padding-inline: var(--gyro-space-standard);
+  padding-bottom: var(--gyro-space-standard);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(
+    .gyro-review-tree-file,
+    .gyro-review-tree-directory,
+    .gyro-diff-tree-file
+  ) {
+  border-radius: var(--gyro-radius-md);
+  min-height: var(--gyro-companion-control-height);
+  font-size: var(--gyro-font-support);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(.gyro-review-tree-file, .gyro-diff-tree-file).is-active {
+  background: var(--gyro-accent-soft);
+  border-color: transparent;
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(.gyro-diff-review-toolbar, .gyro-plain-diff-toolbar) {
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  flex-wrap: wrap;
+  padding: var(--gyro-space-standard) var(--gyro-companion-content-inset);
+  background: transparent;
+  border-bottom-color: var(--gyro-border-soft);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  .gyro-diff-review-toolbar
+  strong {
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-plain-diff-hunk > header {
+  padding-inline: var(--gyro-companion-content-inset);
+  color: var(--gyro-muted);
+  background: transparent;
+  font-family: var(--gyro-font-mono);
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-recorded-diff-controls {
+  min-width: 0;
+  gap: var(--gyro-space-compact);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(
+    .gyro-recorded-diff-controls > button,
+    .gyro-recorded-diff-controls > select,
+    .gyro-plain-diff-toolbar > button,
+    .gyro-plain-diff-pager > button,
+    .gyro-plain-diff-actions > button
+  ) {
+  min-height: var(--gyro-companion-control-height);
+  padding: 4px 10px;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: transparent;
+  color: var(--gyro-text);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  .gyro-review-wrap-toggle[aria-pressed="true"] {
+  background: var(--gyro-accent-soft);
+  color: var(--gyro-accent);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(
+    .gyro-recorded-diff-controls > button,
+    .gyro-plain-diff-toolbar > button,
+    .gyro-plain-diff-pager > button,
+    .gyro-plain-diff-actions > button
+  ):not(:disabled):hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+
+/* Browser owns navigation beneath the common dock header. Its native page
+   remains flush; padding or rounded clips here would change host geometry. */
+:root[data-theme]
+  .gyro-chat-companion
+  .gyro-browser-preview.is-chat
+  .gyro-browser-preview-toolbar {
+  min-height: calc(
+    var(--gyro-companion-control-height) + 2 * var(--gyro-space-standard)
+  );
+  padding: var(--gyro-space-standard) var(--gyro-companion-content-inset);
+  gap: var(--gyro-space-compact);
+  grid-template-columns: auto minmax(0, 1fr) var(
+      --gyro-companion-control-height
+    );
+  background: transparent;
+}
+
+:root[data-theme]
+  .gyro-chat-companion
+  .gyro-browser-preview.is-chat
+  :is(
+    .gyro-browser-nav-group > button,
+    .gyro-browser-menu-trigger,
+    .gyro-url-bar > button
+  ) {
+  width: var(--gyro-companion-control-height);
+  min-width: var(--gyro-companion-control-height);
+  height: var(--gyro-companion-control-height);
+  border-radius: var(--gyro-radius-md);
+}
+
+:root[data-theme]
+  .gyro-chat-companion
+  .gyro-browser-preview.is-chat
+  .gyro-url-bar {
+  height: var(--gyro-companion-control-height);
+  min-height: var(--gyro-companion-control-height);
+  border-radius: var(--gyro-radius-md);
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  padding-left: var(--gyro-space-standard);
+}
+
+:root[data-theme]
+  .gyro-chat-companion
+  .gyro-browser-preview.is-chat
+  .gyro-url-bar:focus-within {
+  background: var(--gyro-pane);
+  border-color: var(--gyro-focus-ring);
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-browser-agent-strip {
+  padding-inline: var(--gyro-companion-content-inset);
+  font-size: var(--gyro-font-micro);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  .gyro-browser-actions.is-overflow-menu.is-open {
+  gap: var(--gyro-space-standard);
+  padding-top: var(--gyro-space-standard);
+}
+
+/* Canvas separates its controls, working surface and request without another
+   enclosing card. HTML previews still use their own viewport/scaling rules. */
+:root[data-theme] .gyro-chat-companion-content .gyro-canvas {
+  background: transparent;
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(
+    .gyro-canvas-toolbar,
+    .gyro-canvas-preview-tools,
+    .gyro-canvas-draft-status,
+    .gyro-canvas-request
+  ) {
+  gap: var(--gyro-space-standard);
+  padding: var(--gyro-space-standard) var(--gyro-companion-content-inset);
+  background: transparent;
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-canvas-toolbar > select {
+  flex: 1 1 140px;
+  min-width: min(140px, 100%);
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-canvas-view-switch {
+  flex: none;
+  gap: var(--gyro-space-compact);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  .gyro-canvas-body:not(.is-preview) {
+  padding: var(--gyro-companion-content-inset);
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-canvas-editor {
+  padding: 0;
+  font-size: var(--gyro-font-body);
+  line-height: 1.65;
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-canvas-preview-stage {
+  padding: var(--gyro-space-standard);
+  background: transparent;
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-canvas-request {
+  flex: none;
+  padding-block: var(--gyro-space-card);
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-canvas-request > input {
+  flex-basis: 160px;
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+}
+
+/* Files remains a tree, not a second editor. Preserve inline indentation and
+   the native file-type colors while aligning the visible row surfaces. */
+:root[data-theme]
+  .gyro-chat-companion-content
+  .gyro-companion-files
+  > .gyro-file-tree
+  > .gyro-panel-body {
+  padding: var(--gyro-space-standard);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  .gyro-companion-files
+  .gyro-file-row {
+  min-height: var(--gyro-companion-control-height);
+  padding-block: var(--gyro-space-compact);
+  padding-right: var(--gyro-space-standard);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  .gyro-companion-files
+  .gyro-file-row.is-active {
+  background: var(--gyro-accent-soft);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  .gyro-companion-files
+  .gyro-file-row.is-active::before {
+  content: none;
+}
+
+/* A single terminal is one uninterrupted reading canvas. xterm owns its font,
+   wrapping and viewport size; only the surrounding inset/material is refined. */
+:root[data-theme]
+  .gyro-chat-companion
+  .gyro-environment-rail.is-tool.is-chromeless
+  .gyro-terminal-workspace,
+:root[data-theme]
+  .gyro-chat-companion
+  .gyro-environment-rail.is-tool.is-chromeless
+  .gyro-terminal-grid:has(.gyro-terminal-pane:only-child)
+  .gyro-terminal-pane {
+  background: var(--gyro-terminal-canvas);
+}
+
+:root[data-theme]
+  .gyro-chat-companion
+  .gyro-environment-rail.is-tool.is-chromeless
+  .gyro-terminal-grid:has(.gyro-terminal-pane:only-child)
+  .gyro-xterm-host {
+  padding: var(--gyro-companion-content-inset);
+}
+
+/* Agents and Side chat share the main answer's reading size, without copying
+   the main chat's broad margins into a narrower companion. */
+:root[data-theme] .gyro-chat-companion-content .gyro-subagent-panel {
+  padding: var(--gyro-companion-content-inset);
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-subagent-task {
+  margin-bottom: var(--gyro-space-panel);
+  padding-bottom: var(--gyro-space-panel);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  font-size: var(--gyro-font-support);
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-subagent-task > summary {
+  color: var(--gyro-text);
+  font-weight: 500;
+  min-height: var(--gyro-companion-control-height);
+  line-height: var(--gyro-companion-control-height);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(.gyro-subagent-result, .gyro-side-chat-message) {
+  font-size: var(--gyro-chat-font-response);
+  line-height: 1.65;
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-subagent-result {
+  margin-top: var(--gyro-space-panel);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  .gyro-subagent-panel
+  .gyro-run-header-actions
+  .gyro-subagent-stop {
+  width: var(--gyro-companion-control-height);
+  height: var(--gyro-companion-control-height);
+  border-radius: var(--gyro-radius-md);
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-side-chat-transcript {
+  padding: var(--gyro-companion-content-inset);
+  gap: var(--gyro-space-section);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  .gyro-side-chat
+  .gyro-side-chat-composer {
+  background: transparent;
+  padding: var(--gyro-space-standard) var(--gyro-companion-content-inset)
+    var(--gyro-companion-content-inset);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  .gyro-side-chat
+  .gyro-composer-shell {
+  border-radius: var(--gyro-chat-composer-radius);
+  box-shadow: none;
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  .gyro-side-chat
+  .gyro-user-message-bubble {
+  border-radius: var(--gyro-chat-canvas-radius);
+}
+
+:root[data-theme] .gyro-chat-companion-content .gyro-side-chat-empty h1 {
+  font-size: var(--gyro-font-lead);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+/* Plan retains its document/steps switch and state semantics. The document is
+   sized for the panel; steps read as rows with clear, separate state marks. */
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-chat-companion-host-pane)
+  > .gyro-plan-rail
+  .gyro-plan-document {
+  padding: var(--gyro-space-panel);
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-chat-companion-host-pane)
+  > .gyro-plan-rail
+  .gyro-plan-document
+  h1 {
+  font-size: var(--gyro-font-lead);
+  letter-spacing: 0;
+  line-height: 1.4;
+  margin-bottom: var(--gyro-space-panel);
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-chat-companion-host-pane)
+  > .gyro-plan-rail
+  .gyro-plan-document
+  h2 {
+  font-size: var(--gyro-font-body);
+  letter-spacing: 0;
+  line-height: 1.5;
+  margin-block: var(--gyro-space-section) var(--gyro-space-standard);
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-chat-companion-host-pane)
+  > .gyro-plan-rail
+  :is(.gyro-plan-document p, .gyro-plan-document li) {
+  font-size: var(--gyro-font-body);
+  line-height: 1.65;
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-chat-companion-host-pane)
+  > .gyro-plan-rail
+  .gyro-plan-harness.gyro-plan-steps {
+  padding: var(--gyro-space-standard) var(--gyro-space-panel)
+    var(--gyro-space-panel);
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-chat-companion-host-pane)
+  > .gyro-plan-rail
+  .gyro-plan-steps
+  > .gyro-rail-section {
+  padding: 0;
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-chat-companion-host-pane)
+  > .gyro-plan-rail
+  .gyro-plan-steps
+  .gyro-plan-item {
+  padding: var(--gyro-space-card) 0;
+  border-radius: 0;
+  column-gap: var(--gyro-space-standard);
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-chat-companion-host-pane)
+  > .gyro-plan-rail
+  .gyro-plan-steps
+  .gyro-plan-item
+  + .gyro-plan-item {
+  border-top: 1px solid var(--gyro-border-soft);
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-chat-companion-host-pane)
+  > .gyro-plan-rail
+  .gyro-plan-steps
+  .gyro-plan-item::before {
+  content: none;
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-chat-companion-host-pane)
+  > .gyro-plan-rail
+  .gyro-plan-steps
+  .gyro-plan-item
+  strong {
+  font-size: var(--gyro-font-body);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-chat-companion-host-pane)
+  > .gyro-plan-rail
+  .gyro-plan-steps
+  .gyro-plan-item
+  > div
+  > span {
+  font-size: var(--gyro-font-support);
+  line-height: 1.5;
+}
+
+/* Environment is a context popover. Its sections use the same quiet, readable
+   labels as the panel instead of an extra uppercase hierarchy. */
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-chat-environment-popover
+  :is(.gyro-environment-overline, .gyro-environment-section > header) {
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-chat-environment-popover
+  :is(.gyro-environment-row, .gyro-chat-environment-popover-actions > button) {
+  min-height: var(--gyro-companion-control-height);
+  border-radius: var(--gyro-radius-md);
+}
+
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-chat-environment-popover
+  .gyro-environment-row:not(.is-commit) {
+  grid-template-columns: 15px minmax(64px, 0.9fr) minmax(0, 1fr) 13px;
+  column-gap: var(--gyro-space-standard);
+}
+
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-chat-environment-popover
+  .gyro-chat-environment-popover-actions
+  > button
+  > small {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+/* The empty tool picker shares the same gutters and one clear row per tool. */
+:root[data-theme] .gyro-chat-companion-content > .gyro-companion-launcher {
+  width: min(440px, calc(100% - 2 * var(--gyro-companion-content-inset)));
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  > .gyro-companion-launcher
+  > button {
+  min-height: calc(
+    var(--gyro-companion-control-height) + var(--gyro-space-standard)
+  );
+  gap: var(--gyro-space-standard);
+  border-radius: var(--gyro-radius-md);
+  padding-inline: var(--gyro-space-standard);
+}
+
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(.gyro-companion-empty, .gyro-subagent-empty) {
+  padding: var(--gyro-companion-content-inset);
+}
+
+@container gyro-companion-content (max-width: 380px) {
+  :root[data-theme] .gyro-chat-companion-content .gyro-canvas-toolbar > select {
+    flex-basis: 100%;
+  }
+
+  :root[data-theme] .gyro-chat-companion-content .gyro-canvas-request > input {
+    min-width: 0;
+  }
+
+  :root[data-theme]
+    .gyro-chat-companion-content
+    .gyro-plain-diff
+    .gyro-plain-diff-hunk
+    .gyro-diff-line {
+    grid-template-columns: 32px 32px 16px minmax(0, 1fr);
+  }
+}
+
+/* Keep keyboard focus distinct from the quiet hover/selection fills. */
+:root[data-theme]
+  .gyro-chat-companion-content
+  :is(
+    .gyro-file-row,
+    .gyro-review-tree-file,
+    .gyro-review-tree-directory,
+    .gyro-canvas button,
+    .gyro-canvas select,
+    .gyro-canvas input,
+    .gyro-companion-launcher > button
+  ):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+
+/* In light appearance, tool navigation belongs to the shared surround;
+   editable fields and the actual working surface remain clearly separate. */
+:root[data-theme="light"]
+  .gyro-chat-companion-content
+  .gyro-browser-preview.is-chat {
+  background: transparent;
+}
+
+:root[data-theme="light"]
+  .gyro-chat-companion-content
+  .gyro-canvas-body:not(.is-preview) {
+  background: var(--gyro-surface-raised);
+}
+
+:root[data-theme="light"]
+  .gyro-chat-companion-content
+  :is(
+    .gyro-canvas-toolbar select,
+    .gyro-canvas-request input,
+    .gyro-browser-preview.is-chat .gyro-url-bar
+  ) {
+  background: var(--gyro-surface-raised);
+  border-color: var(--gyro-border);
+}
+
+:root[data-theme="light"]
+  .gyro-chat-companion-content
+  :is(
+    .gyro-review-file-filter,
+    .gyro-recorded-diff-controls select,
+    .gyro-canvas-toolbar select,
+    .gyro-canvas-request input,
+    .gyro-browser-preview.is-chat .gyro-url-bar
+  ):focus-within {
+  border-color: var(--gyro-focus-ring);
+}
+
+/* Side chat is portaled outside the main chat's composer finish. Keep its
+   light card on the same restrained border and shadow as the main composer. */
+:root[data-theme="light"]
+  .gyro-chat-companion-content
+  .gyro-side-chat
+  .gyro-side-chat-composer
+  > .gyro-composer-shell.is-hero.has-provider {
+  border-color: var(--gyro-border);
+  box-shadow: 0 2px 6px var(--gyro-premium-shadow-soft);
+}

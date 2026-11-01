@@ -92,7 +92,9 @@ fn run_installer(command: &str) -> Result<String, String> {
             Ok(None) if Instant::now() < deadline => std::thread::sleep(INSTALL_POLL),
             Ok(None) => {
                 let _ = child.kill();
-                return Err(format!("`{command}` did not finish within fifteen minutes."));
+                return Err(format!(
+                    "`{command}` did not finish within fifteen minutes."
+                ));
             }
             Err(error) => return Err(format!("`{command}` could not be watched: {error}")),
         }
@@ -106,7 +108,9 @@ fn run_installer(command: &str) -> Result<String, String> {
 
 /// Stdout and stderr folded into one transcript for the UI to show verbatim.
 fn transcript(output: &std::process::Output) -> String {
-    let mut text = String::from_utf8_lossy(&output.stdout).trim_end().to_string();
+    let mut text = String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string();
     let errors = String::from_utf8_lossy(&output.stderr);
     if !errors.trim().is_empty() {
         if !text.is_empty() {

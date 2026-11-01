@@ -636,6 +636,8 @@ export type MenuBarSnapshot = {
 
 /** Which macOS notifications Gyro sends while it is in the background. */
 export type DesktopNotificationPreferences = {
+  /** Preserve the historical preview unless explicitly disabled. */
+  showNames?: boolean;
   enabled: boolean;
   approvals: boolean;
   finished: boolean;
@@ -787,6 +789,7 @@ export type BrowserFeedback = {
 };
 
 export type BrowserPreview = {
+  runtime?: import("./app-preview-panel").AppPreviewRuntime;
   url: string;
   history: string[];
   historyIndex: number;
@@ -883,6 +886,7 @@ export type ProviderExecutionKind =
   | "claude-code"
   | "kimi-acp"
   | "acp-cli"
+  | "antigravity-cli"
   | "ollama-api"
   | "openai-compatible-api"
   | "readiness-only";
@@ -1298,6 +1302,10 @@ export type OnboardingState = {
 };
 
 export type WorkbenchPreferences = {
+  settingsSections?: Record<string, boolean>;
+  defaultChatProviderId?: ProviderId;
+  defaultChatEffort?: string;
+  checkReminders?: boolean;
   theme: ThemeMode;
   /** User-selected brand accents applied across every local Gyro surface. */
   mainColor: string;
@@ -2428,7 +2436,7 @@ export type EfficiencyConfig = {
   enabled: boolean; experimental: boolean; profile: "routine" | "standard" | "deep";
   parallelAgents: boolean; prices: PriceSnapshot[];
   routing?: {enabled: boolean; routes: EfficiencyRoute[]; escalation: EfficiencyRoute | null};
-  structuredEvidence?: boolean; cacheAssembly?: boolean; taskState?: boolean; repositoryRetrieval?: boolean; progressDetection?: boolean;
+  structuredEvidence?: boolean; cacheAssembly?: boolean; taskState?: boolean; repositoryRetrieval?: boolean; progressDetection?: boolean; compactToolCatalog?: boolean; recoverableEvidence?: boolean; retainToolCatalog?: boolean;
 };
 
 export type GyroConfig = {

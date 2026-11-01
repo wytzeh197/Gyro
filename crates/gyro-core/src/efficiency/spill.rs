@@ -176,7 +176,8 @@ impl SpillStore {
     pub fn save(&self, address: &str, text: &str) -> io::Result<PathBuf> {
         fs::create_dir_all(&self.root)?;
         let path = self.path_for(address);
-        let temp = path.with_extension("tmp");
+        // Independent readers can spill identical evidence concurrently.
+        let temp = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
         fs::write(&temp, text)?;
         restrict(&temp)?;
         fs::rename(&temp, &path)?;
@@ -679,5 +680,23 @@ mod tests {
         let complete = complete.render();
         assert!(complete.contains("· complete"));
         assert!(!complete.contains("next offset"));
+    }
+    #[test]
+    fn simultaneous_identical_spills_all_keep_a_readable_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SpillStore::new(dir.path());
+        let address = address("test", "data", "same evidence");
+        std::thread::scope(|scope| {
+            let handles = (0..8)
+                .map(|_| scope.spawn(|| store.save(&address, "same evidence")))
+                .collect::<Vec<_>>();
+            for handle in handles {
+                handle.join().unwrap().unwrap();
+            }
+        });
+        assert_eq!(
+            store.load(&address).unwrap().as_deref(),
+            Some("same evidence")
+        );
     }
 }

@@ -99,6 +99,8 @@ pub(super) fn configured_tool_rounds() -> Option<usize> {
 /// Gyro's to report: a model told to name the internal budget paraphrases it
 /// into a heading like "paused at the tool-round limit", which reads as a
 /// product limit the user cannot lift and buries the way out.
+const TOOL_BUDGET_CHECKPOINT: &str = "Gyro has stopped offering tools for this turn. Do not call more tools. Give a concise checkpoint: what is verified complete, what remains unfinished, and what to do next. Do not claim the whole task is complete.";
+
 pub(super) fn tools_for_round(
     messages: &mut Vec<serde_json::Value>,
     tools: &[serde_json::Value],
@@ -108,16 +110,87 @@ pub(super) fn tools_for_round(
     if limit.is_none_or(|limit| round < limit) {
         return tools.to_vec();
     }
-    messages.push(serde_json::json!({
-        "role": "user",
-        "content": "Gyro has stopped offering tools for this turn. Do not call more tools. Give a concise checkpoint: what is verified complete, what remains unfinished, and what to do next. Do not claim the whole task is complete."
-    }));
+    // A length-limited checkpoint may continue at the same round. Keep one
+    // instruction in history instead of charging for another copy each time.
+    if !messages
+        .iter()
+        .any(|message| message["role"] == "user" && message["content"] == TOOL_BUDGET_CHECKPOINT)
+    {
+        messages.push(serde_json::json!({
+            "role": "user", "content": TOOL_BUDGET_CHECKPOINT
+        }));
+    }
     Vec::new()
+}
+
+/// The cache-assembly experiment can keep definitions at a prose-only checkpoint.
+/// Permission to execute is separate; presence of definitions never lifts a limit.
+pub(super) fn openai_tools_for_round(
+    messages: &mut Vec<serde_json::Value>,
+    tools: &[serde_json::Value],
+    round: usize,
+    limit: Option<usize>,
+    retain_checkpoint_catalog: bool,
+) -> (Vec<serde_json::Value>, bool) {
+    let offered = tools_for_round(messages, tools, round, limit);
+    let allow_calls = !offered.is_empty();
+    let definitions = if !allow_calls && retain_checkpoint_catalog {
+        tools.to_vec()
+    } else {
+        offered
+    };
+    (definitions, allow_calls)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn checkpoint_continuations_do_not_accumulate_budget_notices() {
+        let tools = vec![serde_json::json!({"type":"function"})];
+        let mut messages = Vec::new();
+        assert!(tools_for_round(&mut messages, &tools, 1, Some(1)).is_empty());
+        messages.push(serde_json::json!({"role":"assistant","content":"partial checkpoint"}));
+        let before = messages.clone();
+        for _ in 0..3 {
+            assert!(tools_for_round(&mut messages, &tools, 1, Some(1)).is_empty());
+            assert_eq!(messages, before);
+        }
+        // Compaction may remove the old instruction; reinstate it when absent.
+        messages.remove(0);
+        assert!(tools_for_round(&mut messages, &tools, 1, Some(1)).is_empty());
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["content"], "partial checkpoint");
+        assert_eq!(messages[1]["content"], TOOL_BUDGET_CHECKPOINT);
+    }
+    #[test]
+    fn checkpoint_catalog_never_reopens_tools_and_is_opt_in() {
+        let tools = vec![serde_json::json!({"type":"function","function":{"name":"edit"}})];
+        for retain in [false, true] {
+            for (round, limit, permitted) in
+                [(0, Some(1), true), (1, Some(1), false), (100, None, true)]
+            {
+                let mut messages = vec![serde_json::json!({"role":"tool","content":"edit result"})];
+                let (definitions, allow_calls) =
+                    openai_tools_for_round(&mut messages, &tools, round, limit, retain);
+                assert_eq!(allow_calls, permitted);
+                assert_eq!(
+                    definitions,
+                    if permitted || retain {
+                        tools.clone()
+                    } else {
+                        Vec::new()
+                    }
+                );
+                assert_eq!(messages[0]["content"], "edit result");
+                assert_eq!(messages.len(), if permitted { 1 } else { 2 });
+            }
+            let (definitions, allow_calls) =
+                openai_tools_for_round(&mut Vec::new(), &[], 0, None, retain);
+            assert!(definitions.is_empty());
+            assert!(!allow_calls);
+        }
+    }
     #[test]
     fn tool_budget_reserves_checkpoint_without_replaying_tools() {
         let mut messages = vec![serde_json::json!({"role":"tool","content":"edit applied"})];
@@ -265,7 +338,9 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
         );
     }
     if error.contains(PROVIDER_STOP_MARKER) {
-        return if normalized.contains("per-call ceiling") {
+        return if normalized.contains("repeated unchanged tool results") {
+            ("no-progress", "Gyro paused repeated work. Review the saved checkpoint, then send a changed approach to resume; completed work is preserved.")
+        } else if normalized.contains("per-call ceiling") {
             (
                 "spend-ceiling",
                 "Gyro stopped this turn at its per-call token ceiling. Ask for a smaller piece of the work, or raise `usageGuard.maxTokensPerCall` in config.json.",
@@ -582,5 +657,15 @@ mod recovery_tests {
             readable_provider_error("bad frame {not json}"),
             "bad frame {not json}"
         );
+    }
+    #[test]
+    fn repeated_work_pause_requires_explicit_resume_and_is_not_a_user_stop() {
+        let message = ProviderStopReason::NoProgress.message();
+        assert!(!is_transient_provider_error(&message));
+        assert!(is_provider_cancellation(&message));
+        let (kind, detail) = provider_failure_recovery(&message);
+        assert_eq!(kind, "no-progress");
+        assert!(detail.contains("checkpoint"));
+        assert!(!detail.contains("You stopped"));
     }
 }

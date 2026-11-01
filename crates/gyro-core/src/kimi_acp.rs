@@ -150,10 +150,7 @@ pub fn answer_looks_cut_off(text: &str) -> bool {
 /// A boolean the provider set on this result. Token totals and prose are not a cut.
 fn acp_result_marks_output_truncated(result: &Value) -> bool {
     result.get("truncated").and_then(Value::as_bool) == Some(true)
-        || result
-            .pointer("/_meta/truncated")
-            .and_then(Value::as_bool)
-            == Some(true)
+        || result.pointer("/_meta/truncated").and_then(Value::as_bool) == Some(true)
 }
 
 fn acp_result_needs_output_continuation(reason: &str, result: &Value) -> bool {
@@ -295,6 +292,8 @@ struct KimiAcpConnection {
     /// Set when a permission request was answered with a rejection. Some agents
     /// end the whole prompt for that alone, so the run resumes after it.
     declined_permission: bool,
+    managed_mode: Option<String>,
+    awaiting_input: bool,
 }
 
 impl Drop for KimiAcpConnection {
@@ -321,17 +320,18 @@ impl KimiAcpConnection {
         if let Some(provider_id) = provider_id_from_program(&request.program.to_string_lossy()) {
             try_apply_stored_provider_api_key(&mut command, provider_id)?;
         }
-        if std::path::Path::new(&request.program)
+        let managed_mode = if std::path::Path::new(&request.program)
             .file_name()
             .is_some_and(|name| name == "opencode")
             || request.provider_label == "OpenCode"
         {
-            // OpenCode defaults to allowing native tools. Require its ACP
-            // permission callbacks so Gyro can apply the user's policy.
-            // Agent-specific OpenCode configuration can override this default;
-            // live validation is still required before declaring full support.
-            command.env("OPENCODE_PERMISSION", r#"{"*":"ask","read":{"*":"ask","*.env":"deny","*.env.*":"deny"},"edit":"ask","bash":"ask","task":"ask","external_directory":"ask"}"#);
-        }
+            Some(crate::opencode_policy::configure(
+                &mut command,
+                request.mode == KimiAcpMode::Plan,
+            )?)
+        } else {
+            None
+        };
         configure_process_group(&mut command);
         let mut child = crate::process_guard::spawn_guarded(&mut command).map_err(|error| {
             anyhow!(
@@ -419,6 +419,8 @@ impl KimiAcpConnection {
         register_process_group(child.id());
         let now = Instant::now();
         Ok(Self {
+            managed_mode,
+            awaiting_input: false,
             provider_label: request.provider_label.clone(),
             child,
             stdin,
@@ -900,14 +902,14 @@ where
         );
         if let Err(error) = model_result {
             connection.runtime_info.model_id = previous_model;
-            // An explicit Google model must not silently run the CLI default.
-            if provider_id_from_program(&request.program.to_string_lossy())
-                .is_some_and(|id| matches!(id, "gemini" | "antigravity"))
-                || matches!(
-                    request.provider_label.as_str(),
-                    "Gemini" | "Google Antigravity"
-                )
-            {
+            // An explicitly selected model must not silently run the CLI default.
+            if matches!(
+                connection.usage_provider,
+                AcpProvider::Gemini | AcpProvider::Cursor | AcpProvider::OpenCode
+            ) || matches!(
+                request.provider_label.as_str(),
+                "Gemini" | "Google Antigravity" | "Cursor" | "OpenCode"
+            ) {
                 anyhow::bail!(
                     "{} could not select model {}: {error}",
                     request.provider_label,
@@ -936,12 +938,23 @@ where
             &mut on_write_file,
         );
     }
-    if request.mode == KimiAcpMode::Plan {
+    let cursor = connection.usage_provider == AcpProvider::Cursor;
+    let required_mode = connection.managed_mode.clone().or_else(|| {
+        cursor.then(|| {
+            if request.mode == KimiAcpMode::Plan {
+                "plan"
+            } else {
+                "agent"
+            }
+            .into()
+        })
+    });
+    if request.mode == KimiAcpMode::Plan || required_mode.is_some() {
         let mode_id = connection.send_request(
             "session/set_mode",
-            json!({"sessionId": session_id, "modeId": "plan"}),
+            json!({"sessionId": session_id, "modeId": required_mode.as_deref().unwrap_or("plan")}),
         )?;
-        let _ = wait_for_response(
+        let result = wait_for_response(
             &mut connection,
             mode_id,
             &request.workspace,
@@ -951,6 +964,14 @@ where
             &mut on_approval,
             &mut on_write_file,
         );
+        if required_mode.is_some() {
+            result.map_err(|error| {
+                anyhow!(
+                    "{} could not apply Gyro's execution mode: {error}",
+                    request.provider_label
+                )
+            })?;
+        }
     }
 
     crate::timing::mark(crate::timing::Stage::ProtocolReady);
@@ -1074,7 +1095,10 @@ where
     // looping.
     let mut agent_stops = 0usize;
     loop {
-        if request.cancellation.is_cancelled() || agent_stops >= ACP_AGENT_STOP_RECOVERY_ATTEMPTS {
+        if connection.awaiting_input
+            || request.cancellation.is_cancelled()
+            || agent_stops >= ACP_AGENT_STOP_RECOVERY_ATTEMPTS
+        {
             break;
         }
         let stopped = result
@@ -1204,8 +1228,9 @@ where
         // being reported as a complete answer.
         _ => {}
     }
-    let truncated = acp_result_needs_output_continuation(&stop_reason, &result)
-        || (request.mode == KimiAcpMode::Plan && answer_looks_cut_off(&response));
+    let truncated = !connection.awaiting_input
+        && (acp_result_needs_output_continuation(&stop_reason, &result)
+            || (request.mode == KimiAcpMode::Plan && answer_looks_cut_off(&response)));
     Ok(KimiAcpOutput {
         response: response.trim().to_string(),
         session_id,
@@ -1841,9 +1866,19 @@ where
             }
             "cursor/ask_question" | "cursor/create_plan" => {
                 if let Some(id) = message.get("id").cloned() {
-                    // These require richer UI than the current approval card.
-                    // Explicitly cancel instead of hanging or inventing consent.
                     connection.send_result(id, json!({"outcome": {"outcome": "cancelled"}}))?;
+                    if connection.collecting_usage {
+                        if let Some(handoff) = crate::cursor_input::chat_handoff(method, &params) {
+                            let text = format!("\n\n{handoff}");
+                            response.push_str(&text);
+                            on_delta(&text);
+                            connection.awaiting_input = true;
+                            connection.interrupted_usage();
+                            // Do not run more tools or automatic continuations
+                            // while a question or a plan awaits the user's reply.
+                            return Ok(json!({"stopReason": "end_turn"}));
+                        }
+                    }
                     on_activity(&KimiAcpActivity {
                         id: "cursor-input-required".into(), kind: "tool".into(),
                         label: "Cursor needs input".into(),
@@ -2627,11 +2662,11 @@ mod tests {
         acp_activity_id_slug, acp_diff_counts, acp_model_id, acp_offered_model_ids,
         acp_result_marks_output_truncated, acp_result_needs_output_continuation,
         acp_session_reopen_methods, acp_stop_is_end_turn, acp_stop_is_output_limit,
-        answer_looks_cut_off, check_kimi_acp_health,
-        classify_approval, is_acp_method_not_found, permission_option_id,
-        plan_mode_denies_approval, resolve_workspace_write_path, run_kimi_acp, thought_tail,
-        CredentialPolicy, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpHealthStatus,
-        KimiAcpMode, KimiAcpRequest, THOUGHT_LABEL_CHARS, USAGE_PROBE_FAILURES,
+        answer_looks_cut_off, check_kimi_acp_health, classify_approval, is_acp_method_not_found,
+        permission_option_id, plan_mode_denies_approval, resolve_workspace_write_path,
+        run_kimi_acp, thought_tail, CredentialPolicy, KimiAcpApprovalDecision, KimiAcpApprovalKind,
+        KimiAcpHealthStatus, KimiAcpMode, KimiAcpRequest, THOUGHT_LABEL_CHARS,
+        USAGE_PROBE_FAILURES,
     };
 
     #[test]
@@ -4069,7 +4104,12 @@ done
         .expect("the streamed answer is kept");
         assert_eq!(output.stop_reason, "end_turn");
         assert!(output.truncated);
-        assert_eq!(output.response.matches("ab").count(), 4, "{}", output.response);
+        assert_eq!(
+            output.response.matches("ab").count(),
+            4,
+            "{}",
+            output.response
+        );
     }
 
     #[cfg(unix)]
@@ -4295,12 +4335,15 @@ done
         for (provider, auth) in [("Cursor", "cursor_login"), ("OpenCode", "opencode-login")] {
             let script = r#"
 while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -E 's/.*"id":([0-9]+).*/\1/')
   case "$line" in
     *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"AUTH"}],"agentCapabilities":{}}}' ;;
     *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
     *'"method":"session/new"'*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"provider-session"}}' ;;
     *'"method":"session/set_config_option"'*) printf '%s\n' '{"jsonrpc":"2.0","id":4,"error":{"code":-32601,"message":"Method not found"}}' ;;
+    *'"method":"session/set_mode"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
     *'"method":"session/prompt"'*)
+      prompt_id="$id"
       printf '%s\n' '{"jsonrpc":"2.0","id":"permission","method":"session/request_permission","params":{"toolCall":{"kind":"execute","title":"Run shell command","rawInput":{"command":"touch forbidden"}},"options":[{"optionId":"yes","kind":"allow_once"},{"optionId":"no","kind":"reject_once"}]}}' ;;
     *'"id":"permission"'*)
       case "$line" in *'"optionId":"no"'*) ;; *) exit 7 ;; esac
@@ -4308,7 +4351,7 @@ while IFS= read -r line; do
     *'"id":"question"'*)
       case "$line" in *'"outcome":"cancelled"'*) ;; *) exit 8 ;; esac
       printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Denied safely."}}}}'
-      printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{"stopReason":"end_turn"}}' ;;
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$prompt_id" ;;
   esac
 done
 "#.replace("AUTH", auth);
@@ -4351,6 +4394,225 @@ done
             classify_approval(&json!({"title": "Edit file", "rawInput": {"path": "src/lib.rs"}})),
             KimiAcpApprovalKind::FileChange
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cursor_inputs_end_the_turn_with_visible_questions_without_continuation() {
+        for (method, params, expected) in [
+            (
+                "cursor/ask_question",
+                r#"{"questions":[{"prompt":"Which database?","options":[{"id":"pg","label":"Postgres"},{"id":"sqlite","label":"SQLite"}]}]}"#,
+                "Which database?",
+            ),
+            (
+                "cursor/create_plan",
+                r#"{"plan":"1. Add a cache.\n2. Test."}"#,
+                "Proceed with this Cursor plan?",
+            ),
+        ] {
+            let script = r#"
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -E 's/.*"id":([0-9]+).*/\1/')
+  case "$line" in
+    *'"method":"authenticate"'*) printf '{"id":%s,"result":{}}\n' "$id" ;;
+    *'"method":"initialize"'*) printf '{"id":%s,"result":{"agentCapabilities":{}}}\n' "$id" ;;
+    *'"method":"session/new"'*) printf '{"id":%s,"result":{"sessionId":"cursor-session"}}\n' "$id" ;;
+    *'"method":"session/set_mode"'*) printf '{"id":%s,"result":{}}\n' "$id" ;;
+    *'"method":"session/prompt"'*)
+      printf 'prompt\n' >> prompts
+      printf '%s\n' '{"id":"input","method":"METHOD","params":PARAMS}' ;;
+  esac
+done
+"#.replace("METHOD", method).replace("PARAMS", params);
+            let (temp, program) = acp_fixture(&script);
+            let mut request = fixture_request(
+                program,
+                temp.path().into(),
+                CancellationToken::default(),
+                None,
+            );
+            request.provider_label = "Cursor".into();
+            request.model = "cursor-default".into();
+            request.reasoning_effort = None;
+            request.mode = KimiAcpMode::Plan;
+            let mut streamed = String::new();
+            let output = run_kimi_acp(
+                request,
+                |text| streamed.push_str(text),
+                |_| {},
+                |_| panic!("Input is not tool consent"),
+                |_, _| panic!("Input must not write files"),
+            )
+            .unwrap();
+            assert!(output.response.contains(expected));
+            assert!(output.response.contains("GYRO_QUESTIONS:"));
+            assert!(streamed.contains(expected));
+            assert!(!output.truncated);
+            assert_eq!(
+                std::fs::read_to_string(temp.path().join("prompts")).unwrap(),
+                "prompt\n"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "requires GYRO_TEST_OPENCODE; protocol only, no generation"]
+    fn installed_opencode_accepts_managed_mode_on_new_and_loaded_sessions() {
+        use super::{
+            wait_for_response, KimiAcpActivity, KimiAcpApprovalRequest, KimiAcpConnection,
+        };
+        use std::path::Path;
+        let binary = std::env::var("GYRO_TEST_OPENCODE").expect("GYRO_TEST_OPENCODE");
+        let script = r#"
+export XDG_CONFIG_HOME="$PWD/config"
+export XDG_DATA_HOME="$PWD/data"
+export XDG_CACHE_HOME="$PWD/cache"
+export XDG_STATE_HOME="$PWD/state"
+exec "$GYRO_TEST_OPENCODE" --pure acp
+"#;
+        assert!(Path::new(&binary).exists());
+        let (temp, program) = acp_fixture(script);
+        let mut saved = None;
+        for mode in [KimiAcpMode::Plan, KimiAcpMode::Normal] {
+            let mut request = fixture_request(
+                program.clone(),
+                temp.path().into(),
+                CancellationToken::default(),
+                saved.clone(),
+            );
+            request.provider_label = "OpenCode".into();
+            request.mode = mode;
+            request.timeout = Duration::from_secs(30);
+            request.inactivity_timeout = Duration::from_secs(30);
+            let mut connection = KimiAcpConnection::start(&request).unwrap();
+            let mut response = String::new();
+            let mut delta = |_: &str| {};
+            let mut activity = |_: &KimiAcpActivity| {};
+            let mut approval = |_: &KimiAcpApprovalRequest| Ok(KimiAcpApprovalDecision::RejectOnce);
+            let mut write = |_: &Path, _: &str| anyhow::bail!("protocol probe must not write");
+            let id = connection
+                .send_request(
+                    "initialize",
+                    json!({"protocolVersion":1,"clientCapabilities":{}}),
+                )
+                .unwrap();
+            wait_for_response(
+                &mut connection,
+                id,
+                temp.path(),
+                &mut response,
+                &mut delta,
+                &mut activity,
+                &mut approval,
+                &mut write,
+            )
+            .unwrap();
+            let method = if saved.is_some() {
+                "session/load"
+            } else {
+                "session/new"
+            };
+            let mut params = json!({"cwd":temp.path(),"mcpServers":[]});
+            if let Some(session) = &saved {
+                params["sessionId"] = json!(session);
+            }
+            let id = connection.send_request(method, params).unwrap();
+            let opened = wait_for_response(
+                &mut connection,
+                id,
+                temp.path(),
+                &mut response,
+                &mut delta,
+                &mut activity,
+                &mut approval,
+                &mut write,
+            )
+            .unwrap();
+            let session = saved
+                .clone()
+                .unwrap_or_else(|| opened["sessionId"].as_str().unwrap().to_string());
+            let id = connection
+                .send_request(
+                    "session/set_mode",
+                    json!({"sessionId":session,"modeId":connection.managed_mode}),
+                )
+                .unwrap();
+            wait_for_response(
+                &mut connection,
+                id,
+                temp.path(),
+                &mut response,
+                &mut delta,
+                &mut activity,
+                &mut approval,
+                &mut write,
+            )
+            .unwrap();
+            saved = Some(session);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cursor_reapplies_agent_mode_on_resume_and_rejects_unavailable_selected_models() {
+        for reject_model in [false, true] {
+            let script = r#"
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -E 's/.*"id":([0-9]+).*/\1/')
+  case "$line" in
+    *'"method":"authenticate"'*) printf '{"id":%s,"result":{}}\n' "$id" ;;
+    *'"method":"initialize"'*) printf '{"id":%s,"result":{"agentCapabilities":{"loadSession":true}}}\n' "$id" ;;
+    *'"method":"session/load"'*) printf '{"id":%s,"result":{"sessionId":"cursor-session","modes":{"currentModeId":"plan"}}}\n' "$id" ;;
+    *'"method":"session/set_model"'*) printf '{"id":%s,"error":{"code":-32602,"message":"Model unavailable"}}\n' "$id" ;;
+    *'"method":"session/set_mode"'*)
+      case "$line" in *'"modeId":"agent"'*) ;; *) exit 8 ;; esac
+      printf 'agent' > mode
+      printf '{"id":%s,"result":{}}\n' "$id" ;;
+    *'"method":"session/prompt"'*)
+      printf 'prompt' > prompted
+      printf '%s\n' '{"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Ready."}}}}'
+      printf '{"id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;;
+  esac
+done
+"#;
+            let (temp, program) = acp_fixture(script);
+            let mut request = fixture_request(
+                program,
+                temp.path().into(),
+                CancellationToken::default(),
+                Some("cursor-session".into()),
+            );
+            request.provider_label = "Cursor".into();
+            request.model = if reject_model {
+                "missing-model"
+            } else {
+                "cursor-default"
+            }
+            .into();
+            request.reasoning_effort = None;
+            let result = run_kimi_acp(
+                request,
+                |_| {},
+                |_| {},
+                |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+                |_, _| Ok(()),
+            );
+            if reject_model {
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("could not select model"));
+                assert!(!temp.path().join("prompted").exists());
+            } else {
+                assert!(result.unwrap().resumed);
+                assert_eq!(
+                    std::fs::read_to_string(temp.path().join("mode")).unwrap(),
+                    "agent"
+                );
+            }
+        }
     }
 
     #[test]

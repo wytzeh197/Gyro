@@ -1,4 +1,7 @@
+import { newChatDefaultSelection } from "./new-chat-defaults";
+import { useCheckReminders } from "./use-check-reminders";
 import { flushSync } from "react-dom";
+import { LocalCheckHost } from "./local-check";
 import {
   MonacoEditorPane,
   type WorkspaceNavigationSource,
@@ -35,6 +38,18 @@ import { parseProviderLoginProgress } from "./provider-login-progress";
 import { ProviderSignInContext } from "@gyro-dev/ui";
 import { FirstRunTour } from "@gyro-dev/ui";
 import {
+  MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
+  MODEL_DEFAULT_SUGGESTION_MAX_STORAGE_CHARS,
+  dismissModelDefaultSuggestion,
+  isSuccessfulModelUseResponse,
+  markModelDefaultSuggestionShown,
+  modelDefaultSuggestionFor,
+  parseModelDefaultSuggestionState,
+  recordCompletedModelUse,
+  snoozeProviderDefaultSuggestions,
+  type ModelDefaultSuggestionState,
+} from "./model-default-suggestion";
+import {
   useInlineSignInRunner,
   useProviderSignIn,
   useProviderSignInActions,
@@ -52,6 +67,7 @@ import {
 } from "./system-access-state";
 import { useAppearanceSaveFeedback } from "./use-appearance-save-feedback";
 import { useSessionBrowserEvents, changeSessionBrowserViewport } from "./use-session-browser-events";
+import { appPreviewClient } from "./app-preview-client";
 import type { BrowserViewportMode } from "@gyro-dev/ui";
 import {
   sourceControlForWorkspace,
@@ -122,6 +138,7 @@ import {
 } from "./use-session-context-events";
 import {
   ChatFileActionsContext,
+  ChatFileScopeContext,
   ComposerContextCandidates,
 } from "@gyro-dev/ui";
 import {
@@ -221,6 +238,7 @@ import {
   editorFilePolicy,
   setOpenDroppedWorkspaceHandler,
 } from "@gyro-dev/ui";
+import { createChatFileActions } from "./chat-file-actions";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -458,6 +476,7 @@ import {
   useSoloChatEnvironmentControls,
 } from "./chat-environment-rail";
 import { useWorkspaceExplorerFiles } from "./workspace-explorer";
+import { runWorkspaceSearchRoots } from "./workspace-search-run";
 import { useGyroUpdater } from "./update-controller";
 import {
   deriveLatestMenuBarOutcome,
@@ -633,20 +652,13 @@ type AutomationDraft = Pick<
 >;
 
 type ModelStandardPrompt = {
-  count: number;
+  usageCount: number;
+  chatCount: number;
   modelId: string;
   modelLabel: string;
   providerId: ProviderId;
   providerLabel: string;
 };
-
-type ModelUsageEntry = {
-  count: number;
-  snoozeUntil?: number;
-  standard?: boolean;
-};
-
-type ModelUsageMap = Record<string, ModelUsageEntry>;
 
 type SavedProject = {
   path: string;
@@ -680,7 +692,6 @@ const PINNED_SESSIONS_STORAGE_KEY = "gyro.pinned-session-ids";
 const REMOVED_PROJECTS_STORAGE_KEY = "gyro.removed-project-paths";
 const RECENT_PROJECTS_STORAGE_KEY = "gyro.recent-project-paths";
 const PREVIEW_CONFIG_STORAGE_KEY = "gyro.preview-config";
-const MODEL_USAGE_STORAGE_KEY = "gyro.model-standard-usage";
 /** Lines shown either side of the revealed line in a model focus peek. */
 const MODEL_FOCUS_PEEK_CONTEXT_LINES = 12;
 
@@ -690,8 +701,6 @@ const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
 const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
 /** Record the first automatic request before macOS opens a permission sheet. */
 const SYSTEM_ACCESS_PROMPTED_STORAGE_KEY = "gyro.system-access-prompted-v1";
-const MODEL_STANDARD_PROMPT_THRESHOLD = 3;
-const MODEL_STANDARD_PROMPT_SNOOZE_SELECTIONS = 3;
 const DEFAULT_TOOL_PANEL_HEIGHT = 280;
 const BROWSER_TOOL_PANEL_HEIGHT = 420;
 /** ~65% of viewport — Browser focus mode; never shrink a taller panel. */
@@ -751,7 +760,6 @@ const MAX_PERSISTED_DIRTY_BUFFER_CHARS = 500_000;
 const MAX_PERSISTED_DIRTY_BUFFERS_TOTAL_CHARS = 1_000_000;
 const MAX_STORED_WORKBENCH_STATE_CHARS = 2_000_000;
 const MAX_STORED_PREVIEW_CONFIG_CHARS = 200_000;
-const MAX_STORED_MODEL_USAGE_CHARS = 100_000;
 const MAX_PINNED_SESSIONS = 200;
 const MAX_REMOVED_PROJECTS = 200;
 const MAX_RECENT_PROJECTS = 12;
@@ -763,10 +771,6 @@ const AUTOMATION_SCHEDULER_COMMANDS = {
   recoverLeases: "recover_automation_leases",
 } as const;
 const ACTIVE_TURN_IDLE_MS = 5 * 60 * 1000;
-
-function modelUsageKey(providerId: ProviderId, modelId: string) {
-  return `${providerId}:${modelId}`;
-}
 
 /**
  * Propose a branch name from the pending commit message, so the common case is
@@ -812,51 +816,14 @@ function waitForNextPaint() {
   });
 }
 
-function loadModelUsageMap(): ModelUsageMap {
-  try {
-    const stored = readBoundedLocalStorage(
-      MODEL_USAGE_STORAGE_KEY,
-      MAX_STORED_MODEL_USAGE_CHARS,
-    );
-    if (!stored) {
-      return {};
-    }
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    return Object.fromEntries(
-      Object.entries(parsed).flatMap(([key, value]) => {
-        if (!value || typeof value !== "object" || Array.isArray(value)) {
-          return [];
-        }
-        const entry = value as Partial<ModelUsageEntry>;
-        return [
-          [
-            key,
-            {
-              count:
-                typeof entry.count === "number" && Number.isFinite(entry.count)
-                  ? entry.count
-                  : 0,
-              snoozeUntil:
-                typeof entry.snoozeUntil === "number" &&
-                Number.isFinite(entry.snoozeUntil)
-                  ? entry.snoozeUntil
-                  : undefined,
-              standard: entry.standard === true,
-            },
-          ],
-        ];
-      }),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function saveModelUsageMap(usage: ModelUsageMap) {
-  safeSetLocalStorage(MODEL_USAGE_STORAGE_KEY, JSON.stringify(usage));
+function loadModelDefaultSuggestionState() {
+  return parseModelDefaultSuggestionState(
+    readBoundedLocalStorage(
+      MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
+      MODEL_DEFAULT_SUGGESTION_MAX_STORAGE_CHARS,
+    ),
+    Date.now(),
+  );
 }
 
 /** Pane key for the chat surfaces that render outside the tiled grid. */
@@ -1019,6 +986,7 @@ export function App() {
   >({});
   /** Draft key whose Goal mode should follow a newly started goal chat. */
   const goalModeCarryRef = useRef<string>();
+  const draftWorkspaceModes = useRef<Record<string, WorkbenchState["workspaceMode"]>>({});
   /** Per-draft model picks so split-screen new chats don't share the global model. */
   const [chatDraftModels, setChatDraftModels] = useState<
     Record<string, SessionModelSelection>
@@ -1047,6 +1015,7 @@ export function App() {
     setTerminalSourceControlLoadingPaneId,
   ] = useState<string>();
   const [config, setConfig] = useState<GyroConfig>(loadPreviewConfig);
+  const [configLoaded, setConfigLoaded] = useState(false);
   const configRef = useRef(config);
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermissionState>("prompt");
@@ -1248,6 +1217,32 @@ export function App() {
   const planEditorRequestTokenRef = useRef(0);
   const [modelStandardPrompt, setModelStandardPrompt] =
     useState<ModelStandardPrompt>();
+  const [pendingModelDefaultCandidate, setPendingModelDefaultCandidate] =
+    useState<{ providerId: ProviderId; modelId: string }>();
+  const [isModelDefaultSaving, setIsModelDefaultSaving] = useState(false);
+  const [modelDefaultSaveError, setModelDefaultSaveError] = useState<string>();
+  const modelDefaultSavingRef = useRef(false);
+  const modelSuggestionShownRef = useRef(false);
+  const modelSuggestionStateRef = useRef<ModelDefaultSuggestionState>();
+  if (!modelSuggestionStateRef.current) {
+    modelSuggestionStateRef.current = loadModelDefaultSuggestionState();
+  }
+  const saveModelSuggestionState = useCallback(
+    (next: ModelDefaultSuggestionState) => {
+      modelSuggestionStateRef.current = next;
+      safeSetLocalStorage(
+        MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
+        JSON.stringify(next),
+      );
+    },
+    [],
+  );
+  const clearModelDefaultSuggestion = useCallback(() => {
+    setPendingModelDefaultCandidate(undefined);
+    setModelStandardPrompt(undefined);
+    setModelDefaultSaveError(undefined);
+  }, []);
+
   const [terminalTerminateCandidate, setTerminalTerminateCandidate] =
     useState<TerminalPane>();
   const [chatCloseCandidate, setChatCloseCandidate] = useState<{
@@ -1382,9 +1377,10 @@ export function App() {
   const sessionBrowserKey =
     activeSessionId ??
     (activeWorkspaceRoot ? `workbench:${activeWorkspaceRoot}` : "workbench");
-  const browserPreview =
-    workbench.browserPreviewsBySession?.[sessionBrowserKey] ??
-    EMPTY_BROWSER_PREVIEW;
+  const browserPreview = {
+    ...(workbench.browserPreviewsBySession?.[sessionBrowserKey] ?? EMPTY_BROWSER_PREVIEW),
+    runtime: isTauriRuntime() ? appPreviewClient(sessionBrowserKey, activeWorkspaceRoot ?? "") : undefined,
+  };
   // Each render captures its browser owner, including callbacks completing after
   // a chat switch. Native events explicitly supply the originating session.
   const dispatchActiveBrowser = useCallback(
@@ -2348,6 +2344,7 @@ export function App() {
       files,
       isTauriRuntime() ? loadExplorerDirectory : undefined,
       reportExplorerError,
+      workspaceChangeGeneration,
     );
   const visibleWorkspaceFiles = useMemo(
     () =>
@@ -2817,7 +2814,7 @@ export function App() {
             "Preview config updated",
           );
         }
-        return;
+        return true;
       }
       try {
         configSaveQueueRef.current = configSaveQueueRef.current
@@ -2827,12 +2824,14 @@ export function App() {
         if (shouldNotifySuccess) {
           notify("provider", "Settings saved", "Configuration persisted");
         }
+        return true;
       } catch {
         notify(
           "command-failed",
           "Settings save failed",
           "Config kept in memory",
         );
+        return false;
       }
     },
     [notify],
@@ -3912,6 +3911,7 @@ export function App() {
   const refreshConfig = useCallback(async () => {
     if (!isTauriRuntime()) {
       setConfig(loadPreviewConfig());
+      setConfigLoaded(true);
       setActiveProfileId("shell");
       return;
     }
@@ -3926,6 +3926,7 @@ export function App() {
       applyProviderCapabilityManifest(capabilityManifest);
       const resolvedConfig = withCouncilConfig(nextConfig);
       setConfig(resolvedConfig);
+      setConfigLoaded(true);
       setActiveProfileId(nextConfig.commandProfiles[0]?.id ?? "shell");
       const ollama = providersForConfig(resolvedConfig).find(
         (provider) => provider.id === "ollama",
@@ -3975,6 +3976,7 @@ export function App() {
       }
     } catch {
       setConfig(withCouncilConfig(EMPTY_CONFIG));
+      setConfigLoaded(true);
       setActiveProfileId("shell");
     }
   }, []);
@@ -4510,7 +4512,7 @@ export function App() {
     async (query: WorkspaceSearchQuery) => {
       const requestId = workspaceSearchRequestRef.current + 1;
       workspaceSearchRequestRef.current = requestId;
-      dispatchWorkbench({ type: "ide-set-search-query", query });
+      dispatchWorkbench({ type: "ide-set-search-results", query, results: [] });
       if (workspaceRoots.length === 0 || !query.query.trim()) {
         dispatchWorkbench({
           type: "ide-set-search-results",
@@ -4542,8 +4544,9 @@ export function App() {
         return;
       }
       try {
-        const resultsByRoot = await Promise.all(
-          workspaceRoots.map(async (root) => {
+        await runWorkspaceSearchRoots<WorkspaceSearchResult>(
+          workspaceRoots,
+          async (root) => {
             const settings = resolvedWorkspaceSettings(
               workbench.preferences.workspaceUserSettings,
               workbench.preferences.workspaceSettingsByWorkspace,
@@ -4557,43 +4560,34 @@ export function App() {
                 (pattern) => `!${pattern.replace(/^!+/, "")}`,
               ),
             ].filter((glob, index, all) => all.indexOf(glob) === index);
-            return {
-              root,
-              results: await invoke<WorkspaceSearchResult[]>(
-                "search_workspace",
-                {
-                  request: {
-                    workspacePath: root,
-                    query: query.query,
-                    globs: globs.length > 0 ? globs : undefined,
-                    maxResults: query.maxResults ?? settings.searchMaxResults,
-                  },
+            const rootResults = await invoke<WorkspaceSearchResult[]>(
+              "search_workspace",
+              {
+                request: {
+                  workspacePath: root,
+                  query: query.query,
+                  globs: globs.length > 0 ? globs : undefined,
+                  maxResults: query.maxResults ?? settings.searchMaxResults,
                 },
-              ),
-            };
-          }),
-        );
-        const results = resultsByRoot
-          .flatMap(({ root, results: rootResults }) =>
-            rootResults.map((result) => ({
+              },
+            );
+            return rootResults.map((result) => ({
               ...result,
               path: absoluteWorkspaceFilePath(root, result.path),
-            })),
-          )
-          .slice(
-            0,
-            query.maxResults ?? effectiveWorkspaceSettings.searchMaxResults,
-          );
-        if (workspaceSearchRequestRef.current === requestId) {
-          dispatchWorkbench({
-            type: "ide-set-search-results",
-            query,
-            results,
-          });
-        }
+            }));
+          },
+          (results) =>
+            dispatchWorkbench({
+              type: "ide-set-search-results",
+              query,
+              results,
+            }),
+          () => workspaceSearchRequestRef.current === requestId,
+          query.maxResults ?? effectiveWorkspaceSettings.searchMaxResults,
+        );
       } catch (error) {
         if (workspaceSearchRequestRef.current === requestId) {
-          notify("command-failed", "Workspace search failed", String(error));
+          notify("command-failed", "Workspace search incomplete", String(error));
         }
       }
     },
@@ -4747,7 +4741,9 @@ export function App() {
           event.payload.files,
         ),
       );
-      setWorkspaceChangeGeneration(event.payload.generation);
+      // Watcher generations are per root; equal generations from different
+      // roots must still invalidate expanded directory caches.
+      setWorkspaceChangeGeneration((revision) => revision + 1);
     }).then((unlisten) => {
       if (disposed) unlisten();
       else unlistenWorkspace = unlisten;
@@ -7730,6 +7726,8 @@ export function App() {
       // prompt (and its images) typed while no folder was open so the message
       // the user already wrote is not silently discarded.
       carryFolderlessDraft(draftKey);
+      if (configLoaded) setChatDraftModels(current => current[draftKey] ? current : { ...current, [draftKey]: newChatDefaultSelection(config, workbench.preferences) ?? selectedSessionModelFromConfig(config) });
+
       // A project has one unsent draft; if it is already open in a pane, focus
       // it there rather than opening it twice. A new
       // pane gets an id of its own: a sent draft keeps its pane id, so a
@@ -7763,7 +7761,9 @@ export function App() {
       // Drafts belong to their chat/project, even when its pane was replaced.
       // Sending or explicitly discarding a draft is what clears its contents.
       setDraftResetToken((token) => token + 1);
-      dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });
+      const draftWorkspaceMode = draftWorkspaceModes.current[draftKey] ?? workbench.preferences.defaultWorkspaceMode;
+      draftWorkspaceModes.current[draftKey] = draftWorkspaceMode;
+      dispatchWorkbench({ type: "set-workbench-mode", mode: draftWorkspaceMode });
       // Starting a chat from the AI view keeps the code layout: the chat is
       // already visible in the sidebar.
       if (!options.keepLayout) {
@@ -7774,7 +7774,7 @@ export function App() {
       }
       dispatchWorkbench({ type: "close-tool-panel" });
     },
-    [activeSession?.workspacePath, carryFolderlessDraft, chatGrid.layouts, workspacePath],
+    [activeSession?.workspacePath, carryFolderlessDraft, chatGrid.layouts, workspacePath, config, configLoaded, workbench.preferences],
   );
 
   /**
@@ -8639,6 +8639,7 @@ export function App() {
 
   const selectProvider = useCallback(
     (providerId: ProviderId) => {
+      clearModelDefaultSuggestion();
       const providers = providersForConfig(config);
       const provider = providers.find((item) => item.id === providerId);
       const model = provider ? getProviderModel(provider) : undefined;
@@ -8669,7 +8670,7 @@ export function App() {
         }));
       }
     },
-    [activeDraftKey, activeSessionId, config, persistConfig, saveSessionModel],
+    [activeDraftKey, activeSessionId, config, clearModelDefaultSuggestion, persistConfig, saveSessionModel],
   );
 
   const setProviderAuthStatus = useCallback(
@@ -9373,42 +9374,45 @@ export function App() {
     openProviderSettings,
   });
 
-  const recordModelSelection = useCallback(
+  const recordCompletedModelChoice = useCallback(
     (
-      providerId: ProviderId,
-      providerLabel: string,
-      modelId: string,
-      modelLabel: string,
+      sessionId: string,
+      turnId: string,
+      selection: SessionModelSelection,
+      response: ProviderChatResponse,
     ) => {
-      const usage = loadModelUsageMap();
-      const key = modelUsageKey(providerId, modelId);
-      const current = usage[key] ?? { count: 0 };
-      const count = current.count + 1;
-      const nextEntry: ModelUsageEntry = { ...current, count };
-      usage[key] = nextEntry;
-      saveModelUsageMap(usage);
-
-      const shouldPrompt =
-        !modelStandardPrompt &&
-        !nextEntry.standard &&
-        count >= MODEL_STANDARD_PROMPT_THRESHOLD &&
-        count >= (nextEntry.snoozeUntil ?? MODEL_STANDARD_PROMPT_THRESHOLD);
-
-      if (shouldPrompt) {
-        setModelStandardPrompt({
-          count,
-          modelId,
-          modelLabel,
-          providerId,
-          providerLabel,
-        });
-      }
+      if (
+        !isSuccessfulModelUseResponse(response) ||
+        !selection.providerId ||
+        !isProviderId(selection.providerId) ||
+        !selection.modelId
+      )
+        return;
+      const now = Date.now();
+      saveModelSuggestionState(
+        recordCompletedModelUse(
+          modelSuggestionStateRef.current!,
+          {
+            providerId: selection.providerId,
+            modelId: selection.modelId,
+            sessionId,
+            turnId,
+            completedAt: now,
+          },
+          now,
+        ),
+      );
+      setPendingModelDefaultCandidate({
+        providerId: selection.providerId,
+        modelId: selection.modelId,
+      });
     },
-    [modelStandardPrompt],
+    [saveModelSuggestionState],
   );
 
   const selectProviderModel = useCallback(
     (providerId: ProviderId, modelId: string) => {
+      clearModelDefaultSuggestion();
       let providers = providersForConfig(config).map((provider) =>
         provider.id === providerId
           ? { ...provider, selectedModelId: modelId }
@@ -9454,21 +9458,13 @@ export function App() {
           }));
         }
       }
-      if (provider && selectedModel) {
-        recordModelSelection(
-          providerId,
-          provider.displayName,
-          modelId,
-          selectedModel.displayName,
-        );
-      }
     },
     [
       activeDraftKey,
       activeSessionId,
       config,
+      clearModelDefaultSuggestion,
       persistConfig,
-      recordModelSelection,
       saveSessionModel,
     ],
   );
@@ -9482,6 +9478,20 @@ export function App() {
    */
   const selectProviderDefaultModel = useCallback(
     (providerId: ProviderId, modelId: string) => {
+      saveModelSuggestionState(
+        snoozeProviderDefaultSuggestions(
+          modelSuggestionStateRef.current!,
+          providerId,
+          Date.now(),
+        ),
+      );
+      if (modelStandardPrompt?.providerId === providerId) {
+        setModelStandardPrompt(undefined);
+        setModelDefaultSaveError(undefined);
+      }
+      if (pendingModelDefaultCandidate?.providerId === providerId) {
+        setPendingModelDefaultCandidate(undefined);
+      }
       const providers = providersForConfig(config).map((provider) =>
         provider.id === providerId
           ? { ...provider, defaultModelId: modelId }
@@ -9501,7 +9511,14 @@ export function App() {
         }`,
       );
     },
-    [config, notify, persistConfig],
+    [
+      config,
+      notify,
+      persistConfig,
+      saveModelSuggestionState,
+      modelStandardPrompt,
+      pendingModelDefaultCandidate,
+    ],
   );
 
   const selectProviderReasoningEffort = useCallback(
@@ -9561,81 +9578,76 @@ export function App() {
     ],
   );
 
-  const acceptModelStandardPrompt = useCallback(() => {
-    if (!modelStandardPrompt) {
+  const acceptModelStandardPrompt = useCallback(async () => {
+    if (!modelStandardPrompt || modelDefaultSavingRef.current) return;
+    const currentConfig = configRef.current;
+    const provider = providersForConfig(currentConfig).find(
+      (item) => item.id === modelStandardPrompt.providerId,
+    );
+    const model = provider?.models?.find(
+      (item) => item.id === modelStandardPrompt.modelId,
+    );
+    if (!provider?.enabled || !model) {
+      setModelStandardPrompt(undefined);
+      setPendingModelDefaultCandidate(undefined);
       return;
     }
-    const usage = loadModelUsageMap();
-    const key = modelUsageKey(
-      modelStandardPrompt.providerId,
-      modelStandardPrompt.modelId,
+    modelDefaultSavingRef.current = true;
+    setIsModelDefaultSaving(true);
+    setModelDefaultSaveError(undefined);
+    // A default is a preference for future provider chats. Leave the selected
+    // provider, every existing session, and their reasoning effort untouched.
+    const saved = await persistConfig(
+      {
+        ...currentConfig,
+        modelProviders: providersForConfig(currentConfig).map((item) =>
+          item.id === provider.id ? { ...item, defaultModelId: model.id } : item,
+        ),
+      },
+      { notifySuccess: false },
     );
-    const current = usage[key] ?? { count: modelStandardPrompt.count };
-    usage[key] = {
-      ...current,
-      count: Math.max(current.count, modelStandardPrompt.count),
-      snoozeUntil: undefined,
-      standard: true,
-    };
-    saveModelUsageMap(usage);
-
-    const providers = providersForConfig(config).map((provider) =>
-      provider.id === modelStandardPrompt.providerId
-        ? { ...provider, selectedModelId: modelStandardPrompt.modelId }
-        : provider,
-    );
-    void persistConfig({
-      ...config,
-      selectedProviderId: modelStandardPrompt.providerId,
-      modelProviders: providers,
-    });
-    dispatchWorkbench({
-      type: "set-provider-model",
-      providerId: modelStandardPrompt.providerId,
-      model: modelStandardPrompt.modelLabel,
-    });
-    if (activeSessionId) {
-      void saveSessionModel(activeSessionId, {
-        providerId: modelStandardPrompt.providerId,
-        providerLabel: modelStandardPrompt.providerLabel,
-        modelId: modelStandardPrompt.modelId,
-        modelLabel: modelStandardPrompt.modelLabel,
-      });
+    modelDefaultSavingRef.current = false;
+    setIsModelDefaultSaving(false);
+    if (!saved) {
+      setModelDefaultSaveError("Couldn't save the default to disk. Try again.");
+      return;
     }
+    saveModelSuggestionState(
+      snoozeProviderDefaultSuggestions(
+        modelSuggestionStateRef.current!,
+        provider.id,
+        Date.now(),
+      ),
+    );
     notify(
       "provider",
-      "Standard model set",
-      `${modelStandardPrompt.providerLabel} · ${modelStandardPrompt.modelLabel}`,
+      "Default model updated",
+      `${provider.displayName} · ${model.displayName}`,
     );
     setModelStandardPrompt(undefined);
-  }, [
-    activeSessionId,
-    config,
-    modelStandardPrompt,
-    notify,
-    persistConfig,
-    saveSessionModel,
-  ]);
+    setPendingModelDefaultCandidate(undefined);
+  }, [modelStandardPrompt, notify, persistConfig, saveModelSuggestionState]);
 
-  const dismissModelStandardPrompt = useCallback(() => {
-    if (!modelStandardPrompt) {
-      return;
-    }
-    const usage = loadModelUsageMap();
-    const key = modelUsageKey(
-      modelStandardPrompt.providerId,
-      modelStandardPrompt.modelId,
-    );
-    const current = usage[key] ?? { count: modelStandardPrompt.count };
-    const count = Math.max(current.count, modelStandardPrompt.count);
-    usage[key] = {
-      ...current,
-      count,
-      snoozeUntil: count + MODEL_STANDARD_PROMPT_SNOOZE_SELECTIONS,
-    };
-    saveModelUsageMap(usage);
-    setModelStandardPrompt(undefined);
-  }, [modelStandardPrompt]);
+  const dismissModelStandardPrompt = useCallback(
+    (neverSuggestAgain = false) => {
+      if (!modelStandardPrompt || modelDefaultSavingRef.current) return;
+      saveModelSuggestionState(
+        dismissModelDefaultSuggestion(
+          modelSuggestionStateRef.current!,
+          {
+            providerId: modelStandardPrompt.providerId,
+            modelId: modelStandardPrompt.modelId,
+            neverSuggestAgain,
+          },
+          Date.now(),
+        ),
+      );
+      setModelStandardPrompt(undefined);
+      setPendingModelDefaultCandidate(undefined);
+      setModelDefaultSaveError(undefined);
+    },
+    [modelStandardPrompt, saveModelSuggestionState],
+  );
 
   const updateActiveChatDraft = useCallback(
     (value: string) => {
@@ -9732,7 +9744,20 @@ export function App() {
   );
 
   const selectChatAttachment = useCallback(
-    async (kind: ChatAttachmentPickerKind, explicitPath?: string) => {
+    async (
+      kind: ChatAttachmentPickerKind,
+      explicitPath?: string,
+      target?: {
+        draftKey: string;
+        sessionId?: string;
+        workspacePath?: string;
+      },
+    ) => {
+      const attachmentDraftKey = target?.draftKey ?? activeDraftKey;
+      const attachmentSessionId = target ? target.sessionId : activeSessionId;
+      const attachmentWorkspacePath = target
+        ? target.workspacePath
+        : workspacePath;
       if (!isTauriRuntime()) {
         notify(
           "command-failed",
@@ -9741,7 +9766,7 @@ export function App() {
         );
         return;
       }
-      if (kind === "workspace-file" && !workspacePath) {
+      if (kind === "workspace-file" && !attachmentWorkspacePath) {
         notify(
           "command-failed",
           "Select a project first",
@@ -9760,7 +9785,7 @@ export function App() {
           }));
         const paths =
           typeof selected === "string" ? [selected] : (selected ?? []);
-        const existing = chatAttachments[activeDraftKey] ?? [];
+        const existing = chatAttachmentsRef.current[attachmentDraftKey] ?? [];
         const remaining = {
           image: Math.max(
             0,
@@ -9778,7 +9803,7 @@ export function App() {
         let limitExceeded = false;
         for (const path of paths) {
           const attachmentKind = chatAttachmentKindForPath(kind, path);
-          if (attachmentKind === "workspace-file" && !workspacePath) {
+          if (attachmentKind === "workspace-file" && !attachmentWorkspacePath) {
             rejected.push(
               `${workspaceName(path)}: select a project to attach project files`,
             );
@@ -9797,9 +9822,9 @@ export function App() {
               "prepare_chat_attachment",
               {
                 request: {
-                  sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                  sessionId: attachmentSessionId ?? NEW_CHAT_DRAFT_KEY,
                   path,
-                  workspacePath,
+                  workspacePath: attachmentWorkspacePath,
                   kind: attachmentKind,
                 },
               },
@@ -9821,12 +9846,12 @@ export function App() {
         if (prepared.length) {
           // Picking an image already in the draft stores the same file again.
           setChatAttachments((current) => {
-            const draft = current[activeDraftKey] ?? [];
+            const draft = current[attachmentDraftKey] ?? [];
             const seen = new Set(draft.map((item) => item.path));
             const fresh = prepared.filter(
               (item) => !seen.has(item.path) && Boolean(seen.add(item.path)),
             );
-            return { ...current, [activeDraftKey]: [...draft, ...fresh] };
+            return { ...current, [attachmentDraftKey]: [...draft, ...fresh] };
           });
         }
         if (rejected.length) {
@@ -10219,7 +10244,15 @@ export function App() {
   );
 
   const handleComposerAction = useCallback(
-    (action: string, draftKey = activeDraftKey) => {
+    (
+      action: string,
+      draftKey = activeDraftKey,
+      attachmentTarget?: {
+        draftKey: string;
+        sessionId?: string;
+        workspacePath?: string;
+      },
+    ) => {
       if (isShellOptimizing) {
         const allowedWhileOptimizing =
           action.startsWith("select-provider:") ||
@@ -10243,6 +10276,7 @@ export function App() {
         nextMode: WorkbenchState["workspaceMode"],
       ) => {
         const applyWorkspaceMode = () => {
+          if (!activeSessionId) draftWorkspaceModes.current[activeDraftKey] = nextMode;
           dispatchWorkbench({ type: "set-workbench-mode", mode: nextMode });
           dispatchWorkbench({ type: "close-tool-panel" });
           notify(
@@ -10405,6 +10439,7 @@ export function App() {
         void selectChatAttachment(
           "workspace-file",
           decodeURIComponent(action.slice("attach-workspace-path:".length)),
+          attachmentTarget,
         );
         return;
       }
@@ -10548,20 +10583,24 @@ export function App() {
           startNewChat();
           break;
         case "attach-files":
-          void selectChatAttachment("any");
+          void selectChatAttachment("any", undefined, attachmentTarget);
           break;
         case "add-context":
         case "select-file":
-          void selectChatAttachment("workspace-file");
+          void selectChatAttachment(
+            "workspace-file",
+            undefined,
+            attachmentTarget,
+          );
           break;
         case "select-image":
-          void selectChatAttachment("image");
+          void selectChatAttachment("image", undefined, attachmentTarget);
           break;
         case "select-video":
-          void selectChatAttachment("video");
+          void selectChatAttachment("video", undefined, attachmentTarget);
           break;
         case "select-media":
-          void selectChatAttachment("media");
+          void selectChatAttachment("media", undefined, attachmentTarget);
           break;
         case "attach-editor-snapshot":
           void attachEditorSnapshot();
@@ -11137,6 +11176,10 @@ export function App() {
       const selectedProvider = providersForConfig(config).find(
         (provider) => provider.id === sessionModel.providerId,
       );
+      if (!requestedSessionId && sessionModel.providerId && (!selectedProvider || !selectedProvider.enabled || !isProviderRuntimeUsable(selectedProvider, workbench.providerStatuses.find(item => item.id === selectedProvider.id)) || !getProviderModel(selectedProvider, sessionModel.modelId))) {
+        notify("command-failed", "Choose an available model", "The model saved for this draft is unavailable. Connect its provider or choose another model.");
+        return false;
+      }
       const requireCommandApproval =
         overrideContext?.requireCommandApproval ??
         config.requireCommandApproval;
@@ -11476,6 +11519,7 @@ export function App() {
             workspacePath: session.workspacePath,
           });
         }
+        delete draftWorkspaceModes.current[activeDraftKey];
         setChatDraftModels((current) => {
           if (!(activeDraftKey in current)) {
             return current;
@@ -11763,6 +11807,7 @@ export function App() {
                 },
               );
             applyProviderChatResponse(persistedSession.id, providerResponse);
+            recordCompletedModelChoice(persistedSession.id, turnId, sessionModel, providerResponse);
           }
           didDeliverProviderResponse = true;
           persistedChatTurnIdsRef.current.delete(turnId);
@@ -12029,6 +12074,7 @@ export function App() {
               },
             );
           applyProviderChatResponse(targetSessionId, providerResponse);
+          recordCompletedModelChoice(targetSessionId, turnId, sessionModel, providerResponse);
         }
         didDeliverProviderResponse = true;
         persistedChatTurnIdsRef.current.delete(turnId);
@@ -12099,6 +12145,7 @@ export function App() {
       refreshProviderUsage,
       checkProviderReadiness,
       recordProviderHealthOutput,
+      recordCompletedModelChoice,
       config,
       isShellOptimizing,
       isStartingFirstTurn,
@@ -14768,9 +14815,10 @@ export function App() {
     }),
     [sessionBrowserKey, sessionBrowserWorkspaceKey, activeDraftKey],
   );
-  const previewForBrowser = (owner: BrowserOwner) =>
-    workbench.browserPreviewsBySession?.[owner.sessionId] ??
-    EMPTY_BROWSER_PREVIEW;
+  const previewForBrowser = (owner: BrowserOwner) => ({
+    ...(workbench.browserPreviewsBySession?.[owner.sessionId] ?? EMPTY_BROWSER_PREVIEW),
+    runtime: isTauriRuntime() ? appPreviewClient(owner.sessionId, owner.workspaceKey) : undefined,
+  });
   const sendBrowserAction = (owner: BrowserOwner, action: WorkbenchAction) =>
     dispatchWorkbench({
       type: "browser-session",
@@ -14781,10 +14829,153 @@ export function App() {
     void changeSessionBrowserViewport(owner.sessionId, mode, Boolean(previewForBrowser(owner).url),
       dispatchWorkbench, (error) => notify("command-failed", "Viewport change failed", String(error)));
   const browserNativeHost = isTauriRuntime();
+  const [isFirstRunTourActive, setIsFirstRunTourActive] = useState(false);
+  useEffect(() => {
+    if (!configLoaded || activeSessionId) return;
+    const mode = draftWorkspaceModes.current[activeDraftKey] ?? workbench.preferences.defaultWorkspaceMode;
+    draftWorkspaceModes.current[activeDraftKey] = mode;
+    dispatchWorkbench({ type: "set-workbench-mode", mode });
+    setChatDraftModels(current => current[activeDraftKey] ? current : { ...current, [activeDraftKey]: newChatDefaultSelection(config, workbench.preferences) ?? selectedSessionModelFromConfig(config) });
+  }, [activeDraftKey, activeSessionId, config, configLoaded, workbench.preferences]);
+  const checkReminders = useCheckReminders(workbench.preferences.checkReminders === true, sendingSessionIds, sessionEventsById);
+  const suggestionProviderId =
+    chatDraftModels[activeDraftKey]?.providerId ?? config.selectedProviderId;
+  const canShowModelDefaultSuggestion =
+    activeDestination === "workspace" &&
+    activeWorkspaceLayout === "thread" &&
+    !activeSessionId &&
+    !activeChatDraft.trim() &&
+    activeChatAttachments.length === 0 &&
+    sendingSessionIds.length === 0 &&
+    !isStartingFirstTurn &&
+    !isShellOptimizing &&
+    !isFirstRunTourActive &&
+    !isCommandPaletteOpen &&
+    !quitConfirmation.requested &&
+    !branchNameRequest &&
+    !workspaceRename.draft &&
+    !projectRemoveCandidate &&
+    !terminalTerminateCandidate &&
+    !chatCloseCandidate;
+
+  useEffect(() => {
+    const candidate = modelStandardPrompt ?? pendingModelDefaultCandidate;
+    if (!candidate) return;
+    const provider = providersForConfig(config).find(
+      (item) => item.id === candidate.providerId,
+    );
+    const model = provider?.models?.find((item) => item.id === candidate.modelId);
+    const status = workbench.providerStatuses.find(
+      (item) => item.id === candidate.providerId,
+    );
+    const available = Boolean(
+      provider?.enabled &&
+      model &&
+      (!status || status.connectionStatus === "connected"),
+    );
+    const matchesContext = suggestionProviderId === candidate.providerId;
+    const alreadyDefault =
+      provider && providerDefaultModelId(provider) === candidate.modelId;
+    if (modelStandardPrompt) {
+      if (
+        !modelDefaultSavingRef.current &&
+        (!canShowModelDefaultSuggestion ||
+          !matchesContext ||
+          !available ||
+          (alreadyDefault && !modelDefaultSaveError))
+      ) {
+        setModelStandardPrompt(undefined);
+        setPendingModelDefaultCandidate(undefined);
+        setModelDefaultSaveError(undefined);
+      }
+      return;
+    }
+    if (
+      !canShowModelDefaultSuggestion ||
+      !matchesContext ||
+      !provider ||
+      !model ||
+      !available ||
+      modelSuggestionShownRef.current
+    )
+      return;
+    let timer: number;
+    const schedule = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        if (document.hidden || !document.hasFocus()) return;
+        // Menus/dialogs may be owned inside a child component rather than App.
+        if (
+          Array.from(
+            document.querySelectorAll<HTMLElement>(
+              '.gyro-composer-popover, dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+            ),
+          ).some(
+            (node) =>
+              node.getClientRects().length > 0 &&
+              getComputedStyle(node).visibility !== "hidden",
+          )
+        )
+          return;
+        const now = Date.now();
+        const evidence = modelDefaultSuggestionFor(
+          modelSuggestionStateRef.current!,
+          {
+            providerId: provider.id,
+            modelId: model.id,
+            defaultModelId: providerDefaultModelId(provider),
+            available,
+            shownThisLaunch: modelSuggestionShownRef.current,
+            now,
+          },
+        );
+        if (!evidence) return;
+        modelSuggestionShownRef.current = true;
+        saveModelSuggestionState(
+          markModelDefaultSuggestionShown(modelSuggestionStateRef.current!, now),
+        );
+        setModelDefaultSaveError(undefined);
+        setModelStandardPrompt({
+          ...evidence,
+          providerId: provider.id,
+          providerLabel: provider.displayName,
+          modelLabel: model.displayName,
+        });
+      }, 8_000);
+    };
+    schedule();
+    document.addEventListener("pointerdown", schedule, true);
+    document.addEventListener("keydown", schedule, true);
+    document.addEventListener("wheel", schedule, {
+      capture: true,
+      passive: true,
+    });
+    document.addEventListener("visibilitychange", schedule);
+    window.addEventListener("focus", schedule);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("pointerdown", schedule, true);
+      document.removeEventListener("keydown", schedule, true);
+      document.removeEventListener("wheel", schedule, true);
+      document.removeEventListener("visibilitychange", schedule);
+      window.removeEventListener("focus", schedule);
+    };
+  }, [
+    canShowModelDefaultSuggestion,
+    config,
+    modelDefaultSaveError,
+    modelStandardPrompt,
+    pendingModelDefaultCandidate,
+    saveModelSuggestionState,
+    suggestionProviderId,
+    workbench.providerStatuses,
+    isModelDefaultSaving,
+  ]);
+
   const browserOverlayOccluded =
+    isFirstRunTourActive ||
     quitConfirmation.requested ||
     isCommandPaletteOpen ||
-    Boolean(modelStandardPrompt) ||
     Boolean(branchNameRequest) ||
     Boolean(workspaceRename.draft) ||
     Boolean(projectRemoveCandidate) ||
@@ -15890,8 +16081,9 @@ export function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       const isCommand = event.metaKey || event.ctrlKey;
       if (event.key === "Escape") {
+        if (event.defaultPrevented) return;
         closeGlobalSearch();
-        setModelStandardPrompt(undefined);
+        dismissModelStandardPrompt();
         setProjectRemoveCandidate(undefined);
         return;
       }
@@ -15971,6 +16163,7 @@ export function App() {
     activeSession?.workspacePath,
     addTerminalPane,
     closeGlobalSearch,
+    dismissModelStandardPrompt,
     openGlobalSearch,
     openToolPanel,
     runCommandPaletteCommand,
@@ -17294,6 +17487,10 @@ export function App() {
       draftKey: paneDraftKey,
     };
     return (
+      <ChatFileScopeContext.Provider value={{
+        sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+        workspacePath: pane.workspacePath,
+      }}>
       <ChatSurface
         {...projectImport.chatProps(paneSession)}
         {...taskHandoff.chatProps(paneSession)}
@@ -17398,12 +17595,29 @@ export function App() {
             workspacePath: pane.workspacePath,
           });
         }}
+        onAttachMediaPaths={(paths) => {
+          const target = {
+            draftKey: paneDraftKey,
+            sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+            workspacePath: pane.workspacePath,
+          };
+          focusChatPane(pane);
+          void (async () => {
+            for (const path of paths) {
+              await selectChatAttachment("media", path, target);
+            }
+          })();
+        }}
         onMediaDropError={(message) =>
           notify("command-failed", "Image could not be attached", message)
         }
         onComposerAction={(action) => {
           focusChatPane(pane);
-          handleComposerAction(action, paneDraftKey);
+          handleComposerAction(action, paneDraftKey, {
+            draftKey: paneDraftKey,
+            sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+            workspacePath: pane.workspacePath,
+          });
         }}
         onDraftChange={(value) =>
           setChatDrafts((current) => ({ ...current, [paneDraftKey]: value }))
@@ -17549,6 +17763,7 @@ export function App() {
         workspaceMode={workbench.workspaceMode}
         workspacePath={pane.workspacePath}
       />
+      </ChatFileScopeContext.Provider>
     );
   };
 
@@ -17753,6 +17968,11 @@ export function App() {
       maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
       canAttachEditorSnapshot={canAttachEditorSnapshot}
       onAttachMediaFiles={attachDroppedMedia}
+      onAttachMediaPaths={(paths) => {
+        void (async () => {
+          for (const path of paths) await selectChatAttachment("media", path);
+        })();
+      }}
       onMediaDropError={(message) =>
         notify("command-failed", "Image could not be attached", message)
       }
@@ -17815,62 +18035,17 @@ export function App() {
   );
 
   const chatFileActions = useMemo(
-    () => ({
-      preview: async (path: string, kind: "image" | "video" | "audio") => {
-        if (kind === "audio") return undefined;
-        const key = `${activeSessionId ?? "new"}:${kind}:${path}`;
-        let pending = chatFilePreviewCache.get(key);
-        if (!pending) {
-          pending = invoke<ChatAttachment>("prepare_chat_attachment", {
-            request: {
-              sessionId: activeSessionId ?? "new",
-              path,
-              workspacePath,
-              kind,
-            },
-          }).then((attachment) => convertFileSrc(attachment.path));
-          if (chatFilePreviewCache.size >= 64)
-            chatFilePreviewCache.delete(
-              chatFilePreviewCache.keys().next().value!,
-            );
-          chatFilePreviewCache.set(key, pending);
-          void pending.catch(() => chatFilePreviewCache.delete(key));
-        }
-        return pending;
-      },
-      open: (path: string) => {
-        void revealItemInDir(path).catch((error) =>
-          notify("command-failed", "Could not show the file", String(error)),
-        );
-      },
-      resolveCitedImage: async (request: {
-        target: string;
-        providerId?: string;
-        providerSessionId?: string;
-      }) => {
-        const workspace = activeSession?.workspacePath ?? workspacePath;
-        const key = `${activeSessionId ?? ""}:${request.providerId ?? ""}:${request.providerSessionId ?? ""}:${workspace ?? ""}:${request.target}`;
-        let pending = chatCitedImageCache.get(key);
-        if (!pending) {
-          pending = invoke<string | null>("resolve_cited_chat_image", {
-            request: {
-              target: request.target,
-              workspacePath: workspace,
-              providerId: request.providerId,
-              providerSessionId: request.providerSessionId,
-              sessionId: activeSessionId,
-            },
-          }).then((path) => path || undefined);
-          if (chatCitedImageCache.size >= 64) {
-            chatCitedImageCache.delete(chatCitedImageCache.keys().next().value!);
-          }
-          chatCitedImageCache.set(key, pending);
-          void pending.catch(() => chatCitedImageCache.delete(key));
-        }
-        return pending;
-      },
-    }),
-    [activeSession?.workspacePath, activeSessionId, workspacePath, notify],
+    () =>
+      createChatFileActions({
+        invoke,
+        convertFileSrc,
+        open: (path) => {
+          void revealItemInDir(path).catch((error) =>
+            notify("command-failed", "Could not show the file", String(error)),
+          );
+        },
+      }),
+    [notify],
   );
 
   const appChrome = (
@@ -18246,6 +18421,11 @@ export function App() {
                     }
                     canAttachEditorSnapshot={canAttachEditorSnapshot}
                     onAttachMediaFiles={attachDroppedMedia}
+      onAttachMediaPaths={(paths) => {
+        void (async () => {
+          for (const path of paths) await selectChatAttachment("media", path);
+        })();
+      }}
                     onMediaDropError={(message) =>
                       notify(
                         "command-failed",
@@ -18654,6 +18834,9 @@ export function App() {
       ) : null}
       {activeDestination === "settings" || activeDestination === "providers" ? (
         <SettingsSurface
+          preferences={workbench.preferences}
+          onSettingsPreferencesChange={patch => dispatchWorkbench({ type: "set-settings-preferences", patch })}
+          onImportSettings={settings => dispatchWorkbench({ type: "import-portable-settings", settings })}
           projectImport={projectImport.settingsProps}
           activeSection={
             activeDestination === "providers"
@@ -19068,6 +19251,11 @@ export function App() {
           maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
           canAttachEditorSnapshot={canAttachEditorSnapshot}
           onAttachMediaFiles={attachDroppedMedia}
+      onAttachMediaPaths={(paths) => {
+        void (async () => {
+          for (const path of paths) await selectChatAttachment("media", path);
+        })();
+      }}
           onMediaDropError={(message) =>
             notify("command-failed", "Image could not be attached", message)
           }
@@ -19169,14 +19357,18 @@ export function App() {
       {quitConfirmation.requested ? (
         <QuitConfirmDialog onResolve={quitConfirmation.resolve} />
       ) : null}
-      {modelStandardPrompt ? (
+      {modelStandardPrompt && canShowModelDefaultSuggestion ? (
         <ModelStandardPromptOverlay
           modelLabel={modelStandardPrompt.modelLabel}
           onAccept={acceptModelStandardPrompt}
-          onDismiss={dismissModelStandardPrompt}
+          onDismiss={() => dismissModelStandardPrompt()}
+          onNeverSuggest={() => dismissModelStandardPrompt(true)}
+          isSaving={isModelDefaultSaving}
+          error={modelDefaultSaveError}
           providerId={modelStandardPrompt.providerId}
           providerLabel={modelStandardPrompt.providerLabel}
-          selectionCount={modelStandardPrompt.count}
+          usageCount={modelStandardPrompt.usageCount}
+          chatCount={modelStandardPrompt.chatCount}
         />
       ) : null}
       {projectRemoveCandidate ? (
@@ -19271,6 +19463,7 @@ export function App() {
     <ProviderSignInContext.Provider value={providerSignInState}>
       <WorkspacePathUndoContext.Provider value={workspacePathUndoValue}>
       <ChatFileActionsContext.Provider value={chatFileActions}>
+      <ChatFileScopeContext.Provider value={{ sessionId: activeSessionId, workspacePath: activeSession?.workspacePath ?? workspacePath }}>
         <TerminalAttachmentActionsContext.Provider
           value={terminalAttachmentActions}
         >
@@ -19293,9 +19486,11 @@ export function App() {
             ]}
           >
             <AppearanceContext.Provider value={appearance}>
+              <LocalCheckHost sessions={sessions} reminders={checkReminders.reminders} onDismissReminder={checkReminders.dismiss}>
               {appChrome}
               <FirstRunTour
                 destination={activeDestination}
+                onActiveChange={setIsFirstRunTourActive}
                 providerConfigured={workbench.providerStatuses.some(
                   (provider) => provider.connectionStatus === "connected",
                 )}
@@ -19310,9 +19505,11 @@ export function App() {
                   dispatchWorkbench({ type: "set-settings-section", section });
                 }}
               />
+              </LocalCheckHost>
             </AppearanceContext.Provider>
           </ComposerContextCandidates.Provider>
         </TerminalAttachmentActionsContext.Provider>
+      </ChatFileScopeContext.Provider>
       </ChatFileActionsContext.Provider>
       </WorkspacePathUndoContext.Provider>
     </ProviderSignInContext.Provider>
@@ -19320,8 +19517,6 @@ export function App() {
   );
 }
 
-const chatFilePreviewCache = new Map<string, Promise<string>>();
-const chatCitedImageCache = new Map<string, Promise<string | undefined>>();
 
 function loadInitialWorkbenchState(): WorkbenchState {
   const stored = loadStoredWorkbenchState();

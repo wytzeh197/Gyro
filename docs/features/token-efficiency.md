@@ -19,6 +19,13 @@ pilot qualifies them. Turning off Context efficiency restores the preceding
 context behavior. Existing usage guards, approval policy, token-budget meanings,
 and the auto-compaction threshold remain independent.
 
+The experimental compact tool catalog is independently off by default. On
+owned API and local-model requests it keeps common tools directly callable and
+exposes the remaining tools through the catalog and its dispatcher. The
+dispatcher validates the selected tool and its full argument schema and uses
+the same capability broker and approval policy. Native CLI tool catalogs are
+not changed. Compare discovery, retries and cache behavior before enabling it.
+
 - Structured evidence parses Cargo tests/compiler JSON, Node TAP, TypeScript
   diagnostics, and ESLint JSON. Exact failures and exit codes are preserved;
   partial or unrecognized output retains the raw paged view. Earlier output IDs
@@ -30,6 +37,11 @@ and the auto-compaction threshold remain independent.
   [documented Chat Completions controls](https://developers.openai.com/api/docs/guides/prompt-caching).
   Generic gateways are never assumed to support them. Native histories are not
   rewritten.
+  The cache-assembly experiment also retains tool definitions when a tool-round
+  limit requests a final checkpoint, using `tool_choice: "none"` on documented
+  OpenAI and DeepSeek HTTPS routes. Execution remains disabled by the local
+  round guard. Other endpoints keep omitting tools; this adds no probe or model
+  call. Compare actual cache usage and total cost before promoting the policy.
 - Task checkpoints preserve exact user-message provenance, the latest agent
   response, objective, live plan, file hashes, observed outcomes, and separately
   labeled agent assertions. They use versioned JSONL events and a rebuildable
@@ -71,6 +83,16 @@ Price snapshots are immutable, user supplied, and selected by provider, model,
 and effective date. Corrections use the original snapshot with corrected counts.
 Reasoning is an output subset; cache reads/writes are input subsets.
 
+Owned-runner receipts include bounded generation-attempt and validated tool-request
+class counts; a request may be denied or stopped before execution. These counts
+do not retain arguments, paths, or result text. Native providers' internal
+model and tool loops are unavailable to this accounting. Version 2 retirement
+accounting records bytes newly removed by a request rewrite once, not tokens,
+replay savings, or money. Earlier receipts and native paths remain unknown, not
+zero; mixed-task aggregates report partial coverage. Token budgets act on
+observed usage, may overshoot while a request is in flight, and are not invoice
+or hard currency limits.
+
 ## Pilot and quality gate
 
 `docs/performance/efficiency-pilot.json` contains forty synthetic task fixtures:
@@ -92,6 +114,11 @@ also require immutable prices and a positive `maxCostMicros`. Per-turn ceilings
 are held constant across variants (`maxTokensPerTurn`, default 20,000); a run
 without enough remaining budget is recorded as a budget stop. The template has
 zero limits and no providers, so it cannot accidentally start generations.
+The template includes a `compact-tool-catalog` variant. A separate, explicitly
+configured spec can opt into `routine-profile` with provider effort left empty;
+that comparison requires recorded Gyro-requested low effort for the variant
+and null/default effort for the baseline. A requested effort does not establish
+that a provider honored it.
 
 ```sh
 node scripts/benchmark-efficiency.mjs --spec /absolute/path/to/bounded-spec.json
@@ -113,7 +140,9 @@ JSON and Markdown reports retain failed attempts, unavailable providers, budget
 stops, correctness, cache coverage, costs, and p95 time. They qualify an API
 variant only with a complete paired cohort, no observed verified-task regression,
 at most 10% p95 slowdown, and at least 20% lower cost per verified task. Unknown
-cost cannot qualify a savings claim. Reports do not automatically promote
+cost cannot qualify a savings claim. The gate also requires the exact configured
+cohort, complete provider receipts, comparable requested effort, bounded retries,
+and a single immutable price snapshot. Reports do not automatically promote
 settings or establish production-wide quality equivalence.
 
 Numeric timing traces also record local checkpoint, parser, request-assembly,
@@ -123,3 +152,53 @@ Total task time includes optimization overhead.
 No live pilot, production savings claim, model training, learned compression,
 or inference-hosting service is included in the offline implementation. Learned
 retrieval/compression remain candidates after simpler policies demonstrate value.
+
+## Evidence recovery and catalog continuity (2026-10-31)
+
+Two additional independent experimental switches default to false:
+`recoverableEvidence` stores the complete omitted result data as historical JSON,
+including nested output and every stream; `retainToolCatalog` carries deduplicated
+discovered schemas across whole-exchange compaction. Both require Context
+efficiency and Efficiency experiments. Existing model and effort choices remain
+unchanged. The paired harness includes `recoverable-evidence` and
+`catalog-retention` variants before `combined`; no default promotion is automatic.
+
+Evidence replacement checks persistence first. Failure keeps the original data.
+Existing retirement also retains a complete JSON copy behind its preview, rather
+than losing secondary fields or suggesting that a mutation be repeated. Copies
+may be evicted; the reader reports absence explicitly. Spill results identify
+historical evidence, and callers must revalidate live state before editing.
+Concurrent writes use independent temporary files before atomic replacement.
+
+Retained schemas use the existing 128 KiB capability-result ceiling, including
+appendix framing. In compact-tool mode, overflow or discovery failure restores
+the normal catalog and direct-call guidance for the rest of the turn. The schema
+appendix never splits a tool call/result pair. JSON compatibility mode continues
+to use its existing paged discovery protocol; it cannot switch to native tools
+when the model does not support them.
+
+Experimental repeated-work detection recognizes unchanged sequences of one to
+four calls. It gives a correction after three complete repetitions and pauses
+after six; a two-call loop therefore warns after six calls and pauses after
+twelve. Arguments, workspace state and outcomes must match at every position.
+The detector retains at most 24 fingerprints and does not count the rotating
+phases of the same loop as new corrections. Exact terminal wait/read, workspace
+output-read and agent wait/report capabilities clear the history; changed
+arguments, state or outcomes break the matching sequence. A resumed turn starts
+a fresh detector. No length-based task cutoff or extra model call is added.
+
+Owned receipts expose numeric `efficiencyEvents`: catalog discoveries,
+rediscoveries after compaction, catalog fallbacks, spill recoveries/failures, and
+repeated-call notices/pauses. A recovery counts one paged read, not a whole file.
+Task totals include coverage, and benchmark records carry cumulative task event
+counts. No arguments, paths, schema text or result text are retained in these
+counters. Legacy/native counts remain unavailable rather than invented zeros.
+
+Live evaluation remains pending. Before a paid pilot, supply immutable prices and
+explicit finite spending limits. Run the unchanged model/effort paired cohorts,
+then add frozen repository tasks for an unfamiliar bug, a multi-file change with
+verification, and a long session that forces evidence recovery and compaction.
+Use exact snapshot IDs, independent verifiers, the same permissions, and three
+paired repetitions. Include failed work and recovery calls. The existing 20%
+cost-per-verified-task and 10% p95 latency gates remain in force; passing fixture
+checks or reducing schema bytes does not establish live savings.

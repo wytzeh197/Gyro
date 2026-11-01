@@ -43,7 +43,7 @@ export {
   replyLinkMark,
 } from "./external-links";
 export type { ExternalLinkOpener, LinkClickIntent, ReplyLinkMark } from "./external-links";
-export { ChatFileActionsContext } from "./chat-file-card";
+export { ChatFileActionsContext, ChatFileScopeContext } from "./chat-file-card";
 export { CliSessionList } from "./cli-session-list";
 export { AppearanceContext, useAppearance } from "./appearance-context";
 export { applyAppearancePreferences } from "./appearance-runtime";
@@ -829,6 +829,7 @@ export {
 } from "./workspace-rename";
 
 export { currentChatDrag } from "./chat-session-drag";
+export { CheckWorkContext, CheckWorkActivityContext, CheckWorkStatus, type CheckWorkActivity } from "./check-work-context";
 
 export {
   FirstRunTour,

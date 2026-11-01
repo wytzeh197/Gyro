@@ -192,6 +192,8 @@ fn spill_payload(window: &gyro_core::efficiency::spill::SpillRead) -> (String, V
         "nextOffset": next,
         "content": window.text,
         "source": "spill",
+        "historical": true,
+        "note": "Retained evidence from an earlier execution, not current workspace state. Never repeat an action merely to recover its output.",
     });
     (summary, data)
 }

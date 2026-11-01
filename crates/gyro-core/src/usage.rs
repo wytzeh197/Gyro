@@ -20,6 +20,8 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub(crate) mod queries;
+
 /// What asked for the provider call. One user keypress can produce several.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -1080,6 +1082,9 @@ pub fn ensure_usage_schema(conn: &Connection) -> Result<()> {
          create index if not exists idx_usage_ledger_session
          on usage_ledger(session_id, occurred_at desc);
 
+         create index if not exists idx_usage_ledger_session_turn
+         on usage_ledger(session_id, turn_id);
+
          create index if not exists idx_usage_ledger_occurred_at
          on usage_ledger(occurred_at desc);
 
@@ -1291,18 +1296,7 @@ pub fn session_usage_totals(conn: &Connection, session_id: Uuid) -> Result<Usage
     // linked turn identities so only this chat's descendants are counted.
     let mut totals = totals_from_rows(
         conn,
-        "session_id = ?1 or exists(
-            with recursive owned(session_id, turn_id) as (
-                select child_session_id, child_turn_id from usage_turn_links
-                where parent_session_id = ?1
-                union
-                select links.child_session_id, links.child_turn_id from usage_turn_links links
-                join owned on links.parent_session_id = owned.session_id
-                    and links.parent_turn_id = owned.turn_id
-            )
-            select 1 from owned where owned.session_id = usage_ledger.session_id
-                and owned.turn_id = usage_ledger.turn_id
-         )",
+        &format!("id in ({})", queries::SESSION_LEDGER_IDS),
         &[&session],
     )?;
     // A dispatched call can lose its terminal receipt. Keep known token

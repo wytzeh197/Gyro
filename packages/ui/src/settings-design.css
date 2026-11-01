@@ -1,3 +1,88 @@
+/* Nested headings share the inset of the list's text, with room between groups. */
+:root[data-theme] .gyro-settings-subsection-title {
+  margin: 24px 16px 10px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  font-weight: 600;
+  line-height: 1.4;
+}
+:root[data-theme] .gyro-provider-connect-help:first-child .gyro-settings-subsection-title {
+  margin-top: 0;
+}
+
+/* A rounded list already owns its bottom edge; a second straight rule made
+   tangents protrude from the corners above Council. Keep a separate quiet row. */
+:root[data-theme] .gyro-provider-table + .gyro-model-council-disclosure {
+  border-top: 0;
+  margin-top: 8px;
+  padding: 0;
+}
+:root[data-theme] .gyro-model-council-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: var(--gyro-radius-md);
+  list-style: none;
+}
+.gyro-model-council-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+:root[data-theme] .gyro-model-council-disclosure > summary > span {
+  margin: 0;
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+}
+.gyro-model-council-disclosure > summary > small {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-model-council-disclosure > summary > svg {
+  flex: none;
+  color: var(--gyro-muted);
+}
+.gyro-model-council-disclosure[open] > summary > svg {
+  transform: rotate(90deg);
+}
+.gyro-model-council-disclosure > summary:hover {
+  background: var(--gyro-control-hover);
+}
+.gyro-model-council-disclosure > summary:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+:root[data-theme] .gyro-model-council-disclosure > p {
+  margin: 0;
+  padding: 0 16px 12px 38px;
+}
+
+/* Connection shortcuts reveal the existing account, key and local controls. */
+:root[data-theme] .gyro-provider-setup-methods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+:root[data-theme] .gyro-provider-setup-methods > button {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: var(--gyro-font-micro);
+  cursor: pointer;
+}
+:root[data-theme] .gyro-provider-setup-methods > button:hover {
+  background: var(--gyro-control-hover);
+}
+:root[data-theme] .gyro-provider-setup-methods > button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
 /* Shared Settings presentation. Scope the refinement to preferences so chat,
    native browser geometry and the user's editor layout keep their own roles. */
 :root[data-theme] .gyro-settings-surface {
@@ -6,11 +91,11 @@
     var(--gyro-surface) 35%,
     var(--gyro-pane)
   );
-  --gyro-settings-row-height: calc(64px * var(--gyro-ui-scale, 1));
-  padding: clamp(28px, 5vh, 44px) clamp(20px, 4vw, 48px) 48px;
+  --gyro-settings-row-height: calc(60px * var(--gyro-ui-scale, 1));
+  padding: clamp(28px, 4vh, 36px) clamp(20px, 4vw, 48px) 48px;
 }
 :root[data-theme][data-density="comfortable"] .gyro-settings-surface {
-  --gyro-settings-row-height: calc(76px * var(--gyro-ui-scale, 1));
+  --gyro-settings-row-height: calc(72px * var(--gyro-ui-scale, 1));
 }
 :root[data-theme] .gyro-settings-surface .gyro-settings-content {
   width: min(100%, 720px);
@@ -691,8 +776,7 @@
   letter-spacing: -0.02em;
 }
 
-/* The icon is part of the section contract; render it as a quiet chip instead
-   of dropping it, so every page opens with the same anchor. */
+/* A plain section icon echoes the navigation without adding another box. */
 :root[data-theme]
   .gyro-settings-surface
   :is(.gyro-settings-section, .gyro-workspace-settings-editor)
@@ -701,13 +785,13 @@
   svg {
   display: block;
   flex: none;
-  width: 14px;
-  height: 14px;
-  padding: 6px;
-  box-sizing: content-box;
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--gyro-muted);
 }
 
@@ -725,10 +809,10 @@
 
 /* -- Group cards ---------------------------------------------------------- */
 :root[data-theme] .gyro-settings-surface .gyro-settings-group > h2 {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-font-micro);
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
   font-weight: 600;
-  letter-spacing: 0.03em;
+  letter-spacing: 0;
 }
 
 :root[data-theme]
@@ -1609,45 +1693,43 @@
   color: var(--gyro-danger);
 }
 
-/* -- Spacing rhythm ------------------------------------------------------
-   Settings read cramped: a group label sat ~10px above its card, a row title
-   ~4px above its detail, and the title block only ~21px above the first
-   group. One 4px-based scale now sets the page's whole vertical rhythm:
-   title block 32px to the first group, 32px between groups, 14px from a
-   label to its card, and 7px from a row title to its detail. */
-/* The header rule sits between the title block and the first group, not
-   flush on top of the group label. */
-:root[data-theme] .gyro-settings-surface .gyro-settings-section > header {
-  margin-bottom: calc(28px * var(--gyro-ui-scale, 1));
-  padding: 0 0 calc(24px * var(--gyro-ui-scale, 1));
+/* -- Page rhythm ---------------------------------------------------------
+   Let the heading and spacing separate sections. Only related preference rows
+   share a bordered surface; the page header does not need another divider. */
+:root[data-theme]
+  .gyro-settings-surface
+  :is(.gyro-settings-section, .gyro-workspace-settings-editor)
+  > header {
+  margin-bottom: calc(24px * var(--gyro-ui-scale, 1));
+  padding: 0;
+  border-bottom: 0;
 }
 
-/* Appearance's sticky scope bar already draws that rule. */
+/* Appearance retains its sticky scope and save feedback beneath the heading. */
 :root[data-theme]
   .gyro-settings-surface
   .gyro-settings-section:has(.gyro-appearance-scope)
   > header {
   margin-bottom: 0;
   padding-bottom: calc(12px * var(--gyro-ui-scale, 1));
-  border-bottom: 0;
 }
 
 :root[data-theme] .gyro-settings-surface .gyro-settings-section-body {
-  gap: calc(32px * var(--gyro-ui-scale, 1));
+  gap: calc(28px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-theme] .gyro-settings-surface .gyro-settings-group {
-  gap: calc(14px * var(--gyro-ui-scale, 1));
+  gap: calc(12px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-theme] .gyro-settings-surface .gyro-settings-group-description {
-  margin: calc(-8px * var(--gyro-ui-scale, 1)) 0 0;
+  margin: calc(-6px * var(--gyro-ui-scale, 1)) 0 0;
   max-width: 62ch;
 }
 
 :root[data-theme] .gyro-settings-surface .gyro-settings-row {
-  padding: calc(18px * var(--gyro-ui-scale, 1))
-    calc(18px * var(--gyro-ui-scale, 1));
+  padding: calc(14px * var(--gyro-ui-scale, 1))
+    calc(16px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-theme]
@@ -1655,14 +1737,97 @@
   .gyro-settings-row
   > div:first-child
   > span {
-  margin-top: calc(7px * var(--gyro-ui-scale, 1));
+  margin-top: calc(4px * var(--gyro-ui-scale, 1));
   max-width: 62ch;
 }
 
-/* Rows go full-bleed in one column on narrow windows, so keep their side
-   padding off there while the added vertical air still applies. */
-@media (max-width: 760px) {
-  :root[data-theme] .gyro-settings-surface .gyro-settings-row {
-    padding-inline: 0;
+/* A switch stays beside its label at every window size. Legacy row rules
+   assign the copy a full width below 980px, which otherwise forces it down. */
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-row:has(
+    > .gyro-settings-control-column > .gyro-settings-switch
+  ) {
+  flex-wrap: nowrap;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-row:has(
+    > .gyro-settings-control-column > .gyro-settings-switch
+  )
+  > div:first-child {
+  flex: 1 1 0;
+  width: auto;
+}
+
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-row
+  > .gyro-settings-control-column:has(> .gyro-settings-switch) {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+/* Larger controls get their own left-aligned lane when the content is narrow.
+   Query the content pane, not the window: the sidebar also consumes width. */
+@container gyro-settings (max-width: 600px) {
+  :root[data-theme]
+    .gyro-settings-surface
+    .gyro-settings-row:not(:has(.gyro-settings-switch)) {
+    flex-direction: column;
+    align-items: stretch;
   }
+
+  :root[data-theme]
+    .gyro-settings-surface
+    .gyro-settings-row:not(:has(.gyro-settings-switch))
+    > div:first-child {
+    flex: 0 1 auto;
+    width: auto;
+  }
+
+  :root[data-theme]
+    .gyro-settings-surface
+    .gyro-settings-row:not(:has(.gyro-settings-switch))
+    > .gyro-settings-control-column {
+    margin-left: 0;
+    align-self: flex-start;
+    justify-content: flex-start;
+    text-align: left;
+  }
+}
+
+/* Settings uses the same inset canvas and continuous surround as Sessions. */
+:root[data-theme] .gyro-app-shell.is-settings-layout > .gyro-main > .gyro-settings-surface {
+  border: 0;
+  border-radius: var(--gyro-chat-canvas-radius);
+  background: var(--gyro-pane);
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+@media (max-width: 780px) {
+  :root[data-theme] .gyro-app-shell.is-settings-layout > .gyro-main {
+    padding-top: calc(48px + var(--gyro-chat-rim));
+  }
+  :root[data-theme] .gyro-app-shell.is-settings-layout .gyro-compact-navigation-toolbar.is-settings {
+    background: var(--gyro-chat-surround);
+    border: 0;
+  }
+}
+
+/* Disclosures own their group edge; keep the rows inside a single surface. */
+:root[data-theme] .gyro-settings-surface .gyro-settings-section-body,
+:root[data-theme] .gyro-settings-surface .gyro-appearance-settings {
+  gap: 0;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-body > .gyro-settings-group-rows {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-body .gyro-settings-row {
+  padding-inline: 0;
 }

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 
 import { parseProviderLoginProgress } from "../apps/desktop/src/provider-login-progress.ts";
+import { providerLoginProfile } from "../apps/desktop/src/provider-login-profile.ts";
+
+assert.equal(providerLoginProfile("antigravity").command, "agy");
+assert.deepEqual(providerLoginProfile("antigravity").args, []);
+assert.deepEqual(providerLoginProfile("cursor").args, ["login"]);
+assert.deepEqual(providerLoginProfile("opencode").args, ["auth", "login"]);
 
 // Claude Code: browser OAuth with an optional paste-back prompt.
 const claudeUrl =

@@ -106,6 +106,10 @@ pub struct OpenAiCompatChatRequest<'a> {
     pub model: &'a str,
     pub messages: Vec<serde_json::Value>,
     pub tools: Vec<serde_json::Value>,
+    /// False requests prose only. Verified endpoints can retain the definitions
+    /// for prefix reuse with `tool_choice: none`; unknown endpoints omit them.
+    /// Callers must still reject unexpected tool calls before executing them.
+    pub allow_tool_calls: bool,
     /// Thinking budget, sent as `reasoning_effort` when the selected model
     /// publishes an effort ramp. Endpoints that do not take the field are why
     /// unsupported explicit effort remains an actionable provider error.
@@ -288,13 +292,37 @@ pub fn openai_compat_tool_chat_with_progress<F>(
 where
     F: FnMut(&str),
 {
+    openai_compat_tool_chat_with_updates(request, cancellation, on_delta, |_| {})
+}
+
+/// Forward reported request counts as soon as a stream frame supplies them.
+/// Missing counts stay missing; text deltas are never converted into occupancy.
+pub fn openai_compat_tool_chat_with_updates<F, U>(
+    request: OpenAiCompatChatRequest<'_>,
+    cancellation: &CancellationToken,
+    on_delta: F,
+    mut on_usage: U,
+) -> Result<OpenAiCompatChatResponse>
+where
+    F: FnMut(&str),
+    U: FnMut(UsageTokens),
+{
     crate::provider_retry::stream_response(
         cancellation,
-        |emit| openai_compat_tool_chat_once(&request, cancellation, emit),
+        |emit| {
+            openai_compat_tool_chat_once_with_updates(
+                &request,
+                cancellation,
+                emit,
+                &mut on_usage,
+                recover_openrouter_usage,
+            )
+        },
         on_delta,
     )
 }
 
+#[cfg(test)]
 fn openai_compat_tool_chat_once<F>(
     request: &OpenAiCompatChatRequest<'_>,
     cancellation: &CancellationToken,
@@ -311,16 +339,49 @@ where
     )
 }
 
+#[cfg(test)]
 fn openai_compat_tool_chat_once_with_recovery<F, R>(
     request: &OpenAiCompatChatRequest<'_>,
     cancellation: &CancellationToken,
-    mut on_delta: F,
+    on_delta: F,
     recover_usage: R,
 ) -> Result<OpenAiCompatChatResponse>
 where
     F: FnMut(&str),
     R: FnOnce(&Url, &str, &str, &CancellationToken) -> Option<OpenRouterUsageReceipt>,
 {
+    openai_compat_tool_chat_once_with_updates(
+        request,
+        cancellation,
+        on_delta,
+        |_| {},
+        recover_usage,
+    )
+}
+
+fn openai_compat_tool_chat_once_with_updates<F, U, R>(
+    request: &OpenAiCompatChatRequest<'_>,
+    cancellation: &CancellationToken,
+    mut on_delta: F,
+    mut on_usage: U,
+    recover_usage: R,
+) -> Result<OpenAiCompatChatResponse>
+where
+    F: FnMut(&str),
+    U: FnMut(UsageTokens),
+    R: FnOnce(&Url, &str, &str, &CancellationToken) -> Option<OpenRouterUsageReceipt>,
+{
+    let mut last_live_usage = None;
+    let mut publish_usage = |state: &ChatAccumulator| {
+        if !state.saw_usage {
+            return;
+        }
+        let tokens = state.accounted_usage(0, 0, false);
+        if last_live_usage != Some(tokens) {
+            last_live_usage = Some(tokens);
+            on_usage(tokens);
+        }
+    };
     if cancellation.is_cancelled() {
         return Err(anyhow!(OPENAI_COMPAT_CANCELLED_MESSAGE));
     }
@@ -338,13 +399,7 @@ where
     let mut observation = None;
     let mut receipt = UsageReceipt::start(cancellation);
     let response = crate::provider_retry::http_response(cancellation, || {
-        let mut payload = chat_payload(
-            model,
-            &request.messages,
-            &request.tools,
-            request.reasoning_effort,
-            include_usage,
-        );
+        let mut payload = chat_payload(request, &endpoint, include_usage);
         // Host check inside apply decides. api.openai.com keeps prompt_cache_key;
         // other hosts, including DeepSeek, Mistral, and OpenRouter, do not.
         crate::efficiency::cache::apply(&mut payload, &endpoint, model, true);
@@ -361,13 +416,7 @@ where
                     && crate::provider_retry::compatibility_retry()
                 {
                     include_usage = false;
-                    let mut payload = chat_payload(
-                        model,
-                        &request.messages,
-                        &request.tools,
-                        request.reasoning_effort,
-                        false,
-                    );
+                    let mut payload = chat_payload(request, &endpoint, false);
                     crate::efficiency::cache::apply(&mut payload, &endpoint, model, true);
                     observation = Some(crate::provider_observation::Request::start(&payload));
                     post_chat(&url, api_key, &payload, &receipt.transport)
@@ -474,6 +523,7 @@ where
                         .is_some_and(|groq| groq.error.is_some()));
             state.record_usage(&frame);
             state.usage.observe(&mut observation);
+            publish_usage(&state);
             if frame.error.is_some()
                 || frame
                     .x_groq
@@ -539,6 +589,7 @@ where
             serde_json::from_str(body).context("invalid provider chat response")?;
         state.record_usage(&parsed);
         state.usage.observe(&mut observation);
+        publish_usage(&state);
         if let Err(error) = state.apply(parsed, &mut |text| {
             observation.delta(text);
             on_delta(text);
@@ -569,6 +620,7 @@ where
                     ..Default::default()
                 });
                 state.usage.observe(&mut observation);
+                publish_usage(&state);
             }
         }
     }
@@ -723,30 +775,47 @@ pub fn openai_compat_list_model_metadata(
 const USER_AGENT: &str = concat!("gyro/", env!("CARGO_PKG_VERSION"));
 
 fn chat_payload(
-    model: &str,
-    messages: &[serde_json::Value],
-    tools: &[serde_json::Value],
-    reasoning_effort: Option<&str>,
+    request: &OpenAiCompatChatRequest<'_>,
+    endpoint: &Url,
     include_optional_fields: bool,
 ) -> serde_json::Value {
     let mut payload = serde_json::json!({
-        "model": model,
+        "model": request.model.trim(),
         "stream": true,
-        "messages": messages,
+        "messages": request.messages,
     });
-    if !tools.is_empty() {
-        payload["tools"] = serde_json::Value::Array(tools.to_vec());
+    if !request.tools.is_empty()
+        && (request.allow_tool_calls || supports_disabled_tool_catalog(endpoint))
+    {
+        payload["tools"] = serde_json::Value::Array(request.tools.clone());
+        if !request.allow_tool_calls {
+            payload["tool_choice"] = serde_json::json!("none");
+        }
     }
     if include_optional_fields {
         payload["stream_options"] = serde_json::json!({ "include_usage": true });
     }
-    if let Some(effort) = reasoning_effort
+    if let Some(effort) = request
+        .reasoning_effort
         .map(str::trim)
         .filter(|effort| !effort.is_empty())
     {
         payload["reasoning_effort"] = serde_json::Value::String(effort.to_string());
     }
     payload
+}
+
+/// Documented Chat Completions routes only. Do not guess for a gateway or local
+/// server merely because it accepts OpenAI-style tools. No probing call is made.
+fn supports_disabled_tool_catalog(endpoint: &Url) -> bool {
+    endpoint.scheme() == "https"
+        && endpoint.port_or_known_default() == Some(443)
+        && endpoint.query().is_none()
+        && match (endpoint.host_str(), endpoint.path().trim_end_matches('/')) {
+            (Some("api.openai.com"), "/v1") => true,
+            (Some("api.deepseek.com"), "" | "/v1") => true,
+            _ => false,
+        }
 }
 
 fn post_chat(
@@ -1661,6 +1730,134 @@ mod tests {
     use std::io::{BufRead, Read, Write};
     use std::net::{SocketAddr, TcpListener, TcpStream};
 
+    fn checkpoint_request(base_url: &str) -> OpenAiCompatChatRequest<'_> {
+        OpenAiCompatChatRequest {
+            base_url,
+            api_key: "",
+            model: " gpt-6 ",
+            messages: vec![
+                serde_json::json!({"role":"system","content":"stable instructions"}),
+                serde_json::json!({"role":"user","content":"make a verified edit"}),
+            ],
+            tools: vec![serde_json::json!({"type":"function","function":{
+                "name":"gyro_workspace_edit","description":"Edit one file",
+                "parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}
+            }})],
+            allow_tool_calls: true,
+            reasoning_effort: Some("high"),
+        }
+    }
+
+    #[test]
+    fn checkpoint_catalog_preserves_definitions_and_openai_cache_key() {
+        for base in [
+            "https://api.openai.com/v1",
+            "https://api.openai.com:443/v1/",
+            "https://api.deepseek.com",
+            "https://api.deepseek.com/v1",
+        ] {
+            let endpoint = openai_compat_endpoint(base).unwrap();
+            let mut request = checkpoint_request(base);
+            let mut working = chat_payload(&request, &endpoint, true);
+            crate::efficiency::cache::apply(&mut working, &endpoint, request.model.trim(), true);
+            let original_messages = request.messages.clone();
+            request.allow_tool_calls = false;
+            request.messages.push(serde_json::json!({"role":"user","content":"Give the checkpoint; no further tools."}));
+            let mut checkpoint = chat_payload(&request, &endpoint, true);
+            crate::efficiency::cache::apply(&mut checkpoint, &endpoint, request.model.trim(), true);
+            assert_eq!(checkpoint["tools"], working["tools"], "{base}");
+            assert_eq!(checkpoint["tool_choice"], "none");
+            assert!(working.get("tool_choice").is_none());
+            assert_eq!(checkpoint["model"], working["model"]);
+            assert_eq!(checkpoint["reasoning_effort"], working["reasoning_effort"]);
+            assert_eq!(
+                &request.messages[..original_messages.len()],
+                original_messages
+            );
+            assert_eq!(checkpoint["messages"], serde_json::json!(request.messages));
+            if endpoint.host_str() == Some("api.openai.com") {
+                assert!(working["prompt_cache_key"].is_string());
+                assert_eq!(checkpoint["prompt_cache_key"], working["prompt_cache_key"]);
+                let mut old_checkpoint = checkpoint.clone();
+                old_checkpoint.as_object_mut().unwrap().remove("tools");
+                crate::efficiency::cache::apply(
+                    &mut old_checkpoint,
+                    &endpoint,
+                    request.model.trim(),
+                    true,
+                );
+                assert_ne!(
+                    old_checkpoint["prompt_cache_key"],
+                    working["prompt_cache_key"]
+                );
+            } else {
+                assert!(checkpoint.get("prompt_cache_key").is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn checkpoint_usage_fallback_keeps_prose_only_policy_and_effort() {
+        let mut request = checkpoint_request("https://api.openai.com/v1");
+        request.allow_tool_calls = false;
+        let endpoint = openai_compat_endpoint(request.base_url).unwrap();
+        let with_usage = chat_payload(&request, &endpoint, true);
+        let without_usage = chat_payload(&request, &endpoint, false);
+        assert!(without_usage.get("stream_options").is_none());
+        for key in [
+            "tools",
+            "tool_choice",
+            "model",
+            "messages",
+            "reasoning_effort",
+            "stream",
+        ] {
+            assert_eq!(without_usage[key], with_usage[key], "{key}");
+        }
+        assert_eq!(without_usage["tool_choice"], "none");
+        assert_eq!(without_usage["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn checkpoint_catalog_is_not_assumed_for_gateways_or_lookalike_routes() {
+        for base in [
+            "https://gateway.example/v1",
+            "http://127.0.0.1:11434/v1",
+            "https://api.openai.com.example/v1",
+            "https://api.openai.com:8443/v1",
+            "https://api.openai.com/private/v1",
+            "https://api.openai.com/v1?tenant=custom",
+            "https://api.deepseek.com.example/v1",
+            "https://api.deepseek.com/private/v1",
+            "https://api.deepseek.com/beta",
+            "https://openrouter.ai/api/v1",
+        ] {
+            let endpoint = openai_compat_endpoint(base).unwrap();
+            let mut request = checkpoint_request(base);
+            let working = chat_payload(&request, &endpoint, true);
+            assert_eq!(working["tools"], serde_json::json!(request.tools), "{base}");
+            assert!(working.get("tool_choice").is_none());
+            request.allow_tool_calls = false;
+            let checkpoint = chat_payload(&request, &endpoint, true);
+            assert!(checkpoint.get("tools").is_none(), "{base}");
+            assert!(checkpoint.get("tool_choice").is_none(), "{base}");
+            assert_eq!(checkpoint["reasoning_effort"], "high");
+        }
+    }
+
+    #[test]
+    fn checkpoint_without_definitions_adds_no_tool_control() {
+        let mut request = checkpoint_request("https://api.openai.com/v1");
+        request.tools.clear();
+        let endpoint = openai_compat_endpoint(request.base_url).unwrap();
+        for allow_calls in [false, true] {
+            request.allow_tool_calls = allow_calls;
+            let payload = chat_payload(&request, &endpoint, true);
+            assert!(payload.get("tools").is_none());
+            assert!(payload.get("tool_choice").is_none());
+        }
+    }
+
     #[test]
     fn openrouter_receipt_endpoint_preserves_origin_and_rejects_custom_gateways() {
         let endpoint =
@@ -1813,6 +2010,7 @@ mod tests {
         });
         let result = openai_compat_tool_chat_once_with_recovery(
             &OpenAiCompatChatRequest {
+                allow_tool_calls: true,
                 base_url: &format!("http://{address}/api/v1?tenant=test"),
                 api_key: " receipt-test-key ",
                 model: "test",
@@ -1946,6 +2144,7 @@ mod tests {
             let (address, server) = serve_once("200 OK", "text/event-stream", body);
             let result = openai_compat_tool_chat_once_with_recovery(
                 &OpenAiCompatChatRequest {
+                    allow_tool_calls: true,
                     base_url: &format!("http://{address}/v1"),
                     api_key: "",
                     model: "test",
@@ -2092,6 +2291,7 @@ mod tests {
         let cancellation = CancellationToken::default();
         let result = openai_compat_tool_chat_once_with_recovery(
             &OpenAiCompatChatRequest {
+                allow_tool_calls: true,
                 base_url: &format!("http://{address}/v1"),
                 api_key: "",
                 model: "test",
@@ -2160,6 +2360,7 @@ mod tests {
         let (address, server) = serve_once("200 OK", "text/event-stream", body);
         let result = openai_compat_tool_chat_once(
             &OpenAiCompatChatRequest {
+                allow_tool_calls: true,
                 base_url: &format!("http://{address}/v1"),
                 api_key: "",
                 model: "test",
@@ -2364,6 +2565,7 @@ mod tests {
         let cancellation = CancellationToken::default();
         let result = openai_compat_tool_chat_once(
             &OpenAiCompatChatRequest {
+                allow_tool_calls: true,
                 base_url: &format!("http://{address}/v1"),
                 api_key: "",
                 model: "test",
@@ -2637,6 +2839,7 @@ mod tests {
             let began = std::time::Instant::now();
             let result = openai_compat_tool_chat_once(
                 &OpenAiCompatChatRequest {
+                    allow_tool_calls: true,
                     base_url: &format!("http://{address}/v1"),
                     api_key: "",
                     model: "test",
@@ -2859,6 +3062,7 @@ mod tests {
             ),
         );
         let result = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            allow_tool_calls: true,
             base_url: &format!("http://{address}/v1"),
             api_key: "",
             model: "test",
@@ -2904,6 +3108,7 @@ mod tests {
         ] {
             let (address, server) = serve_once("200 OK", content_type, body);
             let error = openai_compat_tool_chat(OpenAiCompatChatRequest {
+                allow_tool_calls: true,
                 base_url: &format!("http://{address}/v1"),
                 api_key: "",
                 model: "test",
@@ -2925,6 +3130,7 @@ mod tests {
             r#"{"choices":[{"message":{"content":"partial answer"},"finish_reason":"length"}]}"#,
         );
         let response = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            allow_tool_calls: true,
             base_url: &format!("http://{address}/v1"),
             api_key: "",
             model: "test",
@@ -3035,6 +3241,7 @@ mod tests {
         let mut deltas = Vec::new();
         let response = openai_compat_tool_chat_with_progress(
             OpenAiCompatChatRequest {
+                allow_tool_calls: true,
                 base_url: &format!("http://{address}/v1"),
                 api_key: "sk-test-key",
                 model: "deepseek-chat",
@@ -3104,6 +3311,7 @@ mod tests {
             bodies
         });
         let response = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            allow_tool_calls: true,
             base_url: &format!("http://{address}/v1"),
             api_key: "",
             model: "local-model",
@@ -3113,6 +3321,7 @@ mod tests {
         })
         .unwrap();
         openai_compat_tool_chat(OpenAiCompatChatRequest {
+            allow_tool_calls: true,
             base_url: &format!("http://{address}/v1"),
             api_key: "",
             model: "local-model",
@@ -3143,6 +3352,7 @@ mod tests {
             r#"{"error":{"message":"unknown model"}}"#,
         );
         let error = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            allow_tool_calls: true,
             base_url: &format!("http://{address}/v1"),
             api_key: "",
             model: "missing-model",
@@ -3166,6 +3376,7 @@ mod tests {
         let mut deltas = Vec::new();
         let response = openai_compat_tool_chat_with_progress(
             OpenAiCompatChatRequest {
+                allow_tool_calls: true,
                 base_url: &format!("http://{address}/v1"),
                 api_key: "k",
                 model: "m",
@@ -3212,6 +3423,7 @@ mod tests {
             requests
         });
         let response = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            allow_tool_calls: true,
             base_url: &format!("http://{address}/v1"), api_key: "", model: "test",
             messages: vec![serde_json::json!({"role":"tool","tool_call_id":"already-applied","content":"edit complete"})],
             tools: vec![], reasoning_effort: None,
@@ -3252,6 +3464,7 @@ mod tests {
             requests
         });
         let response = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            allow_tool_calls: true,
             base_url: &format!("http://{address}/v1"), api_key: "", model: "test",
             messages: vec![serde_json::json!({"role":"tool","tool_call_id":"already-applied","content":"edit complete"})],
             tools: vec![], reasoning_effort: None,
@@ -3271,6 +3484,7 @@ mod tests {
         ] {
             let (address, server) = serve_once("200 OK", "text/event-stream", body);
             let response = openai_compat_tool_chat(OpenAiCompatChatRequest {
+                allow_tool_calls: true,
                 base_url: &format!("http://{address}/v1"), api_key: "", model: "test",
                 messages: vec![], tools: vec![], reasoning_effort: None,
             });
@@ -3290,6 +3504,7 @@ mod tests {
         let mut deltas = Vec::new();
         let response = openai_compat_tool_chat_with_progress(
             OpenAiCompatChatRequest {
+                allow_tool_calls: true,
                 base_url: &format!("http://{address}/v1"),
                 api_key: "",
                 model: "test",
@@ -3319,6 +3534,7 @@ mod tests {
             "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n",
         );
         let response = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            allow_tool_calls: true,
             base_url: &format!("http://{address}/v1"),
             api_key: "k",
             model: "deepseek-flash",
@@ -3343,6 +3559,7 @@ mod tests {
             "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n",
         );
         openai_compat_tool_chat(OpenAiCompatChatRequest {
+            allow_tool_calls: true,
             base_url: &format!("http://{address}/v1"),
             api_key: "k",
             model: "m",
@@ -3369,6 +3586,7 @@ mod tests {
         let mut deltas = Vec::new();
         let response = openai_compat_tool_chat_with_progress(
             OpenAiCompatChatRequest {
+                allow_tool_calls: true,
                 base_url: &format!("http://{address}/v1"),
                 api_key: "k",
                 model: "mistral-medium-latest",
@@ -3393,6 +3611,7 @@ mod tests {
             r#"{"error":{"message":"Incorrect API key provided"}}"#,
         );
         let error = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            allow_tool_calls: true,
             base_url: &format!("http://{address}/v1"),
             api_key: "sk-secret-value",
             model: "m",
@@ -3414,6 +3633,7 @@ mod tests {
     fn refuses_to_follow_redirects_with_a_bearer_token() {
         let (address, server) = serve_once("302 Found", "text/plain", "");
         let error = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            allow_tool_calls: true,
             base_url: &format!("http://{address}/v1"),
             api_key: "sk-test",
             model: "m",
@@ -3511,6 +3731,7 @@ mod tests {
         cancellation.cancel();
         let error = openai_compat_tool_chat_with_progress(
             OpenAiCompatChatRequest {
+                allow_tool_calls: true,
                 base_url: "https://api.deepseek.com/v1",
                 api_key: "sk-test",
                 model: "deepseek-chat",
@@ -3529,6 +3750,7 @@ mod tests {
     #[test]
     fn rejects_an_empty_model_before_sending() {
         let error = openai_compat_tool_chat(OpenAiCompatChatRequest {
+            allow_tool_calls: true,
             base_url: "https://api.deepseek.com/v1",
             api_key: "sk-test",
             model: "  ",

@@ -5,6 +5,7 @@ import {
   type ComponentProps,
   type ReactNode,
 } from "react";
+import { SettingsDisclosure } from "./settings-disclosure";
 import { SelectionTrack } from "./selection-track";
 import { ChevronDown } from "lucide-react";
 import "./settings-design.css";
@@ -106,52 +107,12 @@ export function SettingsRow({
   );
 }
 
-export function SettingsGroup({
-  label,
-  badge,
-  description,
-  actions,
-  children,
-}: {
-  label: string;
-  /** Marks a group whose controls are visible but not yet usable. */
-  badge?: string;
-  description?: string;
-  actions?: ReactNode;
-  children: ReactNode;
+export function SettingsGroup({ label, id, badge, description, summary, actions, attention, children }: {
+  label: string; id?: string; badge?: string; description?: string; summary?: string; actions?: ReactNode; attention?: boolean; children: ReactNode;
 }) {
-  const headingId = useId();
-  return (
-    <section
-      aria-labelledby={headingId}
-      className={`gyro-settings-group${badge ? " is-unavailable" : ""}`}
-      data-setting-key={settingsSearchKey(label)}
-      tabIndex={-1}
-    >
-      {actions ? (
-        <div className="gyro-settings-group-header">
-          <h2 id={headingId}>
-            {label}
-            {badge ? (
-              <span className="gyro-settings-group-badge">{badge}</span>
-            ) : null}
-          </h2>
-          {actions}
-        </div>
-      ) : badge ? (
-        <h2 id={headingId}>
-          {label}
-          <span className="gyro-settings-group-badge">{badge}</span>
-        </h2>
-      ) : (
-        <h2 id={headingId}>{label}</h2>
-      )}
-      {description ? (
-        <p className="gyro-settings-group-description">{description}</p>
-      ) : null}
-      <div className="gyro-settings-group-rows">{children}</div>
-    </section>
-  );
+  return <SettingsDisclosure id={id ?? settingsSearchKey(label)} title={label} description={description} summary={badge ?? summary} actions={actions} attention={attention}>
+    {badge ? <p>{badge}</p> : null}<div className="gyro-settings-group-rows">{children}</div>
+  </SettingsDisclosure>;
 }
 
 export function SettingsSegmented<T extends string>({

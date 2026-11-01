@@ -411,7 +411,29 @@ pub(super) fn turn(
     prompt: &str,
     timeout_seconds: u64,
 ) -> Result<(Uuid, ProviderChatResponse), String> {
-    let turn_id = Uuid::new_v4();
+    turn_with_id(
+        app,
+        store,
+        session,
+        workspace,
+        provider,
+        prompt,
+        timeout_seconds,
+        Uuid::new_v4(),
+    )
+}
+
+/// A known ID lets an evaluator correlate even a failed turn with its own receipts.
+pub(super) fn turn_with_id(
+    app: &tauri::AppHandle,
+    store: &SessionStore,
+    session: Uuid,
+    workspace: &Path,
+    provider: &Provider,
+    prompt: &str,
+    timeout_seconds: u64,
+    turn_id: Uuid,
+) -> Result<(Uuid, ProviderChatResponse), String> {
     store
         .append_user_turn_message_with_turn_id(session, prompt, json!({}), turn_id)
         .map_err(to_string)?;

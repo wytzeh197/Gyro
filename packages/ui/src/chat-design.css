@@ -675,8 +675,10 @@
 }
 
 /* Chat typography shares a compact scale across messages and live work. */
-:root[data-theme] :is(.gyro-chat-surface, .gyro-side-chat) {
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content) {
   --gyro-chat-font-body: calc(13px * var(--gyro-ui-scale, 1));
+  --gyro-chat-font-response: calc(14px * var(--gyro-ui-scale, 1));
   --gyro-chat-font-work: calc(12px * var(--gyro-ui-scale, 1));
   --gyro-chat-font-meta: calc(11px * var(--gyro-ui-scale, 1));
 }
@@ -759,41 +761,110 @@
   font: var(--gyro-chat-font-body)/1.55 var(--gyro-font-sans);
 }
 
+/* Answers have their own reading scale; tool activity and composer chrome stay
+   compact. Use the same metrics while streaming and after Markdown settles. */
 :root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-run
+  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
   :is(.gyro-response, .gyro-response-body, .gyro-response-streaming-text) {
   color: var(--gyro-text);
-  font-size: var(--gyro-chat-font-body);
+  font-size: var(--gyro-chat-font-response);
   font-weight: 400;
   letter-spacing: 0;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
 :root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-run
+  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
   .gyro-response-body
   :is(p, li) {
+  color: var(--gyro-text);
+  font-size: inherit;
+  line-height: 1.65;
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
+  .gyro-response-body
+  :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--gyro-text);
+  font-size: var(--gyro-chat-font-response);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  margin: 0;
+  padding: 0;
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
+  .gyro-response-body
+  :is(h1, h2) {
+  font-size: var(--gyro-font-lead);
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
+  .gyro-response-body
+  > :is(h1, h2, h3, h4, h5, h6):not(:first-child) {
+  margin-top: 8px;
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
+  .gyro-response-body {
+  gap: 14px;
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
+  .gyro-response-body
+  strong {
+  font-weight: 600;
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
+  .gyro-response-body
+  :is(.gyro-response-inline-code, .gyro-response-command-list code) {
+  background: var(--gyro-surface-soft);
+  box-shadow: none;
+  color: var(--gyro-code-text);
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-support);
+}
+
+:root[data-theme]
+  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
+  .gyro-response-code-block {
+  background: var(--gyro-code-bg);
+  border: 1px solid var(--gyro-border-soft);
+  box-shadow: none;
+  color: var(--gyro-code-text);
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-support);
   line-height: 1.6;
 }
 
 :root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-run
-  .gyro-response-body
-  :is(h2, h3) {
-  font-size: var(--gyro-font-chrome);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.45;
+  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
+  .gyro-response-table {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
 }
 
 :root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-run
-  .gyro-response-body {
-  gap: 11px;
+  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
+  .gyro-response-table
+  th {
+  color: var(--gyro-text);
+}
+
+:root[data-theme] .gyro-side-chat .gyro-side-chat-context {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-chat-font-work);
+  line-height: 1.5;
+  margin: 0;
+  padding: var(--gyro-space-panel) var(--gyro-space-panel) 0;
 }
 
 /* Progress stays secondary to the answer; failures retain their own colors. */

@@ -97,7 +97,9 @@ mod tests {
         assert!(!ordinary.contains(SIDE_PANEL_GUIDE));
         assert!(!needs_surface_guide("preview the diff"));
         assert!(needs_surface_guide("open https://example.com"));
-        assert!(needs_surface_guide("check the component preview and dev server"));
+        assert!(needs_surface_guide(
+            "check the component preview and dev server"
+        ));
         let rendered = context(true, true, "normal", true);
         assert!(rendered.contains("gyro_web_fetch"));
         assert!(rendered.contains("reveal: true"));

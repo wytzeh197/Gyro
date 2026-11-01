@@ -1,3 +1,4 @@
+import { createInitialWorkbenchState, workbenchReducer, type WorkbenchAction } from "@gyro-dev/ui";
 // Standalone production components. Preferences persist in fixture-only storage;
 // accounts, updater state, and workspace data are simulated.
 import React, {
@@ -72,6 +73,8 @@ function loadPreviewAppearance(): PreviewAppearance {
   } catch {
     /* Malformed fixture storage restores the defaults. */
   }
+  if (["compact", "comfortable"].includes(params.get("density") ?? "")) initial.density = params.get("density") as PreviewAppearance["density"];
+  if (["small", "default", "large"].includes(params.get("size") ?? "")) initial.interfaceSize = params.get("size") as PreviewAppearance["interfaceSize"];
   return initial;
 }
 
@@ -176,14 +179,21 @@ const UPDATE_SCENES: Array<{
 ];
 
 function Preview() {
+  const [extraPreferences, setExtraPreferences] = useState(() => {
+    const base = createInitialWorkbenchState().preferences;
+    try { const raw = localStorage.getItem("gyro.settings-preview.preferences"); return raw && raw.length < 65536 ? { ...base, ...JSON.parse(raw) } as WorkbenchPreferences : base; } catch { return base; }
+  });
+  const updateFixturePreference = (action: WorkbenchAction) => setExtraPreferences(current => workbenchReducer(createInitialWorkbenchState({ preferences: current }), action).preferences);
+  const [toolFixture, setToolFixture] = useState(createInitialWorkbenchState);
+
   const [initial] = useState(loadPreviewAppearance);
   const [theme, setTheme] = useState<ThemeMode>(initial.theme);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [defaultWorkspaceMode, setDefaultWorkspaceMode] = useState<
     "local" | "worktree"
-  >("local");
+  >(extraPreferences.defaultWorkspaceMode);
   const [launchView, setLaunchView] = useState<LaunchView>(
-    () => (params.get("launch") as LaunchView | null) ?? "last",
+    () => (params.get("launch") as LaunchView | null) ?? extraPreferences.launchView,
   );
   const [failSave, setFailSave] = useState(params.has("failSave"));
   const failSaveRef = useRef(failSave);
@@ -237,15 +247,11 @@ function Preview() {
       dark.removeEventListener("change", sync);
     };
   }, []);
-  const [menu, setMenu] = useState(true);
+  const [menu, setMenu] = useState(extraPreferences.showMenuBarIcon);
   const [notifications, setNotifications] =
-    useState<DesktopNotificationPreferences>({
-      enabled: true,
-      approvals: true,
-      finished: true,
-      failed: false,
-    });
-  const [follow, setFollow] = useState<"off" | "peek" | "follow">("peek");
+    useState<DesktopNotificationPreferences>(extraPreferences.desktopNotifications);
+  const [follow, setFollow] = useState<"off" | "peek" | "follow">(extraPreferences.modelFollow);
+  useEffect(() => { safeSetLocalStorage("gyro.settings-preview.preferences", JSON.stringify({...extraPreferences, desktopNotifications: notifications, showMenuBarIcon: menu, modelFollow: follow, launchView, defaultWorkspaceMode})); }, [extraPreferences, notifications, menu, follow, launchView, defaultWorkspaceMode]);
   const [config, setConfig] = useState<GyroConfig>(() => {
     const empty = {
       telemetryEnabled: false,
@@ -259,8 +265,11 @@ function Preview() {
       modelProviders: [
         ...providersForConfig(empty).map((provider) => ({
           ...provider,
-          enabled: false,
-          authStatus: "not-connected" as const,
+          // Query-seeded connections are sample state, never live sign-ins.
+          enabled: params.get("connected")?.split(",").includes(provider.id) ?? false,
+          authStatus: params.get("connected")?.split(",").includes(provider.id)
+            ? "connected" as const
+            : "not-connected" as const,
         })),
         {
           id: "custom:lab" as const,
@@ -336,12 +345,14 @@ function Preview() {
     colors[1]!,
   );
   return (
-    <div className="gyro-settings-preview">
+    <div className="gyro-settings-preview" data-reduced-motion={reduceMotion}>
       <style>{`
         html, body, #root { height: 100%; margin: 0; }
         .gyro-settings-preview { height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; background: var(--gyro-pane); color: var(--gyro-text); }
-        .gyro-settings-preview *, .gyro-settings-preview *::before, .gyro-settings-preview *::after { animation: none !important; transition: none !important; }
-        .gyro-settings-preview > .gyro-app-shell { height: 100%; min-height: 0; }
+        .gyro-settings-preview[data-reduced-motion="true"] *, .gyro-settings-preview[data-reduced-motion="true"] *::before, .gyro-settings-preview[data-reduced-motion="true"] *::after { animation-duration: 0.01ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; transition-delay: 0s !important; scroll-behavior: auto !important; }
+        .gyro-settings-preview > .gyro-app-shell { height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+        .gyro-settings-preview .gyro-workspace-activity-rail { min-height: 0; }
+        :root[data-theme] .gyro-settings-preview .gyro-app-shell.is-workspace-shell > .gyro-main, :root[data-theme] .gyro-settings-preview .gyro-app-shell.is-workspace-shell > .gyro-sidebar { height: 100%; min-height: 0; }
         .gyro-settings-preview-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--gyro-border-soft); font: 12px var(--gyro-font-sans); }
         .gyro-settings-preview-toolbar > span:first-child { margin-right: auto; }
         .gyro-settings-preview-toolbar button { font: inherit; }
@@ -427,11 +438,36 @@ function Preview() {
         settingsBackLabel="fixture"
       >
         <SettingsSurface
-          projectImport={projectImportPreview(updateScene, setResult)}
+          preferences={{ ...extraPreferences, theme, density, interfaceSize, motionSpeed, mainColor: colors[0]!, secondaryColor: colors[1]!, desktopNotifications: notifications, launchView, showMenuBarIcon: menu, modelFollow: follow, defaultWorkspaceMode }}
+          onSettingsPreferencesChange={patch => setExtraPreferences(current=>({...current,...patch}))}
+          onImportSettings={settings => { setExtraPreferences(current=>({...current,...settings})); if(settings.theme)setTheme(settings.theme); if(settings.density)setDensity(settings.density); if(settings.interfaceSize)setInterfaceSize(settings.interfaceSize); if(settings.motionSpeed)setMotionSpeed(settings.motionSpeed); if(settings.mainColor||settings.secondaryColor)setColors([settings.mainColor??colors[0]!,settings.secondaryColor??colors[1]!]); if(settings.desktopNotifications)setNotifications(settings.desktopNotifications); if(settings.launchView)setLaunchView(settings.launchView); if(settings.showMenuBarIcon!==undefined)setMenu(settings.showMenuBarIcon); if(settings.modelFollow)setFollow(settings.modelFollow); }}
+          systemAccess={[{id:"documents",label:"Documents",reason:"Fixture access status",status:"granted",path:"/fixture/Documents",canPrompt:false,settingsUrl:""},{id:"full-disk",label:"Full Disk Access",reason:"Fixture access status",status:"unavailable",canPrompt:false,settingsUrl:""}]}
+          onRecheckSystemAccess={()=>setResult("Simulated access check; no macOS permission request.")}
+          onOpenSystemAccessSettings={()=>setResult("System Settings would open in the native app.")}
+          projectImport={{...projectImportPreview(updateScene, setResult),onScan:()=>setUpdateScene("scanned"),onImport:()=>setUpdateScene("completed"),onCancel:()=>setUpdateScene("scanned")}}
           config={config}
           workspacePath="/fixture/Gyro"
           workspaceRoots={["/fixture/Gyro"]}
           onConfigChange={setConfig}
+          onEfficiencyChange={async efficiency=>setConfig(current=>({...current,efficiency}))}
+          onAutoCompactPercentChange={autoCompactPercent=>setConfig(current=>({...current,usageGuard:{enabled:true,pause:{active:false,scope:"all"},budgets:[],windowMinutes:60,maxCallsPerWindow:0,maxUnattendedCallsPerWindow:0,maxTokensPerCall:0,maxToolRounds:0,maxResynthesesPerWindow:0,...current.usageGuard,autoCompactPercent}}))}
+          cliLaunchPreset={extraPreferences.cliLaunchPreset}
+          onCliLaunchPresetChange={preset=>updateFixturePreference({type:"set-cli-launch-preset",preset})}
+          workspaceKeybindings={extraPreferences.workspaceKeybindings}
+          workspaceUserSettings={extraPreferences.workspaceUserSettings}
+          workspaceSettingsByWorkspace={extraPreferences.workspaceSettingsByWorkspace}
+          workspaceSettingsByFolder={extraPreferences.workspaceSettingsByFolder}
+          onWorkspaceKeybindingChange={(commandId,keybinding)=>updateFixturePreference({type:"set-workspace-keybinding",commandId,keybinding})}
+          onWorkspaceSettingsChange={(scope,path,settings)=>updateFixturePreference({type:"set-workspace-settings",scope,path,settings})}
+          workspaceContributions={toolFixture.ide.contributions}
+          workspaceLanguageServers={toolFixture.ide.languageServers}
+          onRegisterWorkspaceContribution={contribution=>setToolFixture(current=>workbenchReducer(current,{type:"ide-register-contribution",contribution}))}
+          onToggleWorkspaceContribution={(id,enabled)=>setToolFixture(current=>workbenchReducer(current,{type:"ide-set-contribution-enabled",id,enabled}))}
+          onRemoveWorkspaceContribution={id=>setToolFixture(current=>workbenchReducer(current,{type:"ide-remove-contribution",id}))}
+          onExportDiagnostics={()=>setResult("Diagnostics export is simulated. No local files were read.")}
+          onResetUiState={()=>{setExtraPreferences(createInitialWorkbenchState().preferences);setResult("Fixture presentation preferences reset.");}}
+          onTestNotification={()=>setResult(notifications.showNames === false ? "Generic test notification (simulated)" : "Test notification (simulated)")}
+
           onSectionChange={setSection}
           defaultWorkspaceMode={defaultWorkspaceMode}
           onDefaultWorkspaceModeChange={setDefaultWorkspaceMode}

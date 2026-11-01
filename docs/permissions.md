@@ -21,13 +21,16 @@ Plan remains a non-mutating ceiling and Council remains advisory-only regardless
 of the remembered normal-run mode. Changing mode is always explicit and the
 current mode must remain visible in the composer.
 
-Automatic sub-agent delegation is available at **Max** and **Ultra** effort.
-Low, Medium, High, XHigh, and an unspecified effort run with one agent unless
-the current user request explicitly asks to use sub-agents. An explicit request
-to work without sub-agents takes precedence at every effort. Permission mode
-does not enable delegation by itself. Gyro applies this rule to tool discovery,
-model instructions, and execution, including resumed chats with older tool lists.
-Existing children can still be inspected, waited for, and stopped.
+Sub-agent delegation requires an explicit request in the current task or the
+Parallel agents setting. Reasoning effort and permission mode do not enable it
+by themselves. An explicit request to work without sub-agents takes precedence.
+Gyro applies this rule to tool discovery, model instructions, and execution,
+including resumed chats with older tool lists. Existing children can still be
+inspected, waited for, and stopped.
+
+Delegation also requires a provider adapter that connects Gyro tools. The current
+Antigravity CLI adapter can run chats but does not connect those tools, so it does
+not support Gyro-managed sub-agents.
 
 Sub-agent spawning and follow-up tasks inherit the parent's model, workspace,
 and permission ceiling. For an eligible turn, Approve for me automatically allows

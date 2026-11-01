@@ -500,6 +500,16 @@ pub(super) fn occupancy_from_request(
     accounted: &gyro_core::usage::UsageTokens,
     model_context_window: Option<u64>,
 ) -> Option<ProviderContextUsage> {
+    let accounting = accounted.effective_accounting();
+    if !accounting.known.input
+        || matches!(
+            accounting.coverage,
+            gyro_core::usage::UsageCoverage::Estimated
+                | gyro_core::usage::UsageCoverage::Unavailable
+        )
+    {
+        return None;
+    }
     let input_tokens = input_tokens?;
     let known = accounted
         .accounting
@@ -702,10 +712,9 @@ pub(super) fn catalog_context_window(provider_id: &str, model_id: Option<&str>) 
         "anthropic" => match model_id {
             // Claude Code runs bare Opus ids at 200K; the `-1m` rows select 1M.
             "claude-haiku-4-5" | "claude-opus-5-5" | "claude-opus-5" | "claude-opus-4-8" => 200_000,
-            "" | "claude-fable-5-1" | "claude-fable-5" | "claude-opus-5-5-1m" | "claude-opus-5-1m"
-            | "claude-opus-4-8-1m" | "claude-sonnet-5-5" | "claude-sonnet-5" | "claude-haiku-5-5" => {
-                1_000_000
-            }
+            "" | "claude-fable-5-1" | "claude-fable-5" | "claude-opus-5-5-1m"
+            | "claude-opus-5-1m" | "claude-opus-4-8-1m" | "claude-sonnet-5-5"
+            | "claude-sonnet-5" | "claude-haiku-5-5" => 1_000_000,
             _ => return None,
         },
         // K3 and K3.1 Pro entitlements depend on the plan; retain the Plus
@@ -1215,6 +1224,22 @@ mod tests {
         assert_eq!(usage.model_context_window, None);
         assert!(!usage.estimated);
         assert!(occupancy_from_request(None, Some(20), &accounted, Some(128_000)).is_none());
+    }
+
+    #[test]
+    fn live_occupancy_accepts_partial_measurements_but_rejects_estimates_and_conflicts() {
+        let partial = gyro_core::usage::UsageTokens::measured(Some(100), None, None, None, None);
+        assert_eq!(
+            occupancy_from_request(Some(100), None, &partial, Some(1000))
+                .unwrap()
+                .input_tokens,
+            Some(100)
+        );
+        let estimated = gyro_core::usage::UsageTokens::estimated(400, 40);
+        assert!(occupancy_from_request(Some(100), Some(10), &estimated, None).is_none());
+        let inconsistent =
+            gyro_core::usage::UsageTokens::measured(Some(100), None, Some(10), None, Some(5));
+        assert!(occupancy_from_request(Some(100), Some(10), &inconsistent, None).is_none());
     }
 
     #[test]

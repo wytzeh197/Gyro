@@ -1,5 +1,6 @@
 //! Local efficiency policies. Accounting never implies provider billing or verified success.
 pub mod accounting;
+mod arguments;
 pub mod cache;
 pub mod cache_plan;
 pub mod checkpoint;
@@ -107,6 +108,10 @@ pub struct Config {
     pub prices: Vec<pricing::PriceSnapshot>,
     pub structured_evidence: bool,
     pub cache_assembly: bool,
+    /// Experimental catalog routing for request-owned tool loops only.
+    pub compact_tool_catalog: bool,
+    pub recoverable_evidence: bool,
+    pub retain_tool_catalog: bool,
     pub task_state: bool,
     pub repository_retrieval: bool,
     pub progress_detection: bool,
@@ -122,6 +127,9 @@ impl Default for Config {
             prices: Vec::new(),
             structured_evidence: true,
             cache_assembly: true,
+            compact_tool_catalog: false,
+            recoverable_evidence: false,
+            retain_tool_catalog: false,
             task_state: true,
             repository_retrieval: true,
             progress_detection: true,
@@ -140,6 +148,16 @@ mod tests {
     #[test]
     fn defaults_preserve_selection() {
         assert!(!Config::default().policies());
+        assert!(!Config::default().compact_tool_catalog);
+        assert!(!Config::default().recoverable_evidence);
+        assert!(!Config::default().retain_tool_catalog);
+        let legacy: Config = serde_json::from_str("{}").unwrap();
+        assert!(!legacy.recoverable_evidence && !legacy.retain_tool_catalog);
+        assert!(
+            !serde_json::from_str::<Config>("{}")
+                .unwrap()
+                .compact_tool_catalog
+        );
         assert_eq!(
             Profile::Deep.effort(Some("max"), &["low", "high"]),
             Some("max")

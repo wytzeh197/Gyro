@@ -1,3 +1,4 @@
+mod context_query;
 mod project_import_storage;
 pub use project_import_storage::{ProjectImportCommit, SessionImportSource};
 
@@ -1505,9 +1506,9 @@ impl SessionStore {
                 eprintln!("session event was saved but its turn index was not updated: {error}");
             }
         }
-        drop(event_lock);
-        drop(file);
-
+        // The status index must follow JSONL append order too. Releasing the
+        // lock first lets a later terminal status be overwritten by an older
+        // running status whose SQLite write was delayed by another process.
         if let Some(turn_id) = event.turn_id {
             if let Some(status) = provider_status_from_payload(&event.payload) {
                 if let Err(error) = self.record_turn_provider_status(session_id, turn_id, &status) {
@@ -1517,6 +1518,8 @@ impl SessionStore {
                 }
             }
         }
+        drop(event_lock);
+        drop(file);
 
         if let Err(error) = self.conn.execute(
             "update sessions set updated_at = ?1 where id = ?2",
@@ -1915,8 +1918,10 @@ impl SessionStore {
         let mut offset = scan_start;
         let mut preceding_assistant: Option<(u64, SessionEvent)> = None;
         let mut context_events = Vec::new();
-        while let Some(line) = read_bounded_session_event_line(&mut reader)? {
-            let next_offset = reader.stream_position()?;
+        while let Some((line, bytes_read)) = read_bounded_session_event_record(&mut reader)? {
+            // Count consumed bytes, including CRLF, instead of issuing a seek
+            // syscall for every record in a cold or appended context index.
+            let next_offset = offset + bytes_read as u64;
             if next_offset == file_len && !has_complete_tail {
                 break;
             }
@@ -1998,18 +2003,21 @@ impl SessionStore {
                     params![session_id.to_string()],
                 )?;
             }
-            for (event_offset, event) in context_events {
-                transaction.execute(
+            {
+                let mut insert = transaction.prepare(
                     "insert or ignore into session_context_events
                      (session_id, event_id, log_offset, event_json)
                      values (?1, ?2, ?3, ?4)",
-                    params![
-                        session_id.to_string(),
+                )?;
+                let session_key = session_id.to_string();
+                for (event_offset, event) in context_events {
+                    insert.execute(params![
+                        session_key,
                         event.id.to_string(),
                         event_offset,
                         serde_json::to_string(&event)?,
-                    ],
-                )?;
+                    ])?;
+                }
             }
             transaction.execute(
                 "insert into session_context_index (session_id, indexed_bytes)
@@ -2028,7 +2036,7 @@ impl SessionStore {
         }
 
         let sql = if efficiency {
-            "select event_json from session_context_events e where session_id=?1 and (json_extract(event_json,'$.payload.kind')='efficiency-phase-route' or json_extract(event_json,'$.kind')='goal-updated' or log_offset=(select max(log_offset) from session_context_events n where n.session_id=e.session_id and json_extract(n.event_json,'$.kind')=json_extract(e.event_json,'$.kind'))) order by log_offset asc"
+            context_query::EFFICIENCY_CONTEXT
         } else {
             "select event_json from session_context_events where session_id = ?1 order by log_offset asc"
         };
@@ -2815,6 +2823,11 @@ impl Drop for SessionEventFileLock {
 }
 
 fn read_bounded_session_event_line(reader: &mut impl BufRead) -> Result<Option<String>> {
+    Ok(read_bounded_session_event_record(reader)?.map(|(line, _)| line))
+}
+
+/// The decoded record and its exact consumed byte count, before trimming CRLF.
+fn read_bounded_session_event_record(reader: &mut impl BufRead) -> Result<Option<(String, usize)>> {
     let mut bytes = Vec::new();
     let read = reader
         .take((MAX_SESSION_EVENT_LINE_BYTES + 1) as u64)
@@ -2836,7 +2849,7 @@ fn read_bounded_session_event_line(reader: &mut impl BufRead) -> Result<Option<S
         bytes.pop();
     }
     match String::from_utf8(bytes) {
-        Ok(line) => Ok(Some(line)),
+        Ok(line) => Ok(Some((line, read))),
         // An interrupted append can stop inside a UTF-8 character. Leave
         // those bytes unconsumed by the context index until append repairs
         // the tail; completed records must still decode strictly.
@@ -3882,6 +3895,134 @@ mod tests {
             Some("done")
         );
         assert!(!store.has_running_provider_turn(session.id).unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_status_index_updates_follow_the_durable_append_order() {
+        use std::os::fd::AsRawFd;
+        use std::time::{Duration, Instant};
+
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "ordered status")
+            .unwrap();
+        let running_store = SessionStore::open(paths.clone()).unwrap();
+        let done_store = SessionStore::open(paths).unwrap();
+        let turn_id = Uuid::new_v4();
+        let session_id = session.id;
+        // WAL permits the append's session read, but holds its status-index
+        // write after the JSONL record is durable. A second appender must not
+        // overtake that blocked update and publish a later status first.
+        store.conn.execute_batch("begin immediate;").unwrap();
+        let running = std::thread::spawn(move || {
+            running_store.append_event_with_turn_id(
+                session_id,
+                SessionEventKind::SystemEvent,
+                "running",
+                serde_json::json!({ "kind": "provider-status", "status": "running" }),
+                Some(turn_id),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut saw_running = false;
+        while Instant::now() < deadline {
+            if std::fs::read_to_string(&session.events_path)
+                .unwrap()
+                .contains("\"status\":\"running\"")
+            {
+                saw_running = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let done = std::thread::spawn(move || {
+            done_store.append_event_with_turn_id(
+                session_id,
+                SessionEventKind::SystemEvent,
+                "done",
+                serde_json::json!({ "kind": "provider-status", "status": "done" }),
+                Some(turn_id),
+            )
+        });
+        let probe = open_session_event_log_for_append(&session.events_path).unwrap();
+        let deadline = Instant::now() + Duration::from_millis(100);
+        let mut released_before_index = false;
+        while Instant::now() < deadline {
+            if unsafe { libc::flock(probe.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+                released_before_index = true;
+                unsafe { libc::flock(probe.as_raw_fd(), libc::LOCK_UN) };
+                break;
+            }
+            assert_eq!(
+                std::io::Error::last_os_error().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // Always unblock and join both writers before asserting the invariant.
+        store.conn.execute_batch("rollback;").unwrap();
+        running.join().unwrap().unwrap();
+        done.join().unwrap().unwrap();
+        assert!(
+            saw_running,
+            "the first writer must reach the durable append"
+        );
+        assert!(
+            !released_before_index,
+            "the append lock was released while its status-index write was blocked"
+        );
+        let events = store.read_events(session_id).unwrap();
+        assert_eq!(events.last().unwrap().payload["status"], "done");
+        assert_eq!(
+            store
+                .latest_provider_status_for_turn(session_id, turn_id)
+                .unwrap(),
+            Some("done".to_owned())
+        );
+        assert!(!store.has_running_provider_turn(session_id).unwrap());
+    }
+
+    #[test]
+    fn status_index_failure_preserves_a_successful_durable_append() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "failed status index")
+            .unwrap();
+        store
+            .conn
+            .execute_batch(
+                "create temp trigger reject_status before insert on session_turn_status
+             begin select raise(abort, 'injected index failure'); end;",
+            )
+            .unwrap();
+        let turn_id = Uuid::new_v4();
+        let event = store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::SystemEvent,
+                "done",
+                serde_json::json!({ "kind": "provider-status", "status": "done" }),
+                Some(turn_id),
+            )
+            .unwrap();
+        assert_eq!(
+            store.read_events(session.id).unwrap().last().unwrap().id,
+            event.id
+        );
+        assert_eq!(
+            store
+                .latest_provider_status_for_turn(session.id, turn_id)
+                .unwrap(),
+            None
+        );
+        store
+            .conn
+            .execute_batch("drop trigger reject_status;")
+            .unwrap();
     }
 
     #[test]

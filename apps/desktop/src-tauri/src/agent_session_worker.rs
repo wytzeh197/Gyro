@@ -20,26 +20,19 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 pub(super) fn start(app: tauri::AppHandle) {
     let hook_app = app.clone();
     gyro_core::agent_sessions::set_session_stop_hook(std::sync::Arc::new(move |session_id| {
-        let _ = stop_provider_run(
-            &hook_app,
-            &session_id.to_string(),
-            ProviderStopReason::User,
-        );
+        let _ = stop_provider_run(&hook_app, &session_id.to_string(), ProviderStopReason::User);
     }));
     let spawned = std::thread::Builder::new()
         .name("gyro-agent-sessions".into())
-        .spawn(move || {
-            loop {
-                let exited = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    worker(app.clone())
-                }));
-                if exited.is_err() {
-                    eprintln!("agent session worker panicked; starting it again");
-                } else {
-                    eprintln!("agent session worker stopped; starting it again");
-                }
-                std::thread::sleep(Duration::from_secs(1));
+        .spawn(move || loop {
+            let exited =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker(app.clone())));
+            if exited.is_err() {
+                eprintln!("agent session worker panicked; starting it again");
+            } else {
+                eprintln!("agent session worker stopped; starting it again");
             }
+            std::thread::sleep(Duration::from_secs(1));
         });
     if let Err(error) = spawned {
         eprintln!("could not start the agent session worker: {error}");
@@ -100,9 +93,8 @@ fn claim_iteration(app: &tauri::AppHandle, paths: &GyroPaths) {
                 execute(app, paths, &row);
             }));
             if result.is_err() {
-                let _ = AgentSessionStore::open(paths.clone()).and_then(|store| {
-                    store.finish(row.id, Err("agent session panicked".into()))
-                });
+                let _ = AgentSessionStore::open(paths.clone())
+                    .and_then(|store| store.finish(row.id, Err("agent session panicked".into())));
             }
         }
         Ok(None) => {}
