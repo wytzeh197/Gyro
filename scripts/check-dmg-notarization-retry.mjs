@@ -3,7 +3,7 @@
 // stapler runs only after status is Accepted.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +38,16 @@ if [ "\${1:-}" = "stapler" ]; then
   if [ "\${2:-}" != "staple" ]; then
     echo "unexpected stapler invocation: \$*" >&2
     exit 1
+  fi
+  printf '%s\\n' "$3" >> "$GYRO_FAKE_STAPLE_ATTEMPTS"
+  n=$(wc -l < "$GYRO_FAKE_STAPLE_ATTEMPTS" | tr -d ' ')
+  if [ "$n" -le "\${GYRO_FAKE_STAPLE_FAILURES:-0}" ]; then
+    if [ "\${GYRO_FAKE_STAPLE_ERROR:-transient}" = "permanent" ]; then
+      echo "The ticket does not match this image." >&2
+      exit 65
+    fi
+    echo 'NSURLErrorDomain Code=-1005 The network connection was lost.' >&2
+    exit 68
   fi
   printf '%s\\n' "$3" >> "$GYRO_FAKE_STAPLED"
   exit 0
@@ -109,6 +119,7 @@ function runCase(name, configure) {
   const submitStderr = join(root, "submit-stderr.txt");
   const submitStdout = join(root, "submit-stdout.txt");
   const stapled = join(root, "stapled.txt");
+  const stapleAttempts = join(root, "staple-attempts.txt");
   const infoIds = join(root, "info-ids.txt");
   const logIds = join(root, "log-ids.txt");
   const sleeps = join(root, "sleeps.txt");
@@ -126,6 +137,7 @@ function runCase(name, configure) {
     APPLE_API_KEY: "TESTKEY",
     APPLE_API_ISSUER: "test-issuer",
     GYRO_FAKE_STAPLED: stapled,
+    GYRO_FAKE_STAPLE_ATTEMPTS: stapleAttempts,
     GYRO_FAKE_INFO_IDS: infoIds,
     GYRO_FAKE_LOG_IDS: logIds,
     GYRO_FAKE_SLEEPS: sleeps,
@@ -142,16 +154,20 @@ function runCase(name, configure) {
     encoding: "utf8",
     timeout: 15000,
   });
-  return {
+  const report = {
     name,
     status: result.status,
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? "",
     error: result.error,
     stapled: existsSync(stapled) ? readFileSync(stapled, "utf8").trim() : "",
+    stapleAttempts: existsSync(stapleAttempts) ? readFileSync(stapleAttempts, "utf8").trim().split("\n").length : 0,
+    sleeps: existsSync(sleeps) ? readFileSync(sleeps, "utf8").trim() : "",
     infoIds: existsSync(infoIds) ? readFileSync(infoIds, "utf8").trim() : "",
     logIds: existsSync(logIds) ? readFileSync(logIds, "utf8").trim() : "",
   };
+  rmSync(root, { recursive: true, force: true });
+  return report;
 }
 
 const droppedWait = runCase("dropped wait then Accepted", ({ submitStderr, responses }) => {
@@ -206,6 +222,31 @@ assert.equal(noSubmission.stapled, "");
 assert.equal(noSubmission.infoIds, "");
 assert.match(noSubmission.stderr, /finished with status 'unknown'/);
 
+function acceptedWithStapleFailures(failures, kind = "transient") {
+  return runCase(`staple ${kind} ${failures}`, ({ submitStdout, env }) => {
+    writeFileSync(submitStdout, '{"id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","status":"Accepted"}\n');
+    env.GYRO_FAKE_SUBMIT_EXIT = "0";
+    env.GYRO_FAKE_STAPLE_FAILURES = String(failures);
+    env.GYRO_FAKE_STAPLE_ERROR = kind;
+  });
+}
+const stapleRecovers = acceptedWithStapleFailures(2);
+assert.equal(stapleRecovers.status, 0, stapleRecovers.stderr);
+assert.equal(stapleRecovers.stapleAttempts, 3);
+assert.equal(stapleRecovers.sleeps, "10\n20");
+assert.match(stapleRecovers.stapled, /\.dmg$/);
+const stapleExhausted = acceptedWithStapleFailures(4);
+assert.equal(stapleExhausted.status, 1, stapleExhausted.stderr);
+assert.equal(stapleExhausted.stapleAttempts, 4);
+assert.equal(stapleExhausted.sleeps, "10\n20\n30");
+assert.equal(stapleExhausted.stapled, "");
+assert.match(stapleExhausted.stderr, /refusing to upload an unstapled image/);
+const stapleInvalid = acceptedWithStapleFailures(1, "permanent");
+assert.equal(stapleInvalid.status, 1, stapleInvalid.stderr);
+assert.equal(stapleInvalid.stapleAttempts, 1);
+assert.equal(stapleInvalid.sleeps, "");
+assert.equal(stapleInvalid.stapled, "");
+
 console.log(
-  "DMG notarization retry passed: dropped wait re-queries, Accepted staples, Invalid and a missing id do not.",
+  "DMG notarization retry passed: dropped wait re-queries, Accepted staples, Invalid and a missing id do not; transient staple retries are bounded and permanent failures stop immediately.",
 );

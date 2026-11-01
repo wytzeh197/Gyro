@@ -90,10 +90,7 @@ const failures = [];
       failures.push(
         "bundle.macOS.dmg.background must be a PNG; the DMG bundler cannot place an SVG.",
       );
-    } else if (
-      width !== windowWidth * 2 ||
-      height !== windowHeight * 2
-    ) {
+    } else if (width !== windowWidth * 2 || height !== windowHeight * 2) {
       failures.push(
         `bundle.macOS.dmg.background is ${width}×${height}, but a ${windowWidth}×${windowHeight} pt window needs ${windowWidth * 2}×${windowHeight * 2} at 2x. Run: swift scripts/render-dmg-background.swift`,
       );
@@ -177,7 +174,8 @@ const versions = new Map([
 const expectedVersion = rootPackage.version;
 const isStableVersion = /^\d+\.\d+\.\d+$/.test(expectedVersion);
 const signingMode =
-  process.env.GYRO_MACOS_SIGNING || (isStableVersion ? "developer-id" : "adhoc");
+  process.env.GYRO_MACOS_SIGNING ||
+  (isStableVersion ? "developer-id" : "adhoc");
 if (!["adhoc", "developer-id"].includes(signingMode)) {
   failures.push(
     `GYRO_MACOS_SIGNING must be adhoc or developer-id, not ${signingMode}.`,
@@ -264,11 +262,23 @@ if (tag?.startsWith("v") && tag.slice(1) !== expectedVersion) {
 }
 
 for (const marker of [
+  "workflow_dispatch:",
+  "Validate release request",
+  "Verify immutable merged release source",
+  'test "$COMMIT" = "$EXPECTED_COMMIT"',
+  'git merge-base --is-ancestor "$COMMIT" origin/main',
+  'test "$RELEASE_TAG" = "v$VERSION"',
+  "ref: ${{ needs.signing.outputs.commit }}",
+  'GITHUB_REF_NAME="$RELEASE_TAG" pnpm release:check',
+  "Use TCP for Apple notarization tickets",
+  "block return out quick proto udp from any to any port 443",
+  "sudo pfctl -E",
+  "refusing to upload an unstapled image",
   "needs: [signing, macos]",
   "needs: signing",
   "GYRO_MACOS_SIGNING: ${{ needs.signing.outputs.mode }}",
   "Resolve Developer ID or ad-hoc signing",
-  "Stable release $GITHUB_REF_NAME must be Developer ID signed and notarized",
+  "Stable release $RELEASE_TAG must be Developer ID signed and notarized",
   "Import Developer ID certificate",
   'KEYCHAIN_PATH="$RUNNER_TEMP/gyro-signing.keychain-db"',
   "security set-key-partition-list",
@@ -291,13 +301,13 @@ for (const marker of [
   "Verify pinned Tauri release toolchain",
   'tauri --version)" = "tauri-cli 2.11.4"',
   'GYRO_REQUIRE_RELEASE_SECRETS: "1"',
-  "group: release-${{ github.ref }}",
+  "group: release-${{ inputs.release_tag || github.ref_name }}",
   "cancel-in-progress: false",
   "actions/upload-artifact@v4",
   "actions/download-artifact@v4",
   "merge-multiple: true",
   "scripts/create-updater-manifest.mjs",
-  'gh release create "$GITHUB_REF_NAME"',
+  'gh release create "$RELEASE_TAG"',
   "cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg",
   "release-assets/Gyro_${{ matrix.updater_suffix }}.app.tar.gz",
   "updater_suffix: aarch64",
@@ -319,9 +329,9 @@ for (const marker of [
   "--json isDraft --jq '.isDraft'",
   'if [ "$IS_DRAFT" != "true" ]',
   "Refusing to overwrite published release",
-  'gh release edit "$GITHUB_REF_NAME"',
+  'gh release edit "$RELEASE_TAG"',
   '--notes "$RELEASE_NOTES"',
-  'NOTES_PATH="docs/releases/${GITHUB_REF_NAME}.md"',
+  'NOTES_PATH="docs/releases/${RELEASE_TAG}.md"',
 ]) {
   if (!releaseWorkflow.includes(marker)) {
     failures.push(`Release workflow is missing ${marker}.`);
@@ -506,7 +516,9 @@ if (process.env.GYRO_REQUIRE_RELEASE_SECRETS === "1") {
 }
 
 function dmgNotarizationStep(workflow) {
-  const start = workflow.indexOf("- name: Sign, notarize, and staple macOS DMG");
+  const start = workflow.indexOf(
+    "- name: Sign, notarize, and staple macOS DMG",
+  );
   const end = workflow.indexOf("- name: Verify macOS DMG");
   if (start === -1 || end <= start) return "";
   return workflow.slice(start, end);
@@ -635,6 +647,17 @@ const dmgRetryTest = spawnSync(
 if (dmgRetryTest.status !== 0) {
   failures.push(
     "DMG notarization retry test failed. The release workflow must re-query a dropped notarytool --wait and staple only after Accepted.",
+  );
+}
+
+const releaseRecoveryTest = spawnSync(
+  process.execPath,
+  [resolve(repoRoot, "scripts/check-release-recovery.mjs")],
+  { stdio: "inherit" },
+);
+if (releaseRecoveryTest.status !== 0) {
+  failures.push(
+    "Release recovery must reject unapproved or unmerged source before signing.",
   );
 }
 
