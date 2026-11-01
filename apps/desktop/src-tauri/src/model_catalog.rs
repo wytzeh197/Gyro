@@ -10,7 +10,7 @@ const MAX_CATALOG_BYTES: u64 = 256 * 1024;
 const CATALOG_SCHEMA: &str = "gyro.model-catalog.v1";
 /// Must match `MODEL_CATALOG_CLIENT_REVISION` in packages/ui, so the runner
 /// and the picker agree on which entries this build can execute.
-const CLIENT_REVISION: u64 = 2;
+const CLIENT_REVISION: u64 = 3;
 const EFFORTS: [&str; 6] = ["low", "medium", "high", "xhigh", "max", "ultra"];
 
 /// What the published catalog says about running one model.

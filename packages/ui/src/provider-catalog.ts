@@ -299,7 +299,9 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         displayName: "Claude Opus 5",
         description:
           "Claude Code. Frontier model for complex agentic coding and long-horizon work. OpenRouter's API row also serves 1M.",
-        contextWindowTokens: 1_000_000,
+        // Claude Code runs bare Opus ids at 200K. The catalog's -1m rows
+        // select the 1M window.
+        contextWindowTokens: 200_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
@@ -307,7 +309,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "claude-opus-4-8",
         displayName: "Claude Opus 4.8",
         description: "Claude Code. Strong model for complex agentic coding.",
-        contextWindowTokens: 1_000_000,
+        contextWindowTokens: 200_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },

@@ -22,7 +22,12 @@ pub fn supports_fast_mode(provider_id: &str, model_id: Option<&str>) -> bool {
         ),
         "anthropic" => matches!(
             model_id.as_str(),
-            "claude-opus-5-5" | "claude-opus-5" | "claude-opus-4-8"
+            "claude-opus-5-5"
+                | "claude-opus-5-5-1m"
+                | "claude-opus-5"
+                | "claude-opus-5-1m"
+                | "claude-opus-4-8"
+                | "claude-opus-4-8-1m"
         ),
         // Grok Build exposes the faster pool as its own model id. The toggle
         // applies to grok-4.7; selecting grok-4.7-build-fast is already fast.

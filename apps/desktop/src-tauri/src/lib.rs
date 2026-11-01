@@ -17113,7 +17113,7 @@ fn claude_chat_args(
     }
     if let Some(model) = model_id.map(str::trim).filter(|model| !model.is_empty()) {
         args.push("--model".into());
-        args.push(model.into());
+        args.push(claude_model_arg(model));
     }
     if let Some(effort) = claude_reasoning_effort_arg(model_id, reasoning_effort) {
         args.push("--effort".into());
@@ -18717,6 +18717,19 @@ fn codex_reasoning_effort_arg(
         ),
     };
     supported.then_some(effort)
+}
+
+/// The `claude --model` value for a picker id.
+///
+/// Claude Code runs a bare Opus id at 200K and selects the 1M window with a
+/// `[1m]` suffix. Catalog ids cannot contain brackets (shipped pickers reject
+/// the whole document), so the 1M rows are spelled `<model>-1m` and rewritten
+/// here.
+fn claude_model_arg(model_id: &str) -> String {
+    match model_id.strip_suffix("-1m") {
+        Some(base) if base.starts_with("claude-") => format!("{base}[1m]"),
+        _ => model_id.to_string(),
+    }
 }
 
 /// The `claude --effort <level>` value supported by the selected model.
@@ -30813,6 +30826,9 @@ while True:
             "claude-opus-5-5",
             "claude-opus-5",
             "claude-opus-4-8",
+            "claude-opus-5-5-1m",
+            "claude-opus-5-1m",
+            "claude-opus-4-8-1m",
             "claude-sonnet-5-5",
             "claude-sonnet-5",
             "claude-haiku-5-5",
@@ -30835,6 +30851,15 @@ while True:
                 None
             );
         }
+    }
+
+    #[test]
+    fn claude_model_arg_selects_the_1m_window_for_1m_rows() {
+        assert_eq!(claude_model_arg("claude-opus-5-5-1m"), "claude-opus-5-5[1m]");
+        assert_eq!(claude_model_arg("claude-opus-4-8-1m"), "claude-opus-4-8[1m]");
+        assert_eq!(claude_model_arg("claude-opus-5-5"), "claude-opus-5-5");
+        assert_eq!(claude_model_arg("claude-sonnet-5-5"), "claude-sonnet-5-5");
+        assert_eq!(claude_model_arg("my-proxy-1m"), "my-proxy-1m");
     }
 
     #[test]
