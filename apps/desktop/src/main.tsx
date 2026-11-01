@@ -1,4 +1,3 @@
-import "./dictation-access";
 import React from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { syncNativeAppearance } from "./native-appearance";

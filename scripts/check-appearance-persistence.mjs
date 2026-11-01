@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
+import { applyLaunchView } from "../packages/ui/src/workbench-state.ts";
 import { createAppearanceSaveTracker } from "../apps/desktop/src/use-appearance-save-feedback.ts";
 import {
   APPEARANCE_STORAGE_KEY,
@@ -183,6 +184,7 @@ const loader = ast.statements.find(
     node.name?.text === "loadInitialWorkbenchState",
 );
 const restartContext = {
+  applyLaunchView,
   loadStoredWorkbenchState: () => ({
     preferences: { ...initial, modelFollow: "peek" },
   }),

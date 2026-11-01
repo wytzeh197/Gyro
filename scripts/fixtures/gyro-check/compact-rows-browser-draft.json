@@ -1,0 +1,88 @@
+{
+  "sessionId": "00000000-0000-4000-8000-000000000001",
+  "previewUrl": "http://127.0.0.1:4319/conversation.html",
+  "command": "",
+  "dataChanges": "On a fresh, isolated copy of the synthetic sub-agent mockup only: observe collapsed rows; review and decline the simulated tests; stop the sample review agent; add one sample reply. No parser test command or provider call runs. All state is in memory.",
+  "files": [
+    "mockups/subagents-2026-10-30/conversation.html"
+  ],
+  "criteria": [
+    {
+      "id": "compact-rows",
+      "requirement": "Collapsed rows match the recorded 1440 by 1080 CSS-pixel reference heights. This exact measurement is not a general visual-quality assertion.",
+      "scope": "browser",
+      "expected": {
+        "parser": 59,
+        "tests": 69,
+        "review": 66
+      }
+    },
+    {
+      "id": "stopped-wording",
+      "requirement": "A new reply describes stopped or declined checks as incomplete.",
+      "scope": "browser",
+      "expected": {
+        "reply": "Some delegated work was stopped or declined. The checks are incomplete; review the available results."
+      }
+    }
+  ],
+  "browser": {
+    "readySelector": "#messages",
+    "viewport": {
+      "width": 1440,
+      "height": 1080
+    },
+    "steps": [
+      {
+        "action": "observe",
+        "criterionId": "compact-rows",
+        "waitMs": 0,
+        "reads": [
+          {
+            "key": "parser",
+            "selector": "[data-agent-row=\"parser\"]",
+            "kind": "height"
+          },
+          {
+            "key": "tests",
+            "selector": "[data-agent-row=\"tests\"]",
+            "kind": "height"
+          },
+          {
+            "key": "review",
+            "selector": "[data-agent-row=\"review\"]",
+            "kind": "height"
+          }
+        ]
+      },
+      {
+        "action": "click",
+        "selector": "[data-action=\"review\"][data-agent=\"tests\"]"
+      },
+      {
+        "action": "click",
+        "selector": "[data-action=\"decline\"][data-agent=\"tests\"]"
+      },
+      {
+        "action": "click",
+        "selector": "[data-action=\"stop\"][data-agent=\"review\"]"
+      },
+      {
+        "action": "click",
+        "selector": "#add-reply"
+      },
+      {
+        "action": "observe",
+        "criterionId": "stopped-wording",
+        "waitMs": 0,
+        "reads": [
+          {
+            "key": "reply",
+            "selector": ".latest-assistant .assistant-copy",
+            "kind": "text"
+          }
+        ]
+      }
+    ]
+  }
+}

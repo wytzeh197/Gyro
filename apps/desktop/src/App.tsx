@@ -1,3 +1,4 @@
+import "./dictation-access";
 import { newChatDefaultSelection } from "./new-chat-defaults";
 import { useCheckReminders } from "./use-check-reminders";
 import { flushSync } from "react-dom";

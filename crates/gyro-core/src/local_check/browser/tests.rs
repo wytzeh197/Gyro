@@ -337,7 +337,7 @@ fn geometry_plan_requires_bounded_viewport_and_positive_numeric_expectation() {
 fn prepared_compact_row_draft_is_valid_but_does_not_execute() {
     let draft: crate::local_check::CheckDraft = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../docs/reviews/gyro-check-next-slice-2026-10-31/compact-rows-browser-draft.json"
+        "/../../scripts/fixtures/gyro-check/compact-rows-browser-draft.json"
     )))
     .unwrap();
     draft.validate().unwrap();
