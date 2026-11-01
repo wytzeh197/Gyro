@@ -6499,7 +6499,7 @@ expect(
     releaseWorkflowSource.includes("needs: [signing, macos]") &&
     releaseWorkflowSource.includes("merge-multiple: true") &&
     releaseWorkflowSource.includes("scripts/create-updater-manifest.mjs") &&
-    releaseWorkflowSource.includes('gh release create "$GITHUB_REF_NAME"') &&
+    releaseWorkflowSource.includes('gh release create "$RELEASE_TAG"') &&
     !releaseWorkflowSource.includes("tauri-apps/tauri-action") &&
     !tauriConfigSource.includes("updates.gyro.dev") &&
     surfaceSource.includes('title="Updates"') &&
