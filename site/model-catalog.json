@@ -1,6 +1,6 @@
 {
   "schema": "gyro.model-catalog.v1",
-  "revision": "2026-11-01.1",
+  "revision": "2026-11-01.2",
   "enabled": true,
   "rolloutPercentage": 100,
   "models": [
@@ -41,17 +41,6 @@
       "minClientRevision": 1,
       "insertBefore": "claude-opus-5",
       "contextWindowTokens": 200000,
-      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
-      "defaultReasoningEffort": "medium"
-    },
-    {
-      "providerId": "anthropic",
-      "id": "claude-opus-5-5-1m",
-      "displayName": "Claude Opus 5.5 (1M)",
-      "description": "Claude Code. Opus 5.5 with a 1M context window for long sessions. Needs a plan with 1M access.",
-      "minClientRevision": 3,
-      "insertBefore": "claude-opus-5",
-      "contextWindowTokens": 1000000,
       "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
       "defaultReasoningEffort": "medium"
     },
@@ -141,28 +130,6 @@
       "minClientRevision": 2,
       "contextWindowTokens": 200000,
       "supportedReasoningEfforts": []
-    },
-    {
-      "providerId": "anthropic",
-      "id": "claude-opus-5-1m",
-      "displayName": "Claude Opus 5 (1M)",
-      "description": "Claude Code. Opus 5 with a 1M context window for long sessions. Needs a plan with 1M access.",
-      "minClientRevision": 3,
-      "insertBefore": "claude-opus-4-8",
-      "contextWindowTokens": 1000000,
-      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
-      "defaultReasoningEffort": "high"
-    },
-    {
-      "providerId": "anthropic",
-      "id": "claude-opus-4-8-1m",
-      "displayName": "Claude Opus 4.8 (1M)",
-      "description": "Claude Code. Opus 4.8 with a 1M context window for long sessions. Needs a plan with 1M access.",
-      "minClientRevision": 3,
-      "insertBefore": "claude-sonnet-5-5",
-      "contextWindowTokens": 1000000,
-      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
-      "defaultReasoningEffort": "high"
     },
     {
       "providerId": "openrouter",
