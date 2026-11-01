@@ -3,7 +3,7 @@ import { retiredModelReplacement } from "./model-retirements.ts";
 import type { ProviderModel, ReasoningEffort } from "./types";
 
 // Increment when this client gains a new catalog-described model capability.
-export const MODEL_CATALOG_CLIENT_REVISION = 2;
+export const MODEL_CATALOG_CLIENT_REVISION = 3;
 export const MODEL_CATALOG_CACHE_KEY = "gyro.model-catalog.v1";
 /**
  * How long a focused, visible Gyro waits between catalog checks. This is the
