@@ -69,6 +69,19 @@ for (let mask = 0; mask < 16; mask++) {
           zones.map((zone) => zone.slotIndex),
           [0, 1, 2, 3],
         );
+      } else if (occupied.length === 2 && reordering) {
+        // Two chats already in a row or stack trade places: one broad tile
+        // per pane, with no placement, so the reducer swaps and the
+        // arrangement stays as it is.
+        assert.deepEqual(
+          zones.map((zone) => zone.slotIndex),
+          occupied,
+        );
+        assert.ok(zones.every((zone) => zone.placement === undefined));
+        assert.equal(
+          chatGridDropLayout(zones),
+          arrangement === "columns" ? "columns" : "stack",
+        );
       } else {
         assert.equal(zones.length, occupied.length + 1);
         assert.deepEqual(

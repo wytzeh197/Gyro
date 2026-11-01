@@ -344,10 +344,13 @@ function nearestZone(
     }
   }
   const layout = chatGridDropLayout(zones);
+  // A two-chat swap renders as Left / Right ("columns") or a two-tile stack;
+  // both need the same source cancellation as longer rows and stacks. A lone
+  // chat's Left / Right split has no source tile, so it is unaffected.
   if (
     !bounds ||
     sourceSlotIndex === undefined ||
-    (layout !== "row" && layout !== "stack")
+    (layout !== "row" && layout !== "stack" && layout !== "columns")
   ) return nearest;
   const sourceIndex = zones.findIndex(
     (zone) => zone.isSource && zone.slotIndex === sourceSlotIndex,
@@ -355,7 +358,7 @@ function nearestZone(
   if (sourceIndex < 0) return nearest;
   // Keep a release on either original source boundary a cancellation. Away
   // from those seams, the broad tiles own their full visible areas.
-  const horizontal = layout === "row";
+  const horizontal = layout !== "stack";
   const offset = horizontal ? x - bounds.left : y - bounds.top;
   const length = horizontal ? bounds.width : bounds.height;
   const track = (length + ROW_PANE_GAP) / zones.length;
