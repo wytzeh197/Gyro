@@ -16795,7 +16795,13 @@ fn run_anthropic_claude_chat(
     // through Gyro's model terminal instead, which outlives the process.
     process
         .env("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "1")
-        .env("CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND", "1");
+        .env("CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND", "1")
+        // Claude Code defers every MCP tool behind ToolSearch unless told
+        // otherwise. Gyro's tools then arrived as bare names while native
+        // Read/Edit/Bash had full schemas, so Claude reached for the natives
+        // and the work never showed up in Review, Terminal or Canvas. The
+        // whole Gyro list is ~10K tokens (guarded by a test), so load it.
+        .env("ENABLE_TOOL_SEARCH", "false");
     let speed_config = load_config_blocking().map_err(anyhow::Error::msg)?;
     process.args(gyro_core::fast_mode::cli_args(
         &speed_config,
@@ -17083,6 +17089,21 @@ fn audit_provider_chat_args(provider_id: &str, args: &[String]) -> anyhow::Resul
         .map_err(|violation| anyhow::anyhow!("{}", violation.message(provider_id)))
 }
 
+/// Claude Code tools that bypass a Gyro surface or cannot work in a `--print`
+/// run, so Claude uses Gyro's governed equivalent instead.
+/// - Agent/Task: delegation goes through Gyro's agent tools.
+/// - Artifact*, DesignSync: publish to claude.ai instead of Gyro Canvas or
+///   Browser; a design asked for in a Gyro chat ended up as an external link.
+/// - Schedule/cron/remote/notification tools: the process exits with the
+///   reply, so a scheduled wakeup or trigger would never come back to the chat.
+/// - Cross-session messaging and worktree switching: they act outside the
+///   chat's bound workspace and session.
+const CLAUDE_DISALLOWED_NATIVE_TOOLS: &str = "Agent,Task,\
+Artifact,ArtifactComments,ArtifactData,DesignSync,\
+ScheduleWakeup,CronCreate,CronDelete,CronList,RemoteTrigger,PushNotification,\
+ListAgents,SendMessage,SendToProject,SendToProjectContext,\
+EnterWorktree,ExitWorktree";
+
 #[allow(clippy::too_many_arguments)]
 fn claude_chat_args(
     resume_session_id: Option<&str>,
@@ -17119,7 +17140,10 @@ fn claude_chat_args(
         args.push("--effort".into());
         args.push(effort);
     }
-    args.extend(["--disallowedTools".into(), "Agent,Task".into()]);
+    args.extend([
+        "--disallowedTools".into(),
+        CLAUDE_DISALLOWED_NATIVE_TOOLS.into(),
+    ]);
     let capability_tools = advertised_mcp_capability_tools(capability_run_mode_for_chat(*mode));
     if let Some(permission_mcp_config) = permission_mcp_config {
         args.extend([
@@ -28857,6 +28881,21 @@ while True:
             .windows(2)
             .any(|args| args == ["--effort", "xhigh"]));
         assert_eq!(fresh_claude.last(), Some(&"hello".to_string()));
+        // Native tools that would route around Gyro's surfaces stay off,
+        // most visibly claude.ai publishing in place of Gyro Canvas.
+        let disallowed = fresh_claude
+            .windows(2)
+            .find(|args| args[0] == "--disallowedTools")
+            .map(|args| args[1].split(',').collect::<Vec<_>>())
+            .expect("Claude runs always disallow some native tools");
+        for tool in ["Agent", "Task", "Artifact", "DesignSync", "ScheduleWakeup", "EnterWorktree"] {
+            assert!(disallowed.contains(&tool), "{tool} must stay disallowed");
+        }
+        // Native file and shell tools remain: they are approval-gated and the
+        // fallback when a Gyro bridge is unavailable.
+        for tool in ["Read", "Edit", "Bash"] {
+            assert!(!disallowed.contains(&tool), "{tool} must stay available");
+        }
 
         let auto_approve_claude = claude_chat_args(
             None,
@@ -28919,6 +28958,39 @@ while True:
             resumed_claude.iter().rev().take(2).collect::<Vec<_>>(),
             vec![&"again".to_string(), &"--".to_string()]
         );
+    }
+
+    /// Claude runs load every Gyro tool up front (`ENABLE_TOOL_SEARCH=false`),
+    /// so the advertised list is paid on each fresh session. Measured at
+    /// ~38 KB (~9.5K tokens) for Normal mode; growth past this budget should be
+    /// a deliberate choice, e.g. switching to `auto:N` deferral.
+    #[test]
+    fn eagerly_loaded_claude_tool_list_stays_within_budget() {
+        const BUDGET_BYTES: usize = 64 * 1024;
+        for mode in [
+            CapabilityRunMode::Normal,
+            CapabilityRunMode::Plan,
+            CapabilityRunMode::Council,
+        ] {
+            let tools: Vec<serde_json::Value> = advertised_capability_descriptors(mode)
+                .map(|descriptor| {
+                    serde_json::json!({
+                        "name": descriptor.id.provider_tool_name(),
+                        "description": provider_tool_batch::advertised_description(
+                            descriptor.id,
+                            descriptor.description,
+                        ),
+                        "inputSchema": provider_tool_batch::advertised_tool_parameters(descriptor.id),
+                    })
+                })
+                .collect();
+            let bytes = serde_json::to_string(&tools).unwrap().len();
+            assert!(
+                bytes <= BUDGET_BYTES,
+                "{mode:?} advertises {} tools in {bytes} bytes, over the {BUDGET_BYTES}-byte eager-load budget",
+                tools.len(),
+            );
+        }
     }
 
     /// Every argument vector Gyro can build, across providers and permission
