@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { readFileSync } from "./read-product-source.mjs";
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { formatCompactTokenCount } from "../packages/ui/src/token-count.ts";
 import { workspaceEditorOptions } from "../apps/desktop/src/editor-presentation.ts";
 import { completionMenuGeometry } from "../packages/ui/src/composer-completion-geometry.ts";
@@ -611,6 +612,7 @@ const surfaceSource = [
   readRepoFile("packages/ui/src/diff-file-tree.ts"),
   readRepoFile("packages/ui/src/surfaces.tsx"),
   readRepoFile("packages/ui/src/cli-session-list.tsx"),
+  readRepoFile("packages/ui/src/chat-session-drag.ts"),
   readRepoFile("packages/ui/src/workspace-header.tsx"),
   readRepoFile("packages/ui/src/browser-capture-view.tsx"),
   readRepoFile("packages/ui/src/browser-viewport-controls.tsx"),
@@ -622,6 +624,8 @@ const surfaceSource = [
   readRepoFile("packages/ui/src/desktop-notification-settings.tsx"),
   readRepoFile("packages/ui/src/use-chat-transcript-scroll.ts"),
   readRepoFile("packages/ui/src/chat-run-view.tsx"),
+  readRepoFile("packages/ui/src/settings-disclosure.tsx"),
+  readRepoFile("packages/ui/src/efficiency-settings.tsx"),
 ].join("\n");
 const chatGridDropSource = readRepoFile("packages/ui/src/chat-grid-drop.ts");
 const modelRailSource = readRepoFile("packages/ui/src/composer-model-rail.tsx");
@@ -647,6 +651,8 @@ const styleSource = [
   readRepoFile("packages/ui/src/ui-upgrade.css"),
   readRepoFile("packages/ui/src/browser-capture.css"),
   readRepoFile("packages/ui/src/installed-update.css"),
+  readRepoFile("packages/ui/src/chat-shell-design.css"),
+  readRepoFile("packages/ui/src/companion-design.css"),
 ].join("\n");
 const chatDesignSource = readRepoFile("packages/ui/src/chat-design.css");
 const planModeSource = [
@@ -669,6 +675,7 @@ const desktopRustSource = [
   readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
   readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
+  readRepoFile("crates/gyro-core/src/provider_permissions.rs"),
 ].join("\n");
 expect(
   // Row heights live in tokens on the surface root and menu_bar.rs mirrors
@@ -1026,7 +1033,9 @@ expect(
     if (end < 0) return false;
     const rail = styleSource
       .slice(styleSource.indexOf("*/", start), end)
-      .replace(/\/\*[\s\S]*?\*\//g, "");
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      // Mask color determines alpha, not theme paint.
+      .replace(/(?:-webkit-)?mask-image:[^;]+;/g, "");
     return (
       !/(?<![\w-])(#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\))/i.test(
         rail,
@@ -1194,7 +1203,7 @@ expect(
 );
 const composerSourceStart = surfaceSource.indexOf("function Composer({");
 const composerSourceEnd = surfaceSource.indexOf(
-  "\nfunction ",
+  "export function ComposerMediaPreview",
   composerSourceStart + 1,
 );
 const composerSource = surfaceSource.slice(
@@ -1277,6 +1286,7 @@ const tauriSource = [
   readRepoFile("apps/desktop/src-tauri/src/terminal_process.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_activity.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
+  readRepoFile("crates/gyro-core/src/provider_permissions.rs"),
   readRepoFile("apps/desktop/src-tauri/src/ollama_runner.rs"),
   readRepoFile("apps/desktop/src-tauri/src/capability_workspace_helpers.rs"),
   readRepoFile("apps/desktop/src-tauri/src/session_browser.rs"),
@@ -1345,7 +1355,7 @@ expect(
     !surfaceSource.includes("workspaceContext") &&
     appSource.includes("activePath: undefined") &&
     appSource.includes("buffers: []") &&
-    appSource.includes('selectChatAttachment("workspace-file")') &&
+    /selectChatAttachment\(\s*"workspace-file"/.test(appSource) &&
     appSource.includes("attachEditorSnapshot") &&
     tauriSource.includes("Gyro does not attach the user's open editor file"),
   "The file open in Workspace should never become chat context on its own; only composer attachments and editor AI actions may put a file in a turn.",
@@ -1381,7 +1391,7 @@ expect(
       styleSource,
       ".gyro-chat-grid.has-multiple-panes > .gyro-chat-grid-slot",
     ).some((rule) => rule.includes("border: 0")) &&
-    !styleSource.includes("padding-right: 96px;"),
+    !cssRules(styleSource, ".gyro-chat-thread-topbar").some(rule => rule.includes("padding-right: 96px")),
   "Grid chat headers should share the 48px title row, keep compact edge insets, and meet at one clean seam.",
 );
 
@@ -1692,11 +1702,11 @@ expect(
     xaiCatalog?.defaultModelId === "grok-4.7" &&
     xaiCatalog.selectedModelId === "grok-4.7" &&
     grok47?.displayName === "Grok 4.7" &&
-    grok47.contextWindowTokens === 500_000 &&
+    grok47.contextWindowTokens === 256_000 &&
     grok47.defaultReasoningEffort === "high" &&
     grok47.supportedReasoningEfforts?.join(",") ===
       GROK_46_REASONING_EFFORTS.join(",") &&
-    grok46?.contextWindowTokens === 500_000 &&
+    grok46?.contextWindowTokens === 256_000 &&
     xaiCatalog.models.some((model) => model.id === "grok-4.5"),
   "xAI should expose Grok 4.7 as the default while retaining Grok 4.6 and 4.5.",
 );
@@ -4783,11 +4793,10 @@ expect(
       tauriSource,
     ) ||
       (tauriSource.includes(
-        "goal_runner::run(worker_app, request, expected_run)",
+        "goal_runner::run(app, request, expected_run)",
       ) &&
         /run_timed_provider_chat_in_lease\(\s*app\.clone\(\),\s*request\.clone\(\),\s*UsageOrigin::Chat,\s*Some\(&lease\)/.test(
-          readRepoFile("apps/desktop/src-tauri/src/goal_runner.rs"),
-        ))) &&
+                ))) &&
     /run_provider_chat_blocking(?:_in_lease)?\(app, request, origin(?:, lease)?\)/.test(
       turnTimingRustSource,
     ) &&
@@ -5858,7 +5867,7 @@ expect(
     surfaceSource.includes("gyro-settings-sidebar-group") &&
     surfaceSource.includes("aria-label={`Back to ${backLabel}`}") &&
     surfaceSource.includes("gyro-settings-back-button") &&
-    surfaceSource.includes("<h2 id={headingId}>{label}</h2>") &&
+    surfaceSource.includes("aria-expanded={open}") && surfaceSource.includes("<strong>{title}</strong>") && surfaceSource.includes("aria-controls={bodyId}") &&
     surfaceSource.includes("aria-pressed={themeMode === mode}") &&
     surfaceSource.includes('onOpenSettingsSection("general")') &&
     surfaceSource.includes('activeDestination !== "settings"') &&
@@ -5866,8 +5875,8 @@ expect(
     surfaceSource.includes("Appearance") &&
     surfaceSource.includes('label: "Workspace"') &&
     surfaceSource.includes('label: "Tools"') &&
-    surfaceSource.includes('label: "Models, Accounts & Limits"') &&
-    !surfaceSource.includes('id: "usage-limits"') &&
+    surfaceSource.includes('label: "Models & accounts"') &&
+    surfaceSource.includes('id: "usage-limits"') &&
     surfaceSource.includes("CLI Profiles") &&
     surfaceSource.includes("Permissions") &&
     surfaceSource.includes("Updates") &&
@@ -5878,9 +5887,9 @@ expect(
     surfaceSource.includes('activeSection === "editor-workspace"') &&
     surfaceSource.includes('activeSection === "tools-contributions"') &&
     surfaceSource.includes('activeSection === "providers"') &&
-    surfaceSource.includes('label: "Efficiency"') &&
+    surfaceSource.includes('label: "Usage & limits"') &&
     surfaceSource.includes('activeSection === "efficiency"') &&
-    surfaceSource.includes('title="Efficiency"') &&
+    surfaceSource.includes('title="Usage & limits"') &&
     !surfaceSource.includes("isAccountMenuOpen") &&
     !surfaceSource.includes("gyro-account-menu") &&
     !surfaceSource.includes('<nav className="gyro-settings-nav"') &&
@@ -6012,9 +6021,7 @@ expect(
       "isGoalComposerActive && sessionGoal?.text\n      ? (goalDraft ?? sessionGoal.text)\n      : localDraft",
     ) &&
     chatSurfaceSource.includes("draft={composerDraft}") &&
-    chatSurfaceSource.includes(
-      "estimateComposerContextUsage(\n        transcriptEvents,\n        composerDraft,\n        contextModel,",
-    ) &&
+    /estimateComposerContextUsage\(\s*transcriptEvents,\s*composerDraft,\s*contextModel/.test(chatSurfaceSource) &&
     chatSurfaceSource.includes("handleComposerDraftChange") &&
     chatSurfaceSource.includes("cancelGoalComposer") &&
     chatSurfaceSource.includes("onStartGoalChat(goal)") &&
@@ -6070,12 +6077,8 @@ expect(
 const chatCompanionSource = readRepoFile("packages/ui/src/chat-companion.ts");
 expect(
   surfaceSource.includes('aria-label="Chat companion"') &&
-    surfaceSource.includes(
-      'const isCompanionPanel = isChatCompanionTab(railPanel) || railPanel === "tools"',
-    ) &&
-    surfaceSource.includes(
-      'activePanel={displayedRailPanel === "review" ? "changes" : displayedRailPanel}',
-    ) &&
+    /const isCompanionPanel =\s*isChatCompanionTab\(railPanel\) \|\| railPanel === "tools"/.test(surfaceSource) &&
+    /activePanel=\{\s*displayedRailPanel === "review" \? "changes" : displayedRailPanel\s*\}/.test(surfaceSource) &&
     surfaceSource.includes("chromeless={hasCompanion}") &&
     surfaceSource.includes('displayedRailPanel === "files" ? (') &&
     surfaceSource.includes("<CompanionFiles") &&
@@ -6319,7 +6322,7 @@ expect(
     ) &&
     styleSource.includes("grid-template-rows: minmax(0, 1fr) auto") &&
     threadSurfaceRules.some((rule) =>
-      rule.includes("grid-template-rows: 48px minmax(0, 1fr)"),
+      rule.includes("grid-template-rows: var(--gyro-chat-header-height, 48px) minmax(0, 1fr)"),
     ) &&
     threadTopbarRules.some(
       (rule) =>
@@ -6590,7 +6593,7 @@ expect(
     appSource.includes('case "select-no-folder":') &&
     appSource.includes('startNewChat({ workspacePath: "" })') &&
     appSource.includes("void openWorkspace();") &&
-    appSource.includes('void selectChatAttachment("workspace-file");') &&
+    /void selectChatAttachment\(\s*"workspace-file",/.test(appSource) &&
     appSource.includes('action.startsWith("start-new-chat-mode:")') &&
     appSource.includes('type: "set-workbench-mode"') &&
     appSource.includes('type: "close-tool-panel"') &&
@@ -7067,7 +7070,7 @@ expect(
 // draft must not rewrite the model chip on every other open pane.
 expect(
   surfaceSource.includes("const boundToSession = Boolean(") &&
-    surfaceSource.includes("const effectiveModelId = boundToSession") &&
+    surfaceSource.includes("const rawModelId = boundToSession") && surfaceSource.includes("const effectiveModelId = pickerModelId(modelProviderId, rawModelId)") &&
     surfaceSource.includes("const providerModelLabel = boundToSession") &&
     appSource.includes("chatDraftModels") &&
     appSource.includes("setChatDraftModels") &&
@@ -7142,9 +7145,7 @@ expect(
 );
 // Model and effort have independent composer chips with direct menu access.
 expect(
-  /const modelChipLabel =\s*hasSelectedProvider\s*\?\s*providerModelLabel\s*:\s*"Choose model"/.test(
-    surfaceSource,
-  ) &&
+  /const modelChipLabel = hasSelectedProvider/.test(surfaceSource) && surfaceSource.includes("pickerModelLabel(modelProviderId, rawModelId, providerModelLabel)") && surfaceSource.includes(': "Choose model"') &&
     surfaceSource.includes("sessionModel?.modelLabel") &&
     surfaceSource.includes("{modelChipLabel}") &&
     surfaceSource.includes('className="gyro-effort-chip-label"') &&
@@ -7292,10 +7293,10 @@ expect(
 expect(
   surfaceSource.includes("const contextItems: ComposerPopoverItem[]") &&
     surfaceSource.includes('action: "attach-files"') &&
-    surfaceSource.includes('label: "Attach"') &&
+    surfaceSource.includes('label: "Attach files"') &&
     surfaceSource.includes("...(canAttachEditorSnapshot") &&
     surfaceSource.includes('label: "Editor"') &&
-    surfaceSource.includes('label: "Goal"') &&
+    surfaceSource.includes('label: sessionGoal?.text ? "Edit goal" : "Save goal"') &&
     surfaceSource.includes('label: "Plan"') &&
     !surfaceSource.includes('label: "Image"') &&
     !surfaceSource.includes('label: "File"') &&
@@ -7303,7 +7304,7 @@ expect(
     !surfaceSource.includes('label: "Search"') &&
     surfaceSource.includes('action: "set-chat-mode-plan"') &&
     surfaceSource.includes("icon: ListChecks") &&
-    !surfaceSource.includes('title="Add"') &&
+    !surfaceSource.includes('label: "Website"') &&
     !surfaceSource.includes('label: "Photos"') &&
     !surfaceSource.includes('label: "Spreadsheet"') &&
     !surfaceSource.includes('label: "Slides"') &&
@@ -7474,7 +7475,7 @@ expect(
     /\.gyro-composer-context-wheel\s*>\s*svg\s*\{[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/.test(
       styleSource,
     ) &&
-    surfaceSource.includes('r="7.5"') &&
+    surfaceSource.includes('r="6.5"') &&
     surfaceSource.includes('pathLength="100"'),
   "Composer context wheel should stay compact while remaining legible.",
 );
@@ -7594,7 +7595,7 @@ expect(
       ':root[data-theme="light"]\n  .gyro-chat-thread-topbar\n  .gyro-thread-pill-button',
     ) &&
     styleSource.includes("backdrop-filter: none") &&
-    surfaceSource.includes(") : sessionGoal?.text ? (") &&
+    surfaceSource.includes(") : !hasGoalCaption && sessionGoal?.text ? (") &&
     appSource.includes("const changeChatMode = useCallback") &&
     // A goal is the outcome and a mode is how the turn runs, so neither
     // cancels the other. Planning toward a stated outcome is the case the
@@ -7768,9 +7769,7 @@ expect(
     appSource.includes("const suppressSessionAutoSelectRef = useRef(true)") &&
     appSource.includes("suppressSessionAutoSelectRef.current = true") &&
     appSource.includes("setActiveSessionId(undefined)") &&
-    appSource.includes(
-      'dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });',
-    ) &&
+    appSource.includes("draftWorkspaceModes.current[draftKey] ?? workbench.preferences.defaultWorkspaceMode") && appSource.includes('dispatchWorkbench({ type: "set-workbench-mode", mode: draftWorkspaceMode });') &&
     appSource.includes("onCreateSession={startNewChat}") &&
     surfaceSource.includes("const transcriptState = useMemo") &&
     surfaceSource.includes(
@@ -7782,7 +7781,7 @@ expect(
     surfaceSource.includes(
       '!isEmptyStart && activeRailPanel === "environment" && !isCompanionPanel',
     ),
-  "Cold launch and New chat should keep recent sessions unselected, reset to local mode, and render the start screen from transcript events.",
+  "Cold launch and New chat should keep recent sessions unselected, honor per-draft workspace defaults, and render the start screen from transcript events.",
 );
 expect(
   !surfaceSource.includes("pane-shell") &&
@@ -8758,13 +8757,13 @@ expect(
     !styleSource.includes(".gyro-composer-context-meter.is-previewing") &&
     // Occupancy survives a model switch; only the window is model-scoped.
     readRepoFile("packages/ui/src/context-usage.ts").includes(
-      "reportedModelId !== model.modelId",
+      "const matchesModel =",
     ) &&
     readRepoFile("packages/ui/src/context-usage.ts").includes(
       "const matchesModel =",
     ) &&
     readRepoFile("packages/ui/src/context-usage.ts").includes(
-      "reportedTokens + liveEstimatedTokens",
+      "reportedInputTokens + reportedOutputTokens",
     ) &&
     surfaceSource.includes("gyro-composer-context-bar") &&
     styleSource.includes(
@@ -8775,8 +8774,7 @@ expect(
     ) &&
     cssRules(styleSource, ".gyro-composer-context-bar").some(
       (rule) =>
-        rule.includes("height: 5px") &&
-        rule.includes("var(--gyro-premium-hairline-soft)"),
+        rule.includes("height: 3px"),
     ) &&
     styleSource.includes("var(--gyro-accent-strong)") &&
     styleSource.includes("min-width: 316px") &&
@@ -8979,14 +8977,14 @@ expect(
     !surfaceSource.includes("Send a message to start work") &&
     styleSource.includes(".gyro-goal-strip {") &&
     styleSource.includes(
-      '.gyro-goal-strip[data-running="true"] .gyro-goal-strip-mark svg',
+      '.gyro-goal-strip[data-running="true"] .gyro-goal-strip-mark',
     ) &&
-    styleSource.includes(".gyro-chat-start .gyro-goal-strip") &&
-    styleSource.includes(".gyro-goal-strip-text::before") &&
+    styleSource.includes(".gyro-composer-shell.has-goal-caption") &&
+    styleSource.includes(".gyro-goal-strip-text") &&
     // Opening the editor from `/goal` or the "+" menu puts this chip under
     // the pointer, so a native title surfaces an OS tooltip nobody asked
     // for. The draft promise lives in the accessible name instead.
-    surfaceSource.includes('aria-label="Close goal editor — draft is kept"') &&
+    surfaceSource.includes('"Close goal editor — draft is kept"') && surfaceSource.includes("onClick={onCancelGoalComposer}") &&
     !surfaceSource.includes('title="Close goal editor'),
   "The goal rides on the composer as a one-line strip with its clock and controls, its mark rotates only while a turn is running, no save is announced in prose, and closing the goal editor never fires a stray hover tooltip.",
 );

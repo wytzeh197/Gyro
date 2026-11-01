@@ -1,6 +1,6 @@
 /* Quiet, neutral tour surfaces. Blue is reserved for the primary action. */
 .gyro-tour {
-  --gyro-tour-accent: var(--gyro-blue, #60b0ff);
+  --gyro-tour-accent: var(--gyro-blue);
   --gyro-tour-on-accent: #06111f;
   --gyro-tour-dimmer: rgba(0, 0, 0, 0.48);
   color: var(--gyro-text);
@@ -23,7 +23,7 @@
 
 /* Keep the actual control visible through a neutral cut-out, without a glow. */
 .gyro-tour-spotlight {
-  border-radius: 10px;
+  border-radius: var(--gyro-radius-xl);
   box-shadow:
     0 0 0 1px var(--gyro-border-strong),
     0 0 0 9999px var(--gyro-tour-dimmer);
@@ -63,7 +63,7 @@
 
 .gyro-tour-step-count {
   color: var(--gyro-muted);
-  font-size: 11px;
+  font-size: var(--gyro-font-caption);
   font-weight: 500;
   line-height: 16px;
 }
@@ -76,7 +76,7 @@
 
 .gyro-tour-dots span {
   background: var(--gyro-border);
-  border-radius: 999px;
+  border-radius: var(--gyro-radius-pill);
   height: 4px;
   width: 12px;
 }
@@ -91,7 +91,7 @@
 
 .gyro-tour-title {
   color: var(--gyro-text);
-  font-size: 16px;
+  font-size: var(--gyro-font-lead);
   font-weight: 600;
   letter-spacing: -0.012em;
   line-height: 1.3;
@@ -100,7 +100,7 @@
 
 .gyro-tour-body {
   color: var(--gyro-muted);
-  font-size: 13px;
+  font-size: var(--gyro-font-support);
   line-height: 1.55;
   margin: 0;
 }
@@ -119,10 +119,10 @@
 }
 
 .gyro-tour button {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-md);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--gyro-font-micro);
   line-height: 18px;
   min-height: 32px;
   transition:

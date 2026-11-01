@@ -1,5 +1,6 @@
+import { readFileSync } from "./read-product-source.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import {
   applyModelCatalog,
   createModelCatalogClient,

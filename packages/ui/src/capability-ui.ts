@@ -17,6 +17,10 @@ import type { CapabilityId } from "./types.ts";
 
 /** One Gyro Browser verb, so each row says what the agent did to the page. */
 export type BrowserAction =
+  | "targets"
+  | "select-target"
+  | "capture-preview"
+  | "preview-click"
   | "open"
   | "navigate"
   | "back"
@@ -107,6 +111,10 @@ export const CAPABILITY_UI = {
   "terminal-wait": { label: "Wait for command", row: "command" },
   "terminal-stop": { label: "Stop terminal", row: "command" },
 
+  "browser-targets": { label: "Inspect preview targets", row: "browser", action: "targets" },
+  "browser-select-target": { label: "Select preview target", row: "browser", action: "select-target" },
+  "browser-capture-preview": { label: "Capture app preview", row: "browser", action: "capture-preview" },
+  "browser-preview-click": { label: "Click app preview", row: "browser", action: "preview-click" },
   "browser-open": { label: "Open browser", row: "browser", action: "open" },
   "browser-inspect": {
     label: "Inspect browser",

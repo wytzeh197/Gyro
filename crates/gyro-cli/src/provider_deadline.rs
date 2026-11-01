@@ -57,7 +57,12 @@ mod tests {
     fn deadline_cancels_pending_work_and_completion_retires_the_watchdog() {
         let token = CancellationToken::default();
         let mut deadline = ProviderDeadline::start(token.clone(), Duration::from_millis(20));
-        std::thread::sleep(Duration::from_millis(60));
+        // Wait for the watchdog to run before sending completion. A fixed short
+        // sleep can finish first on a busy runner and cancel the timer itself.
+        let until = std::time::Instant::now() + Duration::from_secs(2);
+        while !token.is_cancelled() && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(1));
+        }
         deadline.finish();
         assert!(token.is_cancelled() && deadline.expired());
         let token = CancellationToken::default();

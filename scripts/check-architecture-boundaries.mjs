@@ -32,6 +32,7 @@ const uiFiles = [
   "packages/ui/src/index.ts",
   "packages/ui/src/provider-catalog.ts",
   "packages/ui/src/surfaces.tsx",
+  "packages/ui/src/composer.tsx",
   "packages/ui/src/workbench-state.ts",
 ];
 for (const path of uiFiles) {

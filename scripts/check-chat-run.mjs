@@ -1,5 +1,6 @@
+import { readFileSync } from "./read-product-source.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 
 import {
   isAssistantPreambleBlock,
@@ -1098,7 +1099,7 @@ assert.deepEqual(
   rowText("context", "Compacting context", { status: "running" }),
   {
     label: "Compacting context",
-    description: "Making room for the next turn",
+    description: "Summarizing the earlier conversation",
   },
 );
 

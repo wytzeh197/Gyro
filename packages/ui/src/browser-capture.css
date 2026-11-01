@@ -39,8 +39,8 @@
 }
 
 .gyro-browser-feedback-form {
-  background: var(--gyro-surface, #151619);
-  border-top: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.08));
+  background: var(--gyro-surface);
+  border-top: 1px solid var(--gyro-border-soft);
   display: grid;
   gap: 8px;
   padding: 10px;
@@ -52,9 +52,9 @@
 }
 
 .gyro-browser-feedback-form textarea {
-  background: var(--gyro-surface, #151619);
+  background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   min-height: 56px;
   padding: 8px;
@@ -68,7 +68,7 @@
 
 .gyro-browser-feedback-form button {
   background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
-  border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
+  border: 1px solid var(--gyro-border-soft);
   border-radius: var(--gyro-radius-pill);
   color: var(--gyro-text);
   font-size: var(--gyro-font-caption);
@@ -81,8 +81,8 @@
 
 .gyro-browser-capture-meta {
   align-items: center;
-  background: color-mix(in srgb, var(--gyro-surface, #151619) 94%, transparent);
-  border-top: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.08));
+  background: color-mix(in srgb, var(--gyro-surface) 94%, transparent);
+  border-top: 1px solid var(--gyro-border-soft);
   color: var(--gyro-muted);
   display: flex;
   flex-wrap: wrap;
@@ -100,7 +100,7 @@
 
 .gyro-browser-capture-actions > button {
   background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
-  border: 1px solid var(--gyro-border-soft, rgba(255, 255, 255, 0.1));
+  border: 1px solid var(--gyro-border-soft);
   border-radius: var(--gyro-radius-pill);
   color: var(--gyro-text);
   font-size: var(--gyro-font-caption);

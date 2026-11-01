@@ -1,489 +1,441 @@
-import "./dictation-access";
-import { newChatDefaultSelection } from "./new-chat-defaults";
-import { useCheckReminders } from "./use-check-reminders";
-import { flushSync } from "react-dom";
-import { LocalCheckHost } from "./local-check";
-import {
-  MonacoEditorPane,
-  type WorkspaceNavigationSource,
-} from "./editor/workspace-code-editor";
-import { canonicalFileUri, filePathFromUri } from "./editor/document-uri";
-import { useLanguageSessions } from "./editor/use-language-sessions";
-import {
-  useWorkspaceRename,
-  editorBufferFromFile,
-} from "./editor/use-workspace-rename";
-import {
-  recoverWorkspaceBuffers,
-  hasEditRecovery,
-  writeEditRecovery,
-} from "./editor/edit-recovery";
-import {
-  WorkspaceRenameDialog,
-  WorkspaceEditBar,
-  askTextValue,
-  browserConfirm,
-  validateWorkspaceEntryName,
-  workspaceEntryName,
-} from "@gyro-dev/ui";
-import { confirmAction, setConfirmActionHandler } from "@gyro-dev/ui";
-import { ManagedDiffEditor } from "./managed-diff-editor";
-import {
-  type CliInstallPlanReport,
-  providerCliName,
-  providerInstallProfile,
-  providerLoginProfile,
-  providerLoginCommandText,
-} from "./provider-login-profile";
-import { parseProviderLoginProgress } from "./provider-login-progress";
-import { ProviderSignInContext } from "@gyro-dev/ui";
-import { FirstRunTour } from "@gyro-dev/ui";
-import {
-  MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
-  MODEL_DEFAULT_SUGGESTION_MAX_STORAGE_CHARS,
-  dismissModelDefaultSuggestion,
-  isSuccessfulModelUseResponse,
-  markModelDefaultSuggestionShown,
-  modelDefaultSuggestionFor,
-  parseModelDefaultSuggestionState,
-  recordCompletedModelUse,
-  snoozeProviderDefaultSuggestions,
-  type ModelDefaultSuggestionState,
-} from "./model-default-suggestion";
-import {
-  useInlineSignInRunner,
-  useProviderSignIn,
-  useProviderSignInActions,
-} from "./use-provider-sign-in";
-import { useSubagents } from "./use-subagents";
-import {
-  readBoundedLocalStorage,
-  readStoredAppearance,
-  safeSetLocalStorage,
-  saveAppearancePreferences,
-} from "./ui-storage";
-import {
-  parseSystemAccessSnapshot,
-  SYSTEM_ACCESS_STATUS_STORAGE_KEY,
-} from "./system-access-state";
-import { useAppearanceSaveFeedback } from "./use-appearance-save-feedback";
-import { useSessionBrowserEvents, changeSessionBrowserViewport } from "./use-session-browser-events";
-import { appPreviewClient } from "./app-preview-client";
 import type { BrowserViewportMode } from "@gyro-dev/ui";
 import {
-  sourceControlForWorkspace,
-  useScopedIdeState,
-} from "./source-control-scope";
-import { sessionApprovalCounts, sessionQuestionCounts } from "@gyro-dev/ui";
-import { fastModeConfigFromAction } from "@gyro-dev/ui";
-import { useProjectImport } from "./use-project-import";
-import { useTaskHandoff } from "./use-task-handoff";
-import { useChatAutoRetry } from "./use-chat-auto-retry";
-import { applyNativeProviderRetryStatus } from "./provider-retry-stream";
-import {
-  createChatRetryDispatcher,
-  isChatRetryCurrent,
-} from "./chat-retry-dispatch";
-import {
-  ChatRetryContext,
-  WorkspacePathUndoContext,
-  type WorkspacePathUndoOffer,
+ChatFileActionsContext,
+ChatFileScopeContext,
+ChatRetryContext,
+ComposerContextCandidates,
+FirstRunTour,
+ProviderSignInContext,
+PullRequestForm,
+WorkspaceEditBar,
+WorkspacePathUndoContext,
+WorkspaceRenameDialog,
+askTextValue,
+browserConfirm,
+confirmAction,
+fastModeConfigFromAction,
+isSplitChatLayout,
+registerExternalLinkOpener,
+resolveLanguage,
+restoreCompanionPanes,
+sessionApprovalCounts,sessionQuestionCounts,
+setConfirmActionHandler,
+setOpenDroppedWorkspaceHandler,
+terminalLaunchProfiles,
+validateWorkspaceEntryName,
+workspaceEntryName,
+type PullRequestDraft,
+type WorkspacePathUndoOffer,
 } from "@gyro-dev/ui";
-import {
-  compareSessionEventsForHistory,
-  mergeSessionHistoryPages,
-} from "./session-event-order";
-import {
-  createPreviewSession,
-  createPreviewWorkspaceFileContent,
-  createTauriThreadSession,
-  newSessionModelFromConfig,
-  normalizeSessionTitleInput,
-  previewFiles,
-  selectedSessionModelFromConfig,
-  sessionModelSelectionFromSession,
-  workspaceRunMetadata,
-} from "./session-creation";
-import {
-  useWorkbenchAppearance,
-  storedThemeMode,
-  THEME_STORAGE_KEY,
-} from "./use-workbench-appearance";
-import {
-  createIdeEvidenceScheduler,
-  type IdeEvidenceScheduler,
-} from "./ide-evidence-push";
-import {
-  workspaceContextRelativePath,
-  workspaceContextWithLiveEditor,
-} from "./workspace-context-bridge";
-import {
-  turnIdFromSessionEvent,
-  chatModeEventMessage,
-  createChatModeSessionEvent,
-  normalizePlanItem,
-  normalizePlanStatus,
-  recordFromUnknown,
-  stringFromRecord,
-  numberFromUnknown,
-  planStatusVerb,
-  createPlanSessionEvent,
-  createGoalSessionEvent,
-  createEditorSessionEvent,
-  slugify,
-} from "./session-context-events";
-import {
-  deriveSessionContext,
-  useDerivedSessionContext,
-  useSessionContextEvents,
-} from "./use-session-context-events";
-import {
-  ChatFileActionsContext,
-  ChatFileScopeContext,
-  ComposerContextCandidates,
-} from "@gyro-dev/ui";
-import {
-  isSplitChatLayout,
-  registerExternalLinkOpener,
-  restoreCompanionPanes,
-  PullRequestForm,
-  type PullRequestDraft,
-} from "@gyro-dev/ui";
-import { restoreModelCatalog, useModelCatalog } from "./use-model-catalog";
-import { useLiveModelContext } from "./use-live-model-context";
-import { useGoogleModels } from "./use-google-models";
+import { convertFileSrc,invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { confirm as nativeConfirm,open,save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { flushSync } from "react-dom";
+import { appPreviewClient } from "./app-preview-client";
+import { CHAT_ATTACHMENTS_STORAGE_KEY,CHAT_DRAFT_MODES_STORAGE_KEY,CHAT_GRID_STORAGE_KEY,CHAT_TASK_METADATA_KEY,EMPTY_CONFIG,MAX_CHAT_MESSAGE_CHARS,MAX_PINNED_SESSIONS,MAX_RECENT_PROJECTS,MAX_REMOVED_PROJECTS,PINNED_SESSIONS_STORAGE_KEY,PREVIEW_CONFIG_STORAGE_KEY,RECENT_PROJECTS_STORAGE_KEY,REMOVED_PROJECTS_STORAGE_KEY,applyProviderChatStreamEvent,approvalNotificationCopy,areWorkbenchTurnsEqual,base64Utf8,cancelPersistedWorkbenchStateFlush,capabilityActivityFromSessionEvent,capabilityApprovalFromSessionEvent,chatMessageLength,chatPaneForSession,createAutomationDraft,createOptimisticTurnEvents,createPreviewAutomation,createProviderHealthOutput,createTurnId,deriveActiveTurn,diagnosticsFromLspMessages,disposeEditorModels,editorBufferHasUnsavedChanges,editorPathMatches,flushPersistedWorkbenchState,getCommandProfile,ideAiToolCallFromActivity,isPlainShellTerminal,isProviderStop,isRecord,loadChatAttachments,loadChatDraftModes,loadChatDrafts,loadChatGridState,loadChatTaskMetadata,loadInitialWorkspacePath,loadPinnedSessionIds,loadPreviewConfig,loadRecentProjectPaths,loadRemovedProjectPaths,loadStoredWorkbenchState,lspRelativePath,markInactiveCapabilityResources,normalizeChatMessage,parentDirectory,pathFromSessionEvent,persistChatDrafts,persistableWorkbenchState,profileSupportsGovernance,providerLabelForId,providerStopDetail,providerStreamBatchKey,rekeySessionEvents,relativeFilePath,renameEditorPath,savedProjectsFromSessions,schedulePersistedWorkbenchStateFlush,sessionTitleFromMessage,shouldSuggestSessionTitle,sourceControlLineStats,terminalCommandLine,terminalPaneFromSnapshot,terminalPaneProcessIsMissing,terminalProcessForProfile,terminalSizeForTemplate,terminalSnapshotFromCapabilityData,terminalStatusFromSnapshot,untrackedWorkspaceFileDiff,updateOptimisticProviderStatus,withCouncilConfig,workspaceContentToEditorBuffer,workspaceFailedTests,workspaceName,workspaceTaskTerminalPaneId,workspaceTreeSignature,type OptimisticProviderStatus,type SavedProject,type TerminalPaneSnapshot } from "./app-state-helpers";
 import { persistAutoCompactPercent } from "./auto-compaction";
-import { useUsageActions } from "./usage-actions";
-import { useProviderApiKeys } from "./provider-api-keys";
+import { BranchNameDialog } from "./branch-name-dialog";
 import {
-  useProviderConnectionGuard,
-  type ProviderConnectionOptions,
-} from "./provider-connection-guard";
-import { isComposerCliUpdating } from "./cli-update-scope";
-import {
-  providerHealthDetailsFromCheck,
-  providerHealthRequest,
-  providerProbeKeyFor,
-  type ProviderHealthCheck,
-} from "./provider-health-probes";
+appendFeedback,
+browserFeedbackDraft,
+captureChatBrowserPage,
+revealBrowserCapture,
+} from "./browser-capture";
 import { createBrowserHostVisibility } from "./browser-host-visibility";
 import {
-  browserLiveStatusMessage,
-  browserUnreachableMessage,
-  normalizedPreviewUrl,
+browserLiveStatusMessage,
+browserUnreachableMessage,
+normalizedPreviewUrl,
 } from "./browser-preview-text";
 import {
-  appendFeedback,
-  browserFeedbackDraft,
-  captureChatBrowserPage,
-  revealBrowserCapture,
-} from "./browser-capture";
-import { useModelBrowserReveal } from "./model-browser-reveal";
-import { useRemoteCheck } from "./use-remote-check";
-import {
-  useSessionModelSave,
-  type SessionModelSelection,
-} from "./use-session-model-save";
-import { loadGitComparisonDiff } from "./load-comparison-diff";
-import { createGithubRefreshController } from "./github-refresh";
-import { useProviderUsage } from "./use-provider-usage";
-import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
+chatAttachmentKindForPath,
+chatAttachmentPickerFilters,
+chatAttachmentPickerTitle,
+isSupportedChatVideoPath,
+type ChatAttachmentPickerKind,
+} from "./chat-attachment-picker";
+import { createChatFileActions } from "./chat-file-actions";
 import { resolveChatPaneClose } from "./chat-pane-close";
 import {
-  normalizeProjectPath,
-  visibleSessionsForProjects,
-} from "./session-listing";
-import * as turnTiming from "./turn-timing";
-import { useMeasuredWorkbenchReducer } from "./use-measured-workbench";
-import { terminalLaunchProfiles } from "@gyro-dev/ui";
+createChatRetryDispatcher,
+isChatRetryCurrent,
+} from "./chat-retry-dispatch";
+import { isComposerCliUpdating } from "./cli-update-scope";
+import "./dictation-access";
+import { canonicalFileUri,filePathFromUri } from "./editor/document-uri";
 import {
-  pendingMediaAttachment,
-  settlePendingMedia,
-  withMediaUploadTimeout,
-  queueMediaUpload,
-  trackPendingMedia,
-  withoutPendingMedia,
-} from "./pending-media-attachments";
-import { terminalOutputUpdate } from "./terminal-output";
+hasEditRecovery,
+recoverWorkspaceBuffers,
+writeEditRecovery,
+} from "./editor/edit-recovery";
+import { useLanguageSessions } from "./editor/use-language-sessions";
+import {
+editorBufferFromFile,
+useWorkspaceRename,
+} from "./editor/use-workspace-rename";
+import {
+MonacoEditorPane,
+type WorkspaceNavigationSource,
+} from "./editor/workspace-code-editor";
+import { createGithubRefreshController } from "./github-refresh";
+import {
+createIdeEvidenceScheduler,
+type IdeEvidenceScheduler,
+} from "./ide-evidence-push";
 import { LiveTerminalPaneBody } from "./live-terminal-pane";
+import { loadGitComparisonDiff } from "./load-comparison-diff";
+import { LocalCheckHost } from "./local-check";
+import { ManagedDiffEditor } from "./managed-diff-editor";
+import { useModelBrowserReveal } from "./model-browser-reveal";
 import {
-  readTerminalAttachmentSource,
-  rememberTerminalAttachmentSource,
-  useTerminalAttachmentController,
-} from "./terminal-attachment";
+MODEL_DEFAULT_SUGGESTION_MAX_STORAGE_CHARS,
+MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
+dismissModelDefaultSuggestion,
+isSuccessfulModelUseResponse,
+markModelDefaultSuggestionShown,
+modelDefaultSuggestionFor,
+parseModelDefaultSuggestionState,
+recordCompletedModelUse,
+snoozeProviderDefaultSuggestions,
+type ModelDefaultSuggestionState,
+} from "./model-default-suggestion";
+import { newChatDefaultSelection } from "./new-chat-defaults";
+import {
+pendingMediaAttachment,
+queueMediaUpload,
+settlePendingMedia,
+trackPendingMedia,
+withMediaUploadTimeout,
+withoutPendingMedia,
+} from "./pending-media-attachments";
+import { useProviderApiKeys } from "./provider-api-keys";
+import {
+useProviderConnectionGuard,
+type ProviderConnectionOptions,
+} from "./provider-connection-guard";
+import {
+providerHealthDetailsFromCheck,
+providerHealthRequest,
+providerProbeKeyFor,
+type ProviderHealthCheck,
+} from "./provider-health-probes";
+import {
+providerCliName,
+providerInstallProfile,
+providerLoginCommandText,
+providerLoginProfile,
+type CliInstallPlanReport,
+} from "./provider-login-profile";
+import { parseProviderLoginProgress } from "./provider-login-progress";
+import { QuitConfirmDialog } from "./quit-confirm-dialog";
+import {
+sameSessionEvents,
+useCoalescedByKey,
+useDebouncedPersist,
+} from "./responsiveness";
+import {
+chatModeEventMessage,
+createChatModeSessionEvent,
+createEditorSessionEvent,
+createGoalSessionEvent,
+createPlanSessionEvent,
+numberFromUnknown,
+planStatusVerb,
+recordFromUnknown,
+stringFromRecord,
+turnIdFromSessionEvent
+} from "./session-context-events";
+import {
+createPreviewSession,
+createPreviewWorkspaceFileContent,
+createTauriThreadSession,
+newSessionModelFromConfig,
+normalizeSessionTitleInput,
+previewFiles,
+selectedSessionModelFromConfig,
+sessionModelSelectionFromSession,
+workspaceRunMetadata,
+} from "./session-creation";
+import {
+compareSessionEventsForHistory,
+mergeSessionHistoryPages,
+} from "./session-event-order";
+import {
+normalizeProjectPath,
+visibleSessionsForProjects,
+} from "./session-listing";
+import {
+sourceControlForWorkspace,
+useScopedIdeState,
+} from "./source-control-scope";
+import {
+SYSTEM_ACCESS_STATUS_STORAGE_KEY,
+parseSystemAccessSnapshot,
+} from "./system-access-state";
 import { isTauriRuntime } from "./tauri-runtime";
 import {
-  admitWorkspaceFile,
-  admitWorkspaceFolders,
-  useWorkspaceRootHealth,
-  useWorkspaceRootRecovery,
-  workspaceRootRejectionNotice,
+readTerminalAttachmentSource,
+rememberTerminalAttachmentSource,
+useTerminalAttachmentController,
+} from "./terminal-attachment";
+import * as turnTiming from "./turn-timing";
+import {
+readBoundedLocalStorage,
+readStoredAppearance,
+safeSetLocalStorage
+} from "./ui-storage";
+import { useUsageActions } from "./usage-actions";
+import { useAppearanceSaveFeedback } from "./use-appearance-save-feedback";
+import { useChatAutoRetry } from "./use-chat-auto-retry";
+import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
+import { useCheckReminders } from "./use-check-reminders";
+import { useGoogleModels } from "./use-google-models";
+import { useLiveModelContext } from "./use-live-model-context";
+import { useMeasuredWorkbenchReducer } from "./use-measured-workbench";
+import { restoreModelCatalog,useModelCatalog } from "./use-model-catalog";
+import { useProjectImport } from "./use-project-import";
+import {
+useInlineSignInRunner,
+useProviderSignIn,
+useProviderSignInActions,
+} from "./use-provider-sign-in";
+import { useProviderUsage } from "./use-provider-usage";
+import { useQuitConfirmation } from "./use-quit-confirmation";
+import { useRemoteCheck } from "./use-remote-check";
+import { changeSessionBrowserViewport,useSessionBrowserEvents } from "./use-session-browser-events";
+import {
+deriveSessionContext,
+useDerivedSessionContext,
+useSessionContextEvents,
+} from "./use-session-context-events";
+import {
+useSessionModelSave,
+type SessionModelSelection,
+} from "./use-session-model-save";
+import { useSubagents } from "./use-subagents";
+import { useTaskHandoff } from "./use-task-handoff";
+import {
+useWorkbenchAppearance
+} from "./use-workbench-appearance";
+import {
+admitWorkspaceFile,
+admitWorkspaceFolders,
+useWorkspaceRootHealth,
+useWorkspaceRootRecovery,
+workspaceRootRejectionNotice,
 } from "./use-workspace-roots";
 import {
-  sameSessionEvents,
-  useCoalescedByKey,
-  useDebouncedPersist,
-} from "./responsiveness";
-import { BranchNameDialog } from "./branch-name-dialog";
-import { QuitConfirmDialog } from "./quit-confirm-dialog";
-import { useQuitConfirmation } from "./use-quit-confirmation";
-import {
-  chatAttachmentKindForPath,
-  chatAttachmentPickerFilters,
-  chatAttachmentPickerTitle,
-  isSupportedChatVideoPath,
-  type ChatAttachmentPickerKind,
-} from "./chat-attachment-picker";
-import {
-  resolveLanguage,
-  editorFilePolicy,
-  setOpenDroppedWorkspaceHandler,
-} from "@gyro-dev/ui";
-import { createChatFileActions } from "./chat-file-actions";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { confirm as nativeConfirm } from "@tauri-apps/plugin-dialog";
+workspaceContextRelativePath,
+workspaceContextWithLiveEditor,
+} from "./workspace-context-bridge";
 
-import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import {
+AppChrome,
+AppearanceContext,
+AutomationsSurface,
+CLI_LAUNCH_PRESET_MAX_PANES,
+COUNCIL_COMING_SOON,
+ChatCloseConfirmOverlay,
+ChatGridSurface,
+ChatSurface,
+CommandPaletteOverlay,
+IdeStatusBar,
+IdeSurface,
+ModelStandardPromptOverlay,
+NEW_CHAT_DRAFT_KEY,
+ProjectRemoveConfirmOverlay,
+SettingsSurface,
+TerminalAttachmentActionsContext,
+TerminalTerminateConfirmOverlay,
+ToolsSurface,
+WorkspaceToolPanel,
+absoluteWorkspaceFilePath,
+activeChatCompanionPanel,
+applyLaunchView,
+applyProviderCapabilityManifest,
+askAboutFilePrompt,
+chatCompanionPane,
+chatCompanionReducer,
+chatGridReducer,
+chatProjectKey,
+cliUpdateDismissKey,
+createChatProjectLayout,
+createInitialChatCompanionState,
+createInitialWorkbenchState,
+createNotification,
+createTerminalPane,
+defaultCommandProfiles,
+discardedSideChatSessionIds,
+formatExplorerAskListing,
+getProviderModel,
+isChatCompanionTabId,
+isProviderExecutable,
+isProviderId,
+isProviderRuntimeUsable,
+isUserSelectedWorkspacePath,
+isWorkspaceTrusted,
+latestFileReviewTurn,
+mergeWorkspaceRootFiles,
+normalizeCliLaunchPreset,
+normalizedCouncilConfig,
+normalizedWorkspaceTrustPath,
+parseGyroWorkspaceFile,
+parseProviderHealthOutput,
+persistableChatGridState,
+planWorkspaceMove,
+promoteQueuedMessage,
+providerAuthStatusAfterHealth,
+providerConnectionStatusFromRuntime,
+providerDefaultModelId,
+providerHealthAfterSignInRejection,
+providerNeedsSignIn,
+providerSupportsUsage,
+providersForConfig,
+readyCouncilProviders,
+resolveChatRailPanel,
+resolveCleanMachinePath,
+resolveCouncilSeatRequests,
+resolvedWorkspaceSettings,
+selectQueuedMessageDelivery,
+selectedReasoningEffort,
+sendableChatImage,
+serializeGyroWorkspaceFile,
+staleSideChatSessionIds,
+updateSendingSessions,
+withoutSideChatSessions,
+workspaceCommandForKeybinding,
+workspaceFilesForRoot,
+workspaceFolderPaths,
+workspacePathExcluded,
+workspaceRootForPath,
+type AppDestination,
+type Automation,
+type BrowserFeedback,
+type BrowserPreviewCapture,
+type BrowserPreviewDiagnostic,
+type CapabilityActivity,
+type CapabilityApprovalDecision,
+type CapabilityResourceRef,
+type ChatAttachment,
+type ChatBrowserResource,
+type ChatCompanionTabId,
+type ChatCompanionWidthMode,
+type ChatMode,
+type ChatPaneRef,
+type ChatRailDiffTools,
+type ChatRailTerminalTools,
+type ChatSidePanelId,
+type CliLaunchPreset,
+type CliUpdateApplyResult,
+type CliUpdateCheckReport,
+type CliUpdateOffer,
+type CliUpdatePhase,
+type CommandProfile,
+type CouncilActionRequest,
+type CouncilRun,
+type CustomTaskDraft,
+type DebugSessionState,
+type EditorRevealTarget,
+type EditorSelection,
+type FileReviewSummary,
+type GitBranchCatalog,
+type GitReviewActionId,
+type GithubPullRequest,
+type GithubWorkflowRunDetail,
+type GyroConfig,
+type IdeAssistantAction,
+type IdeAssistantRequest,
+type MenuBarOutcome,
+type MenuBarSnapshot,
+type ModelFocus,
+type ModelFocusPeekContent,
+type ModelFollowMode,
+type ModelProviderConfig,
+type NotificationPermissionState,
+type OutputChannel,
+type ProjectCapabilityPolicy,
+type ProviderCapabilitySupport,
+type ProviderChatStreamEvent,
+type ProviderHealthDetails,
+type ProviderId,
+type ProviderLedgerSummary,
+type ProviderResumeCursor,
+type ReasoningEffort,
+type Session,
+type SessionEvent,
+type SessionGoal,
+type SessionPlan,
+type SessionPlanItemStatus,
+type SessionUsageTotals,
+type SettingsSectionId,
+type SideChatMessage,
+type SideChatState,
+type SourceControlState,
+type SystemAccessScope,
+type SystemAccessScopeId,
+type TaskDefinition,
+type TerminalPane,
+type TerminalTemplate,
+type TestTreeItem,
+type UpdateState,
+type UsageSafetySnapshot,
+type WorkbenchAction,
+type WorkbenchPaneTab,
+type WorkbenchState,
+type WorkspaceChangedEvent,
+type WorkspaceContextSnapshot,
+type WorkspaceFile,
+type WorkspaceFileContent,
+type WorkspaceFileStat,
+type WorkspaceLayoutId,
+type WorkspacePreparationProgress,
+type WorkspacePreparationSnapshot,
+type WorkspaceSearchQuery,
+type WorkspaceSearchResult
+} from "@gyro-dev/ui";
+import { openUrl,revealItemInDir } from "@tauri-apps/plugin-opener";
 import "@xterm/xterm/css/xterm.css";
 import {
-  AppChrome,
-  absoluteWorkspaceFilePath,
-  applyProviderCapabilityManifest,
-  CHAT_GRID_MAX_SLOTS,
-  CLI_LAUNCH_PRESET_MAX_PANES,
-  AutomationsSurface,
-  ChatCloseConfirmOverlay,
-  ChatGridSurface,
-  ChatSurface,
-  NEW_CHAT_DRAFT_KEY,
-  TerminalAttachmentActionsContext,
-  type TerminalAttachmentActions,
-  CommandPaletteOverlay,
-  IdeStatusBar,
-  IdeSurface,
-  askAboutFilePrompt,
-  latestFileReviewTurn,
-  ModelStandardPromptOverlay,
-  ProjectRemoveConfirmOverlay,
-  providerNeedsSignIn,
-  SettingsSurface,
-  TerminalTerminateConfirmOverlay,
-  ToolsSurface,
-  WorkspaceToolPanel,
-  activeChatCompanionPanel,
-  chatProjectKey,
-  chatCompanionPane,
-  chatCompanionReducer,
-  chatGridReducer,
-  createChatProjectLayout,
-  AppearanceContext,
-  useAppearance,
-  createInitialChatCompanionState,
-  createInitialChatGridState,
-  createInitialWorkbenchState,
-  applyLaunchView,
-  type WorkbenchAction,
-  discardedSideChatSessionIds,
-  isChatCompanionTabId,
-  resolveChatRailPanel,
-  staleSideChatSessionIds,
-  withoutSideChatSessions,
-  createNotification,
-  createTerminalPane,
-  isTransientWorkspacePath,
-  isUserSelectedWorkspacePath,
-  defaultCommandProfiles,
-  getProviderModel,
-  isProviderId,
-  isProviderExecutable,
-  isProviderRuntimeUsable,
-  isWorkspaceTrusted,
-  mergeWorkspaceRootFiles,
-  normalizeCliLaunchPreset,
-  normalizedWorkspaceTrustPath,
-  workspaceFolderPaths,
-  workspaceFilesForRoot,
-  workspaceRelativeFilePath,
-  workspaceRootForPath,
-  formatExplorerAskListing,
-  planWorkspaceMove,
-  workspacePathExcluded,
-  normalizedConfig,
-  COUNCIL_COMING_SOON,
-  normalizedCouncilConfig,
-  readyCouncilProviders,
-  resolveCouncilSeatRequests,
-  parseProviderHealthOutput,
-  cliUpdateDismissKey,
-  parseGyroWorkspaceFile,
-  workspaceCommandForKeybinding,
-  providerAuthStatusAfterHealth,
-  providerConnectionStatusFromRuntime,
-  providerDefaultModelId,
-  providerHealthAfterSignInRejection,
-  providerSupportsUsage,
-  providersForConfig,
-  resolveCleanMachinePath,
-  resolvedWorkspaceSettings,
-  promoteQueuedMessage,
-  selectQueuedMessageDelivery,
-  updateSendingSessions,
-  persistableChatGridState,
-  sanitizeStoredIdeState,
-  sendableChatImage,
-  sanitizeStoredChatGridState,
-  selectedReasoningEffort,
-  serializeGyroWorkspaceFile,
-  type AppDestination,
-  type Automation,
-  type BrowserPreviewCapture,
-  type BrowserFeedback,
-  type BrowserPreviewDiagnostic,
-  type CapabilityActivity,
-  type CapabilityApprovalDecision,
-  type CapabilityApprovalEvent,
-  type CapabilityCallEvent,
-  type CapabilityResourceRef,
-  type ChatBrowserResource,
-  type ChatAttachment,
-  type ChatGridState,
-  type ChatMode,
-  type CouncilActionRequest,
-  type CouncilRun,
-  type ChatPaneRef,
-  type ChatRailDiffTools,
-  type ChatRailTerminalTools,
-  type ChatCompanionTabId,
-  type ChatCompanionWidthMode,
-  type SideChatMessage,
-  type SideChatState,
-  type ChatSidePanelId,
-  type CliLaunchPreset,
-  type LaunchView,
-  type CommandProfile,
-  type DebugSessionState,
-  type EditorBuffer,
-  type EditorRevealTarget,
-  type EditorSelection,
-  type GyroConfig,
-  type GitBranchCatalog,
-  type GitReviewActionId,
-  type GithubAvailability,
-  type GithubPullRequest,
-  type GithubWorkflowRun,
-  type GithubWorkflowRunDetail,
-  type HarnessRunStatus,
-  type IdeAiToolCall,
-  type IdeAssistantAction,
-  type IdeAssistantRequest,
-  type MenuBarOutcome,
-  type MenuBarSnapshot,
-  type OutputChannel,
-  type ModelFocus,
-  type ModelFocusPeekContent,
-  type ModelFollowMode,
-  type ModelProviderConfig,
-  type NotificationPermissionState,
-  type ProviderHealthDetails,
-  type ProviderCapabilitySupport,
-  type ProjectCapabilityPolicy,
-  type ProviderId,
-  type SessionUsageTotals,
-  type UsageSafetySnapshot,
-  type ProviderLedgerSummary,
-  type ProviderChatStreamEvent,
-  type ProviderResumeCursor,
-  type ReasoningEffort,
-  type ResolvedTheme,
-  type ProblemDiagnostic,
-  type Session,
-  type SessionEvent,
-  type SessionGoal,
-  type SessionPlan,
-  type SessionPlanItem,
-  type SessionPlanItemStatus,
-  type SessionsLayoutId,
-  type SettingsSectionId,
-  type SourceControlState,
-  type SystemAccessScope,
-  type SystemAccessScopeId,
-  type Task,
-  type CustomTaskDraft,
-  type TaskDefinition,
-  type TestTreeItem,
-  type TerminalPaneStatus,
-  type TerminalPane,
-  type TerminalTemplate,
-  type ThemeMode,
-  type UpdateState,
-  type CliUpdateOffer,
-  type CliUpdateCheckReport,
-  type CliUpdateApplyResult,
-  type CliUpdatePhase,
-  type WorkbenchPaneTab,
-  type WorkbenchState,
-  type WorkbenchTurn,
-  type WorkspaceFile,
-  type WorkspaceFileContent,
-  type WorkspaceFileStat,
-  type WorkspaceChangedEvent,
-  type WorkspaceContextSnapshot,
-  type WorkspacePreparationProgress,
-  type WorkspacePreparationSnapshot,
-  type WorkspaceSearchQuery,
-  type WorkspaceSearchResult,
-  type WorkspaceScopedSettings,
-  type WorkspaceSettingScope,
-  type WorkspaceLayoutId,
-  type FileReviewSummary,
-} from "@gyro-dev/ui";
-import {
-  lazy,
-  memo,
-  startTransition,
-  Suspense,
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useState,
-  type DragEvent as ReactDragEvent,
-  type PointerEvent as ReactPointerEvent,
+Suspense,
+lazy,
+useCallback,
+useDeferredValue,
+useEffect,
+useLayoutEffect,
+useMemo,
+useReducer,
+useRef,
+useState,
+type DragEvent as ReactDragEvent,
+type PointerEvent as ReactPointerEvent
 } from "react";
 import {
-  applyProviderChatStreamPresentation,
-  applyProviderChatStreamDeltas,
-  settleOpenProviderActivitiesForTurn,
-  isProviderStatusEvent,
-  limitSessionEventsForUi,
-  limitOptimisticSessionEvents,
-  MAX_CHAT_EVENT_RENDER_COUNT,
-  mergePersistedAndOptimisticEvents,
-  mergeLiveCapabilityEvent,
-  mergeProviderResponseEvents,
-  preserveDeliveredResponses,
-  resetStreamingAssistantForRetry,
-  type ProviderStreamOrderState,
-  upsertStreamingAssistantEvent,
-} from "./provider-stream-events";
-import {
-  chatPaneEnvironmentControls,
-  useChatEnvironmentVisibility,
-  useSoloChatEnvironmentControls,
+chatPaneEnvironmentControls,
+useChatEnvironmentVisibility,
+useSoloChatEnvironmentControls,
 } from "./chat-environment-rail";
+import {
+deriveLatestMenuBarOutcome,
+deriveMenuBarSnapshot,
+} from "./menu-bar-state";
+import {
+MAX_CHAT_EVENT_RENDER_COUNT,
+applyProviderChatStreamDeltas,
+applyProviderChatStreamPresentation,
+limitOptimisticSessionEvents,
+limitSessionEventsForUi,
+mergeLiveCapabilityEvent,
+mergePersistedAndOptimisticEvents,
+mergeProviderResponseEvents,
+preserveDeliveredResponses,
+resetStreamingAssistantForRetry,
+settleOpenProviderActivitiesForTurn,
+type ProviderStreamOrderState
+} from "./provider-stream-events";
+import { useUnreadCompletedChats } from "./unread-completed-chats";
+import { useGyroUpdater } from "./update-controller";
 import { useWorkspaceExplorerFiles } from "./workspace-explorer";
 import { runWorkspaceSearchRoots } from "./workspace-search-run";
-import { useGyroUpdater } from "./update-controller";
-import {
-  deriveLatestMenuBarOutcome,
-  deriveMenuBarSnapshot,
-} from "./menu-bar-state";
-import { useUnreadCompletedChats } from "./unread-completed-chats";
 
 const SourceControlDiffEditor = lazy(
   () => import("./source-control-diff-editor"),
@@ -514,24 +466,6 @@ type ProviderCapabilityResourceEvent = {
   callId: string;
   resource: CapabilityResourceRef;
   data: unknown;
-};
-
-type TerminalPaneSnapshot = {
-  paneId: string;
-  title: string;
-  profileId?: string | null;
-  command: string;
-  output?: string | null;
-  outputRevision: number;
-  status: "running" | "done" | "failed";
-  hasForegroundJob?: boolean | null;
-  exitCode?: number | null;
-  workspacePath?: string;
-  workingDirectory?: string;
-  cols: number;
-  rows: number;
-  governedSessionId?: string | null;
-  governedProviderId?: string | null;
 };
 
 type LspBridgeResponse = {
@@ -637,21 +571,6 @@ type GitSyncResult = {
   status: SourceControlState;
 };
 
-type AutomationDraft = Pick<
-  Automation,
-  | "branch"
-  | "nextRunAt"
-  | "project"
-  | "prompt"
-  | "provider"
-  | "schedule"
-  | "stopCondition"
-  | "title"
-  | "workspaceMode"
-  | "worktreeName"
-  | "execution"
->;
-
 type ModelStandardPrompt = {
   usageCount: number;
   chatCount: number;
@@ -661,45 +580,9 @@ type ModelStandardPrompt = {
   providerLabel: string;
 };
 
-type SavedProject = {
-  path: string;
-  label: string;
-  detail: string;
-  sessionCount: number;
-};
-
-const EMPTY_CONFIG: GyroConfig = {
-  automaticUpdateChecks: true,
-  telemetryEnabled: false,
-  requireCommandApproval: true,
-  requireFileEditApproval: true,
-  fullAccess: false,
-  changeSummariesEnabled: false,
-  accountOidc: {
-    issuerUrl: "local-device://gyro",
-    clientId: "gyro-local-device",
-    redirectLoopbackBase: "http://127.0.0.1",
-    scopes: ["openid", "profile", "email", "offline_access"],
-  },
-  accountSession: { signedIn: false },
-  modelProviders: [],
-  commandProfiles: [],
-};
-
 const PREVIEW_WORKSPACE_PATH = "/preview/Gyro";
-const WORKBENCH_STORAGE_KEY = "gyro.workbench-state";
-const CHAT_TASK_METADATA_KEY = "gyro.chat-task-metadata.v1";
-const PINNED_SESSIONS_STORAGE_KEY = "gyro.pinned-session-ids";
-const REMOVED_PROJECTS_STORAGE_KEY = "gyro.removed-project-paths";
-const RECENT_PROJECTS_STORAGE_KEY = "gyro.recent-project-paths";
-const PREVIEW_CONFIG_STORAGE_KEY = "gyro.preview-config";
 /** Lines shown either side of the revealed line in a model focus peek. */
 const MODEL_FOCUS_PEEK_CONTEXT_LINES = 12;
-
-const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
-const CHAT_DRAFT_MODES_STORAGE_KEY = "gyro.chat-draft-modes-v1";
-const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
-const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
 /** Record the first automatic request before macOS opens a permission sheet. */
 const SYSTEM_ACCESS_PROMPTED_STORAGE_KEY = "gyro.system-access-prompted-v1";
 const DEFAULT_TOOL_PANEL_HEIGHT = 280;
@@ -718,7 +601,6 @@ const PROVIDER_SIGN_IN_FAST_POLL_MS = 500;
 const PROVIDER_SIGN_IN_FAST_POLL_ATTEMPTS = 12;
 // npm installs of a provider CLI finish in well under five minutes.
 const PROVIDER_INSTALL_POLL_ATTEMPTS = 600;
-const MAX_CHAT_MESSAGE_CHARS = 24_000;
 const MAX_CHAT_IMAGES_PER_MESSAGE = 10;
 const MAX_CHAT_VIDEOS_PER_MESSAGE = 2;
 // Mirrors the native limits so oversized files are rejected before they are
@@ -732,7 +614,6 @@ const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
 const PROVIDER_STREAM_FLUSH_MS = 80;
 
 const WORKBENCH_PERSIST_DEBOUNCE_MS = 500;
-const WORKBENCH_PERSIST_IDLE_TIMEOUT_MS = 1_500;
 const TERMINAL_POLL_INTERVAL_MS = 1_000;
 
 type BrowserPreviewCheck = {
@@ -755,15 +636,6 @@ type OllamaDiscovery = {
   }>;
 };
 const TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS = 4_000;
-const MAX_PERSISTED_TERMINAL_OUTPUT_CHARS = 8_000;
-const MAX_PERSISTED_OUTPUT_CHANNEL_LINES = 100;
-const MAX_PERSISTED_DIRTY_BUFFER_CHARS = 500_000;
-const MAX_PERSISTED_DIRTY_BUFFERS_TOTAL_CHARS = 1_000_000;
-const MAX_STORED_WORKBENCH_STATE_CHARS = 2_000_000;
-const MAX_STORED_PREVIEW_CONFIG_CHARS = 200_000;
-const MAX_PINNED_SESSIONS = 200;
-const MAX_REMOVED_PROJECTS = 200;
-const MAX_RECENT_PROJECTS = 12;
 const AUTOMATION_SCHEDULER_COMMANDS = {
   claimDue: "claim_due_automation",
   completeLease: "complete_automation_lease",
@@ -19527,2101 +19399,4 @@ function loadInitialWorkbenchState(): WorkbenchState {
       preferences: { ...stored.preferences, ...readStoredAppearance() },
     }),
   );
-}
-
-function loadStoredWorkbenchState(): WorkbenchState {
-  const base = createInitialWorkbenchState({
-    tasks: Object.values(loadChatTaskMetadata()),
-  });
-  const legacyTheme = storedThemeMode(
-    readBoundedLocalStorage(THEME_STORAGE_KEY, 16),
-  );
-  const stored = readBoundedLocalStorage(
-    WORKBENCH_STORAGE_KEY,
-    MAX_STORED_WORKBENCH_STATE_CHARS,
-  );
-  if (!stored) {
-    return {
-      ...base,
-      preferences: {
-        ...base.preferences,
-        theme: legacyTheme ?? base.preferences.theme,
-      },
-    };
-  }
-  try {
-    const parsed = JSON.parse(stored) as Partial<WorkbenchState>;
-    const legacyDestination = (parsed as { activeDestination?: unknown })
-      .activeDestination;
-    const storedLayout = normalizeStoredWorkspaceLayout(
-      (parsed as { activeWorkspaceLayout?: unknown }).activeWorkspaceLayout,
-      base.activeWorkspaceLayout,
-    );
-    const storedPaneTab = normalizeStoredPaneTab(
-      (parsed as { activePaneTab?: unknown }).activePaneTab,
-      base.activePaneTab,
-    );
-    let activeDestination = normalizeStoredDestination(
-      legacyDestination,
-      base.activeDestination,
-    );
-    let activeWorkspaceLayout = storedLayout;
-    let activePaneTab = storedPaneTab;
-    let isToolPanelOpen =
-      typeof parsed.isToolPanelOpen === "boolean"
-        ? parsed.isToolPanelOpen
-        : base.isToolPanelOpen;
-
-    if (legacyDestination === "chat") {
-      activeDestination = "workspace";
-      activeWorkspaceLayout = "thread";
-    } else if (legacyDestination === "cli") {
-      activeDestination = "workspace";
-      activeWorkspaceLayout = "terminal-grid";
-      activePaneTab = "terminal";
-      isToolPanelOpen = true;
-    } else if (legacyDestination === "ide") {
-      activeDestination = "workspace";
-      activeWorkspaceLayout = "code";
-    } else if (legacyDestination === "diff") {
-      activeDestination = "workspace";
-      activePaneTab = "diff";
-      isToolPanelOpen = true;
-    } else if (legacyDestination === "browser") {
-      activeDestination = "workspace";
-      activePaneTab = "browser";
-      isToolPanelOpen = true;
-    }
-    if (activeWorkspaceLayout === "thread") {
-      isToolPanelOpen = false;
-    }
-    const lastSessionsLayout = normalizeStoredSessionsLayout(
-      parsed.lastSessionsLayout,
-      activeWorkspaceLayout === "code"
-        ? base.lastSessionsLayout
-        : activeWorkspaceLayout,
-    );
-
-    const terminalPanes = sanitizeStoredTerminalPanes(parsed.terminalPanes);
-    const legacyTasks = sanitizeStoredTasks(parsed.tasks);
-    const metadata = loadChatTaskMetadata();
-    const tasks = [
-      ...Object.values(metadata),
-      ...legacyTasks.filter(
-        (task) => !task.sessionId || !metadata[task.sessionId],
-      ),
-    ];
-    const automations = sanitizeStoredAutomations(parsed.automations);
-    const diffReview = sanitizeStoredDiffReview(parsed.diffReview, base);
-    const browserPreview = sanitizeStoredBrowserPreview(
-      parsed.browserPreview,
-      base,
-    );
-    const hasSeededDemoState =
-      terminalPanes.length !== (parsed.terminalPanes?.length ?? 0) ||
-      tasks.length !== (parsed.tasks?.length ?? 0) ||
-      parsed.diffReview?.commitMessage ===
-        "Upgrade Gyro agent workbench UI surfaces";
-    const selectedTerminalPaneId = terminalPanes.some(
-      (pane) => pane.id === parsed.selectedTerminalPaneId,
-    )
-      ? parsed.selectedTerminalPaneId
-      : undefined;
-    const selectedTaskId = tasks.some(
-      (task) => task.id === parsed.selectedTaskId,
-    )
-      ? parsed.selectedTaskId
-      : undefined;
-    const selectedAutomationId = automations.some(
-      (automation) => automation.id === parsed.selectedAutomationId,
-    )
-      ? parsed.selectedAutomationId
-      : undefined;
-
-    return createInitialWorkbenchState({
-      ...parsed,
-      activeDestination,
-      activePaneTab,
-      activeWorkspaceLayout,
-      lastSessionsLayout,
-      automations,
-      browserPreview,
-      browserPreviewsBySession: undefined,
-      diffReview,
-      ide: sanitizeStoredIdeState(parsed.ide, base.ide),
-      isToolPanelOpen,
-      modelFocus: undefined,
-      modelFocusHistory: [],
-      notifications: Array.isArray(parsed.notifications)
-        ? parsed.notifications.filter(
-            (notification) =>
-              notification.id !== "note-approval" &&
-              notification.id !== "note-tests",
-          )
-        : base.notifications,
-      onboarding: {
-        ...base.onboarding,
-        ...parsed.onboarding,
-      },
-      preferences: {
-        ...base.preferences,
-        ...parsed.preferences,
-        activeChatPanel: undefined,
-        // A restart returns the chat to its resting state: no panel on the
-        // rail, and the Environment showing beneath where one was.
-        chatEnvironmentRailOpen: true,
-        theme:
-          legacyTheme ??
-          storedThemeMode(parsed.preferences?.theme) ??
-          base.preferences.theme,
-      },
-      providerStatuses: Array.isArray(parsed.providerStatuses)
-        ? hasSeededDemoState
-          ? parsed.providerStatuses
-              .map((provider) =>
-                provider.id === "openai" ||
-                provider.id === "anthropic" ||
-                provider.id === "kimi" ||
-                provider.id === "xai" ||
-                provider.id === "gemini"
-                  ? { ...provider, connectionStatus: "not-configured" as const }
-                  : provider,
-              )
-              .filter((provider) => isProviderId(provider.id))
-          : parsed.providerStatuses.filter((provider) =>
-              isProviderId(provider.id),
-            )
-        : base.providerStatuses,
-      providerReadiness: parsed.providerReadiness ?? base.providerReadiness,
-      selectedTaskId,
-      selectedAutomationId,
-      selectedTerminalPaneId,
-      tasks,
-      terminalPanes,
-    });
-  } catch {
-    return base;
-  }
-}
-
-function normalizeStoredDestination(
-  destination: unknown,
-  fallback: AppDestination,
-): AppDestination {
-  if (destination === "tasks") return "automations";
-  if (
-    destination === "workspace" ||
-    destination === "tools" ||
-    destination === "settings" ||
-    destination === "automations" ||
-    destination === "providers" ||
-    destination === "onboarding"
-  ) {
-    return destination;
-  }
-  return fallback;
-}
-
-function normalizeStoredWorkspaceLayout(
-  layout: unknown,
-  fallback: WorkspaceLayoutId,
-): WorkspaceLayoutId {
-  if (layout === "thread" || layout === "terminal-grid" || layout === "code") {
-    return layout;
-  }
-  return fallback;
-}
-
-function normalizeStoredSessionsLayout(
-  layout: unknown,
-  fallback: SessionsLayoutId,
-): SessionsLayoutId {
-  return layout === "thread" || layout === "terminal-grid" ? layout : fallback;
-}
-
-function normalizeStoredPaneTab(
-  tab: unknown,
-  fallback: WorkbenchPaneTab,
-): WorkbenchPaneTab {
-  if (tab === "terminal" || tab === "diff" || tab === "browser") {
-    return tab;
-  }
-  return fallback;
-}
-
-function sanitizeStoredTerminalPanes(
-  panes: Partial<WorkbenchState>["terminalPanes"],
-): WorkbenchState["terminalPanes"] {
-  if (!Array.isArray(panes)) {
-    return [];
-  }
-  const demoPaneIds = new Set([
-    "pane-shell",
-    "pane-codex",
-    "pane-claude",
-    "pane-checks",
-  ]);
-  return panes.filter((pane) => !demoPaneIds.has(pane.id));
-}
-
-function loadChatTaskMetadata(): Record<string, Task> {
-  try {
-    const value: unknown = JSON.parse(
-      readBoundedLocalStorage(CHAT_TASK_METADATA_KEY, 2_000_000) ?? "{}",
-    );
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    return Object.fromEntries(
-      Object.entries(value).filter(
-        ([id, task]) =>
-          task &&
-          typeof task === "object" &&
-          task.sessionId === id &&
-          task.id === id &&
-          typeof task.title === "string" &&
-          typeof task.prompt === "string",
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function sanitizeStoredTasks(
-  tasks: Partial<WorkbenchState>["tasks"],
-): WorkbenchState["tasks"] {
-  if (!Array.isArray(tasks)) {
-    return [];
-  }
-  const demoTaskIds = new Set([
-    "task-onboarding",
-    "task-providers",
-    "task-terminal-workbench",
-    "task-diff-review",
-    "task-browser-preview",
-  ]);
-  return tasks.filter((task) => !demoTaskIds.has(task.id));
-}
-
-function sanitizeStoredAutomations(
-  automations: Partial<WorkbenchState>["automations"],
-): WorkbenchState["automations"] {
-  if (!Array.isArray(automations)) {
-    return [];
-  }
-  return automations;
-}
-
-function sanitizeStoredDiffReview(
-  diffReview: Partial<WorkbenchState>["diffReview"],
-  base: WorkbenchState,
-): WorkbenchState["diffReview"] {
-  if (!diffReview) {
-    return base.diffReview;
-  }
-  if (diffReview.commitMessage === "Upgrade Gyro agent workbench UI surfaces") {
-    return base.diffReview;
-  }
-  return {
-    ...base.diffReview,
-    ...diffReview,
-    files: (diffReview.files ?? []).map((file) =>
-      file.countsKnown === undefined
-        ? { ...file, additions: 0, deletions: 0, countsKnown: false, lines: [] }
-        : file,
-    ),
-    collapsedDirectories: Array.isArray(diffReview.collapsedDirectories)
-      ? diffReview.collapsedDirectories
-      : base.diffReview.collapsedDirectories,
-    gitActions: Array.isArray(diffReview.gitActions)
-      ? // A git action that was in flight when the app closed has no process to
-        // resume; restore it as runnable rather than spinning forever.
-        diffReview.gitActions.map((action) =>
-          action.status === "running"
-            ? { ...action, status: "ready" as const }
-            : action,
-        )
-      : base.diffReview.gitActions,
-  };
-}
-
-function sanitizeStoredBrowserPreview(
-  browserPreview: Partial<WorkbenchState>["browserPreview"],
-  base: WorkbenchState,
-): WorkbenchState["browserPreview"] {
-  if (!browserPreview) {
-    return base.browserPreview;
-  }
-  if (
-    browserPreview.verificationMessage === "Agent verification passed" ||
-    browserPreview.url?.includes("localhost:1420") ||
-    browserPreview.url?.includes("127.0.0.1:1420")
-  ) {
-    return base.browserPreview;
-  }
-  const diagnostics = Array.isArray(browserPreview.diagnostics)
-    ? browserPreview.diagnostics
-        .filter((diagnostic): diagnostic is BrowserPreviewDiagnostic =>
-          Boolean(
-            diagnostic &&
-            ["console-error", "page-error", "unhandled-rejection"].includes(
-              diagnostic.kind,
-            ) &&
-            typeof diagnostic.message === "string",
-          ),
-        )
-        .slice(0, 8)
-        .map((diagnostic) => ({
-          ...diagnostic,
-          message: truncatePersistedText(diagnostic.message, 400),
-          source:
-            typeof diagnostic.source === "string"
-              ? truncatePersistedText(diagnostic.source, 400)
-              : undefined,
-          line:
-            typeof diagnostic.line === "number" &&
-            Number.isFinite(diagnostic.line)
-              ? diagnostic.line
-              : undefined,
-          column:
-            typeof diagnostic.column === "number" &&
-            Number.isFinite(diagnostic.column)
-              ? diagnostic.column
-              : undefined,
-        }))
-    : [];
-  return {
-    ...base.browserPreview,
-    ...browserPreview,
-    consoleErrors: diagnostics.length,
-    diagnostics,
-    diagnosticsSupported: browserPreview.diagnosticsSupported === true,
-    diagnosticsCaptured: browserPreview.diagnosticsCaptured === true,
-    captureStatus: "idle",
-    captureError: undefined,
-    latestCapture: undefined,
-  };
-}
-
-function withCouncilConfig(config: GyroConfig): GyroConfig {
-  const base = normalizedConfig(config);
-  return {
-    ...base,
-    council: normalizedCouncilConfig(base.council ?? config.council),
-  };
-}
-
-function loadPreviewConfig(): GyroConfig {
-  const stored = readBoundedLocalStorage(
-    PREVIEW_CONFIG_STORAGE_KEY,
-    MAX_STORED_PREVIEW_CONFIG_CHARS,
-  );
-  if (!stored) {
-    return withCouncilConfig(EMPTY_CONFIG);
-  }
-  try {
-    return withCouncilConfig({
-      ...EMPTY_CONFIG,
-      ...(JSON.parse(stored) as Partial<GyroConfig>),
-    });
-  } catch {
-    return withCouncilConfig(EMPTY_CONFIG);
-  }
-}
-
-function loadPinnedSessionIds(): string[] {
-  const stored = readBoundedLocalStorage(
-    PINNED_SESSIONS_STORAGE_KEY,
-    MAX_STORED_PREVIEW_CONFIG_CHARS,
-  );
-  if (!stored) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(stored);
-    return Array.isArray(parsed)
-      ? parsed
-          .filter((id): id is string => typeof id === "string")
-          .slice(0, MAX_PINNED_SESSIONS)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function loadChatDrafts(): Record<string, string> {
-  const stored = readBoundedLocalStorage(CHAT_DRAFTS_STORAGE_KEY, 256_000);
-  if (!stored) return {};
-  try {
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return {};
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, string] =>
-          typeof entry[0] === "string" &&
-          typeof entry[1] === "string" &&
-          entry[1].length <= MAX_CHAT_MESSAGE_CHARS,
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function loadChatDraftModes(): Record<string, ChatMode> {
-  const stored = readBoundedLocalStorage(CHAT_DRAFT_MODES_STORAGE_KEY, 64_000);
-  if (!stored) return {};
-  try {
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, ChatMode] =>
-          typeof entry[0] === "string" &&
-          (entry[1] === "plan" || entry[1] === "council"),
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function loadChatAttachments(): Record<string, ChatAttachment[]> {
-  const stored = readBoundedLocalStorage(CHAT_ATTACHMENTS_STORAGE_KEY, 512_000);
-  if (!stored) return {};
-  try {
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return {};
-    return Object.fromEntries(
-      Object.entries(parsed).map(([key, value]) => [
-        key,
-        Array.isArray(value)
-          ? value
-              .filter(
-                (item): item is ChatAttachment =>
-                  Boolean(item) &&
-                  typeof item === "object" &&
-                  typeof (item as ChatAttachment).id === "string" &&
-                  typeof (item as ChatAttachment).path === "string",
-              )
-              .slice(0, 12)
-          : [],
-      ]),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function loadChatGridState(): ChatGridState {
-  const stored = readBoundedLocalStorage(CHAT_GRID_STORAGE_KEY, 512_000);
-  if (!stored) return createInitialChatGridState();
-  try {
-    return sanitizeStoredChatGridState(JSON.parse(stored));
-  } catch {
-    return createInitialChatGridState();
-  }
-}
-
-// IPC header values must be ASCII; file names and paths may not be.
-function base64Utf8(value: string) {
-  let binary = "";
-  for (const byte of new TextEncoder().encode(value)) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
-}
-
-function loadRemovedProjectPaths(): string[] {
-  const stored = readBoundedLocalStorage(
-    REMOVED_PROJECTS_STORAGE_KEY,
-    MAX_STORED_PREVIEW_CONFIG_CHARS,
-  );
-  if (!stored) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(stored);
-    return Array.isArray(parsed)
-      ? parsed
-          .filter((path): path is string => typeof path === "string")
-          .map(normalizeProjectPath)
-          .filter(Boolean)
-          .slice(0, MAX_REMOVED_PROJECTS)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function loadInitialWorkspacePath(): string | undefined {
-  const removed = new Set(loadRemovedProjectPaths());
-  return loadRecentProjectPaths().find((path) => !removed.has(path));
-}
-
-function loadRecentProjectPaths(): string[] {
-  const stored = readBoundedLocalStorage(
-    RECENT_PROJECTS_STORAGE_KEY,
-    MAX_STORED_PREVIEW_CONFIG_CHARS,
-  );
-  if (!stored) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(stored);
-    return Array.isArray(parsed)
-      ? [
-          ...new Set(
-            parsed
-              .filter((path): path is string => typeof path === "string")
-              .map(normalizeProjectPath)
-              .filter(Boolean),
-          ),
-        ].slice(0, MAX_RECENT_PROJECTS)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function chatPaneForSession(session: Session): ChatPaneRef {
-  return {
-    paneId: `session:${session.id}`,
-    kind: "session",
-    sessionId: session.id,
-    workspacePath: session.workspacePath,
-  };
-}
-
-function persistChatDrafts(drafts: Record<string, string>) {
-  safeSetLocalStorage(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(drafts));
-}
-
-function flushPersistedWorkbenchState(
-  ref: { current?: WorkbenchState },
-  onPersisted?: (preferences: WorkbenchState["preferences"], saved: boolean) => void,
-) {
-  const pending = ref.current;
-  if (!pending) {
-    return;
-  }
-  ref.current = undefined;
-  const saved = saveAppearancePreferences(pending.preferences);
-  onPersisted?.(pending.preferences, saved);
-  safeSetLocalStorage(WORKBENCH_STORAGE_KEY, JSON.stringify(pending));
-}
-
-function schedulePersistedWorkbenchStateFlush(
-  pendingRef: { current?: WorkbenchState },
-  idleRef: { current?: number },
-  onPersisted?: (preferences: WorkbenchState["preferences"], saved: boolean) => void,
-) {
-  if (idleRef.current !== undefined) {
-    return;
-  }
-  const idleWindow = window as Window & {
-    cancelIdleCallback?: (handle: number) => void;
-    requestIdleCallback?: (
-      callback: () => void,
-      options?: { timeout?: number },
-    ) => number;
-  };
-  if (idleWindow.requestIdleCallback) {
-    idleRef.current = idleWindow.requestIdleCallback(
-      () => {
-        idleRef.current = undefined;
-        flushPersistedWorkbenchState(pendingRef, onPersisted);
-      },
-      { timeout: WORKBENCH_PERSIST_IDLE_TIMEOUT_MS },
-    );
-    return;
-  }
-  idleRef.current = window.setTimeout(() => {
-    idleRef.current = undefined;
-    flushPersistedWorkbenchState(pendingRef, onPersisted);
-  }, 0);
-}
-
-function cancelPersistedWorkbenchStateFlush(ref: { current?: number }) {
-  if (ref.current === undefined) {
-    return;
-  }
-  const idleWindow = window as Window & {
-    cancelIdleCallback?: (handle: number) => void;
-  };
-  if (idleWindow.cancelIdleCallback) {
-    idleWindow.cancelIdleCallback(ref.current);
-  }
-  window.clearTimeout(ref.current);
-  ref.current = undefined;
-}
-
-function persistableWorkbenchState(workbench: WorkbenchState): WorkbenchState {
-  return {
-    ...workbench,
-    activeTurn: undefined,
-    browserPreviewsBySession: undefined,
-    terminalPanes: workbench.terminalPanes
-      .filter((pane) => pane.owner?.kind !== "model")
-      .map((pane) => ({
-        ...pane,
-        attention: undefined,
-        output: truncatePersistedText(
-          pane.output,
-          MAX_PERSISTED_TERMINAL_OUTPUT_CHARS,
-        ),
-      })),
-    providerReadiness: {
-      status: "idle",
-      message: "",
-    },
-    providerStatuses: workbench.providerStatuses.map((provider) => ({
-      ...provider,
-      healthOutput: undefined,
-    })),
-    ide: {
-      ...workbench.ide,
-      buffers: persistableDirtyEditorBuffers(workbench.ide.buffers),
-      selection: undefined,
-      outputChannels: workbench.ide.outputChannels.map(
-        persistableOutputChannel,
-      ),
-    },
-  };
-}
-
-function persistableDirtyEditorBuffers(
-  buffers: WorkbenchState["ide"]["buffers"],
-) {
-  const persisted: WorkbenchState["ide"]["buffers"] = {};
-  let remainingChars = MAX_PERSISTED_DIRTY_BUFFERS_TOTAL_CHARS;
-  for (const buffer of Object.values(buffers)) {
-    if (buffer.status !== "dirty") continue;
-    const chars = buffer.content.length + buffer.savedContent.length;
-    if (chars > MAX_PERSISTED_DIRTY_BUFFER_CHARS || chars > remainingChars) {
-      continue;
-    }
-    persisted[buffer.path] = buffer;
-    remainingChars -= chars;
-  }
-  return persisted;
-}
-
-function persistableOutputChannel(channel: OutputChannel): OutputChannel {
-  return {
-    ...channel,
-    lines: channel.lines.slice(-MAX_PERSISTED_OUTPUT_CHANNEL_LINES),
-  };
-}
-
-function truncatePersistedText(value: string, maxChars: number) {
-  if (value.length <= maxChars) {
-    return value;
-  }
-  return `...${value.slice(-maxChars)}`;
-}
-
-function normalizeChatMessage(value: string) {
-  return value.replace(/\u0000/g, "").trim();
-}
-
-// Same rules as `session_title_from_message` in the desktop backend.
-// Titles stay local so the selected model is not billed to name the chat.
-// Keep in step with `strip_list_marker` in the desktop backend. A marker on
-// its own ("1" from "1. …") carries no title words, so callers skip it.
-function stripTitleListMarker(text: string) {
-  let rest = text.trim();
-  for (;;) {
-    const trimmed = rest.replace(/^[#>]+\s*/, "").trimStart();
-    const bullet = /^[-*+•]\s+/.exec(trimmed);
-    if (bullet) {
-      rest = trimmed.slice(bullet[0].length);
-      continue;
-    }
-    const ordered = /^(\d+)([.):])?\s*/.exec(trimmed);
-    if (ordered) {
-      if (!ordered[2]) {
-        // A bare number left by the sentence split is still a marker.
-        if (trimmed.slice(ordered[0].length).trim() === "") {
-          return "";
-        }
-        return trimmed;
-      }
-      rest = trimmed.slice(ordered[0].length);
-      continue;
-    }
-    return trimmed;
-  }
-}
-
-function sessionTitleFromMessage(message: string) {
-  const base = normalizeChatMessage(message)
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/^\/\w+\s+/, "");
-  // A numbered or bulleted opening ("1. …") must not become the title: the
-  // sentence split would otherwise keep only the marker itself.
-  const cleaned = base
-    .split(/[.!?\n]/)
-    .map(stripTitleListMarker)
-    .map((part) =>
-      part
-        .replace(
-          /^(please\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|i\s+want\s+to\s+|i\s+need\s+to\s+|help\s+me\s+|let'?s\s+)/i,
-          "",
-        )
-        .trim(),
-    )
-    .find((part) => /[a-z]/i.test(part));
-  const words = (cleaned ?? "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 6)
-    .map((word) => {
-      if (/^[A-Z0-9]{2,}$/.test(word)) {
-        return word;
-      }
-      return word.charAt(0).toUpperCase() + word.slice(1);
-    });
-  return normalizeSessionTitleInput(words.join(" ")) ?? "New chat";
-}
-
-function shouldSuggestSessionTitle(
-  session: Session | undefined,
-  hasTranscriptEvents: boolean,
-) {
-  if (!session) {
-    return true;
-  }
-  if (!isGenericSessionTitle(session.title)) {
-    return false;
-  }
-  return !hasTranscriptEvents;
-}
-
-// Keep in step with `is_generic_session_title` in the desktop backend. A
-// placeholder this list misses is treated as a real title, so the first turn
-// skips its rename and the chat keeps the placeholder forever.
-function isGenericSessionTitle(title: string) {
-  // A title with no letters is a marker or a placeholder ("1", "-"), never a
-  // name the user chose, so the model may still replace it.
-  if (!/[a-z]/i.test(title)) {
-    return true;
-  }
-  return [
-    "Desktop session",
-    "New chat",
-    "Worktree session",
-    "Agent workspace",
-    "CLI workspace",
-    "Worktree CLI workspace",
-    "Agent workspace CLI",
-    "Provider session",
-    "Chat handoff",
-    "Gyro session",
-    "Untitled chat",
-  ].includes(title.trim());
-}
-
-function chatMessageLength(value: string) {
-  return Array.from(value).length;
-}
-
-function chatMessagePreview(value: string) {
-  const normalized = normalizeChatMessage(value).replace(/\s+/g, " ");
-  const chars = Array.from(normalized);
-  if (chars.length <= 160) {
-    return normalized;
-  }
-  return `${chars.slice(0, 160).join("")}...`;
-}
-
-function languageServerDescriptorForPath(path: string, override?: string) {
-  if (path.startsWith("gyro-diff:")) return undefined;
-  const language = resolveLanguage({ path, override });
-  return language.lsp
-    ? {
-        languageId: language.lsp.languageId ?? language.id,
-        command: language.lsp.command,
-      }
-    : undefined;
-}
-
-function workspaceFileUri(workspacePath: string, relativePath: string) {
-  const fullPath = absoluteWorkspaceFilePath(workspacePath, relativePath)
-    .replaceAll("\\", "/")
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `file://${fullPath}`;
-}
-
-function diagnosticsFromLspMessages(
-  messages: unknown[] | undefined,
-  workspacePath: string,
-): ProblemDiagnostic[] | undefined {
-  if (!messages) {
-    return undefined;
-  }
-  let sawDiagnostics = false;
-  const diagnostics: ProblemDiagnostic[] = [];
-  for (const message of messages) {
-    if (
-      !isRecord(message) ||
-      message.method !== "textDocument/publishDiagnostics"
-    ) {
-      continue;
-    }
-    const params = isRecord(message.params) ? message.params : undefined;
-    if (!params || typeof params.uri !== "string") {
-      continue;
-    }
-    sawDiagnostics = true;
-    const path = lspRelativePath(params.uri, workspacePath);
-    const values = Array.isArray(params.diagnostics) ? params.diagnostics : [];
-    values.forEach((value, index) => {
-      if (!isRecord(value) || typeof value.message !== "string") {
-        return;
-      }
-      const range = isRecord(value.range) ? value.range : undefined;
-      const start = range && isRecord(range.start) ? range.start : undefined;
-      const end = range && isRecord(range.end) ? range.end : undefined;
-      const severityValue =
-        typeof value.severity === "number" ? value.severity : 3;
-      const severity: ProblemDiagnostic["severity"] =
-        severityValue === 1
-          ? "error"
-          : severityValue === 2
-            ? "warning"
-            : severityValue === 4
-              ? "hint"
-              : "info";
-      diagnostics.push({
-        id: `${path}:${numberField(start, "line")}:${index}:${value.message}`,
-        path,
-        message: value.message,
-        severity,
-        source: typeof value.source === "string" ? value.source : undefined,
-        startLineNumber: numberField(start, "line") + 1,
-        startColumn: numberField(start, "character") + 1,
-        endLineNumber: numberField(end, "line") + 1,
-        endColumn: numberField(end, "character") + 1,
-      });
-    });
-  }
-  return sawDiagnostics ? diagnostics : undefined;
-}
-
-function lspRelativePath(uri: string, workspacePath: string) {
-  try {
-    const absolutePath = decodeURIComponent(uri.replace(/^file:\/\//, ""));
-    return absoluteWorkspaceFilePath(workspacePath, absolutePath);
-  } catch {
-    return uri;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function numberField(value: Record<string, unknown> | undefined, key: string) {
-  return typeof value?.[key] === "number" ? value[key] : 0;
-}
-
-function getCommandProfile(
-  profiles: CommandProfile[],
-  preferredId?: string,
-): CommandProfile {
-  const [fallback] = defaultCommandProfiles();
-  if (!fallback) {
-    throw new Error("Gyro requires at least one command profile");
-  }
-  return (
-    profiles.find((profile) => profile.id === preferredId) ??
-    profiles[0] ??
-    fallback
-  );
-}
-
-/**
- * Whether a pane profile can run under Gyro's approval policy.
- *
- * Mirrors `governable_pane_provider` in the Tauri backend, which is the
- * authority — this only avoids asking for governance the backend will refuse.
- * Governance needs an interactive permission hook, which today means Claude
- * Code; Codex approves through the app-server path a raw PTY cannot speak.
- */
-function profileSupportsGovernance(profile: CommandProfile) {
-  const command = profile.command.trim().split("/").pop() ?? "";
-  return (
-    profile.id === "claude" ||
-    profile.id === "claude-code" ||
-    command === "claude"
-  );
-}
-
-function terminalProcessForProfile(
-  profile: CommandProfile,
-  commandOverride?: string,
-) {
-  if (commandOverride) {
-    return {
-      args: ["-lc", commandOverride],
-      command: "zsh",
-      displayCommand: commandOverride,
-    };
-  }
-  return {
-    args: profile.args,
-    command: profile.command,
-    displayCommand: [profile.command, ...profile.args]
-      .filter(Boolean)
-      .join(" "),
-  };
-}
-
-/** Preserve discovered task arguments when a task is launched through zsh. */
-function terminalCommandLine(task: TaskDefinition) {
-  return [task.command, ...task.args]
-    .map((part) => `'${part.replace(/'/g, "'\\''")}'`)
-    .join(" ");
-}
-
-function workspaceTaskTerminalPaneId(taskId: string) {
-  return `workspace-task-${encodeURIComponent(taskId)}`;
-}
-
-function terminalStatusFromSnapshot(
-  status: TerminalPaneSnapshot["status"],
-): TerminalPaneStatus {
-  if (status === "done") {
-    return "done";
-  }
-  if (status === "failed") {
-    return "failed";
-  }
-  return "running";
-}
-
-function terminalPaneFromSnapshot(
-  snapshot: TerminalPaneSnapshot,
-  mode: WorkbenchState["workspaceMode"],
-) {
-  const profile = {
-    id: snapshot.profileId ?? inferredTerminalProfileId(snapshot),
-    displayName: snapshot.title,
-    command: snapshot.command.split(" ")[0] ?? "sh",
-    args: [],
-    workingDirectory: "Workspace",
-  };
-  return {
-    ...createTerminalPane(
-      snapshot.paneId,
-      profile,
-      terminalStatusFromSnapshot(snapshot.status),
-      workspaceRunMetadata(mode, snapshot.title, snapshot.workingDirectory),
-    ),
-    projectPath: snapshot.workspacePath,
-    command: snapshot.command,
-    lastEvent:
-      snapshot.exitCode === null || snapshot.exitCode === undefined
-        ? snapshot.status
-        : `${snapshot.status} (${snapshot.exitCode})`,
-    output: snapshot.output ?? "",
-    hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
-  };
-}
-
-function terminalSnapshotFromCapabilityData(
-  value: unknown,
-): TerminalPaneSnapshot | undefined {
-  const data = recordFromUnknown(value);
-  const pane = recordFromUnknown(data?.pane);
-  const paneId = stringFromRecord(pane, "paneId");
-  const title = stringFromRecord(pane, "title");
-  const command = stringFromRecord(pane, "command");
-  const status = stringFromRecord(pane, "status");
-  const outputRevision = pane?.outputRevision;
-  if (
-    !paneId ||
-    !title ||
-    !command ||
-    !["running", "done", "failed"].includes(status ?? "") ||
-    typeof outputRevision !== "number"
-  ) {
-    return undefined;
-  }
-  return {
-    paneId,
-    title,
-    profileId: stringFromRecord(pane, "profileId"),
-    command,
-    output: stringFromRecord(pane, "output"),
-    outputRevision,
-    status: status as TerminalPaneSnapshot["status"],
-    hasForegroundJob:
-      typeof pane?.hasForegroundJob === "boolean"
-        ? pane.hasForegroundJob
-        : undefined,
-    exitCode: typeof pane?.exitCode === "number" ? pane.exitCode : undefined,
-    workspacePath: stringFromRecord(pane, "workspacePath"),
-    workingDirectory: stringFromRecord(pane, "workingDirectory"),
-    cols: typeof pane?.cols === "number" ? pane.cols : 120,
-    rows: typeof pane?.rows === "number" ? pane.rows : 32,
-  };
-}
-
-/**
- * Project a capability call onto the Workspace AI view's tool-call row.
- *
- * The capability status vocabulary is wider than the view's, so waiting and
- * requested both read as queued, and every terminal-but-unsuccessful status
- * reads as failed.
- */
-function ideAiToolCallFromActivity(
-  activity: CapabilityActivity,
-): IdeAiToolCall {
-  const status: IdeAiToolCall["status"] =
-    activity.status === "completed"
-      ? "done"
-      : activity.status === "running"
-        ? "running"
-        : activity.status === "denied"
-          ? "blocked"
-          : activity.status === "requested" || activity.status === "waiting"
-            ? "queued"
-            : "failed";
-  return {
-    id: activity.callId,
-    name: activity.capabilityId,
-    status,
-    summary: activity.summary,
-    createdAt: activity.createdAt,
-    finishedAt:
-      status === "done" || status === "failed" || status === "blocked"
-        ? activity.createdAt
-        : undefined,
-  };
-}
-
-function capabilityActivityFromSessionEvent(
-  event: SessionEvent,
-): CapabilityActivity | undefined {
-  const payload = recordFromUnknown(event.payload);
-  if (
-    stringFromRecord(payload, "schema") !== "gyro.capability.v1" ||
-    stringFromRecord(payload, "kind") !== "capability-call"
-  ) {
-    return undefined;
-  }
-  const callId = stringFromRecord(payload, "callId");
-  const capabilityId = stringFromRecord(payload, "capabilityId");
-  const status = stringFromRecord(payload, "status");
-  const providerId = stringFromRecord(payload, "providerId");
-  const summary = stringFromRecord(payload, "summary");
-  const policyRevision = payload?.policyRevision;
-  if (
-    !callId ||
-    !capabilityId ||
-    !status ||
-    !providerId ||
-    !summary ||
-    typeof policyRevision !== "number"
-  ) {
-    return undefined;
-  }
-  const resourceRecord = recordFromUnknown(payload?.resource);
-  const resourceId = stringFromRecord(resourceRecord, "id");
-  const resourceKind = stringFromRecord(resourceRecord, "kind");
-  const resourceLabel = stringFromRecord(resourceRecord, "label");
-  const resource =
-    resourceId &&
-    resourceLabel &&
-    ["workspace", "ide", "terminal", "browser"].includes(resourceKind ?? "")
-      ? {
-          id: resourceId,
-          kind: resourceKind as CapabilityResourceRef["kind"],
-          label: resourceLabel,
-        }
-      : undefined;
-  return {
-    schema: "gyro.capability.v1",
-    kind: "capability-call",
-    callId,
-    capabilityId: capabilityId as CapabilityCallEvent["capabilityId"],
-    status: status as CapabilityCallEvent["status"],
-    providerId,
-    policyRevision,
-    summary,
-    resource,
-    target: stringFromRecord(payload, "target"),
-    sessionId: event.sessionId,
-    turnId: event.turnId,
-    createdAt: event.createdAt,
-  };
-}
-
-function markInactiveCapabilityResources(
-  events: SessionEvent[],
-  liveResourceIds: ReadonlySet<string>,
-) {
-  return events.map((event) => {
-    const payload = recordFromUnknown(event.payload);
-    if (
-      stringFromRecord(payload, "schema") !== "gyro.capability.v1" ||
-      stringFromRecord(payload, "kind") !== "capability-call" ||
-      stringFromRecord(payload, "status") !== "completed"
-    ) {
-      return event;
-    }
-    const resource = recordFromUnknown(payload?.resource);
-    const resourceId = stringFromRecord(resource, "id");
-    const resourceKind = stringFromRecord(resource, "kind");
-    if (
-      !resourceId ||
-      !["terminal", "browser"].includes(resourceKind ?? "") ||
-      liveResourceIds.has(resourceId)
-    ) {
-      return event;
-    }
-    return {
-      ...event,
-      payload: {
-        ...payload,
-        status: "inactive",
-        summary: `${stringFromRecord(payload, "summary") ?? event.message} · inactive after restart`,
-      },
-    };
-  });
-}
-
-function capabilityApprovalFromSessionEvent(
-  event: SessionEvent,
-): CapabilityApprovalEvent | undefined {
-  const payload = recordFromUnknown(event.payload);
-  if (
-    event.kind !== "approval-requested" ||
-    stringFromRecord(payload, "schema") !== "gyro.capability.v1" ||
-    stringFromRecord(payload, "kind") !== "capability-approval"
-  ) {
-    return undefined;
-  }
-  const approvalId = stringFromRecord(payload, "approvalId");
-  const callId = stringFromRecord(payload, "callId");
-  const capabilityId = stringFromRecord(payload, "capabilityId");
-  const capabilityClass = stringFromRecord(payload, "capabilityClass");
-  const providerId = stringFromRecord(payload, "providerId");
-  const scopeKind = stringFromRecord(payload, "scopeKind");
-  const scopeValue = stringFromRecord(payload, "scopeValue");
-  if (
-    !approvalId ||
-    !callId ||
-    !capabilityId ||
-    !capabilityClass ||
-    !providerId ||
-    !scopeKind ||
-    !scopeValue
-  ) {
-    return undefined;
-  }
-  return {
-    schema: "gyro.capability.v1",
-    kind: "capability-approval",
-    approvalId,
-    callId,
-    capabilityId: capabilityId as CapabilityApprovalEvent["capabilityId"],
-    capabilityClass:
-      capabilityClass as CapabilityApprovalEvent["capabilityClass"],
-    providerId,
-    status: "waiting",
-    scopeKind,
-    scopeValue,
-    choices:
-      capabilityId === "workspace-read-editor"
-        ? ["deny", "allow-once"]
-        : ["deny", "allow-once", "allow-project"],
-  };
-}
-
-function inferredTerminalProfileId(snapshot: TerminalPaneSnapshot): string {
-  const command = snapshot.command.trim().split(/\s+/, 1)[0] ?? "";
-  const executable = command.split("/").pop()?.toLowerCase();
-  if (
-    snapshot.title.trim().toLowerCase() === "shell" &&
-    executable &&
-    ["sh", "bash", "zsh", "fish"].includes(executable)
-  ) {
-    return "shell";
-  }
-  return `restored-${snapshot.paneId}`;
-}
-
-function isPlainShellTerminal(pane: TerminalPane): boolean {
-  if (pane.profileId === "shell") {
-    return true;
-  }
-  const command = pane.command.trim().split(/\s+/, 1)[0] ?? "";
-  const executable = command.split("/").pop()?.toLowerCase();
-  return (
-    pane.title.trim().toLowerCase() === "shell" &&
-    executable !== undefined &&
-    ["sh", "bash", "zsh", "fish"].includes(executable)
-  );
-}
-
-function terminalPaneProcessIsMissing(error: unknown): boolean {
-  return String(error).toLowerCase().includes("terminal pane not found");
-}
-
-function terminalSizeForTemplate(template: TerminalTemplate) {
-  if (template <= 1) {
-    return { cols: 132, rows: 36 };
-  }
-  if (template <= 4) {
-    return { cols: 110, rows: 30 };
-  }
-  if (template <= 8) {
-    return { cols: 92, rows: 24 };
-  }
-  return { cols: 80, rows: 20 };
-}
-
-function pathFromSessionEvent(
-  event: SessionEvent,
-  workspacePath?: string,
-): string {
-  const payload = recordFromUnknown(event.payload);
-  const directPath = stringFromRecord(payload, "path");
-  const dataPath = stringFromRecord(recordFromUnknown(payload?.data), "path");
-  const rawPath = (() => {
-    if (directPath || dataPath) {
-      return directPath ?? dataPath ?? "packages/ui/src/surfaces.tsx";
-    }
-    const explicitPath = event.message.match(/(?:file|path):\s*([^\s]+)/i)?.[1];
-    if (explicitPath) {
-      return explicitPath;
-    }
-    return (
-      event.message.match(/[\w./-]+\.(?:css|json|md|rs|ts|tsx)/)?.[0] ??
-      "packages/ui/src/surfaces.tsx"
-    );
-  })();
-  return workspaceRelativeFilePath(rawPath, workspacePath);
-}
-
-function deriveActiveTurn(
-  events: SessionEvent[],
-  sessionTitle = "Desktop session",
-  workspacePath?: string,
-): WorkbenchTurn | undefined {
-  let latestUserEvent: SessionEvent | undefined;
-  let latestUserIndex = -1;
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event?.kind === "user-message") {
-      latestUserEvent = event;
-      latestUserIndex = index;
-      break;
-    }
-  }
-  if (!latestUserEvent) {
-    return undefined;
-  }
-
-  const turnId = turnIdFromSessionEvent(latestUserEvent) ?? latestUserEvent.id;
-  const changedFiles = new Set<string>();
-  let genericApprovalsPending = 0;
-  const mutationApprovalStatuses = new Map<string, string>();
-  let lastEvent = latestUserEvent;
-  let hasCommandRequest = false;
-  let hasCommandOutput = false;
-  let hasStreamingAssistant = false;
-  let hasProviderActivity = false;
-  let providerStatus: string | undefined;
-  /** Heartbeats refresh the status event's createdAt; that is the live clock. */
-  let providerStatusCreatedAt: string | undefined;
-
-  for (
-    let index = Math.max(0, latestUserIndex);
-    index < events.length;
-    index += 1
-  ) {
-    const event = events[index];
-    if (!event) {
-      continue;
-    }
-    const eventTurnId = turnIdFromSessionEvent(event);
-    const isTurnEvent =
-      (eventTurnId ?? event.id) === turnId ||
-      (event.kind !== "user-message" &&
-        !eventTurnId &&
-        event.createdAt >= latestUserEvent.createdAt);
-    if (!isTurnEvent) {
-      continue;
-    }
-    lastEvent = event;
-    if (event.kind === "file-edit-proposed") {
-      changedFiles.add(pathFromSessionEvent(event, workspacePath));
-    } else if (event.kind === "approval-requested") {
-      const payload = recordFromUnknown(event.payload);
-      const proposalId = stringFromRecord(payload, "proposalId");
-      if (
-        proposalId &&
-        stringFromRecord(payload, "kind") === "mutation-approval"
-      ) {
-        mutationApprovalStatuses.set(
-          proposalId,
-          stringFromRecord(payload, "status") ?? "pending",
-        );
-      } else {
-        genericApprovalsPending += 1;
-      }
-    } else if (event.kind === "system-event") {
-      const payload = recordFromUnknown(event.payload);
-      const payloadKind = stringFromRecord(payload, "kind");
-      const proposalId = stringFromRecord(payload, "proposalId");
-      const status = stringFromRecord(payload, "status");
-      if (proposalId && status && payloadKind === "mutation-approval") {
-        mutationApprovalStatuses.set(proposalId, status);
-      }
-      // Backend status is the source of truth for whether the turn is still
-      // open. Heuristics below only fill gaps when no status event exists yet.
-      if (payloadKind === "provider-status" && status) {
-        providerStatus = status;
-        providerStatusCreatedAt = event.createdAt;
-      }
-      if (payloadKind === "provider-activity") {
-        hasProviderActivity = true;
-      }
-    } else if (event.kind === "command-requested") {
-      hasCommandRequest = true;
-    } else if (event.kind === "command-output") {
-      hasCommandOutput = true;
-    } else if (isStreamingAssistantSessionEvent(event)) {
-      hasStreamingAssistant = true;
-    }
-  }
-
-  const approvalsPending =
-    genericApprovalsPending +
-    Array.from(mutationApprovalStatuses.values()).filter(
-      (status) => status === "pending",
-    ).length;
-
-  // Prefer the durable/streamed provider status so a mid-turn assistant bubble
-  // never settles the workbench turn to "done" while the backend is still live.
-  const status =
-    approvalsPending > 0
-      ? "waiting"
-      : providerStatus === "running" ||
-          providerStatus === "queued" ||
-          providerStatus === "waiting"
-        ? providerStatus
-        : providerStatus === "done" ||
-            providerStatus === "failed" ||
-            providerStatus === "cancelled" ||
-            providerStatus === "blocked"
-          ? providerStatus === "cancelled" || providerStatus === "blocked"
-            ? "failed"
-            : providerStatus
-          : hasStreamingAssistant || hasProviderActivity
-            ? "running"
-            : hasCommandOutput ||
-                (!hasCommandRequest && lastEvent.kind === "assistant-message")
-              ? "done"
-              : hasCommandRequest
-                ? "running"
-                : "queued";
-
-  // While the provider is still open, use the later of the last timeline beat
-  // and the status event (which heartbeats touch). Otherwise quiet tool stretches
-  // after early activity leave a stale updatedAt and the idle watchdog fires.
-  const isLiveProviderStatus =
-    status === "running" || status === "queued" || status === "waiting";
-  const updatedAt =
-    isLiveProviderStatus && providerStatusCreatedAt
-      ? laterIsoTimestamp(lastEvent.createdAt, providerStatusCreatedAt)
-      : lastEvent.createdAt;
-
-  return {
-    id: turnId,
-    sessionId: latestUserEvent.sessionId,
-    sessionTitle,
-    status,
-    startedAt: latestUserEvent.createdAt,
-    updatedAt,
-    lastEvent:
-      lastEvent.kind === "assistant-message"
-        ? "Assistant response received"
-        : lastEvent.message,
-    changedFiles: changedFiles.size,
-    approvalsPending,
-  };
-}
-
-function isStreamingAssistantSessionEvent(event: SessionEvent) {
-  const payload = recordFromUnknown(event.payload);
-  return (
-    event.kind === "assistant-message" &&
-    payload?.kind === "provider-stream" &&
-    payload.streaming === true
-  );
-}
-
-function areWorkbenchTurnsEqual(
-  current: WorkbenchTurn | undefined,
-  next: WorkbenchTurn | undefined,
-) {
-  if (!current || !next) {
-    return current === next;
-  }
-  return (
-    current.id === next.id &&
-    current.sessionId === next.sessionId &&
-    current.sessionTitle === next.sessionTitle &&
-    current.status === next.status &&
-    current.startedAt === next.startedAt &&
-    current.updatedAt === next.updatedAt &&
-    current.lastEvent === next.lastEvent &&
-    current.changedFiles === next.changedFiles &&
-    current.approvalsPending === next.approvalsPending
-  );
-}
-
-function editorBufferHasUnsavedChanges(buffer: EditorBuffer | undefined) {
-  return Boolean(buffer && buffer.content !== buffer.savedContent);
-}
-
-function workspaceContentToEditorBuffer(
-  content: WorkspaceFileContent,
-): EditorBuffer {
-  return {
-    path: content.path,
-    content: content.content,
-    savedContent: content.content,
-    contentHash: content.contentHash,
-    sizeBytes: content.sizeBytes,
-    truncated: content.truncated,
-    status: "ready",
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function untrackedWorkspaceFileDiff(path: string, file: WorkspaceFileContent) {
-  const lines = file.content.length > 0 ? file.content.split("\n") : [];
-  return [
-    `diff --git a/${path} b/${path}`,
-    "new file mode 100644",
-    "--- /dev/null",
-    `+++ b/${path}`,
-    `@@ -0,0 +1,${lines.length} @@`,
-    ...lines.map((line) => `+${line}`),
-    ...(file.truncated ? ["+… file preview truncated …"] : []),
-  ].join("\n");
-}
-
-function sourceControlLineStats(sourceControl: SourceControlState) {
-  return Object.fromEntries(
-    sourceControl.files.map((file) => [
-      file.path.replaceAll("\\", "/"),
-      { additions: file.additions, deletions: file.deletions },
-    ]),
-  );
-}
-
-function workspaceName(path?: string) {
-  return path?.split("/").filter(Boolean).at(-1) ?? "Untitled";
-}
-
-function savedProjectsFromSessions(
-  sessions: Session[],
-  currentWorkspacePath?: string,
-  removedProjectPaths: string[] = [],
-  recentProjectPaths: string[] = [],
-): SavedProject[] {
-  const projects = new Map<
-    string,
-    { path: string; label: string; lastUsedAt: number; sessionCount: number }
-  >();
-  const removed = new Set(removedProjectPaths.map(normalizeProjectPath));
-
-  const upsertProject = (
-    path: string | undefined,
-    updatedAt?: string,
-    options: { includeRemoved?: boolean; countSession?: boolean } = {},
-  ) => {
-    if (!path) {
-      return;
-    }
-    const normalizedPath = normalizeProjectPath(path);
-    if (!normalizedPath) {
-      return;
-    }
-    if (removed.has(normalizedPath) && !options.includeRemoved) {
-      return;
-    }
-    const existing = projects.get(normalizedPath);
-    const lastUsedAt = updatedAt
-      ? new Date(updatedAt).getTime() || 0
-      : Date.now();
-    projects.set(normalizedPath, {
-      path: normalizedPath,
-      label: workspaceName(normalizedPath),
-      lastUsedAt: Math.max(existing?.lastUsedAt ?? 0, lastUsedAt),
-      sessionCount:
-        (existing?.sessionCount ?? 0) +
-        (updatedAt && options.countSession !== false ? 1 : 0),
-    });
-  };
-
-  upsertProject(currentWorkspacePath, undefined, { includeRemoved: true });
-  // Smoke tests and CLI probes run in system temp folders. They are not
-  // projects the user chose, so only the open workspace may surface one.
-  recentProjectPaths
-    .filter((path) => !isTransientWorkspacePath(path))
-    .forEach((path, index) =>
-      upsertProject(path, new Date(Date.now() - index).toISOString(), {
-        countSession: false,
-      }),
-    );
-  sessions
-    .filter(
-      (session) =>
-        session.origin !== "cli" &&
-        !isTransientWorkspacePath(session.workspacePath),
-    )
-    .forEach((session) =>
-      upsertProject(session.workspacePath, session.updatedAt),
-    );
-
-  const currentPath = normalizeProjectPath(currentWorkspacePath);
-  return [...projects.values()]
-    .sort((first, second) => {
-      if (first.path === currentPath) {
-        return -1;
-      }
-      if (second.path === currentPath) {
-        return 1;
-      }
-      return second.lastUsedAt - first.lastUsedAt;
-    })
-    .map((project) => ({
-      path: project.path,
-      label: project.label,
-      detail:
-        project.path === currentPath
-          ? "Current project"
-          : project.sessionCount > 0
-            ? `${project.sessionCount} chat${
-                project.sessionCount === 1 ? "" : "s"
-              }`
-            : "Recent project",
-      sessionCount: project.sessionCount,
-    }));
-}
-
-function parentDirectory(path: string) {
-  const normalized = path.replaceAll("\\", "/");
-  const index = normalized.lastIndexOf("/");
-  return index > 0 ? normalized.slice(0, index) : normalized;
-}
-
-function relativeFilePath(path: string, parent: string) {
-  const normalizedPath = path.replaceAll("\\", "/");
-  const normalizedParent = parent.replaceAll("\\", "/").replace(/\/+$/, "");
-  const prefix = `${normalizedParent}/`;
-  return normalizedPath.startsWith(prefix)
-    ? normalizedPath.slice(prefix.length)
-    : workspaceName(normalizedPath);
-}
-
-function workspaceFailedTests(items: TestTreeItem[]): TestTreeItem[] {
-  return items.flatMap((item) => [
-    ...(item.status === "failed" ? [item] : []),
-    ...workspaceFailedTests(item.children ?? []),
-  ]);
-}
-
-function editorPathMatches(path: string, root: string) {
-  return path === root || path.startsWith(`${root}/`);
-}
-
-function renameEditorPath(path: string, fromPath: string, toPath: string) {
-  return editorPathMatches(path, fromPath)
-    ? `${toPath}${path.slice(fromPath.length)}`
-    : path;
-}
-
-function workspaceTreeSignature(files: WorkspaceFile[]) {
-  return files
-    .map((file) => `${file.kind}:${file.path}:${file.depth ?? ""}`)
-    .join("\n");
-}
-
-function disposeEditorModels(paths: string[]) {
-  const uniquePaths = [...new Set(paths.filter(Boolean))];
-  if (uniquePaths.length === 0) {
-    return;
-  }
-  void import("./monaco-editor")
-    .then(({ disposeMonacoModel }) => {
-      uniquePaths.forEach(disposeMonacoModel);
-    })
-    .catch(() => undefined);
-}
-
-function createTurnId() {
-  return globalThis.crypto?.randomUUID?.() ?? `turn-${Date.now()}`;
-}
-
-/** Later of two ISO timestamps; falls back to the first parseable value. */
-function laterIsoTimestamp(first: string, second: string) {
-  const firstMs = Date.parse(first);
-  const secondMs = Date.parse(second);
-  if (!Number.isFinite(firstMs)) {
-    return Number.isFinite(secondMs) ? second : first;
-  }
-  if (!Number.isFinite(secondMs)) {
-    return first;
-  }
-  return secondMs >= firstMs ? second : first;
-}
-
-function providerLabelForId(
-  providers: ModelProviderConfig[],
-  statuses: WorkbenchState["providerStatuses"],
-  providerId: string,
-) {
-  return (
-    providers.find((provider) => provider.id === providerId)?.displayName ??
-    statuses.find((provider) => provider.id === providerId)?.displayName ??
-    providerId
-  );
-}
-
-function approvalNotificationCopy(
-  config: GyroConfig,
-  mode: "auto" | "direct" | "gated",
-) {
-  const providerName =
-    config.selectedProviderId === "anthropic"
-      ? "Claude"
-      : config.selectedProviderId === "kimi"
-        ? "Kimi"
-        : config.selectedProviderId === "xai"
-          ? "Grok"
-          : config.selectedProviderId === "antigravity"
-            ? "Google Antigravity"
-            : "Codex";
-  if (mode === "gated") {
-    return {
-      title: "Ask for approval",
-      detail: `${providerName} will ask before commands and file edits.`,
-    };
-  }
-
-  if (mode === "auto") {
-    return {
-      title: "Approve for me",
-      detail: `${providerName} can work without prompts inside the workspace boundary.`,
-    };
-  }
-
-  return {
-    title: "Full access",
-    detail: `${providerName} can run commands and apply edits without prompts.`,
-  };
-}
-
-function createProviderHealthOutput(
-  providerId: string,
-  provider?: ModelProviderConfig,
-) {
-  if (!provider?.enabled) {
-    return `${provider?.displayName ?? providerId}: not configured`;
-  }
-
-  switch (providerId) {
-    case "openai":
-      return "codex auth status: authenticated; model probe ok";
-    case "anthropic":
-      return "claude auth status: authenticated; local credential metadata verified";
-    case "kimi":
-      return "Kimi Code ACP authenticated; provider-owned token value was not read by Gyro.";
-    case "xai":
-      return "Grok Build ACP authenticated; provider-owned credentials were not read by Gyro.";
-    case "cursor":
-      return "cursor-agent: logged in; command available";
-    case "gemini":
-      return "Gemini CLI ACP authenticated; provider-owned credentials were not read by Gyro.";
-    case "opencode":
-      return "opencode: local config available";
-    case "custom":
-      return "custom command failed: executable not found";
-    default:
-      return `${provider.displayName}: health output inconclusive`;
-  }
-}
-
-function createAutomationDraft(
-  mode: WorkbenchState["workspaceMode"],
-  workspacePath: string,
-  provider: ModelProviderConfig,
-  details: {
-    title: string;
-    prompt: string;
-    schedule: Automation["schedule"];
-    calendar?: import("@gyro-dev/ui").CalendarSchedule;
-    stopCondition?: string;
-  },
-): AutomationDraft {
-  const metadata = workspaceRunMetadata(mode, details.title);
-  if (mode === "worktree") {
-    const suffix = crypto.randomUUID().slice(0, 8);
-    metadata.branch = `${metadata.branch}-${suffix}`;
-    metadata.worktreeName = `${metadata.worktreeName}-${suffix}`;
-  }
-  const model = getProviderModel(provider);
-  return {
-    title: details.title,
-    prompt: details.prompt,
-    schedule: details.schedule,
-    project: workspaceName(workspacePath),
-    provider: provider.displayName,
-    branch: metadata.branch,
-    workspaceMode: metadata.workspaceMode,
-    worktreeName: metadata.worktreeName,
-    stopCondition: details.stopCondition,
-    execution: {
-      calendar: details.calendar,
-      workspacePath,
-      providerId: provider.id,
-      providerLabel: provider.displayName,
-      modelId: model?.id ?? provider.selectedModelId,
-      modelLabel: model?.displayName,
-      reasoningEffort: selectedReasoningEffort(provider),
-    },
-  };
-}
-
-function createPreviewAutomation(draft: AutomationDraft): Automation {
-  const now = new Date().toISOString();
-  const nextRunDelay =
-    draft.schedule === "manual"
-      ? 0
-      : draft.schedule === "weekly"
-        ? 7 * 24 * 60 * 60 * 1000
-        : draft.schedule === "daily"
-          ? 24 * 60 * 60 * 1000
-          : 60 * 60 * 1000;
-  return {
-    ...draft,
-    nextRunAt: nextRunDelay
-      ? new Date(Date.now() + nextRunDelay).toISOString()
-      : undefined,
-    id: `automation-${Date.now()}`,
-    status: "current",
-    triageState: "none",
-    lastResult: "Waiting for first local run",
-    unreadResults: 0,
-    runHistory: [],
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-function createOptimisticTurnEvents(
-  sessionId: string,
-  message: string,
-  turnId: string,
-  provider?: ModelProviderConfig,
-  attachments: ChatAttachment[] = [],
-): SessionEvent[] {
-  const now = new Date().toISOString();
-  return [
-    {
-      id: `${sessionId}-user-${Date.now()}`,
-      sessionId,
-      turnId,
-      createdAt: now,
-      kind: "user-message",
-      message,
-      payload: { optimistic: true, turnId, attachments },
-    },
-    {
-      id: `${sessionId}-provider-${Date.now()}`,
-      sessionId,
-      turnId,
-      createdAt: now,
-      kind: "system-event",
-      message: providerStatusMessage("running", provider),
-      payload: providerStatusPayload("running", message, turnId, provider),
-    },
-  ];
-}
-
-type OptimisticProviderStatus = HarnessRunStatus | "ready";
-
-function providerStatusPayload(
-  status: OptimisticProviderStatus,
-  userMessage: string,
-  turnId: string,
-  provider?: ModelProviderConfig,
-  error?: string,
-) {
-  const model = provider ? getProviderModel(provider) : undefined;
-  return {
-    kind: "provider-status",
-    error,
-    modelId: model?.id,
-    modelLabel: model?.displayName,
-    messagePreview: chatMessagePreview(userMessage),
-    providerId: provider?.id,
-    providerLabel: provider?.displayName ?? "Provider",
-    status,
-    turnId,
-  };
-}
-
-// Kept in step with `PROVIDER_STOP_MARKER` in the Tauri crate, which every stop
-// message opens with so a stop can be told from a genuine failure.
-const PROVIDER_STOP_MARKER = "chat cancelled by";
-const PROVIDER_SELF_STOP_MARKER = "chat cancelled by Gyro: ";
-
-function isProviderStop(errorMessage: string) {
-  return errorMessage.includes(PROVIDER_STOP_MARKER);
-}
-
-// What to tell someone about a turn that stopped. Gyro stops turns of its own
-// accord — at the per-call token ceiling, for one — so a stop is not always
-// something the person did. Reporting every one of them as "cancelled" and
-// nothing further is how a ceiling stop reads as the app breaking for no reason.
-function providerStopDetail(errorMessage: string) {
-  const at = errorMessage.indexOf(PROVIDER_SELF_STOP_MARKER);
-  if (at < 0) {
-    return "The provider process was stopped";
-  }
-  return `Gyro stopped this turn: ${errorMessage.slice(at + PROVIDER_SELF_STOP_MARKER.length)}`;
-}
-
-function providerStatusMessage(
-  status: OptimisticProviderStatus,
-  provider?: ModelProviderConfig,
-) {
-  const providerLabel = provider?.displayName ?? "Provider";
-  if (status === "failed") {
-    return `${providerLabel} send needs attention`;
-  }
-  if (status === "blocked") {
-    return `${providerLabel} is not available for chat yet`;
-  }
-  if (status === "cancelled") {
-    return `${providerLabel} was cancelled`;
-  }
-  if (status === "waiting") {
-    return `${providerLabel} is waiting`;
-  }
-  if (status === "done") {
-    return `${providerLabel} answered`;
-  }
-  if (status === "ready") {
-    return `${providerLabel} is ready for the next step`;
-  }
-  if (status === "running") {
-    return `${providerLabel} is working`;
-  }
-  return `${providerLabel} queued this request`;
-}
-
-function rekeySessionEvents(events: SessionEvent[], sessionId: string) {
-  return events.map((event) => ({
-    ...event,
-    id: event.id.replace(event.sessionId, sessionId),
-    sessionId,
-  }));
-}
-
-function providerStreamBatchKey(sessionId: string, turnId: string) {
-  return `${sessionId}:${turnId}`;
-}
-
-function applyProviderChatStreamEvent(
-  optimisticEventsRef: { current: Map<string, SessionEvent[]> },
-  setEvents: (
-    value: SessionEvent[] | ((current: SessionEvent[]) => SessionEvent[]),
-  ) => void,
-  streamEvent: ProviderChatStreamEvent,
-) {
-  const turnId = streamEvent.turnId ?? undefined;
-  if (!streamEvent.sessionId || !turnId) {
-    return;
-  }
-  // Heartbeats keep a quiet-but-alive run marked running and refresh the status
-  // event's timestamp so the idle watchdog does not settle the turn early.
-  if (
-    streamEvent.phase === "retry-wait" ||
-    streamEvent.phase === "retry-started"
-  ) {
-    const update = (items: SessionEvent[]) =>
-      applyNativeProviderRetryStatus(items, streamEvent);
-    optimisticEventsRef.current.set(
-      streamEvent.sessionId,
-      limitOptimisticSessionEvents(
-        update(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
-      ),
-    );
-    setEvents(update);
-    return;
-  }
-  if (
-    streamEvent.phase === "started" ||
-    streamEvent.phase === "completed" ||
-    streamEvent.phase === "heartbeat"
-  ) {
-    updateOptimisticProviderStatus(
-      optimisticEventsRef,
-      setEvents,
-      streamEvent.sessionId,
-      turnId,
-      streamEvent.status ??
-        (streamEvent.phase === "completed" ? "done" : "running"),
-      undefined,
-      streamEvent.phase === "heartbeat",
-    );
-    return;
-  }
-  if (streamEvent.phase === "failed" || streamEvent.phase === "cancelled") {
-    updateOptimisticProviderStatus(
-      optimisticEventsRef,
-      setEvents,
-      streamEvent.sessionId,
-      turnId,
-      streamEvent.status ??
-        (streamEvent.phase === "cancelled" ? "cancelled" : "failed"),
-      streamEvent.error ?? undefined,
-      false,
-      streamEvent.recoveryKind ?? undefined,
-    );
-    return;
-  }
-  const textDelta = streamEvent.textDelta ?? "";
-  if (streamEvent.phase !== "delta" || textDelta === "") {
-    return;
-  }
-  const updateEvents = (items: SessionEvent[]) =>
-    upsertStreamingAssistantEvent(items, streamEvent, turnId, textDelta);
-  optimisticEventsRef.current.set(
-    streamEvent.sessionId,
-    limitOptimisticSessionEvents(
-      updateEvents(optimisticEventsRef.current.get(streamEvent.sessionId) ?? []),
-    ),
-  );
-  setEvents((current) => {
-    if (!current.some((event) => event.sessionId === streamEvent.sessionId)) {
-      return current;
-    }
-    return limitSessionEventsForUi(updateEvents(current));
-  });
-}
-
-function updateOptimisticProviderStatus(
-  optimisticEventsRef: { current: Map<string, SessionEvent[]> },
-  setEvents: (
-    value: SessionEvent[] | ((current: SessionEvent[]) => SessionEvent[]),
-  ) => void,
-  sessionId: string,
-  turnId: string,
-  status: OptimisticProviderStatus,
-  error?: string,
-  /** Move createdAt forward so idle watches see the run is still alive. */
-  touchTimestamp = false,
-  recoveryKind?: string,
-) {
-  const updateEvents = (items: SessionEvent[]) => {
-    const targetIndex = items.findLastIndex(
-      (event) => isProviderStatusEvent(event) && event.turnId === turnId,
-    );
-    if (targetIndex < 0) {
-      return items;
-    }
-    const next = items.slice();
-    const target = items[targetIndex];
-    if (target) {
-      next[targetIndex] = updateEvent(target);
-    }
-    return next;
-  };
-  const updateEvent = (event: SessionEvent): SessionEvent => {
-    if (!isProviderStatusEvent(event) || event.turnId !== turnId) {
-      return event;
-    }
-    const payload = recordFromUnknown(event.payload);
-    const providerLabel =
-      stringFromRecord(payload, "providerLabel") ?? "Provider";
-    const now = new Date().toISOString();
-    const previousStatus = stringFromRecord(payload, "status");
-    if (touchTimestamp && payload?.nativeRetry === true) {
-      return { ...event, createdAt: now };
-    }
-    const previousStartedAt = stringFromRecord(payload, "startedAt");
-    const isActiveStatus = ["queued", "running", "waiting"].includes(status);
-    const wasActiveStatus =
-      previousStatus !== undefined &&
-      ["queued", "running", "waiting"].includes(previousStatus);
-    const startedAt = isActiveStatus
-      ? wasActiveStatus
-        ? (previousStartedAt ?? event.createdAt)
-        : now
-      : (previousStartedAt ?? event.createdAt);
-    const startedAtMs = Date.parse(startedAt);
-    const completedAtMs = Date.parse(now);
-    return {
-      ...event,
-      // Heartbeats only move the timestamp; they do not invent a new status event.
-      createdAt: touchTimestamp ? now : event.createdAt,
-      message: providerStatusMessage(status, {
-        id: stringFromRecord(payload, "providerId") ?? "openai",
-        displayName: providerLabel,
-      } as ModelProviderConfig),
-      payload: {
-        ...payload,
-        nativeRetry: undefined,
-        retryAt: undefined,
-        retryAttempt: undefined,
-        retryMaxAttempts: undefined,
-        recoveryKind:
-          recoveryKind ??
-          (isActiveStatus || status === "done"
-            ? undefined
-            : payload?.recoveryKind),
-        completedAt: isActiveStatus ? undefined : now,
-        durationMs:
-          !isActiveStatus &&
-          Number.isFinite(startedAtMs) &&
-          Number.isFinite(completedAtMs)
-            ? Math.max(0, completedAtMs - startedAtMs)
-            : undefined,
-        error,
-        startedAt,
-        status,
-      },
-    };
-  };
-  const optimisticEvents = optimisticEventsRef.current.get(sessionId);
-  if (optimisticEvents) {
-    optimisticEventsRef.current.set(
-      sessionId,
-      limitOptimisticSessionEvents(updateEvents(optimisticEvents)),
-    );
-  }
-  setEvents((current) => {
-    if (!current.some((event) => event.sessionId === sessionId)) {
-      return current;
-    }
-    return limitSessionEventsForUi(updateEvents(current));
-  });
 }

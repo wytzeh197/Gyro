@@ -53,15 +53,15 @@
   flex-direction: column;
   gap: 7px;
   min-width: 80px;
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-lg);
   outline-offset: 5px;
-  --allowance-color: var(--gyro-success, #7fc795);
+  --allowance-color: var(--gyro-success);
 }
 .gyro-provider-allowance.is-warning {
   --allowance-color: var(--gyro-warning, #e6b663);
 }
 .gyro-provider-allowance.is-critical {
-  --allowance-color: var(--gyro-danger, #df7b7b);
+  --allowance-color: var(--gyro-danger);
 }
 .gyro-provider-allowance.is-unknown {
   --allowance-color: var(--gyro-muted);
@@ -120,7 +120,7 @@
   max-width: calc(100vw - 24px);
   overflow-wrap: anywhere;
   border: 1px solid var(--gyro-border);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-lg);
   padding: 8px 10px;
   background: var(--gyro-pane);
   box-shadow: 0 5px 18px #0003;

@@ -21,7 +21,7 @@
 .gyro-check-strip-copy {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--gyro-font-micro);
   line-height: 17px;
 }
 .gyro-check-strip-copy > div {
@@ -53,7 +53,7 @@
   padding: 6px;
   color: var(--gyro-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--gyro-font-micro);
   cursor: pointer;
 }
 .gyro-check-strip > button:hover {

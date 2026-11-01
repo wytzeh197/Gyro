@@ -205,7 +205,7 @@
   gap: 4px;
 }
 :root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-thread-topbar .gyro-chat-surface-button {
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   transition: background-color 120ms ease, color 120ms ease;
 }

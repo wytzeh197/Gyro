@@ -1954,6 +1954,10 @@ function extractToolNameFromRaw(raw: string): string {
 }
 
 const BROWSER_ACTIONS: Record<string, BrowserAction> = {
+  targets: "targets",
+  "select-target": "select-target", select_target: "select-target",
+  "capture-preview": "capture-preview", capture_preview: "capture-preview",
+  "preview-click": "preview-click", preview_click: "preview-click",
   open: "open",
   navigate: "navigate",
   back: "back",
@@ -1978,6 +1982,10 @@ const BROWSER_ACTIONS: Record<string, BrowserAction> = {
 };
 
 const BROWSER_ROW_LABELS: Record<BrowserAction, [string, string]> = {
+  targets: ["Finding preview targets", "Found preview targets"],
+  "select-target": ["Selecting preview target", "Selected preview target"],
+  "capture-preview": ["Capturing app preview", "Captured app preview"],
+  "preview-click": ["Clicking app preview", "Clicked app preview"],
   open: ["Opening page", "Opened page"],
   navigate: ["Navigating", "Navigated"],
   back: ["Going back", "Went back"],

@@ -18,6 +18,7 @@ function read(path) {
 const styleFiles = [
   "styles-foundation.css",
   "styles.css",
+  "base-surfaces.css",
   "chat-design.css",
   "ui-upgrade.css",
   "chat-file-card.css",

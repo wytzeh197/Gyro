@@ -43,7 +43,7 @@
 .gyro-preview-stage-label {
   position: absolute;
   bottom: 0;
-  font-size: 10px;
+  font-size: var(--gyro-font-tiny);
   line-height: 12px;
   color: var(--gyro-faint);
   pointer-events: none;

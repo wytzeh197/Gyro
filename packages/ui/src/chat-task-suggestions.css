@@ -8,7 +8,7 @@
 
 .gyro-task-suggestions-title {
   color: var(--gyro-muted);
-  font-size: var(--gyro-chat-font-work, 13px);
+  font-size: var(--gyro-chat-font-work);
   font-weight: 500;
 }
 
@@ -36,14 +36,14 @@
 
 .gyro-task-suggestion-text strong {
   color: var(--gyro-text);
-  font-size: var(--gyro-chat-font-body, 14px);
+  font-size: var(--gyro-chat-font-body);
   font-weight: 600;
   line-height: 1.4;
 }
 
 .gyro-task-suggestion-text p {
   color: var(--gyro-muted);
-  font-size: var(--gyro-chat-font-work, 13px);
+  font-size: var(--gyro-chat-font-work);
   line-height: 1.45;
   margin: 0;
 }
@@ -78,7 +78,7 @@
 }
 
 .gyro-task-suggestion-disclosure {
-  font-size: var(--gyro-chat-font-work, 13px);
+  font-size: var(--gyro-chat-font-work);
   gap: 4px;
   justify-self: start;
   margin-left: -2px;
@@ -124,7 +124,7 @@
   align-items: center;
   color: var(--gyro-muted);
   display: inline-flex;
-  font-size: var(--gyro-chat-font-work, 13px);
+  font-size: var(--gyro-chat-font-work);
   gap: 6px;
 }
 
@@ -192,7 +192,7 @@
   background: transparent;
   color: var(--gyro-muted);
   display: flex;
-  font-size: var(--gyro-chat-font-work, 13px);
+  font-size: var(--gyro-chat-font-work);
   gap: 8px;
   padding-block: 8px;
 }
@@ -212,7 +212,7 @@
 }
 
 .gyro-task-suggestion-link {
-  font-size: var(--gyro-chat-font-work, 13px);
+  font-size: var(--gyro-chat-font-work);
   gap: 3px;
 }
 
@@ -222,7 +222,7 @@
   color: var(--gyro-muted);
   display: flex;
   flex-wrap: wrap;
-  font-size: var(--gyro-chat-font-work, 13px);
+  font-size: var(--gyro-chat-font-work);
   gap: 6px;
   justify-content: flex-end;
   margin-bottom: 6px;

@@ -88,3 +88,6 @@ assert.equal(capabilityIdFromToolName("Bash"), undefined);
 console.log(
   `capability labels: ${backendIds.length} capabilities, ${uiIds.length} rail entries`,
 );
+
+assert.equal(browserCapabilityText("browser-capture-preview", "completed").label, "Captured app preview");
+assert.equal(browserCapabilityText("browser-preview-click", "running").label, "Clicking app preview");
