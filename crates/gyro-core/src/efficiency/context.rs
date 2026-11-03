@@ -85,28 +85,17 @@ impl GenerationAttempts {
 impl Attribution {
     pub fn from_request(payload: &Value) -> Self {
         let mut a = Self::default();
-        a.tool_schemas = payload.get("tools").map_or(0, |v| {
-            serde_json::to_string(v).unwrap_or_default().chars().count() as u64
-        });
+        // Compact JSON length in characters, counted while serializing. The
+        // previous `to_string` copied every tool schema on each observed request.
+        a.tool_schemas = payload.get("tools").map(json_chars).unwrap_or(0);
         if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
             for message in messages {
                 let role = message["role"].as_str().unwrap_or_default();
                 let content = &message["content"];
-                let text = if let Some(s) = content.as_str() {
-                    s.to_owned()
-                } else if let Some(parts) = content.as_array() {
-                    let mut strings = Vec::new();
-                    for part in parts {
-                        if let Some(t) = part.get("text").and_then(Value::as_str) {
-                            strings.push(t);
-                        } else {
-                            a.hidden_content = true;
-                        }
-                    }
-                    strings.join("\n")
-                } else {
-                    String::new()
-                };
+                let counted = counted_content(content);
+                if counted.hidden {
+                    a.hidden_content = true;
+                }
                 if message
                     .get("images")
                     .and_then(Value::as_array)
@@ -114,25 +103,20 @@ impl Attribution {
                 {
                     a.hidden_content = true;
                 }
-                let n = text.chars().count() as u64;
+                let n = counted.chars;
                 match role {
                     "system" | "developer" => a.instructions += n,
                     "tool" => {
-                        let source = serde_json::from_str::<Value>(&text)
-                            .ok()
-                            .and_then(|v| {
-                                v.pointer("/result/capabilityId")
-                                    .and_then(Value::as_str)
-                                    .map(str::to_owned)
-                            })
-                            .is_some_and(|id| {
-                                matches!(
-                                    id.as_str(),
-                                    "workspace-read"
-                                        | "workspace-read-range"
-                                        | "workspace-read-editor"
-                                )
-                            });
+                        // A string body is borrowed. Multipart tool text is joined
+                        // only here, which is the same string the classifier used
+                        // to parse after copying every message.
+                        let source = if let Some(text) = counted.whole {
+                            tool_text_is_source(text)
+                        } else if content.as_array().is_some() {
+                            tool_text_is_source(&joined_text_parts(content))
+                        } else {
+                            false
+                        };
                         if source {
                             a.source_excerpts += n;
                         } else {
@@ -178,6 +162,152 @@ impl Attribution {
         }
     }
 }
+
+struct CountedContent<'a> {
+    chars: u64,
+    /// Set when `content` is one string, so a tool body can be parsed in place.
+    whole: Option<&'a str>,
+    hidden: bool,
+}
+
+/// Length of message text without copying it.
+///
+/// A string is counted where it sits. Multipart text is the same `join("\n")`
+/// the old path counted, including a newline only between text parts. A part
+/// that is not text marks the message hidden and contributes nothing.
+fn counted_content(content: &Value) -> CountedContent<'_> {
+    if let Some(text) = content.as_str() {
+        return CountedContent {
+            chars: char_len(text),
+            whole: Some(text),
+            hidden: false,
+        };
+    }
+    let Some(parts) = content.as_array() else {
+        return CountedContent {
+            chars: 0,
+            whole: None,
+            hidden: false,
+        };
+    };
+    let mut chars = 0u64;
+    let mut pieces = 0u64;
+    let mut hidden = false;
+    for part in parts {
+        if let Some(text) = part.get("text").and_then(Value::as_str) {
+            if pieces > 0 {
+                chars += 1;
+            }
+            chars += char_len(text);
+            pieces += 1;
+        } else {
+            hidden = true;
+        }
+    }
+    CountedContent {
+        chars,
+        whole: None,
+        hidden,
+    }
+}
+
+fn joined_text_parts(content: &Value) -> String {
+    let Some(parts) = content.as_array() else {
+        return String::new();
+    };
+    let mut strings = Vec::new();
+    for part in parts {
+        if let Some(text) = part.get("text").and_then(Value::as_str) {
+            strings.push(text);
+        }
+    }
+    strings.join("\n")
+}
+
+fn char_len(text: &str) -> u64 {
+    if text.is_ascii() {
+        text.len() as u64
+    } else {
+        text.chars().count() as u64
+    }
+}
+
+fn tool_text_is_source(text: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(text) else {
+        return false;
+    };
+    matches!(
+        value
+            .pointer("/result/capabilityId")
+            .and_then(Value::as_str),
+        Some("workspace-read" | "workspace-read-range" | "workspace-read-editor")
+    )
+}
+
+/// Character count of compact JSON.
+///
+/// `serde_json::to_string` then `chars().count()` copied the value. This writer
+/// counts the same scalars. ASCII chunks use their byte length. A scalar split
+/// across writes is finished when its continuation bytes arrive. A failed
+/// write counts as zero, which is what `unwrap_or_default` did.
+fn json_chars(value: &Value) -> u64 {
+    let mut counter = Utf8CharCounter { chars: 0, need: 0 };
+    match serde_json::to_writer(&mut counter, value) {
+        Ok(()) => counter.chars as u64,
+        Err(_) => 0,
+    }
+}
+
+struct Utf8CharCounter {
+    chars: usize,
+    need: u8,
+}
+
+impl std::io::Write for Utf8CharCounter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.need == 0 && buf.is_ascii() {
+            self.chars += buf.len();
+            return Ok(buf.len());
+        }
+        for &byte in buf {
+            if self.need > 0 {
+                if byte & 0b1100_0000 == 0b1000_0000 {
+                    self.need -= 1;
+                    if self.need == 0 {
+                        self.chars += 1;
+                    }
+                } else {
+                    self.need = 0;
+                    self.observe_lead(byte);
+                }
+                continue;
+            }
+            self.observe_lead(byte);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Utf8CharCounter {
+    fn observe_lead(&mut self, byte: u8) {
+        if byte < 0x80 {
+            self.chars += 1;
+        } else if byte & 0b1110_0000 == 0b1100_0000 {
+            self.need = 1;
+        } else if byte & 0b1111_0000 == 0b1110_0000 {
+            self.need = 2;
+        } else if byte & 0b1111_1000 == 0b1111_0000 {
+            self.need = 3;
+        } else {
+            self.chars += 1;
+        }
+    }
+}
+
 /// Sort definitions without changing messages or removing constraints. Wire payloads contain no private annotations.
 pub fn stable_tools(tools: &mut [Value]) {
     tools.sort_by_key(|v| {
@@ -1057,6 +1187,93 @@ mod tests {
         assert_eq!(a.instructions, 4);
         assert!(a.hidden_content);
         assert_eq!(a.estimated_tokens, 1);
+    }
+
+    /// The sums are the old algorithm: owned text, `chars().count()`, and
+    /// `serde_json::to_string` for tools. ASCII is counted as bytes. A non-ASCII
+    /// body, a multipart join, and an escaped tool schema must stay on that sum.
+    #[test]
+    fn attribution_matches_owned_character_counts() {
+        let source = format!("{}界", "fn main() {}\n".repeat(40));
+        let note = "line — two";
+        let read = serde_json::json!({
+            "status": "completed",
+            "callId": "read",
+            "result": {"capabilityId": "workspace-read-editor", "data": {"content": source.clone()}}
+        })
+        .to_string();
+        let terminal = serde_json::json!({
+            "status": "completed",
+            "callId": "run",
+            "result": {"capabilityId": "terminal", "data": {"output": "done\n"}}
+        })
+        .to_string();
+        let tools = serde_json::json!([
+            {"type": "function", "function": {"name": "gyro_workspace_read", "description": "read a file\nwith \"quotes\" and 界"}}
+        ]);
+        let payload = serde_json::json!({
+            "tools": tools.clone(),
+            "messages": [
+                {"role": "developer", "content": "dev"},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "hello"},
+                    {"type": "text", "text": note},
+                    {"type": "image_url", "image_url": {"url": "data:abc"}}
+                ]},
+                {"role": "assistant", "content": "prior"},
+                {"role": "tool", "content": read.clone()},
+                {"role": "tool", "content": [
+                    {"type": "text", "text": terminal.clone()}
+                ]},
+                {"role": "user", "content": source.clone(), "gyroCategory": "source"},
+                {"role": "user", "content": "state", "gyroCategory": "task-state"},
+                {"role": "user", "content": "old", "gyroCategory": "history"},
+                {"role": "user", "content": "ask", "images": ["abc"]}
+            ]
+        });
+        let actual = Attribution::from_request(&payload);
+        let tools_chars = serde_json::to_string(&payload["tools"])
+            .unwrap()
+            .chars()
+            .count() as u64;
+        let other =
+            ("hello".chars().count() + 1 + note.chars().count() + "ask".chars().count()) as u64;
+        assert_eq!(actual.tool_schemas, tools_chars);
+        assert_eq!(actual.instructions, "dev".chars().count() as u64);
+        assert_eq!(actual.other_text, other);
+        assert_eq!(
+            actual.history,
+            ("prior".chars().count() + "old".chars().count()) as u64
+        );
+        assert_eq!(actual.task_state, "state".chars().count() as u64);
+        assert_eq!(
+            actual.source_excerpts,
+            (read.chars().count() + source.chars().count()) as u64
+        );
+        assert_eq!(actual.tool_results, terminal.chars().count() as u64);
+        assert!(actual.hidden_content);
+        let summed = actual.instructions
+            + actual.tool_schemas
+            + actual.source_excerpts
+            + actual.tool_results
+            + actual.task_state
+            + actual.history
+            + actual.other_text;
+        assert_eq!(actual.estimated_tokens, summed.div_ceil(4));
+        assert_ne!(source.len(), source.chars().count());
+        let rendered = serde_json::to_string(&tools).unwrap();
+        assert!(rendered.chars().any(|character| !character.is_ascii()));
+        assert_eq!(json_chars(&tools), rendered.chars().count() as u64);
+    }
+
+    #[test]
+    fn json_char_counter_finishes_a_scalar_split_across_writes() {
+        use std::io::Write;
+        let mut counter = Utf8CharCounter { chars: 0, need: 0 };
+        let bytes = "界".as_bytes();
+        counter.write_all(&bytes[..1]).unwrap();
+        counter.write_all(&bytes[1..]).unwrap();
+        assert_eq!((counter.chars, counter.need), (1, 0));
     }
 
     #[test]
