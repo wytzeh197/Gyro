@@ -138,10 +138,14 @@ function PasswordRow({
     setEditing(false);
     setPassword("");
   }
+  function cancel() {
+    close();
+    onNotice("", false);
+  }
   return editing ? (
     <form
       onKeyDown={(event) => {
-        if (event.key === "Escape" && !busy) close();
+        if (event.key === "Escape" && !busy) cancel();
       }}
       onSubmit={(event) => {
         event.preventDefault();
@@ -169,7 +173,7 @@ function PasswordRow({
         <button
           className="gyro-secondary-button"
           disabled={busy}
-          onClick={close}
+          onClick={cancel}
           type="button"
         >
           Cancel
@@ -353,9 +357,17 @@ export function AccountSettings({ account }: { account: Account }) {
           </SettingsGroup>
           <CloudNotice
             failed={Boolean(
-              error || status.passwordError || passwordNotice.failed,
+              error ||
+                status.passwordError ||
+                passwordNotice.failed ||
+                account.error,
             )}
-            message={error || status.passwordError || passwordNotice.message}
+            message={
+              error ||
+              status.passwordError ||
+              passwordNotice.message ||
+              account.error
+            }
           />
         </>
       )}

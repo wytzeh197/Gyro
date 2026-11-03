@@ -45,10 +45,17 @@
 .gyro-cloud-input::placeholder {
   color: var(--gyro-faint);
 }
-.gyro-cloud-input:focus-visible,
 .gyro-cloud-icon-button:focus-visible {
-  outline: 2px solid var(--gyro-accent);
+  outline: 2px solid var(--gyro-focus-ring);
   outline-offset: 1px;
+}
+/* One quiet ring: the field's own border, not a second box around it. */
+:root[data-theme] .gyro-cloud-input:focus,
+:root[data-theme] .gyro-cloud-input:focus-visible {
+  border-color: var(--gyro-focus-ring);
+  outline: 1px solid var(--gyro-focus-ring);
+  outline-offset: -1px;
+  box-shadow: none;
 }
 .gyro-cloud-icon-button {
   display: inline-grid;
@@ -67,6 +74,34 @@
 }
 
 /* Sign-up and sign-in: label on the left, field on the right, inside one card. */
+.gyro-auth-card {
+  padding: var(--gyro-space-panel) calc(20px * var(--gyro-ui-scale, 1));
+  background: var(--gyro-settings-card, var(--gyro-pane));
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+}
+.gyro-auth-card > h2 {
+  margin: 0;
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+  font-weight: 600;
+}
+.gyro-auth-card > p {
+  margin: 2px 0 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  overflow-wrap: anywhere;
+}
+.gyro-auth-card > .gyro-auth-field:first-of-type {
+  margin-top: var(--gyro-space-standard);
+}
+.gyro-auth-card .gyro-auth-field,
+.gyro-auth-card .gyro-auth-footer {
+  padding-inline: 0;
+}
+.gyro-auth-card .gyro-auth-footer {
+  padding-bottom: 0;
+}
 .gyro-auth-field {
   display: grid;
   grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);

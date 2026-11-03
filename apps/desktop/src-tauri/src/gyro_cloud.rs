@@ -135,6 +135,7 @@ pub(crate) enum Action {
     SendPasswordReset { email: String },
     ResetPassword { email: String, proof: String, password: String },
     ChangePassword { password: String },
+    ResendConfirmation { email: String },
     SignOut,
     UpdateProfile { display_name: String },
     Generate,
@@ -223,17 +224,17 @@ fn proof_body(
     }
     ensure!(
         proof.len() <= 4096,
-        "Enter the original staging sign-in link or code."
+        "Paste the link from the email, or enter its code."
     );
     let link = Url::parse(proof)
-        .map_err(|_| anyhow!("Enter the original staging sign-in link or code."))?;
+        .map_err(|_| anyhow!("Paste the link from the email, or enter its code."))?;
     ensure!(
         link.origin() == Url::parse(STAGING_ISSUER)?.origin()
             && link.path() == "/auth/v1/verify"
             && link.username().is_empty()
             && link.password().is_none()
             && link.fragment().is_none(),
-        "Use the original staging sign-in link."
+        "Use the link from the most recent email."
     );
     let mut fields = std::collections::BTreeMap::new();
     for (name, value) in link.query_pairs() {
@@ -244,12 +245,12 @@ fn proof_body(
             ) && fields
                 .insert(name.into_owned(), value.into_owned())
                 .is_none(),
-            "Invalid staging sign-in link."
+            "That link isn’t a Gyro sign-in link."
         );
     }
     let hash = match (fields.get("token"), fields.get("token_hash")) {
         (Some(hash), None) | (None, Some(hash)) => hash,
-        _ => bail!("Invalid staging sign-in link."),
+        _ => bail!("That link isn’t a Gyro sign-in link."),
     };
     ensure!(
         fields
@@ -259,7 +260,7 @@ fn proof_body(
             && hash
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte)),
-        "Invalid staging sign-in link."
+        "That link isn’t a Gyro sign-in link."
     );
     Ok(json!({ "token_hash": hash, "type": otp_type }))
 }
@@ -282,7 +283,7 @@ fn sign_in(email: &str, proof: &str) -> Result<Login> {
     check_email(email)?;
     let response = auth_request("POST", "verify")
         .send_json(email_proof(email, proof)?)
-        .map_err(|_| anyhow!("Sign-in failed. Request a new code or link and try again."))?;
+        .map_err(auth_failure)?;
     finish_login(email, read_json(response)?)
 }
 
@@ -296,7 +297,7 @@ fn finish_login(email: &str, session: AuthToken) -> Result<Login> {
             && user.email_confirmed_at.is_some()
             && user.role == "authenticated"
             && !user.is_anonymous,
-        "Sign in with a verified staging account."
+        "Confirm your email, then sign in."
     );
     #[derive(Deserialize)]
     struct Account {
@@ -322,8 +323,11 @@ fn check_password(password: &str) -> Result<()> {
 
 fn auth_failure_message(status: u16, error_code: Option<&str>) -> &'static str {
     match (status, error_code) {
-        (_, Some("invalid_credentials")) => "That email and password don’t match.",
+        (_, Some("invalid_credentials")) => {
+            "That email and password don’t match. Never set a password? Email yourself a code instead."
+        }
         (_, Some("email_not_confirmed")) => "Confirm your email first, then sign in.",
+        (_, Some("otp_disabled")) => "No account uses this email yet. Create one first.",
         (_, Some("user_already_exists" | "email_exists")) => {
             "An account with this email already exists. Sign in instead."
         }
@@ -332,14 +336,15 @@ fn auth_failure_message(status: u16, error_code: Option<&str>) -> &'static str {
         (_, Some("reauthentication_needed" | "reauthentication_not_valid")) => {
             "Sign out and back in, then change your password."
         }
-        (_, Some("otp_expired")) => "That link or code expired. Request a new one.",
-        (401, _) => "Your Gyro Cloud sign-in expired. Sign in again.",
+        (_, Some("otp_expired")) => "That link or code is wrong or expired. Request a new one.",
+        (401, _) => SIGN_IN_EXPIRED,
         (_, Some("signup_disabled" | "email_provider_disabled")) => {
             "New Gyro accounts aren’t open right now."
         }
         (429, _) | (_, Some("over_request_rate_limit" | "over_email_send_rate_limit")) => {
             "Too many attempts. Wait a moment and try again."
         }
+        (400 | 422, _) => "Gyro Account couldn’t accept that. Check what you entered and try again.",
         _ => "Couldn’t reach Gyro Account. Try again.",
     }
 }
@@ -385,32 +390,68 @@ fn reset_password(email: &str, proof: &str, password: &str) -> Result<(Login, Op
     Ok((login, refused))
 }
 
-fn sign_in_with_password(email: &str, password: &str) -> Result<Login> {
+/// No login means the account exists but has not confirmed its email yet.
+fn sign_in_with_password(email: &str, password: &str) -> Result<Option<Login>> {
     check_email(email)?;
-    let response = auth_request("POST", "token?grant_type=password")
+    let response = match auth_request("POST", "token?grant_type=password")
         .send_json(serde_json::json!({ "email": email, "password": password }))
-        .map_err(auth_failure)?;
-    finish_login(email, read_json(response)?)
+    {
+        Ok(response) => response,
+        Err(error) => {
+            let (status, code) = auth_failure_parts(error);
+            if code.as_deref() == Some("email_not_confirmed") {
+                return Ok(None);
+            }
+            bail!(auth_failure_message(status, code.as_deref()));
+        }
+    };
+    finish_login(email, read_json(response)?).map(Some)
 }
 
-/// Returns no login when the account must confirm its email before signing in.
-fn sign_up(name: &str, email: &str, password: &str) -> Result<Option<Login>> {
+enum SignUp {
+    Session(Box<AuthToken>),
+    ConfirmationRequired,
+    AccountExists,
+}
+
+/// With email confirmation on, a repeat sign-up looks like success so the
+/// service does not reveal who has an account: no session, no email sent, and
+/// a user with no identities. Sending it to the confirm step would strand them.
+fn classify_sign_up(body: serde_json::Value) -> Result<SignUp> {
+    if body.get("access_token").is_some() {
+        return Ok(SignUp::Session(Box::new(serde_json::from_value(body)?)));
+    }
+    let identities = body
+        .get("identities")
+        .or_else(|| body.get("user").and_then(|user| user.get("identities")))
+        .and_then(serde_json::Value::as_array);
+    Ok(if identities.is_some_and(Vec::is_empty) {
+        SignUp::AccountExists
+    } else {
+        SignUp::ConfirmationRequired
+    })
+}
+
+fn sign_up(name: &str, email: &str, password: &str) -> Result<SignUp> {
     let name = validate_display_name(name)?;
     ensure!(!name.is_empty(), "Enter your name.");
     check_email(email)?;
     check_password(password)?;
-    let response = auth_request("POST", "signup")
-        .send_json(serde_json::json!({
-            "email": email,
-            "password": password,
-            "data": { "display_name": name }
-        }))
-        .map_err(auth_failure)?;
-    let body: serde_json::Value = read_json(response)?;
-    if body.get("access_token").is_none() {
-        return Ok(None);
-    }
-    finish_login(email, serde_json::from_value(body)?).map(Some)
+    let response = match auth_request("POST", "signup").send_json(serde_json::json!({
+        "email": email,
+        "password": password,
+        "data": { "display_name": name }
+    })) {
+        Ok(response) => response,
+        Err(error) => {
+            let (status, code) = auth_failure_parts(error);
+            if matches!(code.as_deref(), Some("user_already_exists" | "email_exists")) {
+                return Ok(SignUp::AccountExists);
+            }
+            bail!(auth_failure_message(status, code.as_deref()));
+        }
+    };
+    classify_sign_up(read_json(response)?)
 }
 
 fn account_profile(login: &Login) -> Result<serde_json::Value> {
@@ -444,9 +485,11 @@ fn request(token: &str, method: &str, path: &str) -> Result<ureq::Request> {
         .set("Authorization", &format!("Bearer {token}")))
 }
 
+const SIGN_IN_EXPIRED: &str = "Your Gyro Cloud sign-in expired. Sign in again.";
+
 fn http_error(error: ureq::Error) -> anyhow::Error {
     match error {
-        ureq::Error::Status(401, _) => anyhow!("Your Gyro Cloud sign-in expired. Sign in again."),
+        ureq::Error::Status(401, _) => anyhow!(SIGN_IN_EXPIRED),
         ureq::Error::Status(404, _) => anyhow!("The cloud copy was removed."),
         ureq::Error::Status(413, _) => {
             anyhow!("This chat exceeds the 16 MiB encrypted backup limit.")
@@ -865,7 +908,7 @@ fn run(action: Action) -> Result<serde_json::Value> {
         Action::SendCode { email } => {
             check_email(email)?;
             auth_request("POST", "otp").send_json(json!({ "email": email, "create_user": false }))
-                .map_err(|_| anyhow!("Could not request a sign-in email. Check your staging address and try again."))?;
+                .map_err(auth_failure)?;
             return Ok(Value::Null);
         }
         Action::SignIn { email, proof } => {
@@ -877,15 +920,30 @@ fn run(action: Action) -> Result<serde_json::Value> {
             email,
             password,
         } => {
-            let Some(login) = sign_up(name, email, password)? else {
+            match sign_up(name, email, password)? {
+                SignUp::Session(session) => {
+                    state.login = Some(finish_login(email, *session)?);
+                    state.pending = None;
+                }
+                SignUp::ConfirmationRequired => {
+                    return Ok(json!({ "confirmationRequired": true }));
+                }
+                SignUp::AccountExists => return Ok(json!({ "accountExists": true })),
+            }
+        }
+        Action::PasswordSignIn { email, password } => {
+            let Some(login) = sign_in_with_password(email, password)? else {
                 return Ok(json!({ "confirmationRequired": true }));
             };
             state.login = Some(login);
             state.pending = None;
         }
-        Action::PasswordSignIn { email, password } => {
-            state.login = Some(sign_in_with_password(email, password)?);
-            state.pending = None;
+        Action::ResendConfirmation { email } => {
+            check_email(email)?;
+            auth_request("POST", "resend")
+                .send_json(json!({ "type": "signup", "email": email }))
+                .map_err(auth_failure)?;
+            return Ok(Value::Null);
         }
         Action::SignOut => {
             *state = State::default();
@@ -901,6 +959,14 @@ fn run(action: Action) -> Result<serde_json::Value> {
             | Action::ResetPassword { .. }
             | Action::SignOut
     ) {
+        // An expired sign-in reads as signed out, not as a broken account.
+        let profile = match state.login.as_ref().map(account_profile).transpose() {
+            Err(error) if error.to_string() == SIGN_IN_EXPIRED => {
+                state.login = None;
+                None
+            }
+            other => other?,
+        };
         let unlocked = state
             .login
             .as_ref()
@@ -908,7 +974,6 @@ fn run(action: Action) -> Result<serde_json::Value> {
             .transpose()?
             .flatten()
             .is_some();
-        let profile = state.login.as_ref().map(account_profile).transpose()?;
         let backup_exists = match state.login.as_ref() {
             Some(login) => unlocked || key_check(login)?.is_some(),
             None => false,
@@ -1084,13 +1149,39 @@ mod tests {
 
     #[test]
     fn auth_failures_explain_the_next_step() {
-        assert_eq!(
-            auth_failure_message(400, Some("invalid_credentials")),
-            "That email and password don’t match."
-        );
+        assert!(auth_failure_message(400, Some("invalid_credentials")).contains("don’t match"));
         assert!(auth_failure_message(422, Some("user_already_exists")).contains("Sign in"));
+        assert!(auth_failure_message(422, Some("otp_disabled")).contains("Create one"));
+        assert!(auth_failure_message(422, Some("something_new")).contains("Check what"));
         assert!(auth_failure_message(429, None).contains("Too many"));
         assert!(auth_failure_message(500, None).contains("Try again"));
+    }
+
+    #[test]
+    fn repeat_sign_up_is_recognized_instead_of_awaiting_an_email() -> Result<()> {
+        // What the service returns for an email that already has an account.
+        assert!(matches!(
+            classify_sign_up(json!({ "id": Uuid::nil(), "email": "w@example.com", "identities": [] }))?,
+            SignUp::AccountExists
+        ));
+        assert!(matches!(
+            classify_sign_up(json!({ "user": { "identities": [] } }))?,
+            SignUp::AccountExists
+        ));
+        assert!(matches!(
+            classify_sign_up(json!({ "id": Uuid::nil(), "identities": [{ "provider": "email" }] }))?,
+            SignUp::ConfirmationRequired
+        ));
+        // A missing list must not claim an account exists.
+        assert!(matches!(
+            classify_sign_up(json!({ "id": Uuid::nil() }))?,
+            SignUp::ConfirmationRequired
+        ));
+        let action: Action = serde_json::from_value(json!({
+            "type": "resendConfirmation", "email": "w@example.com"
+        }))?;
+        assert!(matches!(action, Action::ResendConfirmation { .. }));
+        Ok(())
     }
 
     #[test]

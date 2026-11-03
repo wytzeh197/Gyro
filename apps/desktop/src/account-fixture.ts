@@ -81,8 +81,16 @@ export function installAccountFixture(scene: string) {
             state.profile = null;
             return structuredClone(state);
           case "sendCode":
+            if (action.email === "nobody@example.com") {
+              throw "No account uses this email yet. Create one first.";
+            }
+            return null;
+          case "resendConfirmation":
             return null;
           case "signUp":
+            if (action.email === "taken@example.com") {
+              return { accountExists: true };
+            }
             // ?account=confirm stands in for a project that confirms new emails.
             if (scene === "confirm") {
               pendingName = String(action.name);
@@ -90,8 +98,11 @@ export function installAccountFixture(scene: string) {
             }
             return signIn(action.email, String(action.name));
           case "passwordSignIn":
+            if (action.password === "unconfirmed-password") {
+              return { confirmationRequired: true };
+            }
             if (action.password === "wrong-password") {
-              throw "That email and password don’t match.";
+              throw "That email and password don’t match. Never set a password? Email yourself a code instead.";
             }
             return signIn(action.email, pendingName ?? "Alex");
           case "signIn":

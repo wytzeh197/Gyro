@@ -2003,6 +2003,8 @@
 :root[data-theme] .gyro-settings-surface .gyro-help-topic h2 {
   letter-spacing: 0;
   text-transform: none;
+}
+
 /* Settings uses the same inset canvas and continuous surround as Sessions. */
 :root[data-theme] .gyro-app-shell.is-settings-layout > .gyro-main > .gyro-settings-surface {
   border: 0;

@@ -83,6 +83,10 @@ type AuthMode =
   | "confirm"
   | "reset-request"
   | "reset-verify";
+type AuthResult =
+  | CloudStatus
+  | { confirmationRequired: true }
+  | { accountExists: true };
 
 export function AuthField({
   label,
@@ -115,15 +119,15 @@ export function PasswordInput({
   const [visible, setVisible] = useState(false);
   return (
     <span className="gyro-auth-password">
+      {/* Read-only while busy keeps focus here if the attempt fails. */}
       <input
         autoComplete={isNew ? "new-password" : "current-password"}
         autoFocus={autoFocus}
         className="gyro-cloud-input"
-        disabled={disabled}
-        maxLength={72}
         minLength={isNew ? 8 : undefined}
         onChange={(event) => onChange(event.target.value)}
         placeholder={isNew ? "At least 8 characters" : undefined}
+        readOnly={disabled}
         required
         spellCheck={false}
         type={visible ? "text" : "password"}
@@ -146,40 +150,60 @@ export function PasswordInput({
   );
 }
 
+const noNotice = { message: "", failed: false };
+
 /**
  * New accounts give a name, email and password. Returning accounts use their
- * password, or an emailed link or code when they have none or forgot it.
+ * password, or an emailed link or code when they have none or forgot it. Every
+ * screen offers a way out, so a wrong address or a lost email is never a dead end.
  */
 export function CloudSignIn({
   onSignedIn,
 }: {
   onSignedIn: (status: CloudStatus) => void;
 }) {
+  const form = useRef<HTMLFormElement>(null);
   const [mode, setMode] = useState<AuthMode>("sign-up");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [proof, setProof] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  // Recovery routes wait behind one link instead of crowding the primary path.
+  const [notice, setNotice] = useState(noNotice);
+  // Recovery routes wait behind one link until they're asked for or needed.
   const [showHelp, setShowHelp] = useState(false);
   const address = email.trim();
+
+  // Each screen starts on its first field still needing an answer.
+  useEffect(() => {
+    const fields = form.current?.querySelectorAll("input") ?? [];
+    [...fields].find((field) => !field.value)?.focus({ preventScroll: true });
+  }, [mode]);
 
   function switchTo(next: AuthMode) {
     setMode(next);
     setShowHelp(false);
     setPassword("");
     setProof("");
-    setError("");
+    setNotice(noNotice);
+  }
+  function edit(setter: (value: string) => void) {
+    return (value: string) => {
+      setter(value);
+      setNotice((current) => (current.message ? noNotice : current));
+    };
   }
   async function run(task: () => Promise<void>) {
     setBusy(true);
-    setError("");
+    setNotice(noNotice);
     try {
       await task();
     } catch (reason) {
-      setError(String(reason));
+      setNotice({ message: String(reason), failed: true });
+      setShowHelp(true);
+      // Retrying starts on the answer that was just refused, not the first field.
+      const fields = form.current?.querySelectorAll("input");
+      fields?.[fields.length - 1]?.select();
     } finally {
       setBusy(false);
     }
@@ -192,19 +216,37 @@ export function CloudSignIn({
   function submit() {
     return run(async () => {
       if (mode === "sign-up") {
-        const result = await cloud<CloudStatus | { confirmationRequired: true }>(
-          "signUp",
-          { name: name.trim(), email: address, password },
-        );
-        if ("confirmationRequired" in result) switchTo("confirm");
-        else finish(result);
+        const result = await cloud<AuthResult>("signUp", {
+          name: name.trim(),
+          email: address,
+          password,
+        });
+        if ("accountExists" in result) {
+          switchTo("sign-in");
+          setNotice({
+            message: "You already have an account with this email. Sign in instead.",
+            failed: false,
+          });
+        } else if ("confirmationRequired" in result) {
+          switchTo("confirm");
+        } else {
+          finish(result);
+        }
       } else if (mode === "sign-in") {
-        finish(
-          await cloud<CloudStatus>("passwordSignIn", {
-            email: address,
-            password,
-          }),
-        );
+        const result = await cloud<AuthResult>("passwordSignIn", {
+          email: address,
+          password,
+        });
+        if ("confirmationRequired" in result) {
+          switchTo("confirm");
+          setShowHelp(true);
+          setNotice({
+            message: "Confirm your email to finish signing in.",
+            failed: false,
+          });
+        } else if (!("accountExists" in result)) {
+          finish(result);
+        }
       } else if (mode === "email-link") {
         await cloud("sendCode", { email: address });
         switchTo("enter-proof");
@@ -224,16 +266,28 @@ export function CloudSignIn({
       }
     });
   }
+  function sendAgain() {
+    return run(async () => {
+      await cloud(
+        mode === "reset-verify"
+          ? "sendPasswordReset"
+          : mode === "confirm"
+            ? "resendConfirmation"
+            : "sendCode",
+        { email: address },
+      );
+      setNotice({ message: `Sent again to ${address}.`, failed: false });
+    });
+  }
 
   const emailField = (
     <AuthField label="Email">
       <input
         autoComplete="email"
-        autoFocus={mode !== "sign-up"}
         className="gyro-cloud-input"
-        disabled={busy}
-        onChange={(event) => setEmail(event.target.value)}
+        onChange={(event) => edit(setEmail)(event.target.value)}
         placeholder="you@example.com"
+        readOnly={busy}
         required
         spellCheck={false}
         type="email"
@@ -241,14 +295,13 @@ export function CloudSignIn({
       />
     </AuthField>
   );
-  const isNewPassword = mode === "sign-up" || mode === "reset-verify";
   const passwordField = (
     <AuthField label={mode === "reset-verify" ? "New password" : "Password"}>
       <PasswordInput
         disabled={busy}
-        isNew={isNewPassword}
+        isNew={mode === "sign-up" || mode === "reset-verify"}
         key={mode}
-        onChange={setPassword}
+        onChange={edit(setPassword)}
         value={password}
       />
     </AuthField>
@@ -257,11 +310,10 @@ export function CloudSignIn({
     <AuthField label={mode === "confirm" ? "Confirmation" : "Link or code"}>
       <input
         autoComplete="one-time-code"
-        autoFocus
         className="gyro-cloud-input"
-        disabled={busy}
-        onChange={(event) => setProof(event.target.value)}
+        onChange={(event) => edit(setProof)(event.target.value)}
         placeholder="Paste the link, or enter the code"
+        readOnly={busy}
         required
         spellCheck={false}
         value={proof}
@@ -286,6 +338,16 @@ export function CloudSignIn({
       type="button"
     >
       {label}
+    </button>
+  );
+  const sendAgainLink = (
+    <button
+      className="gyro-auth-link"
+      disabled={busy}
+      onClick={() => void sendAgain()}
+      type="button"
+    >
+      Send again
     </button>
   );
   const { title, action, progress } = {
@@ -321,38 +383,34 @@ export function CloudSignIn({
       progress: "Setting password…",
     },
   }[mode];
+  const description =
+    mode === "enter-proof" || mode === "confirm"
+      ? `Sent to ${address}.`
+      : mode === "reset-verify"
+        ? `Sent to ${address}, if it has an account. Copy the link without opening it.`
+        : undefined;
 
   return (
     <form
       onSubmit={(event) => {
         event.preventDefault();
-        void submit();
+        if (!busy) void submit();
       }}
+      ref={form}
     >
-      <SettingsGroup
-        id="account-auth"
-        defaultOpen
-        label={title}
-        description={
-          mode === "enter-proof"
-            ? `Sent to ${address}.`
-            : mode === "confirm"
-              ? `Sent to ${address}.`
-              : mode === "reset-verify"
-                ? `Sent to ${address}, if it has an account. Copy the link without opening it.`
-                : undefined
-        }
-      >
+      {/* A form you must fill in, so unlike Settings groups it never collapses. */}
+      <section aria-labelledby="gyro-auth-title" className="gyro-auth-card">
+        <h2 id="gyro-auth-title">{title}</h2>
+        {description ? <p>{description}</p> : null}
         {mode === "sign-up" && (
           <AuthField label="Name">
             <input
               autoComplete="name"
-              autoFocus
               className="gyro-cloud-input"
-              disabled={busy}
               maxLength={80}
-              onChange={(event) => setName(event.target.value)}
+              onChange={(event) => edit(setName)(event.target.value)}
               placeholder="Your name"
+              readOnly={busy}
               required
               value={name}
             />
@@ -377,26 +435,39 @@ export function CloudSignIn({
                 {link("Sign in", "sign-in")}
               </>
             )}
-            {mode === "sign-in" &&
+            {mode === "sign-in" && (
+              <>
+                {link("Create account", "sign-up")}
+                {showHelp ? (
+                  <>
+                    {link("Reset password", "reset-request")}
+                    {link("Email me a code", "email-link")}
+                  </>
+                ) : (
+                  helpToggle("Trouble signing in?")
+                )}
+              </>
+            )}
+            {(mode === "email-link" || mode === "reset-request") && (
+              <>
+                {link("Back to sign in", "sign-in")}
+                {link("Create account", "sign-up")}
+              </>
+            )}
+            {mode === "confirm" &&
               (showHelp ? (
                 <>
-                  {link("Reset password", "reset-request")}
-                  {link("Email me a code", "email-link")}
+                  {link("Use another email", "sign-up")}
+                  {sendAgainLink}
+                  {link("Sign in", "sign-in")}
                 </>
               ) : (
                 <>
-                  {link("Create account", "sign-up")}
-                  {helpToggle("Trouble signing in?")}
+                  {helpToggle("Didn’t get it?")}
+                  <span>Confirmed in your browser?</span>
+                  {link("Sign in", "sign-in")}
                 </>
               ))}
-            {mode === "email-link" && link("Back to sign in", "sign-in")}
-            {mode === "reset-request" && link("Back to sign in", "sign-in")}
-            {mode === "confirm" && (
-              <>
-                <span>Confirmed in your browser?</span>
-                {link("Sign in", "sign-in")}
-              </>
-            )}
             {(mode === "enter-proof" || mode === "reset-verify") &&
               (showHelp ? (
                 <>
@@ -404,23 +475,8 @@ export function CloudSignIn({
                     "Use another email",
                     mode === "reset-verify" ? "reset-request" : "email-link",
                   )}
-                  <button
-                    className="gyro-auth-link"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(async () => {
-                        await cloud(
-                          mode === "reset-verify"
-                            ? "sendPasswordReset"
-                            : "sendCode",
-                          { email: address },
-                        );
-                      })
-                    }
-                    type="button"
-                  >
-                    Send again
-                  </button>
+                  {sendAgainLink}
+                  {link("Back to sign in", "sign-in")}
                 </>
               ) : (
                 helpToggle("Didn’t get it?")
@@ -430,8 +486,8 @@ export function CloudSignIn({
             {busy ? progress : action}
           </button>
         </div>
-      </SettingsGroup>
-      <CloudNotice failed={Boolean(error)} message={error} />
+      </section>
+      <CloudNotice failed={notice.failed} message={notice.message} />
     </form>
   );
 }
