@@ -1,7 +1,9 @@
+import { CloudSettings } from "../../../packages/ui/src/cloud-settings";
+import type { BillingSnapshot } from "../../../packages/ui/src/billing-settings";
 // Development-only visual fixture. Production components, invented local data.
 // No desktop IPC, providers, filesystem access, or external browser navigation.
 // ?tool=review|files|browser|canvas|terminal|agents|side-chat|plan|closed|tools
-// &theme=dark|light &split=1 &state=empty|failed|streaming|loading
+// &theme=dark|light &split=1 &state=empty|failed|streaming|loading|issues
 // &review=proposed opts into the separate proposed-file review fixture.
 import {
   useEffect,
@@ -27,6 +29,7 @@ import {
   openSubagentTab,
   providersForConfig,
   terminalDefaultProfiles,
+  type AppDestination,
   type BrowserPreview,
   type ChatCompanionTabId,
   type ChatGridState,
@@ -354,6 +357,36 @@ function initialTerminal(id = "terminal-1"): TerminalPane {
     createdAt: stamp,
   };
 }
+const cloudFixture = query.has("cloud");
+const fixtureCloudSnapshot: BillingSnapshot = {
+  cloudV2: true,
+  staging: true,
+  status: "active",
+  plan: "plus",
+  limits: { devices: 2, storageBytes: 2_000_000_000, historyDays: 30, activeLinks: 10, concurrentJobs: 1, uploadBytesPerMonth: 4_000_000_000, downloadBytesPerMonth: 40_000_000_000 },
+  cloudUsage: { storage: { usedBytes: 24_000_000, reservedBytes: 0, limitBytes: 2_000_000_000 },
+    managedAi: { unit: "percent", used: 0, held: 0, remaining: 0, resetAt: null } },
+};
+const fixtureCloudActions = {
+  preferences: () => ({}),
+  applySettings: () => {},
+  request: async (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    if (input.operation === "preview-chat") return {
+      kind: "chat", ticket: "fixture-preview-ticket",
+      content: { format: "gyro-portable-chat-v1", title: input.localId === "main" ? title : "Check retry edge cases",
+        messages: [{ role: "user", text: "Bound the sync queue retries.", createdAt: stamp },
+          { role: "assistant", text: "The queue now stops after 5 attempts and backs off between retries.", createdAt: stamp }] },
+    };
+    if (input.operation === "upload-preview") {
+      if (query.get("cloud") === "slow") await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      if (input.reviewed !== true || input.ticket !== "fixture-preview-ticket") throw new Error("Review the preview first.");
+      return query.get("cloud") === "queued" ? { queued: true } : { uploaded: { objectId: "fixture-backup", unchanged: query.get("cloud") === "unchanged" } };
+    }
+    if (input.operation === "local-chats") return { items: [{ localId: "main", title }] };
+    return { items: [] };
+  },
+};
+
 function Pane({
   pane,
   tiled,
@@ -580,6 +613,10 @@ function Pane({
       activeChatPanel={panel}
       companionTabs={companionPane.openTabs}
       onOpenCompanionTab={open}
+      backupReview={cloudFixture && pane.kind === "session" ? {
+        localId: id, available: true, accountKey: "fixture", request: fixtureCloudActions.request,
+        uploading: query.get("cloud") === "auto-upload",
+      } : undefined}
       onSelectChatPanel={open}
       onCloseCompanionTab={closeTab}
       onShowCompanionLauncher={() => open("tools")}
@@ -852,6 +889,7 @@ const sessions: Session[] = [
   eventsPath: `/fixture/${index}.jsonl`,
 }));
 function Fixture() {
+  const [destination, setDestination] = useState<AppDestination>("workspace");
   const [grid, dispatch] = useReducer(chatGridReducer, undefined, (): ChatGridState => {
     const initial: ChatGridState = {
       activeProjectKey: workspace,
@@ -920,7 +958,8 @@ function Fixture() {
       <style>{`.companion-polish-stage{height:100dvh;min-height:0;overflow:hidden}.companion-polish-stage>.gyro-app-shell{height:100%;min-height:0;grid-template-rows:minmax(0,1fr)}.companion-polish-stage .gyro-main{height:100%;max-height:100%;min-height:0}.companion-polish-stage .gyro-sidebar{height:100%;max-height:100%;min-height:0}`}</style>
       <main className="companion-polish-stage">
         <AppChrome
-          activeDestination="workspace"
+          activeDestination={destination}
+          showCloudNavigation={cloudFixture}
           activeSessionId="main"
           activeWorkspaceLayout="thread"
           commandProfiles={[]}
@@ -936,7 +975,7 @@ function Fixture() {
           onOpenSettings={() => {}}
           onOpenToolPanel={() => {}}
           onOpenWorkspace={() => {}}
-          onSelectDestination={() => {}}
+          onSelectDestination={setDestination}
           onSelectSessions={() => {}}
           onSelectWorkspaceLayout={() => {}}
           onSelectSession={(sessionId) =>
@@ -948,7 +987,14 @@ function Fixture() {
             })
           }
         >
-          <ChatGridSurface
+          {destination === "cloud" ? (
+            <div className="gyro-settings-surface gyro-cloud-workspace">
+              <div className="gyro-settings-content">
+                <CloudSettings workspace snapshot={fixtureCloudSnapshot} actions={{ cloud: fixtureCloudActions }}
+                  onManageCloud={() => setDestination("workspace")} />
+              </div>
+            </div>
+          ) : <ChatGridSurface
             layout={layout}
             maximizedPaneId={grid.maximizedPaneId}
             onDropSession={(sessionId, _source, slotIndex, placement) =>
@@ -995,7 +1041,7 @@ function Fixture() {
             )}
           >
             <Pane pane={mainPane} tiled={false} onClose={() => {}} />
-          </ChatGridSurface>
+          </ChatGridSurface>}
         </AppChrome>
       </main>
     </>

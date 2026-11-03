@@ -1,3 +1,5 @@
+import { useAutomaticChatBackup } from "./use-automatic-chat-backup";
+import { CloudSettings } from "../../../packages/ui/src/cloud-settings";
 import { newChatDefaultSelection } from "./new-chat-defaults";
 import { useCheckReminders } from "./use-check-reminders";
 import { useCloudConnection } from "./use-cloud-connection";
@@ -1091,6 +1093,13 @@ export function App() {
   const [projectRemoveCandidate, setProjectRemoveCandidate] =
     useState<SavedProject>();
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
+  const automaticBackup = useAutomaticChatBackup(
+    cloudConnection.snapshot,
+    cloudConnection.actions,
+    sendingSessionIds,
+    (id) => !workbench.preferences.sideChatSessionIds.includes(id) &&
+      sessionsRef.current.some((session) => session.id === id && !session.parentSessionId),
+  );
   const sendingSessionIdsRef = useRef(new Set<string>());
   const approvalCountsBySessionId = useMemo(
     () => sessionApprovalCounts(sessions, sessionEventsById),
@@ -1846,6 +1855,18 @@ export function App() {
       (slot) => slot?.paneId === paneId,
     );
     return pane?.kind === "session" ? pane.sessionId : undefined;
+  };
+  const backupReviewFor = (localId?: string) => {
+    const { snapshot, actions } = cloudConnection;
+    if (!localId || !snapshot.billingIdentity || !actions.cloud) return undefined;
+    return {
+      localId,
+      accountKey: snapshot.billingIdentity,
+      uploading: automaticBackup.uploading === localId,
+      request: actions.cloud.request,
+      available: snapshot.cloudCapabilities?.backup?.allowed === true &&
+        ["active", "cancellation-scheduled", "exhausted"].includes(snapshot.status),
+    };
   };
   const companionSurfaceProps = (paneId: string) => ({
     dailyPaceWarning: workbench.preferences.dailyPaceWarning,
@@ -17533,6 +17554,7 @@ export function App() {
         paneKey={paneDraftKey}
         onSelectChatPanel={selectPanePanel}
         {...paneCompanionProps}
+        backupReview={backupReviewFor(paneSession?.id)}
         railDiffTools={railDiffTools}
         railTerminalTools={railTerminalTools}
         browserPreview={previewForBrowser(paneBrowserOwner)}
@@ -17927,6 +17949,7 @@ export function App() {
       activeChatPanel={activeChatPanel}
       onSelectChatPanel={selectSoloChatPanel}
       {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
+      backupReview={backupReviewFor(activeSession?.id)}
       railDiffTools={railDiffTools}
       railTerminalTools={railTerminalTools}
       browserPreview={browserPreview}
@@ -18086,6 +18109,7 @@ export function App() {
   const appChrome = (
     <AppChrome
       renderAiChat={renderWorkspaceChat}
+      showCloudNavigation
       activePaneTab={workbench.activePaneTab}
       activeDestination={activeDestination}
       activeSessionId={sidebarActiveSessionId}
@@ -18389,6 +18413,7 @@ export function App() {
                     paneKey={activeDraftKey}
                     onSelectChatPanel={selectSoloChatPanel}
                     {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
+                    backupReview={backupReviewFor(activeSession?.id)}
                     railDiffTools={railDiffTools}
                     railTerminalTools={railTerminalTools}
                     browserPreview={browserPreview}
@@ -18870,7 +18895,7 @@ export function App() {
       {activeDestination === "settings" || activeDestination === "providers" ? (
         <SettingsSurface
           billingSnapshot={cloudConnection.snapshot}
-          billingActions={cloudConnection.actions}
+          billingActions={{ ...cloudConnection.actions, autoBackup: automaticBackup.preference }}
           preferences={workbench.preferences}
           onSettingsPreferencesChange={patch => dispatchWorkbench({ type: "set-settings-preferences", patch })}
           onImportSettings={settings => dispatchWorkbench({ type: "import-portable-settings", settings })}
@@ -19102,6 +19127,19 @@ export function App() {
           }
           onSelectDestination={selectDestination}
         />
+      ) : null}
+      {activeDestination === "cloud" ? (
+        <div className="gyro-settings-surface gyro-cloud-workspace">
+          <div className="gyro-settings-content">
+            <CloudSettings
+              workspace
+              snapshot={cloudConnection.snapshot}
+              actions={cloudConnection.actions}
+              onOpenBilling={() => openSettingsSection("billing")}
+              onManageCloud={() => openSettingsSection("cloud")}
+            />
+          </div>
+        </div>
       ) : null}
       {activeDestination === "automations" ? (
         <AutomationsSurface

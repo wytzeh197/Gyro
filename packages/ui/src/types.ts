@@ -22,6 +22,7 @@ export type AppDestination =
   | "tools"
   | "settings"
   | "automations"
+  | "cloud"
   | "providers"
   | "onboarding";
 

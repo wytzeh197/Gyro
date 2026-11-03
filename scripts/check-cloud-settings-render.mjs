@@ -287,11 +287,11 @@ check(
       assert.match(content, /€49\/month · VAT included/);
       assert.match(
         content,
-        /2 devices · 2 GB including retained versions · 30 days of history · 10 active report links · 1 managed request at a time/,
+        /Devices 2 devices 5 devices Cloud storage 2 GB 20 GB Version history 30 days 90 days Active report links 10 100/,
       );
       assert.match(
         content,
-        /5 devices · 20 GB including retained versions · 90 days of history · 100 active report links · 2 managed requests at a time/,
+        /Managed requests at once 1 2 Managed tasks.*suggested tests, change reviews and Check comparisons/,
       );
       assert.equal(
         buttons(html).filter(({ label }) => label === "Change at next renewal")
@@ -308,6 +308,16 @@ check(
     }
   },
 );
+
+check("a scheduled plan stays distinct from the current plan", () => {
+  const html = render(ui.BillingSettings, {
+    snapshot: { ...plus, scheduledPlan: "premium" },
+    actions,
+  });
+  assert.match(text(html), /Gyro Plus Current plan/);
+  assert.match(text(html), /Gyro Premium.*Scheduled for next renewal/);
+  assert.doesNotMatch(text(html), /Change at next renewal/);
+});
 
 check("unconfigured, test and production prices cannot be confused", () => {
   const unavailable = text(render(ui.BillingSettings));

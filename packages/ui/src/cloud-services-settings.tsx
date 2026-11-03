@@ -1,3 +1,4 @@
+import { CloudUpload, Laptop, Layers, Link, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   SettingsGroup,
@@ -262,12 +263,16 @@ export function CloudServicesSettings({
   limits,
   plan,
   managedAi,
+  staging,
+  workspace = false,
   accessState,
 }: {
   actions: CloudServicesActions;
   limits?: { historyDays: number; activeLinks: number };
   plan?: CloudPlan;
   managedAi?: CloudCapability;
+  staging?: boolean;
+  workspace?: boolean;
   accessState?: string;
 }) {
   const [activeBlock, setActiveBlock] = useState<Block>();
@@ -673,21 +678,28 @@ export function CloudServicesSettings({
     <>
       <SettingsGroup
         id="cloud-selected-sync"
+        icon={<CloudUpload size={16} />}
+        defaultOpen={false}
         label="Selected sync & backups"
         attention={!!feedback.sync?.error}
         summary={
           limits
-            ? `${limits.historyDays} days of history, within your storage limit`
+            ? `Back up selected work · ${limits.historyDays} days of version history`
             : "Nothing uploads until you review it"
         }
       >
         <p>
-          Choose a chat or appearance settings, review the exact portable
-          content, then upload. Tool actions, approval policies, credentials,
-          machine paths and provider sessions are excluded. Attachments are not
-          included automatically. Cloud data is encrypted in storage and
-          readable by the Gyro service.
+          Choose what to back up, then review exactly what will be uploaded.
         </p>
+        <details>
+          <summary>What is included?</summary>
+          <p>
+            Backups exclude tool actions, approval policies, credentials,
+            machine paths and provider sessions. Choose attachments separately.
+            Gyro encrypts Cloud data in storage and can read it to provide the
+            service.
+          </p>
+        </details>
         {blockFeedback("sync")}
         <div className="gyro-settings-transfer-actions">
           <button
@@ -705,7 +717,9 @@ export function CloudServicesSettings({
               })
             }
           >
-            Load selected-sync controls
+            {loaded.local
+              ? "Refresh chats and backups"
+              : "Show chats and backups"}
           </button>
           <button
             type="button"
@@ -1151,18 +1165,20 @@ export function CloudServicesSettings({
       </SettingsGroup>
       <SettingsGroup
         id="cloud-report-links"
+        icon={<Link size={16} />}
         label="Report links"
         attention={!!feedback.links?.error}
         summary={
           limits
-            ? `Up to ${limits.activeLinks} active, expiring links`
+            ? `Manage up to ${limits.activeLinks} active links`
             : "Revocable access to explicitly selected reports"
         }
       >
         {blockFeedback("links")}
         <p>
-          Anyone with a report link can read that report until it expires or is
-          revoked. Revocation cannot recall copies already downloaded.
+          Create a link from a saved Gyro Check report in Selected sync &amp;
+          backups. Anyone with the link can read the report until it expires or
+          you revoke it. Downloaded copies remain with the recipient.
         </p>
         <button
           type="button"
@@ -1218,9 +1234,10 @@ export function CloudServicesSettings({
       </SettingsGroup>
       <SettingsGroup
         id="cloud-project-memory"
+        icon={<Layers size={16} />}
         label="Editable project memory"
         attention={!!feedback.memory?.error}
-        summary="Review decisions, requirements, findings and unfinished work"
+        summary="Read or edit notes for a selected project"
       >
         {blockFeedback("memory")}
         <p>
@@ -1230,6 +1247,12 @@ export function CloudServicesSettings({
           to OpenAI GPT-6 Luna and consumes your included managed allowance.
           Drafts are suggestions that require review.
         </p>
+        {!selected ? (
+          <p>
+            Choose a local chat in Selected sync &amp; backups to open its
+            project memory.
+          </p>
+        ) : null}
         {!managedAvailable ? (
           <p>
             {memoryAvailability.reason} Reading saved memory, reviewing sources
@@ -1629,9 +1652,16 @@ export function CloudServicesSettings({
       </SettingsGroup>
       <SettingsGroup
         id="cloud-managed-assistance"
+        icon={<Sparkles size={16} />}
         label="Managed assistance"
         attention={!!feedback.ai?.error}
-        summary="Suggestions, never observed local Check evidence"
+        summary={
+          staging
+            ? "Unavailable in staging"
+            : managedAvailable
+              ? "Review and send selected text for help"
+              : taskAvailability.reason
+        }
       >
         {blockFeedback("ai")}
         <p>
@@ -1643,7 +1673,7 @@ export function CloudServicesSettings({
           <SettingsSelect
             aria-label="Managed assistance task"
             value={task}
-            disabled={busy || (jobAmbiguous && !job)}
+            disabled={busy || !managedAvailable || (jobAmbiguous && !job)}
             onChange={(e) => {
               setTask(e.currentTarget.value);
               setJobRequest(id());
@@ -1674,7 +1704,7 @@ export function CloudServicesSettings({
             aria-label="Selected context for managed assistance"
             value={context}
             maxLength={128000}
-            disabled={busy || (jobAmbiguous && !job)}
+            disabled={busy || !managedAvailable || (jobAmbiguous && !job)}
             aria-invalid={!!context && !contextFit.allowed}
             onChange={(e) => {
               setContext(e.currentTarget.value);
@@ -1839,129 +1869,140 @@ export function CloudServicesSettings({
           </div>
         ) : null}
       </SettingsGroup>
-      <SettingsGroup
-        id="cloud-devices"
-        label="Connected devices"
-        attention={!!feedback.devices?.error}
-        summary="Revoke a Cloud session without affecting local data"
-      >
-        {blockFeedback("devices")}
-        <button
-          type="button"
-          className="gyro-secondary-button"
-          disabled={busy}
-          onClick={() => void perform("devices", loadDevices)}
-        >
-          Refresh devices
-        </button>
-        {loaded.devices && !devices.length ? (
-          <p>No registered Cloud devices were returned.</p>
-        ) : null}
-        {!loaded.devices ? (
-          <p>Refresh to view the devices with access to this Cloud account.</p>
-        ) : null}
-        {devices.map((device, index) => (
-          <div key={cloudDeviceId(device) ?? index}>
-            <SettingsRow
-              label={String(device.label ?? "Gyro device")}
-              detail={
-                device.lastSeenAt
-                  ? `Last seen ${new Date(String(device.lastSeenAt)).toLocaleString()} · ${cloudDeviceId(device)?.slice(0, 8) ?? "unverified device"}`
-                  : "Cloud access only"
-              }
-              value={device.revokedAt ? "Revoked" : "Registered"}
-            />
+      {!workspace ? (
+        <>
+          <SettingsGroup
+            id="cloud-devices"
+            icon={<Laptop size={16} />}
+            label="Connected devices"
+            attention={!!feedback.devices?.error}
+            summary="Revoke a Cloud session without affecting local data"
+          >
+            {blockFeedback("devices")}
             <button
               type="button"
               className="gyro-secondary-button"
-              disabled={busy || !!device.revokedAt || !cloudDeviceId(device)}
-              onClick={() =>
-                void perform("devices", async () => {
-                  await service({
-                    operation: "revoke-device",
-                    deviceId: cloudDeviceId(device),
-                  });
-                  setDevices((old) =>
-                    old.map((row) =>
-                      cloudDeviceId(row) === cloudDeviceId(device)
-                        ? { ...row, revokedAt: new Date().toISOString() }
-                        : row,
-                    ),
-                  );
-                  setNotice("Device access revoked. Local data is preserved.");
-                  try {
-                    await loadDevices();
-                  } catch {
-                    setNotice(
-                      "Device access was revoked, but the refreshed list is unavailable. Refresh devices when connected. Local data is preserved.",
-                    );
+              disabled={busy}
+              onClick={() => void perform("devices", loadDevices)}
+            >
+              Refresh devices
+            </button>
+            {loaded.devices && !devices.length ? (
+              <p>No registered Cloud devices were returned.</p>
+            ) : null}
+            {!loaded.devices ? (
+              <p>
+                Refresh to view the devices with access to this Cloud account.
+              </p>
+            ) : null}
+            {devices.map((device, index) => (
+              <div key={cloudDeviceId(device) ?? index}>
+                <SettingsRow
+                  label={String(device.label ?? "Gyro device")}
+                  detail={
+                    device.lastSeenAt
+                      ? `Last seen ${new Date(String(device.lastSeenAt)).toLocaleString()} · ${cloudDeviceId(device)?.slice(0, 8) ?? "unverified device"}`
+                      : "Cloud access only"
                   }
+                  value={device.revokedAt ? "Revoked" : "Registered"}
+                />
+                <button
+                  type="button"
+                  className="gyro-secondary-button"
+                  disabled={
+                    busy || !!device.revokedAt || !cloudDeviceId(device)
+                  }
+                  onClick={() =>
+                    void perform("devices", async () => {
+                      await service({
+                        operation: "revoke-device",
+                        deviceId: cloudDeviceId(device),
+                      });
+                      setDevices((old) =>
+                        old.map((row) =>
+                          cloudDeviceId(row) === cloudDeviceId(device)
+                            ? { ...row, revokedAt: new Date().toISOString() }
+                            : row,
+                        ),
+                      );
+                      setNotice(
+                        "Device access revoked. Local data is preserved.",
+                      );
+                      try {
+                        await loadDevices();
+                      } catch {
+                        setNotice(
+                          "Device access was revoked, but the refreshed list is unavailable. Refresh devices when connected. Local data is preserved.",
+                        );
+                      }
+                    })
+                  }
+                >
+                  Revoke device
+                </button>
+              </div>
+            ))}
+          </SettingsGroup>
+          <SettingsGroup
+            id="cloud-account-data"
+            label="Cloud account data"
+            attention={!!feedback.account?.error}
+            summary="Export or deliberately delete hosted data"
+          >
+            {blockFeedback("account")}
+            <button
+              type="button"
+              className="gyro-secondary-button"
+              disabled={busy}
+              onClick={() =>
+                void perform("account", async () => {
+                  const data = await actions.request({
+                    operation: "export-account-files",
+                  });
+                  setNotice(
+                    data.cancelled ? "Export cancelled." : String(data.notice),
+                  );
                 })
               }
             >
-              Revoke device
+              Export account data
             </button>
-          </div>
-        ))}
-      </SettingsGroup>
-      <SettingsGroup
-        id="cloud-account-data"
-        label="Cloud account data"
-        attention={!!feedback.account?.error}
-        summary="Export or deliberately delete hosted data"
-      >
-        {blockFeedback("account")}
-        <button
-          type="button"
-          className="gyro-secondary-button"
-          disabled={busy}
-          onClick={() =>
-            void perform("account", async () => {
-              const data = await actions.request({
-                operation: "export-account-files",
-              });
-              setNotice(
-                data.cancelled ? "Export cancelled." : String(data.notice),
-              );
-            })
-          }
-        >
-          Export account data
-        </button>
-        <p>
-          Cloud deletion leaves local chats and provider credentials on this
-          Mac. Financial records may be retained separately under the account
-          policy.
-        </p>
-        <label className="gyro-cloud-text-field">
-          Type DELETE CLOUD DATA to request deletion{" "}
-          <input
-            className="gyro-cloud-content-input"
-            aria-label="Cloud deletion confirmation"
-            value={deleteConfirmation}
-            onChange={(e) => setDeleteConfirmation(e.currentTarget.value)}
-          />
-        </label>
-        <button
-          type="button"
-          className="gyro-secondary-button"
-          disabled={busy || deleteConfirmation !== "DELETE CLOUD DATA"}
-          onClick={() =>
-            void perform("account", async () => {
-              await service({
-                operation: "delete-account",
-                confirmation: deleteConfirmation,
-              });
-              setDeleteConfirmation("");
-              setNotice(
-                "Cloud deletion was requested. Local copies are preserved.",
-              );
-            })
-          }
-        >
-          Request Cloud deletion
-        </button>
-      </SettingsGroup>
+            <p>
+              Cloud deletion leaves local chats and provider credentials on this
+              Mac. Financial records may be retained separately under the
+              account policy.
+            </p>
+            <label className="gyro-cloud-text-field">
+              Type DELETE CLOUD DATA to request deletion{" "}
+              <input
+                className="gyro-cloud-content-input"
+                aria-label="Cloud deletion confirmation"
+                value={deleteConfirmation}
+                onChange={(e) => setDeleteConfirmation(e.currentTarget.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="gyro-secondary-button"
+              disabled={busy || deleteConfirmation !== "DELETE CLOUD DATA"}
+              onClick={() =>
+                void perform("account", async () => {
+                  await service({
+                    operation: "delete-account",
+                    confirmation: deleteConfirmation,
+                  });
+                  setDeleteConfirmation("");
+                  setNotice(
+                    "Cloud deletion was requested. Local copies are preserved.",
+                  );
+                })
+              }
+            >
+              Request Cloud deletion
+            </button>
+          </SettingsGroup>
+        </>
+      ) : null}
     </>
   );
 }

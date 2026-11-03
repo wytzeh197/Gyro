@@ -24,6 +24,7 @@ pub enum Task {
     deny_unknown_fields
 )]
 pub enum Command {
+    LastPayment,
     Devices,
     RevokeDevice {
         device_id: Uuid,
@@ -335,6 +336,7 @@ impl Connection {
             let get=|path:&str|self.json("GET",path,Some(session),None);
             let send=|method:&str,path:&str,body:Value|self.json(method,path,Some(session),Some(body));
             match command {
+                Command::LastPayment=>Ok(get("/v2/billing/last-payment").unwrap_or_else(|_| json!({"unavailable":true}))),
                 Command::Devices=>get("/v2/devices"),
                 Command::RevokeDevice{device_id}=>send("POST","/v2/sessions/revoke",json!({"deviceId":device_id})),
                 Command::SchedulePlan{plan_id,request_id}=>send("POST","/v2/billing/plan-change",json!({"planId":plan_id,"requestId":request_id})),
@@ -434,6 +436,30 @@ impl Connection {
                 let chunks = item.payload.len().div_ceil(4 * 1024 * 1024).max(1);
                 if item.upload_id.is_none() {
                     let digest = format!("{:x}", Sha256::digest(&item.payload));
+                    // Reuse only the current server head. A retained revision can
+                    // match the bytes after a remote edit or deletion.
+                    if item.kind == "chat" {
+                        if let Some(base) = item.base_revision_id {
+                            let versions = self.json(
+                                "GET",
+                                &format!("/v2/sync/objects/{}/versions", item.object_id),
+                                Some(session),
+                                None,
+                            );
+                            if versions.as_ref().is_ok_and(|versions| {
+                                matching_chat_head(versions, base, item.payload.len(), &digest)
+                            }) {
+                                local.remove(session.account_id(), item.request_id)?;
+                                return Ok(json!({
+                                    "objectId": item.object_id,
+                                    "revisionId": base,
+                                    "requestId": item.request_id,
+                                    "conflict": false,
+                                    "unchanged": true,
+                                }));
+                            }
+                        }
+                    }
                     let mut body = json!({"requestId":item.request_id,"objectId":item.object_id,"baseRevisionId":item.base_revision_id,"kind":item.kind,"sizeBytes":item.payload.len(),"sha256":digest,"totalChunks":chunks});
                     if let Some(filename) = &item.filename {
                         body["filename"] = json!(filename);
@@ -571,6 +597,20 @@ impl Connection {
         )
     }
 }
+fn matching_chat_head(versions: &Value, base: Uuid, size: usize, digest: &str) -> bool {
+    let Some(items) = versions["items"].as_array() else {
+        return false;
+    };
+    let mut current = items.iter().filter(|item| {
+        item.get("retainedUntil").is_some_and(Value::is_null)
+    });
+    current.next().is_some_and(|head| {
+        uuid(head, "revisionId").ok() == Some(base)
+            && head["sizeBytes"].as_u64() == Some(size as u64)
+            && head["sha256"].as_str() == Some(digest)
+    }) && current.next().is_none()
+}
+
 fn selection_ack(value: &Value, request: Uuid, object: Uuid) -> Result<Option<Value>, Error> {
     let Some(items) = value["completed"].as_array() else {
         return Ok(None);
@@ -674,6 +714,31 @@ mod tests {
         }
         c
     }
+    #[test]
+    fn unchanged_chat_requires_a_matching_current_server_head() {
+        let base = Uuid::new_v4();
+        let current = json!({
+            "revisionId": base,
+            "sizeBytes": 14,
+            "sha256": "digest",
+            "retainedUntil": null,
+        });
+        let mut versions = json!({"items": [current.clone()]});
+        assert!(matching_chat_head(&versions, base, 14, "digest"));
+        assert!(!matching_chat_head(&versions, base, 14, "different"));
+        assert!(!matching_chat_head(&versions, base, 13, "digest"));
+        assert!(!matching_chat_head(&versions, Uuid::new_v4(), 14, "digest"));
+        versions["items"][0]["retainedUntil"] = json!("2026-12-01T00:00:00Z");
+        assert!(!matching_chat_head(&versions, base, 14, "digest"));
+        versions["items"].as_array_mut().unwrap().push(json!({
+            "revisionId": Uuid::new_v4(),
+            "sizeBytes": 14,
+            "sha256": "digest",
+            "retainedUntil": null,
+        }));
+        assert!(!matching_chat_head(&versions, base, 14, "digest"));
+    }
+
     #[test]
     fn report_link_ack_is_bound_to_the_exact_reviewed_upload() {
         let request = Uuid::new_v4();

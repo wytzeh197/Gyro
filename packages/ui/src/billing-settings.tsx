@@ -1,5 +1,5 @@
 import { CreditCard } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { SettingsSection } from "./settings-presentation";
 import { SettingsGroup, SettingsRow } from "./settings-controls";
 import type { CloudServicesActions } from "./cloud-services-settings";
@@ -38,6 +38,7 @@ export type BillingSnapshot = {
   authStage?: "email" | "proof";
   accountLabel?: string;
   plan?: "lite" | "plus" | "premium";
+  scheduledPlan?: "plus" | "premium";
   limits?: {
     devices: number;
     storageBytes: number;
@@ -61,6 +62,7 @@ export type BillingSnapshot = {
   renewalAt?: string;
   cancellationAt?: string;
   invoiceAmount?: string;
+  billingIdentity?: string;
   usage?: {
     periodId: string;
     grantedMicros: number;
@@ -72,6 +74,12 @@ export type BillingSnapshot = {
   fetchedAt?: string;
 };
 export type BillingActions = {
+  autoBackup?: {
+    enabled: boolean;
+    available: boolean;
+    setEnabled: (enabled: boolean) => void;
+  };
+
   requestSignin?: (email: string, remember?: boolean) => Promise<void>;
   verifySignin?: (proof: string) => Promise<void>;
   mockManagedRequest?: () => void;
@@ -79,7 +87,7 @@ export type BillingActions = {
   cloud?: CloudServicesActions;
   restore?: () => void;
   signOut?: () => void;
-  refresh?: () => void;
+  refresh?: () => void | Promise<void>;
   manage?: () => void;
   finishCheckout?: () => void;
   abandonCheckout?: () => void;
@@ -101,6 +109,34 @@ const statusLabels: Record<BillingStatus, string> = {
   offline: "Cannot refresh subscription",
   unavailable: "Gyro Cloud is not available in this build",
 };
+const planNames = {
+  lite: "Gyro Cloud",
+  plus: "Gyro Plus",
+  premium: "Gyro Premium",
+} as const;
+const paidStates: BillingStatus[] = [
+  "active",
+  "cancellation-scheduled",
+  "exhausted",
+];
+const offers = [
+  { id: "plus", name: "Gyro Plus", price: "€15" },
+  { id: "premium", name: "Gyro Premium", price: "€49" },
+] as const;
+const offerLimits = [
+  ["Devices", "2 devices", "5 devices"],
+  ["Cloud storage", "2 GB", "20 GB"],
+  ["Version history", "30 days", "90 days"],
+  ["Active report links", "10", "100"],
+  ["Managed requests at once", "1", "2"],
+  [
+    "Managed tasks",
+    "Memory drafts, Check planning and failure explanations",
+    "Plus tasks, suggested tests, change reviews and Check comparisons",
+  ],
+] as const;
+const dateLabel = (value: string) =>
+  new Date(value).toLocaleDateString(undefined, { dateStyle: "medium" });
 const money = (micros: number) =>
   new Intl.NumberFormat(undefined, {
     style: "currency",
@@ -112,10 +148,16 @@ export function CloudConnectionSettings({
   snapshot,
   actions,
   showAccount = true,
+  showStatus = true,
+  details,
+  children,
 }: {
   snapshot: BillingSnapshot;
   actions: BillingActions;
   showAccount?: boolean;
+  showStatus?: boolean;
+  details?: ReactNode;
+  children?: ReactNode;
 }) {
   const [email, setEmail] = useState("");
   const [proof, setProof] = useState("");
@@ -126,43 +168,53 @@ export function CloudConnectionSettings({
     !!snapshot.error;
   return (
     <>
-      <div
-        className="gyro-settings-page-status"
-        role={issue ? "alert" : "status"}
-      >
-        <strong>{statusLabels[snapshot.status]}</strong>
-        {snapshot.simulation ? (
-          <span> · Local simulation — no real payment or allowance</span>
-        ) : null}
-        {snapshot.staging ? (
-          <span>
-            {modernCloud
-              ? " · Staging — test payments, managed AI disabled"
-              : " · Staging — test payments, mock AI"}
-          </span>
-        ) : null}
-        {snapshot.error ? <p>{snapshot.error}</p> : null}
-        {snapshot.status === "offline" && snapshot.fetchedAt ? (
-          <p>
-            Last confirmed {new Date(snapshot.fetchedAt).toLocaleString()}.
-            These values are stale; paid access must be rechecked by the
-            service.
-          </p>
-        ) : null}
-        {snapshot.status === "checkout-pending" ? (
-          <p>Checkout does not grant access until the service confirms it.</p>
-        ) : null}
-        {actions.refresh ? (
-          <button
-            type="button"
-            className="gyro-secondary-button"
-            onClick={actions.refresh}
-          >
-            Refresh status
-          </button>
-        ) : null}
-      </div>
-      {(snapshot.staging || modernCloud) && snapshot.authStage ? (
+      {showStatus ? (
+        <div
+          className="gyro-settings-page-status gyro-cloud-overview"
+          role={issue ? "alert" : "status"}
+        >
+          <strong>
+            {snapshot.plan && paidStates.includes(snapshot.status)
+              ? `${planNames[snapshot.plan]} · ${statusLabels[snapshot.status]}`
+              : statusLabels[snapshot.status]}
+          </strong>
+          {snapshot.simulation ? (
+            <span> · Local simulation — no real payment or allowance</span>
+          ) : null}
+          {snapshot.staging ? (
+            <span>
+              {modernCloud
+                ? " · Staging — test payments, managed AI disabled"
+                : " · Staging — test payments, mock AI"}
+            </span>
+          ) : null}
+          {snapshot.error ? <p>{snapshot.error}</p> : null}
+          {snapshot.status === "offline" && snapshot.fetchedAt ? (
+            <p>
+              Last confirmed {new Date(snapshot.fetchedAt).toLocaleString()}.
+              These values are stale; paid access must be rechecked by the
+              service.
+            </p>
+          ) : null}
+          {snapshot.status === "checkout-pending" ? (
+            <p>Checkout does not grant access until the service confirms it.</p>
+          ) : null}
+          {details}
+          <div className="gyro-settings-transfer-actions">
+            {children}
+            {actions.refresh ? (
+              <button
+                type="button"
+                className="gyro-secondary-button"
+                onClick={actions.refresh}
+              >
+                Refresh status
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {showStatus && (snapshot.staging || modernCloud) && snapshot.authStage ? (
         <SettingsGroup
           id="staging-signin"
           label={
@@ -296,6 +348,119 @@ export function CloudConnectionSettings({
   );
 }
 
+const cardNames = {
+  visa: "Visa",
+  mastercard: "Mastercard",
+  amex: "American Express",
+  discover: "Discover",
+  diners: "Diners Club",
+  jcb: "JCB",
+  unionpay: "UnionPay",
+  unknown: "Card",
+} as const;
+type CardBrand = keyof typeof cardNames;
+type PaidCard = { brand: CardBrand; last4: string };
+function LastPayment({
+  request,
+  refreshCount,
+  sandbox,
+}: {
+  request: CloudServicesActions["request"];
+  refreshCount: number;
+  sandbox?: boolean;
+}) {
+  const latestRequest = useRef(request);
+  useEffect(() => {
+    latestRequest.current = request;
+  }, [request]);
+  const [payment, setPayment] = useState<
+    PaidCard | "loading" | "unavailable" | null
+  >("loading");
+  useEffect(() => {
+    let cancelled = false;
+    setPayment("loading");
+    void latestRequest
+      .current({ operation: "service", command: { operation: "last-payment" } })
+      .then(({ card, unavailable }) => {
+        if (cancelled) return;
+        if (
+          unavailable ||
+          (card !== null && (!card || typeof card !== "object"))
+        ) {
+          setPayment("unavailable");
+          return;
+        }
+        const data = card as Partial<PaidCard> | null;
+        if (
+          data &&
+          typeof data.last4 === "string" &&
+          /^[0-9]{4}$/.test(data.last4)
+        ) {
+          setPayment({
+            brand:
+              data.brand && Object.hasOwn(cardNames, data.brand)
+                ? data.brand
+                : "unknown",
+            last4: data.last4,
+          });
+        } else setPayment(data ? "unavailable" : null);
+      })
+      .catch(() => {
+        if (!cancelled) setPayment("unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshCount]);
+  return (
+    <div className="gyro-last-payment" role="status">
+      <small>Last payment{sandbox ? " · Sandbox" : ""}</small>
+      {payment && typeof payment === "object" ? (
+        <span className="gyro-last-payment-card">
+          {payment.brand === "mastercard" ? (
+            <svg
+              className="gyro-card-mark"
+              viewBox="0 0 32 22"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="11" r="7" fill="#eb001b" />
+              <circle cx="20" cy="11" r="7" fill="#f79e1b" />
+              <path
+                d="M16 5.26a7 7 0 0 1 0 11.48 7 7 0 0 1 0-11.48Z"
+                fill="#ff5f00"
+              />
+            </svg>
+          ) : payment.brand === "visa" || payment.brand === "amex" ? (
+            <span
+              className="gyro-card-mark"
+              data-brand={payment.brand}
+              aria-hidden="true"
+            >
+              {payment.brand === "visa" ? "VISA" : "AMEX"}
+            </span>
+          ) : (
+            <CreditCard size={18} aria-hidden="true" />
+          )}
+          <strong>
+            {cardNames[payment.brand]}{" "}
+            <span aria-label={`ending in ${payment.last4}`}>
+              •••• {payment.last4}
+            </span>
+          </strong>
+        </span>
+      ) : (
+        <span>
+          {payment === "loading"
+            ? "Checking payment…"
+            : payment === "unavailable"
+              ? "Card details unavailable"
+              : "No card details for the last payment"}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function BillingSettings({
   snapshot = { status: "unavailable" },
   actions = {},
@@ -305,11 +470,54 @@ export function BillingSettings({
   actions?: BillingActions;
   onOpenCloud?: () => void;
 }) {
+  const [paymentRefresh, setPaymentRefresh] = useState(0);
   const [planChangeMessage, setPlanChangeMessage] = useState("");
   const [changingPlan, setChangingPlan] = useState(false);
+  const [pendingPlan, setPendingPlan] = useState<"plus" | "premium">();
   const modernCloud = snapshot.cloudV2 || snapshot.productionCloud;
-  const modernOffer =
-    modernCloud || (!snapshot.staging && !snapshot.simulation);
+  const currentPlan = paidStates.includes(snapshot.status)
+    ? snapshot.plan
+    : undefined;
+  const currentOffer = offers.find((offer) => offer.id === currentPlan);
+  const sandbox = snapshot.staging && modernCloud;
+  const renderPlanAction = (
+    id: NonNullable<BillingSnapshot["plan"]>,
+    name: string,
+  ) =>
+    actions.subscribe ? (
+      <button
+        type="button"
+        className="gyro-secondary-button"
+        onClick={() => actions.subscribe?.(id)}
+      >
+        Subscribe to {name}
+      </button>
+    ) : modernCloud &&
+      actions.cloud &&
+      snapshot.plan !== id &&
+      !snapshot.scheduledPlan &&
+      paidStates.includes(snapshot.status) ? (
+      <button
+        type="button"
+        className="gyro-secondary-button"
+        disabled={changingPlan}
+        onClick={() => {
+          if (id === "plus" || id === "premium") setPendingPlan(id);
+        }}
+      >
+        Change at next renewal
+      </button>
+    ) : modernCloud && currentPlan === id ? null : (
+      <span>
+        {snapshot.scheduledPlan === id
+          ? "Scheduled for next renewal"
+          : snapshot.staging && snapshot.plan === id
+            ? "Current test plan"
+            : snapshot.staging && snapshot.plan
+              ? "Plan changes are unavailable in this test"
+              : "Not available yet"}
+      </span>
+    );
   return (
     <SettingsSection
       icon={CreditCard}
@@ -318,151 +526,283 @@ export function BillingSettings({
     >
       <CloudConnectionSettings
         snapshot={snapshot}
-        actions={actions}
+        actions={
+          actions.refresh
+            ? {
+                ...actions,
+                refresh: async () => {
+                  await actions.refresh?.();
+                  setPaymentRefresh((count) => count + 1);
+                },
+              }
+            : actions
+        }
         showAccount={false}
-      />
+        details={
+          modernCloud &&
+          (currentOffer ||
+            snapshot.accessUntil ||
+            snapshot.renewalAt ||
+            snapshot.cancellationAt) ? (
+            <dl className="gyro-billing-facts">
+              {currentOffer ? (
+                <div>
+                  <dt>Listed plan price</dt>
+                  <dd>
+                    {currentOffer.price}/month
+                    <small>
+                      {sandbox ? "VAT included · sandbox" : "VAT included"}
+                    </small>
+                  </dd>
+                </div>
+              ) : null}
+              {snapshot.cancellationAt ? (
+                <div>
+                  <dt>Access ends</dt>
+                  <dd>
+                    {dateLabel(snapshot.cancellationAt)}
+                    <small>Cancellation confirmed by billing.</small>
+                  </dd>
+                </div>
+              ) : snapshot.accessUntil ? (
+                <div>
+                  <dt>Access through</dt>
+                  <dd>
+                    {dateLabel(snapshot.accessUntil)}
+                    <small>
+                      {currentOffer
+                        ? "Current paid period"
+                        : "Last confirmed by Gyro Cloud"}
+                    </small>
+                  </dd>
+                </div>
+              ) : null}
+              {currentOffer && !snapshot.cancellationAt ? (
+                <div>
+                  <dt>Next renewal</dt>
+                  <dd>
+                    {snapshot.renewalAt
+                      ? dateLabel(snapshot.renewalAt)
+                      : actions.manage
+                        ? "See billing portal"
+                        : "Date not confirmed"}
+                    <small>
+                      {snapshot.scheduledPlan
+                        ? `${planNames[snapshot.scheduledPlan]} scheduled`
+                        : actions.manage
+                          ? "Exact charges and receipts in billing"
+                          : "Reported when billing confirms it"}
+                    </small>
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : null
+        }
+      >
+        {modernCloud &&
+        snapshot.billingIdentity &&
+        actions.cloud &&
+        snapshot.status !== "offline" ? (
+          <LastPayment
+            key={snapshot.billingIdentity}
+            request={actions.cloud.request}
+            refreshCount={paymentRefresh}
+            sandbox={sandbox}
+          />
+        ) : null}
+        {actions.manage ? (
+          <button
+            type="button"
+            className="gyro-secondary-button"
+            onClick={actions.manage}
+          >
+            Manage billing
+          </button>
+        ) : null}
+      </CloudConnectionSettings>
       <SettingsGroup
         id="subscription"
         label="Subscription"
-        summary={
-          snapshot.plan === "premium"
-            ? "Gyro Premium"
-            : snapshot.plan === "plus"
-              ? "Gyro Plus"
-              : snapshot.plan === "lite"
-                ? "Gyro Cloud"
-                : "Free local app"
-        }
+        summary={currentPlan ? planNames[currentPlan] : "Compare Gyro plans"}
       >
         <p>
           The complete local app stays free.{" "}
           {modernCloud
-            ? "Cloud services are optional. Availability and remaining limits are verified by the service."
-            : "Optional services are being prepared; features and included allowances are not final."}
+            ? "Both plans include selected backups, project memory and report sharing. Storage includes retained versions."
+            : snapshot.staging
+              ? "Test billing only. This is not the launch offer."
+              : "Optional services are being prepared; features and included allowances are not final."}
         </p>
         {planChangeMessage ? <p role="status">{planChangeMessage}</p> : null}
-        <div className="gyro-billing-plans">
-          {(modernOffer
-            ? [
-                { id: "plus", name: "Gyro Plus", price: "€15" },
-                { id: "premium", name: "Gyro Premium", price: "€49" },
-              ]
-            : [
+        {modernCloud ? (
+          <>
+            {sandbox ? (
+              <p>
+                Sandbox prices only. Managed assistance is unavailable in
+                staging.
+              </p>
+            ) : null}
+            <table
+              className="gyro-plan-comparison"
+              aria-label="Compare Gyro Plus and Premium"
+            >
+              <thead>
+                <tr>
+                  <th scope="col">Included</th>
+                  {offers.map(({ id, name, price }) => (
+                    <th
+                      key={id}
+                      scope="col"
+                      data-current={id === currentPlan || undefined}
+                    >
+                      {name}
+                      {id === currentPlan ? <small>Current plan</small> : null}
+                      <small>
+                        {price}/month · VAT included
+                        {sandbox ? " · sandbox price, no real charge" : ""}
+                      </small>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(sandbox ? offerLimits.slice(0, 4) : offerLimits).map(
+                  ([label, plus, premium]) => (
+                    <tr key={label}>
+                      <th scope="row">{label}</th>
+                      <td data-current={currentPlan === "plus" || undefined}>
+                        {plus}
+                      </td>
+                      <td data-current={currentPlan === "premium" || undefined}>
+                        {premium}
+                      </td>
+                    </tr>
+                  ),
+                )}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td />
+                  {offers.map(({ id, name }) => (
+                    <td key={id} data-current={id === currentPlan || undefined}>
+                      {renderPlanAction(id, name)}
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
+            </table>
+          </>
+        ) : snapshot.staging || snapshot.simulation ? (
+          <div className="gyro-billing-plans">
+            {(
+              [
                 { id: "lite", name: "Gyro Cloud", price: "$10" },
                 { id: "plus", name: "Gyro Plus", price: "$40" },
-              ]
-          ).map(({ id, name, price }) => (
-            <article key={id}>
-              <h3>{name}</h3>
-              {modernCloud ? (
+              ] as const
+            ).map(({ id, name, price }) => (
+              <article key={id}>
+                <h3>{name}</h3>
                 <p>
-                  <strong>{price}/month</strong> · VAT included
-                  {snapshot.staging ? " · sandbox price, no real charge" : ""}
+                  <strong>
+                    {snapshot.staging ? (id === "lite" ? "$1" : "$2") : price}
+                    /month
+                  </strong>
+                  {snapshot.staging
+                    ? " · sandbox fixture"
+                    : " · planning value"}
                 </p>
-              ) : snapshot.staging ? (
-                <p>
-                  <strong>{id === "lite" ? "$1" : "$2"}/month</strong> · sandbox
-                  fixture
-                </p>
-              ) : snapshot.simulation ? (
-                <p>
-                  <strong>{price}/month</strong> · planning value
-                </p>
-              ) : null}
-              <p>
-                {modernOffer
-                  ? id === "plus"
-                    ? "2 devices · 2 GB including retained versions · 30 days of history · 10 active report links · 1 managed request at a time."
-                    : "5 devices · 20 GB including retained versions · 90 days of history · 100 active report links · 2 managed requests at a time."
-                  : snapshot.staging
-                    ? "Test billing and a $0.05 mock AI balance. This is not the launch offer. Sync, backup and sharing are unavailable."
-                    : id === "lite"
-                      ? "Optional continuity, selected-data backup and report sharing."
-                      : "Cloud services and a larger managed AI allowance for supported Gyro tasks."}
-              </p>
-              {actions.subscribe ? (
-                <button
-                  type="button"
-                  className="gyro-secondary-button"
-                  onClick={() =>
-                    actions.subscribe!(id as "lite" | "plus" | "premium")
-                  }
-                >
-                  Subscribe to {name}
-                </button>
-              ) : modernCloud &&
-                actions.cloud &&
-                snapshot.plan !== id &&
-                ["active", "cancellation-scheduled", "exhausted"].includes(
-                  snapshot.status,
-                ) ? (
-                <button
-                  type="button"
-                  className="gyro-secondary-button"
-                  disabled={changingPlan}
-                  onClick={() => {
-                    setChangingPlan(true);
-                    setPlanChangeMessage(
-                      "Scheduling the change for your next renewal…",
-                    );
-                    void actions
-                      .cloud!.request({
-                        operation: "service",
-                        command: {
-                          operation: "schedule-plan",
-                          planId: id,
-                          requestId: crypto.randomUUID(),
-                        },
-                      })
-                      .then(() =>
-                        setPlanChangeMessage(
-                          "Plan change scheduled for the next renewal. Your current plan and usage remain in place until then.",
-                        ),
-                      )
-                      .catch((error) =>
-                        setPlanChangeMessage(
-                          `Could not confirm the plan change. Refresh status before trying again. ${String(error)}`,
-                        ),
-                      )
-                      .finally(() => setChangingPlan(false));
-                  }}
-                >
-                  Change at next renewal
-                </button>
-              ) : (
-                <span>
-                  {modernCloud && snapshot.plan === id
-                    ? "Current plan"
-                    : snapshot.staging && snapshot.plan === id
-                      ? "Current test plan"
-                      : snapshot.staging && snapshot.plan
-                        ? "Plan changes are unavailable in this test"
-                        : "Not available yet"}
-                </span>
-              )}
-            </article>
-          ))}
-        </div>
-        {snapshot.accessUntil ? (
-          <SettingsRow
-            label="Access valid until"
-            detail="Reported by the service; this is not a renewal date."
-            value={new Date(snapshot.accessUntil).toLocaleString()}
-          />
+                {renderPlanAction(id, name)}
+              </article>
+            ))}
+          </div>
         ) : null}
-        {snapshot.renewalAt ? (
-          <SettingsRow
-            label="Next renewal"
-            detail="Reported by billing."
-            value={new Date(snapshot.renewalAt).toLocaleDateString()}
-          />
+        {pendingPlan &&
+        !snapshot.scheduledPlan &&
+        currentPlan &&
+        currentPlan !== pendingPlan &&
+        actions.cloud ? (
+          <div className="gyro-billing-confirm">
+            <p>
+              Switch to {planNames[pendingPlan]} at your next renewal? The new
+              plan price is{" "}
+              {offers.find((offer) => offer.id === pendingPlan)?.price}/month,
+              VAT included{sandbox ? " (sandbox)" : ""}. Your current plan stays
+              active until then.
+            </p>
+            <div className="gyro-settings-transfer-actions">
+              <button
+                type="button"
+                className="gyro-secondary-button"
+                disabled={changingPlan}
+                onClick={() => setPendingPlan(undefined)}
+              >
+                Keep current plan
+              </button>
+              <button
+                type="button"
+                className="gyro-secondary-button"
+                disabled={changingPlan}
+                onClick={() => {
+                  const id = pendingPlan;
+                  setChangingPlan(true);
+                  setPlanChangeMessage(
+                    "Scheduling the change for your next renewal…",
+                  );
+                  void actions
+                    .cloud!.request({
+                      operation: "service",
+                      command: {
+                        operation: "schedule-plan",
+                        planId: id,
+                        requestId: crypto.randomUUID(),
+                      },
+                    })
+                    .then(() =>
+                      setPlanChangeMessage(
+                        "Plan change scheduled for the next renewal. Your current plan and usage remain in place until then.",
+                      ),
+                    )
+                    .catch((error) =>
+                      setPlanChangeMessage(
+                        `Could not confirm the plan change. Refresh status before trying again. ${String(error)}`,
+                      ),
+                    )
+                    .finally(() => {
+                      setChangingPlan(false);
+                      setPendingPlan(undefined);
+                    });
+                }}
+              >
+                Confirm plan change
+              </button>
+            </div>
+          </div>
         ) : null}
-        {snapshot.cancellationAt ? (
-          <SettingsRow
-            label="Access ends"
-            detail="Cancellation confirmed by billing."
-            value={new Date(snapshot.cancellationAt).toLocaleDateString()}
-          />
+        {!modernCloud ? (
+          <>
+            {snapshot.accessUntil ? (
+              <SettingsRow
+                label="Access valid until"
+                detail="Reported by the service; this is not a renewal date."
+                value={new Date(snapshot.accessUntil).toLocaleString()}
+              />
+            ) : null}
+            {snapshot.renewalAt ? (
+              <SettingsRow
+                label="Next renewal"
+                detail="Reported by billing."
+                value={new Date(snapshot.renewalAt).toLocaleDateString()}
+              />
+            ) : null}
+            {snapshot.cancellationAt ? (
+              <SettingsRow
+                label="Access ends"
+                detail="Cancellation confirmed by billing."
+                value={new Date(snapshot.cancellationAt).toLocaleDateString()}
+              />
+            ) : null}
+          </>
         ) : null}
         {snapshot.status === "checkout-pending" ? (
           <div className="gyro-settings-transfer-actions">
@@ -603,20 +943,11 @@ export function BillingSettings({
             : "Billing management is not available yet"
         }
       >
-        {actions.manage ? (
-          <button
-            type="button"
-            className="gyro-secondary-button"
-            onClick={actions.manage}
-          >
-            Manage billing
-          </button>
-        ) : (
-          <p>
-            Payment methods, invoices, plan changes and cancellation will be
-            managed through the billing service when it is available.
-          </p>
-        )}
+        <p>
+          {actions.manage
+            ? "Manage billing opens Stripe, where you can see your payment method, actual charges and receipts, or cancel renewal. Your paid access runs through the date confirmed by billing."
+            : "Payment methods, invoices and cancellation appear here when billing management is available."}
+        </p>
       </SettingsGroup>
       {onOpenCloud ? (
         <SettingsGroup

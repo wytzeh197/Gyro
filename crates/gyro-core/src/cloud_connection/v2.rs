@@ -1069,6 +1069,10 @@ impl Connection {
 }
 pub fn checked_billing_url(value: &str) -> Result<String, Error> {
     let u = url::Url::parse(value).map_err(|_| Error::Protocol)?;
+    // Stripe Checkout uses the fragment to open its hosted payment page.
+    let stripe_checkout = u.host_str() == Some("checkout.stripe.com")
+        && (u.path().starts_with("/c/pay/cs_test_")
+            || u.path().starts_with("/c/pay/cs_live_"));
     if value.len() > 8192
         || u.scheme() != "https"
         || !matches!(
@@ -1078,7 +1082,7 @@ pub fn checked_billing_url(value: &str) -> Result<String, Error> {
         || u.port().is_some()
         || !u.username().is_empty()
         || u.password().is_some()
-        || u.fragment().is_some()
+        || (u.fragment().is_some() && !stripe_checkout)
     {
         return Err(Error::Protocol);
     }
@@ -1238,11 +1242,15 @@ mod tests {
             "https://checkout.stripe.com.evil.example/x",
             "https://user@billing.stripe.com/x",
             "https://billing.stripe.com:4342/x",
+            "https://billing.stripe.com/p/session/fixture#fragment",
+            "https://checkout.stripe.com/other#fragment",
             "javascript:alert(1)",
         ] {
             assert!(checked_billing_url(bad).is_err());
         }
         assert!(checked_billing_url("https://checkout.stripe.com/c/pay/cs_live_fixture").is_ok());
+        let sandbox = "https://checkout.stripe.com/c/pay/cs_test_fixture#opaqueFixtureToken";
+        assert_eq!(checked_billing_url(sandbox).unwrap(), sandbox);
     }
     #[cfg(debug_assertions)]
     #[test]

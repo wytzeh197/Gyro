@@ -23,6 +23,7 @@ const required = {
   "/v2/sessions/revoke": "post",
   "/v2/billing/checkout": "post",
   "/v2/billing/portal": "post",
+  "/v2/billing/last-payment": "get",
   "/v2/sync/changes": "get",
   "/v2/sync/uploads": "post",
   "/v2/sync/uploads/{uploadId}/chunks/{index}": "put",

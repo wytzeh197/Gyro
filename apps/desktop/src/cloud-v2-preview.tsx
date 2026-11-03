@@ -24,17 +24,22 @@ const status =
       ? "exhausted"
       : "active";
 const premium = params.get("plan") === "premium";
+const staging = params.get("environment") === "staging";
 const snapshot: BillingSnapshot = {
   status,
-  productionCloud: true,
+  productionCloud: !staging,
+  cloudV2: true,
+  billingIdentity: "fixture-paid-period",
+  staging,
   plan: params.get("plan") === "premium" ? "premium" : "plus",
   cloudCapabilities: {
     managedAi: {
-      allowed: !["exhausted", "paused", "offline"].includes(
-        params.get("state") ?? "",
-      ),
-      reason:
-        params.get("state") === "exhausted"
+      allowed:
+        !staging &&
+        !["exhausted", "paused", "offline"].includes(params.get("state") ?? ""),
+      reason: staging
+        ? "staging-ai-disabled"
+        : params.get("state") === "exhausted"
           ? "exhausted"
           : params.get("state") === "paused"
             ? "service-paused"
@@ -46,6 +51,7 @@ const snapshot: BillingSnapshot = {
   },
   accountLabel: "Fixture account · no real account",
   fetchedAt: "2026-11-02T12:00:00Z",
+  accessUntil: "2026-12-02T12:00:00Z",
   limits: {
     devices: premium ? 5 : 2,
     storageBytes: premium ? 20000000000 : 2000000000,
@@ -73,6 +79,8 @@ const snapshot: BillingSnapshot = {
 let deviceRevoked = false,
   linkRevoked = false;
 const actions = {
+  manage: () => {},
+  refresh: () => {},
   cloud: {
     preferences: () => ({
       theme: "light",
@@ -83,6 +91,18 @@ const actions = {
     applySettings: () => {},
     continueChat: async () => true,
     request: async (r: Record<string, unknown>) => {
+      if (
+        (r.command as { operation?: string } | undefined)?.operation ===
+        "last-payment"
+      ) {
+        const visa = params.get("card") === "visa";
+        return {
+          card: {
+            brand: visa ? "visa" : "mastercard",
+            last4: visa ? "4242" : "4444",
+          },
+        };
+      }
       if (r.operation === "save-read-only-archive")
         return {
           content: r.content,
@@ -288,7 +308,7 @@ function Preview() {
     ...createInitialWorkbenchState().preferences,
     settingsSections: {
       "cloud/gyro-account": false,
-      "cloud/cloud-managed-usage": true,
+      "cloud/cloud-managed-usage": false,
       ...(params.get("open") ? { [`cloud/${params.get("open")}`]: true } : {}),
     },
   }));

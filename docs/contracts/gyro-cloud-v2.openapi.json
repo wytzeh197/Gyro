@@ -2188,6 +2188,124 @@
         }
       }
     },
+    "/v2/billing/last-payment": {
+      "get": {
+        "description": "Card brand and last four digits of the latest verified paid invoice, or no card.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Validated response. No client response is spending authority.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "card": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "brand": {
+                              "type": "string",
+                              "enum": [
+                                "visa",
+                                "mastercard",
+                                "amex",
+                                "discover",
+                                "diners",
+                                "jcb",
+                                "unionpay",
+                                "unknown"
+                              ]
+                            },
+                            "last4": {
+                              "type": "string",
+                              "pattern": "^[0-9]{4}$"
+                            }
+                          },
+                          "required": [
+                            "brand",
+                            "last4"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "card"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validated response. No client response is spending authority.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Validated response. No client response is spending authority.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Validated response. No client response is spending authority.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Validated response. No client response is spending authority.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Validated response. No client response is spending authority.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Validated response. No client response is spending authority.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v2/billing/portal": {
       "post": {
         "description": "Open an authenticated, short-lived hosted billing handoff.",

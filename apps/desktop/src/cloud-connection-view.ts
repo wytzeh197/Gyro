@@ -32,6 +32,8 @@ export type CloudView = {
         | "revoked"
         | "disputed";
       planId: string | null;
+      scheduledPlan?: string | null;
+      periodId?: string | null;
       paidThrough: string | null;
       renewalAt: string | null;
       cancellationAt: string | null;
@@ -110,6 +112,11 @@ export function cloudBillingView(view: CloudView): BillingSnapshot {
     productionCloud:
       view.contractVersion === "2.0.0" && view.environment === "production",
     cloudV2: isV2CloudView(view),
+    ...(isV2CloudView(view) && snapshot && sub?.planId
+      ? {
+          billingIdentity: `${snapshot.account.id}:${sub.periodId ?? sub.paidThrough ?? sub.planId}`,
+        }
+      : {}),
     rememberSession: view.rememberSession,
     ...(isV2CloudView(view) && snapshot
       ? { cloudCapabilities: snapshot.capabilities }
@@ -146,6 +153,9 @@ export function cloudBillingView(view: CloudView): BillingSnapshot {
     sub?.planId === "plus" ||
     sub?.planId === "premium"
       ? { plan: sub.planId }
+      : {}),
+    ...(sub?.scheduledPlan === "plus" || sub?.scheduledPlan === "premium"
+      ? { scheduledPlan: sub.scheduledPlan }
       : {}),
     ...(sub?.paidThrough ? { accessUntil: sub.paidThrough } : {}),
     ...(sub?.renewalAt ? { renewalAt: sub.renewalAt } : {}),

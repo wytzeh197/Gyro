@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ChevronDown, SlidersHorizontal } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import "./settings-disclosure.css";
 
 type DisclosureContext = {
@@ -81,6 +81,7 @@ function liveSummary(body: HTMLElement): string {
 export function SettingsDisclosure({
   id,
   title,
+  icon,
   description,
   summary,
   actions,
@@ -90,6 +91,7 @@ export function SettingsDisclosure({
 }: {
   id: string;
   title: string;
+  icon?: ReactNode;
   description?: string;
   summary?: string;
   actions?: ReactNode;
@@ -188,7 +190,7 @@ export function SettingsDisclosure({
               if (!context) setInitialOpen(!open);
             }}
           >
-            <SlidersHorizontal aria-hidden="true" size={18} />
+            {icon ? <span className="gyro-disclosure-leading-icon" aria-hidden="true">{icon}</span> : null}
             <span>
               <strong>{title}</strong>
               {subtitle ? <small>{subtitle}</small> : null}

@@ -1,3 +1,4 @@
+import { CloudChatBackup, type ChatBackupReview } from "./cloud-chat-backup";
 import { ShortcutConflicts, workspaceKeybindingSignature } from "./settings-shortcut-conflicts";
 import { ProviderModelDefaults } from "./settings-provider-defaults";
 import { SettingsDisclosure, SettingsDisclosureProvider, revealSettingsTarget } from "./settings-disclosure";
@@ -854,6 +855,7 @@ type AppChromeProps = {
   onSelectSession: (sessionId: string) => void;
   onAddSessionToGrid?: (sessionId: string) => void;
   onSelectWorkspaceLayout: (layout: WorkspaceLayoutId) => void;
+  showCloudNavigation?: boolean;
   onSelectDestination: (destination: AppDestination) => void;
   onOpenToolPanel: (tab: WorkbenchPaneTab) => void;
   onDeleteSession?: (sessionId: string) => void;
@@ -1006,6 +1008,7 @@ const settingsSidebarItems: Array<{
     icon: Sparkles,
     group: "AI & Agents",
   },
+  { id: "usage-limits", label: "Usage & limits", icon: Gauge, group: "AI & Agents" },
   {
     id: "cli-profiles",
     label: "CLI Profiles",
@@ -1025,22 +1028,21 @@ const settingsSidebarItems: Array<{
     group: "Workspace",
   },
   {
-    id: "tools-contributions",
-    label: "Tools",
-    icon: Blocks,
-    group: "Workspace",
-  },
-  {
     id: "import-projects",
     label: "Import projects",
     icon: Folder,
     group: "Workspace",
   },
-  { id: "usage-limits", label: "Usage & limits", icon: Gauge, group: "AI & Agents" },
+  {
+    id: "tools-contributions",
+    label: "Tools",
+    icon: Blocks,
+    group: "Workspace",
+  },
   { id: "cloud", label: "Gyro Cloud", icon: Cloud, group: "Gyro account" },
   { id: "billing", label: "Plan & billing", icon: Gauge, group: "Gyro account" },
-  { id: "updates", label: "Updates", icon: RefreshCw, group: "System" },
   { id: "advanced", label: "Data & privacy", icon: Settings, group: "System" },
+  { id: "updates", label: "Updates", icon: RefreshCw, group: "System" },
   { id: "about", label: "Help", icon: HelpCircle, group: "System" },
 ];
 
@@ -1056,6 +1058,7 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   { section: "efficiency", label: "Provider for new chats", detail: "Last used or a connected provider", keywords: "new chat default model reasoning effort" },
   { section: "efficiency", label: "Suggest checking finished work", detail: "Optional Check reminders after recorded edits", keywords: "check reminder verification" },
   { section: "advanced", label: "Settings export/import", detail: "Preview and apply a safe settings file", keywords: "backup transfer json import export" },
+  { section: "cloud", label: "Automatically back up chats", detail: "Back up saved chat text after a turn finishes", keywords: "auto automatic cloud backup sync" },
   { section: "cloud", label: "Gyro Cloud", detail: "Selected backups, memory, assistance and connected devices", keywords: "cloud sync restore backup memory sharing report links devices export delete allowance" },
   { section: "billing", label: "Plan & billing", detail: "Optional subscription and payments", keywords: "plus premium subscribe payment invoice cancellation renewal" },
   {
@@ -1771,6 +1774,7 @@ export function AppChrome({
   onSelectSession,
   onAddSessionToGrid,
   onSelectWorkspaceLayout,
+  showCloudNavigation,
   onSelectDestination,
   onOpenToolPanel,
   onDeleteSession,
@@ -2567,6 +2571,7 @@ export function AppChrome({
             <WorkspaceSidebarContent
               renderAiChat={renderAiChat}
               activeDestination={activeDestination}
+              showCloudNavigation={showCloudNavigation}
               activePaneTab={activePaneTab}
               activeSession={activeSession}
               activeSessionId={activeSessionId}
@@ -3839,6 +3844,7 @@ function WorkspaceSidebarContent({
   onSelectDraftChat,
   onSelectSession,
   onAddSessionToGrid,
+  showCloudNavigation,
   onSelectDestination,
   onSelectWorkspaceLayout,
   onOpenToolPanel,
@@ -3935,6 +3941,7 @@ function WorkspaceSidebarContent({
   onSelectDraftChat?: (draftId: string) => void;
   onSelectSession: (sessionId: string) => void;
   onAddSessionToGrid?: (sessionId: string) => void;
+  showCloudNavigation?: boolean;
   onSelectDestination: (destination: AppDestination) => void;
   onSelectWorkspaceLayout: (layout: WorkspaceLayoutId) => void;
   onOpenToolPanel: (tab: WorkbenchPaneTab) => void;
@@ -6843,6 +6850,21 @@ function WorkspaceSidebarContent({
               <CalendarClock size={15} />
               <span>Automations</span>
             </button>
+            {showCloudNavigation ? (
+              <button
+                type="button"
+                className={`gyro-sidebar-action${activeDestination === "cloud" ? " is-active" : ""}`}
+                aria-current={activeDestination === "cloud" ? "page" : undefined}
+                onClick={() => {
+                  setNewSessionMenuView("closed");
+                  onSelectDestination("cloud");
+                }}
+              >
+                <Cloud aria-hidden="true" size={15} />
+                <span>Cloud</span>
+              </button>
+            ) : null}
+
           </div>
 
           {isCliSidebar ? (
@@ -9462,6 +9484,7 @@ type ChatSurfaceProps = {
    * from `activeChatPanel`, so a chat with tabs open but no active one shows
    * the transcript alone until the dock is reopened.
    */
+  backupReview?: ChatBackupReview;
   companionTabs?: ChatCompanionTabId[];
   onOpenCompanionTab?: (tab: ChatCompanionTabId) => void;
   onCloseCompanionTab?: (tab: ChatCompanionTabId) => void;
@@ -9716,6 +9739,7 @@ export function ChatSurface({
   chatSwitcher,
   workspaceMode = "local",
   activeChatPanel,
+  backupReview,
   companionTabs,
   onOpenCompanionTab,
   onCloseCompanionTab,
@@ -10480,6 +10504,14 @@ export function ChatSurface({
   );
   // The Environment is a transient context popover. The persistent right-hand
   // surface is reserved for companion tabs and the plan document.
+  const [openBackupKey, setOpenBackupKey] = useState<string>();
+  const [manualBackupUploads, setManualBackupUploads] = useState<Set<string>>(() => new Set());
+  const backupKey = backupReview ? `${backupReview.accountKey}:${backupReview.localId}` : undefined;
+  const backupUploading = Boolean(backupReview?.uploading || (backupKey && manualBackupUploads.has(backupKey)));
+  const backupDialogOpen = Boolean(backupKey && openBackupKey === backupKey);
+  useEffect(() => {
+    setOpenBackupKey(undefined);
+  }, [backupKey]);
   const railPanel: ChatSidePanelId = activeRailPanel ?? "environment";
   const isCompanionPanel =
     isChatCompanionTab(railPanel) || railPanel === "tools";
@@ -10985,6 +11017,46 @@ export function ChatSurface({
           ) : null}
         </div>
         <div className="gyro-thread-topbar-actions">
+          {backupReview?.available || backupUploading ? (
+            <button
+              type="button"
+              className="gyro-chat-surface-button"
+              title={backupUploading ? "Uploading chat backup" : "Back up chat"}
+              aria-label={backupUploading ? "Uploading chat backup" : "Back up chat"}
+              aria-busy={backupUploading}
+              aria-haspopup="dialog"
+              aria-expanded={backupDialogOpen}
+              onClick={() => setOpenBackupKey(backupKey)}
+            >
+              <span className="gyro-chat-backup-icon" aria-hidden="true">
+                <Cloud size={16} />
+                {backupUploading ? (
+                  <CircleDashed className="gyro-chat-backup-spinner is-spinning" size={10} />
+                ) : null}
+              </span>
+            </button>
+          ) : null}
+          {backupReview && backupKey && backupDialogOpen ? (
+            <CloudChatBackup
+              key={backupKey}
+              {...backupReview}
+              uploading={backupUploading}
+              onDismiss={() => setOpenBackupKey(undefined)}
+              onUploadStateChange={(uploading) =>
+                setManualBackupUploads((current) => {
+                  const next = new Set(current);
+                  if (uploading) next.add(backupKey);
+                  else next.delete(backupKey);
+                  return next;
+                })
+              }
+            />
+          ) : null}
+          {backupReview ? (
+            <span className="gyro-sr-only" role="status">
+              {backupUploading ? "Uploading chat backup" : ""}
+            </span>
+          ) : null}
           <ChatSurfaceControls
             isDockOpen={isCompanionPanel}
             isEnvironmentOpen={isEnvironmentPopoverOpen}

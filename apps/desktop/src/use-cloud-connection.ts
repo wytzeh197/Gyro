@@ -137,7 +137,7 @@ export function useCloudConnection(
               restore: () => void run("restore"),
             }
           : {}),
-        ...(!busy && connected ? { refresh: () => void run("refresh") } : {}),
+        ...(!busy && connected ? { refresh: () => run("refresh") } : {}),
         ...(!busy &&
         !v2 &&
         view.environment !== "staging" &&
@@ -183,6 +183,8 @@ export function useCloudConnection(
                 applySettings,
                 ...(continueChat ? { continueChat } : {}),
                 request: async (request: Record<string, unknown>) => {
+                  // A manual control can wait for the periodic status check.
+                  if (backgroundTask.current) await backgroundTask.current;
                   if (actionRunning.current)
                     throw new Error("Another Cloud action is running.");
                   const ticket = ++generation.current;
