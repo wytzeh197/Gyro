@@ -29,8 +29,8 @@ function Preview() {
     onSelectSessions={() => undefined} onSelectWorkspaceLayout={() => undefined}
     onPinSession={(id) => setPinned((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id])}>
     <main style={{ padding: 32, color: "var(--gyro-text)" }}>
-      {createPortal(<div aria-hidden="true" data-fixture="traffic-lights" style={{ position: "fixed", left: "var(--gyro-traffic-light-inset-x)", top: "var(--gyro-traffic-light-inset-y)", display: "flex", gap: "var(--gyro-traffic-light-gap)", pointerEvents: "none", zIndex: 10000 }}>
-        {["--gyro-traffic-light-close", "--gyro-traffic-light-minimize", "--gyro-traffic-light-zoom"].map((token) => <span key={token} style={{ width: "var(--gyro-traffic-light-size)", height: "var(--gyro-traffic-light-size)", borderRadius: "50%", background: `var(${token})` }} />)}
+      {createPortal(<div aria-hidden="true" data-fixture="traffic-lights" style={{ position: "fixed", left: "calc(var(--gyro-traffic-light-inset-x) + 1px)", top: "calc(var(--gyro-traffic-light-inset-y) + 2px)", display: "flex", gap: 8, pointerEvents: "none", zIndex: 10000 }}>
+        {["--gyro-traffic-light-close", "--gyro-traffic-light-minimize", "--gyro-traffic-light-zoom"].map((token) => <span key={token} style={{ width: 12, height: 12, borderRadius: "50%", background: `var(${token})` }} />)}
       </div>, document.body)}
       <h1>Session actions fixture</h1>
       <p>Title bar fixture: colored circles mark the traffic-light positions in your screenshot.</p>

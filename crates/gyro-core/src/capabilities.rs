@@ -41,6 +41,7 @@ pub enum CapabilityId {
     WorkspaceMovePath,
     WorkspaceDuplicatePath,
     WorkspaceUndoPath,
+    WorkspaceOpenFolder,
     WorkspaceRunTask,
     WorkspaceRunTest,
     WorkspaceReadOutput,
@@ -118,6 +119,7 @@ impl CapabilityId {
             Self::WorkspaceMovePath => "workspace.move",
             Self::WorkspaceDuplicatePath => "workspace.duplicate",
             Self::WorkspaceUndoPath => "workspace.undo",
+            Self::WorkspaceOpenFolder => "workspace.open_folder",
             Self::WorkspaceRunTask => "workspace.run_task",
             Self::WorkspaceRunTest => "workspace.run_test",
             Self::WorkspaceReadOutput => "workspace.read_output",
@@ -195,6 +197,7 @@ impl CapabilityId {
             Self::WorkspaceMovePath => "gyro_workspace_move",
             Self::WorkspaceDuplicatePath => "gyro_workspace_duplicate",
             Self::WorkspaceUndoPath => "gyro_workspace_undo",
+            Self::WorkspaceOpenFolder => "gyro_workspace_open_folder",
             Self::WorkspaceRunTask => "gyro_workspace_run_task",
             Self::WorkspaceRunTest => "gyro_workspace_run_test",
             Self::WorkspaceReadOutput => "gyro_workspace_read_output",
@@ -266,6 +269,9 @@ pub enum CapabilityClass {
     WorkspaceSensitiveRead,
     /// Lifecycle changes inside the workspace: create, rename or move, delete.
     WorkspaceWrite,
+    /// Switching Gyro to a folder outside the chat's own workspace, so the
+    /// user can start a chat there.
+    WorkspaceOpen,
     /// Starting another model run: a research sub-agent, which spends tokens.
     AgentRun,
     IdeReveal,
@@ -350,6 +356,10 @@ impl ProjectCapabilityPolicy {
         // files, so the default is a decision rather than a silent write. Full
         // Access in a normal run still skips the prompt.
         classes.insert(CapabilityClass::WorkspaceWrite, CapabilityAccess::Ask);
+        // Opening a folder moves the user's view and points a new chat at a
+        // directory the model chose, so it is a decision rather than a silent
+        // navigation. Full Access in a normal run still skips the prompt.
+        classes.insert(CapabilityClass::WorkspaceOpen, CapabilityAccess::Ask);
         // A sub-agent spends the user's provider budget, so it is a decision
         // rather than a silent call by default. The desktop permission mode
         // skips the prompt in Full Access or Approve for me within its ceiling.
@@ -817,6 +827,11 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         description: "Undo the last create, rename, move or Trash operation in this workspace, from the explorer or from a model. A trashed entry is restored from the Trash. Returns what changed, or that there was nothing left to undo.",
     },
     CapabilityDescriptor {
+        id: CapabilityId::WorkspaceOpenFolder,
+        class: CapabilityClass::WorkspaceOpen,
+        description: "Switch Gyro to a local folder the user named by absolute path (a leading ~/ is expanded), such as when they ask to open their website checkout from a chat that has no folder. Gyro opens the folder as a project with a fresh chat bound to it. This chat's own workspace does not change, so tools here keep using the current workspace. Use only when the user asks to open or switch folders. Returns the resolved path, folder name, and Git branch when there is one.",
+    },
+    CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTask,
         class: CapabilityClass::TerminalExecute,
         description: "Run one discovered Workspace task with visible, attributed output. Pass background: true for a long-running task such as a dev server or watcher so it starts in this chat's terminal instead of holding the turn open. Background tasks still running when the turn ends are watched under the reply and relaunched if they exit without the user or model stopping them.",
@@ -1053,10 +1068,11 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     },
 ];
 
-pub const ALL_CAPABILITY_CLASSES: [CapabilityClass; 11] = [
+pub const ALL_CAPABILITY_CLASSES: [CapabilityClass; 12] = [
     CapabilityClass::WorkspaceInspect,
     CapabilityClass::WorkspaceSensitiveRead,
     CapabilityClass::WorkspaceWrite,
+    CapabilityClass::WorkspaceOpen,
     CapabilityClass::AgentRun,
     CapabilityClass::IdeReveal,
     CapabilityClass::TerminalExecute,
@@ -1500,6 +1516,41 @@ mod tests {
                 CapabilityRunMode::Normal
             ));
         }
+    }
+
+    #[test]
+    fn opening_a_folder_is_a_decision_and_never_a_plan_tool() {
+        let policy = ProjectCapabilityPolicy::defaults("/tmp/project");
+        assert_eq!(
+            policy.access_for(CapabilityClass::WorkspaceOpen),
+            CapabilityAccess::Ask
+        );
+        assert_eq!(
+            capability_descriptor(CapabilityId::WorkspaceOpenFolder).class,
+            CapabilityClass::WorkspaceOpen
+        );
+        assert_eq!(
+            CapabilityId::from_provider_tool_name("gyro_workspace_open_folder"),
+            Some(CapabilityId::WorkspaceOpenFolder)
+        );
+        assert!(!capability_advertised_for_mode(
+            CapabilityId::WorkspaceOpenFolder,
+            CapabilityRunMode::Plan
+        ));
+        assert!(capability_advertised_for_mode(
+            CapabilityId::WorkspaceOpenFolder,
+            CapabilityRunMode::Normal
+        ));
+        // A policy saved before this class existed is old, not malformed.
+        let mut saved = policy.clone();
+        saved.classes.remove(&CapabilityClass::WorkspaceOpen);
+        assert!(saved.validate().is_err());
+        assert_eq!(
+            saved
+                .with_missing_classes_defaulted()
+                .access_for(CapabilityClass::WorkspaceOpen),
+            CapabilityAccess::Ask
+        );
     }
 
     #[test]

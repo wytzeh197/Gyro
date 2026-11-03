@@ -2,11 +2,12 @@ import {
   createContext,
   useContext,
   useId,
+  useState,
   type ComponentProps,
   type ReactNode,
 } from "react";
 import { SelectionTrack } from "./selection-track";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import "./settings-design.css";
 
 const SettingsRowDescription = createContext<string | undefined>(undefined);
@@ -60,7 +61,7 @@ export function SettingsRow({
 }: {
   label: string;
   value?: string;
-  detail: string;
+  detail?: string;
   onClick?: () => void;
   children?: ReactNode;
   tone?: "danger";
@@ -70,10 +71,10 @@ export function SettingsRow({
     <>
       <div>
         <strong>{label}</strong>
-        <span id={detailId}>{detail}</span>
+        {detail ? <span id={detailId}>{detail}</span> : null}
       </div>
       <div className="gyro-settings-control-column">
-        <SettingsRowDescription.Provider value={detailId}>
+        <SettingsRowDescription.Provider value={detail ? detailId : undefined}>
           {children ?? (
             <span className="gyro-settings-info-value">{value}</span>
           )}
@@ -151,6 +152,32 @@ export function SettingsGroup({
       ) : null}
       <div className="gyro-settings-group-rows">{children}</div>
     </section>
+  );
+}
+
+/**
+ * Secondary settings stay behind a click. A native disclosure keeps its rows
+ * mounted, so settings search can still find and open them. Opens by itself
+ * when `defaultOpen` says something inside already needs attention.
+ */
+export function SettingsMore({
+  label,
+  defaultOpen = false,
+  children,
+}: {
+  label: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [initiallyOpen] = useState(defaultOpen);
+  return (
+    <details className="gyro-settings-more" open={initiallyOpen}>
+      <summary>
+        <ChevronRight aria-hidden="true" size={13} />
+        {label}
+      </summary>
+      <div className="gyro-settings-more-body">{children}</div>
+    </details>
   );
 }
 

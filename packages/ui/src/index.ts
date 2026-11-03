@@ -16,7 +16,23 @@ export type { TurnTokens, UsageAccounting } from "./turn-tokens";
 export { SizingMotionFixture } from "./sizing-motion-fixture";
 export { ComposerEffortSelector } from "./composer-effort-selector";
 export { MotionDisclosure } from "./motion-disclosure";
-export { UsageCard } from "./settings-presentation";
+export {
+  SettingsSection,
+  SettingsStatus,
+  UsageCard,
+} from "./settings-presentation";
+export { SettingsGroup, SettingsMore, SettingsRow } from "./settings-controls";
+export {
+  Check as CheckIcon,
+  Cloud as CloudIcon,
+  Copy as CopyIcon,
+  Eye as EyeIcon,
+  EyeOff as EyeOffIcon,
+  RefreshCw as RefreshIcon,
+  Trash2 as TrashIcon,
+  UserRound as UserRoundIcon,
+  X as CloseIcon,
+} from "lucide-react";
 export { useDialogDismiss } from "./use-dialog-dismiss";
 export {
   browserConfirm,
@@ -650,6 +666,7 @@ export {
   AutomationsSurface,
   BrowserPreviewSurface,
   ChatThread,
+  ReadOnlyChatMessage,
   ChatGridSurface,
   ChatSurface,
   ChatEnvironmentPopover,

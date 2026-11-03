@@ -4,6 +4,7 @@ import type {
 } from "./types";
 import {
   SettingsGroup,
+  SettingsMore,
   SettingsRow,
   SettingsSwitch,
 } from "./settings-controls";
@@ -20,7 +21,7 @@ type DesktopNotificationSettingsProps = {
 function permissionDetail(permission: NotificationPermissionState) {
   switch (permission) {
     case "granted":
-      return "Allowed by macOS. Notifications appear while Gyro is in the background.";
+      return undefined;
     case "denied":
       return "Blocked by macOS. Change Gyro's notification access in System Settings.";
     case "prompt-with-rationale":
@@ -52,8 +53,8 @@ const KINDS: Array<{
   },
 ];
 
-/** The macOS notification settings: a master switch, one switch per kind of
-    message, and the permission row with its test button. */
+/** The macOS notification settings: a master switch, then one switch per kind
+    of message and a test button, which wait behind a click until they matter. */
 export function DesktopNotificationSettings({
   preferences,
   permission,
@@ -61,11 +62,27 @@ export function DesktopNotificationSettings({
   onChange,
   onTest,
 }: DesktopNotificationSettingsProps) {
-  return (
-    <SettingsGroup
-      label="macOS notifications"
-      description="Choose what needs your attention while work runs in the background."
+  const testRow = (
+    <SettingsRow
+      label="Test notification"
+      detail="Sends a sample so you can check how Gyro's notifications look."
     >
+      <button
+        className="gyro-secondary-button"
+        disabled={isTesting || !onTest}
+        onClick={onTest}
+        type="button"
+      >
+        <Bell aria-hidden="true" size={13} />
+        {isTesting ? "Sending..." : "Send test"}
+      </button>
+    </SettingsRow>
+  );
+  // A test is how macOS gets asked for permission, so it stays in view until then.
+  const needsPermission =
+    permission === "prompt" || permission === "prompt-with-rationale";
+  return (
+    <SettingsGroup label="macOS notifications">
       <SettingsRow label="Notifications" detail={permissionDetail(permission)}>
         <SettingsSwitch
           checked={preferences.enabled}
@@ -73,30 +90,21 @@ export function DesktopNotificationSettings({
           onChange={(enabled) => onChange?.({ enabled })}
         />
       </SettingsRow>
-      {KINDS.map((kind) => (
-        <SettingsRow key={kind.key} label={kind.label} detail={kind.detail}>
-          <SettingsSwitch
-            checked={preferences.enabled && preferences[kind.key]}
-            disabled={!preferences.enabled}
-            label={`Notify about ${kind.label.toLowerCase()}`}
-            onChange={(checked) => onChange?.({ [kind.key]: checked })}
-          />
-        </SettingsRow>
-      ))}
-      <SettingsRow
-        label="Test notification"
-        detail="Sends a sample so you can check how Gyro's notifications look."
-      >
-        <button
-          className="gyro-secondary-button"
-          disabled={isTesting || !onTest}
-          onClick={onTest}
-          type="button"
-        >
-          <Bell aria-hidden="true" size={13} />
-          {isTesting ? "Sending..." : "Send test"}
-        </button>
-      </SettingsRow>
+      {preferences.enabled && needsPermission ? testRow : null}
+      {preferences.enabled ? (
+        <SettingsMore label="Choose what notifies you">
+          {KINDS.map((kind) => (
+            <SettingsRow key={kind.key} label={kind.label} detail={kind.detail}>
+              <SettingsSwitch
+                checked={preferences[kind.key]}
+                label={`Notify about ${kind.label.toLowerCase()}`}
+                onChange={(checked) => onChange?.({ [kind.key]: checked })}
+              />
+            </SettingsRow>
+          ))}
+          {needsPermission ? null : testRow}
+        </SettingsMore>
+      ) : null}
     </SettingsGroup>
   );
 }

@@ -4932,9 +4932,12 @@ function normalizedSettingsSection(
     case "import-projects":
     case "editor-workspace":
     case "tools-contributions":
+      return value;
     case "usage-limits":
       // Retired page: usage limits now live on Models, Accounts & Limits.
       return "providers";
+    case "account":
+    case "cloud":
     case "providers":
     case "efficiency":
     case "cli-profiles":

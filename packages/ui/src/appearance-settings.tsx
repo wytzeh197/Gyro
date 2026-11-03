@@ -8,6 +8,7 @@ import type {
 } from "./types";
 import {
   SettingsGroup,
+  SettingsMore,
   SettingsRow,
   SettingsSegmented,
 } from "./settings-controls";
@@ -48,7 +49,6 @@ export function AppearanceSettings({
   return (
     <div className="gyro-appearance-settings">
       <div className="gyro-appearance-scope">
-        <span>Applies across Gyro</span>
         <span
           aria-live="polite"
           aria-atomic="true"
@@ -61,7 +61,7 @@ export function AppearanceSettings({
               ? "Saved"
               : saveStatus === "error"
                 ? "Couldn’t save changes."
-                : "Changes apply immediately"}
+                : ""}
           {saveStatus === "error" && onRetrySave ? (
             <button onClick={onRetrySave} type="button">
               Retry save
@@ -71,7 +71,6 @@ export function AppearanceSettings({
       </div>
       <SettingsGroup
         label="Theme"
-        description="Follow your Mac’s appearance or choose your own."
         actions={
           <AppearanceReset
             label="Reset theme"
@@ -90,15 +89,11 @@ export function AppearanceSettings({
         >
           {(
             [
-              {
-                mode: "system",
-                label: "System",
-                detail: "Match your Mac",
-              },
-              { mode: "light", label: "Light", detail: "Always light" },
-              { mode: "dark", label: "Dark", detail: "Always dark" },
+              { mode: "system", label: "System" },
+              { mode: "light", label: "Light" },
+              { mode: "dark", label: "Dark" },
             ] as const
-          ).map(({ mode, label, detail }) => (
+          ).map(({ mode, label }) => (
             <button
               key={mode}
               aria-pressed={themeMode === mode}
@@ -112,7 +107,6 @@ export function AppearanceSettings({
                 {label}
                 <Check aria-hidden="true" size={13} />
               </span>
-              <small>{detail}</small>
             </button>
           ))}
         </div>
@@ -167,6 +161,14 @@ export function AppearanceSettings({
           />
         </SettingsRow>
       </SettingsGroup>
+      <SettingsMore
+        defaultOpen={
+          motionSpeed !== "default" ||
+          mainColor.toLowerCase() !== "#0874df" ||
+          secondaryColor.toLowerCase() !== "#8b6fcb"
+        }
+        label="Motion and colors"
+      >
       <SettingsGroup
         label="Motion"
         actions={
@@ -201,7 +203,6 @@ export function AppearanceSettings({
       </SettingsGroup>
       <SettingsGroup
         label="Colors"
-        description="Choose colors for selection, actions, and supporting highlights."
         actions={
           <AppearanceReset
             label="Reset colors"
@@ -238,6 +239,7 @@ export function AppearanceSettings({
           />
         </SettingsRow>
       </SettingsGroup>
+      </SettingsMore>
     </div>
   );
 }
@@ -253,11 +255,12 @@ function AppearanceReset({
   disabled: boolean;
   onClick: () => void;
 }) {
+  // Nothing to reset means nothing to show.
+  if (disabled) return null;
   return (
     <button
       aria-label={label}
       className="gyro-settings-group-reset"
-      disabled={disabled}
       onClick={onClick}
       title={detail}
       type="button"

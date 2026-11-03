@@ -148,6 +148,7 @@ import {
 import { SettingsHelp } from "./settings-help";
 import {
   SettingsGroup,
+  SettingsMore,
   SettingsRow,
   SettingsSelect,
   SettingsSwitch,
@@ -919,6 +920,9 @@ type AppChromeProps = {
   onSelectTerminalPane?: (paneId: string) => void;
   onPinSession?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string) => void;
+  onUploadCloudChat?: (sessionId: string) => void;
+  accountNavigation?: ReactNode;
+  onOpenCloudLibrary?: () => void;
   onRemoveProject?: (project: { path: string; label: string }) => void;
   projectSettings?: SidebarProjectSettings;
   onToggleChatsCollapsed?: () => void;
@@ -951,71 +955,71 @@ const settingsSidebarItems: Array<{
   id: SettingsSectionId;
   label: string;
   icon: IconComponent;
-  group: "Preferences" | "AI & Agents" | "Workspace" | "System";
+  group: "App" | "Agents" | "Workflow" | "Support";
 }> = [
-  {
+{
     id: "general",
     label: "General",
     icon: SlidersHorizontal,
-    group: "Preferences",
+    group: "App",
   },
-  {
+{
     id: "appearance",
     label: "Appearance",
     icon: Palette,
-    group: "Preferences",
+    group: "App",
   },
-  {
+{
     id: "keyboard",
     label: "Keyboard Shortcuts",
     icon: CommandIcon,
-    group: "Preferences",
+    group: "App",
   },
-  {
-    id: "providers",
-    label: "Models, Accounts & Limits",
-    icon: Gauge,
-    group: "AI & Agents",
-  },
-  {
-    id: "efficiency",
-    label: "Efficiency",
-    icon: Sparkles,
-    group: "AI & Agents",
-  },
-  {
-    id: "cli-profiles",
-    label: "CLI Profiles",
-    icon: Terminal,
-    group: "AI & Agents",
-  },
-  {
-    id: "permissions",
-    label: "Permissions",
-    icon: LockKeyhole,
-    group: "AI & Agents",
-  },
-  {
+{
     id: "editor-workspace",
     label: "Workspace",
     icon: FileText,
-    group: "Workspace",
+    group: "Workflow",
   },
-  {
-    id: "tools-contributions",
-    label: "Tools",
-    icon: Blocks,
-    group: "Workspace",
-  },
-  {
+{
     id: "import-projects",
     label: "Import projects",
     icon: Folder,
-    group: "Workspace",
+    group: "Workflow",
   },
-  { id: "updates", label: "Updates", icon: RefreshCw, group: "System" },
-  { id: "advanced", label: "Advanced", icon: Settings, group: "System" },
-  { id: "about", label: "Help", icon: HelpCircle, group: "System" },
+{
+    id: "tools-contributions",
+    label: "Tools",
+    icon: Blocks,
+    group: "Workflow",
+  },
+{
+    id: "providers",
+    label: "Models & Providers",
+    icon: Gauge,
+    group: "Agents",
+  },
+{
+    id: "cli-profiles",
+    label: "CLI Profiles",
+    icon: Terminal,
+    group: "Agents",
+  },
+{
+    id: "efficiency",
+    label: "Efficiency",
+    icon: Sparkles,
+    group: "Agents",
+  },
+{
+    id: "permissions",
+    label: "Permissions",
+    icon: LockKeyhole,
+    group: "Agents",
+  },
+{ id: "updates", label: "Updates", icon: RefreshCw, group: "Support" },
+{ id: "advanced", label: "Advanced", icon: Settings, group: "Support" },
+{ id: "about", label: "Help", icon: HelpCircle, group: "Support" }
 ];
 
 type SettingsSearchEntry = {
@@ -1026,6 +1030,8 @@ type SettingsSearchEntry = {
 };
 
 const settingsSearchEntries: SettingsSearchEntry[] = [
+  { section: "account", label: "Gyro Account", detail: "Your profile, name, and sign-in", keywords: "email profile name password reset change sign in sign out" },
+  { section: "cloud", label: "Cloud", detail: "Encrypted chat backups and recovery", keywords: "backup restore recovery code" },
   {
     section: "import-projects",
     label: "Import projects",
@@ -1805,6 +1811,9 @@ export function AppChrome({
   onSelectTerminalPane,
   onPinSession,
   onRenameSession,
+  onUploadCloudChat,
+  accountNavigation,
+  onOpenCloudLibrary,
   onRemoveProject,
   projectSettings,
   onToggleChatsCollapsed,
@@ -2053,6 +2062,14 @@ export function AppChrome({
                 `[data-setting-key="${settingsSearchKey(sectionLabel)}"]`,
               )
             : null);
+        // A setting behind a disclosure still has to be findable.
+        for (
+          let parent = target?.closest("details");
+          parent;
+          parent = parent.parentElement?.closest("details")
+        ) {
+          parent.open = true;
+        }
         target?.scrollIntoView({
           behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
             .matches
@@ -2386,6 +2403,7 @@ export function AppChrome({
           ) : null}
           {activeDestination === "settings" ? (
             <SettingsSidebarContent
+              accountNavigation={accountNavigation}
               activeSection={activeSettingsSection}
               backLabel={settingsBackLabel}
               pendingUpdate={showSidebarUpdate}
@@ -2572,6 +2590,8 @@ export function AppChrome({
               onSelectWorkspaceFolder={onSelectWorkspaceFolder}
               onPinSession={onPinSession}
               onRenameSession={onRenameSession}
+              onUploadCloudChat={onUploadCloudChat}
+              onOpenCloudLibrary={onOpenCloudLibrary}
               onRemoveProject={onRemoveProject}
               projectSettings={projectSettings}
               onRefreshSourceControl={onRefreshSourceControl}
@@ -3131,6 +3151,7 @@ function InstalledUpdateNotice({
 }
 
 function SettingsSidebarContent({
+  accountNavigation,
   activeSection,
   search,
   backLabel,
@@ -3140,6 +3161,7 @@ function SettingsSidebarContent({
   pendingUpdate,
 }: {
   activeSection: SettingsSectionId;
+  accountNavigation?: ReactNode;
   search: ReactNode;
   backLabel: string;
   onBack: () => void;
@@ -3186,11 +3208,12 @@ function SettingsSidebarContent({
       </div>
 
       <div className="gyro-settings-sidebar-search">{search}</div>
+      {accountNavigation}
       <nav
         aria-label="Settings pages"
         className="gyro-sidebar-actions is-settings-pages"
       >
-        {(["Preferences", "AI & Agents", "Workspace", "System"] as const).map(
+        {(["App", "Workflow", "Agents", "Support"] as const).map(
           (group) => {
             const items = settingsSidebarItems.filter(
               (item) => item.group === group,
@@ -3865,6 +3888,8 @@ function WorkspaceSidebarContent({
   onDeleteSession,
   onPinSession,
   onRenameSession,
+  onUploadCloudChat,
+  onOpenCloudLibrary,
   onRemoveProject,
   projectSettings,
   onToggleChatsCollapsed,
@@ -3982,6 +4007,8 @@ function WorkspaceSidebarContent({
   onDeleteSession?: (sessionId: string) => void;
   onPinSession?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string) => void;
+  onUploadCloudChat?: (sessionId: string) => void;
+  onOpenCloudLibrary?: () => void;
   onRemoveProject?: (project: { path: string; label: string }) => void;
   projectSettings?: SidebarProjectSettings;
   onToggleChatsCollapsed?: () => void;
@@ -4757,6 +4784,14 @@ function WorkspaceSidebarContent({
         onRenameSession?.(session.id);
         setOpenSessionMenuId(undefined);
       }}
+      onUploadCloudChat={
+        onUploadCloudChat
+          ? () => {
+              onUploadCloudChat(session.id);
+              setOpenSessionMenuId(undefined);
+            }
+          : undefined
+      }
       onOpenInGrid={() => {
         onAddSessionToGrid?.(session.id);
         setOpenSessionMenuId(undefined);
@@ -4844,6 +4879,12 @@ function WorkspaceSidebarContent({
           />
         </div>
       </div>
+
+      {!isIdeSidebar && onOpenCloudLibrary ? (
+        <button type="button" onClick={onOpenCloudLibrary}>
+          Gyro Cloud
+        </button>
+      ) : null}
 
       {isIdeSidebar ? (
         <>
@@ -7287,6 +7328,7 @@ function SessionSidebarRow({
   onMenuClose,
   onRename,
   onOpenInGrid,
+  onUploadCloudChat,
   onDelete,
   onDragStart,
   onDragEnd,
@@ -7309,6 +7351,7 @@ function SessionSidebarRow({
   onMenuClose: () => void;
   onRename: () => void;
   onOpenInGrid?: () => void;
+  onUploadCloudChat?: () => void;
   onDelete: () => void;
   onDragStart?: (event: ReactDragEvent<HTMLDivElement>) => void;
   onDragEnd?: (event: ReactDragEvent<HTMLDivElement>) => void;
@@ -7487,6 +7530,11 @@ function SessionSidebarRow({
             <button onClick={onOpenInGrid} role="menuitem" type="button">
               <Columns2 aria-hidden="true" size={14} />
               Open in chat grid
+            </button>
+          ) : null}
+          {onUploadCloudChat ? (
+            <button onClick={onUploadCloudChat} role="menuitem" type="button">
+              Back up to Cloud
             </button>
           ) : null}
           <button onClick={onRename} role="menuitem" type="button">
@@ -14385,11 +14433,9 @@ function WorkspaceSettingsEditor({
       </header>
       {intro}
       {view === "editor" ? (
-        <>
-          <h2 className="gyro-workspace-scope-heading">Editor & search</h2>
+        <SettingsMore label="Editor and search">
           <p className="gyro-workspace-scope-description">
-            Choose where these settings apply. Project and folder settings
-            override your app-wide defaults.
+            Project and folder settings override your app-wide defaults.
           </p>
           <div
             aria-label="Settings scope"
@@ -14537,17 +14583,16 @@ function WorkspaceSettingsEditor({
               </SettingsSelect>
             </label>
           </div>
-          {scope !== "user" ? (
+          {scope !== "user" && Object.keys(settings).length > 0 ? (
             <button
               className="gyro-workspace-settings-reset"
-              disabled={Object.keys(settings).length === 0}
               onClick={() => update({})}
               type="button"
             >
               Reset {scope} overrides
             </button>
           ) : null}
-        </>
+        </SettingsMore>
       ) : (
         <>
           <section className="gyro-workspace-services">
@@ -22532,6 +22577,8 @@ export type SettingsSurfaceProps = {
   /** Where Gyro lands on launch; `last` restores the previous view. */
   launchView?: LaunchView;
   onLaunchViewChange?: (view: LaunchView) => void;
+  accountSettings?: ReactNode;
+  cloudSettings?: ReactNode;
   activeSection?: SettingsSectionId;
   onThemeChange: (mode: ThemeMode) => void;
   onUseProvider?: (providerId: ProviderId, modelId: string) => void;
@@ -22773,6 +22820,8 @@ function CliLaunchPresetEditor({
 }
 
 export function SettingsSurface({
+  accountSettings,
+  cloudSettings,
   projectImport,
   config,
   cliLaunchPreset = defaultCliLaunchPreset(),
@@ -22896,6 +22945,7 @@ export function SettingsSurface({
   const hasProviderUsageWindows =
     providerUsage?.status === "available" && providerUsage.windows.length > 0;
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+  const [showAllProviders, setShowAllProviders] = useState(false);
   const resetDialogRef = useRef<HTMLElement>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const copySettingsPath = async (path: string) => {
@@ -22974,6 +23024,8 @@ export function SettingsSurface({
         aria-label="Settings"
         data-settings-page={activeSection}
       >
+        {activeSection === "account" ? accountSettings : null}
+        {activeSection === "cloud" ? cloudSettings : null}
         {activeSection === "import-projects" && projectImport ? (
           <SettingsSection
             icon={Folder}
@@ -23145,7 +23197,7 @@ export function SettingsSurface({
             <SettingsGroup label="Auto Context Compact">
               <SettingsRow
                 label="Auto-compact context"
-                detail="When the last request has filled this share of the model's window, Gyro replaces the oldest tool results so later rounds carry less. Local, with no extra provider call; applies to API and local models, not vendor CLIs."
+                detail="Replaces the oldest tool results once a request fills this share of the model's window. API and local models only."
               >
                 <SettingsSelect
                   aria-label="Auto-compact context threshold"
@@ -23164,6 +23216,7 @@ export function SettingsSurface({
                 </SettingsSelect>
               </SettingsRow>
             </SettingsGroup>
+            <SettingsMore label="How runs are handled">
             <SettingsGroup label="Runs">
               <SettingsRow
                 label="Command output"
@@ -23183,71 +23236,31 @@ export function SettingsSurface({
                 detail="Approval behavior follows Permissions and the chat’s selected approval mode."
               />
             </SettingsGroup>
+            </SettingsMore>
           </SettingsSection>
         ) : null}
 
         {activeSection === "providers" || activeSection === "usage-limits" ? (
           <SettingsSection
             icon={Gauge}
-            title="Models, Accounts & Limits"
-            description="Connect accounts, choose models, and set local guardrails for spend and runs."
+            title="Models & Providers"
+            description="Choose models, connect providers, and set local usage limits."
           >
-            <h2 className="gyro-settings-subheading">Accounts & models</h2>
-            <ConnectedProviderAllowances
-              providers={enabledProviders.filter(
-                (provider) =>
-                  provider.authMode === "cli" &&
-                  provider.id !== "ollama" &&
-                  !providerNeedsSignInRepair(
-                    provider,
-                    providerStatuses?.find(
-                      (status) => status.id === provider.id,
+            {enabledProviders.length > 0 ? (
+              <ConnectedProviderAllowances
+                providers={enabledProviders.filter(
+                  (provider) =>
+                    provider.authMode === "cli" &&
+                    provider.id !== "ollama" &&
+                    !providerNeedsSignInRepair(
+                      provider,
+                      providerStatuses?.find(
+                        (status) => status.id === provider.id,
+                      ),
                     ),
-                  ),
-              )}
-              usageByProvider={providerUsageByProvider}
-            />
-            {enabledProviders.length === 0 ? (
-              <nav
-                className="gyro-provider-connect-path"
-                aria-label="Connection methods"
-              >
-                {(
-                  [
-                    [
-                      "gyro-provider-accounts",
-                      "Existing account",
-                      "Use your provider’s sign-in.",
-                    ],
-                    [
-                      "gyro-provider-api-keys",
-                      "API key",
-                      "Use a key from your provider.",
-                    ],
-                    [
-                      "gyro-provider-ollama",
-                      "Local models",
-                      "Connect to Ollama on this Mac.",
-                    ],
-                  ] as const
-                ).map(([target, label, detail]) => (
-                  <button
-                    key={target}
-                    type="button"
-                    onClick={() => {
-                      const section = document.getElementById(target);
-                      section?.scrollIntoView({
-                        behavior: "instant",
-                        block: "start",
-                      });
-                      section?.focus({ preventScroll: true });
-                    }}
-                  >
-                    <strong>{label}</strong>
-                    <span>{detail}</span>
-                  </button>
-                ))}
-              </nav>
+                )}
+                usageByProvider={providerUsageByProvider}
+              />
             ) : null}
             <div
               className="gyro-provider-connect-help"
@@ -23255,7 +23268,7 @@ export function SettingsSurface({
               tabIndex={-1}
             >
               <h2>
-                {enabledProviders.length ? "Providers" : "Connect an account"}
+                Provider connections
               </h2>
               {enabledProviders.length === 0 ? (
                 <p>
@@ -23271,7 +23284,12 @@ export function SettingsSurface({
                 <span>Connection</span>
                 <span>Actions</span>
               </div>
-              {[...enabledProviders, ...disabledProviders].map((provider) => {
+              {[
+                ...enabledProviders,
+                ...(enabledProviders.length === 0 || showAllProviders
+                  ? disabledProviders
+                  : []),
+              ].map((provider) => {
                 const capabilities = providerCapabilities(provider.id);
                 const defaultModelId = providerDefaultModelId(provider);
                 const hasModelChoice = provider.models.length > 1;
@@ -23312,6 +23330,13 @@ export function SettingsSurface({
                       ? (health?.healthSummary ??
                         "Connection needs attention. Try signing in again.")
                       : undefined;
+                // An idle provider is a name and a way to connect; its model
+                // and status mean nothing until it is connected.
+                const isIdle =
+                  provider.authStatus !== "connected" &&
+                  !needsCliInstall &&
+                  !isChecking &&
+                  !setupMessage;
                 return (
                   <div
                     id={
@@ -23320,7 +23345,7 @@ export function SettingsSurface({
                         : undefined
                     }
                     tabIndex={provider.id === "ollama" ? -1 : undefined}
-                    className={`gyro-provider-row${capabilities?.executable ? "" : " is-readiness-only"}${config.selectedProviderId === provider.id ? " is-selected-provider" : ""}`}
+                    className={`gyro-provider-row${capabilities?.executable ? "" : " is-readiness-only"}${config.selectedProviderId === provider.id ? " is-selected-provider" : ""}${isIdle ? " is-idle" : ""}`}
                     key={provider.id}
                   >
                     <div className="gyro-provider-identity">
@@ -23419,7 +23444,7 @@ export function SettingsSurface({
                           Check connection
                         </button>
                       ) : null}
-                      {provider.id === "ollama" ? (
+                      {provider.id === "ollama" && !isIdle ? (
                         <button
                           className="gyro-secondary-button"
                           disabled={isChecking}
@@ -23455,6 +23480,8 @@ export function SettingsSurface({
                               const section = document.getElementById(
                                 "gyro-provider-api-keys",
                               );
+                              const disclosure = section?.closest("details");
+                              if (disclosure) disclosure.open = true;
                               section?.scrollIntoView({
                                 behavior: "instant",
                                 block: "start",
@@ -23529,17 +23556,19 @@ export function SettingsSurface({
                 );
               })}
             </div>
-            {COUNCIL_COMING_SOON ? (
-              <details className="gyro-settings-disclosure">
-                <summary>
-                  Model Council <span>Coming soon</span>
-                </summary>
-                <p>
-                  Compare answers from multiple providers in one conversation.
-                  This feature is still in development.
-                </p>
-              </details>
-            ) : (
+            {enabledProviders.length > 0 && disabledProviders.length > 0 ? (
+              <button
+                aria-expanded={showAllProviders}
+                className="gyro-provider-more"
+                onClick={() => setShowAllProviders((current) => !current)}
+                type="button"
+              >
+                {showAllProviders
+                  ? "Show fewer providers"
+                  : `Connect another provider (${disabledProviders.length})`}
+              </button>
+            ) : null}
+            {COUNCIL_COMING_SOON ? null : (
               <SettingsGroup
                 badge={
                   COUNCIL_COMING_SOON ? COUNCIL_COMING_SOON_LABEL : undefined
@@ -23622,6 +23651,7 @@ export function SettingsSurface({
                 </SettingsRow>
               </SettingsGroup>
             )}
+            <SettingsMore label="API keys and custom providers">
             <div id="gyro-provider-api-keys" tabIndex={-1}>
               <ProviderApiKeySection
                 connectingProviderIds={connectingProviderIds}
@@ -23652,7 +23682,8 @@ export function SettingsSurface({
               config={config}
               onRestoreProvider={onRestoreProvider}
             />
-            <h2 className="gyro-settings-subheading">Usage & limits</h2>
+            </SettingsMore>
+            <SettingsMore label="Usage and limits">
             {usageProvider ? (
               <div className="gyro-usage-dashboard">
                 <label className="gyro-usage-provider-select">
@@ -23897,6 +23928,7 @@ export function SettingsSurface({
                 detail="Provider billing and allowance controls remain provider-owned."
               />
             </SettingsGroup>
+            </SettingsMore>
           </SettingsSection>
         ) : null}
 
@@ -23913,6 +23945,7 @@ export function SettingsSurface({
                 profiles={commandProfiles}
               />
             </SettingsGroup>
+            <SettingsMore label="Saved profiles and notifications">
             <SettingsGroup label="Saved profiles">
               <div className="gyro-cli-profile-list">
                 {commandProfiles.map((profile) => (
@@ -23937,6 +23970,7 @@ export function SettingsSurface({
                 detail="Done, waiting, failed, and approval states show in app chrome."
               />
             </SettingsGroup>
+            </SettingsMore>
           </SettingsSection>
         ) : null}
 
@@ -23980,6 +24014,7 @@ export function SettingsSurface({
                 />
               </SettingsRow>
             </SettingsGroup>
+            <SettingsMore label="How your workspace is protected">
             <SettingsGroup label="Workspace protection">
               <SettingsRow
                 label="Workspace boundary"
@@ -23997,7 +24032,16 @@ export function SettingsSurface({
                 detail="Gyro masks recognized secret patterns in diagnostics and supported output. Review exported files before sharing."
               />
             </SettingsGroup>
+            </SettingsMore>
             {systemAccess || onRecheckSystemAccess ? (
+              <SettingsMore
+                defaultOpen={systemAccess?.some(
+                  (scope) =>
+                    scope.status !== "granted" &&
+                    scope.status !== "unavailable",
+                )}
+                label="macOS system access"
+              >
               <SettingsGroup label="macOS system access">
                 {(systemAccess ?? []).map((scope) => (
                   <SettingsRow
@@ -24037,6 +24081,7 @@ export function SettingsSurface({
                   </button>
                 </SettingsRow>
               </SettingsGroup>
+              </SettingsMore>
             ) : null}
           </SettingsSection>
         ) : null}
@@ -24102,40 +24147,43 @@ export function SettingsSurface({
                       {updatePrimaryActionLabel(updateState)}
                     </button>
                   ) : null}
-                  <button
-                    className="gyro-secondary-button"
-                    disabled={isUpdateBusy}
-                    onClick={onCheckForUpdates}
-                    type="button"
-                  >
-                    <RefreshCw
-                      className={isCheckingUpdate ? "is-spinning" : ""}
-                      size={14}
-                    />
-                    {isCheckingUpdate ? "Checking…" : "Check for updates"}
-                  </button>
+                  {canRunUpdateAction ? null : (
+                    <button
+                      className="gyro-secondary-button"
+                      disabled={isUpdateBusy}
+                      onClick={onCheckForUpdates}
+                      type="button"
+                    >
+                      <RefreshCw
+                        className={isCheckingUpdate ? "is-spinning" : ""}
+                        size={14}
+                      />
+                      {isCheckingUpdate ? "Checking…" : "Check for updates"}
+                    </button>
+                  )}
                 </div>
               </div>
               {updateFactRows.length > 0 ? (
-                <dl className="gyro-update-facts">
-                  {updateFactRows.map((fact) => (
-                    <div key={fact.label}>
-                      <dt>{fact.label}</dt>
-                      <dd>{fact.value}</dd>
+                <SettingsMore label="Details">
+                  <dl className="gyro-update-facts">
+                    {updateFactRows.map((fact) => (
+                      <div key={fact.label}>
+                        <dt>{fact.label}</dt>
+                        <dd>{fact.value}</dd>
+                      </div>
+                    ))}
+                    <div>
+                      <dt>Source</dt>
+                      <dd>GitHub Releases</dd>
                     </div>
-                  ))}
-                </dl>
+                  </dl>
+                </SettingsMore>
               ) : null}
               <span aria-live="polite" className="gyro-sr-only">
                 {updateNotice}
               </span>
             </section>
             <SettingsGroup label="Preferences">
-              <SettingsRow
-                label="Update source"
-                value="GitHub Releases"
-                detail="Signed Alpha archives are published to GitHub Releases and checked against Gyro's updater key before install."
-              />
               <SettingsRow
                 label="Automatic checks"
                 detail="Checks after launch and when Gyro regains focus. Downloads still require a click."
@@ -24153,20 +24201,16 @@ export function SettingsSurface({
               </SettingsRow>
             </SettingsGroup>
             {updateState?.releaseNotes ? (
-              <section
-                aria-label="What’s new"
-                className="gyro-update-card gyro-update-notes"
+              <SettingsMore
+                label={`What’s new ${updateState.nextVersion ? `in ${updateState.nextVersion}` : "in this release"}`}
               >
-                <div className="gyro-update-notes-head">
-                  <strong>What’s new</strong>
-                  <span>
-                    {updateState.nextVersion
-                      ? `in ${updateState.nextVersion}`
-                      : "in this release"}
-                  </span>
-                </div>
-                <p>{updateState.releaseNotes}</p>
-              </section>
+                <section
+                  aria-label="What’s new"
+                  className="gyro-update-card gyro-update-notes"
+                >
+                  <p>{updateState.releaseNotes}</p>
+                </section>
+              </SettingsMore>
             ) : null}
           </SettingsSection>
         ) : null}
@@ -24177,11 +24221,6 @@ export function SettingsSurface({
             title="Keyboard Shortcuts"
             description="View app shortcuts and customize workspace shortcuts."
           >
-            <WorkspaceKeyboardSettings
-              keybindings={workspaceKeybindings}
-              onKeybindingChange={onWorkspaceKeybindingChange}
-            />
-            <h2 className="gyro-settings-subheading">Built-in app shortcuts</h2>
             {(
               [
                 {
@@ -24211,7 +24250,6 @@ export function SettingsSurface({
               <SettingsGroup key={group.label} label={group.label}>
                 {group.items.map(([label, value]) => (
                   <SettingsRow
-                    detail="Read-only app shortcut"
                     key={label}
                     label={label}
                   >
@@ -24220,6 +24258,12 @@ export function SettingsSurface({
                 ))}
               </SettingsGroup>
             ))}
+            <SettingsMore label="Customize workspace shortcuts">
+              <WorkspaceKeyboardSettings
+                keybindings={workspaceKeybindings}
+                onKeybindingChange={onWorkspaceKeybindingChange}
+              />
+            </SettingsMore>
           </SettingsSection>
         ) : null}
 
@@ -24284,7 +24328,7 @@ export function SettingsSurface({
                 tone="danger"
               >
                 <button
-                  className="gyro-danger-button"
+                  className="gyro-secondary-button"
                   onClick={() => setIsResetConfirmOpen(true)}
                   type="button"
                 >
@@ -30597,6 +30641,31 @@ function CouncilResponseCard({
           {busyAction === "resynth" ? "Re-synthesizing…" : "Re-synthesize"}
         </button>
       </footer>
+    </div>
+  );
+}
+
+/** Render archived chat text without a live session or workspace actions. */
+export function ReadOnlyChatMessage({
+  kind,
+  text,
+}: {
+  kind: "user" | "assistant" | "tool";
+  text: string;
+}) {
+  if (kind === "user") {
+    return <div className="gyro-user-message-bubble"><pre>{text}</pre></div>;
+  }
+  if (kind === "tool" || text.length > ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS) {
+    return <pre className="gyro-response-code-block">{text}</pre>;
+  }
+  return (
+    <div className="gyro-response">
+      <div className="gyro-response-body">
+        {assistantResponseBlocks(finalAssistantResponseText(text)).map((block, index) => (
+          <AssistantResponseBlockView key={index} block={block} />
+        ))}
+      </div>
     </div>
   );
 }

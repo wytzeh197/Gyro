@@ -1,4 +1,5 @@
 [package]
+autobins = false
 name = "gyro-desktop"
 default-run = "gyro-desktop"
 description = "Gyro macOS desktop application."
@@ -19,6 +20,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 native-syntax-smoke = ["tauri/custom-protocol"]
 native-chat-drag-smoke = ["tauri/custom-protocol"]
+
+[[bin]]
+name = "gyro-desktop"
+path = "src/main.rs"
 
 [[bin]]
 name = "gyro-workspace-syntax-smoke"
@@ -43,6 +48,9 @@ notify.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+chacha20poly1305 = "0.10.1"
+zstd = { version = "0.13.3", default-features = false }
+keyring.workspace = true
 portable-pty = "0.9"
 tauri = { version = "2.5", features = ["image-png", "macos-private-api", "protocol-asset", "tray-icon", "unstable"] }
 tauri-plugin-dialog = "2.2"

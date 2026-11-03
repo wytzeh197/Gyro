@@ -471,6 +471,10 @@ assert.throws(() =>
   assert.equal(solEntry?.minClientRevision, 2);
   assert.equal(solEntry?.insertBefore, "gpt-6-astra");
   assert.equal(sol[0].defaultReasoningEffort, "low");
+  const terra = provider.models.filter((model) => model.id === "gpt-6.1-terra");
+  assert.equal(terra.length, 1);
+  assert.equal(provider.models[1].id, "gpt-6.1-terra");
+  assert.equal(published.models.find((model) => model.id === "gpt-6.1-terra")?.minClientRevision, 2);
   reset();
 }
 

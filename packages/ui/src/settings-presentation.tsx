@@ -14,7 +14,7 @@ export function SettingsSection({
 }: {
   icon: IconComponent;
   title: string;
-  description: string;
+  description?: string;
   children: ReactNode;
 }) {
   return (
@@ -30,7 +30,7 @@ export function SettingsSection({
             <Icon aria-hidden="true" size={18} />
             {title}
           </h1>
-          <span>{description}</span>
+          {description ? <span>{description}</span> : null}
         </div>
       </header>
       <div className="gyro-settings-section-body">{children}</div>

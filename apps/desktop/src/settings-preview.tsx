@@ -28,9 +28,21 @@ import {
 import "@gyro-dev/ui/styles.css";
 import { projectImportPreview } from "./project-import-preview";
 import { readBoundedLocalStorage, safeSetLocalStorage } from "./ui-storage";
+import { installAccountFixture } from "./account-fixture";
+import {
+  AccountNavigation,
+  AccountSettings,
+  CloudSettings,
+  useGyroAccount,
+} from "./account-settings";
+import { GyroCloud } from "./gyro-cloud";
 import { useAppearanceSaveFeedback } from "./use-appearance-save-feedback";
 
 const params = new URLSearchParams(location.search);
+// ?account=signed-out|new|locked|ready|empty|unavailable adds the Account and
+// Cloud pages, answered by a fixture backend.
+const accountScene = params.get("account");
+if (accountScene) installAccountFixture(accountScene);
 const appearanceStorageKey = `gyro.settings-preview.appearance.${params.get("theme") ?? "light"}`;
 type PreviewAppearance = Pick<
   WorkbenchPreferences,
@@ -208,6 +220,7 @@ function Preview() {
               ? "general"
               : "appearance"),
   );
+  const account = useGyroAccount();
   const [updateScene, setUpdateScene] = useState(
     () => new URLSearchParams(location.search).get("state") ?? "available",
   );
@@ -406,6 +419,15 @@ function Preview() {
         activeDestination="settings"
         activeWorkspaceLayout="thread"
         activeSettingsSection={section}
+        accountNavigation={
+          accountScene ? (
+            <AccountNavigation
+              account={account}
+              selected={section}
+              onSelect={setSection}
+            />
+          ) : undefined
+        }
         workspacePath="/fixture/Gyro"
         workspaceSidebarHidden={sidebarHidden}
         onWorkspaceSidebarHiddenChange={setSidebarHidden}
@@ -427,6 +449,13 @@ function Preview() {
         settingsBackLabel="fixture"
       >
         <SettingsSurface
+          accountSettings={<AccountSettings account={account} />}
+          cloudSettings={
+            <CloudSettings
+              account={account}
+              onAccount={() => setSection("account")}
+            />
+          }
           projectImport={projectImportPreview(updateScene, setResult)}
           config={config}
           workspacePath="/fixture/Gyro"
@@ -537,6 +566,9 @@ function Preview() {
           }
         />
       </AppChrome>
+      {params.has("cloudDialog") ? (
+        <GyroCloud uploadId="chat-1" onStatus={account.setStatus} onClose={() => {}} />
+      ) : null}
     </div>
   );
 }

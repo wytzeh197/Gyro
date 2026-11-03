@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { GyroConfig, EfficiencyConfig, PriceSnapshot } from "./types";
 import {
   SettingsGroup,
+  SettingsMore,
   SettingsRow,
   SettingsSelect,
   SettingsSwitch,
@@ -51,10 +52,10 @@ export function EfficiencySettings({
   }
   const disabled = busy || !onChange;
   return (
-    <SettingsGroup label="Context & experiments">
+    <SettingsGroup label="Context and agents">
       <SettingsRow
         label="Context efficiency"
-        detail="Enable validated context improvements. Experiments remain separate; model and reasoning choices stay yours."
+        detail="Enable validated context improvements. Model and reasoning choices stay yours."
       >
         <SettingsSwitch
           label="Context efficiency"
@@ -63,6 +64,21 @@ export function EfficiencySettings({
           onChange={(enabled) => void save({ ...value, enabled })}
         />
       </SettingsRow>
+      <SettingsRow
+        label="Parallel agents"
+        detail="Allow additional agents when useful."
+      >
+        <SettingsSwitch
+          label="Parallel agents"
+          checked={value.parallelAgents}
+          disabled={disabled}
+          onChange={(parallelAgents) => void save({ ...value, parallelAgents })}
+        />
+      </SettingsRow>
+      <SettingsMore
+        defaultOpen={value.experimental}
+        label="Experiments, routing and price estimates"
+      >
       <SettingsRow
         label="Efficiency experiments"
         detail="Try structured output, task checkpoints, retrieval and progress detection. Live task-cost evaluation is pending; experiments are off by default."
@@ -117,17 +133,6 @@ export function EfficiencySettings({
           <option value="standard">Standard</option>
           <option value="deep">Deep</option>
         </SettingsSelect>
-      </SettingsRow>
-      <SettingsRow
-        label="Parallel agents"
-        detail="Allow additional agents when useful. Explicit task instructions still take precedence."
-      >
-        <SettingsSwitch
-          label="Parallel agents"
-          checked={value.parallelAgents}
-          disabled={disabled}
-          onChange={(parallelAgents) => void save({ ...value, parallelAgents })}
-        />
       </SettingsRow>
       <EfficiencyRoutingSettings
         value={value}
@@ -237,6 +242,7 @@ export function EfficiencySettings({
           </button>
         </form>
       </details>
+      </SettingsMore>
       {error ? <p role="alert">{error}</p> : null}
     </SettingsGroup>
   );

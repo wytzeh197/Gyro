@@ -2,7 +2,7 @@
   "checkedAt": "2026-10-23",
   "vocabulary": "Gyro's positive effort levels only. none/minimal and thinking toggles are not exposed.",
   "sources": {
-    "openai": "Codex 0.163.0 signed-in catalog context_window, rechecked 2026-10-23: 500000 for gpt-6.1-sol, 272000 for the other current models. A logged-out `codex debug models` prints the bundled 272000 stub for Sol. API maxima are separate. https://learn.chatgpt.com/docs/models",
+    "openai": "Codex signed-in model cache checked 2026-10-30: gpt-6.1-terra has a 500000 context window, low default effort, and low through ultra effort levels. Codex 0.163.0 signed-in catalog rechecked 2026-10-23: 500000 for gpt-6.1-sol, 272000 for the other models then available. A logged-out `codex debug models` prints the bundled 272000 stub for Sol. API maxima are separate. https://learn.chatgpt.com/docs/models",
     "anthropic": "Claude Code 2.1.308 serves 1M by default for every picker model except Haiku 4.5 at 200K. The API table and OpenRouter's anthropic rows also serve 1M; those are separate connections. https://platform.claude.com/docs/en/build-with-claude/context-windows rechecked 2026-10-23.",
     "kimi": "https://www.kimi.com/code/docs/en/kimi-code/models.html rechecked 2026-10-23. k3 and k3.1-pro are 262144 on Plus/Moderato and 1048576 on Pro/Allegretto. k3.1-pro-highspeed is Pro/Allegretto only at 1048576. The offline baseline is the lower ceiling; the runtime window wins. Efforts are low/high/max; K3.1 defaults to max. https://www.kimi.com/code/docs/en/kimi-code/whats-new.html",
     "xai": "Grok Build CLI 1.0.67 models cache, fetched 2026-10-23 from https://cli-chat-proxy.grok.com/v1/models. context_window is 256000 for grok-4.7, grok-4.6, grok-4.5, and grok-4.7-build-fast. 500000 is only the optional larger CLI window. This connection is not the public API.",
@@ -24,6 +24,13 @@
     [
       "openai",
       "gpt-6.1-sol",
+      500000,
+      ["low", "medium", "high", "xhigh", "max", "ultra"],
+      "low"
+    ],
+    [
+      "openai",
+      "gpt-6.1-terra",
       500000,
       ["low", "medium", "high", "xhigh", "max", "ultra"],
       "low"

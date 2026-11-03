@@ -9,6 +9,10 @@ Gyro is local-first and does not require a Gyro account.
 - Gyro metadata is not written into user repositories unless the user chooses
   an action that does so.
 
+## Gyro Cloud staging
+
+Gyro Cloud requires sign-in when enabled and uploads chats you choose to back up. Your name, email, and password go to the account service when you sign up; Gyro does not keep your password on the device. The app compresses and encrypts chat text and titles before transfer. The service stores account and transfer metadata, including backup sizes and upload times. Your recovery code unlocks chats on another device. Removing a cloud copy leaves the local original and any downloaded history on the device.
+
 ## Model providers
 
 Configured coding agents and model providers receive the prompts, selected

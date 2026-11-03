@@ -130,6 +130,7 @@ export type CapabilityId =
   | "workspace-move-path"
   | "workspace-duplicate-path"
   | "workspace-undo-path"
+  | "workspace-open-folder"
   | "workspace-run-task"
   | "workspace-run-test"
   | "workspace-read-output"
@@ -422,6 +423,8 @@ export type ChatAttachment = {
 };
 
 export type SettingsSectionId =
+  | "account"
+  | "cloud"
   | "general"
   | "import-projects"
   | "editor-workspace"

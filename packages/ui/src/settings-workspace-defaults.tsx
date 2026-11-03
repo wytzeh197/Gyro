@@ -13,10 +13,7 @@ export function WorkspaceDefaultSettings({
   onChange?: (mode: WorkbenchMode) => void;
 }) {
   return (
-    <SettingsGroup
-      label="New chats"
-      description="Applies to new chats across Gyro. Existing chats keep their workspace."
-    >
+    <SettingsGroup label="New chats">
       <SettingsRow
         label="New chats start in"
         detail="Use the project folder directly, or give the agent a separate Git worktree and branch."

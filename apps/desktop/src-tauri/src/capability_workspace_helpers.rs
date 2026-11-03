@@ -102,6 +102,8 @@ pub(super) fn capability_uses_workspace_root(id: CapabilityId) -> bool {
             | CapabilityId::BrowserConsole
             | CapabilityId::BrowserNetwork
             | CapabilityId::WebFetch
+            // The folder it opens is the argument, not one of this chat's roots.
+            | CapabilityId::WorkspaceOpenFolder
     )
 }
 
