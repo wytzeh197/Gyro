@@ -1,0 +1,1336 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Gyro optional cloud API",
+    "version": "1.0.0-prototype.2",
+    "description": "Unreleased contract. Local Gyro and user-owned providers do not require this service. No live service origin is configured. Customer identity, paid entitlements and allowances are server-owned. Provider output is a suggestion and never local Check evidence."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Use the explicitly configured service origin. This file does not configure or enable a deployment."
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Read liveness without creating an account",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service information",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceInfo"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/v1/subscription-intents": {
+      "post": {
+        "operationId": "startSubscription",
+        "summary": "Start a short-lived Subscribe setup, without creating an account",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionIntentInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Anonymous intent; protect the returned secret",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionIntent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "413": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "415": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "description": "1024-byte JSON body limit. Each intent expires after 30 minutes. Admission reclaims bounded expired batches and enforces a shared 10,000-row capacity limit. No paid access is granted."
+      }
+    },
+    "/v1/accounts": {
+      "post": {
+        "operationId": "setupAccount",
+        "summary": "Bind an explicit Subscribe intent to the verified identity",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountSetupInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Account setup completed; paidAccessGranted is always false",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSetup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "413": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "415": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "description": "2048-byte JSON body limit. Existing subscriptions and wallets are preserved. next=account for an existing active subscription, otherwise checkout. Disabled accounts are rejected. Registration cannot grant or reset a balance."
+      }
+    },
+    "/v1/account": {
+      "get": {
+        "operationId": "getAccount",
+        "summary": "Read own server subscription state",
+        "responses": {
+          "200": {
+            "description": "Current account; test entitlements are excluded in production",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/v1/catalog": {
+      "get": {
+        "operationId": "getCatalog",
+        "summary": "Read the server model/rate catalog",
+        "responses": {
+          "200": {
+            "description": "Versioned rates in integer USD micros per million tokens",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Catalog"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "operationId": "getUsage",
+        "summary": "Read own allowance, spent amount and reservations",
+        "responses": {
+          "200": {
+            "description": "At most 12 allowance periods; one USD is 1,000,000 micros",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Usage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/v1/usage/{requestId}": {
+      "parameters": [
+        {
+          "name": "requestId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/RequestId"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getReceipt",
+        "summary": "Inspect an owned receipt without replaying inference",
+        "responses": {
+          "200": {
+            "description": "Result text is available only during its 24-hour retrieval window",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/v1/usage/by-key": {
+      "get": {
+        "operationId": "getReceiptByKey",
+        "summary": "Recover an owned receipt after a lost response, without starting inference",
+        "responses": {
+          "200": {
+            "description": "Stored request matching this account and idempotency key",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/IdempotencyKey"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/ai/requests": {
+      "post": {
+        "operationId": "suggestChecks",
+        "summary": "Request a suggestion from explicitly selected, consented context",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settled receipt or a same-key settled retry",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "An existing pending, uncertain or released receipt; no provider replay",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "402": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "413": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "415": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "429": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "502": {
+            "description": "Provider outcome is uncertain, or usage cannot be safely verified. Do not retry inference automatically.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/UncertainReceipt"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/IdempotencyKey"
+            }
+          }
+        ],
+        "description": "24000-byte UTF-8 JSON body limit; prompt is also limited to 16000 JavaScript UTF-16 code units. maxOutputTokens cannot exceed the selected catalog model limit. Reusing an account/key with changed content returns 409. Ambiguous outcomes hold their reservation. Query a receipt instead of generating another request. AI output cannot certify local requirements."
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "ErrorResponse": {
+        "description": "Request rejected or service unavailable. Local work remains available.",
+        "headers": {
+          "Cache-Control": {
+            "schema": {
+              "type": "string",
+              "const": "no-store"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Asymmetric ES256/RS256 JWT from the fixed configured issuer and audience; authenticated role, UUID subject and bounded expiry required. Tokens must never be placed in URLs."
+      }
+    },
+    "schemas": {
+      "SubscriptionIntentInput": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "string",
+            "enum": [
+              "lite",
+              "plus"
+            ]
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "additionalProperties": false
+      },
+      "AccountSetupInput": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "intentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "secret": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          }
+        },
+        "required": [
+          "intentId",
+          "secret"
+        ],
+        "additionalProperties": false
+      },
+      "SuggestionInput": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16000
+          },
+          "maxOutputTokens": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 4096
+          },
+          "consentVersion": {
+            "type": "string",
+            "const": "managed-ai-v1"
+          }
+        },
+        "required": [
+          "model",
+          "prompt",
+          "maxOutputTokens",
+          "consentVersion"
+        ],
+        "additionalProperties": false
+      },
+      "RequestId": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+      },
+      "IdempotencyKey": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{16,128}$"
+      },
+      "ServiceInfo": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok"
+          },
+          "version": {
+            "type": "number",
+            "const": 1
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "mock",
+              "live"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "version",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "SubscriptionIntent": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "intentId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "secret": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "plan": {
+            "type": "string",
+            "enum": [
+              "lite",
+              "plus"
+            ]
+          },
+          "expiresInSeconds": {
+            "type": "number",
+            "const": 1800
+          },
+          "accountCreated": {
+            "type": "boolean",
+            "const": false
+          }
+        },
+        "required": [
+          "intentId",
+          "secret",
+          "plan",
+          "expiresInSeconds",
+          "accountCreated"
+        ],
+        "additionalProperties": false
+      },
+      "AccountSetup": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "accountCreated": {
+            "type": "boolean"
+          },
+          "subscriptionActive": {
+            "type": "boolean"
+          },
+          "paidAccessGranted": {
+            "type": "boolean",
+            "const": false
+          },
+          "next": {
+            "type": "string",
+            "enum": [
+              "account",
+              "checkout"
+            ]
+          }
+        },
+        "required": [
+          "accountId",
+          "accountCreated",
+          "subscriptionActive",
+          "paidAccessGranted",
+          "next"
+        ],
+        "additionalProperties": false
+      },
+      "Account": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "subscription": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "plan": {
+                    "type": "string",
+                    "enum": [
+                      "lite",
+                      "plus"
+                    ]
+                  },
+                  "valid_until": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "test",
+                      "billing"
+                    ]
+                  }
+                },
+                "required": [
+                  "plan",
+                  "valid_until",
+                  "source"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "mock",
+              "live"
+            ]
+          }
+        },
+        "required": [
+          "accountId",
+          "subscription",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "Catalog": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "models": {
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "version": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "inputMicrosPerMillion": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1000000000
+                },
+                "outputMicrosPerMillion": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1000000000
+                },
+                "maxOutputTokens": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 4096
+                }
+              },
+              "required": [
+                "id",
+                "version",
+                "inputMicrosPerMillion",
+                "outputMicrosPerMillion",
+                "maxOutputTokens"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "currency": {
+            "type": "string",
+            "const": "USD"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "mock",
+              "live"
+            ]
+          }
+        },
+        "required": [
+          "models",
+          "currency",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "Usage": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string",
+            "const": "USD"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "mock",
+              "live"
+            ]
+          },
+          "wallets": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "periodId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "grantedMicros": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000000000
+                },
+                "spentMicros": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000000000
+                },
+                "reservedMicros": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000000000
+                },
+                "availableMicros": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000000000
+                }
+              },
+              "required": [
+                "periodId",
+                "grantedMicros",
+                "spentMicros",
+                "reservedMicros",
+                "availableMicros"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "currency",
+          "mode",
+          "wallets"
+        ],
+        "additionalProperties": false
+      },
+      "Receipt": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "reserved",
+              "settled",
+              "uncertain",
+              "released"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "const": "suggestion"
+          },
+          "evidenceStatus": {
+            "type": "string",
+            "const": "not-observed"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "mock",
+                  "live"
+                ]
+              },
+              {
+                "type": "string",
+                "const": "unknown"
+              }
+            ]
+          },
+          "providerId": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "providerRequestId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,160}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "catalogVersion": {
+            "type": "string"
+          },
+          "pricing": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "inputMicrosPerMillion": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "outputMicrosPerMillion": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "currency": {
+                    "type": "string",
+                    "const": "USD"
+                  }
+                },
+                "required": [
+                  "inputMicrosPerMillion",
+                  "outputMicrosPerMillion",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "inputTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  },
+                  "outputTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  }
+                },
+                "required": [
+                  "inputTokens",
+                  "outputTokens"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "usageSource": {
+            "type": "string",
+            "enum": [
+              "simulated",
+              "provider-reported",
+              "unknown",
+              "unavailable"
+            ]
+          },
+          "reservedMicros": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "heldMicros": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "chargedMicros": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000000000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 65536
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resultExpired": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "requestId",
+          "status",
+          "kind",
+          "evidenceStatus",
+          "mode",
+          "providerId",
+          "providerRequestId",
+          "model",
+          "catalogVersion",
+          "pricing",
+          "usage",
+          "usageSource",
+          "reservedMicros",
+          "heldMicros",
+          "chargedMicros",
+          "text",
+          "resultExpired"
+        ],
+        "additionalProperties": false
+      },
+      "UncertainReceipt": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "reserved",
+              "settled",
+              "uncertain",
+              "released"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "const": "suggestion"
+          },
+          "evidenceStatus": {
+            "type": "string",
+            "const": "not-observed"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "mock",
+                  "live"
+                ]
+              },
+              {
+                "type": "string",
+                "const": "unknown"
+              }
+            ]
+          },
+          "providerId": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "providerRequestId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,160}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "catalogVersion": {
+            "type": "string"
+          },
+          "pricing": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "inputMicrosPerMillion": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "outputMicrosPerMillion": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  "currency": {
+                    "type": "string",
+                    "const": "USD"
+                  }
+                },
+                "required": [
+                  "inputMicrosPerMillion",
+                  "outputMicrosPerMillion",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "inputTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  },
+                  "outputTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  }
+                },
+                "required": [
+                  "inputTokens",
+                  "outputTokens"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "usageSource": {
+            "type": "string",
+            "enum": [
+              "simulated",
+              "provider-reported",
+              "unknown",
+              "unavailable"
+            ]
+          },
+          "reservedMicros": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "heldMicros": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "chargedMicros": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000000000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 65536
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resultExpired": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "usage_uncertain"
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "requestId",
+          "status",
+          "kind",
+          "evidenceStatus",
+          "mode",
+          "providerId",
+          "providerRequestId",
+          "model",
+          "catalogVersion",
+          "pricing",
+          "usage",
+          "usageSource",
+          "reservedMicros",
+          "heldMicros",
+          "chargedMicros",
+          "text",
+          "resultExpired",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "Error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

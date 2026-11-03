@@ -423,7 +423,9 @@ export type ChatAttachment = {
 };
 
 export type SettingsSectionId =
+  | "cloud"
   | "general"
+  | "billing"
   | "import-projects"
   | "editor-workspace"
   | "tools-contributions"

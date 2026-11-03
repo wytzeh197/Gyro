@@ -12,6 +12,7 @@ import {
   completedCheckReminder,
   createCheckReminderTracker,
 } from "../apps/desktop/src/check-reminder.ts";
+import { readBillingSnapshot } from "../apps/desktop/src/billing-client.ts";
 
 const initial = createInitialWorkbenchState();
 assert.equal(initial.preferences.desktopNotifications.showNames, true);
@@ -102,6 +103,8 @@ for (const page of [
   "editor-workspace",
   "tools-contributions",
   "usage-limits",
+  "billing",
+  "cloud",
 ])
   assert.equal(
     createInitialWorkbenchState({
@@ -248,4 +251,83 @@ const disabled = createCheckReminderTracker();
 assert.deepEqual(disabled.observe(false, ["s"], { s: [edit, done] }, 200), []);
 assert.deepEqual(disabled.observe(true, [], { s: [edit, done] }, 400), []);
 
-console.log("Settings upgrade: transfer validation, legacy defaults, draft isolation and reminder lifecycle checks passed.");
+const wallet = {
+  periodId: "test",
+  grantedMicros: 50000,
+  spentMicros: 10000,
+  reservedMicros: 5000,
+  availableMicros: 35000,
+};
+const mock =
+  (sub, wallets = [wallet], mode = "mock") =>
+  async (url) =>
+    new Response(
+      JSON.stringify(
+        url.endsWith("/account")
+          ? { accountId: "synthetic", mode, subscription: sub }
+          : { mode, currency: "USD", wallets },
+      ),
+      { status: 200 },
+    );
+const sub = {
+  plan: "lite",
+  valid_until: "2099-01-01T00:00:00Z",
+  source: "test",
+};
+assert.equal(
+  (await readBillingSnapshot("", "fake", mock(sub))).status,
+  "active",
+);
+assert.equal(
+  (await readBillingSnapshot("", "fake", mock(null))).status,
+  "no-subscription",
+);
+assert.equal(
+  (
+    await readBillingSnapshot(
+      "",
+      "fake",
+      mock({ ...sub, valid_until: "2000-01-01T00:00:00Z" }),
+    )
+  ).status,
+  "expired",
+);
+assert.equal(
+  (
+    await readBillingSnapshot(
+      "",
+      "fake",
+      mock(sub, [{ ...wallet, availableMicros: 0 }]),
+    )
+  ).status,
+  "exhausted",
+);
+assert.equal(
+  (
+    await readBillingSnapshot(
+      "",
+      "fake",
+      mock(sub, [{ ...wallet, availableMicros: 1234 }]),
+    )
+  ).usage[0].availableMicros,
+  1234,
+  "balance is exactly server reported",
+);
+await assert.rejects(() =>
+  readBillingSnapshot("", "fake", mock(sub, undefined, "live")),
+);
+await assert.rejects(() =>
+  readBillingSnapshot(
+    "",
+    "fake",
+    mock(sub, [{ ...wallet, reservedMicros: -1 }]),
+  ),
+);
+await assert.rejects(() =>
+  readBillingSnapshot("", "fake", async () => {
+    throw Error("offline");
+  }),
+);
+console.log(
+  "Settings upgrade: transfer validation, legacy defaults, draft isolation, reminder lifecycle and billing contract checks passed.",
+);

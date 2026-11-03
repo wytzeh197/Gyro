@@ -30,6 +30,9 @@ type CheckInvoke = <T>(
   command: string,
   args?: Record<string, unknown>,
 ) => Promise<T>;
+type CheckCloudRequest = (
+  request: Record<string, unknown>,
+) => Promise<Record<string, unknown>>;
 
 const scopeLabels = {
   api: "API responses",
@@ -106,6 +109,8 @@ export function LocalCheckHost({
   children,
   call,
   available,
+  cloudRequest,
+  cloudUnavailableReason,
 }: {
   sessions: CheckSession[];
   reminders?: CheckReminder[];
@@ -113,6 +118,8 @@ export function LocalCheckHost({
   children: ReactNode;
   call?: CheckInvoke;
   available?: boolean;
+  cloudRequest?: CheckCloudRequest;
+  cloudUnavailableReason?: string;
 }) {
   const [target, setTarget] = useState<string>();
   const [opened, setOpened] = useState<
@@ -195,6 +202,8 @@ export function LocalCheckHost({
               onActivity={activityChanged}
               call={call}
               available={available}
+              cloudRequest={cloudRequest}
+              cloudUnavailableReason={cloudUnavailableReason}
             />
           ))}
       </CheckWorkActivityContext.Provider>
@@ -234,6 +243,8 @@ export function LocalCheckDialog({
   onActivity,
   call = invoke,
   available = isTauriRuntime(),
+  cloudRequest,
+  cloudUnavailableReason,
 }: {
   session: CheckSession;
   sourceTurnId?: string;
@@ -243,6 +254,8 @@ export function LocalCheckDialog({
   onActivity?: (sessionId: string, activity?: CheckWorkActivity) => void;
   call?: CheckInvoke;
   available?: boolean;
+  cloudRequest?: CheckCloudRequest;
+  cloudUnavailableReason?: string;
 }) {
   const [requirements, setRequirements] = useState<
     { id: string; requirement: string; expected: string; scope: CheckScope }[]
@@ -1012,6 +1025,13 @@ export function LocalCheckDialog({
                   report={report}
                   disabled={busy}
                   onDelete={() => void remove(report.plan.id)}
+                  cloudRequest={cloudRequest}
+                  cloudUnavailableReason={cloudUnavailableReason}
+                  sharePrimary={
+                    stage === "results" &&
+                    !plan &&
+                    report.plan.id === latest?.plan.id
+                  }
                 />
               ))
             )}
@@ -1082,10 +1102,16 @@ function CheckReportView({
   report,
   onDelete,
   disabled,
+  cloudRequest,
+  cloudUnavailableReason,
+  sharePrimary,
 }: {
   report: CheckReport;
   onDelete: () => void;
   disabled: boolean;
+  cloudRequest?: CheckCloudRequest;
+  cloudUnavailableReason?: string;
+  sharePrimary?: boolean;
 }) {
   return (
     <article className="gyro-check-report">
@@ -1193,6 +1219,312 @@ function CheckReportView({
         )}
       </details>
       <p>{report.omission}</p>
+      <CheckReportShare
+        report={report}
+        disabled={disabled}
+        request={cloudRequest}
+        unavailableReason={cloudUnavailableReason}
+        primary={sharePrimary}
+      />
     </article>
+  );
+}
+
+function CheckReportShare({
+  report,
+  disabled,
+  request,
+  unavailableReason,
+  primary,
+}: {
+  report: CheckReport;
+  disabled: boolean;
+  request?: CheckCloudRequest;
+  unavailableReason?: string;
+  primary?: boolean;
+}) {
+  const [preview, setPreview] = useState<{ ticket: string; content: string }>();
+  const [uploaded, setUploaded] = useState<{
+    objectId: string;
+    revisionId: string;
+  }>();
+  const [queued, setQueued] = useState<string>();
+  const [reviewed, setReviewed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [link, setLink] = useState<{
+    id: string;
+    url: string;
+    expiresAt?: string;
+  }>();
+  const [copied, setCopied] = useState(false);
+  const [shareUncertain, setShareUncertain] = useState(false);
+  const alive = useRef(true);
+  const inFlight = useRef(false);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!request) {
+      setPreview(undefined);
+      setUploaded(undefined);
+      setQueued(undefined);
+      setLink(undefined);
+      setReviewed(false);
+    }
+  }, [request]);
+  const run = async (action: () => Promise<void>) => {
+    if (!request || inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      await action();
+    } catch (e) {
+      if (alive.current) setError(String(e));
+    } finally {
+      inFlight.current = false;
+      if (alive.current) setBusy(false);
+    }
+  };
+  const start = () =>
+    void run(async () => {
+      const value = await request!({
+        operation: "preview-report",
+        localId: report.plan.draft.sessionId,
+        reportId: report.plan.id,
+      });
+      if (
+        typeof value.ticket !== "string" ||
+        value.kind !== "report" ||
+        typeof value.content !== "string" ||
+        new TextEncoder().encode(value.content).length > 256 * 1024
+      )
+        throw new Error("The report preview could not be verified.");
+      if (alive.current) {
+        setPreview({ ticket: value.ticket, content: value.content });
+        setReviewed(false);
+        setUploaded(undefined);
+        setQueued(undefined);
+        setLink(undefined);
+        setCopied(false);
+        setShareUncertain(false);
+      }
+    });
+  const create = () =>
+    void run(async () => {
+      if (!preview || !reviewed) return;
+      let ack = uploaded;
+      if (!ack) {
+        const value = queued
+          ? await request!({
+              operation: "service",
+              command: { operation: "retry-uploads" },
+            })
+          : await request!({
+              operation: "upload-preview",
+              ticket: preview.ticket,
+              reviewed: true,
+            });
+        const candidate =
+          queued && Array.isArray(value.completed)
+            ? value.completed.find(
+                (item: unknown) =>
+                  !!item &&
+                  typeof item === "object" &&
+                  (item as Record<string, unknown>).requestId === queued,
+              )
+            : value.uploaded;
+        if (
+          !candidate ||
+          typeof candidate !== "object" ||
+          typeof (candidate as Record<string, unknown>).objectId !== "string" ||
+          typeof (candidate as Record<string, unknown>).revisionId !== "string"
+        ) {
+          if (typeof value.requestId === "string" && alive.current)
+            setQueued(value.requestId);
+          throw new Error(
+            "No report link was created. The reviewed upload is waiting for Cloud. Retry the upload when Cloud is available.",
+          );
+        }
+        ack = candidate as { objectId: string; revisionId: string };
+        if (alive.current) {
+          setUploaded(ack);
+          setQueued(undefined);
+        }
+      }
+      // Share creation has no server idempotency key. Never offer a blind replay
+      // after a transport failure or unverifiable acknowledgment.
+      if (alive.current) setShareUncertain(true);
+      try {
+        const value = await request!({
+          operation: "service",
+          command: {
+            operation: "create-share",
+            objectId: ack.objectId,
+            revisionId: ack.revisionId,
+            expiresInDays: 7,
+          },
+        });
+        if (typeof value.shareId !== "string" || typeof value.url !== "string")
+          throw new Error("Unverified report link response.");
+        if (alive.current) {
+          setLink({
+            id: value.shareId,
+            url: value.url,
+            expiresAt:
+              typeof value.expiresAt === "string" ? value.expiresAt : undefined,
+          });
+          setPreview(undefined);
+          setShareUncertain(false);
+        }
+      } catch {
+        throw new Error(
+          "Report link creation could not be confirmed. Check shared links in Cloud settings before reviewing again. This request will not retry automatically.",
+        );
+      }
+    });
+  return (
+    <section className="gyro-check-share" aria-label="Share Check report">
+      {!preview && !link ? (
+        <>
+          <button
+            type="button"
+            disabled={disabled || busy || !request}
+            onClick={start}
+          >
+            {busy ? "Preparing report…" : "Share report"}
+          </button>
+          <p>
+            {request
+              ? `${unavailableReason?.includes("cached while offline") ? `${unavailableReason} ` : ""}Review a sanitized, read-only copy before sending it to Gyro Cloud.`
+              : (unavailableReason ??
+                "Report sharing needs a configured Gyro Cloud connection. Your local Check report remains available.")}
+          </p>
+        </>
+      ) : null}
+      {preview ? (
+        <>
+          <h4>Review report to share</h4>
+          <p>
+            This exact text will be sent to Gyro Cloud. Commands, raw output,
+            file lists and local identities are excluded. Recognizable
+            credentials block sharing; check the remaining text for sensitive
+            information.
+          </p>
+          <pre tabIndex={0} aria-label="Exact report text to upload">
+            {preview.content}
+          </pre>
+          <p>
+            Anyone with the link can read this copy for 7 days. Revoke the link
+            in Cloud settings. Deleting the local report does not revoke a
+            shared copy.
+          </p>
+          <label className="gyro-check-consent">
+            <input
+              type="checkbox"
+              checked={reviewed}
+              disabled={busy || !!uploaded || !!queued}
+              onChange={(e) => setReviewed(e.target.checked)}
+            />
+            I reviewed this text and want to upload it and create a public
+            report link.
+          </label>
+          <div className="gyro-check-actions">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setPreview(undefined);
+                setReviewed(false);
+                setUploaded(undefined);
+                setQueued(undefined);
+                setError("");
+              }}
+            >
+              Close review
+            </button>
+            <button
+              type="button"
+              className={primary ? "gyro-check-primary" : undefined}
+              disabled={busy || !reviewed || !request || shareUncertain}
+              onClick={create}
+            >
+              {busy
+                ? "Creating report link…"
+                : queued
+                  ? "Retry report upload"
+                  : uploaded
+                    ? "Create report link"
+                    : "Upload and create 7-day link"}
+            </button>
+          </div>
+        </>
+      ) : null}
+      {link ? (
+        <>
+          <p role="status">
+            Report link created
+            {link.expiresAt
+              ? ` · Expires ${new Date(link.expiresAt).toLocaleString()}`
+              : " · Expires in 7 days"}
+            .
+          </p>
+          <label>
+            Report link
+            <input
+              readOnly
+              value={link.url}
+              onFocus={(event) => event.currentTarget.select()}
+            />
+          </label>
+          <div className="gyro-check-actions">
+            <button
+              type="button"
+              onClick={() =>
+                void navigator.clipboard
+                  .writeText(link.url)
+                  .then(() => setCopied(true))
+                  .catch(() =>
+                    setError(
+                      "Copy failed. Select the report link and copy it manually.",
+                    ),
+                  )
+              }
+            >
+              {copied ? "Copied" : "Copy link"}
+            </button>
+            <button
+              type="button"
+              disabled={busy || !request}
+              onClick={() =>
+                void run(async () => {
+                  await request!({
+                    operation: "service",
+                    command: { operation: "revoke-share", shareId: link.id },
+                  });
+                  if (alive.current) {
+                    setLink(undefined);
+                    setError(
+                      "Report link revoked. The uploaded copy remains in Cloud until you delete it.",
+                    );
+                  }
+                })
+              }
+            >
+              Revoke link
+            </button>
+          </div>
+        </>
+      ) : null}
+      {error ? (
+        <p className="gyro-check-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </section>
   );
 }

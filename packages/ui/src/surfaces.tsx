@@ -1,6 +1,8 @@
 import { ShortcutConflicts, workspaceKeybindingSignature } from "./settings-shortcut-conflicts";
 import { ProviderModelDefaults } from "./settings-provider-defaults";
 import { SettingsDisclosure, SettingsDisclosureProvider, revealSettingsTarget } from "./settings-disclosure";
+import { BillingSettings, type BillingSnapshot, type BillingActions } from "./billing-settings";
+import { CloudSettings } from "./cloud-settings";
 import { NewChatSettings, CheckReminderSettings, type SettingsPreferencePatch } from "./new-chat-settings";
 import { SettingsTransferPanel } from "./settings-transfer-panel";
 import type { PortableSettings } from "./settings-transfer";
@@ -185,6 +187,7 @@ import { LanguagePicker } from "./editor/languages/language-picker";
 import { resolveLanguage } from "./editor/languages/registry";
 import {
   Activity,
+  Cloud,
   Archive,
   ArrowDown,
   ArrowLeft,
@@ -1034,6 +1037,8 @@ const settingsSidebarItems: Array<{
     group: "Workspace",
   },
   { id: "usage-limits", label: "Usage & limits", icon: Gauge, group: "AI & Agents" },
+  { id: "cloud", label: "Gyro Cloud", icon: Cloud, group: "Gyro account" },
+  { id: "billing", label: "Plan & billing", icon: Gauge, group: "Gyro account" },
   { id: "updates", label: "Updates", icon: RefreshCw, group: "System" },
   { id: "advanced", label: "Data & privacy", icon: Settings, group: "System" },
   { id: "about", label: "Help", icon: HelpCircle, group: "System" },
@@ -1051,6 +1056,8 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   { section: "efficiency", label: "Provider for new chats", detail: "Last used or a connected provider", keywords: "new chat default model reasoning effort" },
   { section: "efficiency", label: "Suggest checking finished work", detail: "Optional Check reminders after recorded edits", keywords: "check reminder verification" },
   { section: "advanced", label: "Settings export/import", detail: "Preview and apply a safe settings file", keywords: "backup transfer json import export" },
+  { section: "cloud", label: "Gyro Cloud", detail: "Selected backups, memory, assistance and connected devices", keywords: "cloud sync restore backup memory sharing report links devices export delete allowance" },
+  { section: "billing", label: "Plan & billing", detail: "Optional subscription and payments", keywords: "plus premium subscribe payment invoice cancellation renewal" },
   {
     section: "import-projects",
     label: "Import projects",
@@ -22677,6 +22684,8 @@ function ProviderInstallPanel({
 export type SettingsSurfaceProps = {
   preferences?: WorkbenchPreferences;
   onSettingsPreferencesChange?: (patch: SettingsPreferencePatch) => void;
+  billingSnapshot?: BillingSnapshot;
+  billingActions?: BillingActions;
   onImportSettings?: (settings: Partial<PortableSettings>) => void;
 
   projectImport?: ProjectImportSettingsProps;
@@ -22946,7 +22955,7 @@ function CliLaunchPresetEditor({
 }
 
 export function SettingsSurface({
-  preferences, onSettingsPreferencesChange, onImportSettings,
+  preferences, onSettingsPreferencesChange, onImportSettings, billingSnapshot, billingActions,
 
   projectImport,
   config,
@@ -23427,6 +23436,8 @@ export function SettingsSurface({
             <ProjectImportSettings {...projectImport} />
           </SettingsSection>
         ) : null}
+        {activeSection === "cloud" ? <CloudSettings snapshot={billingSnapshot} actions={billingActions} onOpenBilling={() => onSectionChange?.("billing")}/> : null}
+        {activeSection === "billing" ? <BillingSettings snapshot={billingSnapshot} actions={billingActions} onOpenCloud={() => onSectionChange?.("cloud")}/> : null}
         {activeSection === "general" ? (
           <SettingsSection
             icon={SlidersHorizontal}
@@ -23630,7 +23641,7 @@ export function SettingsSurface({
             dataTour="settings.providers"
             icon={Gauge}
             title="Models & accounts"
-            description="Connect providers and choose their default models."
+            description="Connect providers and choose their default models. Your Gyro subscription is managed separately."
           >
             {providersForConfig(config).filter(provider => connectingProviderIds.includes(provider.id) || provider.authStatus === "connecting" || providerStatuses?.some(status => status.id === provider.id && status.connectionStatus === "failed")).map(provider => <div key={provider.id} className="gyro-settings-page-status" role={connectingProviderIds.includes(provider.id) || provider.authStatus === "connecting" ? "status" : "alert"}><strong>{provider.displayName}</strong><p>{connectingProviderIds.includes(provider.id) || provider.authStatus === "connecting" ? "Sign-in in progress. Complete the provider sign-in to continue." : providerStatuses?.find(status => status.id === provider.id)?.healthSummary ?? "Connection needs attention."}</p><button className="gyro-secondary-button" type="button" onClick={()=>onTestProvider?.(provider.id)}>Check connection</button></div>)}
             {connectedRemoteProviders.length > 0 ? (
@@ -23798,7 +23809,7 @@ export function SettingsSurface({
           </SettingsSection>
         ) : null}
         {activeSection === "usage-limits" ? (
-          <SettingsSection icon={Gauge} title="Usage & limits" description="Provider allowances, local observations and run budgets.">
+          <SettingsSection icon={Gauge} title="Usage & limits" description="Provider allowances, local observations and run budgets. Gyro subscription billing is separate.">
             <SettingsDisclosure id="provider-usage" title="Provider-reported allowances" description="Only windows actually reported by your provider are shown.">
             {usageProvider ? (
               <div className="gyro-usage-dashboard">
