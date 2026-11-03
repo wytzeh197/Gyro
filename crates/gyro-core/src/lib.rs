@@ -9,6 +9,7 @@ pub mod capabilities;
 mod chat_http;
 pub mod cli_install;
 pub mod cli_path;
+pub mod cloud_connection;
 pub mod cli_updates;
 pub mod config;
 pub mod council;

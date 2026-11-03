@@ -1,0 +1,262 @@
+{
+  "evidence": "Actual local mock handler outputs; no hosted identity/payment/ledger acceptance",
+  "snapshots": {
+    "pending": {
+      "contractVersion": "1.1.0-draft.1",
+      "environment": "local",
+      "mode": "mock",
+      "snapshotId": "f9a8dcc3-99a7-4f7d-aeb5-7bafefcba7b2",
+      "revision": 1,
+      "verifiedAt": "2026-10-31T12:00:00.000Z",
+      "expiresAt": "2026-10-31T12:01:00.000Z",
+      "account": {
+        "id": "fcc4cfa6-4416-485e-baf4-bf41026263f7",
+        "emailVerified": true,
+        "status": "enabled"
+      },
+      "session": {
+        "id": "2ddf0cfa-3020-47e5-a6da-3ba865a3fdc5",
+        "expiresAt": "2026-10-31T13:00:00.000Z",
+        "revocationCheckedAt": "2026-10-31T12:00:00.000Z"
+      },
+      "subscription": {
+        "state": "checkout-pending",
+        "planId": "plus",
+        "source": "none",
+        "paidThrough": null,
+        "renewalAt": null,
+        "cancellationAt": null
+      },
+      "capabilities": {
+        "managedAi": {
+          "allowed": false,
+          "reason": "no-subscription"
+        },
+        "selectedSync": {
+          "allowed": false,
+          "reason": "not-available"
+        },
+        "backup": {
+          "allowed": false,
+          "reason": "not-available"
+        },
+        "sharing": {
+          "allowed": false,
+          "reason": "not-available"
+        }
+      },
+      "currentPeriod": null
+    },
+    "active": {
+      "contractVersion": "1.1.0-draft.1",
+      "environment": "local",
+      "mode": "mock",
+      "snapshotId": "8780338c-b7a8-401b-ab31-dc044ea773dc",
+      "revision": 2,
+      "verifiedAt": "2026-10-31T12:00:00.000Z",
+      "expiresAt": "2026-10-31T12:01:00.000Z",
+      "account": {
+        "id": "fcc4cfa6-4416-485e-baf4-bf41026263f7",
+        "emailVerified": true,
+        "status": "enabled"
+      },
+      "session": {
+        "id": "2ddf0cfa-3020-47e5-a6da-3ba865a3fdc5",
+        "expiresAt": "2026-10-31T13:00:00.000Z",
+        "revocationCheckedAt": "2026-10-31T12:00:00.000Z"
+      },
+      "subscription": {
+        "state": "active",
+        "planId": "plus",
+        "source": "test",
+        "paidThrough": "2026-11-01T12:00:00.000Z",
+        "renewalAt": null,
+        "cancellationAt": null
+      },
+      "capabilities": {
+        "managedAi": {
+          "allowed": true,
+          "reason": "entitled"
+        },
+        "selectedSync": {
+          "allowed": false,
+          "reason": "not-available"
+        },
+        "backup": {
+          "allowed": false,
+          "reason": "not-available"
+        },
+        "sharing": {
+          "allowed": false,
+          "reason": "not-available"
+        }
+      },
+      "currentPeriod": {
+        "id": "21944143-3067-4464-afc0-89e7570d39b4",
+        "startsAt": "2026-10-31T12:00:00.000Z",
+        "endsAt": "2026-11-01T12:00:00.000Z",
+        "currency": "USD",
+        "grantedMicros": 50000,
+        "spentMicros": 0,
+        "reservedMicros": 0,
+        "availableMicros": 50000
+      }
+    },
+    "cancelled": {
+      "contractVersion": "1.1.0-draft.1",
+      "environment": "local",
+      "mode": "mock",
+      "snapshotId": "5722eaa5-4794-4569-8a43-12060387b557",
+      "revision": 3,
+      "verifiedAt": "2026-10-31T12:00:00.000Z",
+      "expiresAt": "2026-10-31T12:01:00.000Z",
+      "account": {
+        "id": "fcc4cfa6-4416-485e-baf4-bf41026263f7",
+        "emailVerified": true,
+        "status": "enabled"
+      },
+      "session": {
+        "id": "2ddf0cfa-3020-47e5-a6da-3ba865a3fdc5",
+        "expiresAt": "2026-10-31T13:00:00.000Z",
+        "revocationCheckedAt": "2026-10-31T12:00:00.000Z"
+      },
+      "subscription": {
+        "state": "cancellation-scheduled",
+        "planId": "plus",
+        "source": "test",
+        "paidThrough": "2026-11-01T12:00:00.000Z",
+        "renewalAt": null,
+        "cancellationAt": "2026-10-31T12:00:00.000Z"
+      },
+      "capabilities": {
+        "managedAi": {
+          "allowed": true,
+          "reason": "entitled"
+        },
+        "selectedSync": {
+          "allowed": false,
+          "reason": "not-available"
+        },
+        "backup": {
+          "allowed": false,
+          "reason": "not-available"
+        },
+        "sharing": {
+          "allowed": false,
+          "reason": "not-available"
+        }
+      },
+      "currentPeriod": {
+        "id": "21944143-3067-4464-afc0-89e7570d39b4",
+        "startsAt": "2026-10-31T12:00:00.000Z",
+        "endsAt": "2026-11-01T12:00:00.000Z",
+        "currency": "USD",
+        "grantedMicros": 50000,
+        "spentMicros": 0,
+        "reservedMicros": 0,
+        "availableMicros": 50000
+      }
+    },
+    "exhausted": {
+      "contractVersion": "1.1.0-draft.1",
+      "environment": "local",
+      "mode": "mock",
+      "snapshotId": "3e47f60b-f9e2-4213-bf30-a82c555bf40f",
+      "revision": 8,
+      "verifiedAt": "2026-10-31T12:00:00.000Z",
+      "expiresAt": "2026-10-31T12:01:00.000Z",
+      "account": {
+        "id": "fcc4cfa6-4416-485e-baf4-bf41026263f7",
+        "emailVerified": true,
+        "status": "enabled"
+      },
+      "session": {
+        "id": "2ddf0cfa-3020-47e5-a6da-3ba865a3fdc5",
+        "expiresAt": "2026-10-31T13:00:00.000Z",
+        "revocationCheckedAt": "2026-10-31T12:00:00.000Z"
+      },
+      "subscription": {
+        "state": "cancellation-scheduled",
+        "planId": "plus",
+        "source": "test",
+        "paidThrough": "2026-11-01T12:00:00.000Z",
+        "renewalAt": null,
+        "cancellationAt": "2026-10-31T12:00:00.000Z"
+      },
+      "capabilities": {
+        "managedAi": {
+          "allowed": false,
+          "reason": "exhausted"
+        },
+        "selectedSync": {
+          "allowed": false,
+          "reason": "not-available"
+        },
+        "backup": {
+          "allowed": false,
+          "reason": "not-available"
+        },
+        "sharing": {
+          "allowed": false,
+          "reason": "not-available"
+        }
+      },
+      "currentPeriod": {
+        "id": "21944143-3067-4464-afc0-89e7570d39b4",
+        "startsAt": "2026-10-31T12:00:00.000Z",
+        "endsAt": "2026-11-01T12:00:00.000Z",
+        "currency": "USD",
+        "grantedMicros": 50000,
+        "spentMicros": 50000,
+        "reservedMicros": 0,
+        "availableMicros": 0
+      }
+    },
+    "expired": {
+      "contractVersion": "1.1.0-draft.1",
+      "environment": "local",
+      "mode": "mock",
+      "snapshotId": "b5ad90f5-41dc-4e9e-902f-5860d5736d82",
+      "revision": 9,
+      "verifiedAt": "2026-10-31T12:00:00.000Z",
+      "expiresAt": "2026-10-31T12:01:00.000Z",
+      "account": {
+        "id": "fcc4cfa6-4416-485e-baf4-bf41026263f7",
+        "emailVerified": true,
+        "status": "enabled"
+      },
+      "session": {
+        "id": "2ddf0cfa-3020-47e5-a6da-3ba865a3fdc5",
+        "expiresAt": "2026-10-31T13:00:00.000Z",
+        "revocationCheckedAt": "2026-10-31T12:00:00.000Z"
+      },
+      "subscription": {
+        "state": "expired",
+        "planId": "plus",
+        "source": "test",
+        "paidThrough": "2026-10-31T12:00:00.000Z",
+        "renewalAt": null,
+        "cancellationAt": "2026-10-31T12:00:00.000Z"
+      },
+      "capabilities": {
+        "managedAi": {
+          "allowed": false,
+          "reason": "no-subscription"
+        },
+        "selectedSync": {
+          "allowed": false,
+          "reason": "not-available"
+        },
+        "backup": {
+          "allowed": false,
+          "reason": "not-available"
+        },
+        "sharing": {
+          "allowed": false,
+          "reason": "not-available"
+        }
+      },
+      "currentPeriod": null
+    }
+  }
+}

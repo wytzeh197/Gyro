@@ -1,5 +1,7 @@
 import { newChatDefaultSelection } from "./new-chat-defaults";
 import { useCheckReminders } from "./use-check-reminders";
+import { useCloudConnection } from "./use-cloud-connection";
+import { reviewedCloudContinuation } from "../../../packages/ui/src/cloud-chat-continuation";
 import { flushSync } from "react-dom";
 import { LocalCheckHost } from "./local-check";
 import {
@@ -840,6 +842,16 @@ export function App() {
   const [workbench, dispatchWorkbench] = useMeasuredWorkbenchReducer(
     loadInitialWorkbenchState,
   );
+  const continueCloudChatRef = useRef<(context: string) => Promise<boolean>>();
+  const cloudConnection = useCloudConnection(workbench.preferences, settings => {
+    if (["system", "light", "dark"].includes(String(settings.theme))) dispatchWorkbench({ type: "set-theme", theme: settings.theme as "system" | "light" | "dark" });
+    if (["compact", "comfortable"].includes(String(settings.density))) dispatchWorkbench({ type: "set-density", density: settings.density as "compact" | "comfortable" });
+    if (["small", "default", "large"].includes(String(settings.interfaceSize))) dispatchWorkbench({ type: "set-interface-size", interfaceSize: settings.interfaceSize as "small" | "default" | "large" });
+    if (["slower", "default", "faster"].includes(String(settings.motionSpeed))) dispatchWorkbench({ type: "set-motion-speed", motionSpeed: settings.motionSpeed as "slower" | "default" | "faster" });
+  }, async context => {
+    if (!continueCloudChatRef.current) throw new Error("The local chat workspace is still loading.");
+    return continueCloudChatRef.current(context);
+  });
   const { appearanceSaveStatus, onAppearancePersisted, retryAppearanceSave } =
     useAppearanceSaveFeedback(workbench.preferences);
   const { resolvedTheme, reduceMotion, appearance } = useWorkbenchAppearance(
@@ -7714,26 +7726,27 @@ export function App() {
   }, [activeDraftKey, carryFolderlessDraft]);
 
   const startNewChat = useCallback(
-    (options: { keepLayout?: boolean; workspacePath?: string } = {}) => {
+    (options: { keepLayout?: boolean; workspacePath?: string; draftKey?: string; initialDraft?: string; preserveOpenPanes?: boolean } = {}) => {
       suppressSessionAutoSelectRef.current = true;
       const projectPath =
         options.workspacePath === undefined
           ? (activeSession?.workspacePath ?? workspacePath)
           : options.workspacePath;
       const projectKey = chatProjectKey(projectPath);
-      const draftKey = `new:${projectKey}`;
+      const draftKey = options.draftKey ?? `new:${projectKey}`;
       // Picking a folder moves the composer to this project's draft. Carry a
       // prompt (and its images) typed while no folder was open so the message
       // the user already wrote is not silently discarded.
-      carryFolderlessDraft(draftKey);
+      if (options.initialDraft === undefined) carryFolderlessDraft(draftKey);
+      else setChatDrafts(current => ({ ...current, [draftKey]: options.initialDraft! }));
       if (configLoaded) setChatDraftModels(current => current[draftKey] ? current : { ...current, [draftKey]: newChatDefaultSelection(config, workbench.preferences) ?? selectedSessionModelFromConfig(config) });
 
-      // A project has one unsent draft; if it is already open in a pane, focus
-      // it there rather than opening it twice. A new
+      // Normal new chats share a project's unsent draft; Cloud continuations
+      // provide a unique key. Focus an existing matching pane if available. A new
       // pane gets an id of its own: a sent draft keeps its pane id, so a
       // shared `draft:<project>` id made the next new chat collide with the
       // old one — same React key, shared focus, merged split panes.
-      const openDraftPane = chatGrid.layouts[projectKey]?.slots.find(
+      const openDraftPane = (options.preserveOpenPanes ? chatGridRef.current : chatGrid).layouts[projectKey]?.slots.find(
         (pane) => pane?.kind === "draft" && pane.draftKey === draftKey,
       );
       const paneId =
@@ -7743,11 +7756,11 @@ export function App() {
       dispatchCompanion({ type: "forget-pane", paneId: SOLO_CHAT_PANE_ID });
       dispatchCompanion({ type: "forget-pane", paneId });
       dispatchWorkbench({ type: "set-chat-panel" });
-      // In split view the new chat opens in the selected pane, replacing it.
+      // Cloud continuations append without displacing existing panes.
       dispatchChatGrid({
         type: "select-pane",
         projectKey,
-        mode: "replace",
+        mode: options.preserveOpenPanes ? "drop" : "replace",
         pane: {
           paneId,
           kind: "draft",
@@ -7776,6 +7789,28 @@ export function App() {
     },
     [activeSession?.workspacePath, carryFolderlessDraft, chatGrid.layouts, workspacePath, config, configLoaded, workbench.preferences],
   );
+
+  // The Cloud reader supplies reviewed text only. A local picker establishes
+  // the project and normal Send establishes a new session/permissions later.
+  // A unique draft key preserves every existing unsent project draft.
+  continueCloudChatRef.current = async (context) => {
+    const initialDraft = reviewedCloudContinuation(context, MAX_CHAT_MESSAGE_CHARS);
+    const selected = await openWorkspace();
+    if (!selected) return false;
+    const layout = chatGridRef.current.layouts[chatProjectKey(selected)];
+    if ((layout?.slots.filter(Boolean).length ?? 0) >= CHAT_GRID_MAX_SLOTS)
+      throw new Error("This project has four open chat panes. Close a pane, then continue from the preserved Cloud archive.");
+    setPendingNewChatGoal(undefined);
+    setIsGoalComposerActive(false);
+    goalModeCarryRef.current = undefined;
+    startNewChat({
+      workspacePath: selected,
+      draftKey: `cloud-context:${crypto.randomUUID()}`,
+      initialDraft,
+      preserveOpenPanes: true,
+    });
+    return true;
+  };
 
   /**
    * A chat's folder is fixed at creation. Selecting a project from its
@@ -18834,6 +18869,8 @@ export function App() {
       ) : null}
       {activeDestination === "settings" || activeDestination === "providers" ? (
         <SettingsSurface
+          billingSnapshot={cloudConnection.snapshot}
+          billingActions={cloudConnection.actions}
           preferences={workbench.preferences}
           onSettingsPreferencesChange={patch => dispatchWorkbench({ type: "set-settings-preferences", patch })}
           onImportSettings={settings => dispatchWorkbench({ type: "import-portable-settings", settings })}
@@ -19486,7 +19523,15 @@ export function App() {
             ]}
           >
             <AppearanceContext.Provider value={appearance}>
-              <LocalCheckHost sessions={sessions} reminders={checkReminders.reminders} onDismissReminder={checkReminders.dismiss}>
+              <LocalCheckHost sessions={sessions} reminders={checkReminders.reminders} onDismissReminder={checkReminders.dismiss}
+                cloudRequest={cloudConnection.snapshot.cloudCapabilities?.sharing?.allowed ? cloudConnection.actions.cloud?.request : undefined}
+                cloudUnavailableReason={
+                  !(cloudConnection.snapshot.cloudV2 || cloudConnection.snapshot.productionCloud) ? "Report sharing is unavailable in this build. Your local Check report remains available."
+                  : cloudConnection.snapshot.status === "signed-out" ? "Sign in through Cloud settings to share a report. Your local Check report remains available."
+                  : ["no-subscription", "checkout-pending"].includes(cloudConnection.snapshot.status) ? "Report sharing needs an active Cloud plan. Open Cloud settings to check your plan."
+                  : cloudConnection.snapshot.status === "offline" ? "Cloud status is cached while offline. You can review this report; sending it may need an explicit retry."
+                  : "Report sharing is paused for this Cloud account. Open Cloud settings to refresh access or resolve the plan status."
+                }>
               {appChrome}
               <FirstRunTour
                 destination={activeDestination}

@@ -7,6 +7,7 @@ mod chat_images;
 mod chat_media_upload;
 use chat_media_upload::prepare_chat_media_upload;
 mod conversation_history;
+mod cloud_connection;
 use conversation_history::{acp_conversation_history_text_for_session, local_compaction_summary};
 mod agent_reports;
 mod efficiency;
@@ -24460,6 +24461,7 @@ pub fn run() {
         .manage(language_server::LanguageServerManager::default())
         .manage(DebugAdapterManager::default())
         .manage(ProviderCancellationManager::default())
+        .manage(cloud_connection::CloudConnection::default())
         .manage(local_check::LocalCheckManager::default())
         .manage(project_import::ProjectImportManager::default())
         .manage(delegated_agents::AgentManager::default())
@@ -24552,6 +24554,11 @@ pub fn run() {
             canvas_preview::response(request)
         })
         .invoke_handler(tauri::generate_handler![
+            cloud_connection::cloud_connection_view,
+            cloud_connection::cloud_connection_action,
+            cloud_connection::cloud_connection_begin,
+            cloud_connection::cloud_connection_verify,
+            cloud_connection::cloud_connection_service,
             local_check::prepare_local_check,
             local_check::resolve_local_check,
             local_check::cancel_local_check,

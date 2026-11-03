@@ -1,3 +1,4 @@
+import { BILLING_SCENES, useBillingPreview } from "./billing-preview";
 import { createInitialWorkbenchState, workbenchReducer, type WorkbenchAction } from "@gyro-dev/ui";
 // Standalone production components. Preferences persist in fixture-only storage;
 // accounts, updater state, and workspace data are simulated.
@@ -179,6 +180,7 @@ const UPDATE_SCENES: Array<{
 ];
 
 function Preview() {
+  const billing = useBillingPreview();
   const [extraPreferences, setExtraPreferences] = useState(() => {
     const base = createInitialWorkbenchState().preferences;
     try { const raw = localStorage.getItem("gyro.settings-preview.preferences"); return raw && raw.length < 65536 ? { ...base, ...JSON.parse(raw) } as WorkbenchPreferences : base; } catch { return base; }
@@ -353,6 +355,10 @@ function Preview() {
         .gyro-settings-preview > .gyro-app-shell { height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr); }
         .gyro-settings-preview .gyro-workspace-activity-rail { min-height: 0; }
         :root[data-theme] .gyro-settings-preview .gyro-app-shell.is-workspace-shell > .gyro-main, :root[data-theme] .gyro-settings-preview .gyro-app-shell.is-workspace-shell > .gyro-sidebar { height: 100%; min-height: 0; }
+        .gyro-settings-preview-account-form { position: fixed; z-index: 500; top: 15%; left: 50%; transform: translateX(-50%); width: min(480px, calc(100vw - 40px)); padding: 24px; background: var(--gyro-pane); border: 1px solid var(--gyro-border); border-radius: 12px; box-shadow: 0 12px 80px #0004; }
+        .gyro-settings-preview-account-form input { display: block; width: 100%; margin: 16px 0; }
+        .gyro-settings-preview-portal-backdrop { position: fixed; inset: 0; z-index: 500; background: #0005; }
+        .gyro-settings-preview-portal-backdrop .gyro-settings-preview-account-form { max-height: 80vh; overflow: auto; top: 10%; }
         .gyro-settings-preview-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--gyro-border-soft); font: 12px var(--gyro-font-sans); }
         .gyro-settings-preview-toolbar > span:first-child { margin-right: auto; }
         .gyro-settings-preview-toolbar button { font: inherit; }
@@ -409,6 +415,7 @@ function Preview() {
           </button>
         ) : null}
         {result ? <output>{result}</output> : null}
+        {section === "billing" ? <><select aria-label="Billing fixture state" value={billing.snapshot.status} onChange={e=>billing.setScene(e.target.value as typeof billing.snapshot.status)}>{BILLING_SCENES.map(status=><option key={status}>{status}</option>)}</select><button onClick={billing.cancel}>Simulate cancellation</button></> : null}
       </nav>
       <AppChrome
         sessions={[]}
@@ -437,6 +444,7 @@ function Preview() {
         onSettingsBack={() => setResult("Back to app is simulated.")}
         settingsBackLabel="fixture"
       >
+        {section === "billing" ? billing.accountForm : null}
         <SettingsSurface
           preferences={{ ...extraPreferences, theme, density, interfaceSize, motionSpeed, mainColor: colors[0]!, secondaryColor: colors[1]!, desktopNotifications: notifications, launchView, showMenuBarIcon: menu, modelFollow: follow, defaultWorkspaceMode }}
           onSettingsPreferencesChange={patch => setExtraPreferences(current=>({...current,...patch}))}
@@ -454,6 +462,8 @@ function Preview() {
           cliLaunchPreset={extraPreferences.cliLaunchPreset}
           onCliLaunchPresetChange={preset=>updateFixturePreference({type:"set-cli-launch-preset",preset})}
           workspaceKeybindings={extraPreferences.workspaceKeybindings}
+          billingSnapshot={billing.snapshot}
+          billingActions={billing.actions}
           workspaceUserSettings={extraPreferences.workspaceUserSettings}
           workspaceSettingsByWorkspace={extraPreferences.workspaceSettingsByWorkspace}
           workspaceSettingsByFolder={extraPreferences.workspaceSettingsByFolder}
