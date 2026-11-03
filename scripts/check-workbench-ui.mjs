@@ -6109,10 +6109,11 @@ expect(
 );
 
 // Side chat is a throwaway thread: it inherits the focused chat's project and
-// model but none of its transcript, never reaches the sidebar, and is deleted
-// on close and again on the next launch after an unclean exit.
+// model, reads its transcript as background, never reaches the sidebar, and is
+// deleted on close and again on the next launch after an unclean exit.
 expect(
   appSource.includes('title: "Side chat"') &&
+    appSource.includes("sideChatContext: parent") &&
     appSource.includes("...sessionModelSelectionFromSession(parent)") &&
     appSource.includes(
       "const workspace = parent?.workspacePath ?? workspacePath",
@@ -7214,20 +7215,31 @@ expect(
     ),
   "The model menu should hold one width, animate from its anchor, keep carets neutral, and flip when it cannot open down.",
 );
+const modelDefaultAcceptSource = appSource.slice(
+  appSource.indexOf("const acceptModelStandardPrompt ="),
+  appSource.indexOf("const dismissModelStandardPrompt ="),
+);
 expect(
   indexSource.includes("ModelStandardPromptOverlay") &&
     surfaceSource.includes("export function ModelStandardPromptOverlay") &&
-    surfaceSource.includes("You use {modelLabel} a lot.") &&
-    surfaceSource.includes("Yes, make standard") &&
-    surfaceSource.includes("No, not now") &&
-    styleSource.includes(".gyro-model-standard-overlay") &&
-    appSource.includes("MODEL_STANDARD_PROMPT_THRESHOLD = 3") &&
-    appSource.includes("MODEL_USAGE_STORAGE_KEY") &&
-    appSource.includes("recordModelSelection") &&
-    appSource.includes("acceptModelStandardPrompt") &&
-    appSource.includes("dismissModelStandardPrompt") &&
+    surfaceSource.includes("Use {modelLabel} by default?") &&
+    surfaceSource.includes("Used successfully {usageCount}") &&
+    surfaceSource.includes("onNeverSuggest") &&
+    surfaceSource.includes('className="gyro-model-default-suggestion"') &&
+    styleSource.includes('@import "./model-default-suggestion.css"') &&
+    appSource.includes("isSuccessfulModelUseResponse(response)") &&
+    (appSource.match(/recordCompletedModelChoice\(/g)?.length ?? 0) === 2 &&
+    !appSource.includes("recordModelSelection") &&
+    appSource.includes("modelDefaultSuggestionFor(") &&
+    appSource.includes("canShowModelDefaultSuggestion") &&
+    appSource.includes("dismissModelDefaultSuggestion(") &&
+    modelDefaultAcceptSource.includes("await persistConfig(") &&
+    modelDefaultAcceptSource.includes("defaultModelId: model.id") &&
+    modelDefaultAcceptSource.includes("if (!saved)") &&
+    !modelDefaultAcceptSource.includes("saveSessionModel(") &&
+    !modelDefaultAcceptSource.includes("selectedProviderId:") &&
     appSource.includes("<ModelStandardPromptOverlay"),
-  "Repeated model selections should trigger a polished standard-model confirmation overlay.",
+  "Default suggestions should use completed native chat evidence, support decline, and save future defaults without changing active chats.",
 );
 expect(
   surfaceSource.includes("function useOutsidePointerDismiss") &&

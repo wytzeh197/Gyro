@@ -785,7 +785,7 @@ assert.equal(
     {
       name: "Claude Opus 5",
       rows: [
-        ["anthropic", "claude-opus-5", "cli", 1_000_000],
+        ["anthropic", "claude-opus-5", "cli", 200_000],
         ["openrouter", "anthropic/claude-opus-5", "api", 1_000_000],
       ],
     },

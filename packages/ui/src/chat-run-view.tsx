@@ -410,7 +410,11 @@ export function ChatRun({
             <li className="gyro-run-row-item">
               {/* A reasoning headline, when the provider sent one, is the more
                   honest version of "Thinking": it says what about. */}
-              <RunPulse label="Thinking" thought={tailStatus} />
+              <RunPulse
+                label="Thinking"
+                quietForSeconds={model.quietForSeconds}
+                thought={tailStatus}
+              />
             </li>
           ) : null}
           {retryPhase ? (
@@ -729,13 +733,9 @@ function RunCallRow({
           ) : null}
         </span>
       ) : null}
-      {elapsed ? (
-        <span className="gyro-run-call-meta">
-          · Active now · {elapsed} elapsed
-        </span>
-      ) : null}
+      {elapsed ? <span className="gyro-run-call-meta">{elapsed}</span> : null}
       {item.status === "failed" ? (
-        <span className="gyro-run-call-meta is-failed">· Failed</span>
+        <span className="gyro-run-call-meta is-failed">Failed</span>
       ) : null}
     </>
   );
@@ -1074,17 +1074,32 @@ function RunRetry({
  * on the same line — never wrapped — so the row reads as an in-progress
  * sentence instead of a paragraph landing on the rail.
  */
-function RunPulse({ label, thought }: { label: string; thought?: string }) {
+function RunPulse({
+  label,
+  quietForSeconds,
+  thought,
+}: {
+  label: string;
+  quietForSeconds?: number;
+  thought?: string;
+}) {
+  // A quiet run stops breathing and says how long it has been, in whole minutes
+  // so the note does not jump with each heartbeat. The last thought gives way to
+  // that, since by then it describes the past.
+  const note = quietForSeconds
+    ? `No updates for ${formatRunDuration(Math.floor(quietForSeconds / 60) * 60)}`
+    : thought;
   return (
-    <div className="gyro-run-pulse" role="status">
+    <div
+      className={quietForSeconds ? "gyro-run-pulse is-quiet" : "gyro-run-pulse"}
+      role="status"
+    >
       <span aria-hidden="true" className="gyro-run-row-icon">
         <Lightbulb size={15} />
       </span>
       <span className="gyro-run-pulse-line">
         <span className="gyro-run-pulse-label">{label}</span>
-        {thought ? (
-          <span className="gyro-run-pulse-thought">{thought}</span>
-        ) : null}
+        {note ? <span className="gyro-run-pulse-thought">{note}</span> : null}
       </span>
     </div>
   );
@@ -1156,7 +1171,7 @@ function RunProblem({
   // temporary model-capacity failure shown in the user's recovery notice.
   const isPermanent =
     !isInterrupted &&
-    /^(?:authentication|login-expired|plan-exhausted|provider-config|cli-contract|capacity|spend-ceiling|tool-budget|partial-answer|cancelled|model-unavailable|permission|unsupported|invalid-request|model-capacity-exhausted)$/.test(
+    /^(?:authentication|login-expired|plan-exhausted|provider-config|cli-contract|capacity|spend-ceiling|no-progress|tool-budget|partial-answer|cancelled|model-unavailable|permission|unsupported|invalid-request|model-capacity-exhausted)$/.test(
       phase.recoveryKind ?? "",
     );
   const isInactivityLimit =

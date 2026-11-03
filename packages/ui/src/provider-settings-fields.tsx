@@ -451,6 +451,17 @@ export function ProviderDetailsMenu({
       menu.style.translate = "";
       menu.style.maxHeight = "";
       const bounds = clippingBounds(menu);
+      // Settings disclosures inset the table from the scroll pane. Keep its
+      // menus inside that panel too, including when actions stack on the left.
+      const table = details.closest<HTMLElement>(".gyro-provider-table");
+      if (table) {
+        const panel = table.getBoundingClientRect();
+        bounds.left = Math.max(bounds.left, panel.left + table.clientLeft);
+        bounds.right = Math.min(
+          bounds.right,
+          panel.left + table.clientLeft + table.clientWidth,
+        );
+      }
       const availableWidth = Math.max(0, bounds.right - bounds.left - 16);
       menu.style.maxWidth = `${availableWidth}px`;
       menu.style.minWidth = `${Math.min(230, availableWidth)}px`;

@@ -111,7 +111,7 @@ export function AccountNavigation({
 function UnloadedAccount({ account }: { account: Account }) {
   if (!account.error) return null;
   return (
-    <SettingsGroup label="Connection">
+    <SettingsGroup id="account-connection" label="Connection" defaultOpen>
       <SettingsRow label="Couldn’t load your account" detail={account.error}>
         <button
           className="gyro-secondary-button"
@@ -196,7 +196,7 @@ function PasswordRow({
 }
 
 const unavailable = (
-  <SettingsGroup label="Availability">
+  <SettingsGroup id="account-availability" label="Availability" defaultOpen>
     <SettingsRow
       label="Not available in this build"
     />
@@ -243,7 +243,7 @@ export function AccountSettings({ account }: { account: Account }) {
         <CloudSignIn onSignedIn={account.setStatus} />
       ) : (
         <>
-          <SettingsGroup label="Profile">
+          <SettingsGroup id="account-profile" label="Profile" defaultOpen>
             {editing ? (
               <form
                 className="gyro-account-identity"
@@ -319,7 +319,11 @@ export function AccountSettings({ account }: { account: Account }) {
               </div>
             )}
           </SettingsGroup>
-          <SettingsGroup label="Sign-in">
+          <SettingsGroup
+            id="account-sign-in"
+            label="Sign-in"
+            summary="Password and sign out"
+          >
             <PasswordRow
               onNotice={(message, failed) => {
                 setPasswordNotice({ message, failed });
@@ -378,7 +382,7 @@ export function CloudSettings({
       ) : !status.enabled ? (
         unavailable
       ) : !status.signedIn ? (
-        <SettingsGroup label="Chat backup">
+        <SettingsGroup id="cloud-sign-in" label="Chat backup" defaultOpen>
           <SettingsRow
             label="Sign in to use Cloud"
           >

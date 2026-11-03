@@ -1,6 +1,13 @@
-import { useGyroAccount, AccountNavigation, AccountSettings, CloudSettings } from "./account-settings";
+import { useGyroAccount, AccountNavigation, AccountSettings, CloudSettings as AccountCloudSettings } from "./account-settings";
 import { GyroCloud } from "./gyro-cloud";
+import { useAutomaticChatBackup } from "./use-automatic-chat-backup";
+import { CloudSettings } from "../../../packages/ui/src/cloud-settings";
+import { newChatDefaultSelection } from "./new-chat-defaults";
+import { useCheckReminders } from "./use-check-reminders";
+import { useCloudConnection } from "./use-cloud-connection";
+import { reviewedCloudContinuation } from "../../../packages/ui/src/cloud-chat-continuation";
 import { flushSync } from "react-dom";
+import { LocalCheckHost } from "./local-check";
 import {
   MonacoEditorPane,
   type WorkspaceNavigationSource,
@@ -27,9 +34,32 @@ import {
 import { confirmAction, setConfirmActionHandler } from "@gyro-dev/ui";
 import { ManagedDiffEditor } from "./managed-diff-editor";
 import {
+  type CliInstallPlanReport,
+  providerCliName,
+  providerInstallProfile,
   providerLoginProfile,
   providerLoginCommandText,
 } from "./provider-login-profile";
+import { parseProviderLoginProgress } from "./provider-login-progress";
+import { ProviderSignInContext } from "@gyro-dev/ui";
+import { FirstRunTour } from "@gyro-dev/ui";
+import {
+  MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
+  MODEL_DEFAULT_SUGGESTION_MAX_STORAGE_CHARS,
+  dismissModelDefaultSuggestion,
+  isSuccessfulModelUseResponse,
+  markModelDefaultSuggestionShown,
+  modelDefaultSuggestionFor,
+  parseModelDefaultSuggestionState,
+  recordCompletedModelUse,
+  snoozeProviderDefaultSuggestions,
+  type ModelDefaultSuggestionState,
+} from "./model-default-suggestion";
+import {
+  useInlineSignInRunner,
+  useProviderSignIn,
+  useProviderSignInActions,
+} from "./use-provider-sign-in";
 import { useSubagents } from "./use-subagents";
 import {
   readBoundedLocalStorage,
@@ -43,6 +73,7 @@ import {
 } from "./system-access-state";
 import { useAppearanceSaveFeedback } from "./use-appearance-save-feedback";
 import { useSessionBrowserEvents, changeSessionBrowserViewport } from "./use-session-browser-events";
+import { appPreviewClient } from "./app-preview-client";
 import type { BrowserViewportMode } from "@gyro-dev/ui";
 import {
   sourceControlForWorkspace,
@@ -113,6 +144,7 @@ import {
 } from "./use-session-context-events";
 import {
   ChatFileActionsContext,
+  ChatFileScopeContext,
   ComposerContextCandidates,
 } from "@gyro-dev/ui";
 import {
@@ -128,7 +160,10 @@ import { useGoogleModels } from "./use-google-models";
 import { persistAutoCompactPercent } from "./auto-compaction";
 import { useUsageActions } from "./usage-actions";
 import { useProviderApiKeys } from "./provider-api-keys";
-import { useProviderConnectionGuard } from "./provider-connection-guard";
+import {
+  useProviderConnectionGuard,
+  type ProviderConnectionOptions,
+} from "./provider-connection-guard";
 import { isComposerCliUpdating } from "./cli-update-scope";
 import {
   providerHealthDetailsFromCheck,
@@ -209,6 +244,7 @@ import {
   editorFilePolicy,
   setOpenDroppedWorkspaceHandler,
 } from "@gyro-dev/ui";
+import { createChatFileActions } from "./chat-file-actions";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -446,6 +482,7 @@ import {
   useSoloChatEnvironmentControls,
 } from "./chat-environment-rail";
 import { useWorkspaceExplorerFiles } from "./workspace-explorer";
+import { runWorkspaceSearchRoots } from "./workspace-search-run";
 import { useGyroUpdater } from "./update-controller";
 import {
   deriveLatestMenuBarOutcome,
@@ -621,20 +658,13 @@ type AutomationDraft = Pick<
 >;
 
 type ModelStandardPrompt = {
-  count: number;
+  usageCount: number;
+  chatCount: number;
   modelId: string;
   modelLabel: string;
   providerId: ProviderId;
   providerLabel: string;
 };
-
-type ModelUsageEntry = {
-  count: number;
-  snoozeUntil?: number;
-  standard?: boolean;
-};
-
-type ModelUsageMap = Record<string, ModelUsageEntry>;
 
 type SavedProject = {
   path: string;
@@ -668,7 +698,6 @@ const PINNED_SESSIONS_STORAGE_KEY = "gyro.pinned-session-ids";
 const REMOVED_PROJECTS_STORAGE_KEY = "gyro.removed-project-paths";
 const RECENT_PROJECTS_STORAGE_KEY = "gyro.recent-project-paths";
 const PREVIEW_CONFIG_STORAGE_KEY = "gyro.preview-config";
-const MODEL_USAGE_STORAGE_KEY = "gyro.model-standard-usage";
 /** Lines shown either side of the revealed line in a model focus peek. */
 const MODEL_FOCUS_PEEK_CONTEXT_LINES = 12;
 
@@ -678,8 +707,6 @@ const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
 const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
 /** Record the first automatic request before macOS opens a permission sheet. */
 const SYSTEM_ACCESS_PROMPTED_STORAGE_KEY = "gyro.system-access-prompted-v1";
-const MODEL_STANDARD_PROMPT_THRESHOLD = 3;
-const MODEL_STANDARD_PROMPT_SNOOZE_SELECTIONS = 3;
 const DEFAULT_TOOL_PANEL_HEIGHT = 280;
 const BROWSER_TOOL_PANEL_HEIGHT = 420;
 /** ~65% of viewport — Browser focus mode; never shrink a taller panel. */
@@ -690,6 +717,12 @@ const PROVIDER_AUTH_POLL_ATTEMPTS = 40;
 // runs a browser login someone has to complete by hand, and giving up early
 // means dropping the message that was waiting on it.
 const PROVIDER_SIGN_IN_POLL_ATTEMPTS = 100;
+// The model popover shows the sign-in link as soon as the CLI prints it, so an
+// inline sign-in reads its terminal quickly for the first few seconds.
+const PROVIDER_SIGN_IN_FAST_POLL_MS = 500;
+const PROVIDER_SIGN_IN_FAST_POLL_ATTEMPTS = 12;
+// npm installs of a provider CLI finish in well under five minutes.
+const PROVIDER_INSTALL_POLL_ATTEMPTS = 600;
 const MAX_CHAT_MESSAGE_CHARS = 24_000;
 const MAX_CHAT_IMAGES_PER_MESSAGE = 10;
 const MAX_CHAT_VIDEOS_PER_MESSAGE = 2;
@@ -733,7 +766,6 @@ const MAX_PERSISTED_DIRTY_BUFFER_CHARS = 500_000;
 const MAX_PERSISTED_DIRTY_BUFFERS_TOTAL_CHARS = 1_000_000;
 const MAX_STORED_WORKBENCH_STATE_CHARS = 2_000_000;
 const MAX_STORED_PREVIEW_CONFIG_CHARS = 200_000;
-const MAX_STORED_MODEL_USAGE_CHARS = 100_000;
 const MAX_PINNED_SESSIONS = 200;
 const MAX_REMOVED_PROJECTS = 200;
 const MAX_RECENT_PROJECTS = 12;
@@ -745,10 +777,6 @@ const AUTOMATION_SCHEDULER_COMMANDS = {
   recoverLeases: "recover_automation_leases",
 } as const;
 const ACTIVE_TURN_IDLE_MS = 5 * 60 * 1000;
-
-function modelUsageKey(providerId: ProviderId, modelId: string) {
-  return `${providerId}:${modelId}`;
-}
 
 /**
  * Propose a branch name from the pending commit message, so the common case is
@@ -794,51 +822,14 @@ function waitForNextPaint() {
   });
 }
 
-function loadModelUsageMap(): ModelUsageMap {
-  try {
-    const stored = readBoundedLocalStorage(
-      MODEL_USAGE_STORAGE_KEY,
-      MAX_STORED_MODEL_USAGE_CHARS,
-    );
-    if (!stored) {
-      return {};
-    }
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    return Object.fromEntries(
-      Object.entries(parsed).flatMap(([key, value]) => {
-        if (!value || typeof value !== "object" || Array.isArray(value)) {
-          return [];
-        }
-        const entry = value as Partial<ModelUsageEntry>;
-        return [
-          [
-            key,
-            {
-              count:
-                typeof entry.count === "number" && Number.isFinite(entry.count)
-                  ? entry.count
-                  : 0,
-              snoozeUntil:
-                typeof entry.snoozeUntil === "number" &&
-                Number.isFinite(entry.snoozeUntil)
-                  ? entry.snoozeUntil
-                  : undefined,
-              standard: entry.standard === true,
-            },
-          ],
-        ];
-      }),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function saveModelUsageMap(usage: ModelUsageMap) {
-  safeSetLocalStorage(MODEL_USAGE_STORAGE_KEY, JSON.stringify(usage));
+function loadModelDefaultSuggestionState() {
+  return parseModelDefaultSuggestionState(
+    readBoundedLocalStorage(
+      MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
+      MODEL_DEFAULT_SUGGESTION_MAX_STORAGE_CHARS,
+    ),
+    Date.now(),
+  );
 }
 
 /** Pane key for the chat surfaces that render outside the tiled grid. */
@@ -858,6 +849,16 @@ export function App() {
   const [workbench, dispatchWorkbench] = useMeasuredWorkbenchReducer(
     loadInitialWorkbenchState,
   );
+  const continueCloudChatRef = useRef<(context: string) => Promise<boolean>>();
+  const cloudConnection = useCloudConnection(workbench.preferences, settings => {
+    if (["system", "light", "dark"].includes(String(settings.theme))) dispatchWorkbench({ type: "set-theme", theme: settings.theme as "system" | "light" | "dark" });
+    if (["compact", "comfortable"].includes(String(settings.density))) dispatchWorkbench({ type: "set-density", density: settings.density as "compact" | "comfortable" });
+    if (["small", "default", "large"].includes(String(settings.interfaceSize))) dispatchWorkbench({ type: "set-interface-size", interfaceSize: settings.interfaceSize as "small" | "default" | "large" });
+    if (["slower", "default", "faster"].includes(String(settings.motionSpeed))) dispatchWorkbench({ type: "set-motion-speed", motionSpeed: settings.motionSpeed as "slower" | "default" | "faster" });
+  }, async context => {
+    if (!continueCloudChatRef.current) throw new Error("The local chat workspace is still loading.");
+    return continueCloudChatRef.current(context);
+  });
   const { appearanceSaveStatus, onAppearancePersisted, retryAppearanceSave } =
     useAppearanceSaveFeedback(workbench.preferences);
   const { resolvedTheme, reduceMotion, appearance } = useWorkbenchAppearance(
@@ -1004,6 +1005,7 @@ export function App() {
   >({});
   /** Draft key whose Goal mode should follow a newly started goal chat. */
   const goalModeCarryRef = useRef<string>();
+  const draftWorkspaceModes = useRef<Record<string, WorkbenchState["workspaceMode"]>>({});
   /** Per-draft model picks so split-screen new chats don't share the global model. */
   const [chatDraftModels, setChatDraftModels] = useState<
     Record<string, SessionModelSelection>
@@ -1032,6 +1034,7 @@ export function App() {
     setTerminalSourceControlLoadingPaneId,
   ] = useState<string>();
   const [config, setConfig] = useState<GyroConfig>(loadPreviewConfig);
+  const [configLoaded, setConfigLoaded] = useState(false);
   const configRef = useRef(config);
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermissionState>("prompt");
@@ -1095,6 +1098,13 @@ export function App() {
   const [projectRemoveCandidate, setProjectRemoveCandidate] =
     useState<SavedProject>();
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
+  const automaticBackup = useAutomaticChatBackup(
+    cloudConnection.snapshot,
+    cloudConnection.actions,
+    sendingSessionIds,
+    (id) => !workbench.preferences.sideChatSessionIds.includes(id) &&
+      sessionsRef.current.some((session) => session.id === id && !session.parentSessionId),
+  );
   const sendingSessionIdsRef = useRef(new Set<string>());
   const approvalCountsBySessionId = useMemo(
     () => sessionApprovalCounts(sessions, sessionEventsById),
@@ -1233,6 +1243,32 @@ export function App() {
   const planEditorRequestTokenRef = useRef(0);
   const [modelStandardPrompt, setModelStandardPrompt] =
     useState<ModelStandardPrompt>();
+  const [pendingModelDefaultCandidate, setPendingModelDefaultCandidate] =
+    useState<{ providerId: ProviderId; modelId: string }>();
+  const [isModelDefaultSaving, setIsModelDefaultSaving] = useState(false);
+  const [modelDefaultSaveError, setModelDefaultSaveError] = useState<string>();
+  const modelDefaultSavingRef = useRef(false);
+  const modelSuggestionShownRef = useRef(false);
+  const modelSuggestionStateRef = useRef<ModelDefaultSuggestionState>();
+  if (!modelSuggestionStateRef.current) {
+    modelSuggestionStateRef.current = loadModelDefaultSuggestionState();
+  }
+  const saveModelSuggestionState = useCallback(
+    (next: ModelDefaultSuggestionState) => {
+      modelSuggestionStateRef.current = next;
+      safeSetLocalStorage(
+        MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
+        JSON.stringify(next),
+      );
+    },
+    [],
+  );
+  const clearModelDefaultSuggestion = useCallback(() => {
+    setPendingModelDefaultCandidate(undefined);
+    setModelStandardPrompt(undefined);
+    setModelDefaultSaveError(undefined);
+  }, []);
+
   const [terminalTerminateCandidate, setTerminalTerminateCandidate] =
     useState<TerminalPane>();
   const [chatCloseCandidate, setChatCloseCandidate] = useState<{
@@ -1367,9 +1403,10 @@ export function App() {
   const sessionBrowserKey =
     activeSessionId ??
     (activeWorkspaceRoot ? `workbench:${activeWorkspaceRoot}` : "workbench");
-  const browserPreview =
-    workbench.browserPreviewsBySession?.[sessionBrowserKey] ??
-    EMPTY_BROWSER_PREVIEW;
+  const browserPreview = {
+    ...(workbench.browserPreviewsBySession?.[sessionBrowserKey] ?? EMPTY_BROWSER_PREVIEW),
+    runtime: isTauriRuntime() ? appPreviewClient(sessionBrowserKey, activeWorkspaceRoot ?? "") : undefined,
+  };
   // Each render captures its browser owner, including callbacks completing after
   // a chat switch. Native events explicitly supply the originating session.
   const dispatchActiveBrowser = useCallback(
@@ -1557,14 +1594,20 @@ export function App() {
   // --- Transient side chats -------------------------------------------------
   // The Side chat tab runs against a session of its own so the model answers
   // with the same workspace, branch, model and permissions as the chat it sits
-  // beside — and with none of its transcript. That session never reaches the
-  // sidebar or history, and it is deleted when the tab closes.
+  // beside, and reads that chat's transcript as background. Its replies stay out
+  // of that chat. The session never reaches the sidebar or history, and it is
+  // deleted when the tab closes.
   const [sideChatThreads, setSideChatThreads] = useState<
     Record<
       string,
       { messages: SideChatMessage[]; isSending?: boolean; error?: string }
     >
   >({});
+  // Which chat each side session last read, and when, so a resumed provider
+  // thread is sent only what changed. Losing this just resends the whole chat.
+  const sideChatContextReadsRef = useRef(
+    new Map<string, { parentSessionId: string; at: string }>(),
+  );
   const sideChatSessionIdsRef = useRef<string[]>(
     workbench.preferences.sideChatSessionIds,
   );
@@ -1583,6 +1626,7 @@ export function App() {
   const retireSideChatSessions = useCallback(
     (sessionIds: string[]) => {
       for (const sessionId of [...new Set(sessionIds)]) {
+        sideChatContextReadsRef.current.delete(sessionId);
         void deleteSideChatSession(sessionId).then((deleted) => {
           if (!deleted) return;
           dispatchWorkbench({
@@ -1710,6 +1754,7 @@ export function App() {
           isSending: true,
         },
       }));
+      const lastRead = sideChatContextReadsRef.current.get(sessionId);
       try {
         await invoke<SessionEvent>("append_user_message", {
           attachments: [],
@@ -1717,6 +1762,9 @@ export function App() {
           message,
           turnId,
         });
+        // Taken before the run reads the chat, so a message landing during the
+        // read is sent twice at worst and never skipped.
+        const contextReadAt = new Date().toISOString();
         const response =
           await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
             "run_provider_chat",
@@ -1738,9 +1786,24 @@ export function App() {
                 attachments: [],
                 suggestTitle: false,
                 workspacePath: parent?.workspacePath ?? workspacePath ?? "",
+                sideChatContext: parent
+                  ? {
+                      sessionId: parent.id,
+                      since:
+                        lastRead?.parentSessionId === parent.id
+                          ? lastRead.at
+                          : undefined,
+                    }
+                  : undefined,
               },
             },
           );
+        if (parent) {
+          sideChatContextReadsRef.current.set(sessionId, {
+            parentSessionId: parent.id,
+            at: contextReadAt,
+          });
+        }
         setSideChatThreads((current) => ({
           ...current,
           [paneId]: {
@@ -1823,6 +1886,18 @@ export function App() {
       (slot) => slot?.paneId === paneId,
     );
     return pane?.kind === "session" ? pane.sessionId : undefined;
+  };
+  const backupReviewFor = (localId?: string) => {
+    const { snapshot, actions } = cloudConnection;
+    if (!localId || !snapshot.billingIdentity || !actions.cloud) return undefined;
+    return {
+      localId,
+      accountKey: snapshot.billingIdentity,
+      uploading: automaticBackup.uploading === localId,
+      request: actions.cloud.request,
+      available: snapshot.cloudCapabilities?.backup?.allowed === true &&
+        ["active", "cancellation-scheduled", "exhausted"].includes(snapshot.status),
+    };
   };
   const companionSurfaceProps = (paneId: string) => ({
     dailyPaceWarning: workbench.preferences.dailyPaceWarning,
@@ -2210,7 +2285,9 @@ export function App() {
       dispatchWorkbench({
         type: "add-notification",
         notification: createNotification(
-          `note-${Date.now()}`,
+          // One action can raise two in the same millisecond, such as a media
+          // limit and a rejected file; each must stay separately dismissible.
+          `note-${crypto.randomUUID()}`,
           kind,
           title,
           detail,
@@ -2333,6 +2410,7 @@ export function App() {
       files,
       isTauriRuntime() ? loadExplorerDirectory : undefined,
       reportExplorerError,
+      workspaceChangeGeneration,
     );
   const visibleWorkspaceFiles = useMemo(
     () =>
@@ -2707,7 +2785,7 @@ export function App() {
       dispatchWorkbench({
         type: "set-provider-readiness",
         status: "checking",
-        message: "Checking provider availability...",
+        message: "Checking provider availability…",
         providerId,
       });
 
@@ -2802,7 +2880,7 @@ export function App() {
             "Preview config updated",
           );
         }
-        return;
+        return true;
       }
       try {
         configSaveQueueRef.current = configSaveQueueRef.current
@@ -2812,12 +2890,14 @@ export function App() {
         if (shouldNotifySuccess) {
           notify("provider", "Settings saved", "Configuration persisted");
         }
+        return true;
       } catch {
         notify(
           "command-failed",
           "Settings save failed",
           "Config kept in memory",
         );
+        return false;
       }
     },
     [notify],
@@ -3897,6 +3977,7 @@ export function App() {
   const refreshConfig = useCallback(async () => {
     if (!isTauriRuntime()) {
       setConfig(loadPreviewConfig());
+      setConfigLoaded(true);
       setActiveProfileId("shell");
       return;
     }
@@ -3911,6 +3992,7 @@ export function App() {
       applyProviderCapabilityManifest(capabilityManifest);
       const resolvedConfig = withCouncilConfig(nextConfig);
       setConfig(resolvedConfig);
+      setConfigLoaded(true);
       setActiveProfileId(nextConfig.commandProfiles[0]?.id ?? "shell");
       const ollama = providersForConfig(resolvedConfig).find(
         (provider) => provider.id === "ollama",
@@ -3960,6 +4042,7 @@ export function App() {
       }
     } catch {
       setConfig(withCouncilConfig(EMPTY_CONFIG));
+      setConfigLoaded(true);
       setActiveProfileId("shell");
     }
   }, []);
@@ -4495,7 +4578,7 @@ export function App() {
     async (query: WorkspaceSearchQuery) => {
       const requestId = workspaceSearchRequestRef.current + 1;
       workspaceSearchRequestRef.current = requestId;
-      dispatchWorkbench({ type: "ide-set-search-query", query });
+      dispatchWorkbench({ type: "ide-set-search-results", query, results: [] });
       if (workspaceRoots.length === 0 || !query.query.trim()) {
         dispatchWorkbench({
           type: "ide-set-search-results",
@@ -4527,8 +4610,9 @@ export function App() {
         return;
       }
       try {
-        const resultsByRoot = await Promise.all(
-          workspaceRoots.map(async (root) => {
+        await runWorkspaceSearchRoots<WorkspaceSearchResult>(
+          workspaceRoots,
+          async (root) => {
             const settings = resolvedWorkspaceSettings(
               workbench.preferences.workspaceUserSettings,
               workbench.preferences.workspaceSettingsByWorkspace,
@@ -4542,43 +4626,34 @@ export function App() {
                 (pattern) => `!${pattern.replace(/^!+/, "")}`,
               ),
             ].filter((glob, index, all) => all.indexOf(glob) === index);
-            return {
-              root,
-              results: await invoke<WorkspaceSearchResult[]>(
-                "search_workspace",
-                {
-                  request: {
-                    workspacePath: root,
-                    query: query.query,
-                    globs: globs.length > 0 ? globs : undefined,
-                    maxResults: query.maxResults ?? settings.searchMaxResults,
-                  },
+            const rootResults = await invoke<WorkspaceSearchResult[]>(
+              "search_workspace",
+              {
+                request: {
+                  workspacePath: root,
+                  query: query.query,
+                  globs: globs.length > 0 ? globs : undefined,
+                  maxResults: query.maxResults ?? settings.searchMaxResults,
                 },
-              ),
-            };
-          }),
-        );
-        const results = resultsByRoot
-          .flatMap(({ root, results: rootResults }) =>
-            rootResults.map((result) => ({
+              },
+            );
+            return rootResults.map((result) => ({
               ...result,
               path: absoluteWorkspaceFilePath(root, result.path),
-            })),
-          )
-          .slice(
-            0,
-            query.maxResults ?? effectiveWorkspaceSettings.searchMaxResults,
-          );
-        if (workspaceSearchRequestRef.current === requestId) {
-          dispatchWorkbench({
-            type: "ide-set-search-results",
-            query,
-            results,
-          });
-        }
+            }));
+          },
+          (results) =>
+            dispatchWorkbench({
+              type: "ide-set-search-results",
+              query,
+              results,
+            }),
+          () => workspaceSearchRequestRef.current === requestId,
+          query.maxResults ?? effectiveWorkspaceSettings.searchMaxResults,
+        );
       } catch (error) {
         if (workspaceSearchRequestRef.current === requestId) {
-          notify("command-failed", "Workspace search failed", String(error));
+          notify("command-failed", "Workspace search incomplete", String(error));
         }
       }
     },
@@ -4732,7 +4807,9 @@ export function App() {
           event.payload.files,
         ),
       );
-      setWorkspaceChangeGeneration(event.payload.generation);
+      // Watcher generations are per root; equal generations from different
+      // roots must still invalidate expanded directory caches.
+      setWorkspaceChangeGeneration((revision) => revision + 1);
     }).then((unlisten) => {
       if (disposed) unlisten();
       else unlistenWorkspace = unlisten;
@@ -7703,24 +7780,27 @@ export function App() {
   }, [activeDraftKey, carryFolderlessDraft]);
 
   const startNewChat = useCallback(
-    (options: { keepLayout?: boolean; workspacePath?: string } = {}) => {
+    (options: { keepLayout?: boolean; workspacePath?: string; draftKey?: string; initialDraft?: string; preserveOpenPanes?: boolean } = {}) => {
       suppressSessionAutoSelectRef.current = true;
       const projectPath =
         options.workspacePath === undefined
           ? (activeSession?.workspacePath ?? workspacePath)
           : options.workspacePath;
       const projectKey = chatProjectKey(projectPath);
-      const draftKey = `new:${projectKey}`;
+      const draftKey = options.draftKey ?? `new:${projectKey}`;
       // Picking a folder moves the composer to this project's draft. Carry a
       // prompt (and its images) typed while no folder was open so the message
       // the user already wrote is not silently discarded.
-      carryFolderlessDraft(draftKey);
-      // A project has one unsent draft; if it is already open in a pane, focus
-      // it there rather than opening it twice. A new
+      if (options.initialDraft === undefined) carryFolderlessDraft(draftKey);
+      else setChatDrafts(current => ({ ...current, [draftKey]: options.initialDraft! }));
+      if (configLoaded) setChatDraftModels(current => current[draftKey] ? current : { ...current, [draftKey]: newChatDefaultSelection(config, workbench.preferences) ?? selectedSessionModelFromConfig(config) });
+
+      // Normal new chats share a project's unsent draft; Cloud continuations
+      // provide a unique key. Focus an existing matching pane if available. A new
       // pane gets an id of its own: a sent draft keeps its pane id, so a
       // shared `draft:<project>` id made the next new chat collide with the
       // old one — same React key, shared focus, merged split panes.
-      const openDraftPane = chatGrid.layouts[projectKey]?.slots.find(
+      const openDraftPane = (options.preserveOpenPanes ? chatGridRef.current : chatGrid).layouts[projectKey]?.slots.find(
         (pane) => pane?.kind === "draft" && pane.draftKey === draftKey,
       );
       const paneId =
@@ -7730,11 +7810,11 @@ export function App() {
       dispatchCompanion({ type: "forget-pane", paneId: SOLO_CHAT_PANE_ID });
       dispatchCompanion({ type: "forget-pane", paneId });
       dispatchWorkbench({ type: "set-chat-panel" });
-      // In split view the new chat opens in the selected pane, replacing it.
+      // Cloud continuations append without displacing existing panes.
       dispatchChatGrid({
         type: "select-pane",
         projectKey,
-        mode: "replace",
+        mode: options.preserveOpenPanes ? "drop" : "replace",
         pane: {
           paneId,
           kind: "draft",
@@ -7748,7 +7828,9 @@ export function App() {
       // Drafts belong to their chat/project, even when its pane was replaced.
       // Sending or explicitly discarding a draft is what clears its contents.
       setDraftResetToken((token) => token + 1);
-      dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });
+      const draftWorkspaceMode = draftWorkspaceModes.current[draftKey] ?? workbench.preferences.defaultWorkspaceMode;
+      draftWorkspaceModes.current[draftKey] = draftWorkspaceMode;
+      dispatchWorkbench({ type: "set-workbench-mode", mode: draftWorkspaceMode });
       // Starting a chat from the AI view keeps the code layout: the chat is
       // already visible in the sidebar.
       if (!options.keepLayout) {
@@ -7759,8 +7841,30 @@ export function App() {
       }
       dispatchWorkbench({ type: "close-tool-panel" });
     },
-    [activeSession?.workspacePath, carryFolderlessDraft, chatGrid.layouts, workspacePath],
+    [activeSession?.workspacePath, carryFolderlessDraft, chatGrid.layouts, workspacePath, config, configLoaded, workbench.preferences],
   );
+
+  // The Cloud reader supplies reviewed text only. A local picker establishes
+  // the project and normal Send establishes a new session/permissions later.
+  // A unique draft key preserves every existing unsent project draft.
+  continueCloudChatRef.current = async (context) => {
+    const initialDraft = reviewedCloudContinuation(context, MAX_CHAT_MESSAGE_CHARS);
+    const selected = await openWorkspace();
+    if (!selected) return false;
+    const layout = chatGridRef.current.layouts[chatProjectKey(selected)];
+    if ((layout?.slots.filter(Boolean).length ?? 0) >= CHAT_GRID_MAX_SLOTS)
+      throw new Error("This project has four open chat panes. Close a pane, then continue from the preserved Cloud archive.");
+    setPendingNewChatGoal(undefined);
+    setIsGoalComposerActive(false);
+    goalModeCarryRef.current = undefined;
+    startNewChat({
+      workspacePath: selected,
+      draftKey: `cloud-context:${crypto.randomUUID()}`,
+      initialDraft,
+      preserveOpenPanes: true,
+    });
+    return true;
+  };
 
   /**
    * A chat's folder is fixed at creation. Selecting a project from its
@@ -8624,6 +8728,7 @@ export function App() {
 
   const selectProvider = useCallback(
     (providerId: ProviderId) => {
+      clearModelDefaultSuggestion();
       const providers = providersForConfig(config);
       const provider = providers.find((item) => item.id === providerId);
       const model = provider ? getProviderModel(provider) : undefined;
@@ -8654,7 +8759,7 @@ export function App() {
         }));
       }
     },
-    [activeDraftKey, activeSessionId, config, persistConfig, saveSessionModel],
+    [activeDraftKey, activeSessionId, config, clearModelDefaultSuggestion, persistConfig, saveSessionModel],
   );
 
   const setProviderAuthStatus = useCallback(
@@ -8744,10 +8849,21 @@ export function App() {
     [setProviderAuthStatus],
   );
 
+  const providerSignIn = useProviderSignIn({
+    dispatchWorkbench,
+    terminalOutputRevisionRef,
+  });
+  const {
+    patch: patchProviderSignIn,
+    dismissPane: dismissProviderSignInPane,
+    panesRef: providerSignInPanesRef,
+    isCancelled: isProviderSignInCancelled,
+  } = providerSignIn;
+
   const runProviderConnection = useCallback(
     async (
       providerId: ProviderId,
-      options?: { forceLogin?: boolean; importedSessionId?: string },
+      options?: ProviderConnectionOptions,
     ): Promise<boolean> => {
       const provider = providersForConfig(config).find(
         (item) => item.id === providerId,
@@ -8761,18 +8877,160 @@ export function App() {
       const forceLogin = Boolean(
         options?.forceLogin || providerSignInRejectionsRef.current[providerId],
       );
+      // An inline sign-in reports to the model popover, which stays open
+      // beside the chat; only the outcome is worth a notification.
+      const inline = Boolean(options?.inline);
+      const cliName = providerCliName(providerId, providerLabel);
+      const signInCancelled = () =>
+        inline && isProviderSignInCancelled(providerId);
       dispatchWorkbench({
         type: "set-provider-status",
         providerId,
         status: "checking",
       });
-      notify(
-        "provider",
-        providerId === "openai"
-          ? "Checking Codex sign-in"
-          : "Connecting provider",
-        providerLabel,
-      );
+      if (!inline) {
+        notify(
+          "provider",
+          providerId === "openai"
+            ? "Checking Codex sign-in"
+            : "Connecting provider",
+          providerLabel,
+        );
+      }
+
+      // Mirror a background pane into the workbench, so "Show details" opens a
+      // terminal that already holds everything the CLI printed.
+      const readSignInPane = async (paneId: string) => {
+        const progress = await invoke<TerminalPaneSnapshot>(
+          "read_terminal_output",
+          {
+            paneId,
+            knownOutputRevision: terminalOutputRevisionRef.current[paneId],
+          },
+        ).catch(() => undefined);
+        if (!progress) return undefined;
+        terminalOutputRevisionRef.current[paneId] = progress.outputRevision;
+        dispatchWorkbench({
+          type: "sync-terminal-pane-snapshot",
+          paneId,
+          event:
+            progress.exitCode === null || progress.exitCode === undefined
+              ? progress.status
+              : `${progress.status} (${progress.exitCode})`,
+          output: progress.output ?? "",
+          status: terminalStatusFromSnapshot(progress.status),
+          hasForegroundJob: progress.hasForegroundJob ?? undefined,
+        });
+        if (progress.output) setTerminalOutput(progress.output);
+        return progress;
+      };
+      const startBackgroundPane = async (
+        paneId: string,
+        profile: CommandProfile,
+      ) => {
+        providerSignInPanesRef.current[providerId] = paneId;
+        dispatchWorkbench({
+          type: "upsert-background-terminal-pane",
+          pane: createTerminalPane(
+            paneId,
+            profile,
+            "running",
+            workspaceRunMetadata(
+              "local",
+              profile.displayName,
+              activeSession?.workspacePath ?? workspacePath,
+            ),
+          ),
+        });
+        const snapshot = await invoke<TerminalPaneSnapshot>(
+          "create_terminal_pane",
+          {
+            request: {
+              args: profile.args,
+              command: profile.command,
+              paneId,
+              title: profile.displayName,
+              workspacePath: undefined,
+              workspaceMode: "local",
+              workingDirectory: "Home",
+              providerAuthSessionId: importedSessionId,
+              // Wide enough that a sign-in URL never hard-wraps.
+              cols: 400,
+            },
+          },
+        );
+        terminalOutputRevisionRef.current[paneId] = snapshot.outputRevision;
+        return snapshot;
+      };
+
+      // The backend picks an install Gyro can run and then find: the
+      // provider's installer or npm, falling back to a per-user npm prefix
+      // when the global one is root-owned or outside Gyro's search path.
+      const fetchInstallPlan = () =>
+        invoke<CliInstallPlanReport>("provider_cli_install_plan_command", {
+          providerId,
+        }).catch(() => undefined);
+      const reportNotInstalled = async (message: string) => {
+        const report = await fetchInstallPlan();
+        patchProviderSignIn(providerId, {
+          phase: "not-installed",
+          installCommand: report?.plan?.displayCommand,
+          message:
+            report?.plan || !report?.message
+              ? message
+              : `${message} ${report.message}`,
+        });
+      };
+
+      if (inline && options?.install && isTauriRuntime()) {
+        const plan = (await fetchInstallPlan())?.plan;
+        if (!plan) {
+          await reportNotInstalled(
+            `${providerLabel} needs ${cliName}, which isn't installed yet.`,
+          );
+          return false;
+        }
+        const installProfile = providerInstallProfile(providerId, plan);
+        patchProviderSignIn(providerId, {
+          phase: "installing",
+          installCommand: undefined,
+          message: undefined,
+        });
+        const installPaneId = `provider-${providerId}-install-${Date.now()}`;
+        let exitCode: number | null | undefined;
+        try {
+          exitCode = (await startBackgroundPane(installPaneId, installProfile))
+            .exitCode;
+          for (
+            let attempt = 0;
+            attempt < PROVIDER_INSTALL_POLL_ATTEMPTS &&
+            (exitCode === null || exitCode === undefined);
+            attempt += 1
+          ) {
+            await waitFor(PROVIDER_SIGN_IN_FAST_POLL_MS);
+            if (signInCancelled()) return false;
+            exitCode = (await readSignInPane(installPaneId))?.exitCode;
+          }
+        } catch (error) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `Couldn't start the install: ${String(error)}`,
+          });
+          return false;
+        }
+        if (exitCode !== 0) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message:
+              exitCode === null || exitCode === undefined
+                ? `Installing ${cliName} is taking too long.`
+                : `Installing ${cliName} failed (exit ${exitCode}).`,
+          });
+          return false;
+        }
+        dismissProviderSignInPane(providerId);
+        patchProviderSignIn(providerId, { phase: "starting" });
+      }
 
       if (isTauriRuntime()) {
         try {
@@ -8791,6 +9049,24 @@ export function App() {
             check.output,
             check,
           );
+          if (signInCancelled()) return false;
+          if (inline && check.runtimeStatus === "not-installed") {
+            if (options?.install || providerId === "ollama") {
+              patchProviderSignIn(providerId, {
+                phase: "not-installed",
+                installCommand: undefined,
+                message:
+                  providerId === "ollama"
+                    ? "Ollama isn't running. Install and start it, then try again."
+                    : `${cliName} installed, but Gyro can't find it yet. Restart Gyro, then try again.`,
+              });
+            } else {
+              await reportNotInstalled(
+                `${providerLabel} needs ${cliName}, which isn't installed yet.`,
+              );
+            }
+            return false;
+          }
           if (provider?.authMode === "env") {
             notify(
               result.connectionStatus === "connected" ? "provider" : "approval",
@@ -8881,6 +9157,12 @@ export function App() {
       }
 
       if (provider?.authMode === "env") {
+        if (inline) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `Set ${provider.apiKeyRef ?? "an API key"} outside Gyro, then try again.`,
+          });
+        }
         notify(
           "approval",
           "Provider env setup needed",
@@ -8901,22 +9183,24 @@ export function App() {
       const profile = providerLoginProfile(providerId);
       const commandText = providerLoginCommandText(profile);
       const paneId = `provider-${providerId}-login-${Date.now()}`;
-      const pane = createTerminalPane(
-        paneId,
-        profile,
-        "running",
-        workspaceRunMetadata(
-          "local",
-          profile.displayName,
-          activeSession?.workspacePath ?? workspacePath,
-        ),
-      );
-      dispatchWorkbench({
-        type: "select-workspace-layout",
-        layout: "terminal-grid",
-      });
-      dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
-      dispatchWorkbench({ type: "add-terminal-pane", pane });
+      if (!inline) {
+        const pane = createTerminalPane(
+          paneId,
+          profile,
+          "running",
+          workspaceRunMetadata(
+            "local",
+            profile.displayName,
+            activeSession?.workspacePath ?? workspacePath,
+          ),
+        );
+        dispatchWorkbench({
+          type: "select-workspace-layout",
+          layout: "terminal-grid",
+        });
+        dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
+        dispatchWorkbench({ type: "add-terminal-pane", pane });
+      }
       setTerminalOutput(`Starting ${providerLabel} sign-in: ${commandText}`);
 
       if (!isTauriRuntime()) {
@@ -8925,22 +9209,39 @@ export function App() {
         return true;
       }
 
+      // What the popover shows comes from what the CLI printed. A device code
+      // page is opened once on the person's behalf, since those CLIs don't.
+      let openedDevicePage = false;
+      const showSignInProgress = (output?: string | null) => {
+        if (!inline || !output) return;
+        const progress = parseProviderLoginProgress(output);
+        patchProviderSignIn(providerId, {
+          phase: "waiting",
+          ...(progress.url ? { url: progress.url } : {}),
+          ...(progress.deviceCode ? { deviceCode: progress.deviceCode } : {}),
+          ...(progress.acceptsCode ? { acceptsCode: true } : {}),
+        });
+        if (progress.deviceCode && progress.url && !openedDevicePage) {
+          openedDevicePage = true;
+          void openUrl(progress.url).catch(() => undefined);
+        }
+      };
+
       try {
-        const snapshot = await invoke<TerminalPaneSnapshot>(
-          "create_terminal_pane",
-          {
-            request: {
-              args: profile.args,
-              command: profile.command,
-              paneId,
-              title: profile.displayName,
-              workspacePath: undefined,
-              workspaceMode: "local",
-              workingDirectory: "Home",
-              providerAuthSessionId: importedSessionId,
-            },
-          },
-        );
+        const snapshot = inline
+          ? await startBackgroundPane(paneId, profile)
+          : await invoke<TerminalPaneSnapshot>("create_terminal_pane", {
+              request: {
+                args: profile.args,
+                command: profile.command,
+                paneId,
+                title: profile.displayName,
+                workspacePath: undefined,
+                workspaceMode: "local",
+                workingDirectory: "Home",
+                providerAuthSessionId: importedSessionId,
+              },
+            });
         dispatchWorkbench({
           type: "sync-terminal-pane-snapshot",
           paneId: snapshot.paneId,
@@ -8958,11 +9259,16 @@ export function App() {
         terminalOutputRevisionRef.current[snapshot.paneId] =
           snapshot.outputRevision;
         setTerminalOutput(snapshot.output ?? "");
-        notify(
-          "provider",
-          "Finish provider sign-in",
-          `Complete ${commandText}. Gyro will connect automatically.`,
-        );
+        if (inline) {
+          patchProviderSignIn(providerId, { phase: "waiting" });
+          showSignInProgress(snapshot.output);
+        } else {
+          notify(
+            "provider",
+            "Finish provider sign-in",
+            `Complete ${commandText}. Gyro will connect automatically.`,
+          );
+        }
 
         // Shared post-login watcher for every CLI provider (OpenAI, Anthropic,
         // Kimi, xAI, Gemini, Cursor, OpenCode). A successful login process exit
@@ -8975,6 +9281,13 @@ export function App() {
         ) => {
           clearProviderSignInRejection(providerId);
           setProviderAuthStatus(providerId, "connected");
+          // The popover now lists the models; the login terminal has done its
+          // job. A health-confirmed login may still be idling at its prompt.
+          if (inline) {
+            dismissProviderSignInPane(providerId, {
+              stop: source === "health",
+            });
+          }
           if (source === "login-exit") {
             // Credentials just landed, so a cached answer is stale.
             const verified = await invoke<ProviderHealthCheck>(
@@ -8997,7 +9310,9 @@ export function App() {
               : "Provider verified",
             providerId === "openai" && source === "health"
               ? "OpenAI is available through your local ChatGPT/Codex login."
-              : providerLabel,
+              : inline && provider?.models.length
+                ? `${providerLabel} · ${provider.models.length} ${provider.models.length === 1 ? "model" : "models"} ready`
+                : providerLabel,
           );
           return true as const;
         };
@@ -9009,32 +9324,25 @@ export function App() {
           PROVIDER_SIGN_IN_POLL_ATTEMPTS,
         );
         for (let attempt = 0; attempt < loginPollAttempts; attempt += 1) {
-          await waitFor(PROVIDER_AUTH_POLL_INTERVAL_MS);
+          await waitFor(
+            inline && attempt < PROVIDER_SIGN_IN_FAST_POLL_ATTEMPTS
+              ? PROVIDER_SIGN_IN_FAST_POLL_MS
+              : PROVIDER_AUTH_POLL_INTERVAL_MS,
+          );
+          if (signInCancelled()) return false;
 
-          const progress = await invoke<TerminalPaneSnapshot>(
-            "read_terminal_output",
-            {
-              paneId,
-              knownOutputRevision: terminalOutputRevisionRef.current[paneId],
-            },
-          ).catch(() => undefined);
+          const progress = await readSignInPane(paneId);
           if (progress) {
-            terminalOutputRevisionRef.current[paneId] = progress.outputRevision;
-            dispatchWorkbench({
-              type: "sync-terminal-pane-snapshot",
-              paneId,
-              event:
-                progress.exitCode === null || progress.exitCode === undefined
-                  ? progress.status
-                  : `${progress.status} (${progress.exitCode})`,
-              output: progress.output ?? "",
-              status: terminalStatusFromSnapshot(progress.status),
-              hasForegroundJob: progress.hasForegroundJob ?? undefined,
-            });
-            if (progress.output) setTerminalOutput(progress.output);
+            showSignInProgress(progress.output);
             if (progress.exitCode !== null && progress.exitCode !== undefined) {
               if (progress.exitCode === 0) {
                 return completeProviderLogin("login-exit");
+              }
+              if (inline) {
+                patchProviderSignIn(providerId, {
+                  phase: "failed",
+                  message: `${providerLabel} sign-in didn't finish (exit ${progress.exitCode}).`,
+                });
               }
               notify(
                 "approval",
@@ -9079,6 +9387,12 @@ export function App() {
           }
         }
 
+        if (inline) {
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `${providerLabel} sign-in timed out. Try again when you're ready.`,
+          });
+        }
         notify(
           "approval",
           "Provider sign-in still pending",
@@ -9097,6 +9411,19 @@ export function App() {
         const output = String(error);
         setTerminalOutput(output);
         recordProviderHealthOutput(providerId, output);
+        if (inline) {
+          const missing = /not found|no such file|cannot find/i.test(output);
+          if (missing) {
+            await reportNotInstalled(
+              `${providerLabel} needs ${cliName}, which isn't installed yet.`,
+            );
+            return false;
+          }
+          patchProviderSignIn(providerId, {
+            phase: "failed",
+            message: `${providerLabel} sign-in couldn't start.`,
+          });
+        }
         notify("command-failed", `${providerLabel} login failed`, output);
         return false;
       }
@@ -9105,7 +9432,11 @@ export function App() {
       activeSession?.workspacePath,
       clearProviderSignInRejection,
       config,
+      dismissProviderSignInPane,
       notify,
+      isProviderSignInCancelled,
+      patchProviderSignIn,
+      providerSignInPanesRef,
       recordProviderHealthOutput,
       setProviderAuthStatus,
       workbench.workspaceMode,
@@ -9113,46 +9444,64 @@ export function App() {
     ],
   );
 
-  const { connectProvider, connectingProviderIds } = useProviderConnectionGuard(
+  const runProviderConnectionInline = useInlineSignInRunner(
+    providerSignIn,
     runProviderConnection,
   );
+  const { connectProvider, connectingProviderIds } = useProviderConnectionGuard(
+    runProviderConnectionInline,
+  );
+  const openProviderSettings = useCallback(
+    () => openSettingsSection("providers"),
+    [openSettingsSection],
+  );
+  const providerSignInState = useProviderSignInActions(providerSignIn, {
+    connectProvider,
+    dispatchWorkbench,
+    isProviderId,
+    notify,
+    openProviderSettings,
+  });
 
-  const recordModelSelection = useCallback(
+  const recordCompletedModelChoice = useCallback(
     (
-      providerId: ProviderId,
-      providerLabel: string,
-      modelId: string,
-      modelLabel: string,
+      sessionId: string,
+      turnId: string,
+      selection: SessionModelSelection,
+      response: ProviderChatResponse,
     ) => {
-      const usage = loadModelUsageMap();
-      const key = modelUsageKey(providerId, modelId);
-      const current = usage[key] ?? { count: 0 };
-      const count = current.count + 1;
-      const nextEntry: ModelUsageEntry = { ...current, count };
-      usage[key] = nextEntry;
-      saveModelUsageMap(usage);
-
-      const shouldPrompt =
-        !modelStandardPrompt &&
-        !nextEntry.standard &&
-        count >= MODEL_STANDARD_PROMPT_THRESHOLD &&
-        count >= (nextEntry.snoozeUntil ?? MODEL_STANDARD_PROMPT_THRESHOLD);
-
-      if (shouldPrompt) {
-        setModelStandardPrompt({
-          count,
-          modelId,
-          modelLabel,
-          providerId,
-          providerLabel,
-        });
-      }
+      if (
+        !isSuccessfulModelUseResponse(response) ||
+        !selection.providerId ||
+        !isProviderId(selection.providerId) ||
+        !selection.modelId
+      )
+        return;
+      const now = Date.now();
+      saveModelSuggestionState(
+        recordCompletedModelUse(
+          modelSuggestionStateRef.current!,
+          {
+            providerId: selection.providerId,
+            modelId: selection.modelId,
+            sessionId,
+            turnId,
+            completedAt: now,
+          },
+          now,
+        ),
+      );
+      setPendingModelDefaultCandidate({
+        providerId: selection.providerId,
+        modelId: selection.modelId,
+      });
     },
-    [modelStandardPrompt],
+    [saveModelSuggestionState],
   );
 
   const selectProviderModel = useCallback(
     (providerId: ProviderId, modelId: string) => {
+      clearModelDefaultSuggestion();
       let providers = providersForConfig(config).map((provider) =>
         provider.id === providerId
           ? { ...provider, selectedModelId: modelId }
@@ -9198,21 +9547,13 @@ export function App() {
           }));
         }
       }
-      if (provider && selectedModel) {
-        recordModelSelection(
-          providerId,
-          provider.displayName,
-          modelId,
-          selectedModel.displayName,
-        );
-      }
     },
     [
       activeDraftKey,
       activeSessionId,
       config,
+      clearModelDefaultSuggestion,
       persistConfig,
-      recordModelSelection,
       saveSessionModel,
     ],
   );
@@ -9226,6 +9567,20 @@ export function App() {
    */
   const selectProviderDefaultModel = useCallback(
     (providerId: ProviderId, modelId: string) => {
+      saveModelSuggestionState(
+        snoozeProviderDefaultSuggestions(
+          modelSuggestionStateRef.current!,
+          providerId,
+          Date.now(),
+        ),
+      );
+      if (modelStandardPrompt?.providerId === providerId) {
+        setModelStandardPrompt(undefined);
+        setModelDefaultSaveError(undefined);
+      }
+      if (pendingModelDefaultCandidate?.providerId === providerId) {
+        setPendingModelDefaultCandidate(undefined);
+      }
       const providers = providersForConfig(config).map((provider) =>
         provider.id === providerId
           ? { ...provider, defaultModelId: modelId }
@@ -9245,7 +9600,14 @@ export function App() {
         }`,
       );
     },
-    [config, notify, persistConfig],
+    [
+      config,
+      notify,
+      persistConfig,
+      saveModelSuggestionState,
+      modelStandardPrompt,
+      pendingModelDefaultCandidate,
+    ],
   );
 
   const selectProviderReasoningEffort = useCallback(
@@ -9305,81 +9667,76 @@ export function App() {
     ],
   );
 
-  const acceptModelStandardPrompt = useCallback(() => {
-    if (!modelStandardPrompt) {
+  const acceptModelStandardPrompt = useCallback(async () => {
+    if (!modelStandardPrompt || modelDefaultSavingRef.current) return;
+    const currentConfig = configRef.current;
+    const provider = providersForConfig(currentConfig).find(
+      (item) => item.id === modelStandardPrompt.providerId,
+    );
+    const model = provider?.models?.find(
+      (item) => item.id === modelStandardPrompt.modelId,
+    );
+    if (!provider?.enabled || !model) {
+      setModelStandardPrompt(undefined);
+      setPendingModelDefaultCandidate(undefined);
       return;
     }
-    const usage = loadModelUsageMap();
-    const key = modelUsageKey(
-      modelStandardPrompt.providerId,
-      modelStandardPrompt.modelId,
+    modelDefaultSavingRef.current = true;
+    setIsModelDefaultSaving(true);
+    setModelDefaultSaveError(undefined);
+    // A default is a preference for future provider chats. Leave the selected
+    // provider, every existing session, and their reasoning effort untouched.
+    const saved = await persistConfig(
+      {
+        ...currentConfig,
+        modelProviders: providersForConfig(currentConfig).map((item) =>
+          item.id === provider.id ? { ...item, defaultModelId: model.id } : item,
+        ),
+      },
+      { notifySuccess: false },
     );
-    const current = usage[key] ?? { count: modelStandardPrompt.count };
-    usage[key] = {
-      ...current,
-      count: Math.max(current.count, modelStandardPrompt.count),
-      snoozeUntil: undefined,
-      standard: true,
-    };
-    saveModelUsageMap(usage);
-
-    const providers = providersForConfig(config).map((provider) =>
-      provider.id === modelStandardPrompt.providerId
-        ? { ...provider, selectedModelId: modelStandardPrompt.modelId }
-        : provider,
-    );
-    void persistConfig({
-      ...config,
-      selectedProviderId: modelStandardPrompt.providerId,
-      modelProviders: providers,
-    });
-    dispatchWorkbench({
-      type: "set-provider-model",
-      providerId: modelStandardPrompt.providerId,
-      model: modelStandardPrompt.modelLabel,
-    });
-    if (activeSessionId) {
-      void saveSessionModel(activeSessionId, {
-        providerId: modelStandardPrompt.providerId,
-        providerLabel: modelStandardPrompt.providerLabel,
-        modelId: modelStandardPrompt.modelId,
-        modelLabel: modelStandardPrompt.modelLabel,
-      });
+    modelDefaultSavingRef.current = false;
+    setIsModelDefaultSaving(false);
+    if (!saved) {
+      setModelDefaultSaveError("Couldn't save the default to disk. Try again.");
+      return;
     }
+    saveModelSuggestionState(
+      snoozeProviderDefaultSuggestions(
+        modelSuggestionStateRef.current!,
+        provider.id,
+        Date.now(),
+      ),
+    );
     notify(
       "provider",
-      "Standard model set",
-      `${modelStandardPrompt.providerLabel} · ${modelStandardPrompt.modelLabel}`,
+      "Default model updated",
+      `${provider.displayName} · ${model.displayName}`,
     );
     setModelStandardPrompt(undefined);
-  }, [
-    activeSessionId,
-    config,
-    modelStandardPrompt,
-    notify,
-    persistConfig,
-    saveSessionModel,
-  ]);
+    setPendingModelDefaultCandidate(undefined);
+  }, [modelStandardPrompt, notify, persistConfig, saveModelSuggestionState]);
 
-  const dismissModelStandardPrompt = useCallback(() => {
-    if (!modelStandardPrompt) {
-      return;
-    }
-    const usage = loadModelUsageMap();
-    const key = modelUsageKey(
-      modelStandardPrompt.providerId,
-      modelStandardPrompt.modelId,
-    );
-    const current = usage[key] ?? { count: modelStandardPrompt.count };
-    const count = Math.max(current.count, modelStandardPrompt.count);
-    usage[key] = {
-      ...current,
-      count,
-      snoozeUntil: count + MODEL_STANDARD_PROMPT_SNOOZE_SELECTIONS,
-    };
-    saveModelUsageMap(usage);
-    setModelStandardPrompt(undefined);
-  }, [modelStandardPrompt]);
+  const dismissModelStandardPrompt = useCallback(
+    (neverSuggestAgain = false) => {
+      if (!modelStandardPrompt || modelDefaultSavingRef.current) return;
+      saveModelSuggestionState(
+        dismissModelDefaultSuggestion(
+          modelSuggestionStateRef.current!,
+          {
+            providerId: modelStandardPrompt.providerId,
+            modelId: modelStandardPrompt.modelId,
+            neverSuggestAgain,
+          },
+          Date.now(),
+        ),
+      );
+      setModelStandardPrompt(undefined);
+      setPendingModelDefaultCandidate(undefined);
+      setModelDefaultSaveError(undefined);
+    },
+    [modelStandardPrompt, saveModelSuggestionState],
+  );
 
   const updateActiveChatDraft = useCallback(
     (value: string) => {
@@ -9476,7 +9833,20 @@ export function App() {
   );
 
   const selectChatAttachment = useCallback(
-    async (kind: ChatAttachmentPickerKind, explicitPath?: string) => {
+    async (
+      kind: ChatAttachmentPickerKind,
+      explicitPath?: string,
+      target?: {
+        draftKey: string;
+        sessionId?: string;
+        workspacePath?: string;
+      },
+    ) => {
+      const attachmentDraftKey = target?.draftKey ?? activeDraftKey;
+      const attachmentSessionId = target ? target.sessionId : activeSessionId;
+      const attachmentWorkspacePath = target
+        ? target.workspacePath
+        : workspacePath;
       if (!isTauriRuntime()) {
         notify(
           "command-failed",
@@ -9485,7 +9855,7 @@ export function App() {
         );
         return;
       }
-      if (kind === "workspace-file" && !workspacePath) {
+      if (kind === "workspace-file" && !attachmentWorkspacePath) {
         notify(
           "command-failed",
           "Select a project first",
@@ -9504,7 +9874,7 @@ export function App() {
           }));
         const paths =
           typeof selected === "string" ? [selected] : (selected ?? []);
-        const existing = chatAttachments[activeDraftKey] ?? [];
+        const existing = chatAttachmentsRef.current[attachmentDraftKey] ?? [];
         const remaining = {
           image: Math.max(
             0,
@@ -9522,7 +9892,7 @@ export function App() {
         let limitExceeded = false;
         for (const path of paths) {
           const attachmentKind = chatAttachmentKindForPath(kind, path);
-          if (attachmentKind === "workspace-file" && !workspacePath) {
+          if (attachmentKind === "workspace-file" && !attachmentWorkspacePath) {
             rejected.push(
               `${workspaceName(path)}: select a project to attach project files`,
             );
@@ -9541,9 +9911,9 @@ export function App() {
               "prepare_chat_attachment",
               {
                 request: {
-                  sessionId: activeSessionId ?? NEW_CHAT_DRAFT_KEY,
+                  sessionId: attachmentSessionId ?? NEW_CHAT_DRAFT_KEY,
                   path,
-                  workspacePath,
+                  workspacePath: attachmentWorkspacePath,
                   kind: attachmentKind,
                 },
               },
@@ -9565,12 +9935,12 @@ export function App() {
         if (prepared.length) {
           // Picking an image already in the draft stores the same file again.
           setChatAttachments((current) => {
-            const draft = current[activeDraftKey] ?? [];
+            const draft = current[attachmentDraftKey] ?? [];
             const seen = new Set(draft.map((item) => item.path));
             const fresh = prepared.filter(
               (item) => !seen.has(item.path) && Boolean(seen.add(item.path)),
             );
-            return { ...current, [activeDraftKey]: [...draft, ...fresh] };
+            return { ...current, [attachmentDraftKey]: [...draft, ...fresh] };
           });
         }
         if (rejected.length) {
@@ -9963,7 +10333,15 @@ export function App() {
   );
 
   const handleComposerAction = useCallback(
-    (action: string, draftKey = activeDraftKey) => {
+    (
+      action: string,
+      draftKey = activeDraftKey,
+      attachmentTarget?: {
+        draftKey: string;
+        sessionId?: string;
+        workspacePath?: string;
+      },
+    ) => {
       if (isShellOptimizing) {
         const allowedWhileOptimizing =
           action.startsWith("select-provider:") ||
@@ -9987,6 +10365,7 @@ export function App() {
         nextMode: WorkbenchState["workspaceMode"],
       ) => {
         const applyWorkspaceMode = () => {
+          if (!activeSessionId) draftWorkspaceModes.current[activeDraftKey] = nextMode;
           dispatchWorkbench({ type: "set-workbench-mode", mode: nextMode });
           dispatchWorkbench({ type: "close-tool-panel" });
           notify(
@@ -10056,12 +10435,10 @@ export function App() {
           const session = sessionsRef.current.find(
             (session) => session.id === draftKey,
           );
-          connectProvider(
-            providerId,
-            session?.importSource
-              ? { importedSessionId: session.id }
-              : undefined,
-          );
+          connectProvider(providerId, {
+            inline: true,
+            importedSessionId: session?.importSource ? session.id : undefined,
+          });
         }
         return;
       }
@@ -10151,6 +10528,7 @@ export function App() {
         void selectChatAttachment(
           "workspace-file",
           decodeURIComponent(action.slice("attach-workspace-path:".length)),
+          attachmentTarget,
         );
         return;
       }
@@ -10294,20 +10672,24 @@ export function App() {
           startNewChat();
           break;
         case "attach-files":
-          void selectChatAttachment("any");
+          void selectChatAttachment("any", undefined, attachmentTarget);
           break;
         case "add-context":
         case "select-file":
-          void selectChatAttachment("workspace-file");
+          void selectChatAttachment(
+            "workspace-file",
+            undefined,
+            attachmentTarget,
+          );
           break;
         case "select-image":
-          void selectChatAttachment("image");
+          void selectChatAttachment("image", undefined, attachmentTarget);
           break;
         case "select-video":
-          void selectChatAttachment("video");
+          void selectChatAttachment("video", undefined, attachmentTarget);
           break;
         case "select-media":
-          void selectChatAttachment("media");
+          void selectChatAttachment("media", undefined, attachmentTarget);
           break;
         case "attach-editor-snapshot":
           void attachEditorSnapshot();
@@ -10883,6 +11265,10 @@ export function App() {
       const selectedProvider = providersForConfig(config).find(
         (provider) => provider.id === sessionModel.providerId,
       );
+      if (!requestedSessionId && sessionModel.providerId && (!selectedProvider || !selectedProvider.enabled || !isProviderRuntimeUsable(selectedProvider, workbench.providerStatuses.find(item => item.id === selectedProvider.id)) || !getProviderModel(selectedProvider, sessionModel.modelId))) {
+        notify("command-failed", "Choose an available model", "The model saved for this draft is unavailable. Connect its provider or choose another model.");
+        return false;
+      }
       const requireCommandApproval =
         overrideContext?.requireCommandApproval ??
         config.requireCommandApproval;
@@ -11222,6 +11608,7 @@ export function App() {
             workspacePath: session.workspacePath,
           });
         }
+        delete draftWorkspaceModes.current[activeDraftKey];
         setChatDraftModels((current) => {
           if (!(activeDraftKey in current)) {
             return current;
@@ -11509,6 +11896,7 @@ export function App() {
                 },
               );
             applyProviderChatResponse(persistedSession.id, providerResponse);
+            recordCompletedModelChoice(persistedSession.id, turnId, sessionModel, providerResponse);
           }
           didDeliverProviderResponse = true;
           persistedChatTurnIdsRef.current.delete(turnId);
@@ -11775,6 +12163,7 @@ export function App() {
               },
             );
           applyProviderChatResponse(targetSessionId, providerResponse);
+          recordCompletedModelChoice(targetSessionId, turnId, sessionModel, providerResponse);
         }
         didDeliverProviderResponse = true;
         persistedChatTurnIdsRef.current.delete(turnId);
@@ -11845,6 +12234,7 @@ export function App() {
       refreshProviderUsage,
       checkProviderReadiness,
       recordProviderHealthOutput,
+      recordCompletedModelChoice,
       config,
       isShellOptimizing,
       isStartingFirstTurn,
@@ -14514,9 +14904,10 @@ export function App() {
     }),
     [sessionBrowserKey, sessionBrowserWorkspaceKey, activeDraftKey],
   );
-  const previewForBrowser = (owner: BrowserOwner) =>
-    workbench.browserPreviewsBySession?.[owner.sessionId] ??
-    EMPTY_BROWSER_PREVIEW;
+  const previewForBrowser = (owner: BrowserOwner) => ({
+    ...(workbench.browserPreviewsBySession?.[owner.sessionId] ?? EMPTY_BROWSER_PREVIEW),
+    runtime: isTauriRuntime() ? appPreviewClient(owner.sessionId, owner.workspaceKey) : undefined,
+  });
   const sendBrowserAction = (owner: BrowserOwner, action: WorkbenchAction) =>
     dispatchWorkbench({
       type: "browser-session",
@@ -14527,10 +14918,153 @@ export function App() {
     void changeSessionBrowserViewport(owner.sessionId, mode, Boolean(previewForBrowser(owner).url),
       dispatchWorkbench, (error) => notify("command-failed", "Viewport change failed", String(error)));
   const browserNativeHost = isTauriRuntime();
+  const [isFirstRunTourActive, setIsFirstRunTourActive] = useState(false);
+  useEffect(() => {
+    if (!configLoaded || activeSessionId) return;
+    const mode = draftWorkspaceModes.current[activeDraftKey] ?? workbench.preferences.defaultWorkspaceMode;
+    draftWorkspaceModes.current[activeDraftKey] = mode;
+    dispatchWorkbench({ type: "set-workbench-mode", mode });
+    setChatDraftModels(current => current[activeDraftKey] ? current : { ...current, [activeDraftKey]: newChatDefaultSelection(config, workbench.preferences) ?? selectedSessionModelFromConfig(config) });
+  }, [activeDraftKey, activeSessionId, config, configLoaded, workbench.preferences]);
+  const checkReminders = useCheckReminders(workbench.preferences.checkReminders === true, sendingSessionIds, sessionEventsById);
+  const suggestionProviderId =
+    chatDraftModels[activeDraftKey]?.providerId ?? config.selectedProviderId;
+  const canShowModelDefaultSuggestion =
+    activeDestination === "workspace" &&
+    activeWorkspaceLayout === "thread" &&
+    !activeSessionId &&
+    !activeChatDraft.trim() &&
+    activeChatAttachments.length === 0 &&
+    sendingSessionIds.length === 0 &&
+    !isStartingFirstTurn &&
+    !isShellOptimizing &&
+    !isFirstRunTourActive &&
+    !isCommandPaletteOpen &&
+    !quitConfirmation.requested &&
+    !branchNameRequest &&
+    !workspaceRename.draft &&
+    !projectRemoveCandidate &&
+    !terminalTerminateCandidate &&
+    !chatCloseCandidate;
+
+  useEffect(() => {
+    const candidate = modelStandardPrompt ?? pendingModelDefaultCandidate;
+    if (!candidate) return;
+    const provider = providersForConfig(config).find(
+      (item) => item.id === candidate.providerId,
+    );
+    const model = provider?.models?.find((item) => item.id === candidate.modelId);
+    const status = workbench.providerStatuses.find(
+      (item) => item.id === candidate.providerId,
+    );
+    const available = Boolean(
+      provider?.enabled &&
+      model &&
+      (!status || status.connectionStatus === "connected"),
+    );
+    const matchesContext = suggestionProviderId === candidate.providerId;
+    const alreadyDefault =
+      provider && providerDefaultModelId(provider) === candidate.modelId;
+    if (modelStandardPrompt) {
+      if (
+        !modelDefaultSavingRef.current &&
+        (!canShowModelDefaultSuggestion ||
+          !matchesContext ||
+          !available ||
+          (alreadyDefault && !modelDefaultSaveError))
+      ) {
+        setModelStandardPrompt(undefined);
+        setPendingModelDefaultCandidate(undefined);
+        setModelDefaultSaveError(undefined);
+      }
+      return;
+    }
+    if (
+      !canShowModelDefaultSuggestion ||
+      !matchesContext ||
+      !provider ||
+      !model ||
+      !available ||
+      modelSuggestionShownRef.current
+    )
+      return;
+    let timer: number;
+    const schedule = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        if (document.hidden || !document.hasFocus()) return;
+        // Menus/dialogs may be owned inside a child component rather than App.
+        if (
+          Array.from(
+            document.querySelectorAll<HTMLElement>(
+              '.gyro-composer-popover, dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+            ),
+          ).some(
+            (node) =>
+              node.getClientRects().length > 0 &&
+              getComputedStyle(node).visibility !== "hidden",
+          )
+        )
+          return;
+        const now = Date.now();
+        const evidence = modelDefaultSuggestionFor(
+          modelSuggestionStateRef.current!,
+          {
+            providerId: provider.id,
+            modelId: model.id,
+            defaultModelId: providerDefaultModelId(provider),
+            available,
+            shownThisLaunch: modelSuggestionShownRef.current,
+            now,
+          },
+        );
+        if (!evidence) return;
+        modelSuggestionShownRef.current = true;
+        saveModelSuggestionState(
+          markModelDefaultSuggestionShown(modelSuggestionStateRef.current!, now),
+        );
+        setModelDefaultSaveError(undefined);
+        setModelStandardPrompt({
+          ...evidence,
+          providerId: provider.id,
+          providerLabel: provider.displayName,
+          modelLabel: model.displayName,
+        });
+      }, 8_000);
+    };
+    schedule();
+    document.addEventListener("pointerdown", schedule, true);
+    document.addEventListener("keydown", schedule, true);
+    document.addEventListener("wheel", schedule, {
+      capture: true,
+      passive: true,
+    });
+    document.addEventListener("visibilitychange", schedule);
+    window.addEventListener("focus", schedule);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("pointerdown", schedule, true);
+      document.removeEventListener("keydown", schedule, true);
+      document.removeEventListener("wheel", schedule, true);
+      document.removeEventListener("visibilitychange", schedule);
+      window.removeEventListener("focus", schedule);
+    };
+  }, [
+    canShowModelDefaultSuggestion,
+    config,
+    modelDefaultSaveError,
+    modelStandardPrompt,
+    pendingModelDefaultCandidate,
+    saveModelSuggestionState,
+    suggestionProviderId,
+    workbench.providerStatuses,
+    isModelDefaultSaving,
+  ]);
+
   const browserOverlayOccluded =
+    isFirstRunTourActive ||
     quitConfirmation.requested ||
     isCommandPaletteOpen ||
-    Boolean(modelStandardPrompt) ||
     Boolean(branchNameRequest) ||
     Boolean(workspaceRename.draft) ||
     Boolean(projectRemoveCandidate) ||
@@ -15636,8 +16170,9 @@ export function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       const isCommand = event.metaKey || event.ctrlKey;
       if (event.key === "Escape") {
+        if (event.defaultPrevented) return;
         closeGlobalSearch();
-        setModelStandardPrompt(undefined);
+        dismissModelStandardPrompt();
         setProjectRemoveCandidate(undefined);
         return;
       }
@@ -15717,6 +16252,7 @@ export function App() {
     activeSession?.workspacePath,
     addTerminalPane,
     closeGlobalSearch,
+    dismissModelStandardPrompt,
     openGlobalSearch,
     openToolPanel,
     runCommandPaletteCommand,
@@ -17040,6 +17576,10 @@ export function App() {
       draftKey: paneDraftKey,
     };
     return (
+      <ChatFileScopeContext.Provider value={{
+        sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+        workspacePath: pane.workspacePath,
+      }}>
       <ChatSurface
         {...projectImport.chatProps(paneSession)}
         {...taskHandoff.chatProps(paneSession)}
@@ -17047,6 +17587,7 @@ export function App() {
         paneKey={paneDraftKey}
         onSelectChatPanel={selectPanePanel}
         {...paneCompanionProps}
+        backupReview={backupReviewFor(paneSession?.id)}
         railDiffTools={railDiffTools}
         railTerminalTools={railTerminalTools}
         browserPreview={previewForBrowser(paneBrowserOwner)}
@@ -17144,12 +17685,29 @@ export function App() {
             workspacePath: pane.workspacePath,
           });
         }}
+        onAttachMediaPaths={(paths) => {
+          const target = {
+            draftKey: paneDraftKey,
+            sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+            workspacePath: pane.workspacePath,
+          };
+          focusChatPane(pane);
+          void (async () => {
+            for (const path of paths) {
+              await selectChatAttachment("media", path, target);
+            }
+          })();
+        }}
         onMediaDropError={(message) =>
           notify("command-failed", "Image could not be attached", message)
         }
         onComposerAction={(action) => {
           focusChatPane(pane);
-          handleComposerAction(action, paneDraftKey);
+          handleComposerAction(action, paneDraftKey, {
+            draftKey: paneDraftKey,
+            sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+            workspacePath: pane.workspacePath,
+          });
         }}
         onDraftChange={(value) =>
           setChatDrafts((current) => ({ ...current, [paneDraftKey]: value }))
@@ -17295,6 +17853,7 @@ export function App() {
         workspaceMode={workbench.workspaceMode}
         workspacePath={pane.workspacePath}
       />
+      </ChatFileScopeContext.Provider>
     );
   };
 
@@ -17423,6 +17982,7 @@ export function App() {
       activeChatPanel={activeChatPanel}
       onSelectChatPanel={selectSoloChatPanel}
       {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
+      backupReview={backupReviewFor(activeSession?.id)}
       railDiffTools={railDiffTools}
       railTerminalTools={railTerminalTools}
       browserPreview={browserPreview}
@@ -17499,6 +18059,11 @@ export function App() {
       maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
       canAttachEditorSnapshot={canAttachEditorSnapshot}
       onAttachMediaFiles={attachDroppedMedia}
+      onAttachMediaPaths={(paths) => {
+        void (async () => {
+          for (const path of paths) await selectChatAttachment("media", path);
+        })();
+      }}
       onMediaDropError={(message) =>
         notify("command-failed", "Image could not be attached", message)
       }
@@ -17561,67 +18126,23 @@ export function App() {
   );
 
   const chatFileActions = useMemo(
-    () => ({
-      preview: async (path: string, kind: "image" | "video" | "audio") => {
-        if (kind === "audio") return undefined;
-        const key = `${activeSessionId ?? "new"}:${kind}:${path}`;
-        let pending = chatFilePreviewCache.get(key);
-        if (!pending) {
-          pending = invoke<ChatAttachment>("prepare_chat_attachment", {
-            request: {
-              sessionId: activeSessionId ?? "new",
-              path,
-              workspacePath,
-              kind,
-            },
-          }).then((attachment) => convertFileSrc(attachment.path));
-          if (chatFilePreviewCache.size >= 64)
-            chatFilePreviewCache.delete(
-              chatFilePreviewCache.keys().next().value!,
-            );
-          chatFilePreviewCache.set(key, pending);
-          void pending.catch(() => chatFilePreviewCache.delete(key));
-        }
-        return pending;
-      },
-      open: (path: string) => {
-        void revealItemInDir(path).catch((error) =>
-          notify("command-failed", "Could not show the file", String(error)),
-        );
-      },
-      resolveCitedImage: async (request: {
-        target: string;
-        providerId?: string;
-        providerSessionId?: string;
-      }) => {
-        const workspace = activeSession?.workspacePath ?? workspacePath;
-        const key = `${activeSessionId ?? ""}:${request.providerId ?? ""}:${request.providerSessionId ?? ""}:${workspace ?? ""}:${request.target}`;
-        let pending = chatCitedImageCache.get(key);
-        if (!pending) {
-          pending = invoke<string | null>("resolve_cited_chat_image", {
-            request: {
-              target: request.target,
-              workspacePath: workspace,
-              providerId: request.providerId,
-              providerSessionId: request.providerSessionId,
-              sessionId: activeSessionId,
-            },
-          }).then((path) => path || undefined);
-          if (chatCitedImageCache.size >= 64) {
-            chatCitedImageCache.delete(chatCitedImageCache.keys().next().value!);
-          }
-          chatCitedImageCache.set(key, pending);
-          void pending.catch(() => chatCitedImageCache.delete(key));
-        }
-        return pending;
-      },
-    }),
-    [activeSession?.workspacePath, activeSessionId, workspacePath, notify],
+    () =>
+      createChatFileActions({
+        invoke,
+        convertFileSrc,
+        open: (path) => {
+          void revealItemInDir(path).catch((error) =>
+            notify("command-failed", "Could not show the file", String(error)),
+          );
+        },
+      }),
+    [notify],
   );
 
   const appChrome = (
     <AppChrome
       renderAiChat={renderWorkspaceChat}
+      showCloudNavigation
       activePaneTab={workbench.activePaneTab}
       activeDestination={activeDestination}
       activeSessionId={sidebarActiveSessionId}
@@ -17630,7 +18151,7 @@ export function App() {
       approvalCountsBySessionId={approvalCountsBySessionId}
       questionCountsBySessionId={questionCountsBySessionId}
       modelTerminalSessionIds={modelTerminalSessionIds}
-      accountNavigation={<AccountNavigation account={account} selected={workbench.preferences.lastSettingsSection} onSelect={section => dispatchWorkbench({type: "set-settings-section", section})}/>}
+      accountNavigation={cloudEnabled ? <AccountNavigation account={account} selected={workbench.preferences.lastSettingsSection} onSelect={section => dispatchWorkbench({type: "set-settings-section", section})}/> : undefined}
       activeSettingsSection={workbench.preferences.lastSettingsSection}
       activeWorkspaceLayout={activeWorkspaceLayout}
       commandProfiles={commandProfiles}
@@ -17928,6 +18449,7 @@ export function App() {
                     paneKey={activeDraftKey}
                     onSelectChatPanel={selectSoloChatPanel}
                     {...companionSurfaceProps(SOLO_CHAT_PANE_ID)}
+                    backupReview={backupReviewFor(activeSession?.id)}
                     railDiffTools={railDiffTools}
                     railTerminalTools={railTerminalTools}
                     browserPreview={browserPreview}
@@ -17995,6 +18517,11 @@ export function App() {
                     }
                     canAttachEditorSnapshot={canAttachEditorSnapshot}
                     onAttachMediaFiles={attachDroppedMedia}
+      onAttachMediaPaths={(paths) => {
+        void (async () => {
+          for (const path of paths) await selectChatAttachment("media", path);
+        })();
+      }}
                     onMediaDropError={(message) =>
                       notify(
                         "command-failed",
@@ -18404,7 +18931,12 @@ export function App() {
       {activeDestination === "settings" || activeDestination === "providers" ? (
         <SettingsSurface
           accountSettings={<AccountSettings account={account}/>}
-          cloudSettings={<CloudSettings account={account} onAccount={() => dispatchWorkbench({type: "set-settings-section", section: "account"})}/>}
+          cloudSettings={cloudEnabled ? <AccountCloudSettings account={account} onAccount={() => dispatchWorkbench({type: "set-settings-section", section: "account"})}/> : undefined}
+          billingSnapshot={cloudConnection.snapshot}
+          billingActions={{ ...cloudConnection.actions, autoBackup: automaticBackup.preference }}
+          preferences={workbench.preferences}
+          onSettingsPreferencesChange={patch => dispatchWorkbench({ type: "set-settings-preferences", patch })}
+          onImportSettings={settings => dispatchWorkbench({ type: "import-portable-settings", settings })}
           projectImport={projectImport.settingsProps}
           activeSection={
             activeDestination === "providers"
@@ -18634,6 +19166,19 @@ export function App() {
           onSelectDestination={selectDestination}
         />
       ) : null}
+      {activeDestination === "cloud" ? (
+        <div className="gyro-settings-surface gyro-cloud-workspace">
+          <div className="gyro-settings-content">
+            <CloudSettings
+              workspace
+              snapshot={cloudConnection.snapshot}
+              actions={cloudConnection.actions}
+              onOpenBilling={() => openSettingsSection("billing")}
+              onManageCloud={() => openSettingsSection("cloud")}
+            />
+          </div>
+        </div>
+      ) : null}
       {activeDestination === "automations" ? (
         <AutomationsSurface
           providerChoices={providersForConfig(config)
@@ -18819,6 +19364,11 @@ export function App() {
           maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
           canAttachEditorSnapshot={canAttachEditorSnapshot}
           onAttachMediaFiles={attachDroppedMedia}
+      onAttachMediaPaths={(paths) => {
+        void (async () => {
+          for (const path of paths) await selectChatAttachment("media", path);
+        })();
+      }}
           onMediaDropError={(message) =>
             notify("command-failed", "Image could not be attached", message)
           }
@@ -18920,14 +19470,18 @@ export function App() {
       {quitConfirmation.requested ? (
         <QuitConfirmDialog onResolve={quitConfirmation.resolve} />
       ) : null}
-      {modelStandardPrompt ? (
+      {modelStandardPrompt && canShowModelDefaultSuggestion ? (
         <ModelStandardPromptOverlay
           modelLabel={modelStandardPrompt.modelLabel}
           onAccept={acceptModelStandardPrompt}
-          onDismiss={dismissModelStandardPrompt}
+          onDismiss={() => dismissModelStandardPrompt()}
+          onNeverSuggest={() => dismissModelStandardPrompt(true)}
+          isSaving={isModelDefaultSaving}
+          error={modelDefaultSaveError}
           providerId={modelStandardPrompt.providerId}
           providerLabel={modelStandardPrompt.providerLabel}
-          selectionCount={modelStandardPrompt.count}
+          usageCount={modelStandardPrompt.usageCount}
+          chatCount={modelStandardPrompt.chatCount}
         />
       ) : null}
       {projectRemoveCandidate ? (
@@ -19019,8 +19573,10 @@ export function App() {
   );
   return (
     <ChatRetryContext.Provider value={chatAutoRetry}>
+    <ProviderSignInContext.Provider value={providerSignInState}>
       <WorkspacePathUndoContext.Provider value={workspacePathUndoValue}>
       <ChatFileActionsContext.Provider value={chatFileActions}>
+      <ChatFileScopeContext.Provider value={{ sessionId: activeSessionId, workspacePath: activeSession?.workspacePath ?? workspacePath }}>
         <TerminalAttachmentActionsContext.Provider
           value={terminalAttachmentActions}
         >
@@ -19043,19 +19599,46 @@ export function App() {
             ]}
           >
             <AppearanceContext.Provider value={appearance}>
+              <LocalCheckHost sessions={sessions} reminders={checkReminders.reminders} onDismissReminder={checkReminders.dismiss}
+                cloudRequest={cloudConnection.snapshot.cloudCapabilities?.sharing?.allowed ? cloudConnection.actions.cloud?.request : undefined}
+                cloudUnavailableReason={
+                  !(cloudConnection.snapshot.cloudV2 || cloudConnection.snapshot.productionCloud) ? "Report sharing is unavailable in this build. Your local Check report remains available."
+                  : cloudConnection.snapshot.status === "signed-out" ? "Sign in through Cloud settings to share a report. Your local Check report remains available."
+                  : ["no-subscription", "checkout-pending"].includes(cloudConnection.snapshot.status) ? "Report sharing needs an active Cloud plan. Open Cloud settings to check your plan."
+                  : cloudConnection.snapshot.status === "offline" ? "Cloud status is cached while offline. You can review this report; sending it may need an explicit retry."
+                  : "Report sharing is paused for this Cloud account. Open Cloud settings to refresh access or resolve the plan status."
+                }>
               {appChrome}
               {cloudPanel && <GyroCloud uploadId={cloudPanel.uploadId} onStatus={account.setStatus} onClose={() => {setCloudPanel(undefined);void account.refresh();}} />}
+              <FirstRunTour
+                destination={activeDestination}
+                onActiveChange={setIsFirstRunTourActive}
+                providerConfigured={workbench.providerStatuses.some(
+                  (provider) => provider.connectionStatus === "connected",
+                )}
+                onNavigate={(destination) =>
+                  dispatchWorkbench({ type: "select-destination", destination })
+                }
+                onOpenSettings={(section) => {
+                  dispatchWorkbench({
+                    type: "select-destination",
+                    destination: "settings",
+                  });
+                  dispatchWorkbench({ type: "set-settings-section", section });
+                }}
+              />
+              </LocalCheckHost>
             </AppearanceContext.Provider>
           </ComposerContextCandidates.Provider>
         </TerminalAttachmentActionsContext.Provider>
+      </ChatFileScopeContext.Provider>
       </ChatFileActionsContext.Provider>
       </WorkspacePathUndoContext.Provider>
+    </ProviderSignInContext.Provider>
     </ChatRetryContext.Provider>
   );
 }
 
-const chatFilePreviewCache = new Map<string, Promise<string>>();
-const chatCitedImageCache = new Map<string, Promise<string | undefined>>();
 
 function loadInitialWorkbenchState(): WorkbenchState {
   const stored = loadStoredWorkbenchState();
@@ -19191,11 +19774,15 @@ function loadStoredWorkbenchState(): WorkbenchState {
       modelFocus: undefined,
       modelFocusHistory: [],
       notifications: Array.isArray(parsed.notifications)
-        ? parsed.notifications.filter(
-            (notification) =>
-              notification.id !== "note-approval" &&
-              notification.id !== "note-tests",
-          )
+        ? parsed.notifications
+            .filter(
+              (notification) =>
+                notification.id !== "note-approval" &&
+                notification.id !== "note-tests",
+            )
+            // A failure from an earlier launch is not a current one, so it
+            // must not reappear as a notice when Gyro starts.
+            .map((notification) => ({ ...notification, read: true }))
         : base.notifications,
       onboarding: {
         ...base.onboarding,
@@ -19498,7 +20085,7 @@ function loadChatDrafts(): Record<string, string> {
         (entry): entry is [string, string] =>
           typeof entry[0] === "string" &&
           typeof entry[1] === "string" &&
-          entry[1].length <= MAX_CHAT_MESSAGE_CHARS,
+          chatMessageLength(entry[1]) <= MAX_CHAT_MESSAGE_CHARS,
       ),
     );
   } catch {
@@ -21029,6 +21616,8 @@ function applyProviderChatStreamEvent(
         (streamEvent.phase === "completed" ? "done" : "running"),
       undefined,
       streamEvent.phase === "heartbeat",
+      undefined,
+      streamEvent.quietSeconds ?? undefined,
     );
     return;
   }
@@ -21078,6 +21667,7 @@ function updateOptimisticProviderStatus(
   /** Move createdAt forward so idle watches see the run is still alive. */
   touchTimestamp = false,
   recoveryKind?: string,
+  quietForSeconds?: number,
 ) {
   const updateEvents = (items: SessionEvent[]) => {
     const targetIndex = items.findLastIndex(
@@ -21144,6 +21734,8 @@ function updateOptimisticProviderStatus(
             ? Math.max(0, completedAtMs - startedAtMs)
             : undefined,
         error,
+        // Every update replaces this, so the note cannot outlive its heartbeat.
+        quietForSeconds,
         startedAt,
         status,
       },

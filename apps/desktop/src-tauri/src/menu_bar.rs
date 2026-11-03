@@ -97,6 +97,7 @@ pub struct MenuBarApproval {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct DesktopNotificationPreferences {
+    pub show_names: bool,
     pub enabled: bool,
     pub approvals: bool,
     pub finished: bool,
@@ -106,6 +107,7 @@ pub struct DesktopNotificationPreferences {
 impl Default for DesktopNotificationPreferences {
     fn default() -> Self {
         Self {
+            show_names: true,
             enabled: true,
             approvals: true,
             finished: true,

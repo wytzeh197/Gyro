@@ -275,3 +275,18 @@
   padding: var(--gyro-space-section);
   background: transparent;
 }
+
+/* A disclosure body has no card, so these line up with its flush rows. */
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-disclosure-body
+  :is(
+    .gyro-auth-field,
+    .gyro-auth-footer,
+    .gyro-account-identity,
+    .gyro-cloud-empty,
+    .gyro-cloud-recovery,
+    .gyro-cloud-message
+  ) {
+  padding-inline: 0;
+}

@@ -56,6 +56,10 @@ pub enum CapabilityId {
     TerminalRead,
     TerminalWait,
     TerminalStop,
+    BrowserTargets,
+    BrowserSelectTarget,
+    BrowserCapturePreview,
+    BrowserPreviewClick,
     BrowserOpen,
     BrowserInspect,
     BrowserReload,
@@ -134,6 +138,10 @@ impl CapabilityId {
             Self::TerminalRead => "terminal.read",
             Self::TerminalWait => "terminal.wait",
             Self::TerminalStop => "terminal.stop",
+            Self::BrowserTargets => "browser.targets",
+            Self::BrowserSelectTarget => "browser.select-target",
+            Self::BrowserCapturePreview => "browser.capture-preview",
+            Self::BrowserPreviewClick => "browser.preview-click",
             Self::BrowserOpen => "browser.open",
             Self::BrowserInspect => "browser.inspect",
             Self::BrowserReload => "browser.reload",
@@ -212,6 +220,10 @@ impl CapabilityId {
             Self::TerminalRead => "gyro_terminal_read",
             Self::TerminalWait => "gyro_terminal_wait",
             Self::TerminalStop => "gyro_terminal_stop",
+            Self::BrowserTargets => "gyro_browser_targets",
+            Self::BrowserSelectTarget => "gyro_browser_select_target",
+            Self::BrowserCapturePreview => "gyro_browser_capture_preview",
+            Self::BrowserPreviewClick => "gyro_browser_preview_click",
             Self::BrowserOpen => "gyro_browser_open",
             Self::BrowserInspect => "gyro_browser_inspect",
             Self::BrowserReload => "gyro_browser_reload",
@@ -764,12 +776,12 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceGitStatus,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Inspect Git status for the Gyro project.",
+        description: "List changed, staged, and untracked files in the workspace Git repository with the current branch. Use this instead of shelling out to git status.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceDiff,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Inspect a bounded Git diff for the Gyro project.",
+        description: "Read a bounded Git diff of the working tree, or of staged changes with staged: true. Pass path to diff one file or folder; omitting it diffs the whole workspace and asks the user for approval.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceGitLog,
@@ -834,12 +846,12 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTask,
         class: CapabilityClass::TerminalExecute,
-        description: "Run one discovered Workspace task with visible, attributed output. Pass background: true for a long-running task such as a dev server or watcher so it starts in this chat's terminal instead of holding the turn open. Background tasks still running when the turn ends are watched under the reply and relaunched if they exit without the user or model stopping them.",
+        description: "Run one discovered Workspace task, such as a package script, Cargo, or Make target, by its exact taskId, with visible, attributed output. An unknown taskId fails with the list of valid ids. Pass background: true for a long-running task such as a dev server or watcher so it starts in this chat's terminal instead of holding the turn open. Background tasks still running when the turn ends are watched under the reply and relaunched if they exit without the user or model stopping them.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTest,
         class: CapabilityClass::TerminalExecute,
-        description: "Run one discovered Workspace test task with visible, attributed output. Pass background: true for a watch-mode suite so it starts in this chat's terminal instead of holding the turn open.",
+        description: "Run one discovered Workspace test task by its exact taskId, with visible, attributed output. An unknown taskId fails with the list of valid test ids. Pass background: true for a watch-mode suite so it starts in this chat's terminal instead of holding the turn open.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadOutput,
@@ -900,6 +912,26 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         id: CapabilityId::TerminalStop,
         class: CapabilityClass::TerminalExecute,
         description: "Stop this chat's model-owned terminal process. An explicit stop is not relaunched.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::BrowserTargets,
+        class: CapabilityClass::BrowserInspect,
+        description: "Discover Web, real macOS windows, and booted iPhone Simulator targets with prerequisite issues. Returns the selected target for this chat.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::BrowserSelectTarget,
+        class: CapabilityClass::BrowserNavigate,
+        description: "Select a discovered runtime targetId for this chat's Preview. Use web to return to the web page. Selection invalidates earlier framed captures; never presents an old capture as live.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::BrowserCapturePreview,
+        class: CapabilityClass::BrowserInspect,
+        description: "Capture the selected runtime with a surround. PNG pixels include the frame; contentRect maps to the runtime. Returns target, owner, capture time and expiry. Native images are snapshots, not live streams. iPhone Simulator is capture-only.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::BrowserPreviewClick,
+        class: CapabilityClass::BrowserNavigate,
+        description: "Click the selected preview using framed-image pixel coordinates and its recent captureId (screenshot filename). Surrounds, stale captures and changed windows are rejected. Native input needs Accessibility permission and an unobscured verified window. Capture again to verify the outcome. Simulator touch input is unsupported.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserOpen,
@@ -1092,17 +1124,25 @@ pub fn capability_descriptor(id: CapabilityId) -> &'static CapabilityDescriptor 
 
 /// Which Gyro capability tools a provider can be given.
 ///
-/// Every provider that runs a real chat adapter receives the tools: the Codex
-/// and Claude CLIs load the capability MCP server from their own config, and the
-/// ACP providers get it through `session/new`. Readiness-only providers have no
-/// chat runner at all, so there is nowhere to attach tools.
+/// Tool support requires a connected transport, independently of chat support.
+/// Codex and Claude load the capability MCP server from their own config, ACP
+/// providers receive it through `session/new`, and API runners dispatch tools
+/// directly. Antigravity print mode does not connect a Gyro tool transport.
 pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySupport {
     let descriptor = crate::provider_registry::provider_descriptor(provider_id);
     let custom = crate::provider_registry::is_custom_provider_id(provider_id);
     let available = custom
         || descriptor.is_some_and(|provider| {
-            provider.execution_kind
-                != crate::provider_registry::ProviderExecutionKind::ReadinessOnly
+            use crate::provider_registry::ProviderExecutionKind as Kind;
+            match provider.execution_kind {
+                Kind::CodexCli
+                | Kind::ClaudeCode
+                | Kind::KimiAcp
+                | Kind::AcpCli
+                | Kind::OllamaApi
+                | Kind::OpenAiCompatibleApi => true,
+                Kind::AntigravityCli | Kind::ReadinessOnly => false,
+            }
         });
     ProviderCapabilitySupport {
         schema: PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1.into(),
@@ -1133,8 +1173,19 @@ pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySuppo
         } else {
             Vec::new()
         },
-        reason: (!available)
-            .then(|| "Gyro tools need a provider that runs a chat session on this device.".into()),
+        reason: if available {
+            None
+        } else if descriptor.is_some_and(|provider| {
+            provider.execution_kind
+                == crate::provider_registry::ProviderExecutionKind::AntigravityCli
+        }) {
+            Some(
+                "Google Antigravity chat does not currently connect Gyro tools or sub-agents."
+                    .into(),
+            )
+        } else {
+            Some("Gyro tools need a provider that runs a chat session on this device.".into())
+        },
     }
 }
 
@@ -1400,9 +1451,7 @@ mod tests {
     }
 
     #[test]
-    fn every_chat_capable_provider_can_receive_tools() {
-        // Providers that run a chat adapter get the tools; readiness-only
-        // providers have no runner to attach an MCP server to.
+    fn connected_chat_transports_can_receive_tools() {
         for provider_id in [
             "openai",
             "anthropic",
@@ -1412,6 +1461,9 @@ mod tests {
             "ollama",
             "cursor",
             "opencode",
+            "deepseek",
+            "mistral",
+            "openrouter",
             "custom:local-gateway",
         ] {
             let support = provider_capability_support(provider_id);
@@ -1439,8 +1491,23 @@ mod tests {
         );
         assert_eq!(
             provider_capability_support("cursor").support_tier,
-            crate::provider_registry::ProviderSupportTier::Experimental
+            crate::provider_registry::ProviderSupportTier::Supported
         );
+    }
+
+    #[test]
+    fn antigravity_chat_is_executable_without_advertising_gyro_tools() {
+        let support = provider_capability_support("antigravity");
+        assert!(crate::provider_registry::provider_is_executable(
+            "antigravity"
+        ));
+        assert_eq!(
+            support.execution_kind,
+            Some(crate::provider_registry::ProviderExecutionKind::AntigravityCli)
+        );
+        assert!(!support.available);
+        assert!(support.capabilities.is_empty());
+        assert!(support.reason.is_some());
     }
 
     #[test]

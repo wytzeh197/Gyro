@@ -767,6 +767,9 @@ pub fn provider_runtime_status_from_output(output: &str) -> &'static str {
     {
         "not-installed"
     } else if normalized.contains("not authenticated")
+        || normalized.contains("please sign in")
+        || normalized.contains("not signed in")
+        || normalized.contains("authentication required")
         || normalized.contains("not logged in")
         || normalized.contains("logged out")
         || normalized.contains("authentication_failed")
@@ -1105,6 +1108,7 @@ mod tests {
             provider_runtime_status_from_output("Failed to authenticate: unauthorized"),
             "not-logged-in"
         );
+        assert_eq!(provider_runtime_status_from_output("Error: Please sign in to view available models."), "not-logged-in");
     }
 
     #[cfg(unix)]

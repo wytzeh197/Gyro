@@ -11,11 +11,13 @@ export function SettingsSection({
   title,
   description,
   children,
+  dataTour,
 }: {
   icon: IconComponent;
   title: string;
   description?: string;
   children: ReactNode;
+  dataTour?: string;
 }) {
   return (
     <section
@@ -23,7 +25,7 @@ export function SettingsSection({
       data-setting-key={settingsSearchKey(title)}
       tabIndex={-1}
     >
-      <header>
+      <header data-tour={dataTour}>
         <div>
           <p className="gyro-settings-eyebrow">Settings</p>
           <h1>

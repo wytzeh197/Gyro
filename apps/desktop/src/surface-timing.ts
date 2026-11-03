@@ -10,6 +10,7 @@ export type TimingSurface =
   | "tools"
   | "settings"
   | "automations"
+  | "cloud"
   | "providers"
   | "onboarding";
 

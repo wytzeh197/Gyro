@@ -11,10 +11,10 @@ import {
 const source = providerCatalog.find(
   (provider) => provider.id === "antigravity",
 );
-assert.equal(source.capabilities.executionKind, "acp-cli");
-assert.equal(source.capabilities.supportsApprovals, true);
-assert.equal(source.authMode, "env");
-assert.equal(providerSupportsApiKey("antigravity"), true);
+assert.equal(source.capabilities.executionKind, "antigravity-cli");
+assert.equal(source.capabilities.supportsApprovals, false);
+assert.equal(source.authMode, "cli");
+assert.equal(providerSupportsApiKey("antigravity"), false);
 assert.equal(isProviderId("gemini"), false);
 assert.equal(providerSupportsApiKey("gemini"), false);
 // Old installs must not resurrect Gemini, reuse its OAuth connection, or keep

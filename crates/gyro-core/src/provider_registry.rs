@@ -133,12 +133,12 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         runner: "agy",
         auth_owner: "google-antigravity",
         supports_approvals: false,
-        supports_images: true,
+        supports_images: false,
         supports_resume: true,
         // Token counts come from each run's `result` frame, but no plan or
         // quota window is scraped, so this stays false like Gemini.
         supports_usage: false,
-        support_tier: ProviderSupportTier::Experimental,
+        support_tier: ProviderSupportTier::Supported,
     },
     ProviderDescriptor {
         id: "ollama",
@@ -162,7 +162,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_images: true,
         supports_resume: true,
         supports_usage: false,
-        support_tier: ProviderSupportTier::Experimental,
+        support_tier: ProviderSupportTier::Supported,
     },
     ProviderDescriptor {
         id: "opencode",
@@ -174,7 +174,7 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_images: true,
         supports_resume: true,
         supports_usage: false,
-        support_tier: ProviderSupportTier::Experimental,
+        support_tier: ProviderSupportTier::Supported,
     },
     // API-key providers that speak the OpenAI wire format directly. Nothing
     // here is bespoke: the descriptor is data the shared HTTPS runner reads, so
@@ -319,19 +319,21 @@ mod tests {
             ProviderExecutionKind::AntigravityCli
         );
         assert_eq!(antigravity.runner, "agy");
-        assert_eq!(antigravity.support_tier, ProviderSupportTier::Experimental);
-        assert!(antigravity.supports_images && antigravity.supports_resume);
+        assert_eq!(antigravity.support_tier, ProviderSupportTier::Supported);
+        assert!(!antigravity.supports_images && antigravity.supports_resume);
         // A headless `agy` run has no channel for an approval dialog.
         assert!(!antigravity.supports_approvals);
         // Tokens are accounted per run; no plan window is scraped.
         assert!(!antigravity.supports_usage);
+        for id in ["cursor", "opencode"] {
+            assert_eq!(provider_descriptor(id).unwrap().support_tier, ProviderSupportTier::Supported);
+        }
         for id in [
             "openai",
             "anthropic",
             "kimi",
             "xai",
             "gemini",
-            "antigravity",
             "deepseek",
             "cursor",
             "opencode",
@@ -342,6 +344,7 @@ mod tests {
             assert!(provider_accepts_images(id), "{id}");
         }
         assert!(!provider_accepts_images("ollama"));
+        assert!(!provider_accepts_images("antigravity"));
         assert!(!provider_accepts_images("unknown"));
         assert!(provider_is_executable("ollama"));
         assert!(provider_is_executable("cursor"));

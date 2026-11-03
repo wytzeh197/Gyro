@@ -39,6 +39,8 @@ const USER_CLI_PATH_SUFFIXES: &[&str] = &[
     ".yarn/bin",
     ".pnpm",
     "Library/pnpm",
+    // OpenCode's install script
+    ".opencode/bin",
     // Cursor Agent
     ".cursor/bin",
     ".local/share/cursor-agent/versions",

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { sessionQuestionCounts } from "../packages/ui/src/session-approvals.ts";
 import {
   formatChatAnswers,
@@ -99,6 +100,46 @@ assert.equal(
 );
 // A marker-only reply still asks, even with no visible text.
 assert.equal(latestChatQuestions([{ ...structured, message: "" }])?.id, "s");
+
+// The actual commit suggestion example must travel through the existing card
+// and back into the same chat without losing the user's selected action.
+const commitGuidance = readFileSync(
+  new URL(
+    "../apps/desktop/src-tauri/src/commit_suggestion.rs",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const commitPayload = JSON.parse(
+  commitGuidance.match(/^GYRO_QUESTIONS: (.+)$/m)[1],
+);
+const commitReply = {
+  ...structured,
+  id: "commit-question",
+  message: "Fixed search; checks passed.",
+  payload: { questions: commitPayload },
+};
+const commitQuestion = latestChatQuestions([commitReply]).questions[0];
+assert.equal(commitQuestion.title, "Should I commit these changes?");
+assert.deepEqual(commitQuestion.options, [
+  "Commit changes",
+  "Review first",
+  "Not now",
+]);
+assert.equal(commitQuestion.recommended, undefined);
+for (const answer of [...commitQuestion.options, undefined]) {
+  const message = formatChatAnswers([
+    { question: commitQuestion.title, answer },
+  ]);
+  assert.deepEqual(parseChatAnswers(message).answers, [
+    { question: commitQuestion.title, answer },
+  ]);
+  assert.equal(
+    latestChatQuestions([commitReply, { kind: "user-message", message }]),
+    undefined,
+    "answering or skipping clears the commit question",
+  );
+}
 
 // Answers travel as one message and fold back into the transcript row.
 const answered = formatChatAnswers(

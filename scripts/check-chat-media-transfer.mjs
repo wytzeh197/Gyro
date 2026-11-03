@@ -344,6 +344,59 @@ try {
   delete globalThis.document;
 }
 
+// WebKit accepts or refuses a drop from the `dragenter` of the element the
+// pointer just entered. Both events must be cancelled for media anywhere in
+// the window, and iframes must let the drag through until it ends.
+{
+  const listeners = new Map();
+  const dataset = {};
+  const savedWindow = globalThis.window;
+  const savedDocument = globalThis.document;
+  globalThis.window = {
+    addEventListener: (type, listener) => {
+      listeners.set(type, [...(listeners.get(type) ?? []), listener]);
+    },
+  };
+  globalThis.document = { documentElement: { dataset } };
+  try {
+    await import("../packages/ui/src/chat-media-transfer.ts?window-listeners");
+    const fire = (type, transfer, extra = {}) => {
+      const event = {
+        type,
+        dataTransfer: transfer,
+        defaultPrevented: false,
+        preventDefault() {
+          this.defaultPrevented = true;
+        },
+        stopImmediatePropagation() {},
+        ...extra,
+      };
+      for (const listener of listeners.get(type) ?? []) listener(event);
+      return event;
+    };
+    const finder = () => ({ types: ["Files"], dropEffect: "none" });
+    for (const type of ["dragenter", "dragover"]) {
+      const transfer = finder();
+      assert.equal(fire(type, transfer).defaultPrevented, true, type);
+      assert.equal(transfer.dropEffect, "copy", type);
+    }
+    assert.ok("gyroMediaDrag" in dataset, "iframes yield during a media drag");
+    fire("drop", { ...finder(), files: [image], items: [], getData: () => "" });
+    assert.ok(!("gyroMediaDrag" in dataset), "a drop ends the media drag");
+    const chatDrag = { types: ["application/x-gyro-chat-session"] };
+    assert.equal(fire("dragenter", chatDrag).defaultPrevented, false);
+    assert.ok(!("gyroMediaDrag" in dataset), "chat drags are not media");
+    fire("dragenter", finder());
+    fire("dragleave", finder(), { relatedTarget: {} });
+    assert.ok("gyroMediaDrag" in dataset, "moving between elements keeps it");
+    fire("dragleave", finder(), { relatedTarget: null });
+    assert.ok(!("gyroMediaDrag" in dataset), "leaving the window ends it");
+  } finally {
+    globalThis.window = savedWindow;
+    globalThis.document = savedDocument;
+  }
+}
+
 console.log(
   "Chat media transfer, queued uploads, failure preservation and bounded conversion checks passed",
 );

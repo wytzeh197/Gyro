@@ -2,24 +2,8 @@
 @import "./browser-capture.css";
 @import "./appearance.css";
 
-/*
- System typography keeps every desktop surface consistent. Code and terminals retain their monospace fonts.
- */
-@font-face {
-  font-family: var(--gyro-font-sans);
-  font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
-  src: url("./assets/fonts/inter-latin.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: var(--gyro-font-sans);
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-  src: url("./assets/fonts/inter-tight-latin.woff2") format("woff2");
-}
+/* System typography keeps every desktop surface consistent. Code and terminals
+   retain their monospace fonts. */
 
 :root {
   color-scheme: dark;
@@ -38,15 +22,18 @@
   --gyro-user-main: #0874df;
   --gyro-user-secondary: #8b6fcb;
   --gyro-app: #181818;
-  --gyro-sidebar: #222222;
-  --gyro-sidebar-soft: #2c2c2c;
+  --gyro-sidebar: #202020;
+  --gyro-sidebar-soft: #292929;
   --gyro-pane: #1c1c1c;
-  --gyro-surface: #242424;
-  --gyro-surface-raised: #303030;
-  --gyro-surface-soft: #262626;
-  --gyro-border: #383838;
-  --gyro-border-soft: #2c2c2c;
-  --gyro-border-strong: #707070;
+  --gyro-surface: #222222;
+  --gyro-surface-raised: #2b2b2b;
+  --gyro-surface-soft: #252525;
+  /* Lines are translucent ink, not grey paint: one hairline reads the same
+     on the canvas, a card, or the frosted sidebar, so tonal steps can stay
+     small without seams turning into stripes. */
+  --gyro-border: color-mix(in srgb, white 9%, transparent);
+  --gyro-border-soft: color-mix(in srgb, white 5.5%, transparent);
+  --gyro-border-strong: color-mix(in srgb, white 30%, transparent);
   --gyro-text: #ededed;
   --gyro-muted: #b5b5b5;
   --gyro-faint: #a0a0a0;
@@ -90,7 +77,7 @@
   --gyro-code-bg: #141414;
   --gyro-code-text: #dedede;
   --gyro-segment-bg: var(--gyro-sidebar);
-  --gyro-segment-active: #323232;
+  --gyro-segment-active: #2e2e2e;
   --gyro-segment-active-text: var(--gyro-text);
   /* An off switch keeps a quiet track and a muted thumb on graphite; light
      mode restates both as a pale track with a white thumb. */
@@ -104,8 +91,8 @@
   --gyro-theme-preview-light-content: #e5e5e5;
   --gyro-sidebar-mode-track: var(--gyro-sidebar);
   --gyro-sidebar-mode-active: var(--gyro-control-hover);
-  --gyro-shadow: rgba(0, 0, 0, 0.42);
-  --gyro-heavy-shadow: rgba(0, 0, 0, 0.6);
+  --gyro-shadow: rgba(0, 0, 0, 0.3);
+  --gyro-heavy-shadow: rgba(0, 0, 0, 0.42);
   --gyro-focus-ring: var(--gyro-accent);
   --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
   --gyro-secondary-soft: color-mix(
@@ -121,7 +108,7 @@
   --gyro-window: var(--gyro-app);
   --gyro-workbench-line: rgba(255, 255, 255, 0.06);
   --gyro-control-bg: var(--gyro-surface-soft);
-  --gyro-control-hover: #323232;
+  --gyro-control-hover: #2e2e2e;
   --gyro-premium-app: var(--gyro-app);
   --gyro-premium-sidebar: var(--gyro-sidebar);
   --gyro-premium-panel: var(--gyro-surface);
@@ -134,9 +121,9 @@
   --gyro-premium-muted: var(--gyro-muted);
   --gyro-premium-faint: var(--gyro-faint);
   --gyro-premium-accent: var(--gyro-accent);
-  --gyro-premium-shadow: rgba(0, 0, 0, 0.55);
-  --gyro-premium-shadow-soft: rgba(0, 0, 0, 0.32);
-  --gyro-premium-shadow-lift: rgba(0, 0, 0, 0.42);
+  --gyro-premium-shadow: rgba(0, 0, 0, 0.4);
+  --gyro-premium-shadow-soft: rgba(0, 0, 0, 0.24);
+  --gyro-premium-shadow-lift: rgba(0, 0, 0, 0.3);
   --gyro-premium-hairline: rgba(255, 255, 255, 0.09);
   --gyro-premium-hairline-soft: rgba(255, 255, 255, 0.055);
   --gyro-premium-hairline-strong: rgba(255, 255, 255, 0.15);
@@ -863,9 +850,9 @@
   --gyro-surface: #ffffff;
   --gyro-surface-raised: #ffffff;
   --gyro-surface-soft: #f3f3f3;
-  --gyro-border: #dedede;
-  --gyro-border-soft: #e8e8e8;
-  --gyro-border-strong: #898989;
+  --gyro-border: color-mix(in srgb, black 10%, transparent);
+  --gyro-border-soft: color-mix(in srgb, black 6%, transparent);
+  --gyro-border-strong: color-mix(in srgb, black 42%, transparent);
   --gyro-text: #252525;
   --gyro-muted: #626262;
   /* Lighter than muted so meta text keeps a step of hierarchy, while staying

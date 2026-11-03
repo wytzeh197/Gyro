@@ -28,7 +28,10 @@ pub(super) fn execute(
     request: &CapabilityRequest,
 ) -> anyhow::Result<(String, Value, Option<CapabilityResourceRef>)> {
     if request.capability_id == CapabilityId::WorkspaceUndoPath {
-        let Some(action) = undo_workspace_path_impl()? else {
+        let Some(action) = workspace_path_history::undo_checked(|action| {
+            undo_action_in_workspace(&bound.workspace, action)
+        })?
+        else {
             return Ok((
                 "Nothing to undo".to_string(),
                 json!({
@@ -154,6 +157,33 @@ pub(super) fn execute(
     // the change came from a model.
     emit_workspace_path_change(app, change);
     Ok((summary, data, Some(resource)))
+}
+
+/// The explorer has global history, but a model is authorized for its bound
+/// workspace only. Validate every workspace entry an inverse can touch before
+/// the shared filesystem helper runs. The recorded Trash source intentionally
+/// lives outside the workspace; only its restore destination is workspace data.
+fn undo_action_in_workspace(
+    workspace: &Path,
+    action: &workspace_path_history::PathHistoryAction,
+) -> anyhow::Result<workspace_path_history::PathHistoryAction> {
+    use workspace_path_history::PathHistoryAction;
+    let assert_entry =
+        |path: &Path| gyro_core::security::assert_entry_inside_workspace(workspace, path);
+    let checked = match action {
+        PathHistoryAction::Created { path } => PathHistoryAction::Created {
+            path: assert_entry(path)?,
+        },
+        PathHistoryAction::Moved { from, to } => PathHistoryAction::Moved {
+            from: assert_entry(from)?,
+            to: assert_entry(to)?,
+        },
+        PathHistoryAction::Trashed { original, trashed } => PathHistoryAction::Trashed {
+            original: assert_entry(original)?,
+            trashed: trashed.clone(),
+        },
+    };
+    apply_path_history_action(&checked)
 }
 
 /// Validate the arguments for one lifecycle call. Kept separate from the
@@ -301,6 +331,181 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_undo_refuses_every_entry_in_another_workspace_before_mutation() {
+        use workspace_path_history::PathHistoryAction;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let workspace = root.join("workspace");
+        let other = root.join("other");
+        let trash = root.join("trash");
+        for dir in [&workspace, &other, &trash] {
+            fs::create_dir(dir).unwrap();
+        }
+        fs::write(other.join("created"), "other project").unwrap();
+        fs::write(other.join("moved"), "other move").unwrap();
+        fs::write(workspace.join("moved"), "local move").unwrap();
+        fs::write(trash.join("deleted"), "recoverable").unwrap();
+
+        // The UI's global inverse still works across projects. This was also
+        // the model's previous route; its new bound helper must refuse it.
+        let global_move = PathHistoryAction::Moved {
+            from: other.join("old"),
+            to: other.join("moved"),
+        };
+        let reverse = apply_path_history_action(&global_move).unwrap();
+        assert_eq!(fs::read_to_string(other.join("old")).unwrap(), "other move");
+        apply_path_history_action(&reverse).unwrap();
+
+        for action in [
+            PathHistoryAction::Created {
+                path: other.join("created"),
+            },
+            PathHistoryAction::Moved {
+                from: other.join("old"),
+                to: other.join("moved"),
+            },
+            PathHistoryAction::Moved {
+                from: other.join("old"),
+                to: workspace.join("moved"),
+            },
+            PathHistoryAction::Moved {
+                from: workspace.join("old"),
+                to: other.join("moved"),
+            },
+            PathHistoryAction::Trashed {
+                original: other.join("deleted"),
+                trashed: trash.join("deleted"),
+            },
+        ] {
+            let error = undo_action_in_workspace(&workspace, &action).unwrap_err();
+            assert!(error.to_string().contains("outside workspace"), "{error}");
+        }
+        assert_eq!(
+            fs::read_to_string(other.join("created")).unwrap(),
+            "other project"
+        );
+        assert_eq!(
+            fs::read_to_string(other.join("moved")).unwrap(),
+            "other move"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("moved")).unwrap(),
+            "local move"
+        );
+        assert_eq!(
+            fs::read_to_string(trash.join("deleted")).unwrap(),
+            "recoverable"
+        );
+        assert!(!other.join("old").exists());
+        assert!(!workspace.join("old").exists());
+        assert!(!other.join("deleted").exists());
+    }
+
+    #[test]
+    fn model_undo_restores_local_moves_and_trash_with_missing_parent_folders() {
+        use workspace_path_history::PathHistoryAction;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let workspace = root.join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        fs::write(workspace.join("renamed"), "local content").unwrap();
+        let inverse = undo_action_in_workspace(
+            &workspace,
+            &PathHistoryAction::Moved {
+                from: workspace.join("missing/original"),
+                to: workspace.join("renamed"),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(workspace.join("missing/original")).unwrap(),
+            "local content"
+        );
+        assert!(!workspace.join("renamed").exists());
+        assert_eq!(
+            inverse,
+            PathHistoryAction::Moved {
+                from: workspace.join("renamed"),
+                to: workspace.join("missing/original"),
+            }
+        );
+
+        let trashed = root.join("trash-copy");
+        fs::write(&trashed, "restored content").unwrap();
+        undo_action_in_workspace(
+            &workspace,
+            &PathHistoryAction::Trashed {
+                original: workspace.join("new-parent/restored"),
+                trashed: trashed.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(workspace.join("new-parent/restored")).unwrap(),
+            "restored content"
+        );
+        assert!(!trashed.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn model_undo_refuses_retargeted_parent_and_preserves_leaf_symlinks() {
+        use std::os::unix::fs::symlink;
+        use workspace_path_history::PathHistoryAction;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let workspace = root.join("workspace");
+        let outside = root.join("outside");
+        fs::create_dir(&workspace).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("entry"), "must stay outside").unwrap();
+        symlink(&outside, workspace.join("parent")).unwrap();
+        for action in [
+            PathHistoryAction::Created {
+                path: workspace.join("parent/entry"),
+            },
+            PathHistoryAction::Moved {
+                from: workspace.join("parent/old"),
+                to: outside.join("entry"),
+            },
+            PathHistoryAction::Trashed {
+                original: workspace.join("parent/restored"),
+                trashed: outside.join("entry"),
+            },
+        ] {
+            assert!(undo_action_in_workspace(&workspace, &action).is_err());
+        }
+        assert_eq!(
+            fs::read_to_string(outside.join("entry")).unwrap(),
+            "must stay outside"
+        );
+        assert!(!outside.join("restored").exists());
+
+        for (index, target) in [outside.join("entry"), outside.join("missing")]
+            .into_iter()
+            .enumerate()
+        {
+            let renamed = workspace.join(format!("renamed-{index}"));
+            let original = workspace.join(format!("original-{index}"));
+            symlink(&target, &renamed).unwrap();
+            undo_action_in_workspace(
+                &workspace,
+                &PathHistoryAction::Moved {
+                    from: original.clone(),
+                    to: renamed.clone(),
+                },
+            )
+            .unwrap();
+            assert_eq!(fs::read_link(&original).unwrap(), target);
+            assert!(fs::symlink_metadata(&renamed).is_err());
+        }
+        assert_eq!(
+            fs::read_to_string(outside.join("entry")).unwrap(),
+            "must stay outside"
+        );
+    }
 
     #[test]
     fn create_requires_a_known_kind() {

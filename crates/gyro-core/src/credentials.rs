@@ -27,11 +27,12 @@ pub fn provider_credential_env_vars(provider_id: &str) -> &'static [&'static str
         "anthropic" => &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
         "openai" => &["OPENAI_API_KEY"],
         "xai" => &["XAI_API_KEY"],
-        "gemini" | "antigravity" => &[
+        "gemini" => &[
             "GEMINI_API_KEY",
             "GOOGLE_API_KEY",
             "GOOGLE_APPLICATION_CREDENTIALS",
         ],
+        "antigravity" => &["GOOGLE_APPLICATION_CREDENTIALS"],
         "kimi" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
         "cursor" => &["CURSOR_API_KEY", "CURSOR_AUTH_TOKEN"],
         "deepseek" => &["DEEPSEEK_API_KEY"],
@@ -48,7 +49,21 @@ pub fn provider_api_key_account(provider_id: &str) -> String {
 
 /// The env var a provider CLI reads when Gyro injects a stored API key.
 pub fn provider_api_key_env_name(provider_id: &str) -> Option<&'static str> {
+    // agy uses Google sign-in or an ADC credential file, not a Gemini API key.
+    if provider_id == "antigravity" {
+        return None;
+    }
     provider_credential_env_vars(provider_id).first().copied()
+}
+
+#[cfg(test)]
+mod antigravity_auth_tests {
+    #[test]
+    fn google_sign_in_and_adc_do_not_use_the_retired_gemini_key() {
+        assert!(!super::provider_supports_api_key("antigravity"));
+        assert_eq!(super::provider_api_key_env_name("antigravity"), None);
+        assert_eq!(super::provider_credential_env_vars("antigravity"), ["GOOGLE_APPLICATION_CREDENTIALS"]);
+    }
 }
 
 /// Whether Gyro can hold an API key for this provider.

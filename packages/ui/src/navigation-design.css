@@ -247,7 +247,7 @@
 }
 
 /* A placeholder is not a selected document. Keep its existing tab slot quiet. */
-:root[data-theme] .gyro-editor-tabs > button.is-empty {
+:root[data-theme] .gyro-editor-tab-strip > button.is-empty {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
@@ -255,13 +255,13 @@
   font-weight: 400;
 }
 
-:root[data-theme] .gyro-editor-tabs > button.is-empty::after {
+:root[data-theme] .gyro-editor-tab-strip > button.is-empty::after {
   display: none;
 }
 
 /* Preserve header geometry while the empty editor has no actions to perform. */
 :root[data-theme]
-  .gyro-editor-tabs:has(> button.is-empty)
+  .gyro-editor-tabs:has(.gyro-editor-tab-strip > button.is-empty)
   > .gyro-editor-tab-actions
   > button:disabled {
   visibility: hidden;
@@ -447,6 +447,33 @@
   font-weight: 400;
 }
 
+/* Idle ages yield their width to the title. Hover and keyboard focus expose
+   the age beside row actions; work, approval and unread marks stay visible. */
+:root[data-theme] .gyro-sidebar .gyro-session-row.has-idle-time
+  .gyro-session-time {
+  opacity: 0;
+  pointer-events: none;
+}
+:root[data-theme] .gyro-sidebar .gyro-session-row.has-idle-time:not(:hover):not(:focus-within):not(.is-menu-open)
+  .gyro-sidebar-thread-main {
+  padding-right: 8px;
+}
+:root[data-theme] .gyro-sidebar .gyro-session-row.has-idle-time:not(:hover):not(:focus-within):not(.is-menu-open)
+  .gyro-session-actions {
+  opacity: 0;
+  pointer-events: none;
+}
+:root[data-theme] .gyro-sidebar .gyro-session-row.has-idle-time:is(:hover, :focus-within, .is-menu-open)
+  .gyro-session-time {
+  opacity: 1;
+  right: 60px;
+  max-width: 32px;
+}
+:root[data-theme] .gyro-sidebar .gyro-session-row.has-idle-time:is(:hover, :focus-within, .is-menu-open)
+  .gyro-sidebar-thread-main {
+  padding-right: 96px;
+}
+
 /* Navigation uses the same line weight as the titlebar. Provider marks and
    semantic status icons retain their own artwork and color. */
 :root[data-theme]
@@ -469,21 +496,25 @@
   stroke-width: 1.6;
 }
 
+/* The surface switch speaks the sidebar's language: a barely-there track with
+   a hairline edge, sized to the sidebar toggle beside it (26px), and a flat
+   selected chip with no ring or lift, so it groups the two surfaces without
+   asking for attention. */
 :root[data-theme] .gyro-titlebar-switch {
-  background: color-mix(in srgb, var(--gyro-text) 4%, var(--gyro-sidebar));
-  border: 1px solid color-mix(in srgb, var(--gyro-text) 8%, transparent);
+  background: color-mix(in srgb, var(--gyro-text) 2.5%, var(--gyro-sidebar));
+  border: 1px solid color-mix(in srgb, var(--gyro-text) 6%, transparent);
   /* Nested radii: the chip's radius plus the 2px gutter and 1px border. */
-  border-radius: var(--gyro-radius-lg);
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   gap: 2px;
-  height: calc(28px * var(--gyro-ui-scale, 1));
+  height: calc(26px * var(--gyro-ui-scale, 1));
   padding: 2px;
 }
 
 :root[data-theme] .gyro-titlebar-switch-option {
-  border-radius: var(--gyro-radius-md);
+  border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
-  height: calc(28px * var(--gyro-ui-scale, 1) - 6px);
+  height: calc(26px * var(--gyro-ui-scale, 1) - 6px);
 }
 
 :root[data-theme] .gyro-titlebar-switch-option svg {
@@ -491,7 +522,7 @@
 }
 
 :root[data-theme] .gyro-titlebar-switch-option:not(.is-active):hover {
-  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
 }
 
 :root[data-theme] .gyro-titlebar-switch-option:not(.is-active):hover svg {
@@ -500,20 +531,16 @@
 
 :root[data-theme] .gyro-titlebar-switch-option.is-active,
 :root[data-theme] .gyro-titlebar-switch-option.is-active:hover {
-  /* Fallback chip until the sliding indicator measures itself and takes over. */
-  background: color-mix(in srgb, var(--gyro-text) 11%, var(--gyro-sidebar));
+  /* Fallback fill until the sliding indicator measures itself and takes over. */
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
   box-shadow: none;
   color: var(--gyro-text);
 }
 
-/* The raised chip is the sliding indicator, so the lift lives there: a lighter
-   fill with a hairline ring and a soft drop reads as a physical segment. */
 :root[data-theme] .gyro-titlebar-switch > .gyro-selection-indicator {
-  background: color-mix(in srgb, var(--gyro-text) 11%, var(--gyro-sidebar));
-  border-radius: var(--gyro-radius-md);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--gyro-text) 7%, transparent),
-    0 1px 2px rgb(0 0 0 / 0.08);
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
 }
 
 :root[data-theme] .gyro-titlebar-switch-option.is-active svg {

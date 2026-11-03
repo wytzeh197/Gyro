@@ -13,7 +13,14 @@ const fastModels: Record<string, readonly string[]> = {
     "gpt-5.6-luna",
     "gpt-5.5",
   ],
-  anthropic: ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"],
+  anthropic: [
+    "claude-opus-5-5",
+    "claude-opus-5-5-1m",
+    "claude-opus-5",
+    "claude-opus-5-1m",
+    "claude-opus-4-8",
+    "claude-opus-4-8-1m",
+  ],
   // The fast pool is a launch id, not a picker row. The toggle rewrites grok-4.7.
   xai: ["grok-4.7"],
 };

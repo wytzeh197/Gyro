@@ -10,6 +10,9 @@
     "task-state",
     "retrieval",
     "progress-detection",
+    "compact-tool-catalog",
+    "recoverable-evidence",
+    "catalog-retention",
     "combined"
   ],
   "cacheConditions": [

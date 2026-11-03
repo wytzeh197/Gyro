@@ -589,6 +589,12 @@ export type RunModel = {
   steps: RunStep[];
   files: FileChange[];
   response?: SessionEvent;
+  /**
+   * Set once a live run has gone quiet for long enough to say so. A run with no
+   * output for minutes is alive but not obviously progressing, and a steadily
+   * breathing "Thinking" would claim more than Gyro knows.
+   */
+  quietForSeconds?: number;
 };
 
 /** A settled work turn must visibly explain an absent closing reply.
@@ -613,6 +619,10 @@ export type RunStatusInput = {
   error?: string;
   recoveryKind?: string;
   recoveryMessage?: string;
+  /** When this status was last refreshed. A heartbeat moves it forward. */
+  at?: string;
+  /** How long the backend has heard nothing from a run that is still alive. */
+  quietForSeconds?: number;
 };
 
 export type BuildRunModelOptions = {
@@ -699,7 +709,7 @@ export function buildRunModel(
         item.deletions = item.deletions ?? stats?.deletions;
         mergeFileChange(files, item);
       }
-      if (!absorbRepeatedWork(steps, item)) {
+      if (!absorbRepeatedWork(steps, item, event.createdAt)) {
         steps.push({ kind: "work", id: event.id, at: event.createdAt, item });
       }
       continue;
@@ -780,7 +790,21 @@ export function buildRunModel(
     steps: settledSteps,
     files: settledFiles,
     response: closing?.response,
+    quietForSeconds: runQuietSeconds(settledSteps, options),
   };
+}
+
+function runQuietSeconds(steps: RunStep[], options: BuildRunModelOptions) {
+  const quietFor = options.status?.quietForSeconds;
+  if (!options.isRunning || !quietFor) {
+    return undefined;
+  }
+  // Heartbeats arrive every 20 seconds, so a step can land between them. That
+  // step already disproves the note, and it should not linger until the next one.
+  const heardAt = Date.parse(options.status?.at ?? "");
+  return steps.some((step) => Date.parse(step.at) > heardAt)
+    ? undefined
+    : quietFor;
 }
 
 /** Close open work rows when the turn itself has finished. */
@@ -1108,20 +1132,29 @@ function classifyCommandActivity({
   intent?: string;
   status: WorkStatus;
 }): WorkItem {
-  const normalized = command
-    .replace(/^\s*(?:cd\s+[^;&|]+\s*(?:&&|;)\s*)+/i, "")
-    .trim();
-  if (/^(?:rg|grep)\b/i.test(normalized)) {
+  const shape = parseShellCommand(displayCommand(command));
+  const words = withoutEnvAssignments(shape.segments[0] ?? []);
+  const program = words[0];
+  // The row's verb promises what happened. `rg foo && rm -rf dist` and
+  // `sed -i ...` both start like a lookup, and calling them "Searched" or "Read"
+  // would hide a change, so anything beyond a lookup stays a plain command.
+  const onlyLooks = shellOnlyLooks(shape);
+  if (onlyLooks && (program === "rg" || program === "grep")) {
     return {
       kind: "search",
       id,
       status,
       scope: "project",
-      query: commandTarget(normalized),
+      query: commandSearchQuery(words),
     };
   }
-  if (/^(?:sed|head|tail|cat|awk)\b/i.test(normalized)) {
-    const path = commandFileTarget(normalized);
+  if (
+    onlyLooks &&
+    program &&
+    READ_PROGRAMS.has(program) &&
+    !editsInPlace(words)
+  ) {
+    const path = commandFileTarget(words);
     return {
       kind: "read",
       id,
@@ -1130,34 +1163,254 @@ function classifyCommandActivity({
       media: isImagePath(path) ? "image" : "file",
     };
   }
-  const category: CommandCategory | undefined =
-    /(?:^|\s)(?:pnpm|npm|yarn|bun|cargo)\s+(?:run\s+)?test\b|\bcargo\s+test\b/i.test(
-      normalized,
-    )
-      ? "test"
-      : /(?:^|\s)(?:pnpm|npm|yarn|bun|cargo)\s+(?:run\s+)?build\b|\bcargo\s+build\b/i.test(
-            normalized,
-          )
-        ? "build"
-        : /^(?:git\s+(?:status|diff|log|branch)|ls\b|find\b|pwd\b)/i.test(
-              normalized,
-            )
-          ? "inspect"
-          : undefined;
+  const programs = shape.segments.map((segment) =>
+    withoutEnvAssignments(segment).join(" "),
+  );
+  const category: CommandCategory | undefined = programs.some((text) =>
+    TEST_COMMAND.some((pattern) => pattern.test(text)),
+  )
+    ? "test"
+    : programs.some((text) =>
+          BUILD_COMMAND.some((pattern) => pattern.test(text)),
+        )
+      ? "build"
+      : onlyLooks && INSPECT_COMMAND.test(programs[0] ?? "")
+        ? "inspect"
+        : undefined;
   return { kind: "command", id, status, command, intent, category };
 }
 
-function commandTarget(command: string) {
-  const quoted = command.match(/["']([^"']+)["']/)?.[1];
+const READ_PROGRAMS = new Set(["sed", "head", "tail", "cat", "awk"]);
+/** Downstream of a pipe, these only narrow what is already being looked at. */
+const PIPE_FILTERS = new Set([
+  "awk",
+  "column",
+  "cut",
+  "egrep",
+  "fgrep",
+  "grep",
+  "head",
+  "jq",
+  "less",
+  "more",
+  "nl",
+  "rg",
+  "sed",
+  "sort",
+  "tail",
+  "tr",
+  "uniq",
+  "wc",
+]);
+/** Runners and the flags that can sit before their script: `pnpm -r test`. */
+const PACKAGE_SCRIPT =
+  "^(?:pnpm|npm|yarn|bun)(?:\\s+-\\S+(?:\\s+(?!run\\b|test\\b|build\\b|-)\\S+)?)*\\s+(?:run\\s+)?";
+const TOOL_RUNNER = "^(?:(?:npx|bunx|pnpm\\s+exec|python3?\\s+-m)\\s+)?";
+const TEST_COMMAND = [
+  new RegExp(`${PACKAGE_SCRIPT}(?:test\\b|t(?:\\s|$))`),
+  new RegExp(
+    `${TOOL_RUNNER}(?:vitest|jest|mocha|pytest|playwright\\s+test)\\b`,
+  ),
+  /^cargo(?:\s+\+\S+)?\s+(?:test|nextest)\b/,
+  /^(?:go|swift|deno)\s+test\b/,
+  /^make(?:\s+-\S+)*\s+test\b/,
+  /^node\s+--test\b/,
+];
+const BUILD_COMMAND = [
+  new RegExp(`${PACKAGE_SCRIPT}build\\b`),
+  // `tsc --noEmit` is a typecheck. It builds nothing, so it should not read as one.
+  new RegExp(
+    `${TOOL_RUNNER}(?:tsc\\b(?!.*--noEmit)|(?:vite|next)\\s+build\\b)`,
+  ),
+  /^cargo(?:\s+\+\S+)?\s+build\b/,
+  /^(?:go|swift)\s+build\b/,
+  /^make(?:\s+-\S+)*\s+build\b/,
+];
+const INSPECT_COMMAND =
+  /^(?:git(?:\s+-C\s+\S+)?\s+(?:status|diff|log|show)\b|git\s+branch(?:\s+(?:-a|-r|-v|-vv|--all|--list|--remotes|--show-current))*$|ls\b|pwd\b|find\b(?!.*\s-(?:delete|exec|execdir|ok|okdir|fprint\S*|fls)\b))/;
+
+type ShellShape = {
+  /** The words of each simple command, with quotes and redirects removed. */
+  segments: string[][];
+  /** The operator joining each segment to the next one. */
+  joins: string[];
+  /** Whether any output is redirected somewhere that keeps it. */
+  writesFile: boolean;
+};
+
+/**
+ * Just enough shell to see a command's structure.
+ *
+ * Quote-aware because a pattern routinely holds the operators this looks for:
+ * `rg "a|b"` is one search, not a pipeline. Anything it does not understand
+ * ends up looking chained, and a chained command stays a plain command row.
+ */
+function parseShellCommand(command: string): ShellShape {
+  const segments: string[][] = [[]];
+  const joins: string[] = [];
+  let writesFile = false;
+  let word: string | undefined;
+  let quote: string | undefined;
+  let redirect: "input" | "output" | undefined;
+  const endWord = () => {
+    if (word === undefined) {
+      return;
+    }
+    if (redirect === "output" && !HARMLESS_REDIRECT.test(word)) {
+      writesFile = true;
+    }
+    if (!redirect) {
+      segments.at(-1)!.push(word);
+    }
+    redirect = undefined;
+    word = undefined;
+  };
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index]!;
+    if (quote) {
+      if (char === quote) {
+        quote = undefined;
+      } else if (char === "\\" && quote === '"' && index + 1 < command.length) {
+        index += 1;
+        word += command[index]!;
+      } else {
+        word += char;
+      }
+    } else if (char === "'" || char === '"') {
+      quote = char;
+      word ??= "";
+    } else if (char === "\\") {
+      index += 1;
+      if (command[index] !== "\n") {
+        word = (word ?? "") + (command[index] ?? "");
+      }
+    } else if (char === ">") {
+      // The digits in `2>` name a stream. They are not an argument.
+      if (word !== undefined && /^\d+$/.test(word)) {
+        word = undefined;
+      }
+      endWord();
+      redirect = "output";
+      if (command[index + 1] === ">") {
+        index += 1;
+      }
+      if (command[index + 1] === "&") {
+        index += 1;
+        word = "&";
+      }
+    } else if (char === "<") {
+      endWord();
+      redirect = "input";
+      while (command[index + 1] === "<") {
+        index += 1;
+      }
+    } else if (char === ";" || char === "\n" || char === "&" || char === "|") {
+      endWord();
+      redirect = undefined;
+      const next = command[index + 1];
+      const doubled = next === char && (char === "&" || char === "|");
+      const isPipeAll = char === "|" && next === "&";
+      if (doubled || isPipeAll) {
+        index += 1;
+      }
+      if (segments.at(-1)!.length > 0) {
+        joins.push(doubled ? char + char : char);
+        segments.push([]);
+      }
+    } else if (/\s/.test(char)) {
+      endWord();
+    } else {
+      word = (word ?? "") + char;
+    }
+  }
+  endWord();
+  if (segments.length > 1 && segments.at(-1)!.length === 0) {
+    segments.pop();
+    joins.pop();
+  }
+  return { segments, joins, writesFile };
+}
+
+/** Moving output to a stream or discarding it keeps nothing. */
+const HARMLESS_REDIRECT = /^(?:&\d*-?|\/dev\/(?:null|stdout|stderr))$/;
+
+function shellOnlyLooks(shape: ShellShape) {
   return (
-    quoted ?? command.replace(/^(?:rg|grep)\s+[^\s]+\s*/i, "").slice(0, 160)
+    !shape.writesFile &&
+    shape.joins.every((join, index) => {
+      const next = withoutEnvAssignments(shape.segments[index + 1] ?? []);
+      if (join === "|") {
+        return PIPE_FILTERS.has(next[0] ?? "") && !editsInPlace(next);
+      }
+      // `rg foo || true` only quiets an exit code.
+      return join === "||" && /^(?:true|:|echo)$/.test(next[0] ?? "");
+    })
   );
 }
 
-function commandFileTarget(command: string) {
-  const tokens = command.match(/(?:["'][^"']+["']|\S+)/g) ?? [];
-  const candidate = tokens.at(-1)?.replace(/^['"]|['"]$/g, "");
-  return candidate && !candidate.startsWith("-") ? candidate : undefined;
+function withoutEnvAssignments(words: string[]) {
+  const first = words.findIndex((word) => !/^\w+=/.test(word));
+  return first < 0 ? [] : words.slice(first);
+}
+
+function editsInPlace(words: string[]) {
+  if (words[0] === "sed") {
+    return words.some(
+      (word) => /^-[a-zA-Z]*i/.test(word) || word.startsWith("--in-place"),
+    );
+  }
+  return words[0] === "awk" && words.includes("inplace");
+}
+
+/** Search flags whose next word is their value and not the pattern. */
+const SEARCH_VALUE_FLAGS = new Set([
+  "-A",
+  "-B",
+  "-C",
+  "-f",
+  "-g",
+  "-m",
+  "-t",
+  "-T",
+  "--after-context",
+  "--before-context",
+  "--context",
+  "--file",
+  "--glob",
+  "--max-count",
+  "--type",
+  "--type-not",
+]);
+
+function commandSearchQuery(words: string[]) {
+  for (let index = 1; index < words.length; index += 1) {
+    const word = words[index]!;
+    if (word === "--" || word === "-e" || word === "--regexp") {
+      return (words[index + 1] ?? "").slice(0, 160);
+    }
+    if (word.startsWith("--regexp=")) {
+      return word.slice("--regexp=".length, 160 + "--regexp=".length);
+    }
+    if (SEARCH_VALUE_FLAGS.has(word)) {
+      index += 1;
+    } else if (!word.startsWith("-")) {
+      return word.slice(0, 160);
+    }
+  }
+  return "";
+}
+
+function commandFileTarget(words: string[]) {
+  const candidate = words.at(-1);
+  if (words.length < 2 || !candidate || candidate.startsWith("-")) {
+    return undefined;
+  }
+  // `sed` and `awk` take a script first, so a lone argument is the script
+  // reading from a pipe and there is no file to name.
+  const hasFile =
+    (words[0] !== "sed" && words[0] !== "awk") ||
+    words.slice(1).filter((word) => !word.startsWith("-")).length > 1;
+  return hasFile ? candidate : undefined;
 }
 
 /**
@@ -2083,7 +2336,11 @@ function humanizeToolSegment(value: string) {
  *
  * Returns whether the item was absorbed.
  */
-function absorbRepeatedWork(steps: RunStep[], item: WorkItem): boolean {
+function absorbRepeatedWork(
+  steps: RunStep[],
+  item: WorkItem,
+  at: string,
+): boolean {
   const identity = workIdentity(item);
   if (!identity) {
     return false;
@@ -2094,6 +2351,11 @@ function absorbRepeatedWork(steps: RunStep[], item: WorkItem): boolean {
       : matchingLastStep(steps, identity);
   if (!target) {
     return false;
+  }
+  // A rerun starts its own clock. The row's elapsed time would otherwise count
+  // from the first attempt, so a fresh retry opens already minutes old.
+  if (item.status === "running" && target.item.status !== "running") {
+    target.at = at;
   }
   target.item = carryWorkStats(target.item, item);
   target.repeat = (target.repeat ?? 1) + 1;

@@ -1,22 +1,27 @@
 mod agent_session_worker;
 mod automation_scheduler;
+#[cfg(test)]
+mod backend_performance_tests;
 mod canvas_preview;
 mod chat_images;
 mod chat_media_upload;
 use chat_media_upload::prepare_chat_media_upload;
 mod conversation_history;
+mod cloud_connection;
 use conversation_history::{acp_conversation_history_text_for_session, local_compaction_summary};
 mod agent_reports;
 mod efficiency;
 mod git_read;
 mod ide_evidence;
 mod live_model_context;
+mod local_check;
 mod model_catalog;
 mod provider_accounting;
 mod provider_activity;
 mod provider_spend_guard;
 use provider_accounting::*;
 use provider_activity::*;
+mod codex_startup;
 mod codex_turn_completion;
 mod context_compaction;
 mod provider_mcp;
@@ -25,6 +30,8 @@ mod provider_retry_recovery;
 use provider_retry_recovery::{
     run_provider_chat_with_retry_using, run_provider_chat_with_retry_using_with_wait,
 };
+mod provider_run_cleanup;
+use provider_run_cleanup::{ProviderHeartbeat, ProviderRunReservation, ProviderTurnFinalizer};
 mod provider_session_lifecycle;
 use provider_session_lifecycle::{reconcile_interrupted_provider_turns, ProviderSessionLease};
 mod code_mode;
@@ -57,6 +64,7 @@ mod kimi_usage;
 mod performance_benchmark;
 mod session_goal;
 mod session_model;
+mod session_title_stream;
 use session_model::set_session_model;
 mod session_history;
 use session_history::{read_session_events_blocking, SessionEventsReadResult};
@@ -66,11 +74,13 @@ mod turn_timing;
 mod usage_poll;
 use gyro_core::timing::{self, Stage as TimingStage};
 use kimi_usage::*;
+mod app_preview;
 mod browser_knowledge;
 mod browser_pointer;
 mod file_patch_counts;
 mod workspace_roots;
 mod workspace_search;
+mod workspace_tree_order;
 use workspace_search::{
     bound_model_search_results, confine_search_directory, literal_search_ranges,
     run_scoped_workspace_rg_search, run_workspace_rg_search,
@@ -99,33 +109,32 @@ use gyro_core::{
     discover_ollama_models, fallback_summary, file_review_content_hash, final_run_status,
     ipc::{
         acknowledgement_for, request_desktop_provider_approval,
-        request_desktop_provider_capability, versions_compatible, AppNotification,
-        AutomateAction, AutomateRequest, AutomateResponse, AutomateSummary,
-        DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
-        DesktopProviderApprovalResponse, AUTOMATE_IPC_SCHEMA_V1,
+        request_desktop_provider_capability, versions_compatible, AppNotification, AutomateAction,
+        AutomateRequest, AutomateResponse, AutomateSummary, DesktopProviderApprovalBehavior,
+        DesktopProviderApprovalRequest, DesktopProviderApprovalResponse, AUTOMATE_IPC_SCHEMA_V1,
         DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
     },
     is_openai_compatible_provider, logout_account as account_logout, mutation_approval_payload,
-    ollama_tool_chat_with_progress, openai_compat_endpoint, openai_compat_host_is_loopback,
-    openai_compat_tool_chat_with_progress, parse_council_synthesis, parse_summary_response,
+    openai_compat_endpoint, openai_compat_host_is_loopback, parse_council_synthesis,
+    parse_summary_response,
     prepare_claude_provider_mutation_transaction, prepare_provider_mutation_transaction,
-    provider_accepts_images, provider_api_key_env_name, provider_descriptor,
-    recover_provider_mutation_transactions, refresh_account_session as account_refresh_session,
-    run_kimi_acp, seat_label_map, start_account_login as account_start_login,
-    stored_account_session as account_stored_session, successful_seat_answers,
-    write_council_run_manifest, write_council_snapshot, write_seat_artifact,
-    write_synthesis_artifact, AccountSessionState, AppNotificationKind, Automation,
-    AutomationRunStatus, AutomationStatus, AutomationStore, AutomationTriageState,
+    provider_accepts_images, provider_api_key_env_name, provider_cli_install_plan,
+    provider_descriptor, recover_provider_mutation_transactions,
+    refresh_account_session as account_refresh_session, run_kimi_acp, seat_label_map,
+    start_account_login as account_start_login, stored_account_session as account_stored_session,
+    successful_seat_answers, write_council_run_manifest, write_council_snapshot,
+    write_seat_artifact, write_synthesis_artifact, AccountSessionState, AppNotificationKind,
+    Automation, AutomationRunStatus, AutomationStatus, AutomationStore, AutomationTriageState,
     CancellationToken, CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent,
     CapabilityClass, CapabilityId, CapabilityInvocationContext, CapabilityPolicySnapshot,
     CapabilityRequest, CapabilityResourceRef, CapabilityResponse, CapabilityResult,
-    CapabilityRunMode, CapabilityStatus, CliUpdateApplyResult, CliUpdateCheckReport,
-    CouncilAttachmentRef, CouncilBarrierDecision, CouncilContextSnapshot, CouncilRun,
-    CouncilRunStatus, CouncilSeat, CouncilSeatStatus, CouncilToolPolicy, CreateAutomationRequest,
-    CreateSessionContext, CredentialPolicy, ExecutionRequest, ExecutionStream,
-    ExecutionTermination, FileChangeInput, FileChangeSummary, FileReviewDecision, GyroConfig,
-    GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode,
-    KimiAcpRequest, MutationDecision, MutationProposal, OllamaToolChatRequest,
+    CapabilityRunMode, CapabilityStatus, CliInstallPlanReport, CliUpdateApplyResult,
+    CliUpdateCheckReport, CouncilAttachmentRef, CouncilBarrierDecision, CouncilContextSnapshot,
+    CouncilRun, CouncilRunStatus, CouncilSeat, CouncilSeatStatus, CouncilToolPolicy,
+    CreateAutomationRequest, CreateSessionContext, CredentialPolicy, ExecutionRequest,
+    ExecutionStream, ExecutionTermination, FileChangeInput, FileChangeSummary, FileReviewDecision,
+    GyroConfig, GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind,
+    KimiAcpMode, KimiAcpRequest, MutationDecision, MutationProposal, OllamaToolChatRequest,
     OpenAiCompatChatRequest, PendingProviderMutationCommit, PreparedProviderMutationTransaction,
     ProjectCapabilityGrant, ProjectCapabilityPolicy, ProviderCapabilitySupport,
     ProviderDiagnosticsPayload, ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck,
@@ -189,6 +198,7 @@ mod session_browser;
 use provider_context::*;
 use provider_identity::provider_model_identity;
 mod dictation_access;
+mod commit_suggestion;
 mod source_control_review;
 mod system_access;
 mod task_suggestions;
@@ -241,8 +251,15 @@ const MAX_CHAT_ATTACHMENTS: usize = 16;
 const MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_CHAT_IDE_SNAPSHOT_BYTES: u64 = 128 * 1024;
 const MAX_CHAT_ATTACHMENT_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
-const MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION: usize = 16;
+// A chat keeps its files for as long as its transcript points at them, so these
+// limits last its whole life. Bytes are the budget. The file count only guards
+// against runaway storage: it meets the byte budget at 256 KiB per file, about
+// what stored attachments average, and full-size images hit the bytes long before.
+const MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION: usize = 4096;
 const MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION: u64 = 1024 * 1024 * 1024;
+// Every unsent draft shares one folder, which gives up its least recently used
+// files when full. This leaves room for four full messages across open drafts.
+const MAX_STORED_DRAFT_ATTACHMENTS: usize = 64;
 const MAX_BROWSER_PREVIEW_DIAGNOSTICS: usize = 8;
 const MAX_BROWSER_PREVIEW_DIAGNOSTIC_CHARS: usize = 400;
 const MAX_BROWSER_PREVIEW_DIAGNOSTIC_PAYLOAD_CHARS: usize = 8_000;
@@ -680,6 +697,7 @@ struct ProviderRunControl {
     next_event_sequence: AtomicU64,
     timeline: Mutex<provider_timeline::ProviderTimeline>,
     suggested_title: Mutex<(Option<String>, bool)>,
+    title_stream: Mutex<session_title_stream::SessionTitleStream>,
     approval_nonce: String,
     capability_context: Mutex<Option<BoundProviderCapabilityContext>>,
     capability_calls: Mutex<HashSet<Uuid>>,
@@ -701,6 +719,7 @@ impl Default for ProviderRunControl {
             next_event_sequence: AtomicU64::new(0),
             timeline: Mutex::new(provider_timeline::ProviderTimeline::default()),
             suggested_title: Mutex::new((None, false)),
+            title_stream: Mutex::new(Default::default()),
             approval_nonce: Uuid::new_v4().to_string(),
             capability_context: Mutex::new(None),
             capability_calls: Mutex::new(HashSet::new()),
@@ -1671,6 +1690,18 @@ struct ProviderChatRequest {
     workspace_context: Option<WorkspaceContextSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     workspace_check: Option<WorkspaceCheckReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    side_chat_context: Option<SideChatContextRequest>,
+}
+
+/// The chat a side chat sits beside.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SideChatContextRequest {
+    session_id: String,
+    /// When the side chat's last completed turn read this same chat.
+    #[serde(default)]
+    since: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
@@ -2142,6 +2173,10 @@ struct ProviderChatStreamEvent {
     /// over its own sign-in correct the provider's health immediately, instead
     /// of leaving Settings claiming a verified connection.
     recovery_kind: Option<String>,
+    /// Set on a heartbeat once the run has shown nothing for a while. See
+    /// [`ProviderQuietClock`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quiet_seconds: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -3157,45 +3192,13 @@ async fn run_goal_chat(
     expected_run: Option<Uuid>,
 ) -> Result<ProviderChatResponse, String> {
     request.message = validate_chat_message(&request.message)?;
-    let session_id = request.session_id.clone();
-    {
-        let manager = app.state::<ProviderCancellationManager>();
-        let mut flags = manager
-            .flags
-            .lock()
-            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
-        if flags.contains_key(&session_id) {
-            return Err("a provider turn is already running for this session".into());
-        }
-        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
-            return Err(format!(
-                "Gyro can run at most {MAX_CONCURRENT_PROVIDER_RUNS} provider turns at once"
-            ));
-        }
-        flags.insert(session_id.clone(), Arc::new(ProviderRunControl::default()));
-    }
-    let owner = app
-        .state::<ProviderCancellationManager>()
-        .flags
-        .lock()
-        .map_err(|_| "provider cancellation state is unavailable".to_string())?
-        .get(&session_id)
-        .unwrap()
-        .approval_nonce
-        .clone();
-    let worker_app = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        goal_runner::run(worker_app, request, expected_run)
+    let reservation = ProviderRunReservation::reserve(&app, &request.session_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _reservation = reservation;
+        goal_runner::run(app, request, expected_run)
     })
     .await
-    .map_err(|error| format!("provider chat worker failed: {error}"));
-    app.state::<ProviderCancellationManager>()
-        .flags
-        .lock()
-        .ok()
-        .map(|mut flags| flags.remove(&session_id));
-    goal_runner::finished(&app, &session_id, &owner);
-    result?
+    .map_err(|error| format!("provider chat worker failed: {error}"))?
 }
 
 /// Compact a provider chat. Codex uses its native app-server request; other
@@ -3473,6 +3476,7 @@ fn run_council_chat_blocking(
                 attachments: request.attachments.clone(),
                 workspace_context: None,
                 workspace_check: None,
+                side_chat_context: None,
             };
             (seat.clone(), seat_request)
         })
@@ -3684,6 +3688,7 @@ fn run_council_chat_blocking(
                 attachments: Vec::new(),
                 workspace_context: None,
                 workspace_check: None,
+                side_chat_context: None,
             };
             emit_provider_chat_event(
                 &app,
@@ -3886,6 +3891,7 @@ fn run_council_chat_blocking(
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
     emit_provider_chat_event(
         &app,
@@ -4118,6 +4124,7 @@ fn retry_council_synthesis_blocking(
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
 
     let _ = store.append_event_with_turn_id(
@@ -4477,6 +4484,7 @@ fn run_change_summary_call(
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
 
     // The runners read their cancellation control out of this map, and the chat
@@ -4559,6 +4567,7 @@ fn run_compaction_summary_call(
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
     // An auto-compaction runs inside a turn that already bound its context. A
     // manual `/compact` runs between turns, where nothing is bound, and every
@@ -4809,6 +4818,28 @@ fn run_provider_chat_blocking_in_lease(
     let attempt_id = Uuid::new_v4();
     let started_at = chrono::Utc::now();
     let adapter = provider_adapter_for(&request.provider_id);
+    let mut turn_finalizer = ProviderTurnFinalizer::new(
+        &store,
+        &request,
+        session_id,
+        run_id,
+        attempt_id,
+        |status, error| {
+            emit_provider_chat_event(
+                &app,
+                &request,
+                if status == HarnessRunStatus::Done {
+                    "completed"
+                } else {
+                    "failed"
+                },
+                Some(status),
+                None,
+                None,
+                error.map(str::to_string),
+            );
+        },
+    );
     // Mark the turn live before durable workspace-context writes so the first
     // visible provider activity is not gated on JSONL fsync.
     emit_provider_chat_event(
@@ -5115,6 +5146,7 @@ fn run_provider_chat_blocking_in_lease(
             Some(run_id),
         )
         .map_err(to_string)?;
+    turn_finalizer.response_saved();
     if let Err(error) = efficiency::save_checkpoint(&app, &store, &request) {
         eprintln!(
             "Checkpoint save failed: {}",
@@ -5357,6 +5389,7 @@ fn run_provider_chat_blocking_in_lease(
         None,
     );
 
+    turn_finalizer.settled();
     Ok(ProviderChatResponse {
         activity_events,
         assistant_event,
@@ -5403,6 +5436,7 @@ fn compact_provider_chat_blocking(
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
     bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
     if request.provider_id != "openai" {
@@ -5967,7 +6001,10 @@ fn provider_approval_instructions(request: &ProviderChatRequest) -> Vec<&'static
     }
     // Always send the current policy on resume. A null instruction override
     // can preserve an earlier turn's Ask first instructions in provider state.
-    let mut instructions = vec!["Use the current turn's configured approval policy. Invoke gyro_* capabilities directly: Gyro's capability broker presents any required approval before execution. Do not ask for duplicate approval in chat before invoking these broker-enforced tools. Approval requirements from an earlier turn do not override the current policy."];
+    let mut instructions = vec!["Use the current turn's configured approval policy. Approval requirements from an earlier turn do not override the current policy."];
+    if gyro_core::provider_capability_support(&request.provider_id).available {
+        instructions.push("Invoke gyro_* capabilities directly: Gyro's capability broker presents any required approval before execution. Do not ask for duplicate approval in chat before invoking these broker-enforced tools.");
+    }
     if request.require_command_approval {
         instructions.push("Gyro requires a fresh, explicit user approval before every command or executable tool action, including commands that appear read-only or trusted. Use the provider's approval request mechanism before execution; never infer approval from the user's message or an earlier action.");
     }
@@ -6169,8 +6206,7 @@ fn provider_context_message_with_capabilities_for_turn(
                 .attachments
                 .iter()
                 .any(|item| item.kind == "browser-snapshot");
-    let surface_needed =
-        browser_task || browser_knowledge::needs_surface_guide(&request.message);
+    let surface_needed = browser_task || browser_knowledge::needs_surface_guide(&request.message);
     if surface_needed {
         context.push(browser_knowledge::context(
             supports_tools,
@@ -6191,6 +6227,9 @@ fn provider_context_message_with_capabilities_for_turn(
         context.push(format!(
             "Prior conversation in this Gyro chat (local session continuity — continue from here):\n{history}"
         ));
+    }
+    if let Some(section) = conversation_history::side_chat_context_section(request, turn.resumed) {
+        context.push(section);
     }
     if request.mode == ChatMode::Council {
         context.push(
@@ -6257,10 +6296,18 @@ fn provider_context_message_with_capabilities_for_turn(
             stable.push("A reply may end with a link: [label](https://example.com) renders blue and clickable, and a bare https:// URL becomes a link too. A click opens it in Gyro's Browser panel and a ⌘/Ctrl-click opens the device's default browser, so offer the link instead of describing a URL in prose.".into());
             stable.push("When the user asks to open or switch to a local folder, call gyro_workspace_open_folder with its absolute path instead of telling them to use Open workspace. It opens a fresh chat in that folder; this chat's own workspace does not change.".into());
         }
-        if !turn.resumed {
-            stable.push(
-                "Deferred tools include a compact argument schema (names, types, and limits). Call them directly. Use gyro_tool_catalog with the tool's domain prefix only when an argument is still unclear or a call is rejected as invalid.".into(),
-            );
+        if provider_tool_batch::compact_cli_catalog_active(
+            &request.provider_id,
+            &efficiency::config(),
+        ) {
+            // A resumed thread may hold the "call them directly" text from before.
+            if turn.resumed {
+                context.push(provider_tool_batch::COMPACT_GUIDANCE.into());
+            } else {
+                stable.push(provider_tool_batch::COMPACT_GUIDANCE.into());
+            }
+        } else if !turn.resumed {
+            stable.push(provider_tool_batch::BASELINE_GUIDANCE.into());
         }
     }
     // Any mode can ask. The short form stays in the stable prefix of the opening turn.
@@ -6270,6 +6317,8 @@ fn provider_context_message_with_capabilities_for_turn(
         );
         stable.push(task_suggestions::TASK_SUGGESTION_INSTRUCTION.into());
     }
+    // Resumed threads and Plan -> Normal transitions need this guidance too.
+    stable.extend(commit_suggestion::guidance(request, supports_tools, turn.resumed));
     if request.mode == ChatMode::Plan {
         context.push("Plan mode is read-only. Inspect and reason, but do not mutate files, run mutating commands, or start services.".into());
         context.push("When you create or revise the checklist, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"replace\",\"title\":\"Plan\",\"items\":[{\"id\":\"stable-id\",\"title\":\"Step\",\"status\":\"todo\"}]}. Keep the JSON on one line.".into());
@@ -6609,6 +6658,17 @@ async fn prepare_chat_attachment(
 }
 
 #[tauri::command]
+async fn read_cited_chat_image(
+    request: chat_images::ResolveCitedChatImageRequest,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        chat_images::read_cited_chat_image_request(request)
+    })
+    .await
+    .map_err(|error| format!("image preview worker failed: {error}"))?
+}
+
+#[tauri::command]
 async fn resolve_cited_chat_image(
     request: chat_images::ResolveCitedChatImageRequest,
 ) -> Result<Option<String>, String> {
@@ -6757,6 +6817,9 @@ fn prepare_chat_attachment_blocking(
             // path. Content-addressed native filenames eliminate traversal and make
             // deduplication safe.
             let destination = attachment_dir.join(format!("{content_hash}.{safe_extension}"));
+            if safe_session == "new" {
+                make_room_in_draft_attachments(&attachment_dir, &destination, bytes.len() as u64)?;
+            }
             ensure_attachment_storage_quota(&attachment_dir, &destination, bytes.len() as u64)?;
             write_private_attachment(&destination, &bytes, &content_hash)?;
             if safe_session != "new" {
@@ -6863,6 +6926,9 @@ fn prepare_chat_attachment_blocking(
             let attachment_dir = attachments_root.join(&safe_session);
             ensure_private_attachment_directory(&attachment_dir)?;
             let destination = attachment_dir.join(format!("{content_hash}.snapshot.txt"));
+            if safe_session == "new" {
+                make_room_in_draft_attachments(&attachment_dir, &destination, bytes.len() as u64)?;
+            }
             ensure_attachment_storage_quota(&attachment_dir, &destination, bytes.len() as u64)?;
             write_private_attachment(&destination, &bytes, &content_hash)?;
             if safe_session != "new" {
@@ -6940,6 +7006,61 @@ fn ensure_private_attachment_directory(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Every unsent draft shares one folder, and only sending moves a file out of
+/// it, so images from removed chips and abandoned drafts would otherwise stay
+/// forever and eventually fill it. The draft folder is a cache: give up its least
+/// recently used files instead. A session's folder is never pruned because its
+/// transcript still points at those files.
+fn make_room_in_draft_attachments(
+    directory: &Path,
+    destination: &Path,
+    incoming_bytes: u64,
+) -> Result<(), String> {
+    // Attaching a stored image again counts as using it.
+    if fs::symlink_metadata(destination).is_ok_and(|metadata| metadata.is_file()) {
+        fs::File::options()
+            .write(true)
+            .open(destination)
+            .and_then(|file| file.set_modified(std::time::SystemTime::now()))
+            .map_err(to_string)?;
+        return Ok(());
+    }
+    if fs::symlink_metadata(destination).is_ok() {
+        return Ok(());
+    }
+    let mut stored = Vec::new();
+    let mut bytes = 0u64;
+    for entry in fs::read_dir(directory).map_err(to_string)? {
+        let entry = entry.map_err(to_string)?;
+        if entry.file_name().to_string_lossy().starts_with(".upload-") {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(entry.path()).map_err(to_string)?;
+        // The quota check reports anything that is not a plain file.
+        if !metadata.is_file() {
+            continue;
+        }
+        bytes = bytes.saturating_add(metadata.len());
+        let modified = metadata
+            .modified()
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        stored.push((modified, entry.path(), metadata.len()));
+    }
+    stored.sort();
+    let mut files = stored.len();
+    for (_, path, size) in stored {
+        if files < MAX_STORED_DRAFT_ATTACHMENTS
+            && bytes.saturating_add(incoming_bytes) <= MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION
+        {
+            break;
+        }
+        remove_attachment_storage_entry(&path)?;
+        files -= 1;
+        bytes = bytes.saturating_sub(size);
+    }
+    Ok(())
+}
+
 fn ensure_attachment_storage_quota(
     directory: &Path,
     destination: &Path,
@@ -6966,12 +7087,19 @@ fn ensure_attachment_storage_quota(
             .checked_add(metadata.len())
             .ok_or_else(|| "attachment storage size overflow".to_string())?;
     }
-    if files >= MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION
-        || bytes.checked_add(incoming_bytes).map_or(true, |total| {
-            total > MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION
-        })
-    {
-        return Err("session attachment storage limit reached".into());
+    // A session's files cannot be given up, so the only way forward is a new chat.
+    if files >= MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION {
+        return Err(format!(
+            "this chat has reached its limit of {MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION} stored attachments; start a new chat to attach more"
+        ));
+    }
+    if bytes.checked_add(incoming_bytes).map_or(true, |total| {
+        total > MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION
+    }) {
+        return Err(format!(
+            "this chat's {} GB of attachment storage has no room for this file; start a new chat to attach it",
+            MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION / (1024 * 1024 * 1024)
+        ));
     }
     Ok(())
 }
@@ -7570,7 +7698,7 @@ fn scan_workspace_tree(root: &Path, max_depth: usize) -> Result<WorkspaceTreeSna
         });
     }
 
-    entries.sort_by(compare_workspace_tree_entries);
+    workspace_tree_order::sort(&mut entries);
     Ok(WorkspaceTreeSnapshot {
         files: entries,
         directories,
@@ -7579,6 +7707,7 @@ fn scan_workspace_tree(root: &Path, max_depth: usize) -> Result<WorkspaceTreeSna
     })
 }
 
+#[cfg(test)]
 fn compare_workspace_tree_entries(a: &WorkspaceFile, b: &WorkspaceFile) -> std::cmp::Ordering {
     let mut a_components = Path::new(&a.path).components().peekable();
     let mut b_components = Path::new(&b.path).components().peekable();
@@ -8238,10 +8367,7 @@ async fn classify_dropped_path(path: String) -> Result<String, String> {
 mod dropped_path_kind_tests {
     #[test]
     fn directory_file_and_symlink_stay_distinct() {
-        let root = std::env::temp_dir().join(format!(
-            "gyro-drop-kind-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("gyro-drop-kind-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("folder")).unwrap();
         std::fs::write(root.join("notes.md"), b"hi").unwrap();
@@ -10421,9 +10547,7 @@ fn split_duplicate_name(file_name: &str, is_directory: bool) -> (String, String)
         return (file_name.to_string(), String::new());
     }
     match file_name.rsplit_once('.') {
-        Some((stem, extension)) if !stem.is_empty() => {
-            (stem.to_string(), format!(".{extension}"))
-        }
+        Some((stem, extension)) if !stem.is_empty() => (stem.to_string(), format!(".{extension}")),
         _ => (file_name.to_string(), String::new()),
     }
 }
@@ -10519,8 +10643,7 @@ fn apply_path_history_action(
     }
 }
 
-fn undo_workspace_path_impl(
-) -> anyhow::Result<Option<workspace_path_history::PathHistoryAction>> {
+fn undo_workspace_path_impl() -> anyhow::Result<Option<workspace_path_history::PathHistoryAction>> {
     let Some(action) = workspace_path_history::pop_undo() else {
         return Ok(None);
     };
@@ -10536,8 +10659,7 @@ fn undo_workspace_path_impl(
     }
 }
 
-fn redo_workspace_path_impl(
-) -> anyhow::Result<Option<workspace_path_history::PathHistoryAction>> {
+fn redo_workspace_path_impl() -> anyhow::Result<Option<workspace_path_history::PathHistoryAction>> {
     let Some(action) = workspace_path_history::pop_redo() else {
         return Ok(None);
     };
@@ -10554,9 +10676,7 @@ fn redo_workspace_path_impl(
 }
 
 /// The explorer-facing shape of an undone or redone journal entry.
-fn path_history_change(
-    action: &workspace_path_history::PathHistoryAction,
-) -> WorkspacePathChange {
+fn path_history_change(action: &workspace_path_history::PathHistoryAction) -> WorkspacePathChange {
     use workspace_path_history::PathHistoryAction;
     match action {
         PathHistoryAction::Created { path } => WorkspacePathChange {
@@ -11684,6 +11804,16 @@ async fn check_cli_updates_command() -> Result<CliUpdateCheckReport, String> {
         .map_err(to_string)
 }
 
+/// How to install a missing provider CLI so the sign-in that follows finds it.
+#[tauri::command]
+async fn provider_cli_install_plan_command(
+    provider_id: String,
+) -> Result<CliInstallPlanReport, String> {
+    tauri::async_runtime::spawn_blocking(move || provider_cli_install_plan(&provider_id))
+        .await
+        .map_err(|error| format!("cli install plan worker failed: {error}"))
+}
+
 /// Apply updates for specific provider CLIs, or every pending offer when empty.
 #[tauri::command]
 async fn apply_cli_updates_command(
@@ -12275,7 +12405,6 @@ async fn check_provider_auth(provider_id: String) -> Result<ProviderHealthCheck,
     .map_err(|error| format!("provider auth worker failed: {error}"))?
 }
 
-
 /// What one chat has cost, read from Gyro's own ledger.
 ///
 /// Unlike `get_provider_usage`, this answers for every provider: it counts what
@@ -12331,18 +12460,13 @@ fn publish_settled_provider_usage(app: &tauri::AppHandle, provider_id: &str) {
     spawn_provider_usage_refresh(app, provider_id, false);
 }
 
-fn spawn_provider_usage_refresh(
-    app: &tauri::AppHandle,
-    provider_id: &str,
-    respect_interval: bool,
-) {
+fn spawn_provider_usage_refresh(app: &tauri::AppHandle, provider_id: &str, respect_interval: bool) {
     if !matches!(provider_id, "anthropic" | "openai" | "xai" | "kimi") {
         return;
     }
-    if respect_interval && !provider_usage_refresh_due(provider_id) {
+    if !claim_provider_usage_refresh(provider_id, respect_interval) {
         return;
     }
-    provider_usage_refresh_mark(provider_id);
     let app = app.clone();
     let provider_id = provider_id.to_string();
     std::thread::spawn(move || {
@@ -12352,18 +12476,15 @@ fn spawn_provider_usage_refresh(
     });
 }
 
-fn provider_usage_refresh_due(provider_id: &str) -> bool {
-    provider_usage_refresh_slots()
-        .lock()
-        .ok()
-        .and_then(|slots| slots.get(provider_id).copied())
-        .is_none_or(|at| at.elapsed() >= ANTHROPIC_FRESH_USAGE_MAX_AGE)
-}
-
-fn provider_usage_refresh_mark(provider_id: &str) {
-    if let Ok(mut slots) = provider_usage_refresh_slots().lock() {
-        slots.insert(provider_id.to_string(), Instant::now());
+fn claim_provider_usage_refresh(provider_id: &str, respect_interval: bool) -> bool {
+    let Ok(mut slots) = provider_usage_refresh_slots().lock() else { return false; };
+    if respect_interval && slots.get(provider_id)
+        .is_some_and(|at| at.elapsed() < ANTHROPIC_FRESH_USAGE_MAX_AGE)
+    {
+        return false;
     }
+    slots.insert(provider_id.to_string(), Instant::now());
+    true
 }
 
 fn provider_usage_refresh_slots() -> &'static Mutex<HashMap<String, Instant>> {
@@ -12759,12 +12880,20 @@ fn fetch_anthropic_provider_usage_once(
 fn provider_usage_windows_from_anthropic_usage(
     payload: &serde_json::Value,
 ) -> Vec<ProviderRateLimitWindow> {
-    let windows = anthropic_usage_windows_by_key(payload);
-    if windows.is_empty() {
-        anthropic_usage_windows_from_limits(payload)
-    } else {
-        windows
+    let mut windows = anthropic_usage_windows_by_key(payload);
+    // Accounts can return both shapes with only some keyed windows populated.
+    // Resolve each window independently so a measured weekly key cannot hide
+    // a measured session limit in the list.
+    for incoming in anthropic_usage_windows_from_limits(payload) {
+        if let Some(existing) = windows.iter_mut().find(|window| window.id == incoming.id) {
+            if existing.used_percent.is_none() {
+                *existing = incoming;
+            }
+        } else {
+            windows.push(incoming);
+        }
     }
+    windows
 }
 
 /// The long-standing shape: one object per window, keyed by its name.
@@ -13162,12 +13291,12 @@ fn receive_codex_turn_response(
     deadline: Instant,
 ) -> anyhow::Result<serde_json::Value> {
     let cancelled = || provider_chat_cancelled(app, &request.session_id);
-    receive_codex_app_server_response_until(messages, request_id, deadline, cancelled).map_err(
-        |error| match provider_chat_cancelled(app, &request.session_id) {
+    codex_startup::receive(messages, request_id, deadline, cancelled).map_err(|error| {
+        match provider_chat_cancelled(app, &request.session_id) {
             true => anyhow::anyhow!("{}", provider_stop_message(app, &request.session_id)),
             false => anyhow::Error::msg(error),
-        },
-    )
+        }
+    })
 }
 
 fn codex_app_server_result(response: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -13582,7 +13711,9 @@ fn session_context_signal(event: &SessionEvent) -> provider_context::SessionCont
             })
             .map(|usage| provider_context::AutoCompactReading {
                 input_tokens: usage.get("inputTokens").and_then(serde_json::Value::as_u64),
-                output_tokens: usage.get("outputTokens").and_then(serde_json::Value::as_u64),
+                output_tokens: usage
+                    .get("outputTokens")
+                    .and_then(serde_json::Value::as_u64),
                 model_context_window: usage
                     .get("modelContextWindow")
                     .and_then(serde_json::Value::as_u64),
@@ -13610,11 +13741,7 @@ fn event_text_characters(event: &SessionEvent) -> u64 {
     characters
 }
 
-fn collect_text_characters(
-    value: &serde_json::Value,
-    field: Option<&str>,
-    characters: &mut u64,
-) {
+fn collect_text_characters(value: &serde_json::Value, field: Option<&str>, characters: &mut u64) {
     match value {
         serde_json::Value::String(text) => {
             if !is_encoded_text(field, text) {
@@ -13674,7 +13801,10 @@ fn auto_compact_owned_session(
     let Ok(events) = store.read_events(session_id) else {
         return binding;
     };
-    let signals = events.iter().map(session_context_signal).collect::<Vec<_>>();
+    let signals = events
+        .iter()
+        .map(session_context_signal)
+        .collect::<Vec<_>>();
     let catalog_window = provider_context::provider_model_context_window(
         &request.provider_id,
         request.model_id.as_deref(),
@@ -14483,8 +14613,7 @@ fn run_kimi_acp_chat(
     );
     // Stop heartbeats on every exit path so a finished ACP turn never keeps
     // emitting "still working" after completed/failed/cancelled.
-    heartbeat_stop.store(true, Ordering::Relaxed);
-    let _ = heartbeat.join();
+    drop(heartbeat);
     // Recorded before the error is propagated, as for Claude: a turn stopped
     // after the agent opened its session can still be resumed next time.
     attempt.resume_cursor = opened_session
@@ -15345,8 +15474,7 @@ fn run_openai_codex_app_server_chat(
             )),
         })
     })();
-    heartbeat_stop.store(true, Ordering::Relaxed);
-    let _ = heartbeat.join();
+    drop(heartbeat);
     drop(child);
     if let Some(tokens) = billed.recover() {
         gyro_core::provider_observation::native_usage(tokens);
@@ -16070,10 +16198,7 @@ fn wait_for_provider_approval_with_transaction(
             .and_then(gyro_core::agent_sessions::AgentSessionStore::open)
             .and_then(|store| store.note_command_block(session_id, approval_id, &summary))
             .unwrap_or(false);
-        Some(AgentCommandBlockGuard {
-            session_id,
-            active,
-        })
+        Some(AgentCommandBlockGuard { session_id, active })
     } else {
         None
     };
@@ -16563,7 +16688,6 @@ const ANTIGRAVITY_CURSOR_KIND: &str = "antigravity-conversation";
 
 /// Shown when the official CLI is missing from this machine.
 
-
 /// Google Antigravity through Google's official CLI (`agy`).
 ///
 /// One process per turn. `agy -p <prompt> --output-format stream-json` writes
@@ -16604,11 +16728,23 @@ fn run_antigravity_chat(
     let full_access = request.full_access
         && !request.require_command_approval
         && !request.require_file_edit_approval;
-    let mode = if request.mode == ChatMode::Plan {
-        gyro_core::antigravity_cli::AntigravityMode::Plan
-    } else {
-        gyro_core::antigravity_cli::AntigravityMode::AcceptEdits
-    };
+    let mode = gyro_core::antigravity_cli::execution_mode(
+        matches!(request.mode, ChatMode::Plan | ChatMode::Council),
+        request.require_command_approval,
+        request.require_file_edit_approval,
+    );
+    if mode == gyro_core::antigravity_cli::AntigravityMode::Plan && request.mode == ChatMode::Normal {
+        let activity = ProviderActivity {
+            id: "antigravity-read-only".into(),
+            kind: "tool".into(),
+            label: "Antigravity is planning with read-only access".into(),
+            detail: Some("Antigravity cannot show per-tool approval dialogs. Choose Approve for me to allow workspace edits, or Full access for unrestricted tools.".into()),
+            file_counts: None,
+            note: None,
+            status: "completed".into(),
+        };
+        emit_provider_activity_event(app, request, &activity, None);
+    }
     let conversation_id = resume_cursor.and_then(|cursor| {
         (cursor.kind == ANTIGRAVITY_CURSOR_KIND).then_some(cursor.session_id.as_str())
     });
@@ -16652,7 +16788,7 @@ fn run_antigravity_chat(
         } else {
             error
         }
-    })?;
+    });
 
     // Recorded before any failure propagates: a stopped or failed turn still
     // leaves a conversation the next message can continue.
@@ -16662,13 +16798,22 @@ fn run_antigravity_chat(
             session_id: conversation_id,
         });
     }
+    let output = output?;
     let provider_session_id = observed_session_id.clone().unwrap_or_default();
-    let accounted_usage = antigravity_accounted_usage(&output.stdout);
+    let accounted_usage = antigravity_accounted_usage(&output.stdout, can_resume);
 
     let stdout = gyro_core::security::redact_secrets(output.stdout.trim());
     let stderr = gyro_core::security::redact_secrets(output.stderr.trim());
     if gyro_core::antigravity_cli::needs_sign_in(&format!("{stdout}{stderr}")) {
         anyhow::bail!("{}", gyro_core::antigravity_cli::SIGN_IN_HINT);
+    }
+    if !output.status_success {
+        attempt.activities = output.activities.clone();
+        anyhow::bail!(
+            "Antigravity exited with {}: {}",
+            output.status_label,
+            provider_stream_failure_detail(&stdout, &stderr)
+        );
     }
     if let Some(detail) = antigravity_stream_failure(&stdout) {
         attempt.activities = output.activities.clone();
@@ -16677,7 +16822,6 @@ fn run_antigravity_chat(
 
     if let Some(response) = recover_streamed_provider_answer(&output, "") {
         let response_chars = response.chars().count();
-        let answer_cut_off = !output.status_success;
         return Ok(ProviderRunnerOutput {
             accounted_usage,
             activities: provider_activities_for_response(output.activities, &response),
@@ -16685,14 +16829,14 @@ fn run_antigravity_chat(
             billed_usage: output.billed_usage,
             rate_limits: output.rate_limits,
             paused_at_tool_budget: false,
-            answer_cut_off,
+            answer_cut_off: false,
             response,
-            resume_cursor: Some(ProviderResumeCursor {
+            resume_cursor: observed_session_id.map(|session_id| ProviderResumeCursor {
                 kind: ANTIGRAVITY_CURSOR_KIND.into(),
-                session_id: provider_session_id.clone(),
+                session_id,
             }),
             retry_count: 0,
-            resumed: resume_cursor.is_some(),
+            resumed: can_resume,
             streamed_text: output.assistant_text.clone().map(|text| StreamedText {
                 text,
                 blocks: output.text_blocks.clone(),
@@ -16711,13 +16855,9 @@ fn run_antigravity_chat(
     anyhow::bail!("{}", provider_stream_failure_detail(&stdout, &stderr));
 }
 
-/// The cumulative token count a run reported, for Gyro's accounting.
-fn antigravity_accounted_usage(stdout: &str) -> Option<gyro_core::UsageTokens> {
-    let usage = stdout
-        .lines()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok())
-        .filter_map(|value| gyro_core::antigravity_cli::usage(&value))
-        .max_by_key(|usage| usage.total_tokens)?;
+/// This turn's token counts, excluding prior turns in a resumed conversation.
+fn antigravity_accounted_usage(stdout: &str, resumed: bool) -> Option<gyro_core::UsageTokens> {
+    let usage = gyro_core::antigravity_cli::turn_usage(stdout, resumed)?;
     Some(gyro_core::UsageTokens {
         input_tokens: usage.input_tokens,
         cached_input_tokens: usage.cache_read_tokens,
@@ -16732,10 +16872,7 @@ fn antigravity_accounted_usage(stdout: &str) -> Option<gyro_core::UsageTokens> {
 
 /// The `result` frame's own failure detail, if the turn did not succeed.
 fn antigravity_stream_failure(stdout: &str) -> Option<String> {
-    stdout
-        .lines()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok())
-        .find_map(|value| gyro_core::antigravity_cli::failure_detail(&value))
+    gyro_core::antigravity_cli::stream_failure(stdout)
 }
 
 fn run_anthropic_claude_chat(
@@ -16786,7 +16923,16 @@ fn run_anthropic_claude_chat(
     // through Gyro's model terminal instead, which outlives the process.
     process
         .env("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "1")
-        .env("CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND", "1");
+        .env("CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND", "1")
+        // Claude Code defers every MCP tool behind ToolSearch unless told
+        // otherwise. Gyro's tools then arrived as bare names while native
+        // Read/Edit/Bash had full schemas, so Claude reached for the natives
+        // and the work never showed up in Review, Terminal or Canvas. The
+        // whole Gyro list is ~10K tokens (guarded by a test), so load it.
+        .env("ENABLE_TOOL_SEARCH", "false")
+        // The default one-hour cache writes at 2x input against 1.25x here.
+        // Under 1% of request gaps outlast five minutes, and a read renews it.
+        .env("FORCE_PROMPT_CACHING_5M", "1");
     let speed_config = load_config_blocking().map_err(anyhow::Error::msg)?;
     process.args(gyro_core::fast_mode::cli_args(
         &speed_config,
@@ -16881,34 +17027,13 @@ fn run_anthropic_claude_chat(
         if response.is_empty() {
             anyhow::bail!("Anthropic finished, but Claude did not return a chat response.");
         }
-        let response_chars = response.chars().count();
-        let provider_session_id = session_id.clone();
-        return Ok(ProviderRunnerOutput {
-            accounted_usage: None,
-            activities: provider_activities_for_response(output.activities, &response),
-            context_usage: output.context_usage,
-            billed_usage: output.billed_usage,
-            rate_limits: output.rate_limits,
-            paused_at_tool_budget: false,
-            answer_cut_off: false,
+        return Ok(claude_runner_output(
+            output,
             response,
-            resume_cursor: Some(ProviderResumeCursor {
-                kind: "claude-session".into(),
-                session_id: provider_session_id.clone(),
-            }),
-            retry_count: 0,
-            resumed: resume_cursor.is_some(),
-            streamed_text: output.assistant_text.clone().map(|text| StreamedText {
-                text,
-                blocks: output.text_blocks.clone(),
-            }),
-            output_summary: Some(provider_output_summary(
-                "claude-code",
-                output.status_label.as_str(),
-                Some(provider_session_id.as_str()),
-                response_chars,
-            )),
-        });
+            session_id,
+            resume_cursor.is_some(),
+            false,
+        ));
     }
 
     let stdout = gyro_core::security::redact_secrets(output.stdout.trim());
@@ -16926,37 +17051,13 @@ fn run_anthropic_claude_chat(
         anyhow::bail!("{failure_detail}");
     }
     if let Some(response) = recover_streamed_provider_answer(&output, "") {
-        let response_chars = response.chars().count();
-        let provider_session_id = session_id.clone();
-        return Ok(ProviderRunnerOutput {
-            accounted_usage: None,
-            activities: provider_activities_for_response(output.activities, &response),
-            context_usage: output.context_usage,
-            billed_usage: output.billed_usage,
-            rate_limits: output.rate_limits,
-            paused_at_tool_budget: false,
-            answer_cut_off: true,
+        return Ok(claude_runner_output(
+            output,
             response,
-            resume_cursor: Some(ProviderResumeCursor {
-                kind: "claude-session".into(),
-                session_id: provider_session_id.clone(),
-            }),
-            retry_count: 0,
-            resumed: resume_cursor.is_some(),
-            streamed_text: output.assistant_text.clone().map(|text| StreamedText {
-                text,
-                blocks: output.text_blocks.clone(),
-            }),
-            output_summary: Some(provider_output_summary(
-                "claude-code",
-                &format!(
-                    "{} (answer kept after non-zero exit)",
-                    output.status_label.as_str()
-                ),
-                Some(provider_session_id.as_str()),
-                response_chars,
-            )),
-        });
+            session_id,
+            resume_cursor.is_some(),
+            true,
+        ));
     }
     if stdout.is_empty() && stderr.is_empty() {
         anyhow::bail!(
@@ -16965,6 +17066,49 @@ fn run_anthropic_claude_chat(
         );
     }
     anyhow::bail!("{}", provider_stream_failure_detail(&stdout, &stderr));
+}
+
+/// Hands on the billing parser's total. Leaving `accounted_usage` empty let the
+/// merged `billed_usage` replace it at completion, losing the cache-write bucket.
+fn claude_runner_output(
+    output: StreamingCommandOutput,
+    response: String,
+    session_id: String,
+    resumed: bool,
+    answer_cut_off: bool,
+) -> ProviderRunnerOutput {
+    let status = if answer_cut_off {
+        format!("{} (answer kept after non-zero exit)", output.status_label)
+    } else {
+        output.status_label.clone()
+    };
+    let output_summary = provider_output_summary(
+        "claude-code",
+        &status,
+        Some(session_id.as_str()),
+        response.chars().count(),
+    );
+    ProviderRunnerOutput {
+        accounted_usage: output.accounted_usage,
+        activities: provider_activities_for_response(output.activities, &response),
+        context_usage: output.context_usage,
+        billed_usage: output.billed_usage,
+        rate_limits: output.rate_limits,
+        paused_at_tool_budget: false,
+        answer_cut_off,
+        response,
+        resume_cursor: Some(ProviderResumeCursor {
+            kind: "claude-session".into(),
+            session_id,
+        }),
+        retry_count: 0,
+        resumed,
+        streamed_text: output.assistant_text.map(|text| StreamedText {
+            text,
+            blocks: output.text_blocks,
+        }),
+        output_summary: Some(output_summary),
+    }
 }
 
 /// Claude Code reports a rejected sign-in inside its stream-json output rather
@@ -17074,6 +17218,21 @@ fn audit_provider_chat_args(provider_id: &str, args: &[String]) -> anyhow::Resul
         .map_err(|violation| anyhow::anyhow!("{}", violation.message(provider_id)))
 }
 
+/// Claude Code tools that bypass a Gyro surface or cannot work in a `--print`
+/// run, so Claude uses Gyro's governed equivalent instead.
+/// - Agent/Task: delegation goes through Gyro's agent tools.
+/// - Artifact*, DesignSync: publish to claude.ai instead of Gyro Canvas or
+///   Browser; a design asked for in a Gyro chat ended up as an external link.
+/// - Schedule/cron/remote/notification tools: the process exits with the
+///   reply, so a scheduled wakeup or trigger would never come back to the chat.
+/// - Cross-session messaging and worktree switching: they act outside the
+///   chat's bound workspace and session.
+const CLAUDE_DISALLOWED_NATIVE_TOOLS: &str = "Agent,Task,\
+Artifact,ArtifactComments,ArtifactData,DesignSync,\
+ScheduleWakeup,CronCreate,CronDelete,CronList,RemoteTrigger,PushNotification,\
+ListAgents,SendMessage,SendToProject,SendToProjectContext,\
+EnterWorktree,ExitWorktree";
+
 #[allow(clippy::too_many_arguments)]
 fn claude_chat_args(
     resume_session_id: Option<&str>,
@@ -17104,14 +17263,20 @@ fn claude_chat_args(
     }
     if let Some(model) = model_id.map(str::trim).filter(|model| !model.is_empty()) {
         args.push("--model".into());
-        args.push(model.into());
+        args.push(claude_model_arg(model));
     }
     if let Some(effort) = claude_reasoning_effort_arg(model_id, reasoning_effort) {
         args.push("--effort".into());
         args.push(effort);
     }
-    args.extend(["--disallowedTools".into(), "Agent,Task".into()]);
-    let capability_tools = advertised_mcp_capability_tools(capability_run_mode_for_chat(*mode));
+    args.extend([
+        "--disallowedTools".into(),
+        CLAUDE_DISALLOWED_NATIVE_TOOLS.into(),
+    ]);
+    let capability_tools = claude_allowed_capability_tools(
+        advertised_mcp_capability_tools(capability_run_mode_for_chat(*mode)),
+        provider_tool_batch::compact_cli_catalog_active("anthropic", &efficiency::config()),
+    );
     if let Some(permission_mcp_config) = permission_mcp_config {
         args.extend([
             "--setting-sources".into(),
@@ -17158,6 +17323,18 @@ fn claude_chat_args(
     args.push("--".into());
     args.push(prompt.into());
     args
+}
+
+/// Plan can reach discovery, so it gets the wrapper too; Council lists no tools.
+fn claude_allowed_capability_tools(tools: String, compact: bool) -> String {
+    if compact && tools.contains("mcp__gyro_capabilities__gyro_tool_catalog") {
+        format!(
+            "{tools},mcp__gyro_capabilities__{}",
+            provider_tool_batch::COMPACT_INVOKE
+        )
+    } else {
+        tools
+    }
 }
 
 fn active_provider_approval_nonce(
@@ -17246,11 +17423,24 @@ fn capability_mcp_env(
             bound.workspace_context.revision.to_string(),
         ),
     ];
+    if compact_cli_catalog_for_run(bound) {
+        env.push((provider_tool_batch::COMPACT_CATALOG_ENV, "true".into()));
+    }
     #[cfg(debug_assertions)]
     if let Ok(root) = std::env::var("GYRO_TEST_DATA_DIR") {
         env.push(("GYRO_TEST_DATA_DIR", root));
     }
     env
+}
+
+/// Panes have no turn id. Their prompts carry no Gyro guidance, so a short list
+/// would hide tools from them without saying how to reach the rest.
+fn compact_cli_catalog_for_run(bound: &BoundProviderCapabilityContext) -> bool {
+    bound.turn_id.is_some()
+        && provider_tool_batch::compact_cli_catalog_active(
+            &bound.provider_id,
+            &efficiency::config(),
+        )
 }
 
 fn codex_capability_mcp_config_args(
@@ -17283,7 +17473,20 @@ fn codex_capability_mcp_config_args(
         ));
     }
     args.extend(codex_capability_tool_approval_args());
+    if compact_cli_catalog_for_run(&bound) {
+        args.extend(codex_compact_invoke_approval_args());
+    }
     Ok(args)
+}
+
+fn codex_compact_invoke_approval_args() -> [String; 2] {
+    [
+        "-c".into(),
+        format!(
+            "mcp_servers.gyro_capabilities.tools.{}.approval_mode=\"approve\"",
+            provider_tool_batch::COMPACT_INVOKE
+        ),
+    ]
 }
 
 fn codex_capability_tool_approval_args() -> Vec<String> {
@@ -17625,7 +17828,7 @@ const CHAT_IMAGE_REPLY_INSTRUCTION: &str = "To show the user an image you alread
 /// The desktop composer uses the same rules in `sessionTitleFromMessage` so
 /// the sidebar can update before this turn reaches the provider. Keep the two
 /// in step. This local title is the instant provisional one; the model's
-/// `GYRO_SESSION_TITLE` line replaces it when the first turn finishes.
+/// `GYRO_SESSION_TITLE` line replaces it as soon as that line arrives.
 fn session_title_from_message(message: &str) -> Option<String> {
     let without_fences = strip_fenced_code_blocks(&message.replace('\0', ""));
     let without_inline = strip_inline_code_markers(&without_fences);
@@ -17682,9 +17885,7 @@ fn strip_list_marker(text: &str) -> &str {
                     .find(|ch: char| !ch.is_ascii_digit())
                     .unwrap_or(rest.len());
                 let after = &rest[end..];
-                let marked = after
-                    .strip_prefix(['.', ')', ':'])
-                    .unwrap_or(after);
+                let marked = after.strip_prefix(['.', ')', ':']).unwrap_or(after);
                 if marked.len() != after.len() {
                     rest = marked.trim_start();
                     if rest.is_empty() {
@@ -17858,13 +18059,12 @@ fn openai_codex_chat_prompt(
     } else {
         session_title_instruction(suggest_title)
     };
-    let image_instruction = if resumed
-        || message.contains("![short description](/absolute/path.png)")
-    {
-        ""
-    } else {
-        CHAT_IMAGE_REPLY_INSTRUCTION
-    };
+    let image_instruction =
+        if resumed || message.contains("![short description](/absolute/path.png)") {
+            ""
+        } else {
+            CHAT_IMAGE_REPLY_INSTRUCTION
+        };
     if resumed {
         // The resumed thread already holds the style and marker guide from its
         // opening turn; resend only what can change between turns.
@@ -17921,13 +18121,12 @@ fn claude_chat_prompt(
     } else {
         session_title_instruction(suggest_title)
     };
-    let image_instruction = if resumed
-        || message.contains("![short description](/absolute/path.png)")
-    {
-        ""
-    } else {
-        CHAT_IMAGE_REPLY_INSTRUCTION
-    };
+    let image_instruction =
+        if resumed || message.contains("![short description](/absolute/path.png)") {
+            ""
+        } else {
+            CHAT_IMAGE_REPLY_INSTRUCTION
+        };
     if resumed {
         // The resumed session already holds the style and marker guide from its
         // opening turn; resend only what can change between turns.
@@ -18194,12 +18393,7 @@ fn publish_stream_session_title(
         let line = format!("{GYRO_SESSION_TITLE_MARKER} {title}\n");
         publish_streamed_session_title(app, request, &line, true);
     }
-    publish_streamed_session_title(
-        app,
-        request,
-        &stream_state.assistant_text,
-        message_complete,
-    );
+    publish_streamed_session_title(app, request, &stream_state.assistant_text, message_complete);
 }
 
 /// The title control a turn starts with: open, expecting the title Gyro just
@@ -18264,6 +18458,9 @@ fn publish_streamed_session_title(
     let Ok(mut state) = control.suggested_title.lock() else {
         return;
     };
+    if state.1 || state.0.is_none() {
+        return;
+    }
     let Ok(store) = open_store() else {
         return;
     };
@@ -18273,7 +18470,8 @@ fn publish_streamed_session_title(
     let Ok(Some(session)) = store.get_session(session_id) else {
         return;
     };
-    let Some(title) = streamed_title_replacement(&mut state, &session.title, text, message_complete)
+    let Some(title) =
+        streamed_title_replacement(&mut state, &session.title, text, message_complete)
     else {
         return;
     };
@@ -18708,6 +18906,19 @@ fn codex_reasoning_effort_arg(
         ),
     };
     supported.then_some(effort)
+}
+
+/// The `claude --model` value for a picker id.
+///
+/// Claude Code runs a bare Opus id at 200K and selects the 1M window with a
+/// `[1m]` suffix. Catalog ids cannot contain brackets (shipped pickers reject
+/// the whole document), so the 1M rows are spelled `<model>-1m` and rewritten
+/// here.
+fn claude_model_arg(model_id: &str) -> String {
+    match model_id.strip_suffix("-1m") {
+        Some(base) if base.starts_with("claude-") => format!("{base}[1m]"),
+        _ => model_id.to_string(),
+    }
 }
 
 /// The `claude --effort <level>` value supported by the selected model.
@@ -19145,6 +19356,9 @@ struct StreamingCommandOutput {
     /// prefers the per-request reading because it answers a different question
     /// — how full the window is — so the billing figure is kept apart.
     billed_usage: Option<ProviderContextUsage>,
+    /// The billing parser's total, with cache reads and writes still apart.
+    /// `billed_usage` merges them for the legacy context display.
+    accounted_usage: Option<UsageTokens>,
     rate_limits: Vec<ProviderRateLimitWindow>,
     status_success: bool,
     status_label: String,
@@ -19740,8 +19954,46 @@ impl StreamingCommandState {
 
 const PROVIDER_CHAT_MAX_RUNTIME_SECS: u64 = 24 * 60 * 60;
 const PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS: u64 = 30 * 60;
-/// How long a run may be silent before its heartbeat says so.
+/// How long a run may show nothing before its heartbeat says so.
 const PROVIDER_CHAT_QUIET_NOTICE: Duration = Duration::from_secs(5 * 60);
+
+/// How long a run has gone without showing the person anything.
+///
+/// [`ProviderStreamLiveness`] only exists for CLI runs, and it counts raw output,
+/// so a chatty process that never surfaces anything reads as active. Every frame
+/// a run emits takes a sequence number whichever runner sent it, so a gap in the
+/// numbers beyond the heartbeat's own is proof that something else happened.
+struct ProviderQuietClock {
+    since: Instant,
+    expected_sequence: Option<u64>,
+}
+
+impl ProviderQuietClock {
+    fn new(now: Instant) -> Self {
+        Self {
+            since: now,
+            expected_sequence: None,
+        }
+    }
+
+    /// Read just before a heartbeat, which is assumed to take `next_sequence`.
+    ///
+    /// `paused` restarts the clock while the run is waiting on someone else. A
+    /// tool that takes ten minutes, or an approval nobody has answered, is not
+    /// the run going quiet.
+    fn tick(&mut self, next_sequence: u64, paused: bool, now: Instant) -> Duration {
+        if paused || self.expected_sequence != Some(next_sequence) {
+            self.since = now;
+        }
+        self.expected_sequence = Some(next_sequence + 1);
+        now.saturating_duration_since(self.since)
+    }
+}
+
+/// What a heartbeat reports for a run that has been quiet this long.
+fn provider_quiet_seconds(quiet_for: Duration) -> Option<u64> {
+    (quiet_for >= PROVIDER_CHAT_QUIET_NOTICE).then(|| quiet_for.as_secs())
+}
 
 /// What the heartbeat reads to tell a quiet run from a stalled one.
 struct ProviderStreamLiveness {
@@ -19870,8 +20122,7 @@ fn run_streaming_command(
                 .store(stream_state.has_running_tool(), Ordering::Relaxed);
         }
     });
-    heartbeat_stop.store(true, Ordering::Relaxed);
-    let _ = heartbeat.join();
+    drop(heartbeat);
     // Drain every remaining line and force-flush text before the termination
     // check. Completing with a half-applied buffer is what left the chat looking
     // finished while tokens were still sitting in memory.
@@ -19943,6 +20194,7 @@ fn run_streaming_command(
         activities: stream_state.activities,
         context_usage: stream_state.context_usage,
         billed_usage: stream_state.billed_usage,
+        accounted_usage: stream_state.accounted_usage,
         rate_limits: stream_state.rate_limits,
         status_success: outcome.succeeded(),
         status_label,
@@ -19967,8 +20219,11 @@ fn spawn_provider_chat_heartbeat(
     cancellation: CancellationToken,
     stop: Arc<AtomicBool>,
     liveness: Option<(Arc<ProviderStreamLiveness>, Duration)>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
+) -> ProviderHeartbeat {
+    let worker_stop = stop.clone();
+    let worker = std::thread::spawn(move || {
+        let stop = worker_stop;
+        let mut quiet_clock = ProviderQuietClock::new(Instant::now());
         loop {
             // Sleep in short slices so stop/cancel is noticed promptly at the
             // end of a run instead of waiting out a full heartbeat interval.
@@ -19977,20 +20232,19 @@ fn spawn_provider_chat_heartbeat(
                 if stop.load(Ordering::Relaxed) || cancellation.is_cancelled() {
                     return;
                 }
-                std::thread::sleep(Duration::from_millis(250));
+                std::thread::park_timeout(Duration::from_millis(250));
             }
             if stop.load(Ordering::Relaxed) || cancellation.is_cancelled() {
                 return;
             }
             let label = request.provider_label.as_deref().unwrap_or("Provider");
-            let silent_for = liveness
+            let awaits_approval = provider_session_awaits_approval(&app, &request.session_id);
+            let tool_running = liveness
                 .as_ref()
-                .map(|(liveness, _)| liveness.silent_for())
-                .unwrap_or_default();
+                .is_some_and(|(liveness, _)| liveness.tool_running.load(Ordering::Relaxed));
             if let Some((liveness, limit)) = &liveness {
-                let waiting = liveness.tool_running.load(Ordering::Relaxed)
-                    || provider_session_awaits_approval(&app, &request.session_id);
-                if provider_run_stalled(silent_for, *limit, waiting) {
+                let silent_for = liveness.silent_for();
+                if provider_run_stalled(silent_for, *limit, tool_running || awaits_approval) {
                     stop_provider_run(
                         &app,
                         &request.session_id,
@@ -20001,15 +20255,23 @@ fn spawn_provider_chat_heartbeat(
                     return;
                 }
             }
-            let message = if silent_for >= PROVIDER_CHAT_QUIET_NOTICE {
-                format!(
-                    "{label} is still working, with no output for {} min",
-                    silent_for.as_secs() / 60
-                )
-            } else {
-                format!("{label} is still working")
+            let quiet_seconds = peek_provider_event_sequence(&app, &request.session_id)
+                .map(|next_sequence| {
+                    quiet_clock.tick(
+                        next_sequence,
+                        tool_running || awaits_approval,
+                        Instant::now(),
+                    )
+                })
+                .and_then(provider_quiet_seconds);
+            let message = match quiet_seconds {
+                Some(seconds) => format!(
+                    "{label} is still working, with no activity for {} min",
+                    seconds / 60
+                ),
+                None => format!("{label} is still working"),
             };
-            emit_provider_chat_event(
+            emit_provider_chat_frame(
                 &app,
                 &request,
                 "heartbeat",
@@ -20017,9 +20279,12 @@ fn spawn_provider_chat_heartbeat(
                 None,
                 Some(message),
                 None,
+                None,
+                quiet_seconds,
             );
         }
-    })
+    });
+    ProviderHeartbeat::new(stop, worker)
 }
 
 /// Wrap a run failure with the provider's sign-in hint, unless it was a stop.
@@ -20095,18 +20360,7 @@ fn handle_provider_stdout_line(
             emit_provider_context_usage(app, request, usage);
         }
     }
-    // A new request puts a new prompt in the window and draws on the plan.
-    // Output deltas keep the context meter live without another account read.
-    let previous_input = previous_usage
-        .as_ref()
-        .and_then(|usage| usage.input_tokens);
-    let next_input = stream_state
-        .context_usage
-        .as_ref()
-        .and_then(|usage| usage.input_tokens);
-    if next_input.is_some() && next_input != previous_input {
-        publish_live_provider_usage(app, &request.provider_id);
-    }
+
 }
 
 fn handle_provider_stdout_value(
@@ -20645,9 +20899,27 @@ fn emit_provider_chat_event_with_timeline(
     error: Option<String>,
     timeline: Option<provider_timeline::TimelinePosition>,
 ) {
+    emit_provider_chat_frame(
+        app, request, phase, status, text_delta, message, error, timeline, None,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_provider_chat_frame(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    phase: &str,
+    status: Option<HarnessRunStatus>,
+    text_delta: Option<String>,
+    message: Option<String>,
+    error: Option<String>,
+    timeline: Option<provider_timeline::TimelinePosition>,
+    quiet_seconds: Option<u64>,
+) {
     if context_compaction::summary_stream_muted(&request.session_id) {
         return;
     }
+    session_title_stream::observe(app, request, phase, text_delta.as_deref());
     if phase == "delta" && text_delta.as_ref().is_some_and(|text| !text.is_empty()) {
         timing::mark(TimingStage::FirstActivity);
         timing::mark(TimingStage::FirstToken);
@@ -20686,6 +20958,7 @@ fn emit_provider_chat_event_with_timeline(
             .map(|error| provider_failure_recovery(error).0.to_string()),
         message,
         error,
+        quiet_seconds,
     };
     let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
 }
@@ -20698,24 +20971,31 @@ fn emit_provider_context_usage(
     if context_compaction::summary_stream_muted(&request.session_id) {
         return;
     }
+    // All adapters reach this boundary, including Codex app-server and ACP.
+    // The shared poll coalesces context frames and respects account cooldowns.
+    publish_live_provider_usage(app, &request.provider_id);
     let context_window_source = if usage.model_context_window.is_some() {
         "runtime"
     } else {
         "catalog"
     };
-    let base_url = load_config_blocking().ok().and_then(|config| {
-        config
-            .model_providers
-            .into_iter()
-            .find(|provider| provider.id == request.provider_id)
-            .and_then(|provider| provider.base_url)
-    });
-    live_model_context::observe_runtime(
-        &request.provider_id,
-        request.model_id.as_deref(),
-        base_url.as_deref(),
-        usage.model_context_window,
-    );
+    // This runs on every usage frame, and reading the config touches the disk.
+    // Most frames report no window, and those have nothing to record.
+    if usage.model_context_window.is_some() && request.model_id.is_some() {
+        let base_url = load_config_blocking().ok().and_then(|config| {
+            config
+                .model_providers
+                .into_iter()
+                .find(|provider| provider.id == request.provider_id)
+                .and_then(|provider| provider.base_url)
+        });
+        live_model_context::observe_runtime(
+            &request.provider_id,
+            request.model_id.as_deref(),
+            base_url.as_deref(),
+            usage.model_context_window,
+        );
+    }
     let usage = provider_context_usage_with_window(
         Some(usage.clone()),
         &request.provider_id,
@@ -20776,6 +21056,7 @@ fn emit_provider_activity_event(
         message: None,
         error: None,
         recovery_kind: None,
+        quiet_seconds: None,
     };
     let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
 }
@@ -20796,6 +21077,17 @@ fn next_provider_event_sequence(app: &tauri::AppHandle, session_id: &str) -> u64
         .and_then(|flags| flags.get(session_id).cloned())
         .map(|control| control.next_event_sequence.fetch_add(1, Ordering::Relaxed))
         .unwrap_or_else(|| ORPHAN_PROVIDER_EVENT_SEQUENCE.fetch_add(1, Ordering::Relaxed))
+}
+
+/// The sequence the run's next frame would take, without taking it. `None` once
+/// the run control is gone, when there is no run left to be quiet.
+fn peek_provider_event_sequence(app: &tauri::AppHandle, session_id: &str) -> Option<u64> {
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(session_id).cloned())
+        .map(|control| control.next_event_sequence.load(Ordering::Relaxed))
 }
 
 /// A non-zero CLI exit that still produced a real streamed answer.
@@ -21254,6 +21546,45 @@ fn effective_capability_class(
         }
     }
     Ok(gyro_core::capability_descriptor(capability_id).class)
+}
+
+/// Models cannot list Workspace tasks, so an unknown id names the valid ones
+/// instead of leaving the model to guess again.
+fn unknown_workspace_task_message(
+    task_id: &str,
+    tasks: &[TaskDefinitionResult],
+    tests_only: bool,
+) -> String {
+    const MAX_LISTED_IDS_CHARS: usize = 2_000;
+    let kind = if tests_only { "test task" } else { "task" };
+    let candidates: Vec<&str> = tasks
+        .iter()
+        .filter(|task| !tests_only || task.group == "test")
+        .map(|task| task.id.as_str())
+        .collect();
+    if candidates.is_empty() {
+        return format!(
+            "no {kind} with id \"{task_id}\"; this Workspace has no discovered {kind}s"
+        );
+    }
+    let mut listed = String::new();
+    let mut shown = 0;
+    for id in &candidates {
+        let separator = if listed.is_empty() { "" } else { ", " };
+        if listed.len() + separator.len() + id.len() > MAX_LISTED_IDS_CHARS {
+            break;
+        }
+        listed.push_str(separator);
+        listed.push_str(id);
+        shown += 1;
+    }
+    let more = candidates.len() - shown;
+    let suffix = if more > 0 {
+        format!(" (and {more} more)")
+    } else {
+        String::new()
+    };
+    format!("no {kind} with id \"{task_id}\"; available ids: {listed}{suffix}")
 }
 
 fn capability_git_diff_path(arguments: &serde_json::Value) -> anyhow::Result<Option<String>> {
@@ -22011,6 +22342,24 @@ fn execute_provider_capability(
 ) -> anyhow::Result<CapabilityResult> {
     let workspace = bound.workspace.display().to_string();
     let arguments = &request.arguments;
+    if request
+        .capability_id
+        .provider_tool_name()
+        .starts_with("gyro_browser_")
+        && !matches!(
+            request.capability_id,
+            CapabilityId::BrowserTargets
+                | CapabilityId::BrowserSelectTarget
+                | CapabilityId::BrowserCapturePreview
+                | CapabilityId::BrowserPreviewClick
+        )
+        && app_preview::selected(app, &bound.session_id, &bound.workspace_key)
+            .map_err(anyhow::Error::msg)?
+            .kind
+            != "web"
+    {
+        anyhow::bail!("The selected preview is a native runtime. Use capture_preview/preview_click, or select targetId web before using web-page tools.");
+    }
     let (summary, data, resource) = match request.capability_id {
         CapabilityId::CodeModeDiscover | CapabilityId::CodeModeExecute => {
             code_mode::execute(app, bound, request)?
@@ -22217,14 +22566,14 @@ fn execute_provider_capability(
             capability_output_budget::offset(arguments, "stderrOffset")?;
             let task_id = capability_argument_string(arguments, "taskId")?.to_string();
             let tasks = task_discover_impl(&workspace)?;
-            let task = tasks
-                .into_iter()
-                .find(|task| task.id == task_id)
-                .ok_or_else(|| anyhow::anyhow!("task is no longer present in the Workspace"))?;
             let is_test = request.capability_id == CapabilityId::WorkspaceRunTest;
-            if is_test && task.group != "test" {
-                anyhow::bail!("the requested task is not a discovered test task");
-            }
+            let Some(task) = tasks
+                .iter()
+                .find(|task| task.id == task_id && (!is_test || task.group == "test"))
+                .cloned()
+            else {
+                anyhow::bail!(unknown_workspace_task_message(&task_id, &tasks, is_test));
+            };
             let kind = if is_test { "test" } else { "task" };
             if arguments
                 .get("background")
@@ -22424,6 +22773,16 @@ fn execute_provider_capability(
             if !cwd.is_dir() {
                 anyhow::bail!("terminal working directory is not a directory");
             }
+            // The program runs without a shell, so a whole command line in
+            // `program` fails as an unknown executable. Say how to fix it.
+            if args.is_empty()
+                && program.trim().contains(char::is_whitespace)
+                && !cwd.join(&program).exists()
+            {
+                anyhow::bail!(
+                    "terminal program must be one executable, not a command line; pass arguments in args (program \"npm\", args [\"run\", \"dev\"]), or use program \"sh\" with args [\"-c\", \"<command>\"] for pipes, redirects, or &&"
+                );
+            }
             let (resource_id, snapshot) = claim_model_terminal(
                 app,
                 bound,
@@ -22556,6 +22915,40 @@ fn execute_provider_capability(
                 }),
                 Some(resource),
             )
+        }
+        CapabilityId::BrowserTargets
+        | CapabilityId::BrowserSelectTarget
+        | CapabilityId::BrowserCapturePreview
+        | CapabilityId::BrowserPreviewClick => {
+            let data = match request.capability_id {
+                CapabilityId::BrowserTargets => {
+                    app_preview::targets(app, &bound.session_id, &bound.workspace_key)
+                }
+                CapabilityId::BrowserSelectTarget => app_preview::select(
+                    app,
+                    &bound.session_id,
+                    &bound.workspace_key,
+                    capability_argument_string(arguments, "targetId")?,
+                )
+                .and_then(|t| serde_json::to_value(t).map_err(|e| e.to_string())),
+                CapabilityId::BrowserCapturePreview => {
+                    app_preview::capture(app, &bound.session_id, &bound.workspace_key)
+                }
+                _ => app_preview::click(
+                    app,
+                    &bound.session_id,
+                    &bound.workspace_key,
+                    capability_argument_string(arguments, "captureId")?,
+                    arguments["x"]
+                        .as_f64()
+                        .ok_or_else(|| anyhow::anyhow!("x is required"))?,
+                    arguments["y"]
+                        .as_f64()
+                        .ok_or_else(|| anyhow::anyhow!("y is required"))?,
+                ),
+            }
+            .map_err(anyhow::Error::msg)?;
+            ("Observed selected app preview".into(), data, None)
         }
         CapabilityId::BrowserViewport => browser_viewport::execute_capability(app, bound, request)?,
         CapabilityId::BrowserInspect => {
@@ -23117,10 +23510,7 @@ fn execute_provider_capability(
                 bound.allow_delegation,
             );
             (
-                format!(
-                    "Listed tools for {}",
-                    prefix.unwrap_or("gyro_")
-                ),
+                format!("Listed tools for {}", prefix.unwrap_or("gyro_")),
                 page,
                 None,
             )
@@ -23716,6 +24106,7 @@ struct DesktopProviderCapabilityContext {
     policy_revision: u64,
     workspace_context_revision: u64,
     allow_delegation: bool,
+    compact_catalog: bool,
 }
 
 impl DesktopProviderCapabilityContext {
@@ -23738,6 +24129,8 @@ impl DesktopProviderCapabilityContext {
             // Older launchers do not carry an opt-in; fail closed. Execution
             // still checks the host-owned context rather than trusting this env.
             allow_delegation: std::env::var("GYRO_CAPABILITY_ALLOW_DELEGATION")
+                .is_ok_and(|value| value == "true"),
+            compact_catalog: std::env::var(provider_tool_batch::COMPACT_CATALOG_ENV)
                 .is_ok_and(|value| value == "true"),
             policy_revision: desktop_permission_env("GYRO_CAPABILITY_POLICY_REVISION")?
                 .parse()
@@ -23915,8 +24308,8 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
                 "type": "string",
                 "description": "Optional workspace-relative directory. Search stays inside this directory."
             },
-            "globs": { "type": "array", "items": { "type": "string" } },
-            "maxResults": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 50 },
+            "globs": { "type": "array", "items": { "type": "string" }, "description": "Optional ripgrep globs that filter files, such as [\"*.ts\", \"!*.test.ts\"]." },
+            "maxResults": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 50, "description": "Maximum matching lines to return." },
             "maxBytes": workspace_result_bytes_schema()
         }),
         CapabilityId::WorkspaceRead | CapabilityId::WorkspaceReadRange => serde_json::json!({
@@ -23925,10 +24318,10 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
                 "description": "Workspace-relative file path, or a spill:// address quoted by a prior preview."
             },
             "knownContentHash": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$", "description": "Omit unchanged text when rechecking evidence already read at this hash. Omit this argument to read new content or a new range." },
-            "line": { "type": "integer", "minimum": 1 },
-            "endLine": { "type": "integer", "minimum": 1 },
-            "column": { "type": "integer", "minimum": 1 },
-            "endColumn": { "type": "integer", "minimum": 1 },
+            "line": { "type": "integer", "minimum": 1, "description": "First line to read, 1-based. With no endLine, reads 200 lines." },
+            "endLine": { "type": "integer", "minimum": 1, "description": "Last line to read, 1-based and inclusive. At most 2,000 lines per call; the reply names where to continue." },
+            "column": { "type": "integer", "minimum": 1, "description": "First column on line, 1-based." },
+            "endColumn": { "type": "integer", "minimum": 1, "description": "Last column on endLine, 1-based." },
             "offset": {
                 "type": "integer",
                 "minimum": 0,
@@ -23965,6 +24358,12 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
                 "default": false,
                 "description": "Show the Browser panel only when the user explicitly asks to see the page or a required manual handoff such as sign-in needs it. Omit or set false for reading, research, implementation checks, interactions, screenshots, or rendering fallback; these work while hidden."
             }
+        }),
+        CapabilityId::BrowserSelectTarget => serde_json::json!({
+            "targetId": {"type":"string","description":"ID returned by gyro_browser_targets, or web"}
+        }),
+        CapabilityId::BrowserPreviewClick => serde_json::json!({
+            "captureId":{"type":"string"},"x":{"type":"number"},"y":{"type":"number"}
         }),
         CapabilityId::BrowserScreenshot => serde_json::json!({
             "device": { "type": "string", "enum": ["responsive", "desktop", "tablet", "mobile"] }
@@ -24010,7 +24409,7 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
                 "default": "gyro_",
                 "description": "Domain prefix such as gyro_browser_ or gyro_github_."
             },
-            "offset": { "type": "integer", "minimum": 0 }
+            "offset": { "type": "integer", "minimum": 0, "description": "Page start; pass nextOffset from the previous page." }
         }),
         _ => serde_json::json!({}),
     };
@@ -24025,6 +24424,8 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
         CapabilityId::TerminalOpen => vec!["program"],
         CapabilityId::TerminalWait => vec!["resourceId"],
         CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => vec!["url"],
+        CapabilityId::BrowserSelectTarget => vec!["targetId"],
+        CapabilityId::BrowserPreviewClick => vec!["captureId", "x", "y"],
         CapabilityId::BrowserClick => vec!["ref"],
         CapabilityId::BrowserMouse => vec!["action", "captureId", "x", "y"],
         CapabilityId::BrowserType => vec!["text"],
@@ -24050,9 +24451,39 @@ fn desktop_capability_tool_call(
         .get("name")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| anyhow::anyhow!("capability tool name is required"))?;
-    let capability_id = CapabilityId::from_provider_tool_name(name)
-        .ok_or_else(|| anyhow::anyhow!("unknown Gyro capability tool"))?;
     let call_id = Uuid::new_v4();
+    let empty = serde_json::json!({});
+    let arguments = params.get("arguments").unwrap_or(&empty);
+    let (capability_id, arguments) =
+        if context.compact_catalog && name == provider_tool_batch::COMPACT_INVOKE {
+            let allow_delegation =
+                context.allow_delegation && delegated_agents::can_delegate(&context.session_id);
+            match provider_tool_batch::resolve_tool_call(
+                name,
+                arguments,
+                context.mode,
+                allow_delegation,
+                true,
+            ) {
+                Ok(resolved) => resolved,
+                Err(message) => {
+                    return capability_mcp_response(
+                        paths,
+                        CapabilityResponse::failed(
+                            env!("CARGO_PKG_VERSION"),
+                            call_id,
+                            "invalid-arguments",
+                            message,
+                        ),
+                        provider_accepts_images(&context.provider_id),
+                    );
+                }
+            }
+        } else {
+            let capability_id = CapabilityId::from_provider_tool_name(name)
+                .ok_or_else(|| anyhow::anyhow!("unknown Gyro capability tool"))?;
+            (capability_id, arguments.clone())
+        };
     let request = CapabilityRequest {
         schema: PROVIDER_CAPABILITY_IPC_SCHEMA_V1.into(),
         sender_version: env!("CARGO_PKG_VERSION").into(),
@@ -24068,10 +24499,7 @@ fn desktop_capability_tool_call(
             workspace_context_revision: context.workspace_context_revision,
         },
         capability_id,
-        arguments: params
-            .get("arguments")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({})),
+        arguments,
     };
     let response = request_desktop_provider_capability(paths, &request).unwrap_or_else(|error| {
         CapabilityResponse::failed(
@@ -24099,7 +24527,10 @@ fn browser_result_image(
 ) -> anyhow::Result<Option<String>> {
     let Some(result) = response.result.as_ref().filter(|result| {
         response.status == CapabilityStatus::Completed
-            && result.capability_id == CapabilityId::BrowserScreenshot
+            && matches!(
+                result.capability_id,
+                CapabilityId::BrowserScreenshot | CapabilityId::BrowserCapturePreview
+            )
             && result.data["schema"] == BROWSER_OBSERVATION_SCHEMA_V1
     }) else {
         return Ok(None);
@@ -24220,21 +24651,7 @@ pub fn run_provider_capability_server() -> anyhow::Result<()> {
         &mut std::io::stdin().lock(),
         std::io::stdout(),
         "gyro-provider-capabilities",
-        advertised_capability_descriptors(context.mode)
-            .filter(|descriptor| {
-                allow_delegation || !delegated_agents::delegation_tool(descriptor.id)
-            })
-            .map(|descriptor| {
-                serde_json::json!({
-                    "name": descriptor.id.provider_tool_name(),
-                    "description": provider_tool_batch::advertised_description(
-                        descriptor.id,
-                        descriptor.description,
-                    ),
-                    "inputSchema": provider_tool_batch::advertised_tool_parameters(descriptor.id),
-                })
-            })
-            .collect(),
+        provider_tool_batch::mcp_tools_for(context.mode, allow_delegation, context.compact_catalog),
         |params| desktop_capability_tool_call(&paths, &context, params),
     )
 }
@@ -24300,6 +24717,8 @@ pub fn run() {
         .manage(language_server::LanguageServerManager::default())
         .manage(DebugAdapterManager::default())
         .manage(ProviderCancellationManager::default())
+        .manage(cloud_connection::CloudConnection::default())
+        .manage(local_check::LocalCheckManager::default())
         .manage(project_import::ProjectImportManager::default())
         .manage(delegated_agents::AgentManager::default())
         .manage(ProviderApprovalManager::default())
@@ -24311,6 +24730,7 @@ pub fn run() {
         .manage(WorkspacePreparationManager::default())
         .manage(AutomationSchedulerControl::default())
         .manage(session_browser::SessionBrowserManager::default())
+        .manage(app_preview::ManagerState::default())
         .manage(menu_bar::MenuBarController::default())
         .manage(quit_confirmation::QuitConfirmation::default())
         .setup(|app| {
@@ -24391,6 +24811,16 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             gyro_cloud::gyro_cloud,
+            cloud_connection::cloud_connection_view,
+            cloud_connection::cloud_connection_action,
+            cloud_connection::cloud_connection_begin,
+            cloud_connection::cloud_connection_verify,
+            cloud_connection::cloud_connection_service,
+            local_check::prepare_local_check,
+            local_check::resolve_local_check,
+            local_check::cancel_local_check,
+            local_check::list_local_checks,
+            local_check::delete_local_check,
             efficiency::set_efficiency_config,
             efficiency::get_efficiency_task_totals,
             efficiency::route_efficiency_phase,
@@ -24425,12 +24855,14 @@ pub fn run() {
             provider_api_keys::list_custom_provider_models,
             check_cli_updates_command,
             apply_cli_updates_command,
+            provider_cli_install_plan_command,
             system_access::check_system_access,
             system_access::open_system_access_settings,
             dictation_access::request_dictation_access,
             dictation_access::start_dictation,
             dictation_access::stop_dictation,
             capture_browser_preview,
+            app_preview::app_preview_request,
             capture_session_browser_preview,
             session_browser::session_browser_open,
             session_browser::session_browser_set_bounds,
@@ -24519,6 +24951,7 @@ pub fn run() {
             read_terminal_output,
             read_session_events,
             prepare_chat_attachment,
+            read_cited_chat_image,
             resolve_cited_chat_image,
             prepare_chat_media_upload,
             prepare_browser_attachment,
@@ -25072,8 +25505,7 @@ mod automate_resume_guard_tests {
     #[test]
     fn resume_refuses_completed_and_current_automations() {
         assert!(refuse_unpaused_automation_resume(AutomationStatus::Paused).is_ok());
-        let completed =
-            refuse_unpaused_automation_resume(AutomationStatus::Completed).unwrap_err();
+        let completed = refuse_unpaused_automation_resume(AutomationStatus::Completed).unwrap_err();
         assert!(
             completed.contains("Only a paused automation can be resumed"),
             "{completed}"
@@ -25563,6 +25995,32 @@ mod tests {
         assert!(unrestricted.contains("capability broker"));
     }
 
+    #[test]
+    fn approval_guidance_omits_unconnected_gyro_tools_for_antigravity() {
+        let mut request = anthropic_provider_request();
+        request.provider_id = "antigravity".into();
+        request.provider_label = Some("Google Antigravity".into());
+        request.model_id = Some("antigravity-default".into());
+        request.message = "Use sub-agents to review this change.".into();
+        request.require_command_approval = true;
+        request.require_file_edit_approval = true;
+        for resumed in [false, true] {
+            let prompt = provider_context_message_for_turn(
+                &request,
+                None,
+                PromptTurn {
+                    resumed,
+                    ..PromptTurn::default()
+                },
+            );
+            assert!(prompt.contains("fresh, explicit user approval before every command"));
+            assert!(prompt.contains("fresh, explicit user approval before every file change"));
+            assert!(!prompt.contains("Invoke gyro_* capabilities directly"));
+            assert!(!prompt.contains("gyro_agent_spawn"));
+            assert!(!prompt.contains("Parallel delegation:"));
+        }
+    }
+
     fn anthropic_provider_request() -> ProviderChatRequest {
         ProviderChatRequest {
             session_id: Uuid::new_v4().to_string(),
@@ -25584,6 +26042,7 @@ mod tests {
             attachments: Vec::new(),
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         }
     }
 
@@ -26061,6 +26520,7 @@ mod tests {
             workspace_key: temp.path().display().to_string(),
             mode: CapabilityRunMode::Normal,
             allow_delegation: false,
+            compact_catalog: false,
             policy_revision: 0,
             workspace_context_revision: 0,
         };
@@ -26078,6 +26538,81 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("Gyro tools unavailable"));
+    }
+
+    #[test]
+    fn compact_cli_wrapper_reaches_dispatch_only_when_the_run_serves_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let mut context = DesktopProviderCapabilityContext {
+            session_id: Uuid::new_v4().to_string(),
+            turn_id: Some(Uuid::new_v4().to_string()),
+            run_nonce: "test-run-nonce".into(),
+            provider_id: "openai".into(),
+            workspace_key: temp.path().display().to_string(),
+            mode: CapabilityRunMode::Normal,
+            allow_delegation: false,
+            compact_catalog: true,
+            policy_revision: 0,
+            workspace_context_revision: 0,
+        };
+        let text = |result: serde_json::Value| {
+            assert_eq!(result["isError"], true);
+            result["content"][0]["text"].as_str().unwrap().to_string()
+        };
+        let valid = serde_json::json!({
+            "name": provider_tool_batch::COMPACT_INVOKE,
+            "arguments": {
+                "name": "gyro_workspace_list",
+                "arguments": { "depth": 2 },
+            },
+        });
+        // No host is listening, so reaching dispatch fails closed with this message.
+        assert!(
+            text(desktop_capability_tool_call(&paths, &context, valid.clone()).unwrap())
+                .contains("Gyro tools unavailable")
+        );
+        for bad in [
+            serde_json::json!({ "name": "gyro_workspace_list" }),
+            serde_json::json!({ "name": "not_a_tool", "arguments": {} }),
+            serde_json::json!({ "name": provider_tool_batch::COMPACT_INVOKE, "arguments": {} }),
+        ] {
+            let message = text(
+                desktop_capability_tool_call(
+                    &paths,
+                    &context,
+                    serde_json::json!({
+                        "name": provider_tool_batch::COMPACT_INVOKE,
+                        "arguments": bad,
+                    }),
+                )
+                .unwrap(),
+            );
+            assert!(message.contains("invalid-arguments"), "{message}");
+            assert!(!message.contains("Gyro tools unavailable"), "{message}");
+        }
+        // Panes and full-list runs do not recognize the wrapper at all.
+        context.compact_catalog = false;
+        assert!(desktop_capability_tool_call(&paths, &context, valid).is_err());
+    }
+
+    #[test]
+    fn compact_cli_allowlists_add_only_the_wrapper() {
+        let tools = "mcp__gyro_capabilities__gyro_workspace_read,mcp__gyro_capabilities__gyro_tool_catalog";
+        assert_eq!(claude_allowed_capability_tools(tools.into(), false), tools);
+        assert_eq!(
+            claude_allowed_capability_tools(tools.into(), true),
+            format!("{tools},mcp__gyro_capabilities__gyro_tool_invoke")
+        );
+        assert_eq!(claude_allowed_capability_tools(String::new(), true), "");
+        assert_eq!(
+            codex_compact_invoke_approval_args(),
+            [
+                "-c".to_string(),
+                "mcp_servers.gyro_capabilities.tools.gyro_tool_invoke.approval_mode=\"approve\""
+                    .to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -26135,7 +26670,10 @@ mod tests {
         let (stable_a, dynamic_a) =
             efficiency::capture_prompt(|| build(&first, "User: one\n\nAssistant: first answer"));
         let (stable_b, dynamic_b) = efficiency::capture_prompt(|| {
-            build(&second, "User: one\n\nAssistant: a different and longer answer")
+            build(
+                &second,
+                "User: one\n\nAssistant: a different and longer answer",
+            )
         });
         assert!(!stable_a.is_empty());
         assert_eq!(stable_a, stable_b);
@@ -27330,6 +27868,13 @@ mod tests {
             result
         );
 
+        response.result.as_mut().unwrap().capability_id = CapabilityId::BrowserCapturePreview;
+        let framed = capability_mcp_response(&paths, response.clone(), true).unwrap();
+        assert_eq!(framed["content"][1]["type"], "image");
+        let framed_bytes = base64::engine::general_purpose::STANDARD
+            .decode(framed["content"][1]["data"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(framed_bytes, png);
         let outside = temp.path().join("outside.png");
         fs::write(&outside, &png).unwrap();
         response.result.as_mut().unwrap().data["screenshot"]["path"] = serde_json::json!(outside);
@@ -28110,6 +28655,7 @@ while True:
             }],
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         };
         validate_chat_context(&request).unwrap();
         std::fs::write(&file, "changed\n").unwrap();
@@ -28218,14 +28764,38 @@ while True:
             "../../../../scripts/fixtures/model-metadata.json"
         ))
         .unwrap();
+        let published: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../site/model-catalog.json")).unwrap();
         for row in facts["models"].as_array().unwrap() {
             let provider = row[0].as_str().unwrap();
             let model = row[1].as_str().unwrap();
-            assert_eq!(
-                provider_model_context_window(provider, Some(model)),
-                row[2].as_u64(),
-                "{provider}/{model} context"
-            );
+            let window = provider_model_context_window(provider, Some(model));
+            // A model added through the remote catalog has no bundled facts;
+            // the installed catalog supplies them, so verify the entry instead.
+            let catalog_entry = published["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["providerId"] == provider && entry["id"] == model);
+            if let (None, Some(entry)) = (window, catalog_entry) {
+                assert_eq!(
+                    entry["contextWindowTokens"].as_u64(),
+                    row[2].as_u64(),
+                    "{provider}/{model} catalog context"
+                );
+                assert_eq!(
+                    entry["supportedReasoningEfforts"], row[3],
+                    "{provider}/{model} catalog efforts"
+                );
+                if let Some(default) = row.get(4) {
+                    assert_eq!(
+                        &entry["defaultReasoningEffort"], default,
+                        "{provider}/{model} catalog default effort"
+                    );
+                }
+                continue;
+            }
+            assert_eq!(window, row[2].as_u64(), "{provider}/{model} context");
             for effort in ["low", "medium", "high", "xhigh", "max", "ultra", "invalid"] {
                 let actual = match provider {
                     "openai" => codex_reasoning_effort_arg(Some(model), Some(effort)),
@@ -28500,7 +29070,10 @@ while True:
                 "end the turn and wait",
                 "Use gyro_tool_catalog",
             ] {
-                assert!(opening.contains(opening_only), "{provider} lost {opening_only}");
+                assert!(
+                    opening.contains(opening_only),
+                    "{provider} lost {opening_only}"
+                );
                 assert!(
                     !resumed.contains(opening_only),
                     "{provider} repeated {opening_only}"
@@ -28762,6 +29335,21 @@ while True:
             .windows(2)
             .any(|args| args == ["--effort", "xhigh"]));
         assert_eq!(fresh_claude.last(), Some(&"hello".to_string()));
+        // Native tools that would route around Gyro's surfaces stay off,
+        // most visibly claude.ai publishing in place of Gyro Canvas.
+        let disallowed = fresh_claude
+            .windows(2)
+            .find(|args| args[0] == "--disallowedTools")
+            .map(|args| args[1].split(',').collect::<Vec<_>>())
+            .expect("Claude runs always disallow some native tools");
+        for tool in ["Agent", "Task", "Artifact", "DesignSync", "ScheduleWakeup", "EnterWorktree"] {
+            assert!(disallowed.contains(&tool), "{tool} must stay disallowed");
+        }
+        // Native file and shell tools remain: they are approval-gated and the
+        // fallback when a Gyro bridge is unavailable.
+        for tool in ["Read", "Edit", "Bash"] {
+            assert!(!disallowed.contains(&tool), "{tool} must stay available");
+        }
 
         let auto_approve_claude = claude_chat_args(
             None,
@@ -28824,6 +29412,39 @@ while True:
             resumed_claude.iter().rev().take(2).collect::<Vec<_>>(),
             vec![&"again".to_string(), &"--".to_string()]
         );
+    }
+
+    /// Claude runs load every Gyro tool up front (`ENABLE_TOOL_SEARCH=false`),
+    /// so the advertised list is paid on each fresh session. Measured at
+    /// ~38 KB (~9.5K tokens) for Normal mode; growth past this budget should be
+    /// a deliberate choice, e.g. switching to `auto:N` deferral.
+    #[test]
+    fn eagerly_loaded_claude_tool_list_stays_within_budget() {
+        const BUDGET_BYTES: usize = 64 * 1024;
+        for mode in [
+            CapabilityRunMode::Normal,
+            CapabilityRunMode::Plan,
+            CapabilityRunMode::Council,
+        ] {
+            let tools: Vec<serde_json::Value> = advertised_capability_descriptors(mode)
+                .map(|descriptor| {
+                    serde_json::json!({
+                        "name": descriptor.id.provider_tool_name(),
+                        "description": provider_tool_batch::advertised_description(
+                            descriptor.id,
+                            descriptor.description,
+                        ),
+                        "inputSchema": provider_tool_batch::advertised_tool_parameters(descriptor.id),
+                    })
+                })
+                .collect();
+            let bytes = serde_json::to_string(&tools).unwrap().len();
+            assert!(
+                bytes <= BUDGET_BYTES,
+                "{mode:?} advertises {} tools in {bytes} bytes, over the {BUDGET_BYTES}-byte eager-load budget",
+                tools.len(),
+            );
+        }
     }
 
     /// Every argument vector Gyro can build, across providers and permission
@@ -29660,9 +30281,8 @@ while True:
     fn streaming_state_applies_the_completed_message_to_a_short_stream() {
         let mut state = StreamingCommandState::new();
         state.push_assistant_delta("The plan starts here and stops");
-        state.push_assistant_final(
-            "The plan starts here and stops only when every step is listed.",
-        );
+        state
+            .push_assistant_final("The plan starts here and stops only when every step is listed.");
 
         assert_eq!(
             state.assistant_text,
@@ -29885,12 +30505,97 @@ while True:
     }
 
     #[test]
+    fn claude_five_minute_cache_frames_count_writes_apart_from_reads() {
+        // Usage blocks as the Claude CLI printed them with FORCE_PROMPT_CACHING_5M=1.
+        let usage = serde_json::json!({
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 2977,
+            "cache_read_input_tokens": 658,
+            "cache_creation": {
+                "ephemeral_5m_input_tokens": 2977,
+                "ephemeral_1h_input_tokens": 0
+            },
+            "output_tokens": 4,
+            "service_tier": "standard"
+        });
+        let mut parser = provider_accounting::ClaudeTurnUsage::default();
+        parser.observe(&serde_json::json!({
+            "type": "assistant",
+            "message": { "id": "msg_1", "stop_reason": null, "usage": usage }
+        }));
+        parser.observe(&serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "usage": usage
+        }));
+        let tokens = parser.tokens().expect("usage should be accounted");
+        assert_eq!(tokens.input_tokens, 3_637);
+        assert_eq!(tokens.cached_input_tokens, 658);
+        assert_eq!(tokens.cache_write_tokens, 2_977);
+        assert_eq!(tokens.output_tokens, 4);
+        assert!(tokens.effective_accounting().known.cache_write);
+    }
+
+    #[test]
+    fn claude_runs_keep_cache_reads_and_writes_apart() {
+        let mut parser = provider_accounting::ClaudeTurnUsage::default();
+        parser.observe(&serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "usage": {
+                "input_tokens": 10,
+                "cache_read_input_tokens": 900,
+                "cache_creation_input_tokens": 90,
+                "output_tokens": 5
+            }
+        }));
+        let accounted = parser.tokens();
+        for answer_cut_off in [false, true] {
+            let tokens = claude_runner_output(
+                StreamingCommandOutput {
+                    activities: Vec::new(),
+                    context_usage: None,
+                    billed_usage: Some(ProviderContextUsage {
+                        input_tokens: Some(1_000),
+                        cached_input_tokens: Some(990),
+                        output_tokens: Some(5),
+                        total_tokens: Some(1_005),
+                        ..Default::default()
+                    }),
+                    accounted_usage: accounted,
+                    rate_limits: Vec::new(),
+                    status_success: !answer_cut_off,
+                    status_label: "exit status: 0".into(),
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    assistant_text: Some("done".into()),
+                    text_blocks: Vec::new(),
+                    parsed_stream_json: true,
+                    provider_session_id: Some("sess-1".into()),
+                },
+                "done".into(),
+                "sess-1".into(),
+                false,
+                answer_cut_off,
+            )
+            .accounted_usage
+            .expect("the parser's total reaches the runner output");
+            assert_eq!(tokens.input_tokens, 1_000);
+            assert_eq!(tokens.cached_input_tokens, 900);
+            assert_eq!(tokens.cache_write_tokens, 90);
+            assert!(tokens.effective_accounting().known.cache_write);
+        }
+    }
+
+    #[test]
     fn a_streamed_answer_survives_a_nonzero_cli_exit() {
         let failed =
             |assistant: Option<&str>, parsed_json: bool, stdout: &str| StreamingCommandOutput {
                 activities: Vec::new(),
                 context_usage: None,
                 billed_usage: None,
+                accounted_usage: None,
                 rate_limits: Vec::new(),
                 status_success: false,
                 status_label: "exit status: 1".into(),
@@ -30731,6 +31436,9 @@ while True:
             "claude-opus-5-5",
             "claude-opus-5",
             "claude-opus-4-8",
+            "claude-opus-5-5-1m",
+            "claude-opus-5-1m",
+            "claude-opus-4-8-1m",
             "claude-sonnet-5-5",
             "claude-sonnet-5",
             "claude-haiku-5-5",
@@ -30753,6 +31461,15 @@ while True:
                 None
             );
         }
+    }
+
+    #[test]
+    fn claude_model_arg_selects_the_1m_window_for_1m_rows() {
+        assert_eq!(claude_model_arg("claude-opus-5-5-1m"), "claude-opus-5-5[1m]");
+        assert_eq!(claude_model_arg("claude-opus-4-8-1m"), "claude-opus-4-8[1m]");
+        assert_eq!(claude_model_arg("claude-opus-5-5"), "claude-opus-5-5");
+        assert_eq!(claude_model_arg("claude-sonnet-5-5"), "claude-sonnet-5-5");
+        assert_eq!(claude_model_arg("my-proxy-1m"), "my-proxy-1m");
     }
 
     #[test]
@@ -30826,6 +31543,85 @@ while True:
             limit,
             true
         ));
+    }
+
+    /// Quiet means every frame since the last heartbeat was a heartbeat.
+    #[test]
+    fn only_heartbeats_let_a_run_go_quiet() {
+        let start = Instant::now();
+        let beat = PROVIDER_CHAT_HEARTBEAT_INTERVAL;
+        let mut clock = ProviderQuietClock::new(start);
+
+        assert_eq!(clock.tick(10, false, start), Duration::ZERO);
+        assert_eq!(clock.tick(11, false, start + beat), beat);
+        assert_eq!(clock.tick(12, false, start + beat * 2), beat * 2);
+
+        // Anything else took a number in between, so that was progress.
+        assert_eq!(clock.tick(20, false, start + beat * 3), Duration::ZERO);
+        assert_eq!(clock.tick(21, false, start + beat * 4), beat);
+    }
+
+    /// A long tool or an unanswered approval is not the run going quiet, and the
+    /// wait does not count against it once the run picks back up.
+    #[test]
+    fn waiting_on_something_else_does_not_count_as_quiet() {
+        let start = Instant::now();
+        let beat = PROVIDER_CHAT_HEARTBEAT_INTERVAL;
+        let mut clock = ProviderQuietClock::new(start);
+
+        assert_eq!(clock.tick(1, true, start), Duration::ZERO);
+        assert_eq!(clock.tick(2, true, start + beat * 30), Duration::ZERO);
+        assert_eq!(clock.tick(3, false, start + beat * 31), beat);
+    }
+
+    /// The note only appears once the quiet is long enough to mean something.
+    #[test]
+    fn a_short_quiet_is_not_reported() {
+        let notice = PROVIDER_CHAT_QUIET_NOTICE;
+        assert_eq!(provider_quiet_seconds(Duration::ZERO), None);
+        assert_eq!(
+            provider_quiet_seconds(notice - Duration::from_secs(1)),
+            None
+        );
+        assert_eq!(provider_quiet_seconds(notice), Some(notice.as_secs()));
+    }
+
+    /// Frames from before this field keep their shape on the wire.
+    #[test]
+    fn a_frame_only_carries_quiet_seconds_when_quiet() {
+        let frame = |quiet_seconds| ProviderChatStreamEvent {
+            session_id: "session".into(),
+            turn_id: None,
+            provider_id: "provider".into(),
+            model_id: None,
+            event_id: "event".into(),
+            sequence: 1,
+            timeline: provider_timeline::TimelinePosition {
+                timeline_order: 1,
+                timeline_created_at: "2026-11-02T00:00:00Z".into(),
+            },
+            timeline_segments: None,
+            activity_sequence: None,
+            phase: "heartbeat".into(),
+            status: None,
+            text_delta: None,
+            activity_id: None,
+            activity_kind: None,
+            activity_label: None,
+            activity_detail: None,
+            activity_note: None,
+            additions: None,
+            deletions: None,
+            activity_status: None,
+            message: None,
+            error: None,
+            recovery_kind: None,
+            quiet_seconds,
+        };
+        let idle = serde_json::to_value(frame(None)).expect("serializes");
+        assert!(idle.get("quietSeconds").is_none());
+        let quiet = serde_json::to_value(frame(Some(360))).expect("serializes");
+        assert_eq!(quiet["quietSeconds"], 360);
     }
 
     /// A tool counts as running by its latest state, not its first.
@@ -31029,6 +31825,7 @@ while True:
             attachments: Vec::new(),
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         };
         let mut attempts = Vec::new();
         let output = run_provider_chat_with_retry_using(
@@ -31108,6 +31905,7 @@ while True:
             attachments: Vec::new(),
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         };
         assert!(compatible_provider_session_binding(binding.clone(), &request).is_none());
         let same_model = ProviderChatRequest {
@@ -31251,6 +32049,7 @@ while True:
             attachments: Vec::new(),
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         }
     }
     #[test]
@@ -31355,28 +32154,24 @@ while True:
     #[test]
     fn a_title_the_user_renamed_survives_the_model_marker() {
         let mut state = suggested_title_for_turn("We Drew Our Own Traffic Lights");
-        assert!(
-            streamed_title_replacement(
-                &mut state,
-                "My Own Name",
-                "GYRO_SESSION_TITLE: Traffic Light Bug\nWorking on it.",
-                true,
-            )
-            .is_none()
-        );
+        assert!(streamed_title_replacement(
+            &mut state,
+            "My Own Name",
+            "GYRO_SESSION_TITLE: Traffic Light Bug\nWorking on it.",
+            true,
+        )
+        .is_none());
         assert!(
             state.1,
             "a hand rename closes the control for the rest of the run"
         );
-        assert!(
-            streamed_title_replacement(
-                &mut state,
-                "My Own Name",
-                "GYRO_SESSION_TITLE: Late Marker\nWorking on it.",
-                true,
-            )
-            .is_none()
-        );
+        assert!(streamed_title_replacement(
+            &mut state,
+            "My Own Name",
+            "GYRO_SESSION_TITLE: Late Marker\nWorking on it.",
+            true,
+        )
+        .is_none());
     }
 
     #[test]
@@ -31397,26 +32192,42 @@ while True:
         let session = store
             .create_session(temp.path(), SessionOrigin::Desktop, "Untitled chat")
             .unwrap();
-        for provider in [
-            "openai",
-            "anthropic",
-            "xai",
-            "gemini",
-            "kimi",
-            "cursor",
-            "opencode",
-            "antigravity",
-            "deepseek",
-            "ollama",
-        ] {
+        let catalog: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../site/model-catalog.json")).unwrap();
+        let models = catalog["models"].as_array().unwrap();
+        let cases = gyro_core::provider_registry()
+            .iter()
+            .map(|provider| (provider.id, None))
+            .chain(
+                models
+                    .iter()
+                    .map(|model| (model["providerId"].as_str().unwrap(), model["id"].as_str())),
+            )
+            .chain([("custom-endpoint", Some("custom-model"))]);
+        for (provider, model) in cases {
             let mut request = provider_chat_request_for(&session, temp.path(), provider);
+            request.model_id = model.map(str::to_string);
             request.suggest_title = true;
-            let context = provider_context_message(&request);
-            assert_eq!(
-                context.matches("GYRO_SESSION_TITLE").count(),
-                1,
-                "{provider} must be asked for exactly one title"
-            );
+            for resumed in [false, true] {
+                let context = provider_context_message_for_turn(
+                    &request,
+                    None,
+                    PromptTurn {
+                        resumed,
+                        ..PromptTurn::default()
+                    },
+                );
+                assert_eq!(
+                    context
+                        .matches(SESSION_TITLE_FIRST_TURN_INSTRUCTION.trim_end())
+                        .count(),
+                    1,
+                    "{provider}/{model:?} must be asked for exactly one title"
+                );
+            }
+            request.suggest_title = false;
+            assert!(!provider_context_message(&request)
+                .contains(SESSION_TITLE_FIRST_TURN_INSTRUCTION.trim_end()));
         }
     }
 
@@ -31746,6 +32557,7 @@ while True:
             attachments: Vec::new(),
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         };
 
         let event = append_provider_status_event(
@@ -31834,6 +32646,7 @@ while True:
             attachments: Vec::new(),
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         };
 
         bind_provider_chat_request(&mut request, &session, &config, store.paths()).unwrap();
@@ -32002,6 +32815,7 @@ while True:
                 workspace_key: temp.path().display().to_string(),
                 mode: CapabilityRunMode::Normal,
                 allow_delegation: false,
+                compact_catalog: false,
                 policy_revision: 0,
                 workspace_context_revision: 0,
             };
@@ -34013,6 +34827,156 @@ while True:
         assert!(error.contains("task definition changed"));
     }
 
+    /// Sparse, so tests can reach the byte budget without writing a gigabyte.
+    fn sized_attachment(path: &Path, bytes: u64) {
+        std::fs::File::create(path).unwrap().set_len(bytes).unwrap();
+    }
+
+    fn age_attachment(path: &Path, seconds_old: u64) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(
+                std::time::SystemTime::now() - std::time::Duration::from_secs(seconds_old),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn full_draft_attachment_storage_gives_up_its_oldest_file_for_a_new_drop() {
+        let root = tempfile::tempdir().unwrap();
+        let draft_dir = root.path().join("new");
+        std::fs::create_dir(&draft_dir).unwrap();
+        for index in 0..MAX_STORED_DRAFT_ATTACHMENTS {
+            let path = draft_dir.join(format!("{index}.png"));
+            std::fs::write(&path, b"x").unwrap();
+            age_attachment(&path, 1_000 + index as u64);
+        }
+        let oldest = draft_dir.join(format!("{}.png", MAX_STORED_DRAFT_ATTACHMENTS - 1));
+        let destination = draft_dir.join("next.png");
+
+        make_room_in_draft_attachments(&draft_dir, &destination, 1).unwrap();
+
+        assert!(!oldest.exists());
+        assert_eq!(
+            std::fs::read_dir(&draft_dir).unwrap().count(),
+            MAX_STORED_DRAFT_ATTACHMENTS - 1
+        );
+        ensure_attachment_storage_quota(&draft_dir, &destination, 1).unwrap();
+    }
+
+    #[test]
+    fn draft_attachment_storage_keeps_files_while_there_is_room() {
+        let root = tempfile::tempdir().unwrap();
+        let existing = root.path().join("existing.png");
+        std::fs::write(&existing, b"x").unwrap();
+
+        make_room_in_draft_attachments(root.path(), &root.path().join("next.png"), 1).unwrap();
+
+        assert!(existing.exists());
+    }
+
+    #[test]
+    fn attaching_a_stored_draft_image_again_protects_it_from_eviction() {
+        let root = tempfile::tempdir().unwrap();
+        for index in 0..MAX_STORED_DRAFT_ATTACHMENTS {
+            let path = root.path().join(format!("{index}.png"));
+            std::fs::write(&path, b"x").unwrap();
+            age_attachment(&path, 1_000 + index as u64);
+        }
+        let reused = root
+            .path()
+            .join(format!("{}.png", MAX_STORED_DRAFT_ATTACHMENTS - 1));
+
+        make_room_in_draft_attachments(root.path(), &reused, 1).unwrap();
+        make_room_in_draft_attachments(root.path(), &root.path().join("next.png"), 1).unwrap();
+
+        assert!(reused.exists());
+        assert!(!root
+            .path()
+            .join(format!("{}.png", MAX_STORED_DRAFT_ATTACHMENTS - 2))
+            .exists());
+    }
+
+    #[test]
+    fn draft_attachment_storage_gives_up_old_files_to_stay_inside_the_byte_budget() {
+        let root = tempfile::tempdir().unwrap();
+        let large = root.path().join("large.mov");
+        sized_attachment(&large, MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION);
+        age_attachment(&large, 2_000);
+        let recent = root.path().join("recent.png");
+        std::fs::write(&recent, b"x").unwrap();
+        let destination = root.path().join("next.png");
+
+        make_room_in_draft_attachments(root.path(), &destination, 1).unwrap();
+
+        assert!(!large.exists());
+        assert!(recent.exists());
+        ensure_attachment_storage_quota(root.path(), &destination, 1).unwrap();
+    }
+
+    // A file count below these would again end a chat long before its bytes run
+    // out, and a draft folder this small would evict images from a full message.
+    const _: () = assert!(
+        MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION as u64 * MAX_CHAT_IMAGE_BYTES
+            > MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION
+    );
+    const _: () = assert!(MAX_STORED_DRAFT_ATTACHMENTS > MAX_CHAT_ATTACHMENTS);
+
+    #[test]
+    fn session_outlives_many_full_turns_of_small_attachments() {
+        let root = tempfile::tempdir().unwrap();
+        // A limit of sixteen files used to end a chat after one full turn.
+        for index in 0..=16 * MAX_CHAT_ATTACHMENTS {
+            ensure_attachment_storage_quota(
+                root.path(),
+                &root.path().join(format!("{index}.png")),
+                1,
+            )
+            .unwrap();
+            std::fs::write(root.path().join(format!("{index}.png")), b"x").unwrap();
+        }
+    }
+
+    #[test]
+    fn session_takes_full_size_images_until_the_byte_budget_runs_out() {
+        let root = tempfile::tempdir().unwrap();
+        let mut accepted = 0_u64;
+        let error = loop {
+            let path = root.path().join(format!("{accepted}.png"));
+            match ensure_attachment_storage_quota(root.path(), &path, MAX_CHAT_IMAGE_BYTES) {
+                Ok(()) => sized_attachment(&path, MAX_CHAT_IMAGE_BYTES),
+                Err(error) => break error,
+            }
+            accepted += 1;
+        };
+
+        assert_eq!(
+            accepted,
+            MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION / MAX_CHAT_IMAGE_BYTES
+        );
+        assert!(error.contains("1 GB"), "{error}");
+        assert!(error.contains("new chat"), "{error}");
+        assert_eq!(
+            std::fs::read_dir(root.path()).unwrap().count() as u64,
+            accepted,
+            "a session's files must survive a refused attachment"
+        );
+    }
+
+    #[test]
+    fn full_session_can_take_a_smaller_file_or_one_it_already_stores() {
+        let root = tempfile::tempdir().unwrap();
+        let stored = root.path().join("stored.mov");
+        sized_attachment(&stored, MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION - 1);
+        let next = root.path().join("next.png");
+
+        ensure_attachment_storage_quota(root.path(), &stored, 1 << 20).unwrap();
+        ensure_attachment_storage_quota(root.path(), &next, 1).unwrap();
+        assert!(ensure_attachment_storage_quota(root.path(), &next, 2).is_err());
+    }
+
     #[test]
     fn private_attachment_storage_is_quota_limited_and_staged_for_deletion() {
         let root = tempfile::tempdir().unwrap();
@@ -34024,7 +34988,11 @@ while True:
         }
         let error = ensure_attachment_storage_quota(&session_dir, &session_dir.join("next.png"), 1)
             .unwrap_err();
-        assert!(error.contains("storage limit"));
+        assert!(
+            error.contains(&MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION.to_string()),
+            "{error}"
+        );
+        assert!(error.contains("new chat"), "{error}");
 
         let (original, tombstone) = stage_session_attachments(root.path(), session_id)
             .unwrap()
@@ -34103,10 +35071,13 @@ while True:
         let status = git_status_impl(repo.path().to_str().unwrap()).unwrap();
         assert_eq!(status.additions, 450);
         assert!(!status.stats_partial);
+        // Untracked files stay out of the main comparison; only the tracked
+        // binary change is listed, and it has no line counts.
         let comparison = status.compared_to_main.unwrap();
-        assert_eq!((comparison.additions, comparison.deletions), (450, 0));
+        assert_eq!((comparison.additions, comparison.deletions), (0, 0));
         assert!(!comparison.partial);
-        assert_eq!(comparison.files.len(), 451);
+        assert_eq!(comparison.files.len(), 1);
+        assert_eq!(comparison.files[0].path, "image.bin");
         let (_, malformed) = parse_git_numstat("invalid\t1\tfile.txt");
         assert!(malformed);
     }
@@ -34131,6 +35102,61 @@ while True:
             String::from_utf8_lossy(&output.stderr)
         );
     }
+
+    #[test]
+    fn every_tool_schema_is_consistent_and_scoped() {
+        for descriptor in gyro_core::CAPABILITY_DESCRIPTORS {
+            let name = descriptor.id.provider_tool_name();
+            let schema = desktop_capability_tool_schema(descriptor.id);
+            let properties = schema["properties"].as_object().unwrap();
+            for required in schema["required"].as_array().into_iter().flatten() {
+                let required = required.as_str().unwrap();
+                assert!(
+                    properties.contains_key(required),
+                    "{name} requires undeclared {required}"
+                );
+            }
+            for (parameter, property) in properties {
+                assert!(
+                    property.get("type").is_some() || property.get("enum").is_some(),
+                    "{name}.{parameter} has no type"
+                );
+            }
+            if name.starts_with("gyro_browser_") {
+                assert!(
+                    !properties.contains_key("rootId"),
+                    "{name} is not bound to a workspace root"
+                );
+            }
+        }
+        let diff = desktop_capability_tool_schema(CapabilityId::WorkspaceDiff);
+        assert!(!diff["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|required| required == "path"));
+    }
+
+    #[test]
+    fn unknown_workspace_task_lists_the_valid_ids() {
+        let task =
+            |id: &str, group: &str| suggested_task(id.into(), id.into(), "npm", Vec::new(), group);
+        let tasks = vec![task("package:build", "build"), task("package:test", "test")];
+        let message = unknown_workspace_task_message("build", &tasks, false);
+        assert!(message.contains("package:build, package:test"), "{message}");
+        let message = unknown_workspace_task_message("package:build", &tasks, true);
+        assert!(message.contains("available ids: package:test"), "{message}");
+        assert!(!message.contains("package:build,"), "{message}");
+        let many: Vec<_> = (0..240)
+            .map(|index| task(&format!("package:script-{index:03}"), "build"))
+            .collect();
+        let message = unknown_workspace_task_message("x", &many, false);
+        assert!(
+            message.len() < 2_200 && message.ends_with("more)"),
+            "{message}"
+        );
+        assert!(unknown_workspace_task_message("x", &[], true).contains("no discovered test tasks"));
+    }
 }
 
 /// Deleting a workspace entry must always land in a trash, whichever volume it
@@ -34141,10 +35167,8 @@ mod workspace_trash_tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let directory = std::env::temp_dir().join(format!(
-            "gyro-trash-{}-{name}",
-            std::process::id()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("gyro-trash-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).unwrap();
         directory
@@ -34223,10 +35247,7 @@ mod workspace_trash_tests {
 
     #[test]
     fn a_relative_path_resolves_against_the_workspace_root() {
-        assert_eq!(
-            absolute_workspace_path("/w", "src/lib.rs"),
-            "/w/src/lib.rs"
-        );
+        assert_eq!(absolute_workspace_path("/w", "src/lib.rs"), "/w/src/lib.rs");
         assert_eq!(
             absolute_workspace_path("/w", "/elsewhere/lib.rs"),
             "/elsewhere/lib.rs"

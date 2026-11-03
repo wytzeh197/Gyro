@@ -168,15 +168,12 @@ pub(crate) fn session_missing_calls(conn: &Connection, session: Uuid) -> Result<
 
 pub fn session_tokens(conn: &Connection, session: Uuid) -> Result<Option<UsageTokens>> {
     // Follow exact linked turns rather than every call in a reused child
-    // session. UNION terminates cycles; EXISTS counts each ledger row once,
+    // session. UNION terminates cycles and counts each ledger row once,
     // including direct calls that never had a turn identity.
     let sql = format!(
-        "{SESSION_OWNED_TURNS}
-         select {COLUMNS} from usage_ledger l
-         where l.session_id = ?1 or exists(
-            select 1 from owned where owned.session_id = l.session_id
-                and owned.turn_id = l.turn_id
-         ) order by l.occurred_at, l.id"
+        "select {COLUMNS} from usage_ledger l
+         where l.id in ({}) order by l.occurred_at, l.id",
+        crate::usage::queries::SESSION_LEDGER_IDS
     );
     let session_id = session.to_string();
     let parameters: [&dyn rusqlite::ToSql; 1] = [&session_id];
@@ -202,7 +199,7 @@ pub fn task_tokens(conn: &Connection, session: Uuid, turn: Uuid) -> Result<Optio
             join owned on links.parent_session_id = owned.session_id and links.parent_turn_id = owned.turn_id
          )
          select {COLUMNS} from usage_ledger l
-         where exists(select 1 from owned where owned.session_id = l.session_id and owned.turn_id = l.turn_id)
+         where (l.session_id, l.turn_id) in (select session_id, turn_id from owned)
          order by l.occurred_at, l.id");
     let parameters: [&dyn rusqlite::ToSql; 2] = [&session.to_string(), &turn.to_string()];
     let mut total = fold_rows(conn, &sql, &parameters)?;

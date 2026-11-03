@@ -23,7 +23,7 @@ export function BrowserViewportControls({
         type="button"
         aria-label="Automatic viewport"
         aria-pressed={mode === "auto"}
-        className={mode === "auto" ? "is-active" : undefined}
+        className={mode === "auto" ? "is-text is-active" : "is-text"}
         title="Automatic: Desktop fit for local previews, Responsive for websites"
         onClick={() => onChange?.("auto")}
       >
@@ -31,12 +31,13 @@ export function BrowserViewportControls({
       </button>
       {(
         [
-          { id: "responsive", label: "Responsive", Icon: ScanLine },
-          { id: "desktop", label: "Desktop fit", Icon: Monitor },
-          { id: "tablet", label: "Tablet", Icon: Tablet },
-          { id: "mobile", label: "Mobile", Icon: Smartphone },
+          { id: "responsive", label: "Responsive", Icon: ScanLine, size: 14 },
+          { id: "desktop", label: "Desktop fit", Icon: Monitor, size: 14 },
+          // Both are portrait outlines; the size difference tells them apart.
+          { id: "tablet", label: "Tablet", Icon: Tablet, size: 15 },
+          { id: "mobile", label: "Mobile", Icon: Smartphone, size: 13 },
         ] as const
-      ).map(({ id, label, Icon }) => (
+      ).map(({ id, label, Icon, size }) => (
         <button
           key={id}
           type="button"
@@ -46,7 +47,7 @@ export function BrowserViewportControls({
           title={label}
           onClick={() => onChange?.(id)}
         >
-          <Icon size={14} />
+          <Icon size={size} />
         </button>
       ))}
     </div>

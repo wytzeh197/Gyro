@@ -4,6 +4,7 @@ use crate::{timing, UsageTokens};
 use serde::Serialize;
 use serde_json::Value;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 
 thread_local! { static ACTIVE: RefCell<Option<Summary>> = const { RefCell::new(None) }; }
 
@@ -19,12 +20,18 @@ pub struct Summary {
     /// Images and provider-owned context cannot be priced from JSON characters.
     pub unmeasured_content: bool,
     pub provider_attempts: u32,
+    /// Fixed tool classes only; never tool arguments, paths, or result data.
+    pub tool_class_counts: BTreeMap<String, u64>,
     /// Bounded adapter receipts retain the runtime contract without prompt text.
     pub usage_observations: Vec<crate::acp_usage::AcpUsageObservation>,
     #[serde(skip)]
     native: NativeAttempt,
     #[serde(skip)]
     prepared_context: crate::efficiency::context::Attribution,
+    #[serde(skip)]
+    pending_retired_bytes: u64,
+    #[serde(skip)]
+    pending_retirement_observed: bool,
     #[serde(skip)]
     previous_native: Option<UsageTokens>,
 }
@@ -118,23 +125,60 @@ pub fn prepared_context(attribution: crate::efficiency::context::Attribution) {
         }
     });
 }
-/// Bytes a request saved by retiring stale tool evidence; recorded on the active summary so the
-/// saving reaches the same record as the prompt categories instead of being computed and dropped.
+/// Record each rewrite once, even if the prepared request is retried. Pending
+/// values become observable only if an owned request is actually attempted.
 pub fn retired_context(bytes: usize) {
-    if bytes == 0 {
-        return;
-    }
     ACTIVE.with(|slot| {
         if let Some(summary) = slot.borrow_mut().as_mut() {
-            summary.prepared_context.retired_bytes += bytes as u64;
+            summary.pending_retirement_observed = true;
+            summary.pending_retired_bytes =
+                summary.pending_retired_bytes.saturating_add(bytes as u64);
         }
     });
+}
+/// Count a schema-valid capability request by a fixed, bounded class. It may
+/// still be denied by policy or blocked before execution. Unknown class names
+/// collapse into `other`, so this surface cannot persist arbitrary user data.
+pub fn observe_tool_class(class: &str) {
+    let class = normalize_tool_class(class);
+    ACTIVE.with(|slot| {
+        if let Some(summary) = slot.borrow_mut().as_mut() {
+            let count = summary
+                .tool_class_counts
+                .entry(class.to_owned())
+                .or_default();
+            *count = count.saturating_add(1);
+        }
+    });
+}
+
+/// Numeric, fixed-field local observations. Call on the owned runner thread;
+/// collectors never receive tool arguments or output text.
+pub fn efficiency_event(update: impl FnOnce(&mut crate::efficiency::context::EfficiencyEvents)) {
+    ACTIVE.with(|slot| {
+        if let Some(summary) = slot.borrow_mut().as_mut() {
+            update(
+                summary
+                    .context_attribution
+                    .efficiency_events
+                    .get_or_insert_with(Default::default),
+            );
+        }
+    });
+}
+
+pub(crate) fn normalize_tool_class(class: &str) -> &str {
+    let class = match class {
+        "workspace-read" | "workspace-search" | "workspace-list" | "workspace-write"
+        | "terminal" | "browser" | "git" | "web" | "code" | "agent" | "memory" => class,
+        _ => "other",
+    };
+    class
 }
 fn categorize_prompt(
     mut attribution: crate::efficiency::context::Attribution,
     prepared: &crate::efficiency::context::Attribution,
 ) -> crate::efficiency::context::Attribution {
-    attribution.retired_bytes = prepared.retired_bytes;
     let available = attribution.other_text;
     let classified = prepared.instructions
         + prepared.history
@@ -241,6 +285,15 @@ impl Request {
         let index = ACTIVE.with(|slot| {
             slot.borrow_mut().as_mut().map_or(0, |summary| {
                 summary.requests = summary.requests.saturating_add(1);
+                if summary.pending_retirement_observed {
+                    let attribution = &mut summary.context_attribution;
+                    attribution.retirement_accounting_version = Some(2);
+                    attribution.retired_bytes = attribution
+                        .retired_bytes
+                        .saturating_add(summary.pending_retired_bytes);
+                    summary.pending_retired_bytes = 0;
+                    summary.pending_retirement_observed = false;
+                }
                 let attribution = categorize_prompt(
                     crate::efficiency::context::Attribution::from_request(payload),
                     &summary.prepared_context,
@@ -364,7 +417,7 @@ pub fn add_usage(total: &mut Option<UsageTokens>, tokens: UsageTokens) {
 pub fn text_size(value: &Value) -> (usize, bool) {
     match value {
         Value::String(text) if text.starts_with("data:image/") => (0, true),
-        Value::String(text) => (text.chars().count().saturating_add(2), false),
+        Value::String(text) => (text_chars(text).saturating_add(2), false),
         Value::Array(items) => items
             .iter()
             .map(text_size)
@@ -389,9 +442,96 @@ pub fn text_size(value: &Value) -> (usize, bool) {
     }
 }
 
+/// Character count used as the token estimate.
+///
+/// Tool output and source files are almost always ASCII. `str::is_ascii` is a
+/// byte scan, and for ASCII the byte length is the character length, so a
+/// multi-megabyte result does not pay for scalar decoding. Non-ASCII text
+/// still counts scalars, which is what the four-characters-per-token estimate
+/// means.
+fn text_chars(text: &str) -> usize {
+    if text.is_ascii() {
+        text.len()
+    } else {
+        text.chars().count()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retirement_counts_new_rewrites_once_even_on_retry_and_cancel() {
+        let _scope = Scope::start();
+        let payload =
+            serde_json::json!({"messages":[{"role":"user","content":"private prompt sentinel"}]});
+        retired_context(0);
+        retired_context(2_048);
+        {
+            let mut first = Request::start(&payload);
+            first.rejected();
+        }
+        retry();
+        drop(Request::start(&payload));
+        retired_context(512);
+        drop(Request::start(&payload));
+        let summary = snapshot().unwrap();
+        assert_eq!(summary.context_attribution.retired_bytes, 2_560);
+        assert_eq!(
+            summary.context_attribution.retirement_accounting_version,
+            Some(2)
+        );
+        assert_eq!(summary.requests, 3);
+        assert_eq!(summary.rejected, 1);
+        assert!(!serde_json::to_string(&summary)
+            .unwrap()
+            .contains("private prompt sentinel"));
+    }
+
+    #[test]
+    fn retirement_without_an_attempt_stays_unavailable() {
+        let _scope = Scope::start();
+        retired_context(3_000);
+        let summary = snapshot().unwrap();
+        assert_eq!(summary.requests, 0);
+        assert_eq!(summary.context_attribution.retired_bytes, 0);
+        assert_eq!(
+            summary.context_attribution.retirement_accounting_version,
+            None
+        );
+    }
+
+    #[test]
+    fn attempted_owned_request_can_report_observed_zero() {
+        let _scope = Scope::start();
+        retired_context(0);
+        drop(Request::start(&serde_json::json!({"messages": []})));
+        let attribution = snapshot().unwrap().context_attribution;
+        assert_eq!(attribution.retired_bytes, 0);
+        assert_eq!(attribution.retirement_accounting_version, Some(2));
+    }
+
+    #[test]
+    fn tool_class_counts_are_bounded_private_and_scoped() {
+        let _outer = Scope::start();
+        observe_tool_class("workspace-read");
+        observe_tool_class("private/path/sentinel");
+        observe_tool_class("another arbitrary value");
+        {
+            let _inner = Scope::start();
+            observe_tool_class("terminal");
+            let inner = snapshot().unwrap();
+            assert_eq!(inner.tool_class_counts.get("terminal"), Some(&1));
+            assert!(!inner.tool_class_counts.contains_key("workspace-read"));
+        }
+        let outer = snapshot().unwrap();
+        assert_eq!(outer.tool_class_counts.get("workspace-read"), Some(&1));
+        assert_eq!(outer.tool_class_counts.get("other"), Some(&2));
+        assert!(!serde_json::to_string(&outer)
+            .unwrap()
+            .contains("private/path/sentinel"));
+    }
 
     #[test]
     fn lightweight_live_usage_preserves_native_restarts_http_retries_and_rejections() {
@@ -543,6 +683,29 @@ mod tests {
             "type": "image", "data": "x".repeat(100_000), "mimeType": "image/png"
         }));
         assert!(unknown && chars < 100);
+    }
+    #[test]
+    fn text_size_counts_ascii_bytes_and_unicode_scalars_the_same_way() {
+        let ascii = "fn main() {\n    println!(\"ok\");\n}\n".repeat(200);
+        let mixed = format!("{ascii}café 🦀");
+        for text in [ascii, mixed] {
+            let (chars, unknown) = text_size(&Value::String(text.clone()));
+            assert!(!unknown);
+            assert_eq!(chars, text.chars().count() + 2);
+        }
+        let content = "a".repeat(4_096);
+        let note = "line — two";
+        let (object_chars, unknown) = text_size(&serde_json::json!({
+            "content": content,
+            "note": note
+        }));
+        assert!(!unknown);
+        // Object overhead is the same walk `text_size` uses: 2 for `{}`, then
+        // key length + 4 and the string's own quoted character count per field.
+        let expected = 2
+            + ("content".len() + 4 + content.chars().count() + 2)
+            + ("note".len() + 4 + note.chars().count() + 2);
+        assert_eq!(object_chars, expected);
     }
     #[test]
     fn native_restarts_keep_prior_attempts_and_reported_cache_counts() {

@@ -129,7 +129,6 @@ export function providerSupportsApiKey(providerId: string) {
     providerId === "openai" ||
     providerId === "anthropic" ||
     providerId === "xai" ||
-    providerId === "antigravity" ||
     providerId === "kimi" ||
     providerId === "cursor" ||
     providerId === "deepseek" ||
@@ -149,8 +148,6 @@ export function providerApiKeyEnvName(providerId: string) {
       return "ANTHROPIC_API_KEY";
     case "xai":
       return "XAI_API_KEY";
-    case "antigravity":
-      return "GEMINI_API_KEY";
     case "kimi":
       return "MOONSHOT_API_KEY";
     case "cursor":
@@ -299,7 +296,9 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         displayName: "Claude Opus 5",
         description:
           "Claude Code. Frontier model for complex agentic coding and long-horizon work. OpenRouter's API row also serves 1M.",
-        contextWindowTokens: 1_000_000,
+        // Claude Code runs bare Opus ids at 200K. The catalog's -1m rows
+        // select the 1M window.
+        contextWindowTokens: 200_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
@@ -307,7 +306,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
         id: "claude-opus-4-8",
         displayName: "Claude Opus 4.8",
         description: "Claude Code. Strong model for complex agentic coding.",
-        contextWindowTokens: 1_000_000,
+        contextWindowTokens: 200_000,
         defaultReasoningEffort: "high",
         supportedReasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
@@ -456,19 +455,19 @@ export const providerCatalog: ProviderCatalogEntry[] = [
     displayName: "Google Antigravity",
     apiKeyRef: "provider-cli:antigravity",
     enabled: false,
-    authMode: "env",
+    authMode: "cli",
     authStatus: "not-connected",
     baseUrl: null,
     defaultModelId: "antigravity-default",
     selectedModelId: "antigravity-default",
     capabilities: {
-      executionKind: "acp-cli",
+      executionKind: "antigravity-cli",
       executable: true,
-      supportsApprovals: true,
-      supportsImages: true,
+      supportsApprovals: false,
+      supportsImages: false,
       supportsResume: true,
       supportsUsage: false,
-      visibility: "experimental",
+      visibility: "standard",
     },
     models: [
       {
@@ -478,7 +477,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       },
     ],
     effort: "medium",
-    allowedTools: ["files", "terminal", "diff", "browser"],
+    allowedTools: [],
   },
   {
     id: "cursor",
@@ -857,9 +856,11 @@ export function applyProviderCapabilityManifest(
       (candidate) => candidate.id === support.providerId,
     );
     if (!provider || !support.executionKind) continue;
+    // A chat adapter can run without connecting Gyro tools.
+    const executable = support.executionKind !== "readiness-only";
     provider.capabilities = {
       executionKind: support.executionKind,
-      executable: support.available,
+      executable,
       supportsApprovals: support.supportsApprovals,
       supportsImages: support.supportsImages,
       supportsResume: support.supportsResume,
@@ -867,7 +868,7 @@ export function applyProviderCapabilityManifest(
       visibility:
         support.supportTier === "experimental"
           ? "experimental"
-          : support.available
+          : executable
             ? "standard"
             : "readiness-only",
     };
@@ -1125,11 +1126,13 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
       savedProvider?.authStatus ??
       (savedProvider?.enabled ? "connected" : catalogProvider.authStatus);
     const authMode =
-      savedProvider?.authMode === "cli" ||
-      savedProvider?.authMode === "env" ||
-      savedProvider?.authMode === "sdk"
-        ? savedProvider.authMode
-        : catalogProvider.authMode;
+      catalogProvider.id === "antigravity"
+        ? "cli"
+        : savedProvider?.authMode === "cli" ||
+            savedProvider?.authMode === "env" ||
+            savedProvider?.authMode === "sdk"
+          ? savedProvider.authMode
+          : catalogProvider.authMode;
 
     return {
       ...catalogProvider,

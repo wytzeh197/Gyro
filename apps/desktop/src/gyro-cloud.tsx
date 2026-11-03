@@ -7,7 +7,6 @@ import {
   ReadOnlyChatMessage,
   RefreshIcon,
   SettingsGroup,
-  SettingsMore,
   SettingsRow,
   TrashIcon,
 } from "@gyro-dev/ui";
@@ -331,6 +330,8 @@ export function CloudSignIn({
       }}
     >
       <SettingsGroup
+        id="account-auth"
+        defaultOpen
         label={title}
         description={
           mode === "enter-proof"
@@ -524,7 +525,7 @@ export function GyroCloud({
     <>
       <fieldset className="gyro-cloud-fieldset" disabled={!!busy}>
         {!status ? (
-          <SettingsGroup label="Connection">
+          <SettingsGroup id="cloud-connection" label="Connection" defaultOpen>
             <SettingsRow
               label={busy ? "Loading Cloud…" : "Couldn’t load Cloud"}
               detail="Cloud needs a connection to your Gyro Account."
@@ -549,7 +550,7 @@ export function GyroCloud({
         ) : (
           <>
             {message.includes("sign-in expired") && (
-              <SettingsGroup label="Sign-in">
+              <SettingsGroup id="cloud-expired" label="Sign-in" defaultOpen>
                 <SettingsRow
                   label="Your sign-in expired"
                   detail="Sign in again to keep using Cloud."
@@ -580,6 +581,8 @@ export function GyroCloud({
             {!status.unlocked ? (
               generated ? (
                 <SettingsGroup
+                  id="cloud-recovery-setup"
+                  defaultOpen
                   label="Save your recovery code"
                   description="You’ll need it to unlock backups on another device. Account recovery alone cannot unlock your chats."
                 >
@@ -633,7 +636,7 @@ export function GyroCloud({
                     });
                   }}
                 >
-                  <SettingsGroup label="Chat backup">
+                  <SettingsGroup id="cloud-backup" label="Chat backup" defaultOpen>
                     <SettingsRow
                       label="Unlock your backups"
                     >
@@ -658,7 +661,7 @@ export function GyroCloud({
                   </SettingsGroup>
                 </form>
               ) : (
-                <SettingsGroup label="Chat backup">
+                <SettingsGroup id="cloud-backup" label="Chat backup" defaultOpen>
                   <SettingsRow
                     label="Set up encrypted backup"
                     detail="Save a recovery code to get started."
@@ -682,7 +685,7 @@ export function GyroCloud({
             ) : (
               <>
                 {uploadId && (
-                  <SettingsGroup label="This chat">
+                  <SettingsGroup id="cloud-this-chat" label="This chat" defaultOpen>
                     <SettingsRow
                       label="Save an encrypted copy"
                     >
@@ -714,6 +717,8 @@ export function GyroCloud({
                   </SettingsGroup>
                 )}
                 <SettingsGroup
+                  id="cloud-chats"
+                  defaultOpen
                   label="Cloud chats"
                   actions={
                     <button
@@ -837,41 +842,45 @@ export function GyroCloud({
                   )}
                 </SettingsGroup>
                 {restored.length > 0 && (
-                  <SettingsMore
-                    label={`Downloaded history (${restored.length})`}
+                  <SettingsGroup
+                    id="cloud-downloaded"
+                    label="Downloaded history"
+                    summary={`${restored.length} on this device`}
                   >
-                    <SettingsGroup label="Downloaded history">
-                      {restored.map((id) => (
-                        <SettingsRow key={id} label={chatTitle(id)}>
-                          <button
-                            className="gyro-secondary-button"
-                            onClick={() =>
-                              void run("Opening history…", async () => {
-                                setArchive(
-                                  await cloud<Archive>("open", { id }),
-                                );
-                              })
-                            }
-                            type="button"
-                          >
-                            Open
-                          </button>
-                        </SettingsRow>
-                      ))}
-                    </SettingsGroup>
-                  </SettingsMore>
+                    {restored.map((id) => (
+                      <SettingsRow key={id} label={chatTitle(id)}>
+                        <button
+                          className="gyro-secondary-button"
+                          onClick={() =>
+                            void run("Opening history…", async () => {
+                              setArchive(await cloud<Archive>("open", { id }));
+                            })
+                          }
+                          type="button"
+                        >
+                          Open
+                        </button>
+                      </SettingsRow>
+                    ))}
+                  </SettingsGroup>
                 )}
                 {inline && (
-                  <SettingsMore label="About your recovery code">
+                  <SettingsGroup
+                    id="cloud-recovery-code"
+                    label="Recovery code"
+                    summary="Keep it safe"
+                  >
                     <p className="gyro-cloud-note">
-                      Keep it safe. You’ll need it to unlock backups on another
-                      device, even after signing in.
+                      You’ll need it to unlock backups on another device, even
+                      after signing in.
                     </p>
-                  </SettingsMore>
+                  </SettingsGroup>
                 )}
                 {archive && (
                   <div ref={archiveRef}>
                     <SettingsGroup
+                      id="cloud-archive"
+                      defaultOpen
                       label={archive.title}
                       description={`Read-only history · ${formatCloudDate(archive.createdAt)}${archive.model ? ` · ${archive.model}` : ""}`}
                       actions={

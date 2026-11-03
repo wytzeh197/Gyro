@@ -76,6 +76,7 @@ export function useWorkspaceExplorerFiles(
   files: WorkspaceFile[],
   loadDirectory: ((path: string) => Promise<WorkspaceFile[]>) | undefined,
   onError: (path: string, error: unknown) => void,
+  changeRevision = 0,
 ) {
   const [expanded, setExpanded] = useState<string[]>([]);
   const [listings, setListings] = useState<DirectoryListing[]>([]);
@@ -124,18 +125,26 @@ export function useWorkspaceExplorerFiles(
   onErrorRef.current = onError;
   const rootsRef = useRef(roots);
   rootsRef.current = roots;
+  const refreshRef = useRef<(() => void) | undefined>(undefined);
 
   useEffect(() => {
     if (!loadDirectoryRef.current) return;
     let cancelled = false;
     let pending = false;
+    let refreshQueued = false;
     const failed = new Set<string>();
     const directories = directoryKey ? directoryKey.split("\n") : [];
     const refresh = async () => {
       const load = loadDirectoryRef.current;
-      if (pending || !directories.length || !load) return;
+      if (cancelled || !directories.length || !load) return;
+      if (pending) {
+        refreshQueued = true;
+        return;
+      }
       pending = true;
-      const results = await Promise.allSettled(directories.map(load));
+      const results = await Promise.allSettled(
+        directories.map((path) => Promise.resolve().then(() => load(path))),
+      );
       pending = false;
       if (cancelled) return;
       const updated: DirectoryListing[] = [];
@@ -166,6 +175,13 @@ export function useWorkspaceExplorerFiles(
         const next = [...byPath.values()];
         return sameListings(current, next) ? current : next;
       });
+      if (refreshQueued) {
+        refreshQueued = false;
+        void refresh();
+      }
+    };
+    refreshRef.current = () => {
+      void refresh();
     };
     void refresh();
     // Keep open folders current even when native file watching is unavailable.
@@ -179,9 +195,13 @@ export function useWorkspaceExplorerFiles(
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       cancelled = true;
+      refreshRef.current = undefined;
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [directoryKey, rootKey]);
+  useEffect(() => {
+    if (changeRevision > 0) refreshRef.current?.();
+  }, [changeRevision]);
   return { explorerFiles, onExpandedDirectoriesChange: setExpanded };
 }

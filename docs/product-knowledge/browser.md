@@ -1,5 +1,13 @@
 # Gyro Browser
 
+## App Preview targets
+
+Use `gyro_browser_targets` to discover this chat's selected target, real macOS windows, and booted iPhone Simulators. Use `gyro_browser_select_target` with a discovered targetId (or `web`). Selection is shared with the person's Preview panel and invalidates previous framed captures. Selection does not launch apps, boot devices, or install runtimes.
+
+Use `gyro_browser_capture_preview` for a framed PNG of the selected runtime. It returns the runtime identity, owner, capture time, expiry, and contentRect in image pixels. Use `gyro_browser_preview_click` with that screenshot filename and coordinates in the full framed image, including the surround offset. Frame decorations are not interactive. A capture expires after 15 seconds; target changes, window geometry/content changes, and dispatched input invalidate it. Capture again to inspect the outcome. Native input requires an unobscured target and Accessibility permission; text/protected controls require user interaction.
+
+Native captures are timestamped snapshots, never live web pages. iPhone Simulator currently supports discovery and device screenshots with surrounds; touch injection is unavailable. Interact in Simulator, then capture again. Missing Xcode, a booted iPhone, Screen Recording, or Accessibility permission must be reported as unavailable, not simulated success. Ordinary web tools apply only while the Web target is selected; their existing CSS-coordinate contract remains unchanged.
+
 Gyro owns a browser page per chat. Use it to inspect websites and interact with their visible controls. A project folder is not required. The current capability contract states whether this model can call tools and receive images; it describes support, not proof that a page or image was observed.
 
 Delegated sub-agents each own an independent browser page, navigation history, and private browsing data. Open and use it with the same browser tools under the parent's inherited permissions. The page stays hidden from the frontend and does not replace the parent's browser. Background pointer actions dispatch page events; trusted OS input, native menus, HTML drag-and-drop, and CSS hover state are unavailable. Verify the page after each action and report any unsupported interaction accurately.

@@ -59,7 +59,7 @@ export {
   replyLinkMark,
 } from "./external-links";
 export type { ExternalLinkOpener, LinkClickIntent, ReplyLinkMark } from "./external-links";
-export { ChatFileActionsContext } from "./chat-file-card";
+export { ChatFileActionsContext, ChatFileScopeContext } from "./chat-file-card";
 export { CliSessionList } from "./cli-session-list";
 export { AppearanceContext, useAppearance } from "./appearance-context";
 export { applyAppearancePreferences } from "./appearance-runtime";
@@ -776,6 +776,12 @@ export {
 
 export { ChatRun } from "./chat-run-view";
 export { ChatRetryContext } from "./chat-retry-context";
+export { ProviderSignInContext } from "./provider-sign-in-context";
+export type {
+  ProviderSignIn,
+  ProviderSignInPhase,
+  ProviderSignInState,
+} from "./provider-sign-in-context";
 export { WorkspacePathUndoContext } from "./workspace-path-undo";
 export type {
   WorkspacePathUndoOffer,
@@ -840,3 +846,9 @@ export {
 } from "./workspace-rename";
 
 export { currentChatDrag } from "./chat-session-drag";
+export { CheckWorkContext, CheckWorkActivityContext, CheckWorkStatus, type CheckWorkActivity } from "./check-work-context";
+
+export {
+  FirstRunTour,
+  type FirstRunTourProps,
+} from "./first-run-tour-overlay";

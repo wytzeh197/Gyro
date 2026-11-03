@@ -1,5 +1,6 @@
 import { normalizedInterfaceSize, normalizedMotionSpeed } from "./appearance.ts";
 import { automaticBrowserDevice } from "./browser-viewport.ts";
+import { addNotification } from "./failure-notifications.ts";
 import type {
   DesktopNotificationPreferences,
   AppDestination,
@@ -1634,6 +1635,8 @@ export type WorkbenchAction =
   | { type: "open-tool-panel"; tab?: WorkbenchPaneTab }
   | { type: "close-tool-panel" }
   | { type: "set-workbench-mode"; mode: WorkbenchMode }
+  | { type: "set-settings-preferences"; patch: Partial<Pick<WorkbenchPreferences, "settingsSections" | "defaultChatProviderId" | "defaultChatEffort" | "checkReminders">> }
+  | { type: "import-portable-settings"; settings: Partial<import("./settings-transfer").PortableSettings> }
   | { type: "set-default-workspace-mode"; mode: WorkbenchMode }
   | { type: "set-theme"; theme: ThemeMode }
   | {
@@ -2269,10 +2272,13 @@ export function workbenchReducer(
             ? false
             : state.isToolPanelOpen,
       };
+    case "set-settings-preferences":
+      return { ...state, preferences: { ...state.preferences, ...action.patch } };
+    case "import-portable-settings":
+      return { ...state, preferences: { ...state.preferences, ...action.settings, desktopNotifications: { ...state.preferences.desktopNotifications, ...action.settings.desktopNotifications } } };
     case "set-default-workspace-mode":
       return {
         ...state,
-        workspaceMode: action.mode,
         preferences: {
           ...state.preferences,
           defaultWorkspaceMode: action.mode,
@@ -3691,9 +3697,9 @@ export function workbenchReducer(
     case "add-notification":
       return {
         ...state,
-        notifications: [action.notification, ...state.notifications].slice(
-          0,
-          12,
+        notifications: addNotification(
+          state.notifications,
+          action.notification,
         ),
       };
     case "dismiss-notification":
@@ -4934,11 +4940,10 @@ function normalizedSettingsSection(
     case "tools-contributions":
       return value;
     case "usage-limits":
-      // Retired page: usage limits now live on Models, Accounts & Limits.
-      return "providers";
     case "account":
-    case "cloud":
     case "providers":
+    case "billing":
+    case "cloud":
     case "efficiency":
     case "cli-profiles":
     case "appearance":
@@ -4979,6 +4984,7 @@ export function normalizedDesktopNotifications(
   value: Partial<DesktopNotificationPreferences> | undefined,
 ): DesktopNotificationPreferences {
   return {
+    showNames: value?.showNames !== false,
     enabled: value?.enabled !== false,
     approvals: value?.approvals !== false,
     finished: value?.finished !== false,
@@ -5047,6 +5053,10 @@ function normalizeWorkbenchPreferences(
       Number.isFinite(preferences.browserCompanionWidth)
         ? clampBrowserCompanionWidth(preferences.browserCompanionWidth)
         : undefined,
+    settingsSections: Object.fromEntries(Object.entries(preferences?.settingsSections ?? {}).filter(([key, value]) => /^[a-z0-9/-]{1,120}$/.test(key) && typeof value === "boolean").slice(0, 200)),
+    defaultChatProviderId: typeof preferences?.defaultChatProviderId === "string" && /^[a-z0-9][a-z0-9_:-]{0,100}$/.test(preferences.defaultChatProviderId) ? preferences.defaultChatProviderId : undefined,
+    defaultChatEffort: typeof preferences?.defaultChatEffort === "string" && ["minimal", "low", "medium", "high", "xhigh", "max", "ultra", "none"].includes(preferences.defaultChatEffort) ? preferences.defaultChatEffort : undefined,
+    checkReminders: preferences?.checkReminders === true,
     modelFollow: normalizedModelFollowMode(preferences?.modelFollow),
     sidebarChatsCollapsed: preferences?.sidebarChatsCollapsed === true,
     theme:

@@ -4,7 +4,6 @@ import type {
 } from "./types";
 import {
   SettingsGroup,
-  SettingsMore,
   SettingsRow,
   SettingsSwitch,
 } from "./settings-controls";
@@ -54,7 +53,7 @@ const KINDS: Array<{
 ];
 
 /** The macOS notification settings: a master switch, then one switch per kind
-    of message and a test button, which wait behind a click until they matter. */
+    of message and a test button, which appear once notifications are on. */
 export function DesktopNotificationSettings({
   preferences,
   permission,
@@ -82,7 +81,7 @@ export function DesktopNotificationSettings({
   const needsPermission =
     permission === "prompt" || permission === "prompt-with-rationale";
   return (
-    <SettingsGroup label="macOS notifications">
+    <SettingsGroup id="macos-notifications" label="macOS notifications">
       <SettingsRow label="Notifications" detail={permissionDetail(permission)}>
         <SettingsSwitch
           checked={preferences.enabled}
@@ -92,7 +91,8 @@ export function DesktopNotificationSettings({
       </SettingsRow>
       {preferences.enabled && needsPermission ? testRow : null}
       {preferences.enabled ? (
-        <SettingsMore label="Choose what notifies you">
+        <>
+          <SettingsRow label="Show chat and project names" detail="Turn off for generic notifications that keep names private on your lock screen."><SettingsSwitch label="Show chat and project names in notifications" checked={preferences.showNames !== false} onChange={showNames => onChange?.({ showNames })}/></SettingsRow>
           {KINDS.map((kind) => (
             <SettingsRow key={kind.key} label={kind.label} detail={kind.detail}>
               <SettingsSwitch
@@ -103,7 +103,7 @@ export function DesktopNotificationSettings({
             </SettingsRow>
           ))}
           {needsPermission ? null : testRow}
-        </SettingsMore>
+        </>
       ) : null}
     </SettingsGroup>
   );

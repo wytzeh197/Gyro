@@ -12,17 +12,29 @@ import { workspaceFileBadge } from "./workspace-file-icons";
 import { chatFileKind, type ChatFileLink } from "./chat-file-links";
 import "./chat-file-card.css";
 
+export type ChatFileScope = {
+  sessionId?: string;
+  workspacePath?: string;
+  providerId?: string;
+  providerSessionId?: string;
+};
+export const ChatFileScopeContext = createContext<ChatFileScope | undefined>(
+  undefined,
+);
+
 export const ChatFileActionsContext = createContext<
   | {
       preview: (
         path: string,
         kind: "image" | "video" | "audio",
+        scope?: ChatFileScope,
       ) => Promise<string | undefined>;
       open: (path: string) => void;
       resolveCitedImage?: (request: {
         target: string;
         providerId?: string;
         providerSessionId?: string;
+        scope?: ChatFileScope;
       }) => Promise<string | undefined>;
     }
   | undefined
@@ -53,30 +65,41 @@ export function ChatFileCard({
   variant?: "card" | "thumbnail" | "inline";
 }) {
   const actions = useContext(ChatFileActionsContext);
+  const scope = useContext(ChatFileScopeContext);
+  const hint = useContext(ChatImageHintContext);
   const trigger = useRef<HTMLButtonElement | HTMLAnchorElement | null>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const [resolvedPreview, setResolvedPreview] = useState<string>();
   const [failed, setFailed] = useState(false);
   const [previewPending, setPreviewPending] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [rejectedPreview, setRejectedPreview] = useState<string>();
+  const [previewAttempt, setPreviewAttempt] = useState(0);
+  const suppliedPreview =
+    previewUrl === rejectedPreview ? undefined : previewUrl;
   const media =
     file.kind === "image" || file.kind === "video" || file.kind === "audio";
   const src =
-    previewUrl ??
+    suppliedPreview ??
     (file.local ? resolvedPreview : media ? file.target : undefined);
   useEffect(() => {
     let current = true;
     setFailed(false);
     setResolvedPreview(undefined);
+    setPreviewPending(false);
     if (
-      !previewUrl &&
+      !suppliedPreview &&
       file.local &&
       (file.kind === "image" || file.kind === "video" || file.kind === "audio")
     ) {
       if (actions?.preview) {
         setPreviewPending(true);
         void actions
-          .preview(file.target, file.kind)
+          .preview(file.target, file.kind, {
+            ...scope,
+            providerId: hint?.providerId,
+            providerSessionId: hint?.providerSessionId,
+          })
           .then((url) => {
             if (!current) return;
             setResolvedPreview(url);
@@ -92,7 +115,18 @@ export function ChatFileCard({
     return () => {
       current = false;
     };
-  }, [file.target, file.kind, file.local, previewUrl, actions]);
+  }, [
+    file.target,
+    file.kind,
+    file.local,
+    suppliedPreview,
+    actions,
+    scope?.sessionId,
+    scope?.workspacePath,
+    hint?.providerId,
+    hint?.providerSessionId,
+    previewAttempt,
+  ]);
   useEffect(() => {
     if (!expanded) return;
     const dismiss = (event: KeyboardEvent) => {
@@ -147,23 +181,31 @@ export function ChatFileCard({
     ? (file.local
         ? file.target
         : decodeURIComponent(new URL(file.target).pathname)
-      ).split("/").pop() || file.name
+      )
+        .split("/")
+        .pop() || file.name
     : file.name;
   const className = inline
     ? "gyro-chat-file-link"
     : `gyro-chat-file-card is-${file.kind}${thumbnail ? " is-thumbnail" : ""}`;
   const open = () => {
     if (media && hasPreview) setExpanded(true);
+    else if (file.local && file.kind === "image" && actions?.preview)
+      setPreviewAttempt((attempt) => attempt + 1);
     else if (file.local) actions?.open(file.target);
     else onOpen?.(file.target);
   };
   const label =
     media && hasPreview
       ? `Preview ${inlineName}`
-      : file.local
-        ? `Show ${inlineName} in Finder`
-        : `Open ${inlineName}`;
-  const content = inline ? inlineName : (
+      : file.local && file.kind === "image" && actions?.preview
+        ? `Retry preview ${inlineName}`
+        : file.local
+          ? `Show ${inlineName} in Finder`
+          : `Open ${inlineName}`;
+  const content = inline ? (
+    inlineName
+  ) : (
     <>
       {media &&
       file.kind !== "audio" &&
@@ -179,7 +221,11 @@ export function ChatFileCard({
             <img
               alt=""
               loading="lazy"
-              onError={() => setFailed(true)}
+              onError={() => {
+                if (suppliedPreview && file.local)
+                  setRejectedPreview(suppliedPreview);
+                else setFailed(true);
+              }}
               src={src}
             />
           ) : hasPreview ? (
@@ -307,10 +353,10 @@ export function CitedChatImage({
   skipWhenMarkdownImage?: boolean;
 }) {
   const actions = useContext(ChatFileActionsContext);
+  const scope = useContext(ChatFileScopeContext);
   const hint = useContext(ChatImageHintContext);
   const skipped =
-    skipWhenMarkdownImage &&
-    hint?.markdownImages?.has(target.trim()) === true;
+    skipWhenMarkdownImage && hint?.markdownImages?.has(target.trim()) === true;
   const resolve = skipped ? undefined : actions?.resolveCitedImage;
   const [path, setPath] = useState<string>();
   const [settled, setSettled] = useState(!resolve);
@@ -327,6 +373,7 @@ export function CitedChatImage({
       target,
       providerId: hint?.providerId,
       providerSessionId: hint?.providerSessionId,
+      scope,
     })
       .then((resolved) => {
         if (!current) return;
@@ -341,7 +388,14 @@ export function CitedChatImage({
     return () => {
       current = false;
     };
-  }, [resolve, target, hint?.providerId, hint?.providerSessionId]);
+  }, [
+    resolve,
+    target,
+    hint?.providerId,
+    hint?.providerSessionId,
+    scope?.sessionId,
+    scope?.workspacePath,
+  ]);
   if (skipped) return null;
   if (!resolve) return <>{fallback}</>;
   if (!settled || !path) {

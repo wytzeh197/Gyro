@@ -279,6 +279,15 @@ struct RgText {
 }
 
 #[derive(Deserialize)]
+#[serde(tag = "type", content = "data")]
+enum RgRecord {
+    #[serde(rename = "match")]
+    Match(RgMatch),
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Deserialize)]
 struct RgMatch {
     path: RgText,
     lines: RgText,
@@ -383,11 +392,15 @@ fn parse_rg_record(record: &str) -> Option<WorkspaceSearchResult> {
     if record.is_empty() {
         return None;
     }
-    let mut record: serde_json::Value = serde_json::from_str(record).ok()?;
-    if record.get("type")?.as_str()? != "match" {
+    // Decode match fields once. A generic Value tree allocated a map and
+    // numbers for every submatch before rebuilding the same typed record.
+    let RgRecord::Match(data) = serde_json::from_str(record).ok()? else {
         return None;
-    }
-    let data: RgMatch = serde_json::from_value(record.get_mut("data")?.take()).ok()?;
+    };
+    Some(search_result_from_rg_match(data))
+}
+
+fn search_result_from_rg_match(data: RgMatch) -> WorkspaceSearchResult {
     let line = data
         .lines
         .text
@@ -400,7 +413,7 @@ fn parse_rg_record(record: &str) -> Option<WorkspaceSearchResult> {
         .map(|range| (range.start, range.end))
         .collect::<Vec<_>>();
     let ranges = columns_for_byte_spans(line, &spans);
-    Some(WorkspaceSearchResult {
+    WorkspaceSearchResult {
         path: data
             .path
             .text
@@ -410,7 +423,7 @@ fn parse_rg_record(record: &str) -> Option<WorkspaceSearchResult> {
         line_number: data.line_number,
         line: line.to_owned(),
         ranges,
-    })
+    }
 }
 
 pub(super) fn parse_rg_output(output: &str, max_results: usize) -> Vec<WorkspaceSearchResult> {
@@ -429,6 +442,118 @@ pub(super) fn parse_rg_output(output: &str, max_results: usize) -> Vec<Workspace
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pre-change decoding path, retained only for equivalence and opt-in timing.
+    fn parse_rg_record_via_value(record: &str) -> Option<WorkspaceSearchResult> {
+        let record = record.trim_end_matches(['\r', ' ', '\t']);
+        let mut record: serde_json::Value = serde_json::from_str(record).ok()?;
+        if record.get("type")?.as_str()? != "match" {
+            return None;
+        }
+        let data: RgMatch = serde_json::from_value(record.get_mut("data")?.take()).ok()?;
+        Some(search_result_from_rg_match(data))
+    }
+
+    fn decoding_fixture(records: usize, matches_per_line: usize) -> Vec<String> {
+        let line = format!("🦀{}\r\n", " needle".repeat(matches_per_line));
+        let spans: Vec<_> = line.match_indices("needle")
+            .map(|(start, text)| serde_json::json!({"match":{"text":text},"start":start,"end":start + text.len()}))
+            .collect();
+        (0..records)
+            .map(|index| {
+                // Ripgrep emits the type before its data. Preserve that order
+                // rather than serde_json::Value's alphabetical object order.
+                let data = serde_json::json!({
+                        "path":{"text":format!("./src/café-{index}.rs")},
+                        "lines":{"text":line}, "line_number":index + 1,
+                        "absolute_offset":index * line.len(), "submatches":spans,
+                });
+                format!(r#"{{"type":"match","data":{data}}}"#)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn typed_ripgrep_decoding_preserves_match_and_nonmatch_records() {
+        let mut records = decoding_fixture(3, 200);
+        records.extend([
+            r#"{"type":"begin","data":{"path":{"text":"./file.rs"}}}"#,
+            r#"{"type":"summary","data":{"elapsed_total":{"secs":0,"nanos":42}}}"#,
+            r#"{"type":"context","data":{"lines":{"text":"context"}}}"#,
+            r#"{"type":"future-record","data":[1,2,3]}"#,
+            r#"{"type":"match","data":{"path":{"bytes":"AA=="}}}"#,
+            r#"{"type":"match","data":null}"#,
+            r#"{"type":"match"}"#,
+            r#"{"data":{"path":{"text":"x"},"lines":{"text":"🦀x\n"},"line_number":1,"submatches":[{"start":4,"end":5}]},"type":"match"}"#,
+            r#"{"type":"match","data":{"path":{"text":"x"},"lines":{"text":"x\n"},"line_number":1,"submatches":[]},"extra":true}"#,
+            "not json", "", "{",
+        ].into_iter().map(str::to_owned));
+        for record in records {
+            assert_eq!(
+                serde_json::to_value(parse_rg_record(&record)).unwrap(),
+                serde_json::to_value(parse_rg_record_via_value(&record)).unwrap(),
+                "record: {record}",
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "explicit local performance measurement"]
+    fn workspace_search_decode_benchmark() {
+        let mut results = Vec::new();
+        for (name, records, matches_per_line) in [("small", 4, 1), ("dense", 300, 200)] {
+            let fixture = decoding_fixture(records, matches_per_line);
+            let before = fixture
+                .iter()
+                .filter_map(|record| parse_rg_record_via_value(record))
+                .collect::<Vec<_>>();
+            let after = fixture
+                .iter()
+                .filter_map(|record| parse_rg_record(record))
+                .collect::<Vec<_>>();
+            let output = serde_json::to_vec(&after).unwrap();
+            assert_eq!(serde_json::to_vec(&before).unwrap(), output);
+            let mut before_samples = Vec::new();
+            let mut after_samples = Vec::new();
+            let measure = |decode: fn(&str) -> Option<WorkspaceSearchResult>| {
+                let started = Instant::now();
+                for record in &fixture {
+                    std::hint::black_box(decode(std::hint::black_box(record))).unwrap();
+                }
+                started.elapsed().as_secs_f64() * 1000.0
+            };
+            // Alternate order so machine load does not consistently favour one path.
+            for iteration in 0..10 {
+                let (before, after) = if iteration % 2 == 0 {
+                    (measure(parse_rg_record_via_value), measure(parse_rg_record))
+                } else {
+                    let after = measure(parse_rg_record);
+                    (measure(parse_rg_record_via_value), after)
+                };
+                if iteration != 0 {
+                    before_samples.push(before);
+                    after_samples.push(after);
+                }
+            }
+            before_samples.sort_by(f64::total_cmp);
+            after_samples.sort_by(f64::total_cmp);
+            results.push(serde_json::json!({
+                "fixture":name, "records":records, "matchesPerLine":matches_per_line,
+                "inputBytes":fixture.iter().map(String::len).sum::<usize>(),
+                "outputSha256":content_hash(&output),
+                "beforeMedianMs":before_samples[4], "afterMedianMs":after_samples[4],
+                "beforeSamplesMs":before_samples, "afterSamplesMs":after_samples,
+            }));
+        }
+        println!(
+            "WORKSPACE_SEARCH_DECODE_BENCHMARK {}",
+            serde_json::json!({
+                "schema":"gyro.backend-performance.v1",
+                "evidence":"local debug ripgrep record decoding; no native UI or process timing",
+                "results":results,
+            })
+        );
+    }
 
     #[test]
     fn workspace_search_preserves_paths_and_exact_unicode_ranges() {
@@ -711,15 +836,9 @@ mod tests {
         fs::write(src.join("hit.txt"), "needle\n").unwrap();
         fs::write(other.join("hit.txt"), "needle\n").unwrap();
         let directory = confine_search_directory(workspace.path(), "src").unwrap();
-        let results = run_scoped_workspace_rg_search(
-            workspace.path(),
-            &directory,
-            "needle",
-            None,
-            10,
-            true,
-        )
-        .unwrap();
+        let results =
+            run_scoped_workspace_rg_search(workspace.path(), &directory, "needle", None, 10, true)
+                .unwrap();
         assert_eq!(results.results.len(), 1);
         assert_eq!(results.results[0].path, "src/hit.txt");
     }

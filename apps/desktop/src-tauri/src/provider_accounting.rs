@@ -297,6 +297,27 @@ struct TokenEmission {
 }
 
 impl TokenEmission {
+    fn request(
+        current: UsageTokens,
+        previous_rounds: Option<UsageTokens>,
+        observed: Option<(u32, Option<UsageTokens>)>,
+        offset: Option<UsageTokens>,
+    ) -> Self {
+        // The collector commits owned requests on Drop. Inside a callback its
+        // total contains earlier attempts only, so add this snapshot once.
+        let observed = observed.map(|(requests, previous)| {
+            (
+                requests,
+                Some(previous.map_or(current, |old| old.combine(current))),
+            )
+        });
+        Self::live(
+            previous_rounds.map_or(current, |old| old.combine(current)),
+            observed,
+            offset,
+        )
+    }
+
     fn live(
         tokens: UsageTokens,
         observed: Option<(u32, Option<UsageTokens>)>,
@@ -343,6 +364,43 @@ pub(super) fn emit_turn_tokens(
         .and_then(|flags| flags.get(&request.session_id).cloned())
         .and_then(|control| control.usage_offset.lock().ok().and_then(|offset| *offset));
     emit_tokens(app, request, TokenEmission::live(tokens, observed, offset));
+}
+
+/// A stream snapshot covers one owned request; earlier tool rounds remain in
+/// the turn bill, while context occupancy uses only this request's counters.
+pub(super) fn emit_request_usage(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    previous_rounds: Option<UsageTokens>,
+    tokens: UsageTokens,
+    window: Option<u64>,
+) {
+    let known = tokens.effective_accounting().known;
+    if let Some(usage) = provider_context::occupancy_from_request(
+        known.input.then_some(tokens.input_tokens),
+        known.output.then_some(tokens.output_tokens),
+        &tokens,
+        window,
+    ) {
+        emit_provider_context_usage(app, request, &usage);
+    }
+    let offset = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(&request.session_id).cloned())
+        .and_then(|control| control.usage_offset.lock().ok().and_then(|offset| *offset));
+    emit_tokens(
+        app,
+        request,
+        TokenEmission::request(
+            tokens,
+            previous_rounds,
+            gyro_core::provider_observation::current_usage(),
+            offset,
+        ),
+    );
 }
 
 pub(super) fn emit_task_tokens(
@@ -426,6 +484,36 @@ pub(super) fn provider_turn_tokens(
         })
 }
 
+/// Native processes own their inner generations. Only request-owning adapters
+/// with an observed request can report generation and tool-request counters.
+fn attach_owned_diagnostics(
+    attribution: &mut gyro_core::efficiency::context::Attribution,
+    observation: Option<&gyro_core::provider_observation::Summary>,
+    owns_requests: bool,
+) {
+    if !owns_requests {
+        attribution.efficiency_events = None;
+        return;
+    }
+    if let Some(summary) = observation.filter(|summary| summary.requests > 0) {
+        attribution.generation_attempts =
+            Some(gyro_core::efficiency::context::GenerationAttempts {
+                started: u64::from(summary.requests),
+                completed: u64::from(summary.completed),
+                rejected: u64::from(summary.rejected),
+                retries: u64::from(summary.retries),
+            });
+        attribution.tool_class_counts = Some(summary.tool_class_counts.clone());
+        attribution.efficiency_events = Some(
+            summary
+                .context_attribution
+                .efficiency_events
+                .clone()
+                .unwrap_or_default(),
+        );
+    }
+}
+
 /// Append one provider call to the usage ledger.
 ///
 /// Best-effort on purpose: a ledger write that fails must never turn a
@@ -468,9 +556,16 @@ pub(super) fn record_provider_usage(
     match store.record_usage(&entry) {
         Ok(id) => {
             let cfg = efficiency::config();
-            let attribution = gyro_core::provider_observation::snapshot()
-                .map(|s| s.context_attribution)
+            let observation = gyro_core::provider_observation::snapshot();
+            let mut attribution = observation
+                .as_ref()
+                .map(|summary| summary.context_attribution.clone())
                 .unwrap_or_default();
+            attach_owned_diagnostics(
+                &mut attribution,
+                observation.as_ref(),
+                gyro_core::efficiency::controls(&request.provider_id).owns_requests,
+            );
             let price = if gyro_core::efficiency::controls(&request.provider_id).owns_requests
                 && request.provider_id != "ollama"
             {
@@ -497,7 +592,7 @@ pub(super) fn record_provider_usage(
                 .unwrap_or(session_id);
                 let _ = store.link_efficiency_task(task, session_id, turn);
                 let totals = store.efficiency_task_totals(task).ok();
-                let _ = store.append_event_with_turn_id(session_id,SessionEventKind::SystemEvent,"",serde_json::json!({"kind":"efficiency-receipt","taskId":task,"contextAttribution":attribution,"optimizationOverheadMicros":timing::efficiency_overhead(),"generationRequests":gyro_core::provider_observation::snapshot().map(|s|s.requests.max(s.provider_attempts)),"estimatedCost":price.and_then(|p|p.price(tokens)),"taskTotals":totals,"subscriptionBilling":!gyro_core::efficiency::controls(&request.provider_id).owns_requests}),Some(turn));
+                let _ = store.append_event_with_turn_id(session_id,SessionEventKind::SystemEvent,"",serde_json::json!({"kind":"efficiency-receipt","taskId":task,"contextAttribution":attribution,"optimizationOverheadMicros":timing::efficiency_overhead(),"generationRequests":observation.as_ref().map(|s|s.requests.max(s.provider_attempts)),"retryCount":entry.retry_count,"requestedReasoningEffort":request.reasoning_effort,"usageTokens":tokens,"usageAccounting":tokens.effective_accounting(),"estimatedCost":price.and_then(|p|p.price(tokens)),"taskTotals":totals,"subscriptionBilling":!gyro_core::efficiency::controls(&request.provider_id).owns_requests}),Some(turn));
             }
         }
         Err(error) => eprintln!(
@@ -556,6 +651,44 @@ pub(super) fn tool_timing(call_id: Uuid, status: CapabilityStatus) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnostics_do_not_turn_native_or_unattempted_runs_into_zeroes() {
+        let mut summary = gyro_core::provider_observation::Summary::default();
+        summary.provider_attempts = 3;
+        let mut attribution = gyro_core::efficiency::context::Attribution::default();
+        attach_owned_diagnostics(&mut attribution, Some(&summary), false);
+        assert!(attribution.generation_attempts.is_none());
+        assert!(attribution.tool_class_counts.is_none());
+        attach_owned_diagnostics(&mut attribution, Some(&summary), true);
+        assert!(attribution.generation_attempts.is_none());
+        assert!(attribution.tool_class_counts.is_none());
+
+        summary.requests = 3;
+        summary.completed = 1;
+        summary.rejected = 1;
+        summary.retries = 1;
+        summary.tool_class_counts.insert("workspace-read".into(), 2);
+        attach_owned_diagnostics(&mut attribution, Some(&summary), true);
+        let generations = attribution.generation_attempts.as_ref().unwrap();
+        assert_eq!(
+            (
+                generations.started,
+                generations.completed,
+                generations.rejected,
+                generations.retries
+            ),
+            (3, 1, 1, 1)
+        );
+        assert_eq!(
+            attribution
+                .tool_class_counts
+                .as_ref()
+                .unwrap()
+                .get("workspace-read"),
+            Some(&2)
+        );
+    }
 
     #[test]
     fn task_totals_display_children_once_without_rebilling_them_to_the_live_guard() {
@@ -622,6 +755,27 @@ mod tests {
             outside.total_tokens + live.spend.unwrap().0.total_tokens,
             900
         );
+    }
+
+    #[test]
+    fn live_request_snapshots_include_active_counts_without_double_counting_earlier_rounds() {
+        let tokens = |input| UsageTokens::measured(Some(input), None, Some(0), None, None);
+        let previous = tokens(100);
+        for active in [20, 30] {
+            let emission = TokenEmission::request(
+                tokens(active),
+                Some(previous),
+                Some((2, Some(previous))),
+                Some(tokens(5)),
+            );
+            assert_eq!(emission.display.total_tokens, 105 + active);
+            assert_eq!(emission.spend.unwrap().0.total_tokens, 105 + active);
+        }
+        let first = TokenEmission::request(tokens(20), None, Some((1, None)), None);
+        assert_eq!(first.display.total_tokens, 20);
+        let completed =
+            TokenEmission::live(tokens(30), Some((2, Some(tokens(130)))), Some(tokens(5)));
+        assert_eq!(completed.display.total_tokens, 135);
     }
 
     #[test]

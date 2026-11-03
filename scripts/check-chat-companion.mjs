@@ -20,9 +20,12 @@ import {
   defaultChatEnvironmentVisible,
   discardedSideChatSessionIds,
   resolveChatRailPanel,
+  restoreCompanionPanes,
   keyboardChatCompanionWidth,
   staleSideChatSessionIds,
   shouldOverlayChatCompanion,
+  chatPaneTranscriptMinimum,
+  shouldOverlayPaneChatCompanion,
   withoutSideChatSessions,
 } from "../packages/ui/src/chat-companion.ts";
 
@@ -34,6 +37,16 @@ import {
 
 const PANE_A = "pane-a";
 const PANE_B = "pane-b";
+
+// Each pane frames its own panel. A split pane docks while 320px of
+// conversation fits beside the 320px panel; a single chat keeps 480px.
+assert.equal(shouldOverlayPaneChatCompanion(639, true), true);
+assert.equal(shouldOverlayPaneChatCompanion(640, true), false);
+assert.equal(shouldOverlayPaneChatCompanion(719, false), true);
+assert.equal(shouldOverlayPaneChatCompanion(720, false), false);
+assert.equal(shouldOverlayPaneChatCompanion(undefined, true), false);
+assert.equal(chatPaneTranscriptMinimum(true), 320);
+assert.equal(chatPaneTranscriptMinimum(false), 480);
 
 const reduce = (state, ...actions) =>
   actions.reduce(chatCompanionReducer, state);
@@ -145,6 +158,84 @@ const focused = (paneId = PANE_A) =>
 }
 
 {
+  const opened = reduce(
+    focused(),
+    { type: "open-tab", tab: "review" },
+    { type: "open-tab", tab: "terminal" },
+    { type: "select-tab", tab: "review" },
+  );
+  const hidden = reduce(opened, { type: "close-dock" });
+  assert.equal(activeChatCompanionPanel(hidden), undefined);
+  assert.equal(chatCompanionPane(hidden).isOpen, false);
+  const reopened = reduce(hidden, { type: "reopen-dock" });
+  assert.equal(
+    activeChatCompanionTab(reopened),
+    "review",
+    "reopening restores the last viewed tool, not the last tool in the strip",
+  );
+  assert.deepEqual(chatCompanionPane(reopened).openTabs, [
+    "review",
+    "terminal",
+  ]);
+
+  const restored = {
+    ...hidden,
+    panes: restoreCompanionPanes(JSON.stringify(hidden.panes)),
+  };
+  assert.equal(
+    activeChatCompanionPanel(restored),
+    undefined,
+    "persisting tool layout must not reopen a hidden dock",
+  );
+  assert.equal(
+    activeChatCompanionTab(reduce(restored, { type: "reopen-dock" })),
+    "review",
+    "last-viewed selection survives a restart",
+  );
+
+  const legacy = restoreCompanionPanes(
+    JSON.stringify({
+      open: { openTabs: ["review", "files"], activeTab: "review" },
+      hidden: {
+        openTabs: ["review", "files"],
+        activeTab: "review",
+        isOpen: false,
+      },
+    }),
+  );
+  assert.equal(legacy.open.activeTab, "review");
+  assert.equal(legacy.open.isOpen, true);
+  assert.equal(legacy.hidden.activeTab, undefined);
+  assert.equal(legacy.hidden.lastActiveTab, "review");
+}
+
+{
+  const hidden = reduce(
+    focused(),
+    { type: "open-tab", tab: "review" },
+    { type: "open-tab", tab: "terminal" },
+    { type: "open-tab", tab: "files" },
+    { type: "select-tab", tab: "terminal" },
+    { type: "close-dock" },
+  );
+  const closed = reduce(hidden, { type: "close-tab", tab: "terminal" });
+  assert.equal(activeChatCompanionPanel(closed), undefined);
+  assert.equal(
+    activeChatCompanionTab(reduce(closed, { type: "reopen-dock" })),
+    "review",
+    "closing a remembered tool while hidden chooses its left neighbour without revealing the dock",
+  );
+  const emptied = reduce(
+    closed,
+    { type: "close-tab", tab: "review" },
+    { type: "close-tab", tab: "files" },
+    { type: "reopen-dock" },
+  );
+  assert.equal(activeChatCompanionPanel(emptied), "tools");
+  assert.deepEqual(chatCompanionPane(emptied).openTabs, []);
+}
+
+{
   // The panel button works before a tool has ever been opened.
   const state = chatCompanionReducer(focused(), { type: "reopen-dock" });
   assert.equal(activeChatCompanionTab(state), undefined);
@@ -174,6 +265,23 @@ const focused = (paneId = PANE_A) =>
   assert.equal(clampChatPanelWidth(Number.NaN, 1304), 880);
   assert.equal(clampChatPanelWidth(Number.NaN, 360), 360);
   assert.equal(clampChatPanelWidth(1400, 1000), 680);
+
+  const restored = {
+    ...state,
+    panes: restoreCompanionPanes(JSON.stringify(state.panes)),
+  };
+  assert.equal(
+    activeChatCompanionPanel(restored),
+    "tools",
+    "an open launcher stays the launcher after restoring its layout",
+  );
+  assert.equal(
+    activeChatCompanionTab(
+      reduce(restored, { type: "close-dock" }, { type: "reopen-dock" }),
+    ),
+    "browser",
+    "using the launcher does not discard the most recently viewed tool",
+  );
 }
 
 // --- Following the focused pane --------------------------------------------
@@ -205,6 +313,28 @@ const focused = (paneId = PANE_A) =>
     "terminal",
     "returning to pane A restores its own active tab",
   );
+}
+
+{
+  let state = reduce(
+    focused(PANE_A),
+    { type: "open-tab", tab: "review" },
+    { type: "open-tab", tab: "terminal" },
+    { type: "select-tab", tab: "review" },
+    { type: "close-dock" },
+    { type: "focus-pane", paneId: PANE_B },
+    { type: "open-tab", tab: "browser" },
+    { type: "open-tab", tab: "files" },
+    { type: "select-tab", tab: "browser" },
+    { type: "close-dock" },
+    { type: "reopen-dock", paneId: PANE_A },
+  );
+  assert.equal(state.focusedPaneId, PANE_A);
+  assert.equal(activeChatCompanionTab(state), "review");
+  assert.equal(activeChatCompanionPanel(state, PANE_B), undefined);
+  state = reduce(state, { type: "reopen-dock", paneId: PANE_B });
+  assert.equal(activeChatCompanionTab(state), "browser");
+  assert.equal(activeChatCompanionTab(state, PANE_A), "review");
 }
 
 {
@@ -378,6 +508,21 @@ assert.equal(
   const hidden = chatCompanionReducer(opened, { type: "close-dock" });
   assert.equal(chatCompanionPane(hidden).sideChatSessionId, "side-1");
   assert.deepEqual(discardedSideChatSessionIds(opened, hidden), []);
+  const reopened = reduce(hidden, { type: "reopen-dock" });
+  assert.equal(activeChatCompanionTab(reopened), "side-chat");
+  assert.equal(chatCompanionPane(reopened).sideChatSessionId, "side-1");
+
+  const restored = {
+    ...hidden,
+    panes: restoreCompanionPanes(JSON.stringify(hidden.panes)),
+  };
+  assert.equal(chatCompanionPane(restored).lastActiveTab, undefined);
+  assert.equal(chatCompanionPane(restored).sideChatSessionId, undefined);
+  assert.equal(
+    activeChatCompanionPanel(reduce(restored, { type: "reopen-dock" })),
+    "tools",
+    "a transient Side chat is not resurrected from saved layout",
+  );
 }
 
 {

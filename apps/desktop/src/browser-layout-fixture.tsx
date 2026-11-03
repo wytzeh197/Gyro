@@ -117,7 +117,7 @@ function Fixture() {
         ) : null}
       </nav>
       <div
-        className={`gyro-chat-companion${nativeDemo ? " fixture-native-host" : ""}`}
+        className={`gyro-chat-companion gyro-chat-companion-content${nativeDemo ? " fixture-native-host" : ""}`}
         style={{
           display: "grid",
           gridTemplateRows: "minmax(0, 1fr)",

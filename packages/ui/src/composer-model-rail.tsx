@@ -1,5 +1,14 @@
-import { Check, Plus, Settings2, TriangleAlert } from "lucide-react";
 import {
+  Check,
+  CircleDashed,
+  Copy,
+  ExternalLink,
+  Plus,
+  Settings2,
+  TriangleAlert,
+} from "lucide-react";
+import {
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -9,6 +18,10 @@ import {
 } from "react";
 import { groupModelsByClass } from "./model-classes";
 import { clippingBounds } from "./composer-popover-bounds";
+import {
+  ProviderSignInContext,
+  type ProviderSignIn,
+} from "./provider-sign-in-context";
 
 export type ModelRailProvider = {
   id: string;
@@ -59,6 +72,199 @@ function useScrollEdges(
   }, [ref, contentKey]);
 }
 
+/** Whose account a CLI provider signs in with, in the words its sign-in page uses. */
+const SIGN_IN_ACCOUNTS: Record<string, string> = {
+  anthropic: "Claude",
+  cursor: "Cursor",
+  gemini: "Google",
+  kimi: "Kimi",
+  openai: "ChatGPT",
+  xai: "xAI",
+};
+
+function connectPrompt(provider: ModelRailProvider) {
+  if (provider.connection === "API") {
+    return `Add a ${provider.label} API key to use its models here.`;
+  }
+  if (provider.connection === "Local") {
+    return `Start ${provider.label} on this computer to use its models here.`;
+  }
+  const account = SIGN_IN_ACCOUNTS[provider.id];
+  return account
+    ? `Sign in with your ${account} account to use ${provider.label} models here.`
+    : `Sign in to ${provider.label} to use its models here.`;
+}
+
+function copyText(value: string) {
+  void navigator.clipboard?.writeText(value).catch(() => undefined);
+}
+
+/**
+ * Sign-in progress for a provider that is not connected yet. The login CLI
+ * runs out of sight; this shows only what the person has to do next, and the
+ * terminal stays one click away for anything the parse did not catch.
+ */
+function SignInProgress({
+  provider,
+  signIn,
+  onConnect,
+}: {
+  provider: ModelRailProvider;
+  signIn: ProviderSignIn;
+  onConnect: (providerId: string) => void;
+}) {
+  const actions = useContext(ProviderSignInContext);
+  const [code, setCode] = useState("");
+  const [copied, setCopied] = useState<string>();
+  const copy = (key: string, value: string) => {
+    copyText(value);
+    setCopied(key);
+    window.setTimeout(
+      () => setCopied((current) => (current === key ? undefined : current)),
+      1600,
+    );
+  };
+  const secondary = (
+    <div className="gyro-model-rail-signin-links">
+      {signIn.phase === "failed" || signIn.phase === "not-installed" ? null : (
+        <button onClick={() => actions.cancel(provider.id)} type="button">
+          Cancel
+        </button>
+      )}
+      <button onClick={() => actions.showDetails(provider.id)} type="button">
+        Show details
+      </button>
+    </div>
+  );
+
+  if (signIn.phase === "not-installed") {
+    return (
+      <>
+        <p>
+          {signIn.message ?? `${provider.label} needs its CLI installed first.`}
+        </p>
+        {signIn.installCommand ? (
+          <>
+            <button
+              className="gyro-model-rail-signin-command"
+              onClick={() => copy("install", signIn.installCommand ?? "")}
+              title={`Copy: ${signIn.installCommand}`}
+              type="button"
+            >
+              <code>{signIn.installCommand}</code>
+              {copied === "install" ? <Check size={12} /> : <Copy size={12} />}
+            </button>
+            <button
+              className="is-primary"
+              onClick={() => actions.install(provider.id)}
+              type="button"
+            >
+              Install and sign in
+            </button>
+          </>
+        ) : (
+          <button onClick={() => onConnect(provider.id)} type="button">
+            Try again
+          </button>
+        )}
+      </>
+    );
+  }
+
+  if (signIn.phase === "failed") {
+    return (
+      <>
+        <p>{signIn.message ?? `${provider.label} sign-in didn't finish.`}</p>
+        <button
+          className="is-primary"
+          onClick={() => onConnect(provider.id)}
+          type="button"
+        >
+          Try again
+        </button>
+        {secondary}
+      </>
+    );
+  }
+
+  if (signIn.phase === "starting" || signIn.phase === "installing") {
+    return (
+      <>
+        <p className="gyro-model-rail-signin-status" role="status">
+          <CircleDashed aria-hidden="true" className="is-spinning" size={13} />
+          {signIn.phase === "installing"
+            ? "Installing…"
+            : "Checking for an existing sign-in…"}
+        </p>
+        {signIn.phase === "installing" ? secondary : null}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <p className="gyro-model-rail-signin-status" role="status">
+        <CircleDashed aria-hidden="true" className="is-spinning" size={13} />
+        {signIn.deviceCode
+          ? "Enter this code on the sign-in page"
+          : "Waiting for browser sign-in"}
+      </p>
+      {signIn.deviceCode ? (
+        <button
+          aria-label={`Copy code ${signIn.deviceCode}`}
+          className="gyro-model-rail-signin-code"
+          onClick={() => copy("code", signIn.deviceCode ?? "")}
+          type="button"
+        >
+          <code>{signIn.deviceCode}</code>
+          {copied === "code" ? <Check size={13} /> : <Copy size={13} />}
+        </button>
+      ) : null}
+      {signIn.url ? (
+        <div className="gyro-model-rail-signin-row">
+          <button onClick={() => actions.openLink(provider.id)} type="button">
+            <ExternalLink aria-hidden="true" size={12} />
+            {signIn.deviceCode ? "Open page" : "Reopen page"}
+          </button>
+          <button onClick={() => copy("url", signIn.url ?? "")} type="button">
+            {copied === "url" ? (
+              <Check aria-hidden="true" size={12} />
+            ) : (
+              <Copy aria-hidden="true" size={12} />
+            )}
+            {copied === "url" ? "Copied" : "Copy link"}
+          </button>
+        </div>
+      ) : null}
+      {signIn.acceptsCode ? (
+        <form
+          className="gyro-model-rail-signin-paste"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const value = code.trim();
+            if (!value) return;
+            actions.submitCode(provider.id, value);
+            setCode("");
+          }}
+        >
+          <input
+            aria-label="Authorization code"
+            autoComplete="off"
+            onChange={(event) => setCode(event.target.value)}
+            placeholder="Paste code"
+            spellCheck={false}
+            value={code}
+          />
+          <button disabled={!code.trim()} type="submit">
+            Submit
+          </button>
+        </form>
+      ) : null}
+      {secondary}
+    </>
+  );
+}
+
 /**
  * Providers down a rail of their own marks, the previewed provider's models
  * beside it. A provider's models show only once its mark is clicked (or
@@ -101,6 +307,9 @@ export function ComposerModelRail({
       providers[0]?.id,
   );
   const preview = providers.find((provider) => provider.id === previewId);
+  const { signIns } = useContext(ProviderSignInContext);
+  const previewSignIn =
+    preview && !preview.connected ? signIns[preview.id] : undefined;
   const panelRef = useRef<HTMLDivElement>(null);
   const [resolvedPlacement, setResolvedPlacement] = useState(placement);
   const railRef = useRef<HTMLDivElement>(null);
@@ -355,15 +564,22 @@ export function ComposerModelRail({
               <strong id={`${id}-heading`}>{preview.label}</strong>
               <small className="gyro-model-rail-status">
                 <span className="gyro-model-rail-connection">
-                  {preview.connection}
+                  {preview.connected
+                    ? preview.connection
+                    : previewSignIn?.phase === "installing"
+                      ? "Installing…"
+                      : previewSignIn?.phase === "starting" ||
+                          previewSignIn?.phase === "waiting"
+                        ? "Signing in…"
+                        : "Not connected"}
                 </span>
-                <span className={isPreviewInUse ? "is-in-use" : undefined}>
-                  {!preview.connected
-                    ? "Not connected"
-                    : isPreviewInUse
+                {preview.connected ? (
+                  <span className={isPreviewInUse ? "is-in-use" : undefined}>
+                    {isPreviewInUse
                       ? "In use"
                       : `${preview.models.length} ${preview.models.length === 1 ? "model" : "models"}`}
-                </span>
+                  </span>
+                ) : null}
               </small>
             </header>
             {showWarning ? (
@@ -410,19 +626,33 @@ export function ComposerModelRail({
                 </button>
               </div>
             ) : (
-              <div className="gyro-model-rail-empty" ref={listRef}>
+              <div
+                className="gyro-model-rail-empty"
+                key={preview.id}
+                ref={listRef}
+              >
                 <span aria-hidden="true" className="gyro-model-rail-empty-mark">
                   {renderLogo(preview)}
                 </span>
-                <p>Connect {preview.label} to use its models here.</p>
-                <button
-                  className="is-primary"
-                  onClick={() => onConnect(preview.id)}
-                  type="button"
-                >
-                  <Plus aria-hidden="true" size={13} />
-                  Connect
-                </button>
+                {previewSignIn ? (
+                  <SignInProgress
+                    onConnect={onConnect}
+                    provider={preview}
+                    signIn={previewSignIn}
+                  />
+                ) : (
+                  <>
+                    <p>{connectPrompt(preview)}</p>
+                    <button
+                      className="is-primary"
+                      onClick={() => onConnect(preview.id)}
+                      type="button"
+                    >
+                      <Plus aria-hidden="true" size={13} />
+                      Connect
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </>

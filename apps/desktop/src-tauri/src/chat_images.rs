@@ -5,6 +5,7 @@
 //! citation text. Display asks this resolver for an absolute path, and only
 //! a regular PNG, JPEG, or WebP that stays inside an allowed root is returned.
 
+use base64::Engine as _;
 use serde::Deserialize;
 use std::fs;
 use std::io::Read;
@@ -58,6 +59,31 @@ pub(super) fn resolve_cited_chat_image_request(
         },
     );
     Ok(resolved.map(|path| path.display().to_string()))
+}
+
+/// Previewing an existing image is a bounded read, not an attachment upload.
+/// It must not require a database session, consume its quota, or move a draft.
+pub(super) fn read_cited_chat_image_request(
+    request: ResolveCitedChatImageRequest,
+) -> Result<Option<String>, String> {
+    let Some(path) = resolve_cited_chat_image_request(request)? else {
+        return Ok(None);
+    };
+    image_data_url(Path::new(&path)).map(Some)
+}
+
+fn image_data_url(path: &Path) -> Result<String, String> {
+    let (bytes, _) = super::read_bounded_regular_file(
+        path,
+        super::MAX_CHAT_IMAGE_BYTES as usize,
+        "chat image preview",
+    )
+    .map_err(|error| error.to_string())?;
+    let (mime, _) = super::validated_chat_media_type("preview", false, &bytes)?;
+    Ok(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
 }
 
 /// Absolute path of a cited image, or `None` when the citation is not a file
@@ -293,6 +319,44 @@ mod tests {
     use super::*;
 
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\ncited";
+
+    #[test]
+    fn previews_are_reads_without_a_session_or_attachment_storage() {
+        let temp = tempfile::tempdir().unwrap();
+        let image = temp.path().join("preview with spaces.png");
+        fs::write(&image, PNG).unwrap();
+        let preview = read_cited_chat_image_request(ResolveCitedChatImageRequest {
+            target: image.display().to_string(),
+            workspace_path: Some(temp.path().display().to_string()),
+            provider_id: None,
+            provider_session_id: None,
+            // A preview does not require this session to exist in SQLite.
+            session_id: Some("missing-session".into()),
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            preview,
+            format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(PNG)
+            )
+        );
+        assert_eq!(fs::read(&image).unwrap(), PNG);
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn preview_reader_rejects_invalid_and_oversized_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let image = temp.path().join("invalid.png");
+        fs::write(&image, b"not an image").unwrap();
+        assert!(image_data_url(&image).is_err());
+        let file = fs::File::create(&image).unwrap();
+        file.set_len(super::super::MAX_CHAT_IMAGE_BYTES + 1)
+            .unwrap();
+        assert!(image_data_url(&image).is_err());
+    }
 
     fn context(workspace: &Path, home: &Path, provider: &str, session: &str) -> CitedImageContext {
         CitedImageContext {

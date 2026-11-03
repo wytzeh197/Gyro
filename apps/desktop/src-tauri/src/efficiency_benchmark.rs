@@ -61,12 +61,7 @@ pub(super) fn start(app: &tauri::AppHandle, root: PathBuf, spec: Value) -> anyho
     let paths = GyroPaths::for_current_user()?;
     paths.ensure()?;
     let store = SessionStore::open(paths.clone())?;
-    let mut config = GyroConfig::default();
-    config.require_command_approval = false;
-    config.require_file_edit_approval = false;
-    config.efficiency.prices = spec.prices.clone();
-    config.usage_guard.max_calls_per_window = spec.execution_budget.max_calls;
-    config.usage_guard.max_tokens_per_call = spec.execution_budget.max_observed_tokens;
+    let config = benchmark_config(&spec);
     config.save(&paths)?;
     start_cli_ipc_listener(app.clone());
     let app = app.clone();
@@ -83,6 +78,44 @@ pub(super) fn start(app: &tauri::AppHandle, root: PathBuf, spec: Value) -> anyho
     drop(store);
     Ok(true)
 }
+fn benchmark_config(spec: &Spec) -> GyroConfig {
+    let mut config = GyroConfig::default();
+    config.require_command_approval = false;
+    config.require_file_edit_approval = false;
+    config.efficiency.prices = spec.prices.clone();
+    config.usage_guard.max_calls_per_window = spec.execution_budget.max_calls;
+    config.usage_guard.max_tokens_per_call = spec.execution_budget.max_observed_tokens;
+    for provider in &mut config.model_providers {
+        provider.enabled = spec
+            .providers
+            .iter()
+            .any(|selected| selected.id == provider.id);
+    }
+    config
+}
+fn routine_effort_allowed(variants: &[String], effort: &str) -> bool {
+    !variants.iter().any(|variant| variant == "routine-profile") || effort.trim().is_empty()
+}
+
+fn benchmark_session(
+    store: &SessionStore,
+    workspace: &Path,
+    provider: &Provider,
+) -> anyhow::Result<Session> {
+    let session = store.create_session(workspace, SessionOrigin::Desktop, "Efficiency pilot")?;
+    // Chat identity comes from persisted state, not the request payload.
+    store
+        .update_session_model(
+            session.id,
+            Some(provider.id.clone()),
+            None,
+            Some(provider.model.clone()),
+            None,
+            (!provider.effort.trim().is_empty()).then(|| provider.effort.trim().to_owned()),
+        )?
+        .ok_or_else(|| anyhow::anyhow!("Benchmark session disappeared while binding its model"))
+}
+
 fn validate(spec: &Spec) -> anyhow::Result<()> {
     anyhow::ensure!(
         spec.schema == "gyro.efficiency-benchmark.v2"
@@ -106,6 +139,10 @@ fn validate(spec: &Spec) -> anyhow::Result<()> {
         anyhow::ensure!(
             ids.insert(&p.id) && gyro_core::provider_descriptor(&p.id).is_some(),
             "Unknown or duplicate provider"
+        );
+        anyhow::ensure!(
+            routine_effort_allowed(&spec.variants, &p.effort),
+            "A routine-profile comparison needs no explicit effort; it never overrides the user's choice"
         );
         if gyro_core::efficiency::controls(&p.id).owns_requests && p.id != "ollama" {
             anyhow::ensure!(
@@ -148,6 +185,13 @@ fn validate(spec: &Spec) -> anyhow::Result<()> {
                     | "task-state"
                     | "retrieval"
                     | "progress-detection"
+                    | "compact-tool-catalog"
+                    | "recoverable-evidence"
+                    | "tight-evidence"
+                    | "batch-reads"
+                    | "compact-cli-catalog"
+                    | "catalog-retention"
+                    | "routine-profile"
                     | "combined"
             ),
             "Unknown optimization variant"
@@ -268,6 +312,116 @@ fn verify(task: &Task, workspace: &Path, verifier: &Path) -> anyhow::Result<bool
         ExecutionTermination::Exited { code: Some(0) }
     ) && allowed)
 }
+fn turn_receipt<'a>(
+    events: &'a [SessionEvent],
+    turn_id: Uuid,
+    kind: &str,
+) -> Option<&'a SessionEvent> {
+    events
+        .iter()
+        .rev()
+        .find(|event| event.turn_id == Some(turn_id) && event.payload["kind"] == kind)
+}
+
+// Simulate the review step only for the benchmark's disposable fixture and
+// declared edit paths. Keep normal app approvals and Full access unchanged.
+#[derive(Clone, Copy, Debug, Default)]
+struct FixtureReviews {
+    applied: usize,
+    failed: usize,
+}
+impl std::ops::AddAssign for FixtureReviews {
+    fn add_assign(&mut self, other: Self) {
+        self.applied += other.applied;
+        self.failed += other.failed;
+    }
+}
+
+fn review_fixture_proposals(
+    store: &SessionStore,
+    root: &Path,
+    workspace: &Path,
+    session: Uuid,
+    turn: Uuid,
+    allowed: &[String],
+) -> anyhow::Result<FixtureReviews> {
+    let workspace = workspace.canonicalize()?;
+    anyhow::ensure!(
+        workspace.parent() == Some(root.join("sessions/workspaces").canonicalize()?.as_path()),
+        "Proposal review requires a disposable benchmark workspace"
+    );
+    let proposals = store.list_pending_mutation_proposals(session)?;
+    // Validate the complete batch before applying any of it.
+    for proposal in &proposals {
+        anyhow::ensure!(
+            proposal.turn_id == Some(turn)
+                && proposal.workspace_path.canonicalize()? == workspace
+                && allowed.contains(&proposal.path),
+            "Proposal falls outside this benchmark turn's allowed changes"
+        );
+    }
+    let mut reviews = FixtureReviews::default();
+    for proposal in &proposals {
+        let result = match decide_mutation_proposal(store, proposal.id, MutationDecision::Approve) {
+            Ok(result) => result,
+            Err(error) => {
+                // A stale proposal is a failed action, not permission to overwrite
+                // newer content or stop reviewing a later corrected proposal.
+                if store
+                    .get_mutation_proposal(proposal.id)?
+                    .is_some_and(|p| p.status == gyro_core::MutationProposalStatus::Failed)
+                {
+                    reviews.failed += 1;
+                    continue;
+                }
+                return Err(error);
+            }
+        };
+        anyhow::ensure!(
+            result.proposal.status == gyro_core::MutationProposalStatus::Applied,
+            "Benchmark fixture proposal did not apply"
+        );
+        reviews.applied += 1;
+    }
+    Ok(reviews)
+}
+
+fn with_fixture_review<T>(
+    store: &SessionStore,
+    root: &Path,
+    workspace: &Path,
+    session: Uuid,
+    turn: Uuid,
+    allowed: &[String],
+    run: impl FnOnce() -> T,
+) -> (T, anyhow::Result<FixtureReviews>) {
+    let paths = store.paths().clone();
+    let root = root.to_path_buf();
+    let workspace = workspace.to_path_buf();
+    let allowed = allowed.to_vec();
+    let (done, completion) = std::sync::mpsc::channel();
+    let reviewer = std::thread::spawn(move || -> anyhow::Result<FixtureReviews> {
+        let store = SessionStore::open(paths)?;
+        let mut count = FixtureReviews::default();
+        loop {
+            count += review_fixture_proposals(&store, &root, &workspace, session, turn, &allowed)?;
+            if completion.recv_timeout(Duration::from_millis(100))
+                != Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            {
+                count +=
+                    review_fixture_proposals(&store, &root, &workspace, session, turn, &allowed)?;
+                return Ok(count);
+            }
+        }
+    });
+    let result = run();
+    let _ = done.send(());
+    let reviewed = reviewer
+        .join()
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("Fixture reviewer panicked")));
+    (result, reviewed)
+}
+
 fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
     let paths = GyroPaths::for_current_user()?;
     let store = SessionStore::open(paths.clone())?;
@@ -313,9 +467,27 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                                 variant == "combined" || variant == "retrieval";
                             e.progress_detection =
                                 variant == "combined" || variant == "progress-detection";
+                            e.compact_tool_catalog =
+                                variant == "combined" || variant == "compact-tool-catalog";
+                            e.recoverable_evidence =
+                                variant == "combined" || variant == "recoverable-evidence";
+                            // Not part of `combined`: tight evidence replaces recoverable
+                            // evidence, so each is measured on its own first.
+                            e.tight_evidence = variant == "tight-evidence";
+                            e.batch_reads = variant == "batch-reads";
+                            e.compact_cli_catalog = variant == "compact-cli-catalog";
+                            e.retain_tool_catalog =
+                                variant == "combined" || variant == "catalog-retention";
+                            e.profile = if variant == "routine-profile" {
+                                gyro_core::efficiency::Profile::Routine
+                            } else {
+                                gyro_core::efficiency::Profile::Standard
+                            };
                             Ok(())
                         })?;
-                        let workspace = root.join("workspaces").join(Uuid::new_v4().to_string());
+                        let workspace = root
+                            .join("sessions/workspaces")
+                            .join(Uuid::new_v4().to_string());
                         fixture(task, &workspace)?;
                         let mut policy =
                             ProjectCapabilityPolicy::defaults(workspace.display().to_string());
@@ -330,11 +502,7 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                             policy.classes.insert(class, CapabilityAccess::Deny);
                         }
                         store.save_project_capability_policy(policy, None)?;
-                        let session = store.create_session(
-                            &workspace,
-                            SessionOrigin::Desktop,
-                            "Efficiency pilot",
-                        )?;
+                        let session = benchmark_session(&store, &workspace, provider)?;
                         record["sessionId"] = json!(session.id);
                         let legacy = super::performance_benchmark::Provider {
                             id: provider.id.clone(),
@@ -344,7 +512,12 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                         let started = Instant::now();
                         let mut usage = None::<UsageTokens>;
                         let mut outcome = "done";
-                        let mut retries = 0u32;
+                        let mut retries = Some(0u64);
+                        let mut generation_requests = Some(0u64);
+                        let mut requested_efforts = Some(Vec::<Value>::new());
+                        let mut reviewed_proposals = FixtureReviews::default();
+                        record["approvalSimulation"] =
+                            json!("allowlisted-fixture-review-during-turn");
                         let prompts = if condition == "resumed-session" {
                             std::iter::once("Inspect the repository overview. Do not edit files. Preserve subsequent task constraints.".to_string()).chain(task.turns.clone()).collect::<Vec<_>>()
                         } else {
@@ -412,38 +585,74 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                                 Ok(())
                             })?;
                             calls += 1;
-                            let response = super::performance_benchmark::turn(
-                                app,
+                            let turn_id = Uuid::new_v4();
+                            let (response, reviewed_turn) = with_fixture_review(
                                 &store,
-                                session.id,
+                                root,
                                 &workspace,
-                                &legacy,
-                                &prompt,
-                                spec.timeout_seconds,
+                                session.id,
+                                turn_id,
+                                &task.allowed_changes,
+                                || {
+                                    super::performance_benchmark::turn_with_id(
+                                        app,
+                                        &store,
+                                        session.id,
+                                        &workspace,
+                                        &legacy,
+                                        &prompt,
+                                        spec.timeout_seconds,
+                                        turn_id,
+                                    )
+                                },
                             );
+                            if let Ok(count) = &reviewed_turn {
+                                reviewed_proposals += *count;
+                            }
                             let events = store.read_events(session.id)?;
-                            let overhead = events
-                                .iter()
-                                .rev()
-                                .find(|e| e.payload["kind"] == "efficiency-receipt")
+                            let receipt = turn_receipt(&events, turn_id, "efficiency-receipt");
+                            let requested_effort = receipt
+                                .and_then(|e| e.payload.get("requestedReasoningEffort"))
+                                .filter(|v| v.is_null() || v.is_string())
+                                .cloned();
+                            requested_efforts = requested_efforts.zip(requested_effort).map(
+                                |(mut efforts, effort)| {
+                                    efforts.push(effort);
+                                    efforts
+                                },
+                            );
+                            let overhead = receipt
                                 .map(|e| e.payload["optimizationOverheadMicros"].clone())
                                 .unwrap_or(json!({}));
                             record["optimizationOverheadMicros"] = overhead;
-                            let observed_calls = events
-                                .iter()
-                                .rev()
-                                .find(|e| e.payload["kind"] == "efficiency-receipt")
-                                .and_then(|e| e.payload["generationRequests"].as_u64())
-                                .unwrap_or(1)
-                                .max(1);
+                            // Task totals include setup turns, failures and all continuations.
+                            if let Some(receipt) = receipt {
+                                record["efficiencyEvents"] =
+                                    receipt.payload["taskTotals"]["efficiencyEvents"].clone();
+                                record["efficiencyEventCoverage"] = receipt.payload["taskTotals"]
+                                    ["efficiencyEventCoverage"]
+                                    .clone();
+                            }
+                            let observed =
+                                receipt.and_then(|e| e.payload["generationRequests"].as_u64());
+                            generation_requests = generation_requests
+                                .zip(observed)
+                                .and_then(|(a, b)| a.checked_add(b));
+                            let observed_retries =
+                                receipt.and_then(|e| e.payload["retryCount"].as_u64());
+                            retries = retries
+                                .zip(observed_retries)
+                                .and_then(|(a, b)| a.checked_add(b));
+                            // A missing receipt makes call/retry accounting unknown; stop further spending.
+                            if observed.is_none() || observed_retries.is_none() {
+                                unknown = true;
+                            }
+                            let observed_calls = observed.unwrap_or(1).max(1);
                             calls = calls.saturating_add(
                                 observed_calls.saturating_sub(1).min(u64::from(u32::MAX)) as u32,
                             );
 
-                            let latest = events
-                                .iter()
-                                .rev()
-                                .find(|e| e.payload["kind"] == "provider-turn-tokens");
+                            let latest = turn_receipt(&events, turn_id, "provider-turn-tokens");
                             let tokens = latest.and_then(|e| {
                                 serde_json::from_value::<UsageTokens>(
                                     e.payload["turnTokens"].clone(),
@@ -476,24 +685,59 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                                 }
                             }
                             match response {
-                                Ok((_, r)) => {
-                                    retries += r.assistant_event.payload["retryCount"]
-                                        .as_u64()
-                                        .unwrap_or(0)
-                                        as u32;
-                                }
+                                Ok(_) => match reviewed_turn {
+                                    Ok(_) => {}
+                                    Err(error) => {
+                                        outcome = "failed";
+                                        record["failureClass"] = json!("fixture-review-failed");
+                                        record["failureDetail"] = json!(
+                                            gyro_core::security::redact_secrets(&error.to_string())
+                                                .chars()
+                                                .take(500)
+                                                .collect::<String>()
+                                        );
+                                        break;
+                                    }
+                                },
                                 Err(error) => {
                                     outcome = "failed";
                                     record["failureClass"] =
                                         json!(super::performance_benchmark::failure_class(&error));
+                                    record["failureDetail"] =
+                                        json!(gyro_core::security::redact_secrets(&error)
+                                            .chars()
+                                            .take(500)
+                                            .collect::<String>());
                                     break;
                                 }
                             }
                         }
                         record["outcome"] = json!(outcome);
+                        record["reviewedFixtureProposals"] = json!(reviewed_proposals.applied);
+                        record["failedFixtureReviews"] = json!(reviewed_proposals.failed);
                         record["elapsedMs"] = json!(started.elapsed().as_millis());
                         record["tokens"] = json!(usage);
                         record["retries"] = json!(retries);
+                        record["generationRequests"] = json!(generation_requests);
+                        let consistent_effort = requested_efforts.as_ref().and_then(|efforts| {
+                            let first = efforts.first()?;
+                            efforts
+                                .iter()
+                                .all(|effort| effort == first)
+                                .then_some(first)
+                        });
+                        record["requestedReasoningEffort"] =
+                            consistent_effort.cloned().unwrap_or(Value::Null);
+                        record["requestedEffortCoverage"] = json!(if consistent_effort.is_some() {
+                            "observed"
+                        } else if requested_efforts
+                            .as_ref()
+                            .is_some_and(|efforts| !efforts.is_empty())
+                        {
+                            "mixed"
+                        } else {
+                            "unavailable"
+                        });
                         record["verified"] =
                             json!(outcome == "done" && verify(task, &workspace, &verifier)?);
                         if let Some(u) = usage {
@@ -534,8 +778,9 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                         {
                             record["outcome"] = json!("unsupported-or-budget-stop");
                         } else {
-                            let workspace =
-                                root.join("workspaces").join(Uuid::new_v4().to_string());
+                            let workspace = root
+                                .join("sessions/workspaces")
+                                .join(Uuid::new_v4().to_string());
                             fixture(task, &workspace)?;
                             let mut command = command_with_gui_path(&native.argv[0]);
                             command.current_dir(&workspace);
@@ -589,8 +834,390 @@ fn persist(root: &Path, records: &[Value]) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn frozen_native_pair_is_valid_and_requires_its_baseline() {
+        let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../docs/performance/efficiency-repo-pilot.json");
+        let mut spec: Spec = serde_json::from_slice(&fs::read(file).unwrap()).unwrap();
+        spec.providers = vec![Provider {
+            id: "xai".into(),
+            model: "grok-4.6".into(),
+            effort: "high".into(),
+            native_comparison: None,
+        }];
+        spec.trials = 1;
+        spec.timeout_seconds = 420;
+        spec.variants = vec!["baseline".into(), "progress-detection".into()];
+        spec.cache_conditions = vec!["fresh-session".into()];
+        spec.execution_budget = Budget {
+            max_observed_tokens: 4_000_000,
+            max_tokens_per_turn: Some(300_000),
+            max_calls: 40,
+            max_cost_micros: None,
+            currency: "USD".into(),
+        };
+        spec.tasks.truncate(1);
+        validate(&spec).unwrap();
+        spec.variants = vec!["progress-detection".into()];
+        assert!(validate(&spec).is_err());
+    }
+
+    #[test]
+    fn fixture_review_applies_while_the_provider_turn_is_still_running() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("sessions/workspaces/run");
+        fs::create_dir_all(&workspace).unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("data"))).unwrap();
+        let session = store
+            .create_session(&workspace, SessionOrigin::Desktop, "test")
+            .unwrap();
+        let turn = Uuid::new_v4();
+        let (observed, reviewed) = with_fixture_review(
+            &store,
+            temp.path(),
+            &workspace,
+            session.id,
+            turn,
+            &["answer.txt".into()],
+            || {
+                store
+                    .create_mutation_proposal(
+                        session.id,
+                        Some(turn),
+                        "answer.txt",
+                        "approved\n",
+                        None,
+                        false,
+                    )
+                    .unwrap();
+                let deadline = Instant::now() + Duration::from_secs(3);
+                while !workspace.join("answer.txt").exists() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                fs::read_to_string(workspace.join("answer.txt")).ok()
+            },
+        );
+        assert_eq!(observed.as_deref(), Some("approved\n"));
+        assert_eq!(reviewed.unwrap().applied, 1);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn managed_fixture_can_run_checks_without_exposing_private_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("data");
+        let workspace = root.join("sessions/workspaces/run");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(root.join("config.json"), "private-state").unwrap();
+        let sandbox = gyro_core::workspace_sandbox::PreparedWorkspaceSandbox::prepare(
+            &workspace,
+            &workspace,
+            &std::env::var_os("HOME").map(PathBuf::from).unwrap(),
+            Some(&root),
+        )
+        .unwrap();
+        let (program, arguments) = sandbox.wrap_command(
+            std::ffi::OsStr::new("/bin/sh"),
+            &["-c".into(), "printf verified > result.txt; test -f result.txt && ! cat ../../../config.json 2>/dev/null".into()],
+        );
+        let result = Command::new(program)
+            .args(arguments)
+            .envs(sandbox.environment())
+            .current_dir(&workspace)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("result.txt")).unwrap(),
+            "verified"
+        );
+    }
+
+    #[test]
+    fn fixture_review_applies_only_the_current_turns_declared_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("sessions/workspaces/run");
+        fs::create_dir_all(&workspace).unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("data"))).unwrap();
+        let session = store
+            .create_session(&workspace, SessionOrigin::Desktop, "test")
+            .unwrap();
+        let turn = Uuid::new_v4();
+        let proposal = store
+            .create_mutation_proposal(
+                session.id,
+                Some(turn),
+                "answer.txt",
+                "answer\n",
+                None,
+                false,
+            )
+            .unwrap();
+        assert_eq!(
+            review_fixture_proposals(
+                &store,
+                temp.path(),
+                &workspace,
+                session.id,
+                turn,
+                &["answer.txt".into()]
+            )
+            .unwrap()
+            .applied,
+            1
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("answer.txt")).unwrap(),
+            "answer\n"
+        );
+        assert_eq!(
+            store
+                .get_mutation_proposal(proposal.id)
+                .unwrap()
+                .unwrap()
+                .status,
+            gyro_core::MutationProposalStatus::Applied
+        );
+    }
+
+    #[test]
+    fn fixture_review_rejects_out_of_scope_batch_before_writing() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("sessions/workspaces/run");
+        fs::create_dir_all(&workspace).unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("data"))).unwrap();
+        let session = store
+            .create_session(&workspace, SessionOrigin::Desktop, "test")
+            .unwrap();
+        let turn = Uuid::new_v4();
+        for path in ["allowed.txt", "other.txt"] {
+            store
+                .create_mutation_proposal(session.id, Some(turn), path, "changed\n", None, false)
+                .unwrap();
+        }
+        assert!(review_fixture_proposals(
+            &store,
+            temp.path(),
+            &workspace,
+            session.id,
+            turn,
+            &["allowed.txt".into()]
+        )
+        .is_err());
+        assert!(!workspace.join("allowed.txt").exists());
+        assert!(!workspace.join("other.txt").exists());
+        assert!(review_fixture_proposals(
+            &store,
+            temp.path(),
+            &workspace,
+            session.id,
+            Uuid::new_v4(),
+            &["allowed.txt".into(), "other.txt".into()]
+        )
+        .is_err());
+        assert!(review_fixture_proposals(
+            &store,
+            &workspace,
+            &workspace,
+            session.id,
+            turn,
+            &["allowed.txt".into(), "other.txt".into()]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn fixture_review_preserves_the_normal_stale_content_guard() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("sessions/workspaces/run");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(workspace.join("answer.txt"), "before\n").unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("data"))).unwrap();
+        let session = store
+            .create_session(&workspace, SessionOrigin::Desktop, "test")
+            .unwrap();
+        let turn = Uuid::new_v4();
+        store
+            .create_mutation_proposal(
+                session.id,
+                Some(turn),
+                "answer.txt",
+                "model\n",
+                Some(content_hash(b"before\n")),
+                true,
+            )
+            .unwrap();
+        fs::write(workspace.join("answer.txt"), "changed elsewhere\n").unwrap();
+        let reviews = review_fixture_proposals(
+            &store,
+            temp.path(),
+            &workspace,
+            session.id,
+            turn,
+            &["answer.txt".into()],
+        )
+        .unwrap();
+        assert_eq!((reviews.applied, reviews.failed), (0, 1));
+        assert_eq!(
+            fs::read_to_string(workspace.join("answer.txt")).unwrap(),
+            "changed elsewhere\n"
+        );
+    }
+
+    #[test]
+    fn isolated_configuration_enables_only_explicitly_selected_providers() {
+        let spec: Spec = serde_json::from_value(json!({
+            "schema":"gyro.efficiency-benchmark.v2",
+            "providers":[{"id":"openai","model":"selected-model","effort":"high"},{"id":"ollama","model":"local-model","effort":""}],
+            "trials":1,"timeoutSeconds":180,"variants":["baseline"],"cacheConditions":["fresh-session"],
+            "executionBudget":{"maxCalls":12,"maxObservedTokens":50_000,"maxCostMicros":null,"currency":"USD"},"tasks":[]
+        })).unwrap();
+        let config = benchmark_config(&spec);
+        for provider in config.model_providers {
+            assert_eq!(
+                provider.enabled,
+                matches!(provider.id.as_str(), "openai" | "ollama")
+            );
+        }
+        assert!(!config.require_command_approval);
+        assert!(!config.require_file_edit_approval);
+        assert_eq!(config.usage_guard.max_calls_per_window, 12);
+        assert_eq!(config.usage_guard.max_tokens_per_call, 50_000);
+    }
+
+    #[test]
+    fn fixture_reviewer_continues_after_a_failed_stale_proposal() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("sessions/workspaces/run");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(workspace.join("answer.txt"), "current\n").unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("data"))).unwrap();
+        let session = store
+            .create_session(&workspace, SessionOrigin::Desktop, "test")
+            .unwrap();
+        let turn = Uuid::new_v4();
+        let stale = store
+            .create_mutation_proposal(
+                session.id,
+                Some(turn),
+                "answer.txt",
+                "stale\n",
+                Some(content_hash(b"old\n")),
+                true,
+            )
+            .unwrap();
+        let (_, reviews) = with_fixture_review(
+            &store,
+            temp.path(),
+            &workspace,
+            session.id,
+            turn,
+            &["answer.txt".into()],
+            || {
+                let deadline = Instant::now() + Duration::from_secs(3);
+                while store
+                    .get_mutation_proposal(stale.id)
+                    .unwrap()
+                    .unwrap()
+                    .status
+                    == gyro_core::MutationProposalStatus::Pending
+                    && Instant::now() < deadline
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                store
+                    .create_mutation_proposal(
+                        session.id,
+                        Some(turn),
+                        "answer.txt",
+                        "corrected\n",
+                        Some(content_hash(b"current\n")),
+                        true,
+                    )
+                    .unwrap();
+                while fs::read_to_string(workspace.join("answer.txt")).unwrap() != "corrected\n"
+                    && Instant::now() < deadline
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                assert_eq!(
+                    fs::read_to_string(workspace.join("answer.txt")).unwrap(),
+                    "corrected\n"
+                );
+            },
+        );
+        let reviews = reviews.unwrap();
+        assert_eq!((reviews.applied, reviews.failed), (1, 1));
+    }
+
+    #[test]
+    fn benchmark_session_persists_exact_model_and_explicit_effort_before_chat() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("data"))).unwrap();
+        for effort in [" high ", ""] {
+            let provider = Provider {
+                id: "openai".into(),
+                model: "selected-model".into(),
+                effort: effort.into(),
+                native_comparison: None,
+            };
+            let session = benchmark_session(&store, temp.path(), &provider).unwrap();
+            let saved = store.get_session(session.id).unwrap().unwrap();
+            assert_eq!(saved.provider_id.as_deref(), Some("openai"));
+            assert_eq!(saved.model_id.as_deref(), Some("selected-model"));
+            assert_eq!(
+                saved.reasoning_effort.as_deref(),
+                (!effort.is_empty()).then_some("high")
+            );
+        }
+    }
+    #[test]
     fn no_budget_is_rejected() {
         let spec:Spec=serde_json::from_value(json!({"schema":"gyro.efficiency-benchmark.v2","providers":[],"trials":3,"timeoutSeconds":180,"variants":["baseline"],"cacheConditions":["fresh-session"],"executionBudget":{"maxCalls":0,"maxObservedTokens":0,"maxCostMicros":null,"currency":"USD"},"tasks":[]})).unwrap();
         assert!(validate(&spec).is_err());
+    }
+
+    #[test]
+    fn routine_profile_never_overrides_explicit_effort() {
+        let routine = vec!["baseline".to_string(), "routine-profile".to_string()];
+        assert!(routine_effort_allowed(&routine, ""));
+        assert!(!routine_effort_allowed(&routine, "high"));
+        assert!(routine_effort_allowed(&["baseline".into()], "high"));
+    }
+
+    #[test]
+    fn missing_turn_receipt_never_reuses_setup_turn_usage() {
+        let session = Uuid::new_v4();
+        let setup = Uuid::new_v4();
+        let task = Uuid::new_v4();
+        let mut old = SessionEvent::new(
+            session,
+            SessionEventKind::SystemEvent,
+            "",
+            json!({
+                "kind": "provider-turn-tokens", "turnTokens": {"totalTokens": 5000}
+            }),
+        );
+        old.turn_id = Some(setup);
+        assert!(turn_receipt(&[old.clone()], task, "provider-turn-tokens").is_none());
+        let mut own = SessionEvent::new(
+            session,
+            SessionEventKind::SystemEvent,
+            "",
+            json!({
+                "kind": "provider-turn-tokens", "turnTokens": {"totalTokens": 300}
+            }),
+        );
+        own.turn_id = Some(task);
+        let events = [own, old];
+        assert_eq!(
+            turn_receipt(&events, task, "provider-turn-tokens")
+                .unwrap()
+                .payload["turnTokens"]["totalTokens"],
+            300
+        );
     }
 }
