@@ -25,7 +25,7 @@ fn main() -> anyhow::Result<()> {
         json!({"role":"assistant","content":"The proposal is pending review."}),
     ];
     let mut after = before.clone();
-    let retired = context::prepare_owned_model_request_with_policy(&mut after, false);
+    let retired = context::prepare_owned_model_request(&mut after);
     anyhow::ensure!(retired > 0, "fixture did not exercise retirement");
     let stored = spill::read(&address)?.expect("retired arguments must be recoverable");
     anyhow::ensure!(

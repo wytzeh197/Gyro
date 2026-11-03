@@ -1831,3 +1831,50 @@
 :root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-body .gyro-settings-row {
   padding-inline: 0;
 }
+
+
+/* Shared settings refinements: distinct groups, aligned reading edges and
+   enough room for descriptions. Use Gyro's existing semantic scale. */
+:root[data-theme] .gyro-settings-surface .gyro-settings-content {
+  width: min(100%, var(--gyro-chat-content-width));
+  max-width: var(--gyro-chat-content-width);
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-group {
+  margin-bottom: var(--gyro-space-card);
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-group:last-child {
+  margin-bottom: 0;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-heading small {
+  max-width: 62ch;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-actions {
+  padding-left: var(--gyro-space-standard);
+}
+:root[data-theme] .gyro-settings-surface .gyro-workspace-scope-heading {
+  margin: 0 0 var(--gyro-space-standard);
+  font-size: var(--gyro-font-chrome);
+}
+:root[data-theme] .gyro-settings-surface .gyro-workspace-scope-description {
+  margin: 0 0 var(--gyro-space-card);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  line-height: 1.5;
+}
+:root[data-theme] .gyro-settings-surface .gyro-workspace-settings-scopes {
+  margin-bottom: var(--gyro-space-section);
+}
+:root[data-theme] .gyro-settings-surface .gyro-workspace-settings-list {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-body .gyro-workspace-settings-list > label {
+  padding-inline: 0;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-body .gyro-workspace-keybindings > header h2 {
+  display: none;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-body > :is(.gyro-workspace-contributions, .gyro-workspace-services) {
+  margin-top: 0;
+}

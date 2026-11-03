@@ -475,6 +475,12 @@
 :root[data-theme]
   .gyro-chat-surface
   .gyro-run.is-segments
+  .gyro-run-pulse.is-quiet {
+  animation: none;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
   .gyro-run-pulse
   .gyro-run-row-icon {
   display: none;

@@ -1,15 +1,24 @@
-//! Verified OpenAI Chat Completions controls, confined to the official endpoint.
+//! Verified cache controls, confined to the official endpoints they are documented for.
 //! https://developers.openai.com/api/docs/guides/prompt-caching (checked 2026-10-12).
+//! https://openrouter.ai/docs/features/prompt-caching (checked 2026-11-02).
 use serde_json::{json, Value};
 pub fn apply(payload: &mut Value, endpoint: &url::Url, model: &str, enabled: bool) {
-    if !enabled
-        || endpoint.scheme() != "https"
-        || !super::cache_plan::KEY_HOSTS.contains(&super::cache_plan::host_of(endpoint))
-    {
+    if !enabled || endpoint.scheme() != "https" {
+        return;
+    }
+    let host = super::cache_plan::host_of(endpoint);
+    let openrouter_claude = host == "openrouter.ai" && model.starts_with("anthropic/");
+    if !openrouter_claude && !super::cache_plan::KEY_HOSTS.contains(&host) {
         return;
     }
     let _measure =
         crate::timing::EfficiencyTimer::start(crate::timing::EfficiencyComponent::CacheControls);
+    if openrouter_claude {
+        // Claude routes cache nothing unless asked. OpenRouter keeps this one
+        // breakpoint on the last cacheable block as the conversation grows.
+        payload["cache_control"] = json!({"type": "ephemeral"});
+        return;
+    }
     payload["prompt_cache_key"] = json!(super::cache_plan::openai_prefix_key(payload));
     if let Some(options) = super::cache_plan::openai_cache_options(model) {
         payload["prompt_cache_options"] = options;
@@ -126,6 +135,62 @@ mod tests {
             apply(&mut p, &url::Url::parse(host).unwrap(), "gpt-6", true);
             assert!(p.get("prompt_cache_key").is_none(), "{host}");
             assert!(p.get("prompt_cache_options").is_none(), "{host}");
+            assert!(p.get("cache_control").is_none(), "{host}");
+        }
+    }
+
+    #[test]
+    fn openrouter_claude_routes_ask_for_automatic_caching() {
+        let url = url::Url::parse("https://openrouter.ai/api/v1").unwrap();
+        let mut p = json!({"messages": [{"role": "system", "content": "stable"}]});
+        apply(&mut p, &url, "anthropic/claude-sonnet-5.5", true);
+        assert_eq!(p["cache_control"], json!({"type": "ephemeral"}));
+        assert!(p.get("prompt_cache_key").is_none());
+        assert!(p.get("prompt_cache_options").is_none());
+        assert_eq!(
+            p["messages"][0],
+            json!({"role": "system", "content": "stable"})
+        );
+    }
+
+    #[test]
+    fn the_openrouter_marker_stays_on_verified_routes() {
+        for (endpoint, model, enabled) in [
+            (
+                "https://openrouter.ai/api/v1",
+                "deepseek/deepseek-v4-pro",
+                true,
+            ),
+            ("https://openrouter.ai/api/v1", "openai/gpt-6", true),
+            (
+                "https://openrouter.ai/api/v1",
+                "anthropic/claude-sonnet-5.5",
+                false,
+            ),
+            (
+                "http://openrouter.ai/api/v1",
+                "anthropic/claude-sonnet-5.5",
+                true,
+            ),
+            (
+                "https://api.deepseek.com/v1",
+                "anthropic/claude-sonnet-5.5",
+                true,
+            ),
+            (
+                "https://api.mistral.ai/v1",
+                "anthropic/claude-sonnet-5.5",
+                true,
+            ),
+            (
+                "https://example.com/v1",
+                "anthropic/claude-sonnet-5.5",
+                true,
+            ),
+        ] {
+            let mut p = json!({"messages": []});
+            apply(&mut p, &url::Url::parse(endpoint).unwrap(), model, enabled);
+            assert!(p.get("cache_control").is_none(), "{endpoint} {model}");
         }
     }
 }

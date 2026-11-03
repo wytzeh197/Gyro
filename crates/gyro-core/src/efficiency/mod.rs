@@ -111,6 +111,16 @@ pub struct Config {
     /// Experimental catalog routing for request-owned tool loops only.
     pub compact_tool_catalog: bool,
     pub recoverable_evidence: bool,
+    /// Retired results keep identity and a spill address, without a preview.
+    /// Off is not written: `deny_unknown_fields` makes an older build reject the key.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub tight_evidence: bool,
+    /// Stronger instruction to request known read-only lookups in one response.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub batch_reads: bool,
+    /// Serve CLI providers the short tool list, with the rest reached by discovery.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub compact_cli_catalog: bool,
     pub retain_tool_catalog: bool,
     pub task_state: bool,
     pub repository_retrieval: bool,
@@ -129,6 +139,9 @@ impl Default for Config {
             cache_assembly: true,
             compact_tool_catalog: false,
             recoverable_evidence: false,
+            tight_evidence: false,
+            batch_reads: false,
+            compact_cli_catalog: false,
             retain_tool_catalog: false,
             task_state: true,
             repository_retrieval: true,
@@ -141,6 +154,18 @@ impl Config {
     pub fn policies(&self) -> bool {
         self.enabled && self.experimental
     }
+    /// Tight wins over recoverable because it also spills the complete JSON.
+    pub fn evidence_policy(&self) -> context::EvidencePolicy {
+        if !self.policies() {
+            context::EvidencePolicy::Preview
+        } else if self.tight_evidence {
+            context::EvidencePolicy::Tight
+        } else if self.recoverable_evidence {
+            context::EvidencePolicy::Recoverable
+        } else {
+            context::EvidencePolicy::Preview
+        }
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -151,8 +176,13 @@ mod tests {
         assert!(!Config::default().compact_tool_catalog);
         assert!(!Config::default().recoverable_evidence);
         assert!(!Config::default().retain_tool_catalog);
+        assert!(!Config::default().tight_evidence);
+        assert!(!Config::default().batch_reads);
+        assert!(!Config::default().compact_cli_catalog);
         let legacy: Config = serde_json::from_str("{}").unwrap();
         assert!(!legacy.recoverable_evidence && !legacy.retain_tool_catalog);
+        assert!(!legacy.tight_evidence && !legacy.batch_reads);
+        assert!(!legacy.compact_cli_catalog);
         assert!(
             !serde_json::from_str::<Config>("{}")
                 .unwrap()
@@ -163,6 +193,41 @@ mod tests {
             Some("max")
         );
         assert_eq!(Profile::Deep.effort(None, &["low"]), None);
+    }
+    #[test]
+    fn switches_that_are_off_stay_out_of_saved_config() {
+        // An installed older build shares this config and rejects unknown keys.
+        let saved = serde_json::to_value(Config::default()).unwrap();
+        for key in ["tightEvidence", "batchReads", "compactCliCatalog"] {
+            assert!(saved.get(key).is_none(), "{key} was written");
+        }
+        assert_eq!(
+            serde_json::from_value::<Config>(saved).unwrap(),
+            Config::default()
+        );
+        let on = Config {
+            compact_cli_catalog: true,
+            ..Config::default()
+        };
+        let saved = serde_json::to_value(&on).unwrap();
+        assert_eq!(saved["compactCliCatalog"], true);
+        assert_eq!(serde_json::from_value::<Config>(saved).unwrap(), on);
+    }
+    #[test]
+    fn evidence_policy_needs_experiments_and_tight_wins() {
+        use context::EvidencePolicy as P;
+        let mut config = Config {
+            tight_evidence: true,
+            recoverable_evidence: true,
+            ..Config::default()
+        };
+        assert_eq!(config.evidence_policy(), P::Preview);
+        config.experimental = true;
+        assert_eq!(config.evidence_policy(), P::Tight);
+        config.tight_evidence = false;
+        assert_eq!(config.evidence_policy(), P::Recoverable);
+        config.recoverable_evidence = false;
+        assert_eq!(config.evidence_policy(), P::Preview);
     }
     #[test]
     fn custom_support_is_unknown() {

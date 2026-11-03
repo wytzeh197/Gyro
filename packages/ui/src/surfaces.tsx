@@ -23,6 +23,7 @@ import { groupWorkflowEvents, workflowDetails } from "./code-mode";
 import { createTranscriptTurnCache } from "./chat-history-efficiency";
 import { capabilityLabel } from "./capability-ui.ts";
 import { EfficiencySettings } from "./efficiency-settings";
+import { visibleFailureNotifications } from "./failure-notifications";
 import { Folder, FolderOpen, Folders } from "./workspace-folder-icons";
 import {
   WorkspaceRootIssues,
@@ -187,8 +188,8 @@ import { workspaceFileBadge } from "./workspace-file-icons";
 import { LanguagePicker } from "./editor/languages/language-picker";
 import { resolveLanguage } from "./editor/languages/registry";
 import {
-  Activity,
   Cloud,
+  Activity,
   Archive,
   ArrowDown,
   ArrowLeft,
@@ -1699,6 +1700,39 @@ export function CliUpdateBanner({
  * Provider readiness blocks the whole chat surface, so present it in the same
  * center-top notice area as CLI updates instead of shrinking the composer.
  */
+function FailureNotice({
+  notification,
+  onDismiss,
+}: {
+  notification: Notification;
+  onDismiss?: (id: string) => void;
+}) {
+  return (
+    <div
+      className="gyro-cli-update-banner gyro-failure-notice"
+      data-phase="failed"
+      role="alert"
+      title={notification.detail}
+    >
+      <span className="gyro-cli-update-banner-icon" aria-hidden="true">
+        <TriangleAlert size={13} />
+      </span>
+      <span className="gyro-cli-update-banner-copy">
+        <strong>{notification.title}</strong>
+        {notification.detail ? <small>{notification.detail}</small> : null}
+      </span>
+      <button
+        aria-label={`Dismiss ${notification.title}`}
+        className="gyro-cli-update-banner-dismiss"
+        onClick={() => onDismiss?.(notification.id)}
+        type="button"
+      >
+        <X size={13} />
+      </button>
+    </div>
+  );
+}
+
 function ProviderReadinessBanner({
   message,
   actionLabel,
@@ -1888,6 +1922,7 @@ export function AppChrome({
     () => settingsSearchResults(settingsQuery),
     [settingsQuery],
   );
+  const failureNotices = visibleFailureNotifications(notifications);
   const [noticeLane, noticeLaneRef] = useState<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
     const main = noticeLane?.parentElement;
@@ -2779,18 +2814,27 @@ export function AppChrome({
             <span aria-hidden="true" className="gyro-seam-corner is-bottom" />
           </>
         ) : null}
-        {activeDestination !== "settings" &&
-        (providerReadinessNotice ||
-          cliUpdateOffers.some((offer) => offer.updateAvailable)) ? (
+        {failureNotices.length > 0 ||
+        (activeDestination !== "settings" &&
+          (providerReadinessNotice ||
+            cliUpdateOffers.some((offer) => offer.updateAvailable))) ? (
           <div className="gyro-global-status-notices" ref={noticeLaneRef}>
-            {providerReadinessNotice ? (
+            {failureNotices.map((notification) => (
+              <FailureNotice
+                key={notification.id}
+                notification={notification}
+                onDismiss={onDismissNotification}
+              />
+            ))}
+            {activeDestination !== "settings" && providerReadinessNotice ? (
               <ProviderReadinessBanner
                 actionLabel={providerReadinessNotice.actionLabel}
                 message={providerReadinessNotice.message}
                 onAction={onProviderReadinessAction}
               />
             ) : null}
-            {cliUpdateOffers.some((offer) => offer.updateAvailable) ? (
+            {activeDestination !== "settings" &&
+            cliUpdateOffers.some((offer) => offer.updateAvailable) ? (
               <CliUpdateBanner
                 failure={cliUpdateFailure}
                 offers={cliUpdateOffers}
@@ -13079,9 +13123,10 @@ function CompanionFiles({
  * question, kept beside the main chat rather than inside it.
  *
  * It runs against a session of its own so the model answers with the same
- * workspace, branch and permissions as the chat it sits next to, and reads none
- * of that chat's transcript. That session is transient — it never reaches the
- * sidebar or history, and closing the tab deletes it.
+ * workspace, branch and permissions as the chat it sits next to, and reads that
+ * chat's transcript as background. Nothing said here goes back into that chat.
+ * The session is transient — it never reaches the sidebar or history, and
+ * closing the tab deletes it.
  */
 function SideChatPanel({
   onOpenBrowserUrl,
@@ -13119,7 +13164,7 @@ function SideChatPanel({
   return (
     <div className="gyro-side-chat">
       <p className="gyro-side-chat-context">
-        Separate conversation · cleared when this tab closes.
+        Reads this chat · replies stay here · cleared when this tab closes.
       </p>
       <div className="gyro-side-chat-transcript" ref={transcriptRef}>
         {messages.length === 0 && !sideChat?.streamingMessage ? (
@@ -13419,13 +13464,13 @@ function ChatContextSection({
         ))}
         {activePopover ? (
           <ComposerPopover
-            className={
+            className={`gyro-chat-context-picker ${
               activePopover === "project"
                 ? "gyro-project-picker"
                 : activePopover === "branch"
                   ? "gyro-chat-context-branch-picker"
-                  : undefined
-            }
+                  : "gyro-workspace-mode-picker"
+            }`}
             id={`${popoverBaseId}-context`}
             keepInBounds
             items={items}
@@ -14763,7 +14808,6 @@ function WorkspaceSettingsEditor({
         <>
           <SettingsDisclosure id="language-services" title="Language services" summary={`${languageServers.length} detected`}><section className="gyro-workspace-services">
             <header>
-              <h2>Language services</h2>
               <p>
                 Detected locally for the active project. Gyro does not
                 auto-install external tools.
@@ -14788,7 +14832,6 @@ function WorkspaceSettingsEditor({
           <SettingsDisclosure id="local-contributions" title="Local contributions" summary={`${contributions.length} registered`}><section className="gyro-workspace-contributions">
             <header>
               <div>
-                <h2>Local contributions</h2>
                 <p>
                   Declarative commands and views loaded from a local manifest.
                   Contributions stay disabled until you enable them.
@@ -20855,6 +20898,10 @@ function WebBrowserPreviewSurface({
     <div className={previewClassName}>
       {/* The browser owns navigation; the surrounding dock owns tool tabs. */}
       <div className="gyro-browser-preview-head">
+        {/* Drawn over the head's edge so loading never resizes the page's host. */}
+        {isChat && (isLoading || isCapturing) ? (
+          <span aria-hidden="true" className="gyro-browser-progress" />
+        ) : null}
         <div className="gyro-browser-preview-toolbar" ref={browserToolbarRef}>
           <div
             className="gyro-browser-nav-group"
@@ -20900,7 +20947,21 @@ function WebBrowserPreviewSurface({
               onNavigate?.(isChat ? addressValue : frameUrl);
             }}
           >
-            <Globe2 size={14} />
+            {isChat ? (
+              <span aria-hidden="true" className="gyro-url-glyph">
+                {isBlank ? (
+                  <Search size={14} />
+                ) : preview.status === "verification-failed" ? (
+                  <TriangleAlert size={14} />
+                ) : isLocalPreview ? (
+                  <Laptop size={14} />
+                ) : (
+                  <Globe2 size={14} />
+                )}
+              </span>
+            ) : (
+              <Globe2 size={14} />
+            )}
             <input
               aria-label="Browser URL"
               onChange={(event) => {
@@ -21011,17 +21072,21 @@ function WebBrowserPreviewSurface({
               type="button"
             >
               <Camera size={14} />
+              {isChat ? <span>Screenshot</span> : null}
             </button>
-            <button
-              aria-label="Open in system browser"
-              className="gyro-browser-external-button"
-              disabled={isBlank}
-              onClick={onOpenExternal}
-              title="Open in system browser"
-              type="button"
-            >
-              <Globe2 size={14} />
-            </button>
+            {/* The chat address bar already has this action. */}
+            {!isChat ? (
+              <button
+                aria-label="Open in system browser"
+                className="gyro-browser-external-button"
+                disabled={isBlank}
+                onClick={onOpenExternal}
+                title="Open in system browser"
+                type="button"
+              >
+                <Globe2 size={14} />
+              </button>
+            ) : null}
           </div>
         </div>
         {isChat && agentActivity ? (
@@ -21045,7 +21110,16 @@ function WebBrowserPreviewSurface({
         ) : null}
       </div>
       <div className="gyro-browser-frame">
-        <BrowserPreviewSurround preview={preview} disabled={isBlank || showingCapture}>
+        <BrowserPreviewSurround
+          preview={preview}
+          // Only a page gets a viewport frame; messages fill the panel.
+          disabled={
+            isBlank ||
+            showingCapture ||
+            preview.status === "idle" ||
+            preview.status === "verification-failed"
+          }
+        >
         <div
           className={`gyro-browser-page is-${preview.device}`}
           data-device-label={deviceLabel(preview.device)}
@@ -21134,14 +21208,18 @@ function WebBrowserPreviewSurface({
         </BrowserPreviewSurround>
       </div>
       <div
-        className={`gyro-browser-statusbar${isChat && !showingCapture && preview.captureStatus === "idle" && !hasDiagnostics ? " is-hidden" : ""}`}
+        // In chat this row appears only for something to act on: its other readouts
+        // live elsewhere, and showing it would resize the native page mid-load.
+        className={`gyro-browser-statusbar${isChat && preview.captureStatus !== "failed" && !hasDiagnostics ? " is-hidden" : ""}`}
       >
         <div>
           <span className={statusRingClass} />
           <span>
             {showingCapture
               ? `Capture · ${captureSourceLabel || "preview"} · ${deviceLabel(preview.device)}`
-              : browserStatusLabel(preview)}
+              : isChat && hasDiagnostics
+                ? "This page reported errors"
+                : browserStatusLabel(preview)}
           </span>
         </div>
         {preview.captureStatus !== "idle" ? (
@@ -21268,7 +21346,7 @@ function BrowserFramePlaceholder({
     : isLoading
       ? "Loading preview"
       : isUnreachable
-        ? "Can't reach this URL"
+        ? "Can't reach this page"
         : "No live preview yet";
   const detail = isOccluded
     ? "Close the overlay to show the native browser surface again."
@@ -21277,10 +21355,15 @@ function BrowserFramePlaceholder({
         ? `Connecting to ${hostLabel}…`
         : "Connecting…"
       : isUnreachable
-        ? "Start the app, or try another local URL."
+        ? isLoopbackBrowserPreviewUrl(suggestedUrl)
+          ? `Nothing is responding at ${hostLabel || "this address"}. Start the app, then try again.`
+          : "Check the address or your connection, then try again."
         : hasUrl
           ? "Point the browser at a running app, or open this URL externally."
           : "Enter a URL above to preview a running app or website.";
+  // A chat panel's toolbar already offers reload, so its loading state stays quiet.
+  const showActions = !isOccluded && !(isLoading && compactLoading);
+  const showHostAction = hasUrl && !isLoading && !isUnreachable;
 
   return (
     <div
@@ -21314,30 +21397,28 @@ function BrowserFramePlaceholder({
           </div>
         ) : (
           <div className="gyro-browser-placeholder-icon" aria-hidden="true">
-            <Globe2 size={22} />
+            {isUnreachable ? <TriangleAlert size={22} /> : <Globe2 size={22} />}
           </div>
         )}
         <strong>{title}</strong>
         <p>{detail}</p>
-        {!isOccluded ? (
+        {showActions ? (
           <div className="gyro-browser-placeholder-actions">
-            {hasUrl ? (
+            {showHostAction ? (
               <button onClick={() => onNavigate?.(suggestedUrl)} type="button">
-                {hostLabel || "localhost:3000"}
+                Open {hostLabel || "localhost:3000"}
               </button>
             ) : null}
             {isUnreachable || isLoading ? (
               <button onClick={onReload} type="button">
-                Retry
+                Try again
               </button>
             ) : null}
-            <button
-              disabled={!hasUrl || !onOpenExternal}
-              onClick={onOpenExternal}
-              type="button"
-            >
-              Open external
-            </button>
+            {hasUrl && onOpenExternal ? (
+              <button onClick={onOpenExternal} type="button">
+                Open in system browser
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -25194,7 +25275,8 @@ function branchPopoverItems({
  */
 function BranchLabel({ name }: { name: string }) {
   const slash = name.lastIndexOf("/");
-  if (slash < 0) return <>{name}</>;
+  if (slash < 0)
+    return <span className="gyro-branch-label-leaf">{name}</span>;
   return (
     <>
       <span className="gyro-branch-label-prefix">
@@ -25226,6 +25308,7 @@ function ComposerPopover({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
+  const hasBranchList = items.some((item) => item.kind === "branch");
   // Long branch lists get a filter; short ones stay a plain menu.
   const searchable = items.filter((item) => item.kind === "branch").length >= 6;
   const needle = query.trim().toLowerCase();
@@ -25317,12 +25400,16 @@ function ComposerPopover({
           ? {
               gridAutoRows: "max-content",
               alignContent: "start",
-              overflowY: "auto",
+              overflowY: hasBranchList ? "hidden" : "auto",
             }
           : undefined
       }
       aria-label={title ?? "Menu"}
-      className={["gyro-composer-popover", className ?? ""]
+      className={[
+        "gyro-composer-popover",
+        hasBranchList ? "has-branch-list" : "",
+        className ?? "",
+      ]
         .filter(Boolean)
         .join(" ")}
       data-align={align}
@@ -25340,6 +25427,17 @@ function ComposerPopover({
             aria-label="Find branch"
             autoFocus
             onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+              const rows = panelRef.current?.querySelectorAll<HTMLButtonElement>(
+                '.gyro-composer-menu-list [role="menuitem"]:not(:disabled)',
+              );
+              const row =
+                event.key === "ArrowDown" ? rows?.[0] : rows?.[rows.length - 1];
+              if (!row) return;
+              event.preventDefault();
+              row.focus();
+            }}
             placeholder="Find branch…"
             spellCheck={false}
             type="search"
@@ -25347,12 +25445,24 @@ function ComposerPopover({
           />
         </label>
       ) : null}
-      {searchable &&
-      needle &&
-      !listItems.some((item) => item.kind === "branch") ? (
-        <div className="gyro-composer-menu-empty">No matching branches</div>
-      ) : null}
-      {listItems.map(renderItem)}
+      {hasBranchList ? (
+        <div
+          className="gyro-composer-menu-list"
+          role="group"
+          aria-label="Local branches"
+        >
+          {searchable &&
+          needle &&
+          !listItems.some((item) => item.kind === "branch") ? (
+            <div className="gyro-composer-menu-empty" role="status">
+              No matching branches
+            </div>
+          ) : null}
+          {listItems.map(renderItem)}
+        </div>
+      ) : (
+        listItems.map(renderItem)
+      )}
       {footerItems.length ? (
         <div className="gyro-composer-menu-footer" role="group">
           {footerItems.map(renderItem)}
@@ -25435,11 +25545,14 @@ function ComposerPopover({
           ) : null}
           <div className={itemClassName}>
             <button
+              aria-current={item.active ? "true" : undefined}
               className="gyro-composer-menu-primary"
               disabled={item.disabled}
               onClick={() => onAction(item.action, item)}
               role="menuitem"
-              title={item.tooltip}
+              title={
+                item.tooltip ? `${item.label} — ${item.tooltip}` : item.label
+              }
               type="button"
             >
               {itemContent}
@@ -25466,11 +25579,12 @@ function ComposerPopover({
           </div>
         ) : null}
         <button
+          aria-current={item.active ? "true" : undefined}
           className={itemClassName}
           disabled={item.disabled}
           onClick={() => onAction(item.action, item)}
           role="menuitem"
-          title={item.tooltip}
+          title={item.tooltip ? `${item.label} — ${item.tooltip}` : item.label}
           type="button"
         >
           {itemContent}
@@ -29544,6 +29658,8 @@ function ChatTurn({
               error: providerStatus.error,
               recoveryKind: providerStatus.recoveryKind,
               recoveryMessage: providerStatus.recoveryMessage,
+              at: turn.statusEvent?.createdAt,
+              quietForSeconds: runQuietSeconds(turn.statusEvent),
             }
           : undefined,
         // Native capacity recovery owns its wait while this invoke stays alive;
@@ -29562,7 +29678,9 @@ function ChatTurn({
     [
       turn.timelineEvents,
       turn.durationMs,
+      turn.statusEvent?.createdAt,
       turn.statusEvent?.message,
+      turn.statusEvent?.payload,
       isRunning,
       startedAt,
       completedAt,
@@ -31795,6 +31913,11 @@ function eventPayloadRecord(event: SessionEvent) {
     return event.payload as Record<string, unknown>;
   }
   return undefined;
+}
+
+function runQuietSeconds(event?: SessionEvent) {
+  const seconds = recordFromUnknown(event?.payload)?.quietForSeconds;
+  return typeof seconds === "number" ? seconds : undefined;
 }
 
 function recordFromUnknown(value: unknown) {

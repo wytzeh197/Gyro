@@ -74,6 +74,7 @@ function loadPreviewAppearance(): PreviewAppearance {
   } catch {
     /* Malformed fixture storage restores the defaults. */
   }
+  if (["light", "dark"].includes(params.get("theme") ?? "")) initial.theme = params.get("theme") as ThemeMode;
   if (["compact", "comfortable"].includes(params.get("density") ?? "")) initial.density = params.get("density") as PreviewAppearance["density"];
   if (["small", "default", "large"].includes(params.get("size") ?? "")) initial.interfaceSize = params.get("size") as PreviewAppearance["interfaceSize"];
   return initial;
@@ -347,7 +348,7 @@ function Preview() {
     colors[1]!,
   );
   return (
-    <div className="gyro-settings-preview" data-reduced-motion={reduceMotion}>
+    <div className="gyro-settings-preview" data-reduced-motion={reduceMotion} data-capture={params.has("capture") || undefined}>
       <style>{`
         html, body, #root { height: 100%; margin: 0; }
         .gyro-settings-preview { height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; background: var(--gyro-pane); color: var(--gyro-text); }
@@ -355,6 +356,13 @@ function Preview() {
         .gyro-settings-preview > .gyro-app-shell { height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr); }
         .gyro-settings-preview .gyro-workspace-activity-rail { min-height: 0; }
         :root[data-theme] .gyro-settings-preview .gyro-app-shell.is-workspace-shell > .gyro-main, :root[data-theme] .gyro-settings-preview .gyro-app-shell.is-workspace-shell > .gyro-sidebar { height: 100%; min-height: 0; }
+        /* Optional document-scroll mode for full-page production-component captures. */
+        html:has(.gyro-settings-preview[data-capture]), body:has(.gyro-settings-preview[data-capture]), #root:has(.gyro-settings-preview[data-capture]) { height: auto; overflow: visible; }
+        .gyro-settings-preview[data-capture] { height: auto; min-height: 100dvh; overflow: visible; }
+        .gyro-settings-preview[data-capture] > .gyro-app-shell { height: auto; min-height: 100dvh; overflow: visible; }
+        :root[data-theme] .gyro-settings-preview[data-capture] .gyro-app-shell > .gyro-main { height: auto; max-height: none; overflow: visible; }
+        :root[data-theme] .gyro-settings-preview[data-capture] .gyro-app-shell.is-settings-layout > .gyro-main > .gyro-settings-surface { overflow: visible; flex: none; }
+        :root[data-theme] .gyro-settings-preview[data-capture] .gyro-app-shell > .gyro-sidebar { position: sticky; top: 0; align-self: start; height: 100dvh; }
         .gyro-settings-preview-account-form { position: fixed; z-index: 500; top: 15%; left: 50%; transform: translateX(-50%); width: min(480px, calc(100vw - 40px)); padding: 24px; background: var(--gyro-pane); border: 1px solid var(--gyro-border); border-radius: 12px; box-shadow: 0 12px 80px #0004; }
         .gyro-settings-preview-account-form input { display: block; width: 100%; margin: 16px 0; }
         .gyro-settings-preview-portal-backdrop { position: fixed; inset: 0; z-index: 500; background: #0005; }
@@ -390,6 +398,7 @@ function Preview() {
           />
           Reduce Motion
         </label>
+        {section === "billing" ? <><select aria-label="Billing fixture state" value={billing.snapshot.status} onChange={e=>billing.setScene(e.target.value as typeof billing.snapshot.status)}>{BILLING_SCENES.map(status=><option key={status}>{status}</option>)}</select><button onClick={billing.cancel}>Simulate cancellation</button></> : null}
         {section === "updates"
           ? UPDATE_SCENES.map((entry) => (
               <button key={entry.id} onClick={() => setUpdateScene(entry.id)}>
@@ -449,6 +458,8 @@ function Preview() {
           preferences={{ ...extraPreferences, theme, density, interfaceSize, motionSpeed, mainColor: colors[0]!, secondaryColor: colors[1]!, desktopNotifications: notifications, launchView, showMenuBarIcon: menu, modelFollow: follow, defaultWorkspaceMode }}
           onSettingsPreferencesChange={patch => setExtraPreferences(current=>({...current,...patch}))}
           onImportSettings={settings => { setExtraPreferences(current=>({...current,...settings})); if(settings.theme)setTheme(settings.theme); if(settings.density)setDensity(settings.density); if(settings.interfaceSize)setInterfaceSize(settings.interfaceSize); if(settings.motionSpeed)setMotionSpeed(settings.motionSpeed); if(settings.mainColor||settings.secondaryColor)setColors([settings.mainColor??colors[0]!,settings.secondaryColor??colors[1]!]); if(settings.desktopNotifications)setNotifications(settings.desktopNotifications); if(settings.launchView)setLaunchView(settings.launchView); if(settings.showMenuBarIcon!==undefined)setMenu(settings.showMenuBarIcon); if(settings.modelFollow)setFollow(settings.modelFollow); }}
+          billingSnapshot={billing.snapshot}
+          billingActions={billing.actions}
           systemAccess={[{id:"documents",label:"Documents",reason:"Fixture access status",status:"granted",path:"/fixture/Documents",canPrompt:false,settingsUrl:""},{id:"full-disk",label:"Full Disk Access",reason:"Fixture access status",status:"unavailable",canPrompt:false,settingsUrl:""}]}
           onRecheckSystemAccess={()=>setResult("Simulated access check; no macOS permission request.")}
           onOpenSystemAccessSettings={()=>setResult("System Settings would open in the native app.")}
@@ -462,8 +473,6 @@ function Preview() {
           cliLaunchPreset={extraPreferences.cliLaunchPreset}
           onCliLaunchPresetChange={preset=>updateFixturePreference({type:"set-cli-launch-preset",preset})}
           workspaceKeybindings={extraPreferences.workspaceKeybindings}
-          billingSnapshot={billing.snapshot}
-          billingActions={billing.actions}
           workspaceUserSettings={extraPreferences.workspaceUserSettings}
           workspaceSettingsByWorkspace={extraPreferences.workspaceSettingsByWorkspace}
           workspaceSettingsByFolder={extraPreferences.workspaceSettingsByFolder}

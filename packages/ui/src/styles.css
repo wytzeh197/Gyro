@@ -11,6 +11,8 @@
 @import "./model-default-suggestion.css";
 @import "./chat-shell-design.css";
 @import "./companion-design.css";
+@import "./chat-context-popovers.css";
+@import "./browser-panel-design.css";
 
 .gyro-surface-row {
   align-items: center;
@@ -842,6 +844,16 @@ button.gyro-account-menu-row:hover {
 
 .gyro-provider-readiness-banner[data-phase="blocked"] {
   border-color: color-mix(in srgb, var(--gyro-warn) 42%, var(--gyro-border));
+}
+
+/* The reason is the point of a failure notice, so it wraps instead of
+   truncating to one line. The full text stays on hover past the clamp. */
+.gyro-failure-notice .gyro-cli-update-banner-copy small {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  display: -webkit-box;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 
 .gyro-provider-readiness-banner[data-phase="blocked"]
@@ -3667,7 +3679,7 @@ button.gyro-account-menu-row:hover {
 }
 
 .gyro-browser-preview.is-capture-view .gyro-browser-page {
-  background: #0a0b0d;
+  background: var(--gyro-code-bg);
 }
 
 .gyro-browser-console-pill {
@@ -3773,7 +3785,7 @@ button.gyro-account-menu-row:hover {
 }
 
 .gyro-browser-placeholder.has-capture {
-  background: #0a0b0d;
+  background: var(--gyro-code-bg);
 }
 
 .gyro-browser-placeholder-capture {
@@ -30082,10 +30094,10 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-run-pulse-thought {
-  -webkit-mask-image: linear-gradient(to right, #000 84%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, var(--gyro-text) 84%, transparent 100%);
   flex: 1 1 auto;
   font-weight: 400;
-  mask-image: linear-gradient(to right, #000 84%, transparent 100%);
+  mask-image: linear-gradient(to right, var(--gyro-text) 84%, transparent 100%);
   min-width: 0;
   opacity: 0.8;
   overflow: hidden;
@@ -35143,12 +35155,6 @@ textarea:focus-visible,
   width: 100%;
 }
 
-.gyro-browser-preview.is-chat:not(.is-loading):not(.is-capturing-frame):not(
-    .is-capture-view
-  )
-  .gyro-browser-statusbar {
-  display: none;
-}
 .gyro-browser-new-tab {
   align-items: center;
   background: var(--gyro-pane);

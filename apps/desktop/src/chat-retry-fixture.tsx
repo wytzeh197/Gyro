@@ -25,7 +25,15 @@ if (params.has("accent")) {
 }
 
 type FixtureState =
-  "scheduled" | "cancelled" | "permanent" | "interrupted" | "retrying" | "done";
+  | "scheduled"
+  | "cancelled"
+  | "permanent"
+  | "interrupted"
+  | "retrying"
+  | "done"
+  | "thinking"
+  | "working"
+  | "quiet";
 const initialState = (params.get("state") ?? "scheduled") as FixtureState;
 const eventId = "fixture-failed-status";
 const requestedSeconds = Number(params.get("seconds") ?? "30");
@@ -82,31 +90,53 @@ function Fixture() {
 
   const model: RunModel = {
     startedAt,
-    steps,
+    steps:
+      state === "working"
+        ? [
+            ...steps,
+            {
+              kind: "work",
+              id: "fixture-command",
+              at: new Date(Date.now() - 83_000).toISOString(),
+              item: {
+                kind: "command",
+                id: "fixture-command",
+                status: "running",
+                command: "pnpm test",
+                category: "test",
+              },
+            },
+          ]
+        : steps,
     files: [],
+    quietForSeconds: state === "quiet" ? 360 : undefined,
     phase:
-      state === "interrupted"
-        ? { name: "interrupted" }
-        : state === "retrying"
-          ? { name: "retrying", reason: "Waiting for the provider" }
-          : state === "done"
-            ? { name: "done", durationMs: 5_000 }
-            : state === "permanent"
-              ? {
-                  name: "failed",
-                  message:
-                    "The provider needs to be signed in before this message can continue.",
-                  recoveryKind: "authentication",
-                  recoveryMessage: "The conversation context is preserved.",
-                }
-              : {
-                  name: "failed",
-                  message:
-                    "Selected model is at capacity. Please try a different model.",
-                  recoveryKind: "model-capacity",
-                  recoveryMessage:
-                    "Retry the message. Gyro will preserve the conversation context.",
-                },
+      state === "thinking" || state === "quiet"
+        ? { name: "thinking" }
+        : state === "working"
+          ? { name: "working" }
+          : state === "interrupted"
+            ? { name: "interrupted" }
+            : state === "retrying"
+              ? { name: "retrying", reason: "Waiting for the provider" }
+              : state === "done"
+                ? { name: "done", durationMs: 5_000 }
+                : state === "permanent"
+                  ? {
+                      name: "failed",
+                      message:
+                        "The provider needs to be signed in before this message can continue.",
+                      recoveryKind: "authentication",
+                      recoveryMessage: "The conversation context is preserved.",
+                    }
+                  : {
+                      name: "failed",
+                      message:
+                        "Selected model is at capacity. Please try a different model.",
+                      recoveryKind: "model-capacity",
+                      recoveryMessage:
+                        "Retry the message. Gyro will preserve the conversation context.",
+                    },
   };
   return (
     <ChatRetryContext.Provider

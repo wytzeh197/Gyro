@@ -20,6 +20,82 @@ let pending: CheckPlan | undefined;
 let finishRunning: (() => void) | undefined;
 let completeRunning: (() => void) | undefined;
 const calls: string[] = [];
+const cloudCalls: Record<string, unknown>[] = [];
+let queueReport = false;
+let failShare = false;
+let reportUpload:
+  { requestId: string; objectId: string; revisionId: string } | undefined;
+const reportTickets = new Set<string>();
+const cloudRequest = async (
+  request: Record<string, unknown>,
+): Promise<Record<string, unknown>> => {
+  cloudCalls.push(structuredClone(request));
+  if (request.operation === "preview-report") {
+    if (
+      !reports.some(
+        (report) =>
+          report.plan.id === request.reportId &&
+          report.plan.draft.sessionId === request.localId,
+      )
+    )
+      throw new Error("Report not found");
+    const ticket = crypto.randomUUID();
+    reportTickets.add(ticket);
+    const content =
+      "Gyro Check report\nUI fixture · simulated transport\nPassed: Add a to-do item\nRequired evidence: API responses\nLimits: Browser interaction was not checked.\n[local path removed]\nRead-only report; no execution permissions.";
+    return {
+      ticket,
+      kind: "report",
+      content,
+      sizeBytes: new TextEncoder().encode(content).length,
+    };
+  }
+  if (request.operation === "upload-preview") {
+    if (
+      request.reviewed !== true ||
+      typeof request.ticket !== "string" ||
+      !reportTickets.delete(request.ticket)
+    )
+      throw new Error("Unreviewed or expired ticket");
+    reportUpload = {
+      requestId: crypto.randomUUID(),
+      objectId: crypto.randomUUID(),
+      revisionId: crypto.randomUUID(),
+    };
+    return queueReport
+      ? { queued: true, requestId: reportUpload.requestId }
+      : {
+          queued: false,
+          requestId: reportUpload.requestId,
+          uploaded: reportUpload,
+          completed: [reportUpload],
+        };
+  }
+  const command = request.command as Record<string, unknown> | undefined;
+  if (request.operation === "service" && command?.operation === "retry-uploads")
+    return { queued: false, completed: reportUpload ? [reportUpload] : [] };
+  if (
+    request.operation === "service" &&
+    command?.operation === "create-share"
+  ) {
+    if (failShare) throw new Error("Simulated ambiguous share response");
+    if (
+      !reportUpload ||
+      command.objectId !== reportUpload.objectId ||
+      command.revisionId !== reportUpload.revisionId ||
+      command.expiresInDays !== 7
+    )
+      throw new Error("Wrong upload acknowledgment");
+    return {
+      shareId: crypto.randomUUID(),
+      url: "https://share.example/reports/synthetic-fixture",
+      expiresAt: "2026-11-09T12:00:00Z",
+    };
+  }
+  if (request.operation === "service" && command?.operation === "revoke-share")
+    return { revoked: true };
+  throw new Error("Unexpected Cloud fixture operation");
+};
 let executed = 0;
 let stale = false;
 setConfirmActionHandler(async () => true);
@@ -140,6 +216,15 @@ Object.assign(window, {
     get calls() {
       return calls;
     },
+    get cloudCalls() {
+      return cloudCalls;
+    },
+    queueReport(value: boolean) {
+      queueReport = value;
+    },
+    failShare(value: boolean) {
+      failShare = value;
+    },
     get executed() {
       return executed;
     },
@@ -214,7 +299,16 @@ function FixtureContent() {
 }
 function Fixture() {
   return (
-    <LocalCheckHost sessions={[session]} call={call} available>
+    <LocalCheckHost
+      sessions={[session]}
+      call={call}
+      available
+      cloudRequest={
+        new URL(location.href).searchParams.has("sharing")
+          ? cloudRequest
+          : undefined
+      }
+    >
       <FixtureContent />
     </LocalCheckHost>
   );

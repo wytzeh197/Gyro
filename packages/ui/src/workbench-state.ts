@@ -1,5 +1,6 @@
 import { normalizedInterfaceSize, normalizedMotionSpeed } from "./appearance.ts";
 import { automaticBrowserDevice } from "./browser-viewport.ts";
+import { addNotification } from "./failure-notifications.ts";
 import type {
   DesktopNotificationPreferences,
   AppDestination,
@@ -3696,9 +3697,9 @@ export function workbenchReducer(
     case "add-notification":
       return {
         ...state,
-        notifications: [action.notification, ...state.notifications].slice(
-          0,
-          12,
+        notifications: addNotification(
+          state.notifications,
+          action.notification,
         ),
       };
     case "dismiss-notification":
@@ -4938,6 +4939,8 @@ function normalizedSettingsSection(
     case "editor-workspace":
     case "tools-contributions":
     case "usage-limits":
+    case "billing":
+    case "cloud":
     case "providers":
     case "billing":
     case "cloud":

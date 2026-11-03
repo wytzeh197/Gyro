@@ -219,7 +219,7 @@ export function SettingsHelp({
       </p>
       <div className="gyro-help-answers">
         {filtered.map((group) => (
-          <SettingsDisclosure key={group.label} id={`help-${group.id}`} title={group.label} summary={`${group.articles.length} answers`} attention={terms.length > 0}>
+          <SettingsDisclosure key={group.label} id={`help-${group.id}`} title={group.label} summary={`${group.articles.length} ${group.articles.length === 1 ? "answer" : "answers"}`} attention={terms.length > 0}>
             {group.articles.map((article) => (
               <details
                 key={`${article.title}:${query}:${topic}`}

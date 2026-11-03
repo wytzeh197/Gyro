@@ -1112,6 +1112,8 @@ export type ProviderChatStreamEvent = {
   error?: string | null;
   /** How a failed turn can be repaired, as classified by the backend. */
   recoveryKind?: string | null;
+  /** On a heartbeat, how long the live run has shown nothing. */
+  quietSeconds?: number | null;
 };
 
 export type ProviderRunDiagnostics = {
@@ -2439,7 +2441,7 @@ export type EfficiencyConfig = {
   enabled: boolean; experimental: boolean; profile: "routine" | "standard" | "deep";
   parallelAgents: boolean; prices: PriceSnapshot[];
   routing?: {enabled: boolean; routes: EfficiencyRoute[]; escalation: EfficiencyRoute | null};
-  structuredEvidence?: boolean; cacheAssembly?: boolean; taskState?: boolean; repositoryRetrieval?: boolean; progressDetection?: boolean; compactToolCatalog?: boolean; recoverableEvidence?: boolean; retainToolCatalog?: boolean;
+  structuredEvidence?: boolean; cacheAssembly?: boolean; taskState?: boolean; repositoryRetrieval?: boolean; progressDetection?: boolean; compactToolCatalog?: boolean; recoverableEvidence?: boolean; tightEvidence?: boolean; batchReads?: boolean; compactCliCatalog?: boolean; retainToolCatalog?: boolean;
 };
 
 export type GyroConfig = {

@@ -319,16 +319,21 @@ pub fn stable_tools(tools: &mut [Value]) {
     });
 }
 
-/// Replace earlier copies of large, identical disk-read evidence with a
-/// reference to the newest copy still present in this request. Every read
-/// really ran; tool-call order, results with changed hashes, and side effects
-/// remain intact. Persisted history is untouched.
+/// Replace earlier copies of large, identical disk-read evidence in the newest
+/// exchange with a reference to the newest copy. Every read really ran;
+/// tool-call order, results with changed hashes, and side effects remain
+/// intact. Persisted history is untouched. Messages before the newest assistant
+/// turn were already sent: rewriting one misses the provider cache for it and
+/// everything after it, which costs far more than the copy it removes.
 pub fn compact_duplicate_reads(messages: &mut [Value]) -> usize {
     use sha2::{Digest, Sha256};
     use std::collections::HashMap;
     let mut latest = HashMap::<[u8; 32], String>::new();
     let mut saved = 0;
     for message in messages.iter_mut().rev() {
+        if message["role"] == "assistant" {
+            break;
+        }
         if message["role"] != "tool" {
             continue;
         }
@@ -387,16 +392,32 @@ const COMPAT_CATALOG_PREFIX: &str = "Gyro tool catalog (local capability definit
 const IMAGE_NOTE: &str =
     "Earlier image omitted. Take a new screenshot if you still need the pixels.";
 
+/// How an older large tool result is shortened in the live request.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EvidencePolicy {
+    /// Head and tail of the first text stream, with the full copy spilled.
+    #[default]
+    Preview,
+    /// Head and tail of the whole JSON value, with the full copy spilled.
+    Recoverable,
+    /// Identity and spill address only. Cheapest to replay, but reading any of
+    /// the text again takes a tool call.
+    Tight,
+}
+
 /// Shrink the live request every owned runner sends, for every model id.
 ///
 /// The newest exchange stays intact so the model sees a result once. Older
 /// large tool bodies become stubs. Persisted history is not this slice.
 pub fn prepare_owned_model_request(messages: &mut [Value]) -> usize {
-    prepare_owned_model_request_with_policy(messages, false)
+    prepare_owned_model_request_with_policy(messages, EvidencePolicy::Preview)
 }
 
-pub fn prepare_owned_model_request_with_policy(messages: &mut [Value], recoverable: bool) -> usize {
-    retire_with_policy(messages, recoverable) + compact_duplicate_reads(messages)
+pub fn prepare_owned_model_request_with_policy(
+    messages: &mut [Value],
+    policy: EvidencePolicy,
+) -> usize {
+    retire_with_policy(messages, policy) + compact_duplicate_reads(messages)
 }
 
 /// Replace tool results older than the newest assistant exchange once they
@@ -406,10 +427,10 @@ pub fn prepare_owned_model_request_with_policy(messages: &mut [Value], recoverab
 /// a spill before large file bodies are omitted; identifiers and failed calls
 /// stay intact. A second pass saves nothing.
 pub fn retire_stale_tool_results(messages: &mut [Value]) -> usize {
-    retire_with_policy(messages, false)
+    retire_with_policy(messages, EvidencePolicy::Preview)
 }
 
-fn retire_with_policy(messages: &mut [Value], recoverable: bool) -> usize {
+fn retire_with_policy(messages: &mut [Value], policy: EvidencePolicy) -> usize {
     let newest = messages
         .iter()
         .rposition(|message| message["role"] == "assistant")
@@ -434,9 +455,9 @@ fn retire_with_policy(messages: &mut [Value], recoverable: bool) -> usize {
         let replaced = if role == "user" && text.starts_with(COMPAT_CATALOG_PREFIX) {
             None
         } else if role == "tool" {
-            stub_tool_content(text, recoverable)
+            stub_tool_content(text, policy)
         } else if role == "user" && text.starts_with(COMPAT_TOOL_PREFIX) {
-            stub_compat_content(text, recoverable)
+            stub_compat_content(text, policy)
         } else {
             None
         };
@@ -525,7 +546,7 @@ fn append_image_note(message: &mut Value) {
     }
 }
 
-fn stub_tool_content(text: &str, recoverable: bool) -> Option<String> {
+fn stub_tool_content(text: &str, policy: EvidencePolicy) -> Option<String> {
     let mut payload: Value = serde_json::from_str(text).ok()?;
     if payload
         .pointer("/result/capabilityId")
@@ -534,15 +555,15 @@ fn stub_tool_content(text: &str, recoverable: bool) -> Option<String> {
     {
         return None;
     }
-    apply_stub(&mut payload, recoverable)?;
+    apply_stub(&mut payload, policy)?;
     serde_json::to_string(&payload).ok()
 }
 
-fn stub_compat_content(text: &str, recoverable: bool) -> Option<String> {
+fn stub_compat_content(text: &str, policy: EvidencePolicy) -> Option<String> {
     let json_at = text.find(COMPAT_JSON_MARKER)? + COMPAT_JSON_MARKER.len();
     let (prefix, json) = text.split_at(json_at);
     let mut payload: Value = serde_json::from_str(json.trim()).ok()?;
-    apply_stub(&mut payload, recoverable)?;
+    apply_stub(&mut payload, policy)?;
     Some(format!("{prefix}{}", serde_json::to_string(&payload).ok()?))
 }
 
@@ -554,7 +575,7 @@ fn already_omitted(payload: &Value) -> bool {
             .is_some()
 }
 
-fn apply_stub(payload: &mut Value, recoverable: bool) -> Option<()> {
+fn apply_stub(payload: &mut Value, policy: EvidencePolicy) -> Option<()> {
     if already_omitted(payload) || payload.get("result").is_none() {
         return None;
     }
@@ -563,20 +584,26 @@ fn apply_stub(payload: &mut Value, recoverable: bool) -> Option<()> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
-    let slim = if recoverable {
+    let slim = match policy {
         // Persist before replacing the body: a failed spill must retain evidence.
-        recoverable_data(
+        EvidencePolicy::Recoverable => recoverable_data(
             payload.pointer("/result/data").unwrap_or(&Value::Null),
             &capability,
             super::spill::persist,
-        )?
-    } else {
-        // Move retired evidence rather than keeping a second payload copy.
-        let data = match payload.pointer_mut("/result/data") {
-            Some(slot) => std::mem::replace(slot, Value::Null),
-            None => Value::Null,
-        };
-        slim_data(&data, &capability)
+        )?,
+        EvidencePolicy::Tight => tight_data(
+            payload.pointer("/result/data").unwrap_or(&Value::Null),
+            &capability,
+            super::spill::persist,
+        )?,
+        EvidencePolicy::Preview => {
+            // Move retired evidence rather than keeping a second payload copy.
+            let data = match payload.pointer_mut("/result/data") {
+                Some(slot) => std::mem::replace(slot, Value::Null),
+                None => Value::Null,
+            };
+            slim_data(&data, &capability)
+        }
     };
     payload["result"]["data"] = slim;
     cap_text_field(payload, "/result/summary");
@@ -730,6 +757,75 @@ fn recoverable_data(
     Some(Value::Object(kept))
 }
 
+/// Save the whole JSON value, then keep only what identifies it. Nothing here
+/// grows with the result, so replaying the stub stays cheap however often the
+/// request is resent. A small stub also clears the cached-route breakeven that
+/// a preview misses on results of a few kilobytes.
+fn tight_data(
+    data: &Value,
+    capability: &str,
+    persist: impl FnOnce(&str, &str) -> bool,
+) -> Option<Value> {
+    if data.is_null() {
+        return None;
+    }
+    let text = serde_json::to_string(data).ok()?;
+    let address = super::spill::address(capability, "result-data", &text);
+    if !persist(&address, &text) {
+        crate::provider_observation::efficiency_event(|e| {
+            e.spill_failures = e.spill_failures.saturating_add(1)
+        });
+        return None;
+    }
+    let mut kept = serde_json::Map::new();
+    for key in [
+        "path",
+        "contentHash",
+        "diskHash",
+        "rootId",
+        "revision",
+        "id",
+        "outputId",
+        "status",
+        "exitCode",
+        "line",
+        "endLine",
+        "startLine",
+        "column",
+        "endColumn",
+        "nextLine",
+        "nextColumn",
+        "truncated",
+        "unchanged",
+        "capturedAt",
+        "observedAt",
+    ] {
+        if let Some(value) = data.get(key).filter(|value| !value.is_null()) {
+            if value.as_str().is_none_or(|text| text.len() <= 200) {
+                kept.insert(key.into(), value.clone());
+            }
+        }
+    }
+    if let Some(object) = data.as_object() {
+        for (key, value) in object {
+            if key == "window" || key.ends_with("Window") {
+                if let Some(slim) = slim_window(value) {
+                    kept.insert(key.clone(), slim);
+                }
+            }
+        }
+    }
+    kept.insert("evidenceOmitted".into(), true.into());
+    kept.insert("elidedBytes".into(), text.len().into());
+    kept.insert("spill".into(), address.into());
+    kept.insert(
+        "retrievalHint".into(),
+        "Read spill with gyro_workspace_read and offset. Historical copy; revalidate before editing."
+            .into(),
+    );
+    Some(Value::Object(kept))
+}
+
 fn slim_window(value: &Value) -> Option<Value> {
     let object = value.as_object()?;
     let mut slim = serde_json::Map::new();
@@ -786,19 +882,46 @@ mod tests {
         let first = read_message("first", "hash", 1, &text);
         let newest = read_message("last", "hash", 1, &text);
         let mut messages = vec![
-            first,
             serde_json::json!({"role":"assistant","content":"continue"}),
+            first,
             newest.clone(),
         ];
         let saved = compact_duplicate_reads(&mut messages);
         assert!(saved > 14_000);
         assert_eq!(messages[2], newest);
-        assert_eq!(messages[0]["tool_call_id"], "first");
+        assert_eq!(messages[1]["tool_call_id"], "first");
         let reference: Value =
-            serde_json::from_str(messages[0]["content"].as_str().unwrap()).unwrap();
+            serde_json::from_str(messages[1]["content"].as_str().unwrap()).unwrap();
         assert_eq!(reference["callId"], "first");
         assert_eq!(reference["result"]["data"]["sameEvidenceAsCallId"], "last");
         assert_eq!(compact_duplicate_reads(&mut messages), 0);
+    }
+    #[test]
+    fn a_later_read_never_rewrites_an_already_sent_message() {
+        let text = "source evidence ".repeat(1000);
+        let briefing = serde_json::json!({"role":"user","content":"briefing"});
+        let assistant = |name: &str| serde_json::json!({"role":"assistant","content":name});
+        let mut messages = vec![
+            serde_json::json!({"role":"system","content":"instructions"}),
+            briefing,
+            assistant("first"),
+            read_message("first", "hash", 1, &text),
+            assistant("second"),
+            read_message("second", "hash", 1, &text),
+        ];
+        prepare_owned_model_request(&mut messages);
+        let sent = messages[..4].to_vec();
+        // The file is unchanged, so retiring the second read yields a stub identical to the
+        // first apart from its call id. The first stub must keep its exact bytes regardless.
+        messages.push(assistant("third"));
+        messages.push(read_message("third", "hash", 1, &text));
+        prepare_owned_model_request(&mut messages);
+        assert_eq!(messages[..4], sent[..]);
+        let sent = messages[..6].to_vec();
+        messages.push(assistant("fourth"));
+        messages.push(read_message("fourth", "hash", 1, &text));
+        prepare_owned_model_request(&mut messages);
+        assert_eq!(messages[..6], sent[..]);
     }
     #[test]
     fn changed_reads_ranges_failures_and_actions_are_never_compacted() {
@@ -1389,12 +1512,79 @@ mod tests {
             newest.clone(),
         ];
         let head = messages[..2].to_vec();
-        prepare_owned_model_request_with_policy(&mut messages, true);
+        prepare_owned_model_request_with_policy(&mut messages, EvidencePolicy::Recoverable);
         assert_eq!(messages[..2], head);
         assert_eq!(messages[5], newest);
         assert_eq!(parsed(&messages[3])["callId"], "old");
         assert_eq!(
-            prepare_owned_model_request_with_policy(&mut messages, true),
+            prepare_owned_model_request_with_policy(&mut messages, EvidencePolicy::Recoverable),
+            0
+        );
+    }
+    #[test]
+    fn tight_evidence_keeps_identity_and_a_complete_copy() {
+        let data = serde_json::json!({"path":"a.rs","contentHash":"v1","exitCode":1,"outputId":"job1",
+            "window":{"offset":0,"nextOffset":4000,"totalChars":9000,"secret":"dropped"},
+            "pane":{"stdout":"a".repeat(4000),"stderr":"failure".repeat(900)},
+            "matches":[{"text":"界".repeat(2000)}]});
+        let dir = tempfile::tempdir().unwrap();
+        let store = super::super::spill::SpillStore::new(dir.path());
+        let compact = tight_data(&data, "workspace-run-task", |address, text| {
+            store.save(address, text).is_ok()
+        })
+        .unwrap();
+        assert_eq!(compact["path"], "a.rs");
+        assert_eq!(compact["contentHash"], "v1");
+        assert_eq!(compact["exitCode"], 1);
+        assert_eq!(compact["outputId"], "job1");
+        assert_eq!(compact["window"]["nextOffset"], 4000);
+        assert!(compact["window"].get("secret").is_none());
+        assert_eq!(compact["evidenceOmitted"], true);
+        let body = compact.to_string();
+        assert!(body.len() < 500, "stub grew to {} bytes", body.len());
+        assert!(!body.contains("failure"), "no preview text stays");
+        let saved = store
+            .load(compact["spill"].as_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&saved).unwrap(), data);
+        assert_eq!(compact["elidedBytes"], saved.len());
+    }
+    #[test]
+    fn tight_evidence_keeps_the_original_when_the_spill_fails() {
+        let data = serde_json::json!({"path":"a.rs","content":"x".repeat(8000)});
+        assert!(tight_data(&data, "workspace-read", |_, _| false).is_none());
+        assert!(tight_data(&Value::Null, "workspace-read", |_, _| true).is_none());
+    }
+    #[test]
+    fn tight_policy_keeps_head_newest_failures_and_protocol_identity() {
+        let old = read_message("old", "v1", 1, &"x".repeat(8000));
+        let newest = read_message("new", "v2", 1, &"y".repeat(8000));
+        let failed = serde_json::json!({"role":"tool","tool_call_id":"bad","content":
+            serde_json::json!({"status":"failed","callId":"bad","error":{"message":"e".repeat(4000)}}).to_string()});
+        let mut messages = vec![
+            serde_json::json!({"role":"system","content":"rules"}),
+            serde_json::json!({"role":"user","content":"attachment and exact request"}),
+            serde_json::json!({"role":"assistant","content":"read"}),
+            old.clone(),
+            failed.clone(),
+            serde_json::json!({"role":"assistant","content":"read again"}),
+            newest.clone(),
+        ];
+        let head = messages[..2].to_vec();
+        let saved = prepare_owned_model_request_with_policy(&mut messages, EvidencePolicy::Tight);
+        assert!(saved > 7000, "saved only {saved} bytes");
+        assert_eq!(messages[..2], head);
+        assert_eq!(messages[4], failed);
+        assert_eq!(messages[6], newest);
+        assert_eq!(messages[3]["tool_call_id"], old["tool_call_id"]);
+        let stub = parsed(&messages[3]);
+        assert_eq!(stub["callId"], "old");
+        assert_eq!(stub["result"]["data"]["contentHash"], "v1");
+        assert!(stub["result"]["data"]["spill"].is_string());
+        assert!(stub["result"]["data"].get("content").is_none());
+        assert_eq!(
+            prepare_owned_model_request_with_policy(&mut messages, EvidencePolicy::Tight),
             0
         );
     }

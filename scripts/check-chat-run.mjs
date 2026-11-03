@@ -1098,7 +1098,7 @@ assert.deepEqual(
   rowText("context", "Compacting context", { status: "running" }),
   {
     label: "Compacting context",
-    description: "Making room for the next turn",
+    description: "Summarizing the earlier conversation",
   },
 );
 
@@ -1552,7 +1552,6 @@ assert.equal(
   "the run rail allows exactly one light override (icon opacity, which is optical)",
 );
 
-console.log("chat run checks passed");
 
 assert.equal(
   buildRunModel([], {
@@ -1929,3 +1928,165 @@ assert.equal(
   0,
   "creating a path is not a content edit",
 );
+
+// Commands are classified from their structure, so a row's verb cannot promise
+// less than the command did.
+const commandRow = (command) =>
+  workItemFromEvent(activity("command", command, { detail: command }, 0));
+for (const [command, query] of [
+  ["rg foo src", "foo"],
+  ["rg -g '*.ts' foo src", "foo"],
+  ["rg -n -C 3 'a|b' src", "a|b"],
+  ["rg -e needle src", "needle"],
+  ["grep -rn --include=*.ts hello .", "hello"],
+  ["/bin/zsh -lc 'rg foo src'", "foo"],
+  ["cd /repo && rg foo src", "foo"],
+  ["rg foo src 2>/dev/null", "foo"],
+  ["rg foo src || true", "foo"],
+  ["rg -l foo | head -5", "foo"],
+]) {
+  const row = commandRow(command);
+  assert.equal(row.kind, "search", `${command} should read as a search`);
+  assert.equal(row.query, query, `${command} should search for ${query}`);
+}
+for (const [command, path] of [
+  ["cat src/a.ts", "src/a.ts"],
+  ["sed -n '1,20p' src/a.ts", "src/a.ts"],
+  ["cat src/a.ts | grep b", "src/a.ts"],
+  ["cat src/a.ts 2>/dev/null", "src/a.ts"],
+  ["head -n 20 'src/a b.ts'", "src/a b.ts"],
+  ["sed -n '/-i/p' src/a.ts", "src/a.ts"],
+]) {
+  const row = commandRow(command);
+  assert.equal(row.kind, "read", `${command} should read as a read`);
+  assert.equal(row.path, path, `${command} should name ${path}`);
+}
+// Each of these starts like a lookup and changes something, or does more than
+// its first word says. Naming them "Searched" or "Read" would hide that.
+for (const command of [
+  "sed -i 's/a/b/' src/a.ts",
+  "sed -i.bak 's/a/b/' src/a.ts",
+  "sed --in-place 's/a/b/' src/a.ts",
+  "awk -i inplace '{print}' src/a.ts",
+  "cat a.ts > b.ts",
+  "cat a.ts >> b.ts",
+  "cat a.ts | tee b.ts",
+  "rg foo && rm -rf dist",
+  "rg foo; rm -rf dist",
+  "rg -l foo | xargs rm",
+  "cat <<EOF > a.ts\nhello\nEOF",
+  "cat a.ts | sed -i 's/a/b/'",
+]) {
+  const row = commandRow(command);
+  assert.equal(row.kind, "command", `${command} should stay a plain command`);
+  assert.equal(row.category, undefined, `${command} should have no category`);
+}
+for (const [command, category] of [
+  ["pnpm test", "test"],
+  ["pnpm -r test", "test"],
+  ["pnpm --filter @gyro-dev/ui test", "test"],
+  ["pnpm run test:unit", "test"],
+  ["npm t", "test"],
+  ["CI=1 pnpm test", "test"],
+  ["cd /repo && cargo test -p gyro-core", "test"],
+  ["/bin/zsh -lc 'cargo test'", "test"],
+  ["cargo nextest run", "test"],
+  ["npx vitest run", "test"],
+  ["pytest tests/", "test"],
+  ["python -m pytest", "test"],
+  ["go test ./...", "test"],
+  ["make test", "test"],
+  ["node --test scripts/a.mjs", "test"],
+  ["pnpm build && pnpm test", "test"],
+  ["pnpm build", "build"],
+  ["pnpm --filter @gyro-dev/ui build", "build"],
+  ["cargo build --release", "build"],
+  ["tsc -p .", "build"],
+  ["vite build", "build"],
+  ["go build ./...", "build"],
+  ["git status", "inspect"],
+  ["git show HEAD", "inspect"],
+  ["git -C /repo diff", "inspect"],
+  ["git branch --show-current", "inspect"],
+  ["ls -la | grep foo", "inspect"],
+  ["find . -name '*.ts'", "inspect"],
+  // Each of these only looks like one of the categories above.
+  ["tsc --noEmit", undefined],
+  ["echo 'pnpm test'", undefined],
+  ["git status && git add .", undefined],
+  ["git diff > out.patch", undefined],
+  ["git branch -D old", undefined],
+  ["find . -name '*.tmp' -delete", undefined],
+  ["pnpm install", undefined],
+]) {
+  const row = commandRow(command);
+  assert.equal(row.kind, "command", `${command} should be a command row`);
+  assert.equal(row.category, category, `${command} category`);
+}
+
+// A rerun's elapsed time counts from the rerun. The same row stays open across
+// its own running-to-done update, though, and must keep its start time.
+const commandAt = (status, at, id = "run") => ({
+  ...activity("command", "pnpm test", { detail: "pnpm test", status }, 0),
+  id,
+  createdAt: at,
+});
+const rerun = buildRunModel(
+  [
+    commandAt("done", "2026-11-02T10:00:00.000Z", "first"),
+    commandAt("running", "2026-11-02T10:05:00.000Z", "second"),
+  ],
+  { isRunning: true },
+);
+assert.equal(rerun.steps.length, 1, "a rerun still folds into one row");
+assert.equal(
+  rerun.steps[0].at,
+  "2026-11-02T10:05:00.000Z",
+  "a rerun should restart the row's clock",
+);
+const stillRunning = buildRunModel(
+  [
+    commandAt("running", "2026-11-02T10:00:00.000Z", "first"),
+    commandAt("running", "2026-11-02T10:05:00.000Z", "second"),
+  ],
+  { isRunning: true },
+);
+assert.equal(
+  stillRunning.steps[0].at,
+  "2026-11-02T10:00:00.000Z",
+  "a row that never settled keeps its first start time",
+);
+
+// A quiet note belongs to a live run, and only until something else is heard.
+const quietStatus = (at) => ({
+  status: "running",
+  at,
+  quietForSeconds: 360,
+});
+const quietWork = commandAt("done", "2026-11-02T10:00:00.000Z");
+assert.equal(
+  buildRunModel([quietWork], {
+    isRunning: true,
+    status: quietStatus("2026-11-02T10:06:00.000Z"),
+  }).quietForSeconds,
+  360,
+  "a live run should carry the quiet note",
+);
+assert.equal(
+  buildRunModel([quietWork], {
+    isRunning: true,
+    status: quietStatus("2026-11-02T09:59:00.000Z"),
+  }).quietForSeconds,
+  undefined,
+  "a step newer than the heartbeat disproves the quiet note",
+);
+assert.equal(
+  buildRunModel([quietWork], {
+    isRunning: false,
+    status: quietStatus("2026-11-02T10:06:00.000Z"),
+  }).quietForSeconds,
+  undefined,
+  "a finished run is not quiet",
+);
+
+console.log("chat run checks passed");

@@ -6109,10 +6109,11 @@ expect(
 );
 
 // Side chat is a throwaway thread: it inherits the focused chat's project and
-// model but none of its transcript, never reaches the sidebar, and is deleted
-// on close and again on the next launch after an unclean exit.
+// model, reads its transcript as background, never reaches the sidebar, and is
+// deleted on close and again on the next launch after an unclean exit.
 expect(
   appSource.includes('title: "Side chat"') &&
+    appSource.includes("sideChatContext: parent") &&
     appSource.includes("...sessionModelSelectionFromSession(parent)") &&
     appSource.includes(
       "const workspace = parent?.workspacePath ?? workspacePath",

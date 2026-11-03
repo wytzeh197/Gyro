@@ -250,8 +250,15 @@ const MAX_CHAT_ATTACHMENTS: usize = 16;
 const MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_CHAT_IDE_SNAPSHOT_BYTES: u64 = 128 * 1024;
 const MAX_CHAT_ATTACHMENT_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
-const MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION: usize = 16;
+// A chat keeps its files for as long as its transcript points at them, so these
+// limits last its whole life. Bytes are the budget. The file count only guards
+// against runaway storage: it meets the byte budget at 256 KiB per file, about
+// what stored attachments average, and full-size images hit the bytes long before.
+const MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION: usize = 4096;
 const MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION: u64 = 1024 * 1024 * 1024;
+// Every unsent draft shares one folder, which gives up its least recently used
+// files when full. This leaves room for four full messages across open drafts.
+const MAX_STORED_DRAFT_ATTACHMENTS: usize = 64;
 const MAX_BROWSER_PREVIEW_DIAGNOSTICS: usize = 8;
 const MAX_BROWSER_PREVIEW_DIAGNOSTIC_CHARS: usize = 400;
 const MAX_BROWSER_PREVIEW_DIAGNOSTIC_PAYLOAD_CHARS: usize = 8_000;
@@ -1682,6 +1689,18 @@ struct ProviderChatRequest {
     workspace_context: Option<WorkspaceContextSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     workspace_check: Option<WorkspaceCheckReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    side_chat_context: Option<SideChatContextRequest>,
+}
+
+/// The chat a side chat sits beside.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SideChatContextRequest {
+    session_id: String,
+    /// When the side chat's last completed turn read this same chat.
+    #[serde(default)]
+    since: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
@@ -2153,6 +2172,10 @@ struct ProviderChatStreamEvent {
     /// over its own sign-in correct the provider's health immediately, instead
     /// of leaving Settings claiming a verified connection.
     recovery_kind: Option<String>,
+    /// Set on a heartbeat once the run has shown nothing for a while. See
+    /// [`ProviderQuietClock`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quiet_seconds: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -3452,6 +3475,7 @@ fn run_council_chat_blocking(
                 attachments: request.attachments.clone(),
                 workspace_context: None,
                 workspace_check: None,
+                side_chat_context: None,
             };
             (seat.clone(), seat_request)
         })
@@ -3663,6 +3687,7 @@ fn run_council_chat_blocking(
                 attachments: Vec::new(),
                 workspace_context: None,
                 workspace_check: None,
+                side_chat_context: None,
             };
             emit_provider_chat_event(
                 &app,
@@ -3865,6 +3890,7 @@ fn run_council_chat_blocking(
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
     emit_provider_chat_event(
         &app,
@@ -4097,6 +4123,7 @@ fn retry_council_synthesis_blocking(
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
 
     let _ = store.append_event_with_turn_id(
@@ -4456,6 +4483,7 @@ fn run_change_summary_call(
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
 
     // The runners read their cancellation control out of this map, and the chat
@@ -4538,6 +4566,7 @@ fn run_compaction_summary_call(
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
     // An auto-compaction runs inside a turn that already bound its context. A
     // manual `/compact` runs between turns, where nothing is bound, and every
@@ -5406,6 +5435,7 @@ fn compact_provider_chat_blocking(
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
     bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
     if request.provider_id != "openai" {
@@ -6197,6 +6227,9 @@ fn provider_context_message_with_capabilities_for_turn(
             "Prior conversation in this Gyro chat (local session continuity — continue from here):\n{history}"
         ));
     }
+    if let Some(section) = conversation_history::side_chat_context_section(request, turn.resumed) {
+        context.push(section);
+    }
     if request.mode == ChatMode::Council {
         context.push(
             "Council seat mode: advisory only. Answer from the provided prompt and attachments. Do not use tools, mutate files, run commands, or request approvals.".into(),
@@ -6262,7 +6295,17 @@ fn provider_context_message_with_capabilities_for_turn(
             stable.push("A reply may end with a link: [label](https://example.com) renders blue and clickable, and a bare https:// URL becomes a link too. A click opens it in Gyro's Browser panel and a ⌘/Ctrl-click opens the device's default browser, so offer the link instead of describing a URL in prose.".into());
             stable.push("When the user asks to open or switch to a local folder, call gyro_workspace_open_folder with its absolute path instead of telling them to use Open workspace. It opens a fresh chat in that folder; this chat's own workspace does not change.".into());
         }
-        if !turn.resumed {
+        if provider_tool_batch::compact_cli_catalog_active(
+            &request.provider_id,
+            &efficiency::config(),
+        ) {
+            // A resumed thread may hold the "call them directly" text from before.
+            if turn.resumed {
+                context.push(provider_tool_batch::COMPACT_GUIDANCE.into());
+            } else {
+                stable.push(provider_tool_batch::COMPACT_GUIDANCE.into());
+            }
+        } else if !turn.resumed {
             stable.push(provider_tool_batch::BASELINE_GUIDANCE.into());
         }
     }
@@ -6773,6 +6816,9 @@ fn prepare_chat_attachment_blocking(
             // path. Content-addressed native filenames eliminate traversal and make
             // deduplication safe.
             let destination = attachment_dir.join(format!("{content_hash}.{safe_extension}"));
+            if safe_session == "new" {
+                make_room_in_draft_attachments(&attachment_dir, &destination, bytes.len() as u64)?;
+            }
             ensure_attachment_storage_quota(&attachment_dir, &destination, bytes.len() as u64)?;
             write_private_attachment(&destination, &bytes, &content_hash)?;
             if safe_session != "new" {
@@ -6879,6 +6925,9 @@ fn prepare_chat_attachment_blocking(
             let attachment_dir = attachments_root.join(&safe_session);
             ensure_private_attachment_directory(&attachment_dir)?;
             let destination = attachment_dir.join(format!("{content_hash}.snapshot.txt"));
+            if safe_session == "new" {
+                make_room_in_draft_attachments(&attachment_dir, &destination, bytes.len() as u64)?;
+            }
             ensure_attachment_storage_quota(&attachment_dir, &destination, bytes.len() as u64)?;
             write_private_attachment(&destination, &bytes, &content_hash)?;
             if safe_session != "new" {
@@ -6956,6 +7005,61 @@ fn ensure_private_attachment_directory(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Every unsent draft shares one folder, and only sending moves a file out of
+/// it, so images from removed chips and abandoned drafts would otherwise stay
+/// forever and eventually fill it. The draft folder is a cache: give up its least
+/// recently used files instead. A session's folder is never pruned because its
+/// transcript still points at those files.
+fn make_room_in_draft_attachments(
+    directory: &Path,
+    destination: &Path,
+    incoming_bytes: u64,
+) -> Result<(), String> {
+    // Attaching a stored image again counts as using it.
+    if fs::symlink_metadata(destination).is_ok_and(|metadata| metadata.is_file()) {
+        fs::File::options()
+            .write(true)
+            .open(destination)
+            .and_then(|file| file.set_modified(std::time::SystemTime::now()))
+            .map_err(to_string)?;
+        return Ok(());
+    }
+    if fs::symlink_metadata(destination).is_ok() {
+        return Ok(());
+    }
+    let mut stored = Vec::new();
+    let mut bytes = 0u64;
+    for entry in fs::read_dir(directory).map_err(to_string)? {
+        let entry = entry.map_err(to_string)?;
+        if entry.file_name().to_string_lossy().starts_with(".upload-") {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(entry.path()).map_err(to_string)?;
+        // The quota check reports anything that is not a plain file.
+        if !metadata.is_file() {
+            continue;
+        }
+        bytes = bytes.saturating_add(metadata.len());
+        let modified = metadata
+            .modified()
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        stored.push((modified, entry.path(), metadata.len()));
+    }
+    stored.sort();
+    let mut files = stored.len();
+    for (_, path, size) in stored {
+        if files < MAX_STORED_DRAFT_ATTACHMENTS
+            && bytes.saturating_add(incoming_bytes) <= MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION
+        {
+            break;
+        }
+        remove_attachment_storage_entry(&path)?;
+        files -= 1;
+        bytes = bytes.saturating_sub(size);
+    }
+    Ok(())
+}
+
 fn ensure_attachment_storage_quota(
     directory: &Path,
     destination: &Path,
@@ -6982,12 +7086,19 @@ fn ensure_attachment_storage_quota(
             .checked_add(metadata.len())
             .ok_or_else(|| "attachment storage size overflow".to_string())?;
     }
-    if files >= MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION
-        || bytes.checked_add(incoming_bytes).map_or(true, |total| {
-            total > MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION
-        })
-    {
-        return Err("session attachment storage limit reached".into());
+    // A session's files cannot be given up, so the only way forward is a new chat.
+    if files >= MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION {
+        return Err(format!(
+            "this chat has reached its limit of {MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION} stored attachments; start a new chat to attach more"
+        ));
+    }
+    if bytes.checked_add(incoming_bytes).map_or(true, |total| {
+        total > MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION
+    }) {
+        return Err(format!(
+            "this chat's {} GB of attachment storage has no room for this file; start a new chat to attach it",
+            MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION / (1024 * 1024 * 1024)
+        ));
     }
     Ok(())
 }
@@ -16817,7 +16928,10 @@ fn run_anthropic_claude_chat(
         // Read/Edit/Bash had full schemas, so Claude reached for the natives
         // and the work never showed up in Review, Terminal or Canvas. The
         // whole Gyro list is ~10K tokens (guarded by a test), so load it.
-        .env("ENABLE_TOOL_SEARCH", "false");
+        .env("ENABLE_TOOL_SEARCH", "false")
+        // The default one-hour cache writes at 2x input against 1.25x here.
+        // Under 1% of request gaps outlast five minutes, and a read renews it.
+        .env("FORCE_PROMPT_CACHING_5M", "1");
     let speed_config = load_config_blocking().map_err(anyhow::Error::msg)?;
     process.args(gyro_core::fast_mode::cli_args(
         &speed_config,
@@ -16912,34 +17026,13 @@ fn run_anthropic_claude_chat(
         if response.is_empty() {
             anyhow::bail!("Anthropic finished, but Claude did not return a chat response.");
         }
-        let response_chars = response.chars().count();
-        let provider_session_id = session_id.clone();
-        return Ok(ProviderRunnerOutput {
-            accounted_usage: None,
-            activities: provider_activities_for_response(output.activities, &response),
-            context_usage: output.context_usage,
-            billed_usage: output.billed_usage,
-            rate_limits: output.rate_limits,
-            paused_at_tool_budget: false,
-            answer_cut_off: false,
+        return Ok(claude_runner_output(
+            output,
             response,
-            resume_cursor: Some(ProviderResumeCursor {
-                kind: "claude-session".into(),
-                session_id: provider_session_id.clone(),
-            }),
-            retry_count: 0,
-            resumed: resume_cursor.is_some(),
-            streamed_text: output.assistant_text.clone().map(|text| StreamedText {
-                text,
-                blocks: output.text_blocks.clone(),
-            }),
-            output_summary: Some(provider_output_summary(
-                "claude-code",
-                output.status_label.as_str(),
-                Some(provider_session_id.as_str()),
-                response_chars,
-            )),
-        });
+            session_id,
+            resume_cursor.is_some(),
+            false,
+        ));
     }
 
     let stdout = gyro_core::security::redact_secrets(output.stdout.trim());
@@ -16957,37 +17050,13 @@ fn run_anthropic_claude_chat(
         anyhow::bail!("{failure_detail}");
     }
     if let Some(response) = recover_streamed_provider_answer(&output, "") {
-        let response_chars = response.chars().count();
-        let provider_session_id = session_id.clone();
-        return Ok(ProviderRunnerOutput {
-            accounted_usage: None,
-            activities: provider_activities_for_response(output.activities, &response),
-            context_usage: output.context_usage,
-            billed_usage: output.billed_usage,
-            rate_limits: output.rate_limits,
-            paused_at_tool_budget: false,
-            answer_cut_off: true,
+        return Ok(claude_runner_output(
+            output,
             response,
-            resume_cursor: Some(ProviderResumeCursor {
-                kind: "claude-session".into(),
-                session_id: provider_session_id.clone(),
-            }),
-            retry_count: 0,
-            resumed: resume_cursor.is_some(),
-            streamed_text: output.assistant_text.clone().map(|text| StreamedText {
-                text,
-                blocks: output.text_blocks.clone(),
-            }),
-            output_summary: Some(provider_output_summary(
-                "claude-code",
-                &format!(
-                    "{} (answer kept after non-zero exit)",
-                    output.status_label.as_str()
-                ),
-                Some(provider_session_id.as_str()),
-                response_chars,
-            )),
-        });
+            session_id,
+            resume_cursor.is_some(),
+            true,
+        ));
     }
     if stdout.is_empty() && stderr.is_empty() {
         anyhow::bail!(
@@ -16996,6 +17065,49 @@ fn run_anthropic_claude_chat(
         );
     }
     anyhow::bail!("{}", provider_stream_failure_detail(&stdout, &stderr));
+}
+
+/// Hands on the billing parser's total. Leaving `accounted_usage` empty let the
+/// merged `billed_usage` replace it at completion, losing the cache-write bucket.
+fn claude_runner_output(
+    output: StreamingCommandOutput,
+    response: String,
+    session_id: String,
+    resumed: bool,
+    answer_cut_off: bool,
+) -> ProviderRunnerOutput {
+    let status = if answer_cut_off {
+        format!("{} (answer kept after non-zero exit)", output.status_label)
+    } else {
+        output.status_label.clone()
+    };
+    let output_summary = provider_output_summary(
+        "claude-code",
+        &status,
+        Some(session_id.as_str()),
+        response.chars().count(),
+    );
+    ProviderRunnerOutput {
+        accounted_usage: output.accounted_usage,
+        activities: provider_activities_for_response(output.activities, &response),
+        context_usage: output.context_usage,
+        billed_usage: output.billed_usage,
+        rate_limits: output.rate_limits,
+        paused_at_tool_budget: false,
+        answer_cut_off,
+        response,
+        resume_cursor: Some(ProviderResumeCursor {
+            kind: "claude-session".into(),
+            session_id,
+        }),
+        retry_count: 0,
+        resumed,
+        streamed_text: output.assistant_text.map(|text| StreamedText {
+            text,
+            blocks: output.text_blocks,
+        }),
+        output_summary: Some(output_summary),
+    }
 }
 
 /// Claude Code reports a rejected sign-in inside its stream-json output rather
@@ -17160,7 +17272,10 @@ fn claude_chat_args(
         "--disallowedTools".into(),
         CLAUDE_DISALLOWED_NATIVE_TOOLS.into(),
     ]);
-    let capability_tools = advertised_mcp_capability_tools(capability_run_mode_for_chat(*mode));
+    let capability_tools = claude_allowed_capability_tools(
+        advertised_mcp_capability_tools(capability_run_mode_for_chat(*mode)),
+        provider_tool_batch::compact_cli_catalog_active("anthropic", &efficiency::config()),
+    );
     if let Some(permission_mcp_config) = permission_mcp_config {
         args.extend([
             "--setting-sources".into(),
@@ -17207,6 +17322,18 @@ fn claude_chat_args(
     args.push("--".into());
     args.push(prompt.into());
     args
+}
+
+/// Plan can reach discovery, so it gets the wrapper too; Council lists no tools.
+fn claude_allowed_capability_tools(tools: String, compact: bool) -> String {
+    if compact && tools.contains("mcp__gyro_capabilities__gyro_tool_catalog") {
+        format!(
+            "{tools},mcp__gyro_capabilities__{}",
+            provider_tool_batch::COMPACT_INVOKE
+        )
+    } else {
+        tools
+    }
 }
 
 fn active_provider_approval_nonce(
@@ -17295,11 +17422,24 @@ fn capability_mcp_env(
             bound.workspace_context.revision.to_string(),
         ),
     ];
+    if compact_cli_catalog_for_run(bound) {
+        env.push((provider_tool_batch::COMPACT_CATALOG_ENV, "true".into()));
+    }
     #[cfg(debug_assertions)]
     if let Ok(root) = std::env::var("GYRO_TEST_DATA_DIR") {
         env.push(("GYRO_TEST_DATA_DIR", root));
     }
     env
+}
+
+/// Panes have no turn id. Their prompts carry no Gyro guidance, so a short list
+/// would hide tools from them without saying how to reach the rest.
+fn compact_cli_catalog_for_run(bound: &BoundProviderCapabilityContext) -> bool {
+    bound.turn_id.is_some()
+        && provider_tool_batch::compact_cli_catalog_active(
+            &bound.provider_id,
+            &efficiency::config(),
+        )
 }
 
 fn codex_capability_mcp_config_args(
@@ -17332,7 +17472,20 @@ fn codex_capability_mcp_config_args(
         ));
     }
     args.extend(codex_capability_tool_approval_args());
+    if compact_cli_catalog_for_run(&bound) {
+        args.extend(codex_compact_invoke_approval_args());
+    }
     Ok(args)
+}
+
+fn codex_compact_invoke_approval_args() -> [String; 2] {
+    [
+        "-c".into(),
+        format!(
+            "mcp_servers.gyro_capabilities.tools.{}.approval_mode=\"approve\"",
+            provider_tool_batch::COMPACT_INVOKE
+        ),
+    ]
 }
 
 fn codex_capability_tool_approval_args() -> Vec<String> {
@@ -19202,6 +19355,9 @@ struct StreamingCommandOutput {
     /// prefers the per-request reading because it answers a different question
     /// — how full the window is — so the billing figure is kept apart.
     billed_usage: Option<ProviderContextUsage>,
+    /// The billing parser's total, with cache reads and writes still apart.
+    /// `billed_usage` merges them for the legacy context display.
+    accounted_usage: Option<UsageTokens>,
     rate_limits: Vec<ProviderRateLimitWindow>,
     status_success: bool,
     status_label: String,
@@ -19797,8 +19953,46 @@ impl StreamingCommandState {
 
 const PROVIDER_CHAT_MAX_RUNTIME_SECS: u64 = 24 * 60 * 60;
 const PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS: u64 = 30 * 60;
-/// How long a run may be silent before its heartbeat says so.
+/// How long a run may show nothing before its heartbeat says so.
 const PROVIDER_CHAT_QUIET_NOTICE: Duration = Duration::from_secs(5 * 60);
+
+/// How long a run has gone without showing the person anything.
+///
+/// [`ProviderStreamLiveness`] only exists for CLI runs, and it counts raw output,
+/// so a chatty process that never surfaces anything reads as active. Every frame
+/// a run emits takes a sequence number whichever runner sent it, so a gap in the
+/// numbers beyond the heartbeat's own is proof that something else happened.
+struct ProviderQuietClock {
+    since: Instant,
+    expected_sequence: Option<u64>,
+}
+
+impl ProviderQuietClock {
+    fn new(now: Instant) -> Self {
+        Self {
+            since: now,
+            expected_sequence: None,
+        }
+    }
+
+    /// Read just before a heartbeat, which is assumed to take `next_sequence`.
+    ///
+    /// `paused` restarts the clock while the run is waiting on someone else. A
+    /// tool that takes ten minutes, or an approval nobody has answered, is not
+    /// the run going quiet.
+    fn tick(&mut self, next_sequence: u64, paused: bool, now: Instant) -> Duration {
+        if paused || self.expected_sequence != Some(next_sequence) {
+            self.since = now;
+        }
+        self.expected_sequence = Some(next_sequence + 1);
+        now.saturating_duration_since(self.since)
+    }
+}
+
+/// What a heartbeat reports for a run that has been quiet this long.
+fn provider_quiet_seconds(quiet_for: Duration) -> Option<u64> {
+    (quiet_for >= PROVIDER_CHAT_QUIET_NOTICE).then(|| quiet_for.as_secs())
+}
 
 /// What the heartbeat reads to tell a quiet run from a stalled one.
 struct ProviderStreamLiveness {
@@ -19999,6 +20193,7 @@ fn run_streaming_command(
         activities: stream_state.activities,
         context_usage: stream_state.context_usage,
         billed_usage: stream_state.billed_usage,
+        accounted_usage: stream_state.accounted_usage,
         rate_limits: stream_state.rate_limits,
         status_success: outcome.succeeded(),
         status_label,
@@ -20027,6 +20222,7 @@ fn spawn_provider_chat_heartbeat(
     let worker_stop = stop.clone();
     let worker = std::thread::spawn(move || {
         let stop = worker_stop;
+        let mut quiet_clock = ProviderQuietClock::new(Instant::now());
         loop {
             // Sleep in short slices so stop/cancel is noticed promptly at the
             // end of a run instead of waiting out a full heartbeat interval.
@@ -20041,14 +20237,13 @@ fn spawn_provider_chat_heartbeat(
                 return;
             }
             let label = request.provider_label.as_deref().unwrap_or("Provider");
-            let silent_for = liveness
+            let awaits_approval = provider_session_awaits_approval(&app, &request.session_id);
+            let tool_running = liveness
                 .as_ref()
-                .map(|(liveness, _)| liveness.silent_for())
-                .unwrap_or_default();
+                .is_some_and(|(liveness, _)| liveness.tool_running.load(Ordering::Relaxed));
             if let Some((liveness, limit)) = &liveness {
-                let waiting = liveness.tool_running.load(Ordering::Relaxed)
-                    || provider_session_awaits_approval(&app, &request.session_id);
-                if provider_run_stalled(silent_for, *limit, waiting) {
+                let silent_for = liveness.silent_for();
+                if provider_run_stalled(silent_for, *limit, tool_running || awaits_approval) {
                     stop_provider_run(
                         &app,
                         &request.session_id,
@@ -20059,15 +20254,23 @@ fn spawn_provider_chat_heartbeat(
                     return;
                 }
             }
-            let message = if silent_for >= PROVIDER_CHAT_QUIET_NOTICE {
-                format!(
-                    "{label} is still working, with no output for {} min",
-                    silent_for.as_secs() / 60
-                )
-            } else {
-                format!("{label} is still working")
+            let quiet_seconds = peek_provider_event_sequence(&app, &request.session_id)
+                .map(|next_sequence| {
+                    quiet_clock.tick(
+                        next_sequence,
+                        tool_running || awaits_approval,
+                        Instant::now(),
+                    )
+                })
+                .and_then(provider_quiet_seconds);
+            let message = match quiet_seconds {
+                Some(seconds) => format!(
+                    "{label} is still working, with no activity for {} min",
+                    seconds / 60
+                ),
+                None => format!("{label} is still working"),
             };
-            emit_provider_chat_event(
+            emit_provider_chat_frame(
                 &app,
                 &request,
                 "heartbeat",
@@ -20075,6 +20278,8 @@ fn spawn_provider_chat_heartbeat(
                 None,
                 Some(message),
                 None,
+                None,
+                quiet_seconds,
             );
         }
     });
@@ -20693,6 +20898,23 @@ fn emit_provider_chat_event_with_timeline(
     error: Option<String>,
     timeline: Option<provider_timeline::TimelinePosition>,
 ) {
+    emit_provider_chat_frame(
+        app, request, phase, status, text_delta, message, error, timeline, None,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_provider_chat_frame(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    phase: &str,
+    status: Option<HarnessRunStatus>,
+    text_delta: Option<String>,
+    message: Option<String>,
+    error: Option<String>,
+    timeline: Option<provider_timeline::TimelinePosition>,
+    quiet_seconds: Option<u64>,
+) {
     if context_compaction::summary_stream_muted(&request.session_id) {
         return;
     }
@@ -20735,6 +20957,7 @@ fn emit_provider_chat_event_with_timeline(
             .map(|error| provider_failure_recovery(error).0.to_string()),
         message,
         error,
+        quiet_seconds,
     };
     let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
 }
@@ -20755,19 +20978,23 @@ fn emit_provider_context_usage(
     } else {
         "catalog"
     };
-    let base_url = load_config_blocking().ok().and_then(|config| {
-        config
-            .model_providers
-            .into_iter()
-            .find(|provider| provider.id == request.provider_id)
-            .and_then(|provider| provider.base_url)
-    });
-    live_model_context::observe_runtime(
-        &request.provider_id,
-        request.model_id.as_deref(),
-        base_url.as_deref(),
-        usage.model_context_window,
-    );
+    // This runs on every usage frame, and reading the config touches the disk.
+    // Most frames report no window, and those have nothing to record.
+    if usage.model_context_window.is_some() && request.model_id.is_some() {
+        let base_url = load_config_blocking().ok().and_then(|config| {
+            config
+                .model_providers
+                .into_iter()
+                .find(|provider| provider.id == request.provider_id)
+                .and_then(|provider| provider.base_url)
+        });
+        live_model_context::observe_runtime(
+            &request.provider_id,
+            request.model_id.as_deref(),
+            base_url.as_deref(),
+            usage.model_context_window,
+        );
+    }
     let usage = provider_context_usage_with_window(
         Some(usage.clone()),
         &request.provider_id,
@@ -20828,6 +21055,7 @@ fn emit_provider_activity_event(
         message: None,
         error: None,
         recovery_kind: None,
+        quiet_seconds: None,
     };
     let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
 }
@@ -20848,6 +21076,17 @@ fn next_provider_event_sequence(app: &tauri::AppHandle, session_id: &str) -> u64
         .and_then(|flags| flags.get(session_id).cloned())
         .map(|control| control.next_event_sequence.fetch_add(1, Ordering::Relaxed))
         .unwrap_or_else(|| ORPHAN_PROVIDER_EVENT_SEQUENCE.fetch_add(1, Ordering::Relaxed))
+}
+
+/// The sequence the run's next frame would take, without taking it. `None` once
+/// the run control is gone, when there is no run left to be quiet.
+fn peek_provider_event_sequence(app: &tauri::AppHandle, session_id: &str) -> Option<u64> {
+    app.state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(session_id).cloned())
+        .map(|control| control.next_event_sequence.load(Ordering::Relaxed))
 }
 
 /// A non-zero CLI exit that still produced a real streamed answer.
@@ -23866,6 +24105,7 @@ struct DesktopProviderCapabilityContext {
     policy_revision: u64,
     workspace_context_revision: u64,
     allow_delegation: bool,
+    compact_catalog: bool,
 }
 
 impl DesktopProviderCapabilityContext {
@@ -23888,6 +24128,8 @@ impl DesktopProviderCapabilityContext {
             // Older launchers do not carry an opt-in; fail closed. Execution
             // still checks the host-owned context rather than trusting this env.
             allow_delegation: std::env::var("GYRO_CAPABILITY_ALLOW_DELEGATION")
+                .is_ok_and(|value| value == "true"),
+            compact_catalog: std::env::var(provider_tool_batch::COMPACT_CATALOG_ENV)
                 .is_ok_and(|value| value == "true"),
             policy_revision: desktop_permission_env("GYRO_CAPABILITY_POLICY_REVISION")?
                 .parse()
@@ -24208,9 +24450,39 @@ fn desktop_capability_tool_call(
         .get("name")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| anyhow::anyhow!("capability tool name is required"))?;
-    let capability_id = CapabilityId::from_provider_tool_name(name)
-        .ok_or_else(|| anyhow::anyhow!("unknown Gyro capability tool"))?;
     let call_id = Uuid::new_v4();
+    let empty = serde_json::json!({});
+    let arguments = params.get("arguments").unwrap_or(&empty);
+    let (capability_id, arguments) =
+        if context.compact_catalog && name == provider_tool_batch::COMPACT_INVOKE {
+            let allow_delegation =
+                context.allow_delegation && delegated_agents::can_delegate(&context.session_id);
+            match provider_tool_batch::resolve_tool_call(
+                name,
+                arguments,
+                context.mode,
+                allow_delegation,
+                true,
+            ) {
+                Ok(resolved) => resolved,
+                Err(message) => {
+                    return capability_mcp_response(
+                        paths,
+                        CapabilityResponse::failed(
+                            env!("CARGO_PKG_VERSION"),
+                            call_id,
+                            "invalid-arguments",
+                            message,
+                        ),
+                        provider_accepts_images(&context.provider_id),
+                    );
+                }
+            }
+        } else {
+            let capability_id = CapabilityId::from_provider_tool_name(name)
+                .ok_or_else(|| anyhow::anyhow!("unknown Gyro capability tool"))?;
+            (capability_id, arguments.clone())
+        };
     let request = CapabilityRequest {
         schema: PROVIDER_CAPABILITY_IPC_SCHEMA_V1.into(),
         sender_version: env!("CARGO_PKG_VERSION").into(),
@@ -24226,10 +24498,7 @@ fn desktop_capability_tool_call(
             workspace_context_revision: context.workspace_context_revision,
         },
         capability_id,
-        arguments: params
-            .get("arguments")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({})),
+        arguments,
     };
     let response = request_desktop_provider_capability(paths, &request).unwrap_or_else(|error| {
         CapabilityResponse::failed(
@@ -24381,21 +24650,7 @@ pub fn run_provider_capability_server() -> anyhow::Result<()> {
         &mut std::io::stdin().lock(),
         std::io::stdout(),
         "gyro-provider-capabilities",
-        advertised_capability_descriptors(context.mode)
-            .filter(|descriptor| {
-                allow_delegation || !delegated_agents::delegation_tool(descriptor.id)
-            })
-            .map(|descriptor| {
-                serde_json::json!({
-                    "name": descriptor.id.provider_tool_name(),
-                    "description": provider_tool_batch::advertised_description(
-                        descriptor.id,
-                        descriptor.description,
-                    ),
-                    "inputSchema": provider_tool_batch::advertised_tool_parameters(descriptor.id),
-                })
-            })
-            .collect(),
+        provider_tool_batch::mcp_tools_for(context.mode, allow_delegation, context.compact_catalog),
         |params| desktop_capability_tool_call(&paths, &context, params),
     )
 }
@@ -25785,6 +26040,7 @@ mod tests {
             attachments: Vec::new(),
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         }
     }
 
@@ -26262,6 +26518,7 @@ mod tests {
             workspace_key: temp.path().display().to_string(),
             mode: CapabilityRunMode::Normal,
             allow_delegation: false,
+            compact_catalog: false,
             policy_revision: 0,
             workspace_context_revision: 0,
         };
@@ -26279,6 +26536,81 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("Gyro tools unavailable"));
+    }
+
+    #[test]
+    fn compact_cli_wrapper_reaches_dispatch_only_when_the_run_serves_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let mut context = DesktopProviderCapabilityContext {
+            session_id: Uuid::new_v4().to_string(),
+            turn_id: Some(Uuid::new_v4().to_string()),
+            run_nonce: "test-run-nonce".into(),
+            provider_id: "openai".into(),
+            workspace_key: temp.path().display().to_string(),
+            mode: CapabilityRunMode::Normal,
+            allow_delegation: false,
+            compact_catalog: true,
+            policy_revision: 0,
+            workspace_context_revision: 0,
+        };
+        let text = |result: serde_json::Value| {
+            assert_eq!(result["isError"], true);
+            result["content"][0]["text"].as_str().unwrap().to_string()
+        };
+        let valid = serde_json::json!({
+            "name": provider_tool_batch::COMPACT_INVOKE,
+            "arguments": {
+                "name": "gyro_workspace_list",
+                "arguments": { "depth": 2 },
+            },
+        });
+        // No host is listening, so reaching dispatch fails closed with this message.
+        assert!(
+            text(desktop_capability_tool_call(&paths, &context, valid.clone()).unwrap())
+                .contains("Gyro tools unavailable")
+        );
+        for bad in [
+            serde_json::json!({ "name": "gyro_workspace_list" }),
+            serde_json::json!({ "name": "not_a_tool", "arguments": {} }),
+            serde_json::json!({ "name": provider_tool_batch::COMPACT_INVOKE, "arguments": {} }),
+        ] {
+            let message = text(
+                desktop_capability_tool_call(
+                    &paths,
+                    &context,
+                    serde_json::json!({
+                        "name": provider_tool_batch::COMPACT_INVOKE,
+                        "arguments": bad,
+                    }),
+                )
+                .unwrap(),
+            );
+            assert!(message.contains("invalid-arguments"), "{message}");
+            assert!(!message.contains("Gyro tools unavailable"), "{message}");
+        }
+        // Panes and full-list runs do not recognize the wrapper at all.
+        context.compact_catalog = false;
+        assert!(desktop_capability_tool_call(&paths, &context, valid).is_err());
+    }
+
+    #[test]
+    fn compact_cli_allowlists_add_only_the_wrapper() {
+        let tools = "mcp__gyro_capabilities__gyro_workspace_read,mcp__gyro_capabilities__gyro_tool_catalog";
+        assert_eq!(claude_allowed_capability_tools(tools.into(), false), tools);
+        assert_eq!(
+            claude_allowed_capability_tools(tools.into(), true),
+            format!("{tools},mcp__gyro_capabilities__gyro_tool_invoke")
+        );
+        assert_eq!(claude_allowed_capability_tools(String::new(), true), "");
+        assert_eq!(
+            codex_compact_invoke_approval_args(),
+            [
+                "-c".to_string(),
+                "mcp_servers.gyro_capabilities.tools.gyro_tool_invoke.approval_mode=\"approve\""
+                    .to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -28321,6 +28653,7 @@ while True:
             }],
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         };
         validate_chat_context(&request).unwrap();
         std::fs::write(&file, "changed\n").unwrap();
@@ -30170,12 +30503,97 @@ while True:
     }
 
     #[test]
+    fn claude_five_minute_cache_frames_count_writes_apart_from_reads() {
+        // Usage blocks as the Claude CLI printed them with FORCE_PROMPT_CACHING_5M=1.
+        let usage = serde_json::json!({
+            "input_tokens": 2,
+            "cache_creation_input_tokens": 2977,
+            "cache_read_input_tokens": 658,
+            "cache_creation": {
+                "ephemeral_5m_input_tokens": 2977,
+                "ephemeral_1h_input_tokens": 0
+            },
+            "output_tokens": 4,
+            "service_tier": "standard"
+        });
+        let mut parser = provider_accounting::ClaudeTurnUsage::default();
+        parser.observe(&serde_json::json!({
+            "type": "assistant",
+            "message": { "id": "msg_1", "stop_reason": null, "usage": usage }
+        }));
+        parser.observe(&serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": false,
+            "usage": usage
+        }));
+        let tokens = parser.tokens().expect("usage should be accounted");
+        assert_eq!(tokens.input_tokens, 3_637);
+        assert_eq!(tokens.cached_input_tokens, 658);
+        assert_eq!(tokens.cache_write_tokens, 2_977);
+        assert_eq!(tokens.output_tokens, 4);
+        assert!(tokens.effective_accounting().known.cache_write);
+    }
+
+    #[test]
+    fn claude_runs_keep_cache_reads_and_writes_apart() {
+        let mut parser = provider_accounting::ClaudeTurnUsage::default();
+        parser.observe(&serde_json::json!({
+            "type": "result",
+            "subtype": "success",
+            "usage": {
+                "input_tokens": 10,
+                "cache_read_input_tokens": 900,
+                "cache_creation_input_tokens": 90,
+                "output_tokens": 5
+            }
+        }));
+        let accounted = parser.tokens();
+        for answer_cut_off in [false, true] {
+            let tokens = claude_runner_output(
+                StreamingCommandOutput {
+                    activities: Vec::new(),
+                    context_usage: None,
+                    billed_usage: Some(ProviderContextUsage {
+                        input_tokens: Some(1_000),
+                        cached_input_tokens: Some(990),
+                        output_tokens: Some(5),
+                        total_tokens: Some(1_005),
+                        ..Default::default()
+                    }),
+                    accounted_usage: accounted,
+                    rate_limits: Vec::new(),
+                    status_success: !answer_cut_off,
+                    status_label: "exit status: 0".into(),
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    assistant_text: Some("done".into()),
+                    text_blocks: Vec::new(),
+                    parsed_stream_json: true,
+                    provider_session_id: Some("sess-1".into()),
+                },
+                "done".into(),
+                "sess-1".into(),
+                false,
+                answer_cut_off,
+            )
+            .accounted_usage
+            .expect("the parser's total reaches the runner output");
+            assert_eq!(tokens.input_tokens, 1_000);
+            assert_eq!(tokens.cached_input_tokens, 900);
+            assert_eq!(tokens.cache_write_tokens, 90);
+            assert!(tokens.effective_accounting().known.cache_write);
+        }
+    }
+
+    #[test]
     fn a_streamed_answer_survives_a_nonzero_cli_exit() {
         let failed =
             |assistant: Option<&str>, parsed_json: bool, stdout: &str| StreamingCommandOutput {
                 activities: Vec::new(),
                 context_usage: None,
                 billed_usage: None,
+                accounted_usage: None,
                 rate_limits: Vec::new(),
                 status_success: false,
                 status_label: "exit status: 1".into(),
@@ -31125,6 +31543,85 @@ while True:
         ));
     }
 
+    /// Quiet means every frame since the last heartbeat was a heartbeat.
+    #[test]
+    fn only_heartbeats_let_a_run_go_quiet() {
+        let start = Instant::now();
+        let beat = PROVIDER_CHAT_HEARTBEAT_INTERVAL;
+        let mut clock = ProviderQuietClock::new(start);
+
+        assert_eq!(clock.tick(10, false, start), Duration::ZERO);
+        assert_eq!(clock.tick(11, false, start + beat), beat);
+        assert_eq!(clock.tick(12, false, start + beat * 2), beat * 2);
+
+        // Anything else took a number in between, so that was progress.
+        assert_eq!(clock.tick(20, false, start + beat * 3), Duration::ZERO);
+        assert_eq!(clock.tick(21, false, start + beat * 4), beat);
+    }
+
+    /// A long tool or an unanswered approval is not the run going quiet, and the
+    /// wait does not count against it once the run picks back up.
+    #[test]
+    fn waiting_on_something_else_does_not_count_as_quiet() {
+        let start = Instant::now();
+        let beat = PROVIDER_CHAT_HEARTBEAT_INTERVAL;
+        let mut clock = ProviderQuietClock::new(start);
+
+        assert_eq!(clock.tick(1, true, start), Duration::ZERO);
+        assert_eq!(clock.tick(2, true, start + beat * 30), Duration::ZERO);
+        assert_eq!(clock.tick(3, false, start + beat * 31), beat);
+    }
+
+    /// The note only appears once the quiet is long enough to mean something.
+    #[test]
+    fn a_short_quiet_is_not_reported() {
+        let notice = PROVIDER_CHAT_QUIET_NOTICE;
+        assert_eq!(provider_quiet_seconds(Duration::ZERO), None);
+        assert_eq!(
+            provider_quiet_seconds(notice - Duration::from_secs(1)),
+            None
+        );
+        assert_eq!(provider_quiet_seconds(notice), Some(notice.as_secs()));
+    }
+
+    /// Frames from before this field keep their shape on the wire.
+    #[test]
+    fn a_frame_only_carries_quiet_seconds_when_quiet() {
+        let frame = |quiet_seconds| ProviderChatStreamEvent {
+            session_id: "session".into(),
+            turn_id: None,
+            provider_id: "provider".into(),
+            model_id: None,
+            event_id: "event".into(),
+            sequence: 1,
+            timeline: provider_timeline::TimelinePosition {
+                timeline_order: 1,
+                timeline_created_at: "2026-11-02T00:00:00Z".into(),
+            },
+            timeline_segments: None,
+            activity_sequence: None,
+            phase: "heartbeat".into(),
+            status: None,
+            text_delta: None,
+            activity_id: None,
+            activity_kind: None,
+            activity_label: None,
+            activity_detail: None,
+            activity_note: None,
+            additions: None,
+            deletions: None,
+            activity_status: None,
+            message: None,
+            error: None,
+            recovery_kind: None,
+            quiet_seconds,
+        };
+        let idle = serde_json::to_value(frame(None)).expect("serializes");
+        assert!(idle.get("quietSeconds").is_none());
+        let quiet = serde_json::to_value(frame(Some(360))).expect("serializes");
+        assert_eq!(quiet["quietSeconds"], 360);
+    }
+
     /// A tool counts as running by its latest state, not its first.
     #[test]
     fn a_finished_tool_is_not_counted_as_running() {
@@ -31326,6 +31823,7 @@ while True:
             attachments: Vec::new(),
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         };
         let mut attempts = Vec::new();
         let output = run_provider_chat_with_retry_using(
@@ -31405,6 +31903,7 @@ while True:
             attachments: Vec::new(),
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         };
         assert!(compatible_provider_session_binding(binding.clone(), &request).is_none());
         let same_model = ProviderChatRequest {
@@ -31548,6 +32047,7 @@ while True:
             attachments: Vec::new(),
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         }
     }
     #[test]
@@ -32055,6 +32555,7 @@ while True:
             attachments: Vec::new(),
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         };
 
         let event = append_provider_status_event(
@@ -32143,6 +32644,7 @@ while True:
             attachments: Vec::new(),
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         };
 
         bind_provider_chat_request(&mut request, &session, &config, store.paths()).unwrap();
@@ -32311,6 +32813,7 @@ while True:
                 workspace_key: temp.path().display().to_string(),
                 mode: CapabilityRunMode::Normal,
                 allow_delegation: false,
+                compact_catalog: false,
                 policy_revision: 0,
                 workspace_context_revision: 0,
             };
@@ -34322,6 +34825,156 @@ while True:
         assert!(error.contains("task definition changed"));
     }
 
+    /// Sparse, so tests can reach the byte budget without writing a gigabyte.
+    fn sized_attachment(path: &Path, bytes: u64) {
+        std::fs::File::create(path).unwrap().set_len(bytes).unwrap();
+    }
+
+    fn age_attachment(path: &Path, seconds_old: u64) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(
+                std::time::SystemTime::now() - std::time::Duration::from_secs(seconds_old),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn full_draft_attachment_storage_gives_up_its_oldest_file_for_a_new_drop() {
+        let root = tempfile::tempdir().unwrap();
+        let draft_dir = root.path().join("new");
+        std::fs::create_dir(&draft_dir).unwrap();
+        for index in 0..MAX_STORED_DRAFT_ATTACHMENTS {
+            let path = draft_dir.join(format!("{index}.png"));
+            std::fs::write(&path, b"x").unwrap();
+            age_attachment(&path, 1_000 + index as u64);
+        }
+        let oldest = draft_dir.join(format!("{}.png", MAX_STORED_DRAFT_ATTACHMENTS - 1));
+        let destination = draft_dir.join("next.png");
+
+        make_room_in_draft_attachments(&draft_dir, &destination, 1).unwrap();
+
+        assert!(!oldest.exists());
+        assert_eq!(
+            std::fs::read_dir(&draft_dir).unwrap().count(),
+            MAX_STORED_DRAFT_ATTACHMENTS - 1
+        );
+        ensure_attachment_storage_quota(&draft_dir, &destination, 1).unwrap();
+    }
+
+    #[test]
+    fn draft_attachment_storage_keeps_files_while_there_is_room() {
+        let root = tempfile::tempdir().unwrap();
+        let existing = root.path().join("existing.png");
+        std::fs::write(&existing, b"x").unwrap();
+
+        make_room_in_draft_attachments(root.path(), &root.path().join("next.png"), 1).unwrap();
+
+        assert!(existing.exists());
+    }
+
+    #[test]
+    fn attaching_a_stored_draft_image_again_protects_it_from_eviction() {
+        let root = tempfile::tempdir().unwrap();
+        for index in 0..MAX_STORED_DRAFT_ATTACHMENTS {
+            let path = root.path().join(format!("{index}.png"));
+            std::fs::write(&path, b"x").unwrap();
+            age_attachment(&path, 1_000 + index as u64);
+        }
+        let reused = root
+            .path()
+            .join(format!("{}.png", MAX_STORED_DRAFT_ATTACHMENTS - 1));
+
+        make_room_in_draft_attachments(root.path(), &reused, 1).unwrap();
+        make_room_in_draft_attachments(root.path(), &root.path().join("next.png"), 1).unwrap();
+
+        assert!(reused.exists());
+        assert!(!root
+            .path()
+            .join(format!("{}.png", MAX_STORED_DRAFT_ATTACHMENTS - 2))
+            .exists());
+    }
+
+    #[test]
+    fn draft_attachment_storage_gives_up_old_files_to_stay_inside_the_byte_budget() {
+        let root = tempfile::tempdir().unwrap();
+        let large = root.path().join("large.mov");
+        sized_attachment(&large, MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION);
+        age_attachment(&large, 2_000);
+        let recent = root.path().join("recent.png");
+        std::fs::write(&recent, b"x").unwrap();
+        let destination = root.path().join("next.png");
+
+        make_room_in_draft_attachments(root.path(), &destination, 1).unwrap();
+
+        assert!(!large.exists());
+        assert!(recent.exists());
+        ensure_attachment_storage_quota(root.path(), &destination, 1).unwrap();
+    }
+
+    // A file count below these would again end a chat long before its bytes run
+    // out, and a draft folder this small would evict images from a full message.
+    const _: () = assert!(
+        MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION as u64 * MAX_CHAT_IMAGE_BYTES
+            > MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION
+    );
+    const _: () = assert!(MAX_STORED_DRAFT_ATTACHMENTS > MAX_CHAT_ATTACHMENTS);
+
+    #[test]
+    fn session_outlives_many_full_turns_of_small_attachments() {
+        let root = tempfile::tempdir().unwrap();
+        // A limit of sixteen files used to end a chat after one full turn.
+        for index in 0..=16 * MAX_CHAT_ATTACHMENTS {
+            ensure_attachment_storage_quota(
+                root.path(),
+                &root.path().join(format!("{index}.png")),
+                1,
+            )
+            .unwrap();
+            std::fs::write(root.path().join(format!("{index}.png")), b"x").unwrap();
+        }
+    }
+
+    #[test]
+    fn session_takes_full_size_images_until_the_byte_budget_runs_out() {
+        let root = tempfile::tempdir().unwrap();
+        let mut accepted = 0_u64;
+        let error = loop {
+            let path = root.path().join(format!("{accepted}.png"));
+            match ensure_attachment_storage_quota(root.path(), &path, MAX_CHAT_IMAGE_BYTES) {
+                Ok(()) => sized_attachment(&path, MAX_CHAT_IMAGE_BYTES),
+                Err(error) => break error,
+            }
+            accepted += 1;
+        };
+
+        assert_eq!(
+            accepted,
+            MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION / MAX_CHAT_IMAGE_BYTES
+        );
+        assert!(error.contains("1 GB"), "{error}");
+        assert!(error.contains("new chat"), "{error}");
+        assert_eq!(
+            std::fs::read_dir(root.path()).unwrap().count() as u64,
+            accepted,
+            "a session's files must survive a refused attachment"
+        );
+    }
+
+    #[test]
+    fn full_session_can_take_a_smaller_file_or_one_it_already_stores() {
+        let root = tempfile::tempdir().unwrap();
+        let stored = root.path().join("stored.mov");
+        sized_attachment(&stored, MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION - 1);
+        let next = root.path().join("next.png");
+
+        ensure_attachment_storage_quota(root.path(), &stored, 1 << 20).unwrap();
+        ensure_attachment_storage_quota(root.path(), &next, 1).unwrap();
+        assert!(ensure_attachment_storage_quota(root.path(), &next, 2).is_err());
+    }
+
     #[test]
     fn private_attachment_storage_is_quota_limited_and_staged_for_deletion() {
         let root = tempfile::tempdir().unwrap();
@@ -34333,7 +34986,11 @@ while True:
         }
         let error = ensure_attachment_storage_quota(&session_dir, &session_dir.join("next.png"), 1)
             .unwrap_err();
-        assert!(error.contains("storage limit"));
+        assert!(
+            error.contains(&MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION.to_string()),
+            "{error}"
+        );
+        assert!(error.contains("new chat"), "{error}");
 
         let (original, tombstone) = stage_session_attachments(root.path(), session_id)
             .unwrap()

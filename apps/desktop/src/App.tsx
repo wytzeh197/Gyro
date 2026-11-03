@@ -1589,14 +1589,20 @@ export function App() {
   // --- Transient side chats -------------------------------------------------
   // The Side chat tab runs against a session of its own so the model answers
   // with the same workspace, branch, model and permissions as the chat it sits
-  // beside — and with none of its transcript. That session never reaches the
-  // sidebar or history, and it is deleted when the tab closes.
+  // beside, and reads that chat's transcript as background. Its replies stay out
+  // of that chat. The session never reaches the sidebar or history, and it is
+  // deleted when the tab closes.
   const [sideChatThreads, setSideChatThreads] = useState<
     Record<
       string,
       { messages: SideChatMessage[]; isSending?: boolean; error?: string }
     >
   >({});
+  // Which chat each side session last read, and when, so a resumed provider
+  // thread is sent only what changed. Losing this just resends the whole chat.
+  const sideChatContextReadsRef = useRef(
+    new Map<string, { parentSessionId: string; at: string }>(),
+  );
   const sideChatSessionIdsRef = useRef<string[]>(
     workbench.preferences.sideChatSessionIds,
   );
@@ -1615,6 +1621,7 @@ export function App() {
   const retireSideChatSessions = useCallback(
     (sessionIds: string[]) => {
       for (const sessionId of [...new Set(sessionIds)]) {
+        sideChatContextReadsRef.current.delete(sessionId);
         void deleteSideChatSession(sessionId).then((deleted) => {
           if (!deleted) return;
           dispatchWorkbench({
@@ -1742,6 +1749,7 @@ export function App() {
           isSending: true,
         },
       }));
+      const lastRead = sideChatContextReadsRef.current.get(sessionId);
       try {
         await invoke<SessionEvent>("append_user_message", {
           attachments: [],
@@ -1749,6 +1757,9 @@ export function App() {
           message,
           turnId,
         });
+        // Taken before the run reads the chat, so a message landing during the
+        // read is sent twice at worst and never skipped.
+        const contextReadAt = new Date().toISOString();
         const response =
           await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
             "run_provider_chat",
@@ -1770,9 +1781,24 @@ export function App() {
                 attachments: [],
                 suggestTitle: false,
                 workspacePath: parent?.workspacePath ?? workspacePath ?? "",
+                sideChatContext: parent
+                  ? {
+                      sessionId: parent.id,
+                      since:
+                        lastRead?.parentSessionId === parent.id
+                          ? lastRead.at
+                          : undefined,
+                    }
+                  : undefined,
               },
             },
           );
+        if (parent) {
+          sideChatContextReadsRef.current.set(sessionId, {
+            parentSessionId: parent.id,
+            at: contextReadAt,
+          });
+        }
         setSideChatThreads((current) => ({
           ...current,
           [paneId]: {
@@ -2254,7 +2280,9 @@ export function App() {
       dispatchWorkbench({
         type: "add-notification",
         notification: createNotification(
-          `note-${Date.now()}`,
+          // One action can raise two in the same millisecond, such as a media
+          // limit and a rejected file; each must stay separately dismissible.
+          `note-${crypto.randomUUID()}`,
           kind,
           title,
           detail,
@@ -19735,11 +19763,15 @@ function loadStoredWorkbenchState(): WorkbenchState {
       modelFocus: undefined,
       modelFocusHistory: [],
       notifications: Array.isArray(parsed.notifications)
-        ? parsed.notifications.filter(
-            (notification) =>
-              notification.id !== "note-approval" &&
-              notification.id !== "note-tests",
-          )
+        ? parsed.notifications
+            .filter(
+              (notification) =>
+                notification.id !== "note-approval" &&
+                notification.id !== "note-tests",
+            )
+            // A failure from an earlier launch is not a current one, so it
+            // must not reappear as a notice when Gyro starts.
+            .map((notification) => ({ ...notification, read: true }))
         : base.notifications,
       onboarding: {
         ...base.onboarding,
@@ -20042,7 +20074,7 @@ function loadChatDrafts(): Record<string, string> {
         (entry): entry is [string, string] =>
           typeof entry[0] === "string" &&
           typeof entry[1] === "string" &&
-          entry[1].length <= MAX_CHAT_MESSAGE_CHARS,
+          chatMessageLength(entry[1]) <= MAX_CHAT_MESSAGE_CHARS,
       ),
     );
   } catch {
@@ -21573,6 +21605,8 @@ function applyProviderChatStreamEvent(
         (streamEvent.phase === "completed" ? "done" : "running"),
       undefined,
       streamEvent.phase === "heartbeat",
+      undefined,
+      streamEvent.quietSeconds ?? undefined,
     );
     return;
   }
@@ -21622,6 +21656,7 @@ function updateOptimisticProviderStatus(
   /** Move createdAt forward so idle watches see the run is still alive. */
   touchTimestamp = false,
   recoveryKind?: string,
+  quietForSeconds?: number,
 ) {
   const updateEvents = (items: SessionEvent[]) => {
     const targetIndex = items.findLastIndex(
@@ -21688,6 +21723,8 @@ function updateOptimisticProviderStatus(
             ? Math.max(0, completedAtMs - startedAtMs)
             : undefined,
         error,
+        // Every update replaces this, so the note cannot outlive its heartbeat.
+        quietForSeconds,
         startedAt,
         status,
       },

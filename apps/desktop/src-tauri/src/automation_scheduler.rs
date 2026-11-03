@@ -428,6 +428,7 @@ fn execute_claimed_automation(
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
     // Register cancellation first, then re-read persisted state. A pause between
     // claiming the lease and registering this session must still prevent dispatch.

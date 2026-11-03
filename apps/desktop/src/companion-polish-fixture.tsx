@@ -445,17 +445,21 @@ function Pane({
     history: [previewUrl],
     historyIndex: 0,
     device: "desktop",
-    consoleErrors: 0,
+    consoleErrors: sampleState === "issues" ? 2 : 0,
     diagnostics: [],
-    diagnosticsSupported: false,
-    diagnosticsCaptured: false,
+    diagnosticsSupported: sampleState === "issues",
+    diagnosticsCaptured: sampleState === "issues",
     captureStatus: "idle",
     status:
       sampleState === "empty"
         ? "idle"
         : sampleState === "failed"
           ? "verification-failed"
-          : "ready",
+          : sampleState === "loading"
+            ? "loading"
+            : sampleState === "issues"
+              ? "console-error"
+              : "ready",
     verificationMessage: "Local sample preview",
   });
   const [sideMessages, setSideMessages] = useState<SideChatMessage[]>(() =>

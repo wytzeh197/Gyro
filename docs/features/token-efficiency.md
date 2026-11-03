@@ -23,8 +23,9 @@ The experimental compact tool catalog is independently off by default. On
 owned API and local-model requests it keeps common tools directly callable and
 exposes the remaining tools through the catalog and its dispatcher. The
 dispatcher validates the selected tool and its full argument schema and uses
-the same capability broker and approval policy. Native CLI tool catalogs are
-not changed. Compare discovery, retries and cache behavior before enabling it.
+the same capability broker and approval policy. This switch does not change
+native CLI tool catalogs; `compactCliCatalog` below is the separate switch for
+them. Compare discovery, retries and cache behavior before enabling it.
 
 - Structured evidence parses Cargo tests/compiler JSON, Node TAP, TypeScript
   diagnostics, and ESLint JSON. Exact failures and exit codes are preserved;
@@ -35,8 +36,13 @@ not changed. Compare discovery, retries and cache behavior before enabling it.
   history, user messages, and task records remain outside the system prompt.
   Cache options are confined to the official OpenAI endpoint, based on the
   [documented Chat Completions controls](https://developers.openai.com/api/docs/guides/prompt-caching).
+  OpenRouter's `anthropic/` routes get the
+  [documented automatic cache marker](https://openrouter.ai/docs/features/prompt-caching).
+  That marker has only offline test coverage so far; it has not been sent to a
+  live OpenRouter route, and a rejected marker would fail the request.
   Generic gateways are never assumed to support them. Native histories are not
-  rewritten.
+  rewritten. Claude CLI launches set `FORCE_PROMPT_CACHING_5M=1`, because the
+  default one-hour cache write costs 2x input against 1.25x for five minutes.
   The cache-assembly experiment also retains tool definitions when a tool-round
   limit requests a final checkpoint, using `tool_choice: "none"` on documented
   OpenAI and DeepSeek HTTPS routes. Execution remains disabled by the local
@@ -62,6 +68,10 @@ not changed. Compare discovery, retries and cache behavior before enabling it.
   attachments stay. The transcript is unchanged. Auto-compact remains the
   window backstop. Resumed Codex, Claude, and ACP threads keep their own
   history and their own compaction.
+- Duplicate reads fold only inside the newest exchange. A later read no longer
+  rewrites a message that was already sent, because that rewrite misses the
+  provider's cached prefix for everything after it. If a spill fails, the older
+  full copy stays in the request.
 - `/compact` reports what it actually did. A resumed Codex thread compacts
   inside its own session, which is a model summary of the earlier conversation.
   Every other provider is rewritten locally: the checkpoint either keeps the
@@ -114,7 +124,9 @@ also require immutable prices and a positive `maxCostMicros`. Per-turn ceilings
 are held constant across variants (`maxTokensPerTurn`, default 20,000); a run
 without enough remaining budget is recorded as a budget stop. The template has
 zero limits and no providers, so it cannot accidentally start generations.
-The template includes a `compact-tool-catalog` variant. A separate, explicitly
+The template includes `compact-tool-catalog`, `tight-evidence`, `batch-reads` and
+`compact-cli-catalog` variants; `combined` does not turn on the last three, so
+each is measured on its own first. A separate, explicitly
 configured spec can opt into `routine-profile` with provider effort left empty;
 that comparison requires recorded Gyro-requested low effort for the variant
 and null/default effort for the baseline. A requested effort does not establish
@@ -193,6 +205,32 @@ repeated-call notices/pauses. A recovery counts one paged read, not a whole file
 Task totals include coverage, and benchmark records carry cumulative task event
 counts. No arguments, paths, schema text or result text are retained in these
 counters. Legacy/native counts remain unavailable rather than invented zeros.
+
+## Provider cost experiments (2026-11-02)
+
+Three more independent switches default to false and need Context efficiency and
+Efficiency experiments. A switch that is off is not written to the config, because
+`deny_unknown_fields` makes an older build reject the key. Turning one on writes
+it, so an older build sharing that config then refuses to load it.
+
+- `tightEvidence` applies to OpenAI-compatible and Ollama runners. It drops the
+  preview from a retired tool result and keeps its identity, window, failure state
+  and a pointer to the complete spilled copy. A failed spill keeps the original.
+  Offline simulation shows no loss at any tested result size, where today's
+  preview loses money on 3-5 KB results on cached routes. The simulation assumes
+  no extra re-reads, which only a live run can check.
+- `batchReads` adds system guidance on the same runners to send independent known
+  reads together. It does not apply in compatibility mode or Council. Existing
+  guidance already asks for batching and DeepSeek still measured 1.39 calls per
+  generation, so wording may not change behavior.
+- `compactCliCatalog` serves the short tool list and the `gyro_tool_invoke`
+  dispatcher to Claude, Codex, xAI and Kimi chat runs. In the Normal list that is
+  47.6 KB reduced to 14.6 KB. Gemini, Cursor and OpenCode keep the full list until
+  their approval handling has been read, and Antigravity has no Gyro tools. Panes
+  keep the full list. Older prompt text can still name a tool directly, and the
+  CLI refuses that name in this mode, so the model recovers through the guidance.
+  ACP rows may show the CLI's own title for a dispatched call. Discovery adds
+  rounds, so short turns that need deferred tools can cost more.
 
 Live evaluation remains pending. Before a paid pilot, supply immutable prices and
 explicit finite spending limits. Run the unchanged model/effort paired cohorts,
