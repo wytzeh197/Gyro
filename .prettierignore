@@ -6,6 +6,8 @@ dist/
 apps/desktop/src/editor/textmate/grammars/
 apps/desktop/src/editor/textmate/sources/
 apps/desktop/src/editor/textmate/licenses/
+# Generated contract stays byte-identical to the private service's reviewed export.
+docs/contracts/gyro-cloud-v1.openapi.json
 # Frozen benchmark sources and canonical generated manifests are hash-verified.
 scripts/fixtures/efficiency-repo/sources/
 docs/performance/efficiency-repo-pilot.json

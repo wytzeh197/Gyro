@@ -437,7 +437,6 @@ function Preview() {
           </button>
         ) : null}
         {result ? <output>{result}</output> : null}
-        {section === "billing" ? <><select aria-label="Billing fixture state" value={billing.snapshot.status} onChange={e=>billing.setScene(e.target.value as typeof billing.snapshot.status)}>{BILLING_SCENES.map(status=><option key={status}>{status}</option>)}</select><button onClick={billing.cancel}>Simulate cancellation</button></> : null}
       </nav>
       <AppChrome
         sessions={[]}

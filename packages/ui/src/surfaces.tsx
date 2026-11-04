@@ -22876,9 +22876,9 @@ function ProviderInstallPanel({
 export type SettingsSurfaceProps = {
   preferences?: WorkbenchPreferences;
   onSettingsPreferencesChange?: (patch: SettingsPreferencePatch) => void;
+  onImportSettings?: (settings: Partial<PortableSettings>) => void;
   billingSnapshot?: BillingSnapshot;
   billingActions?: BillingActions;
-  onImportSettings?: (settings: Partial<PortableSettings>) => void;
 
   projectImport?: ProjectImportSettingsProps;
   config: GyroConfig;

@@ -4941,9 +4941,9 @@ function normalizedSettingsSection(
       return value;
     case "usage-limits":
     case "account":
-    case "providers":
     case "billing":
     case "cloud":
+    case "providers":
     case "efficiency":
     case "cli-profiles":
     case "appearance":
