@@ -3,9 +3,7 @@
   "previewUrl": "http://127.0.0.1:4317",
   "command": "",
   "dataChanges": "Synthetic geometry fixture; validation only, no execution.",
-  "files": [
-    "compact-rows.html"
-  ],
+  "files": ["compact-rows.html"],
   "criteria": [
     {
       "id": "first-row",
