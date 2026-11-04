@@ -113,7 +113,7 @@
 .gyro-app-preview-note {
   padding: 8px 12px;
   color: var(--gyro-muted);
-  font-size: 10px;
+  font-size: var(--gyro-font-tiny);
   line-height: 1.5;
 }
 .gyro-app-preview-empty {

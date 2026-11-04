@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readRepoSource } from "./read-repo-source.mjs";
 /**
  * Clean-machine activation path checks.
  *
@@ -110,7 +111,7 @@ assert.deepEqual(
 
 // --- UI wiring: empty chat and composer expose real actions ----------------
 
-const surfaces = readFileSync(
+const surfaces = readRepoSource(
   resolve(root, "packages/ui/src/surfaces.tsx"),
   "utf8",
 );
@@ -131,7 +132,7 @@ assert.match(
 );
 
 // Desktop must still route connect-provider and select-workspace.
-const app = readFileSync(resolve(root, "apps/desktop/src/App.tsx"), "utf8");
+const app = readRepoSource(resolve(root, "apps/desktop/src/App.tsx"), "utf8");
 assert.match(app, /connect-provider:/);
 assert.match(app, /case "select-workspace"/);
 

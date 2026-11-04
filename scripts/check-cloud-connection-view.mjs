@@ -98,6 +98,11 @@ const production = {
   lastVerified: "2026-11-02T12:00:00Z",
   revocationPending: false,
   snapshot: {
+    account: {
+      id: "00000000-0000-4000-8000-000000000001",
+      emailVerified: true,
+      status: "enabled",
+    },
     subscription: {
       state: "active",
       planId: "premium",

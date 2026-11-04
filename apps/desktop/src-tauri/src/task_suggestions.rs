@@ -166,7 +166,11 @@ pub(crate) fn select_start_tasks(
 }
 
 fn suggestion_key(title: &str) -> String {
-    title.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 fn cap_reply(message: &str) -> String {
@@ -248,10 +252,7 @@ pub(crate) async fn list_start_task_suggestions(
     exclude_ids: Option<Vec<String>>,
 ) -> Result<Vec<StartTaskSuggestion>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        list_start_task_suggestions_blocking(
-            &workspace_path,
-            &exclude_ids.unwrap_or_default(),
-        )
+        list_start_task_suggestions_blocking(&workspace_path, &exclude_ids.unwrap_or_default())
     })
     .await
     .map_err(|error| format!("start task suggestion worker failed: {error}"))?
@@ -349,7 +350,11 @@ mod tests {
         ]);
         let newer = source("new", now - 100, "fix   the fade", "chat b");
         let rows = select_start_tasks(
-            &[older, newer, source("gone", now - 50, "Sample the hang", "chat c")],
+            &[
+                older,
+                newer,
+                source("gone", now - 50, "Sample the hang", "chat c"),
+            ],
             &HashSet::from(["gone:0".into()]),
             now,
             3,
@@ -365,7 +370,12 @@ mod tests {
     fn drops_suggestions_older_than_the_window() {
         let now = 10_000_000_i64;
         let rows = select_start_tasks(
-            &[source("stale", now - START_MAX_AGE_MS - 1, "Too old", "chat")],
+            &[source(
+                "stale",
+                now - START_MAX_AGE_MS - 1,
+                "Too old",
+                "chat",
+            )],
             &HashSet::new(),
             now,
             3,

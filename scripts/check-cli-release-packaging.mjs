@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 
+import { releaseIdentity } from "./release-identity.mjs";
+
 import {
   appendFileSync,
   copyFileSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -102,7 +105,7 @@ try {
     "--assets",
     first,
     "--tag",
-    `v${version}`,
+    releaseIdentity.tag,
   ]);
   const formula = readFileSync(join(first, "gyro.rb"), "utf8");
   const sums = readFileSync(join(first, "SHA256SUMS"), "utf8")
@@ -113,6 +116,56 @@ try {
       "release finalization did not produce two real CLI checksums",
     );
   }
+
+  // Construction fixtures only: these deliberately synthetic app bytes do not
+  // claim a valid Apple or updater signature. Real release signing is separate.
+  for (const arch of ["aarch64", "x64"]) {
+    const name = `Gyro_${version}_${arch}`;
+    writeFileSync(join(first, `${name}.dmg`), "synthetic manifest fixture");
+    writeFileSync(
+      join(first, `${name}.app.tar.gz`),
+      "synthetic manifest fixture",
+    );
+    writeFileSync(join(first, `${name}.app.tar.gz.sig`), "synthetic-signature");
+  }
+  const unsigned = spawnSync(
+    process.execPath,
+    [
+      "scripts/create-updater-manifest.mjs",
+      "--assets",
+      first,
+      "--tag",
+      releaseIdentity.tag,
+      "--signing",
+      "adhoc",
+    ],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+  if (/^\d+\.\d+\.\d+$/.test(version) && unsigned.status === 0)
+    throw new Error(
+      "Stable launch alias bypassed the Developer ID requirement",
+    );
+  run(process.execPath, [
+    "scripts/create-updater-manifest.mjs",
+    "--assets",
+    first,
+    "--tag",
+    releaseIdentity.tag,
+    "--signing",
+    "developer-id",
+  ]);
+  const latest = JSON.parse(readFileSync(join(first, "latest.json"), "utf8"));
+  if (
+    latest.version !== version ||
+    Object.values(latest.platforms).some(
+      (p) => !p.url.includes(`/download/${releaseIdentity.tag}/`),
+    )
+  )
+    throw new Error(
+      "Launch manifest must separate app version from immutable release tag",
+    );
+  if (!formula.includes(`/download/${releaseIdentity.tag}/`))
+    throw new Error("CLI Formula points at an older release tag");
 
   console.log(
     `CLI release packaging smoke passed for ${version} on ${target}.`,

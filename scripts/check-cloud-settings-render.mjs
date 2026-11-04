@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -17,6 +18,8 @@ const repo = fileURLToPath(new URL("../", import.meta.url));
 const compiled = await build({
   stdin: {
     contents: `
+      export { AccountSettings, AccountNavigation } from "./apps/desktop/src/native-account-settings.tsx";
+      export { AppChrome } from "./packages/ui/src/surfaces.tsx";
       export { CloudSettings } from "./packages/ui/src/cloud-settings.tsx";
       export { BillingSettings } from "./packages/ui/src/billing-settings.tsx";
       export * from "./packages/ui/src/cloud-services-settings.tsx";
@@ -33,7 +36,12 @@ const compiled = await build({
   platform: "node",
   jsx: "automatic",
   external: ["react", "react-dom", "lucide-react"],
-  loader: { ".css": "empty" },
+  loader: {
+    ".css": "empty",
+    ".svg": "dataurl",
+    ".png": "dataurl",
+    ".woff2": "dataurl",
+  },
   logLevel: "silent",
 });
 const componentModule = { exports: {} };
@@ -787,6 +795,91 @@ check(
       text(billingHtml),
       /\$1|\$2|\$0\.05|mock AI|planning value/,
     );
+  },
+);
+
+check(
+  "Account uses the same native connection as billing and Cloud in a normal build",
+  () => {
+    const app = readFileSync(
+      new URL("../apps/desktop/src/App.tsx", import.meta.url),
+      "utf8",
+    );
+    const lib = readFileSync(
+      new URL("../apps/desktop/src-tauri/src/lib.rs", import.meta.url),
+      "utf8",
+    );
+    assert.equal((app.match(/= useCloudConnection\(/g) ?? []).length, 1);
+    assert.doesNotMatch(app, /useGyroAccount|from "\.\/gyro-cloud"/);
+    assert.doesNotMatch(lib, /gyro_cloud::gyro_cloud,/);
+    const unavailable = render(ui.AccountSettings, {
+      account: { snapshot: { status: "unavailable" }, actions: {} },
+    });
+    assert.match(
+      text(unavailable),
+      /Local work and your own providers work without an account/,
+    );
+    assert.match(text(unavailable), /Cloud is not configured in this build/);
+    const pending = render(ui.AccountNavigation, {
+      account: {
+        snapshot: {
+          status: "checking",
+          accountLabel: "Connecting to Gyro Cloud",
+        },
+        actions: {
+          signOut: () => {
+            actionCalls++;
+          },
+        },
+      },
+      selected: "account",
+      onSelect: () => {},
+    });
+    assert.doesNotMatch(text(pending), /Signed in/);
+    assert.match(text(pending), /Optional/);
+    for (const status of ["active", "payment-problem", "expired", "disputed"]) {
+      const snapshot = {
+        status,
+        productionCloud: true,
+        cloudV2: true,
+        plan: "plus",
+        accountLabel: "Signed in",
+      };
+      const actions = {
+        signOut: () => {
+          actionCalls++;
+        },
+        refresh: () => {
+          actionCalls++;
+        },
+      };
+      const account = render(ui.AccountSettings, {
+        account: { snapshot, actions },
+      });
+      assert.match(text(account), /Sign out/);
+      assert.match(text(account), /Refresh status/);
+      assert.doesNotMatch(account, /password|gyro_cloud/);
+    }
+  },
+);
+
+check(
+  "Cloud is absent from the standard sidebar and remains in Settings",
+  () => {
+    const sidebar = readFileSync(
+      new URL("../packages/ui/src/workspace-sidebar.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.doesNotMatch(
+      sidebar,
+      /onOpenCloudLibrary|showCloudNavigation|onSelectDestination\("cloud"\)/,
+    );
+    const shell = readFileSync(
+      new URL("../packages/ui/src/surfaces.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.match(shell, /id: "cloud", label: "Gyro Cloud"/);
+    assert.match(shell, /activeSection === "cloud"/);
   },
 );
 

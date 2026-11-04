@@ -363,26 +363,73 @@ const fixtureCloudSnapshot: BillingSnapshot = {
   staging: true,
   status: "active",
   plan: "plus",
-  limits: { devices: 2, storageBytes: 2_000_000_000, historyDays: 30, activeLinks: 10, concurrentJobs: 1, uploadBytesPerMonth: 4_000_000_000, downloadBytesPerMonth: 40_000_000_000 },
-  cloudUsage: { storage: { usedBytes: 24_000_000, reservedBytes: 0, limitBytes: 2_000_000_000 },
-    managedAi: { unit: "percent", used: 0, held: 0, remaining: 0, resetAt: null } },
+  limits: {
+    devices: 2,
+    storageBytes: 2_000_000_000,
+    historyDays: 30,
+    activeLinks: 10,
+    concurrentJobs: 1,
+    uploadBytesPerMonth: 4_000_000_000,
+    downloadBytesPerMonth: 40_000_000_000,
+  },
+  cloudUsage: {
+    storage: {
+      usedBytes: 24_000_000,
+      reservedBytes: 0,
+      limitBytes: 2_000_000_000,
+    },
+    managedAi: {
+      unit: "percent",
+      used: 0,
+      held: 0,
+      remaining: 0,
+      resetAt: null,
+    },
+  },
 };
 const fixtureCloudActions = {
   preferences: () => ({}),
   applySettings: () => {},
-  request: async (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
-    if (input.operation === "preview-chat") return {
-      kind: "chat", ticket: "fixture-preview-ticket",
-      content: { format: "gyro-portable-chat-v1", title: input.localId === "main" ? title : "Check retry edge cases",
-        messages: [{ role: "user", text: "Bound the sync queue retries.", createdAt: stamp },
-          { role: "assistant", text: "The queue now stops after 5 attempts and backs off between retries.", createdAt: stamp }] },
-    };
+  request: async (
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> => {
+    if (input.operation === "preview-chat")
+      return {
+        kind: "chat",
+        ticket: "fixture-preview-ticket",
+        content: {
+          format: "gyro-portable-chat-v1",
+          title: input.localId === "main" ? title : "Check retry edge cases",
+          messages: [
+            {
+              role: "user",
+              text: "Bound the sync queue retries.",
+              createdAt: stamp,
+            },
+            {
+              role: "assistant",
+              text: "The queue now stops after 5 attempts and backs off between retries.",
+              createdAt: stamp,
+            },
+          ],
+        },
+      };
     if (input.operation === "upload-preview") {
-      if (query.get("cloud") === "slow") await new Promise((resolve) => window.setTimeout(resolve, 1500));
-      if (input.reviewed !== true || input.ticket !== "fixture-preview-ticket") throw new Error("Review the preview first.");
-      return query.get("cloud") === "queued" ? { queued: true } : { uploaded: { objectId: "fixture-backup", unchanged: query.get("cloud") === "unchanged" } };
+      if (query.get("cloud") === "slow")
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      if (input.reviewed !== true || input.ticket !== "fixture-preview-ticket")
+        throw new Error("Review the preview first.");
+      return query.get("cloud") === "queued"
+        ? { queued: true }
+        : {
+            uploaded: {
+              objectId: "fixture-backup",
+              unchanged: query.get("cloud") === "unchanged",
+            },
+          };
     }
-    if (input.operation === "local-chats") return { items: [{ localId: "main", title }] };
+    if (input.operation === "local-chats")
+      return { items: [{ localId: "main", title }] };
     return { items: [] };
   },
 };
@@ -586,19 +633,31 @@ function Pane({
       config={config}
       events={events}
       paneKey={id}
-      isComposerSending={query.get("activity")?.split(",").includes(id) && query.get("activityStatus") !== "stopped"}
-      capabilityActivities={query.get("activity")?.split(",").includes(id) ? [{
-        schema: "gyro.capability.v1",
-        kind: "capability-call",
-        callId: `fixture-tool-${id}`,
-        capabilityId: "browser-read-page",
-        status: query.get("activityStatus") === "completed" ? "completed" : "running",
-        providerId: "anthropic",
-        policyRevision: 1,
-        summary: "Reading the local preview",
-        sessionId: id,
-        createdAt: stamp,
-      }] : []}
+      isComposerSending={
+        query.get("activity")?.split(",").includes(id) &&
+        query.get("activityStatus") !== "stopped"
+      }
+      capabilityActivities={
+        query.get("activity")?.split(",").includes(id)
+          ? [
+              {
+                schema: "gyro.capability.v1",
+                kind: "capability-call",
+                callId: `fixture-tool-${id}`,
+                capabilityId: "browser-read-page",
+                status:
+                  query.get("activityStatus") === "completed"
+                    ? "completed"
+                    : "running",
+                providerId: "anthropic",
+                policyRevision: 1,
+                summary: "Reading the local preview",
+                sessionId: id,
+                createdAt: stamp,
+              },
+            ]
+          : []
+      }
       sessionTitle={id === "main" ? title : "Check retry edge cases"}
       workspacePath={workspace}
       branchName="main"
@@ -617,10 +676,17 @@ function Pane({
       activeChatPanel={panel}
       companionTabs={companionPane.openTabs}
       onOpenCompanionTab={open}
-      backupReview={cloudFixture && pane.kind === "session" ? {
-        localId: id, available: true, accountKey: "fixture", request: fixtureCloudActions.request,
-        uploading: query.get("cloud") === "auto-upload",
-      } : undefined}
+      backupReview={
+        cloudFixture && pane.kind === "session"
+          ? {
+              localId: id,
+              available: true,
+              accountKey: "fixture",
+              request: fixtureCloudActions.request,
+              uploading: query.get("cloud") === "auto-upload",
+            }
+          : undefined
+      }
       onSelectChatPanel={open}
       onCloseCompanionTab={closeTab}
       onShowCompanionLauncher={() => open("tools")}
@@ -894,41 +960,50 @@ const sessions: Session[] = [
 }));
 function Fixture() {
   const [destination, setDestination] = useState<AppDestination>("workspace");
-  const [grid, dispatch] = useReducer(chatGridReducer, undefined, (): ChatGridState => {
-    const initial: ChatGridState = {
-      activeProjectKey: workspace,
-      layouts: { [workspace]: createChatProjectLayout(workspace, mainPane) },
-    };
-    if (query.get("split") === "4") {
-      return {
-        ...initial,
-        layouts: { [workspace]: {
-          ...initial.layouts[workspace]!,
-          arrangement: "grid",
-          slots: ["main", "secondary", "third", "fourth"].map(id => ({
-            ...mainPane, paneId: id, sessionId: id,
-          })),
-          focusedPaneId: "main",
-        } },
+  const [grid, dispatch] = useReducer(
+    chatGridReducer,
+    undefined,
+    (): ChatGridState => {
+      const initial: ChatGridState = {
+        activeProjectKey: workspace,
+        layouts: { [workspace]: createChatProjectLayout(workspace, mainPane) },
       };
-    }
-    if (query.get("split") !== "1") return initial;
-    const splitState = chatGridReducer(initial, {
-      type: "select-pane",
-      projectKey: workspace,
-      mode: "drop",
-      slotIndex: 0,
-      insertPosition: "after",
-      splitDirection: query.get("arrangement") === "rows" ? "vertical" : "horizontal",
-      arrangement: query.get("arrangement") === "rows" ? "rows" : "columns",
-      pane: { ...mainPane, paneId: "secondary", sessionId: "secondary" },
-    });
-    return chatGridReducer(splitState, {
-      type: "focus-pane",
-      projectKey: workspace,
-      paneId: "main",
-    });
-  });
+      if (query.get("split") === "4") {
+        return {
+          ...initial,
+          layouts: {
+            [workspace]: {
+              ...initial.layouts[workspace]!,
+              arrangement: "grid",
+              slots: ["main", "secondary", "third", "fourth"].map((id) => ({
+                ...mainPane,
+                paneId: id,
+                sessionId: id,
+              })),
+              focusedPaneId: "main",
+            },
+          },
+        };
+      }
+      if (query.get("split") !== "1") return initial;
+      const splitState = chatGridReducer(initial, {
+        type: "select-pane",
+        projectKey: workspace,
+        mode: "drop",
+        slotIndex: 0,
+        insertPosition: "after",
+        splitDirection:
+          query.get("arrangement") === "rows" ? "vertical" : "horizontal",
+        arrangement: query.get("arrangement") === "rows" ? "rows" : "columns",
+        pane: { ...mainPane, paneId: "secondary", sessionId: "secondary" },
+      });
+      return chatGridReducer(splitState, {
+        type: "focus-pane",
+        projectKey: workspace,
+        paneId: "main",
+      });
+    },
+  );
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.density = "compact";
@@ -963,15 +1038,20 @@ function Fixture() {
       <main className="companion-polish-stage">
         <AppChrome
           activeDestination={destination}
-          showCloudNavigation={cloudFixture}
           activeSessionId="main"
           activeWorkspaceLayout="thread"
           commandProfiles={[]}
           savedProjects={[]}
           sessions={sessions}
-          sendingSessionIds={query.get("sidebarState") === "working" ? ["main"] : []}
-          approvalCountsBySessionId={query.get("sidebarState") === "approval" ? { main: 1 } : {}}
-          questionCountsBySessionId={query.get("sidebarState") === "question" ? { main: 1 } : {}}
+          sendingSessionIds={
+            query.get("sidebarState") === "working" ? ["main"] : []
+          }
+          approvalCountsBySessionId={
+            query.get("sidebarState") === "approval" ? { main: 1 } : {}
+          }
+          questionCountsBySessionId={
+            query.get("sidebarState") === "question" ? { main: 1 } : {}
+          }
           workspacePath={workspace}
           onCreateSession={newChat}
           onCreateCliSession={() => {}}
@@ -994,58 +1074,64 @@ function Fixture() {
           {destination === "cloud" ? (
             <div className="gyro-settings-surface gyro-cloud-workspace">
               <div className="gyro-settings-content">
-                <CloudSettings workspace snapshot={fixtureCloudSnapshot} actions={{ cloud: fixtureCloudActions }}
-                  onManageCloud={() => setDestination("workspace")} />
+                <CloudSettings
+                  workspace
+                  snapshot={fixtureCloudSnapshot}
+                  actions={{ cloud: fixtureCloudActions }}
+                  onManageCloud={() => setDestination("workspace")}
+                />
               </div>
             </div>
-          ) : <ChatGridSurface
-            layout={layout}
-            maximizedPaneId={grid.maximizedPaneId}
-            onDropSession={(sessionId, _source, slotIndex, placement) =>
-              dispatch({
-                type: "select-pane",
-                projectKey: workspace,
-                mode: "drop",
-                slotIndex,
-                pane: { ...mainPane, paneId: sessionId, sessionId },
-                ...placement,
-              })
-            }
-            onFocusPane={(pane) =>
-              dispatch({
-                type: "focus-pane",
-                projectKey: workspace,
-                paneId: pane.paneId,
-              })
-            }
-            onMovePane={(paneId, slotIndex) =>
-              dispatch({
-                type: "move-pane",
-                projectKey: workspace,
-                paneId,
-                slotIndex,
-              })
-            }
-            onToggleMaximize={(paneId) =>
-              dispatch({ type: "toggle-maximize-pane", paneId })
-            }
-            renderPane={(pane, options) => (
-              <Pane
-                key={pane.paneId}
-                pane={pane}
-                tiled={options.isTiled}
-                onClose={() =>
-                  dispatch({
-                    type: "close-pane",
-                    projectKey: workspace,
-                    paneId: pane.paneId,
-                  })
-                }
-              />
-            )}
-          >
-            <Pane pane={mainPane} tiled={false} onClose={() => {}} />
-          </ChatGridSurface>}
+          ) : (
+            <ChatGridSurface
+              layout={layout}
+              maximizedPaneId={grid.maximizedPaneId}
+              onDropSession={(sessionId, _source, slotIndex, placement) =>
+                dispatch({
+                  type: "select-pane",
+                  projectKey: workspace,
+                  mode: "drop",
+                  slotIndex,
+                  pane: { ...mainPane, paneId: sessionId, sessionId },
+                  ...placement,
+                })
+              }
+              onFocusPane={(pane) =>
+                dispatch({
+                  type: "focus-pane",
+                  projectKey: workspace,
+                  paneId: pane.paneId,
+                })
+              }
+              onMovePane={(paneId, slotIndex) =>
+                dispatch({
+                  type: "move-pane",
+                  projectKey: workspace,
+                  paneId,
+                  slotIndex,
+                })
+              }
+              onToggleMaximize={(paneId) =>
+                dispatch({ type: "toggle-maximize-pane", paneId })
+              }
+              renderPane={(pane, options) => (
+                <Pane
+                  key={pane.paneId}
+                  pane={pane}
+                  tiled={options.isTiled}
+                  onClose={() =>
+                    dispatch({
+                      type: "close-pane",
+                      projectKey: workspace,
+                      paneId: pane.paneId,
+                    })
+                  }
+                />
+              )}
+            >
+              <Pane pane={mainPane} tiled={false} onClose={() => {}} />
+            </ChatGridSurface>
+          )}
         </AppChrome>
       </main>
     </>

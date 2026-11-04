@@ -56,7 +56,9 @@ static HISTORY: Mutex<History> = Mutex::new(History {
 });
 
 fn lock() -> std::sync::MutexGuard<'static, History> {
-    HISTORY.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    HISTORY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Records a completed operation and invalidates the redo stack.
@@ -222,7 +224,9 @@ mod tests {
 
     #[test]
     fn record_and_pop_round_trip() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         clear();
         record(PathHistoryAction::Moved {
             from: path("/w/a.txt"),
@@ -240,7 +244,9 @@ mod tests {
 
     #[test]
     fn recording_clears_redo() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         clear();
         push_redo(PathHistoryAction::Created {
             path: path("/w/a.txt"),
@@ -253,7 +259,9 @@ mod tests {
 
     #[test]
     fn peek_names_the_top_move_without_removing_it() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         clear();
         record(PathHistoryAction::Moved {
             from: path("/w/drafts/a.txt"),
@@ -278,7 +286,9 @@ mod tests {
 
     #[test]
     fn peek_names_a_same_folder_move_as_a_rename() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         clear();
         record(PathHistoryAction::Moved {
             from: path("/w/draft.md"),
@@ -292,7 +302,9 @@ mod tests {
 
     #[test]
     fn history_is_bounded() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         clear();
         for index in 0..(HISTORY_LIMIT + 5) {
             record(PathHistoryAction::Created {

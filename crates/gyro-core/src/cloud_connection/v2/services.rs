@@ -601,9 +601,9 @@ fn matching_chat_head(versions: &Value, base: Uuid, size: usize, digest: &str) -
     let Some(items) = versions["items"].as_array() else {
         return false;
     };
-    let mut current = items.iter().filter(|item| {
-        item.get("retainedUntil").is_some_and(Value::is_null)
-    });
+    let mut current = items
+        .iter()
+        .filter(|item| item.get("retainedUntil").is_some_and(Value::is_null));
     current.next().is_some_and(|head| {
         uuid(head, "revisionId").ok() == Some(base)
             && head["sizeBytes"].as_u64() == Some(size as u64)

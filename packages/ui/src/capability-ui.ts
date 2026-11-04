@@ -37,12 +37,7 @@ export type BrowserAction =
 
 /** The rail row — and therefore the icon — a capability call becomes. */
 export type CapabilityRowKind =
-  | "tool"
-  | "command"
-  | "search"
-  | "read"
-  | "file"
-  | "browser";
+  "tool" | "command" | "search" | "read" | "file" | "browser";
 
 export type CapabilityUi = {
   /** Settled title in the rail, and the name approval prompts show. */
@@ -107,6 +102,26 @@ export const CAPABILITY_UI = {
   "terminal-wait": { label: "Wait for command", row: "command" },
   "terminal-stop": { label: "Stop terminal", row: "command" },
 
+  "browser-targets": {
+    label: "Preview targets",
+    row: "browser",
+    action: "inspect",
+  },
+  "browser-select-target": {
+    label: "Select preview target",
+    row: "browser",
+    action: "navigate",
+  },
+  "browser-capture-preview": {
+    label: "Capture preview",
+    row: "browser",
+    action: "capture",
+  },
+  "browser-preview-click": {
+    label: "Click preview",
+    row: "browser",
+    action: "click",
+  },
   "browser-open": { label: "Open browser", row: "browser", action: "open" },
   "browser-inspect": {
     label: "Inspect browser",

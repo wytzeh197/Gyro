@@ -275,7 +275,7 @@ export function isPublicStableRelease(release) {
   if (!isUsableRelease(release) || release.draft || release.prerelease) {
     return false;
   }
-  return /^v\d+\.\d+\.\d+$/.test(release.tag_name);
+  return /^v\d+\.\d+\.\d+(?:-launch\.\d{8})?$/.test(release.tag_name);
 }
 
 export async function fetchGitHubJson(url) {
@@ -296,4 +296,10 @@ export async function fetchGitHubJson(url) {
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+// Launch tag aliases preserve immutable historic tags; displayed app versions
+// and updater comparisons still use the app's actual semantic version.
+export function releaseAppVersion(release) {
+  return release.tag_name.replace(/^v/, "").replace(/-launch\.\d{8}$/, "");
 }

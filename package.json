@@ -1,6 +1,6 @@
 {
   "name": "@gyro-dev/workspace",
-  "version": "0.1.0-preview.2",
+  "version": "0.1.0",
   "private": true,
   "description": "Open-source local-first coding agent workspace.",
   "license": "Apache-2.0",
@@ -34,7 +34,7 @@
     "site:deploy": "node scripts/refuse-public-site-deploy.mjs",
     "smoke:native": "node scripts/run-native-smoke.mjs",
     "smoke:workbench": "node scripts/check-workbench-ui.mjs && node scripts/check-ui-tokens.mjs",
-    "test": "pnpm test:reliability && pnpm -r test",
+    "test": "pnpm test:reliability && pnpm test:cloud && pnpm -r test",
     "test:chat-drag-browser": "node scripts/run-chat-drag-browser.mjs",
     "test:chat-retry-browser": "node scripts/run-chat-retry-browser.mjs",
     "test:chat-retry-dispatch": "node --experimental-strip-types scripts/check-chat-retry-dispatch.mjs",
@@ -60,7 +60,9 @@
     "test:efficiency-repo-pilot": "node scripts/check-efficiency-repo-pilot.mjs",
     "test:first-run-tour-browser": "node scripts/check-first-run-tour-browser.mjs",
     "test:local-app": "node --experimental-strip-types scripts/check-assistant-response-headings.mjs && node --experimental-strip-types scripts/check-model-default-suggestion.mjs && node --experimental-strip-types scripts/check-settings-upgrade.mjs && node --experimental-strip-types scripts/check-ide-evidence-push.mjs",
-    "test:local-check-browser": "node scripts/check-local-check-browser.mjs"
+    "test:local-check-browser": "node scripts/check-local-check-browser.mjs",
+    "test:cloud": "node --experimental-strip-types scripts/check-cloud-chat-continuation.mjs && node --experimental-strip-types scripts/check-cloud-connection-view.mjs && node --experimental-strip-types scripts/check-cloud-services-state.mjs && node --experimental-strip-types scripts/check-cloud-settings-render.mjs && node --experimental-strip-types scripts/check-cloud-v2-contract.mjs",
+    "test:cloud:wire": "node scripts/check-cloud-connection-wire.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.10",

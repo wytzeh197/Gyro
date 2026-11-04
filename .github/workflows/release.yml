@@ -44,7 +44,7 @@ jobs:
             echo "Developer ID signing is partially configured; missing secrets: ${missing[*]}" >&2
             exit 1
           fi
-          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "$MODE" != "developer-id" ]; then
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-launch\.[0-9]{8})?$ ]] && [ "$MODE" != "developer-id" ]; then
             echo "Stable release $GITHUB_REF_NAME must be Developer ID signed and notarized; missing secrets: ${missing[*]}" >&2
             exit 1
           fi
@@ -81,7 +81,7 @@ jobs:
           version: 11.7.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -104,9 +104,9 @@ jobs:
       - run: pnpm check
       - name: Build and check confined Code Mode worker
         run: pnpm --filter @gyro-dev/codemode build && pnpm --filter @gyro-dev/codemode test
-      - run: cargo test --workspace
+      - run: cargo test --workspace --locked -- --test-threads=4
       - name: Build native CLI
-        run: cargo build --release -p gyro-cli --target ${{ matrix.target }}
+        run: cargo build --locked --release -p gyro-cli --target ${{ matrix.target }}
       - name: Package and verify native CLI
         run: |
           VERSION="$(node -p "require('./package.json').version")"
@@ -327,7 +327,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
       - name: Download both architecture bundles
         uses: actions/download-artifact@v4
         with:

@@ -1,6 +1,6 @@
 /* Quiet, neutral tour surfaces. Blue is reserved for the primary action. */
 .gyro-tour {
-  --gyro-tour-accent: var(--gyro-blue, #60b0ff);
+  --gyro-tour-accent: var(--gyro-blue);
   --gyro-tour-on-accent: #06111f;
   --gyro-tour-dimmer: rgba(0, 0, 0, 0.48);
   color: var(--gyro-text);
@@ -91,7 +91,7 @@
 
 .gyro-tour-title {
   color: var(--gyro-text);
-  font-size: 16px;
+  font-size: var(--gyro-font-lead);
   font-weight: 600;
   letter-spacing: -0.012em;
   line-height: 1.3;

@@ -1,0 +1,7 @@
+{
+  "environment": "production",
+  "apiOrigin": "https://api.usegyro.io",
+  "shareOrigin": "https://reports.usegyro.io",
+  "authProject": null,
+  "authPublishableKey": null
+}

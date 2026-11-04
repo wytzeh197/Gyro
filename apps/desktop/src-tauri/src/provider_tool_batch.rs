@@ -759,11 +759,16 @@ mod tests {
         let (full_names, compact_names) = (names(&full), names(&compact));
         assert!(!full_names.iter().any(|name| name == COMPACT_INVOKE));
         assert!(full_names.iter().any(|name| name == "gyro_browser_click"));
-        assert!(!compact_names.iter().any(|name| name == "gyro_browser_click"));
+        assert!(!compact_names
+            .iter()
+            .any(|name| name == "gyro_browser_click"));
         assert!(compact_names.iter().any(|name| name == "gyro_tool_catalog"));
         assert_eq!(compact.last().unwrap()["name"], COMPACT_INVOKE);
         // Every tool the short list drops is still reachable through the wrapper.
-        for name in full_names.iter().filter(|name| !compact_names.contains(name)) {
+        for name in full_names
+            .iter()
+            .filter(|name| !compact_names.contains(name))
+        {
             let id = CapabilityId::from_provider_tool_name(name).unwrap();
             assert!(!inline_tool_schema(id), "{name}");
         }

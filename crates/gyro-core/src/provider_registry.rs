@@ -326,7 +326,10 @@ mod tests {
         // Tokens are accounted per run; no plan window is scraped.
         assert!(!antigravity.supports_usage);
         for id in ["cursor", "opencode"] {
-            assert_eq!(provider_descriptor(id).unwrap().support_tier, ProviderSupportTier::Supported);
+            assert_eq!(
+                provider_descriptor(id).unwrap().support_tier,
+                ProviderSupportTier::Supported
+            );
         }
         for id in [
             "openai",

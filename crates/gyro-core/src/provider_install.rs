@@ -205,8 +205,16 @@ mod tests {
                 "`{}` needs an https docs link",
                 guide.provider_id
             );
-            assert!(!guide.summary.is_empty(), "`{}` needs a summary", guide.provider_id);
-            assert!(!guide.binary.is_empty(), "`{}` needs a binary", guide.provider_id);
+            assert!(
+                !guide.summary.is_empty(),
+                "`{}` needs a summary",
+                guide.provider_id
+            );
+            assert!(
+                !guide.binary.is_empty(),
+                "`{}` needs a binary",
+                guide.provider_id
+            );
         }
     }
 

@@ -424,5 +424,33 @@
   },
   "check-download-site-build.mjs": {
     "kind": "behavioral"
+  },
+  "check-cloud-chat-continuation.mjs": {
+    "kind": "behavioral",
+    "note": "Exercises the native Cloud contract or production UI with isolated transports; no live payment or provider calls."
+  },
+  "check-cloud-connection-view.mjs": {
+    "kind": "behavioral",
+    "note": "Exercises the native Cloud contract or production UI with isolated transports; no live payment or provider calls."
+  },
+  "check-cloud-connection-wire.mjs": {
+    "kind": "behavioral",
+    "note": "Exercises the native Cloud contract or production UI with isolated transports; no live payment or provider calls."
+  },
+  "check-cloud-services-state.mjs": {
+    "kind": "behavioral",
+    "note": "Exercises the native Cloud contract or production UI with isolated transports; no live payment or provider calls."
+  },
+  "check-cloud-settings-render.mjs": {
+    "kind": "behavioral",
+    "note": "Exercises the native Cloud contract or production UI with isolated transports; no live payment or provider calls."
+  },
+  "check-cloud-v2-contract.mjs": {
+    "kind": "behavioral",
+    "note": "Exercises the native Cloud contract or production UI with isolated transports; no live payment or provider calls."
+  },
+  "check-failure-notifications.mjs": {
+    "kind": "behavioral",
+    "note": "Exercises failure notification routing and visibility with isolated event fixtures."
   }
 }

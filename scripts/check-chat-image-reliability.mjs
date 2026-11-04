@@ -1,3 +1,4 @@
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
@@ -62,7 +63,7 @@ assert.ok(await actions.resolveCitedImage({ target: "later.png", scope: b }));
 
 // Execute the actual App callback with a delayed native picker. Focus is still
 // on A when B requests the picker; the explicit pane owns its eventual result.
-const source = readFileSync(
+const source = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );

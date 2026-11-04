@@ -235,6 +235,8 @@
   --gyro-press-opacity: 0.94;
   /* Blocking decisions sit above menus and content-viewer overlays. */
   --gyro-layer-dialog: 11000;
+  /* Slash commands clear the composer picker (122), below the overlay (124). */
+  --gyro-layer-composer-slash: 123;
   --gyro-effort-thumb-ink: #fff;
   --gyro-effort-thumb-size: max(24px, calc(28px * var(--gyro-ui-scale, 1)));
   --gyro-control-compact: 24px;

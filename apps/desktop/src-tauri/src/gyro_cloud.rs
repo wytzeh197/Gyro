@@ -128,24 +128,61 @@ fn read_pending(path: &Path) -> Option<(PendingUpload, Vec<u8>)> {
 )]
 pub(crate) enum Action {
     Status,
-    SendCode { email: String },
-    SignIn { email: String, proof: String },
-    SignUp { name: String, email: String, password: String },
-    PasswordSignIn { email: String, password: String },
-    SendPasswordReset { email: String },
-    ResetPassword { email: String, proof: String, password: String },
-    ChangePassword { password: String },
-    ResendConfirmation { email: String },
+    SendCode {
+        email: String,
+    },
+    SignIn {
+        email: String,
+        proof: String,
+    },
+    SignUp {
+        name: String,
+        email: String,
+        password: String,
+    },
+    PasswordSignIn {
+        email: String,
+        password: String,
+    },
+    SendPasswordReset {
+        email: String,
+    },
+    ResetPassword {
+        email: String,
+        proof: String,
+        password: String,
+    },
+    ChangePassword {
+        password: String,
+    },
+    ResendConfirmation {
+        email: String,
+    },
     SignOut,
-    UpdateProfile { display_name: String },
+    UpdateProfile {
+        display_name: String,
+    },
     Generate,
     Confirm,
-    Recover { code: String },
-    List { cursor: Option<String> },
-    Upload { id: Uuid, replace: Option<String> },
-    Download { id: Uuid },
-    Delete { id: Uuid },
-    Open { id: Uuid },
+    Recover {
+        code: String,
+    },
+    List {
+        cursor: Option<String>,
+    },
+    Upload {
+        id: Uuid,
+        replace: Option<String>,
+    },
+    Download {
+        id: Uuid,
+    },
+    Delete {
+        id: Uuid,
+    },
+    Open {
+        id: Uuid,
+    },
     History,
 }
 
@@ -445,7 +482,10 @@ fn sign_up(name: &str, email: &str, password: &str) -> Result<SignUp> {
         Ok(response) => response,
         Err(error) => {
             let (status, code) = auth_failure_parts(error);
-            if matches!(code.as_deref(), Some("user_already_exists" | "email_exists")) {
+            if matches!(
+                code.as_deref(),
+                Some("user_already_exists" | "email_exists")
+            ) {
                 return Ok(SignUp::AccountExists);
             }
             bail!(auth_failure_message(status, code.as_deref()));
@@ -907,7 +947,8 @@ fn run(action: Action) -> Result<serde_json::Value> {
         }
         Action::SendCode { email } => {
             check_email(email)?;
-            auth_request("POST", "otp").send_json(json!({ "email": email, "create_user": false }))
+            auth_request("POST", "otp")
+                .send_json(json!({ "email": email, "create_user": false }))
                 .map_err(auth_failure)?;
             return Ok(Value::Null);
         }
@@ -919,18 +960,16 @@ fn run(action: Action) -> Result<serde_json::Value> {
             name,
             email,
             password,
-        } => {
-            match sign_up(name, email, password)? {
-                SignUp::Session(session) => {
-                    state.login = Some(finish_login(email, *session)?);
-                    state.pending = None;
-                }
-                SignUp::ConfirmationRequired => {
-                    return Ok(json!({ "confirmationRequired": true }));
-                }
-                SignUp::AccountExists => return Ok(json!({ "accountExists": true })),
+        } => match sign_up(name, email, password)? {
+            SignUp::Session(session) => {
+                state.login = Some(finish_login(email, *session)?);
+                state.pending = None;
             }
-        }
+            SignUp::ConfirmationRequired => {
+                return Ok(json!({ "confirmationRequired": true }));
+            }
+            SignUp::AccountExists => return Ok(json!({ "accountExists": true })),
+        },
         Action::PasswordSignIn { email, password } => {
             let Some(login) = sign_in_with_password(email, password)? else {
                 return Ok(json!({ "confirmationRequired": true }));
@@ -989,9 +1028,8 @@ fn run(action: Action) -> Result<serde_json::Value> {
     match action {
         Action::ChangePassword { password } => {
             check_password(&password)?;
-            set_password(login, &password).map_err(|(status, code)| {
-                anyhow!(auth_failure_message(status, code.as_deref()))
-            })?;
+            set_password(login, &password)
+                .map_err(|(status, code)| anyhow!(auth_failure_message(status, code.as_deref())))?;
             return Ok(Value::Null);
         }
         Action::UpdateProfile { display_name } => {
@@ -1161,7 +1199,9 @@ mod tests {
     fn repeat_sign_up_is_recognized_instead_of_awaiting_an_email() -> Result<()> {
         // What the service returns for an email that already has an account.
         assert!(matches!(
-            classify_sign_up(json!({ "id": Uuid::nil(), "email": "w@example.com", "identities": [] }))?,
+            classify_sign_up(
+                json!({ "id": Uuid::nil(), "email": "w@example.com", "identities": [] })
+            )?,
             SignUp::AccountExists
         ));
         assert!(matches!(
@@ -1169,7 +1209,9 @@ mod tests {
             SignUp::AccountExists
         ));
         assert!(matches!(
-            classify_sign_up(json!({ "id": Uuid::nil(), "identities": [{ "provider": "email" }] }))?,
+            classify_sign_up(
+                json!({ "id": Uuid::nil(), "identities": [{ "provider": "email" }] })
+            )?,
             SignUp::ConfirmationRequired
         ));
         // A missing list must not claim an account exists.

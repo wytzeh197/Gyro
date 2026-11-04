@@ -1,0 +1,60 @@
+{
+  "sessionId": "00000000-0000-4000-8000-000000000001",
+  "previewUrl": "http://127.0.0.1:4317",
+  "command": "",
+  "dataChanges": "Synthetic geometry fixture; validation only, no execution.",
+  "files": [
+    "compact-rows.html"
+  ],
+  "criteria": [
+    {
+      "id": "first-row",
+      "requirement": "First compact row is 32 pixels high",
+      "scope": "browser",
+      "expected": {
+        "row": 32
+      }
+    },
+    {
+      "id": "second-row",
+      "requirement": "Second compact row is 32 pixels high",
+      "scope": "browser",
+      "expected": {
+        "row": 32
+      }
+    }
+  ],
+  "browser": {
+    "readySelector": "body",
+    "viewport": {
+      "width": 1440,
+      "height": 1080
+    },
+    "steps": [
+      {
+        "action": "observe",
+        "criterionId": "first-row",
+        "waitMs": 0,
+        "reads": [
+          {
+            "key": "row",
+            "selector": "#first-row",
+            "kind": "height"
+          }
+        ]
+      },
+      {
+        "action": "observe",
+        "criterionId": "second-row",
+        "waitMs": 0,
+        "reads": [
+          {
+            "key": "row",
+            "selector": "#second-row",
+            "kind": "height"
+          }
+        ]
+      }
+    ]
+  }
+}

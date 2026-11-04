@@ -6,6 +6,7 @@ import {
   isPublicAlphaRelease,
   isPublicStableRelease,
   releaseAnchor,
+  releaseAppVersion,
   renderReleaseNotes,
 } from "./release-utils.js";
 
@@ -132,8 +133,8 @@ async function loadChangelog() {
     jump.replaceChildren();
     for (const [index, release] of stable.entries()) {
       const href = `#${releaseAnchor(release.tag_name)}`;
-      appendLink(rail, href, release.tag_name);
-      appendLink(jump, href, release.tag_name);
+      appendLink(rail, href, `v${releaseAppVersion(release)}`);
+      appendLink(jump, href, `v${releaseAppVersion(release)}`);
       list.append(renderRelease(release, index === 0 ? "Latest" : "Release"));
     }
     if (alphas.length) {

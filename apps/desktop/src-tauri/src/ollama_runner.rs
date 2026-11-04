@@ -506,7 +506,15 @@ pub(super) fn run_ollama_chat(
                         );
                     }
                 },
-                |tokens, window| provider_accounting::emit_request_usage(app, request, accounted_usage, tokens, window),
+                |tokens, window| {
+                    provider_accounting::emit_request_usage(
+                        app,
+                        request,
+                        accounted_usage,
+                        tokens,
+                        window,
+                    )
+                },
             )
             .map_err(|error| {
                 if error.to_string().contains(OLLAMA_CANCELLED_MESSAGE)

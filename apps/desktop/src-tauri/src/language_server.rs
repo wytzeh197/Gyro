@@ -208,7 +208,7 @@ pub struct LanguageServerManager {
 struct LanguageServerStartGate<'a> {
     gates: &'a LanguageServerStartGates,
     key: LanguageServerKey,
-    gate: Arc<Mutex<()>>,
+    gate: Option<Arc<Mutex<()>>>,
 }
 
 impl<'a> LanguageServerStartGate<'a> {
@@ -219,18 +219,25 @@ impl<'a> LanguageServerStartGate<'a> {
             .entry(key.clone())
             .or_default()
             .clone();
-        Ok(Self { gates, key, gate })
+        Ok(Self {
+            gates,
+            key,
+            gate: Some(gate),
+        })
     }
 }
 
 impl Drop for LanguageServerStartGate<'_> {
     fn drop(&mut self) {
         if let Ok(mut gates) = self.gates.lock() {
-            // The map's reference plus ours: nobody else is queued. Clones are
-            // only taken under this lock, so the count cannot race upward.
-            if Arc::strong_count(&self.gate) <= 2 {
+            let gate = self.gate.take().expect("start gate is owned until drop");
+            // Retire our reference while holding the map lock. Otherwise two
+            // finishing callers can both count the other's not-yet-dropped
+            // field and leave an unused gate behind forever.
+            if Arc::strong_count(&gate) <= 2 {
                 gates.remove(&self.key);
             }
+            drop(gate);
         }
     }
 }
@@ -422,7 +429,12 @@ impl LanguageServerManager {
                 command_text.to_string(),
             ),
         )?;
-        let _start_turn = gate.gate.lock().unwrap_or_else(PoisonError::into_inner);
+        let _start_turn = gate
+            .gate
+            .as_ref()
+            .expect("live start gate")
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
 
         let existing_processes = {
             let processes = self

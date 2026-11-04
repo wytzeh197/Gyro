@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { releaseIdentity } from "./release-identity.mjs";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -90,10 +91,7 @@ const failures = [];
       failures.push(
         "bundle.macOS.dmg.background must be a PNG; the DMG bundler cannot place an SVG.",
       );
-    } else if (
-      width !== windowWidth * 2 ||
-      height !== windowHeight * 2
-    ) {
+    } else if (width !== windowWidth * 2 || height !== windowHeight * 2) {
       failures.push(
         `bundle.macOS.dmg.background is ${width}×${height}, but a ${windowWidth}×${windowHeight} pt window needs ${windowWidth * 2}×${windowHeight * 2} at 2x. Run: swift scripts/render-dmg-background.swift`,
       );
@@ -177,7 +175,8 @@ const versions = new Map([
 const expectedVersion = rootPackage.version;
 const isStableVersion = /^\d+\.\d+\.\d+$/.test(expectedVersion);
 const signingMode =
-  process.env.GYRO_MACOS_SIGNING || (isStableVersion ? "developer-id" : "adhoc");
+  process.env.GYRO_MACOS_SIGNING ||
+  (isStableVersion ? "developer-id" : "adhoc");
 if (!["adhoc", "developer-id"].includes(signingMode)) {
   failures.push(
     `GYRO_MACOS_SIGNING must be adhoc or developer-id, not ${signingMode}.`,
@@ -190,7 +189,7 @@ if (isStableVersion && signingMode !== "developer-id") {
 }
 const releaseNotesPath = resolve(
   repoRoot,
-  `docs/releases/v${expectedVersion}.md`,
+  `docs/releases/${releaseIdentity.tag}.md`,
 );
 if (!existsSync(releaseNotesPath)) {
   failures.push(
@@ -259,7 +258,11 @@ if (
 }
 
 const tag = process.env.GITHUB_REF_NAME;
-if (tag?.startsWith("v") && tag.slice(1) !== expectedVersion) {
+if (
+  process.env.GITHUB_REF_TYPE === "tag" &&
+  tag?.startsWith("v") &&
+  tag !== releaseIdentity.tag
+) {
   failures.push(`Git tag ${tag} does not match version ${expectedVersion}.`);
 }
 
@@ -306,7 +309,7 @@ for (const marker of [
   "x86_64-apple-darwin",
   "runner: macos-15",
   "runner: macos-15-intel",
-  "cargo build --release -p gyro-cli --target ${{ matrix.target }}",
+  "cargo build --locked --release -p gyro-cli --target ${{ matrix.target }}",
   "scripts/package-cli-release.mjs",
   "gyro-cli-${VERSION}-${{ matrix.target }}.tar.gz",
   "scripts/finalize-cli-release.mjs",
@@ -341,7 +344,7 @@ if (
 }
 
 for (const marker of [
-  "cargo build -p gyro-cli",
+  "cargo build --locked -p gyro-cli",
   "scripts/check-cli-release-packaging.mjs",
 ]) {
   if (!ciWorkflow.includes(marker)) {
@@ -450,8 +453,8 @@ for (const [marker, meaning] of [
 
 for (const marker of [
   `version "${expectedVersion}"`,
-  "releases/download/v#{version}/gyro-cli-#{version}-aarch64-apple-darwin.tar.gz",
-  "releases/download/v#{version}/gyro-cli-#{version}-x86_64-apple-darwin.tar.gz",
+  `releases/download/${releaseIdentity.tag}/gyro-cli-#{version}-aarch64-apple-darwin.tar.gz`,
+  `releases/download/${releaseIdentity.tag}/gyro-cli-#{version}-x86_64-apple-darwin.tar.gz`,
   "REPLACE_WITH_AARCH64_CLI_SHA256",
   "REPLACE_WITH_X86_64_CLI_SHA256",
   "generate_completions_from_executable",
@@ -506,7 +509,9 @@ if (process.env.GYRO_REQUIRE_RELEASE_SECRETS === "1") {
 }
 
 function dmgNotarizationStep(workflow) {
-  const start = workflow.indexOf("- name: Sign, notarize, and staple macOS DMG");
+  const start = workflow.indexOf(
+    "- name: Sign, notarize, and staple macOS DMG",
+  );
   const end = workflow.indexOf("- name: Verify macOS DMG");
   if (start === -1 || end <= start) return "";
   return workflow.slice(start, end);

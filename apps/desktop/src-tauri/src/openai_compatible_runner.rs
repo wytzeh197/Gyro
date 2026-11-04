@@ -447,7 +447,15 @@ pub(super) fn run_openai_compatible_chat(
                         );
                     }
                 },
-                |tokens| provider_accounting::emit_request_usage(app, request, accounted_usage, tokens, None),
+                |tokens| {
+                    provider_accounting::emit_request_usage(
+                        app,
+                        request,
+                        accounted_usage,
+                        tokens,
+                        None,
+                    )
+                },
             );
             let mut turn = match turn {
                 Err(error)

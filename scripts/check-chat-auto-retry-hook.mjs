@@ -1,3 +1,4 @@
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
@@ -212,7 +213,7 @@ assert.deepEqual(
   "mounting an old failure cannot send anything",
 );
 // Execute the production send's plan selection with another chat focused.
-const appSource = readFileSync(
+const appSource = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );

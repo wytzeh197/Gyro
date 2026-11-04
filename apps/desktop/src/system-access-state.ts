@@ -1,5 +1,4 @@
 import type { SystemAccessScope } from "@gyro-dev/ui";
-import "./dictation-access";
 
 export const SYSTEM_ACCESS_STATUS_STORAGE_KEY = "gyro.system-access-status-v1";
 

@@ -146,6 +146,10 @@ export type CapabilityId =
   | "terminal-read"
   | "terminal-wait"
   | "terminal-stop"
+  | "browser-targets"
+  | "browser-select-target"
+  | "browser-capture-preview"
+  | "browser-preview-click"
   | "browser-open"
   | "browser-inspect"
   | "browser-reload"
@@ -341,7 +345,14 @@ export type ProviderCapabilitySupport = {
   supportsImages: boolean;
   supportsResume: boolean;
   supportsUsage: boolean;
-  efficiency?: { ownsRequests: boolean; nativeContinuation: "supported" | "unsupported" | "unknown"; effort: "supported" | "unsupported" | "unknown"; cacheControls: "supported" | "unsupported" | "unknown"; usage: "supported" | "unsupported" | "unknown"; hiddenContext: boolean };
+  efficiency?: {
+    ownsRequests: boolean;
+    nativeContinuation: "supported" | "unsupported" | "unknown";
+    effort: "supported" | "unsupported" | "unknown";
+    cacheControls: "supported" | "unsupported" | "unknown";
+    usage: "supported" | "unsupported" | "unknown";
+    hiddenContext: boolean;
+  };
   capabilities: CapabilityId[];
   reason?: string;
 };
@@ -736,7 +747,8 @@ export type DiffReview = {
   lastAction?: string;
 };
 
-export type BrowserPreviewDevice = "responsive" | "desktop" | "tablet" | "mobile";
+export type BrowserPreviewDevice =
+  "responsive" | "desktop" | "tablet" | "mobile";
 export type BrowserViewportMode = "auto" | BrowserPreviewDevice;
 export type BrowserViewportState = {
   mode: BrowserViewportMode;
@@ -2433,16 +2445,43 @@ export type GyroAccountOidcConfig = {
 };
 
 export type PriceSnapshot = {
-  id: string; provider: string; model: string; effectiveDate: string; currency: string;
-  inputMicrosPerMillion: number; cachedMicrosPerMillion: number | null;
-  cacheWriteMicrosPerMillion: number | null; outputMicrosPerMillion: number;
+  id: string;
+  provider: string;
+  model: string;
+  effectiveDate: string;
+  currency: string;
+  inputMicrosPerMillion: number;
+  cachedMicrosPerMillion: number | null;
+  cacheWriteMicrosPerMillion: number | null;
+  outputMicrosPerMillion: number;
 };
-export type EfficiencyRoute = {phase: string; provider: string; model: string};
+export type EfficiencyRoute = {
+  phase: string;
+  provider: string;
+  model: string;
+};
 export type EfficiencyConfig = {
-  enabled: boolean; experimental: boolean; profile: "routine" | "standard" | "deep";
-  parallelAgents: boolean; prices: PriceSnapshot[];
-  routing?: {enabled: boolean; routes: EfficiencyRoute[]; escalation: EfficiencyRoute | null};
-  structuredEvidence?: boolean; cacheAssembly?: boolean; taskState?: boolean; repositoryRetrieval?: boolean; progressDetection?: boolean; compactToolCatalog?: boolean; recoverableEvidence?: boolean; tightEvidence?: boolean; batchReads?: boolean; compactCliCatalog?: boolean; retainToolCatalog?: boolean;
+  enabled: boolean;
+  experimental: boolean;
+  profile: "routine" | "standard" | "deep";
+  parallelAgents: boolean;
+  prices: PriceSnapshot[];
+  routing?: {
+    enabled: boolean;
+    routes: EfficiencyRoute[];
+    escalation: EfficiencyRoute | null;
+  };
+  structuredEvidence?: boolean;
+  cacheAssembly?: boolean;
+  taskState?: boolean;
+  repositoryRetrieval?: boolean;
+  progressDetection?: boolean;
+  compactToolCatalog?: boolean;
+  recoverableEvidence?: boolean;
+  tightEvidence?: boolean;
+  batchReads?: boolean;
+  compactCliCatalog?: boolean;
+  retainToolCatalog?: boolean;
 };
 
 export type GyroConfig = {

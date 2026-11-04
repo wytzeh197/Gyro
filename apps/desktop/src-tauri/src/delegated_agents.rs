@@ -1730,10 +1730,7 @@ mod tests {
                     approvals_sent_separately: false,
                 },
             );
-            assert_eq!(
-                !resumed,
-                prompt.contains("gyro_agent_spawn/wait/send/stop")
-            );
+            assert_eq!(!resumed, prompt.contains("gyro_agent_spawn/wait/send/stop"));
             request.message = original_message;
             request.reasoning_effort = Some("high".into());
         }

@@ -1,3 +1,5 @@
+import { applyLaunchView } from "../packages/ui/src/workbench-state.ts";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
@@ -78,7 +80,7 @@ assert.deepEqual(
   "A failed write preserves the last saved values",
 );
 // Exercise the real app's debounced flush, including the latest queued values.
-const appSource = readFileSync(
+const appSource = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );
@@ -183,6 +185,7 @@ const loader = ast.statements.find(
     node.name?.text === "loadInitialWorkbenchState",
 );
 const restartContext = {
+  applyLaunchView,
   loadStoredWorkbenchState: () => ({
     preferences: { ...initial, modelFollow: "peek" },
   }),

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readRepoSource } from "./read-repo-source.mjs";
 // Multi-root workspace policy: validation, health, canonical storage, and
 // relocation. The filesystem half is covered by `gyro_core::workspace_roots`
 // tests; these inputs stand in for what `inspect_workspace_folders` returns.
@@ -343,7 +344,7 @@ assert.equal(
 
 // --- every add entry point goes through validation ----------------------------
 
-const app = readFileSync(
+const app = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );

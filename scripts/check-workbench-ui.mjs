@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { readRepoSource } from "./read-repo-source.mjs";
+import { sourceIncludes } from "./source-includes.mjs";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { formatCompactTokenCount } from "../packages/ui/src/token-count.ts";
 import { workspaceEditorOptions } from "../apps/desktop/src/editor-presentation.ts";
@@ -159,7 +161,7 @@ function expect(condition, message) {
 }
 
 function readRepoFile(path) {
-  return readFileSync(resolve(repoRoot, path), "utf8");
+  return readRepoSource(resolve(repoRoot, path), "utf8");
 }
 
 // Some docs are deliberately kept out of the repo. Their checks still run for
@@ -862,28 +864,37 @@ expect(
   "Chat drag hover should light the tile under the pointer immediately and reuse pane elements instead of rebuilding every open chat mid-drag.",
 );
 expect(
-  !surfaceSource.includes('className="gyro-chat-pane-drag-handle"') &&
-    !surfaceSource.includes("Drag chat to rearrange split") &&
+  !sourceIncludes(surfaceSource, 'className="gyro-chat-pane-drag-handle"') &&
+    !sourceIncludes(surfaceSource, "Drag chat to rearrange split") &&
     !styleSource.includes(".gyro-chat-pane-drag-handle") &&
-    appSource.includes("onPaneDragStart={options.onPaneDragStart}") &&
-    surfaceSource.includes("data-chat-pane-drag={paneKey}") &&
-    surfaceSource.includes("CHAT_SESSION_DRAG_MIME") &&
-    surfaceSource.includes("onDropSession(") &&
-    surfaceSource.includes("function dataTransferHasType") &&
-    surfaceSource.includes("types.contains(type)") &&
-    !surfaceSource.includes(
+    sourceIncludes(appSource, "onPaneDragStart={options.onPaneDragStart}") &&
+    sourceIncludes(surfaceSource, "data-chat-pane-drag={paneKey}") &&
+    readRepoFile("packages/ui/src/chat-session-drag.ts").includes(
+      "CHAT_SESSION_DRAG_MIME",
+    ) &&
+    sourceIncludes(surfaceSource, "onDropSession(") &&
+    sourceIncludes(surfaceSource, "function dataTransferHasType") &&
+    sourceIncludes(surfaceSource, "types.contains(type)") &&
+    !sourceIncludes(
+      surfaceSource,
       "dataTransfer.types.includes(CHAT_SESSION_DRAG_MIME)",
     ) &&
-    surfaceSource.includes("function dragPointerIsOutside") &&
-    surfaceSource.includes("event.clientX < bounds.left") &&
-    surfaceSource.includes("Updating a provider CLI. Sending will unlock") &&
-    surfaceSource.includes("!isCliUpdating &&") &&
-    appSource.includes("isCliUpdating={paneComposerCliUpdating}") &&
-    appSource.includes("isCliUpdating={activeComposerCliUpdating}") &&
-    !appSource.includes('isCliUpdating={cliUpdatePhase === "updating"}') &&
+    sourceIncludes(surfaceSource, "function dragPointerIsOutside") &&
+    sourceIncludes(surfaceSource, "event.clientX < bounds.left") &&
+    sourceIncludes(
+      surfaceSource,
+      "Updating a provider CLI. Sending will unlock",
+    ) &&
+    sourceIncludes(surfaceSource, "!isCliUpdating &&") &&
+    sourceIncludes(appSource, "isCliUpdating={paneComposerCliUpdating}") &&
+    sourceIncludes(appSource, "isCliUpdating={activeComposerCliUpdating}") &&
+    !sourceIncludes(
+      appSource,
+      'isCliUpdating={cliUpdatePhase === "updating"}',
+    ) &&
     styleSource.includes("Sessions/Workspace is navigation") &&
     styleSource.includes("var(--gyro-sidebar-mode-active)") &&
-    surfaceSource.includes("{zone.label}"),
+    sourceIncludes(surfaceSource, "{zone.label}"),
   "Sidebar chats and pane titles can rearrange splits; toolbar controls stay separate from draggable titles.",
 );
 expect(
@@ -1341,13 +1352,19 @@ expect(
 // no active path/tabs/selection/buffer, and the only way a file reaches a turn
 // is the composer "+" context menu or an editor AI action that names it.
 expect(
-  !surfaceSource.includes("Live Workspace context") &&
-    !surfaceSource.includes("workspaceContext") &&
-    appSource.includes("activePath: undefined") &&
-    appSource.includes("buffers: []") &&
-    appSource.includes('selectChatAttachment("workspace-file")') &&
-    appSource.includes("attachEditorSnapshot") &&
-    tauriSource.includes("Gyro does not attach the user's open editor file"),
+  !sourceIncludes(surfaceSource, "Live Workspace context") &&
+    !sourceIncludes(surfaceSource, "workspaceContext") &&
+    sourceIncludes(appSource, "activePath: undefined") &&
+    sourceIncludes(appSource, "buffers: []") &&
+    sourceIncludes(
+      appSource,
+      'selectChatAttachment("workspace-file", undefined, attachmentTarget)',
+    ) &&
+    sourceIncludes(appSource, "attachEditorSnapshot") &&
+    sourceIncludes(
+      tauriSource,
+      "Gyro does not attach the user's open editor file",
+    ),
   "The file open in Workspace should never become chat context on its own; only composer attachments and editor AI actions may put a file in a turn.",
 );
 
@@ -1381,7 +1398,10 @@ expect(
       styleSource,
       ".gyro-chat-grid.has-multiple-panes > .gyro-chat-grid-slot",
     ).some((rule) => rule.includes("border: 0")) &&
-    !styleSource.includes("padding-right: 96px;"),
+    !cssRules(
+      styleSource,
+      ".gyro-chat-surface.is-tiled > .gyro-chat-thread-topbar",
+    ).some((rule) => rule.includes("padding-right: 96px")),
   "Grid chat headers should share the 48px title row, keep compact edge insets, and meet at one clean seam.",
 );
 
@@ -1692,11 +1712,11 @@ expect(
     xaiCatalog?.defaultModelId === "grok-4.7" &&
     xaiCatalog.selectedModelId === "grok-4.7" &&
     grok47?.displayName === "Grok 4.7" &&
-    grok47.contextWindowTokens === 500_000 &&
+    grok47.contextWindowTokens === 256_000 &&
     grok47.defaultReasoningEffort === "high" &&
     grok47.supportedReasoningEfforts?.join(",") ===
       GROK_46_REASONING_EFFORTS.join(",") &&
-    grok46?.contextWindowTokens === 500_000 &&
+    grok46?.contextWindowTokens === 256_000 &&
     xaiCatalog.models.some((model) => model.id === "grok-4.5"),
   "xAI should expose Grok 4.7 as the default while retaining Grok 4.6 and 4.5.",
 );
@@ -4354,76 +4374,92 @@ for (const readinessCall of [
 }
 
 expect(
-  appSource.includes("createOptimisticTurnEvents") &&
-    appSource.includes('providerStatusMessage("running", provider)') &&
-    appSource.includes("waitForNextPaint") &&
-    appSource.includes("optimisticEventsRef") &&
-    appSource.includes("mergePersistedAndOptimisticEvents") &&
+  sourceIncludes(appSource, "createOptimisticTurnEvents") &&
+    sourceIncludes(appSource, 'providerStatusMessage("running", provider)') &&
+    sourceIncludes(appSource, "waitForNextPaint") &&
+    sourceIncludes(appSource, "optimisticEventsRef") &&
+    sourceIncludes(appSource, "mergePersistedAndOptimisticEvents") &&
     appAndStreamSource.includes(
       "const merged = limitSessionEventsForUi(persistedEvents, maxEvents)",
     ) &&
     appAndStreamSource.includes("const seenEventIds = new Set<string>()") &&
-    appSource.includes(
+    sourceIncludes(
+      appSource,
       "limitOptimisticSessionEvents(updateEvents(optimisticEvents))",
     ) &&
-    appSource.includes("items.findLastIndex(") &&
-    appSource.includes("updateOptimisticProviderStatus") &&
-    appSource.includes("setIsStartingFirstTurn") &&
-    appSource.includes("sendingSessionIdsRef") &&
-    appSource.includes("setSessionSending") &&
-    appSource.includes("const activeSessionHasTranscriptEvents = useMemo") &&
-    appSource.includes("[activeSessionId, events]") &&
+    sourceIncludes(appSource, "items.findLastIndex(") &&
+    sourceIncludes(appSource, "updateOptimisticProviderStatus") &&
+    sourceIncludes(appSource, "setIsStartingFirstTurn") &&
+    sourceIncludes(appSource, "sendingSessionIdsRef") &&
+    sourceIncludes(appSource, "setSessionSending") &&
+    sourceIncludes(
+      appSource,
+      "const activeSessionHasTranscriptEvents = useMemo",
+    ) &&
+    sourceIncludes(appSource, "[activeSessionId, events]") &&
     /shouldSuggestSessionTitle\(\s*targetSession,\s*targetSessionHasTranscriptEvents/.test(
       appSource,
     ) &&
-    !appSource.includes(
+    !sourceIncludes(
+      appSource,
       "shouldSuggestSessionTitle(\n        activeSession,\n        events",
     ) &&
-    appSource.includes("draftResetToken") &&
-    appSource.includes("setEventsForSession(") &&
-    appSource.includes("limitSessionEventsForUi(optimisticEvents)") &&
-    appSource.includes(
+    sourceIncludes(appSource, "draftResetToken") &&
+    sourceIncludes(appSource, "setEventsForSession(") &&
+    sourceIncludes(appSource, "limitSessionEventsForUi(optimisticEvents)") &&
+    sourceIncludes(
+      appSource,
       "sessionModel,\n          chatWorkspacePath,\n          provisionalTitle",
     ) &&
-    appSource.includes("const draftKey = `new:${projectKey}`") &&
-    appSource.includes("resetChatDraft") &&
-    !appSource.includes("const [draft, setDraft]") &&
-    !appSource.includes("onDraftChange={setDraft}") &&
-    appSource.includes("maxDraftLength={MAX_CHAT_MESSAGE_CHARS}") &&
+    sourceIncludes(
+      appSource,
+      "const draftKey = options.draftKey ??`new:${projectKey}`",
+    ) &&
+    sourceIncludes(appSource, "resetChatDraft") &&
+    !sourceIncludes(appSource, "const [draft, setDraft]") &&
+    !sourceIncludes(appSource, "onDraftChange={setDraft}") &&
+    sourceIncludes(appSource, "maxDraftLength={MAX_CHAT_MESSAGE_CHARS}") &&
     /invokeTimedProviderChat<ProviderChatResponse>\(\s*"run_provider_chat"/.test(
       appSource,
     ) &&
-    appSource.includes("turnTiming.invokeTimedProviderChat") &&
+    sourceIncludes(appSource, "turnTiming.invokeTimedProviderChat") &&
     turnTimingSource.includes("return await invoke<T>(command, args)") &&
-    appSource.includes("sessionTitleFromMessage") &&
-    appSource.includes("shouldSuggestSessionTitle") &&
-    appSource.includes("applyProviderChatResponse") &&
-    appSource.includes("mergeProviderResponseEvents") &&
-    appSource.includes("response?.statusEvent") &&
-    appSource.includes("response?.assistantEvent") &&
-    appSource.includes(
+    sourceIncludes(appSource, "sessionTitleFromMessage") &&
+    sourceIncludes(appSource, "shouldSuggestSessionTitle") &&
+    sourceIncludes(appSource, "applyProviderChatResponse") &&
+    sourceIncludes(appSource, "mergeProviderResponseEvents") &&
+    sourceIncludes(appSource, "response?.statusEvent") &&
+    sourceIncludes(appSource, "response?.assistantEvent") &&
+    sourceIncludes(
+      appSource,
       "const bySession = new Map<string, ProviderStreamBatch[]>()",
     ) &&
-    appSource.includes("(value) => setEventsForSession(sessionId, value)") &&
-    appSource.includes("applyProviderChatResponse(targetSessionId") &&
-    appSource.includes("applyProviderChatResponse(persistedSession.id") &&
+    sourceIncludes(
+      appSource,
+      "(value) => setEventsForSession(sessionId, value)",
+    ) &&
+    sourceIncludes(appSource, "applyProviderChatResponse(targetSessionId") &&
+    sourceIncludes(
+      appSource,
+      "applyProviderChatResponse(persistedSession.id",
+    ) &&
     !/applyProviderChatResponse\(persistedSession\.id,\s*providerResponse\);\s*updateOptimisticProviderStatus/.test(
       appSource,
     ) &&
     !/applyProviderChatResponse\(targetSessionId,\s*providerResponse\);\s*updateOptimisticProviderStatus/.test(
       appSource,
     ) &&
-    appSource.includes("ProviderChatStreamEvent") &&
-    appSource.includes("ProviderResumeCursor") &&
-    appSource.includes("gyro://provider-chat-event") &&
-    appSource.includes("applyProviderChatStreamEvent") &&
-    appSource.includes('streamEvent.phase === "started"') &&
-    appSource.includes('streamEvent.phase === "completed"') &&
-    appSource.includes("applyProviderChatStreamDeltas") &&
+    sourceIncludes(appSource, "ProviderChatStreamEvent") &&
+    sourceIncludes(appSource, "ProviderResumeCursor") &&
+    sourceIncludes(appSource, "gyro://provider-chat-event") &&
+    sourceIncludes(appSource, "applyProviderChatStreamEvent") &&
+    sourceIncludes(appSource, 'streamEvent.phase === "started"') &&
+    sourceIncludes(appSource, 'streamEvent.phase === "completed"') &&
+    sourceIncludes(appSource, "applyProviderChatStreamDeltas") &&
     providerStreamSource.includes("applyProviderChatStreamActivity") &&
-    appSource.includes("applyProviderChatStreamPresentation") &&
-    appSource.includes('streamEvent.phase === "activity"') &&
-    appSource.includes("sessionBatches.map((batch) => ({") &&
+    sourceIncludes(appSource, "applyProviderChatStreamPresentation") &&
+    sourceIncludes(appSource, 'streamEvent.phase === "activity"') &&
+    sourceIncludes(appSource, "sessionBatches.map((batch) => ({") &&
     providerStreamSource.includes(
       "const coalescedDeltaEvents = new Map<string, PendingStreamDeltaEvent>()",
     ) &&
@@ -4433,42 +4469,56 @@ expect(
       "const updatedSessionIds = new Set<string>()",
     ) &&
     appAndStreamSource.includes("upsertStreamingAssistantEvent") &&
-    appSource.includes("PROVIDER_STREAM_FLUSH_MS") &&
-    appSource.includes("providerStreamBatchRef") &&
-    appSource.includes("flushProviderStreamBatches") &&
-    appSource.includes("queueProviderChatStreamEvent") &&
-    appSource.includes("startTransition") &&
-    appSource.includes(
+    sourceIncludes(appSource, "PROVIDER_STREAM_FLUSH_MS") &&
+    sourceIncludes(appSource, "providerStreamBatchRef") &&
+    sourceIncludes(appSource, "flushProviderStreamBatches") &&
+    sourceIncludes(appSource, "queueProviderChatStreamEvent") &&
+    sourceIncludes(appSource, "startTransition") &&
+    sourceIncludes(
+      appSource,
       "const deferredEventsForPlan = useDeferredValue(events)",
     ) &&
-    appSource.includes(
+    sourceIncludes(
+      appSource,
       "const persistedSessionContext = useDerivedSessionContext(",
     ) &&
-    appSource.includes("deferredEventsForPlan,") &&
-    appSource.includes("plan: deriveSessionPlan(events, sessionId)") &&
+    sourceIncludes(appSource, "deferredEventsForPlan,") &&
+    sourceIncludes(appSource, "plan: deriveSessionPlan(events, sessionId)") &&
     // Live turns must not wait on deferred events — otherwise the rail freezes
     // mid-stream while the provider is still working.
-    appSource.includes("const isLiveTurnStreaming = activeSessionId") &&
-    appSource.includes("const deferredEventsForTurn = isLiveTurnStreaming") &&
-    appSource.includes("const derivedActiveTurn = useMemo") &&
-    appSource.includes("deriveActiveTurn(") &&
-    appSource.includes("deferredEventsForTurn,") &&
-    appSource.includes("activeSession?.title,") &&
-    appSource.includes("activeSession?.workspacePath ?? workspacePath") &&
+    sourceIncludes(appSource, "const isLiveTurnStreaming = activeSessionId") &&
+    sourceIncludes(
+      appSource,
+      "const deferredEventsForTurn = isLiveTurnStreaming",
+    ) &&
+    sourceIncludes(appSource, "const derivedActiveTurn = useMemo") &&
+    sourceIncludes(appSource, "deriveActiveTurn(") &&
+    sourceIncludes(appSource, "deferredEventsForTurn,") &&
+    sourceIncludes(appSource, "activeSession?.title,") &&
+    sourceIncludes(
+      appSource,
+      "activeSession?.workspacePath ?? workspacePath",
+    ) &&
     // Stream flushes stay high priority so concurrent React work cannot starve
     // the live token stream.
-    appSource.includes(
+    sourceIncludes(
+      appSource,
       "Stream text must paint at the same priority as the turn itself",
     ) &&
-    appSource.includes("const nextTurn = derivedActiveTurn") &&
-    appSource.includes(
+    sourceIncludes(appSource, "const nextTurn = derivedActiveTurn") &&
+    sourceIncludes(
+      appSource,
       "const activeTurnId = workbench.activeTurn?.id ?? derivedActiveTurn?.id",
     ) &&
-    appSource.includes("const freshEvents = deferredEventsForTurn.filter") &&
-    appSource.includes("let latestUserIndex = -1") &&
-    appSource.includes("index = Math.max(0, latestUserIndex)") &&
-    appSource.includes('if (event.kind !== "plan-updated")') &&
-    !appSource.includes(
+    sourceIncludes(
+      appSource,
+      "const freshEvents = deferredEventsForTurn.filter",
+    ) &&
+    sourceIncludes(appSource, "let latestUserIndex = -1") &&
+    sourceIncludes(appSource, "index = Math.max(0, latestUserIndex)") &&
+    sourceIncludes(appSource, 'if (event.kind !== "plan-updated")') &&
+    !sourceIncludes(
+      appSource,
       'events.filter((event) => event.kind === "plan-updated")',
     ) &&
     providerStreamSource.includes("appendChatResponseDelta") &&
@@ -4477,75 +4527,87 @@ expect(
     // live stream that event is the last one in the window.
     providerStreamSource.includes("events.findLastIndex") &&
     providerStreamSource.includes("CHAT_RESPONSE_TRUNCATION_SUFFIX") &&
-    appSource.includes("isStreamingAssistantSessionEvent") &&
-    !appSource.includes("[...events]\n    .reverse()") &&
-    appSource.includes(
+    sourceIncludes(appSource, "isStreamingAssistantSessionEvent") &&
+    !sourceIncludes(appSource, "[...events]\n    .reverse()") &&
+    sourceIncludes(
+      appSource,
       "document.documentElement.dataset.density = preferences.density",
     ) &&
-    appSource.includes(
+    sourceIncludes(
+      appSource,
       "window.localStorage.setItem(THEME_STORAGE_KEY, themePreference)",
     ) &&
-    appSource.includes("WORKBENCH_PERSIST_DEBOUNCE_MS") &&
-    appSource.includes("WORKBENCH_PERSIST_IDLE_TIMEOUT_MS") &&
-    appSource.includes("persistableWorkbenchState") &&
-    appSource.includes("flushPersistedWorkbenchState") &&
-    appSource.includes("schedulePersistedWorkbenchStateFlush") &&
-    appSource.includes("cancelPersistedWorkbenchStateFlush") &&
-    appSource.includes("const persistableWorkbench = useMemo") &&
-    appSource.includes(
+    sourceIncludes(appSource, "WORKBENCH_PERSIST_DEBOUNCE_MS") &&
+    sourceIncludes(appSource, "WORKBENCH_PERSIST_IDLE_TIMEOUT_MS") &&
+    sourceIncludes(appSource, "persistableWorkbenchState") &&
+    sourceIncludes(appSource, "flushPersistedWorkbenchState") &&
+    sourceIncludes(appSource, "schedulePersistedWorkbenchStateFlush") &&
+    sourceIncludes(appSource, "cancelPersistedWorkbenchStateFlush") &&
+    sourceIncludes(appSource, "const persistableWorkbench = useMemo") &&
+    sourceIncludes(
+      appSource,
       "pendingWorkbenchPersistRef.current = persistableWorkbench",
     ) &&
-    appSource.includes("workbenchPersistIdleRef") &&
-    appSource.includes("requestIdleCallback") &&
-    appSource.includes("JSON.stringify(pending)") &&
-    !appSource.includes("pendingWorkbenchPersistRef.current = workbench") &&
-    !appSource.includes("JSON.stringify(persistableWorkbenchState(pending))") &&
-    appSource.includes("MAX_PERSISTED_TERMINAL_OUTPUT_CHARS") &&
-    appSource.includes("activeTurn: undefined") &&
-    appSource.includes("areWorkbenchTurnsEqual") &&
-    appSource.includes("const eventsRef = useRef<SessionEvent[]>([])") &&
-    appSource.includes("eventsRef.current = events") &&
-    appSource.includes("eventSessionEvents.find(") &&
-    appSource.includes(
+    sourceIncludes(appSource, "workbenchPersistIdleRef") &&
+    sourceIncludes(appSource, "requestIdleCallback") &&
+    sourceIncludes(appSource, "JSON.stringify(pending)") &&
+    !sourceIncludes(
+      appSource,
+      "pendingWorkbenchPersistRef.current = workbench",
+    ) &&
+    !sourceIncludes(
+      appSource,
+      "JSON.stringify(persistableWorkbenchState(pending))",
+    ) &&
+    sourceIncludes(appSource, "MAX_PERSISTED_TERMINAL_OUTPUT_CHARS") &&
+    sourceIncludes(appSource, "activeTurn: undefined") &&
+    sourceIncludes(appSource, "areWorkbenchTurnsEqual") &&
+    sourceIncludes(appSource, "const eventsRef = useRef<SessionEvent[]>([])") &&
+    sourceIncludes(appSource, "eventsRef.current = events") &&
+    sourceIncludes(appSource, "eventSessionEvents.find(") &&
+    sourceIncludes(
+      appSource,
       "sessionEventsById[event.sessionId] ?? eventsRef.current",
     ) &&
-    appSource.includes("item.sessionId === event.sessionId &&") &&
-    !appSource.includes("[connectProvider, events, sendDraft]") &&
+    sourceIncludes(appSource, "item.sessionId === event.sessionId &&") &&
+    !sourceIncludes(appSource, "[connectProvider, events, sendDraft]") &&
     providerStreamSource.includes('kind: "provider-stream"') &&
     providerStreamSource.includes('kind: "provider-activity"') &&
     providerStreamSource.includes("applyProviderChatStreamActivity") &&
     providerStreamSource.includes("receivedTerminalEvent") &&
     providerStreamSource.includes('event.phase === "started"') &&
-    appSource.includes('streamEvent.phase === "cancelled"') &&
+    sourceIncludes(appSource, 'streamEvent.phase === "cancelled"') &&
     providerStreamSource.includes("hasSameTurnAssistant") &&
-    appSource.includes("suggestTitle: shouldSuggestTitle") &&
-    appSource.includes('kind: "provider-status"') &&
-    surfaceSource.includes("function ChatTurn") &&
+    sourceIncludes(appSource, "suggestTitle: shouldSuggestTitle") &&
+    sourceIncludes(appSource, 'kind: "provider-status"') &&
+    sourceIncludes(surfaceSource, "function ChatTurn") &&
     runViewSource.includes("function RunHeader") &&
     runViewSource.includes("function RunRow") &&
-    surfaceSource.includes("timelineEvents: SessionEvent[]") &&
-    surfaceSource.includes("turn.timelineEvents.push(event)") &&
+    sourceIncludes(surfaceSource, "timelineEvents: SessionEvent[]") &&
+    sourceIncludes(surfaceSource, "turn.timelineEvents.push(event)") &&
     runViewSource.includes('className="gyro-run-rail"') &&
-    surfaceSource.includes(
+    sourceIncludes(
+      surfaceSource,
       'className="gyro-chat-run-timeline is-final-response"',
     ) &&
     runViewSource.includes('aria-label="Work timeline"') &&
     runViewSource.includes("function RunWorkGroup") &&
     runViewSource.includes('"Show details"') &&
-    surfaceSource.includes("buildRunModel(") &&
-    surfaceSource.includes(
+    sourceIncludes(surfaceSource, "buildRunModel(") &&
+    sourceIncludes(
+      surfaceSource,
       'isRunning ? "Assistant update" : "Final response"',
     ) &&
     runSource.includes("`Working for ${elapsedLabel}`") &&
     runSource.includes("`Worked for ${elapsedLabel}`") &&
     runSource.includes("export function formatRunDuration") &&
-    surfaceSource.includes("formatMessageTime(event.createdAt)") &&
-    surfaceSource.includes('aria-label="Copy message"') &&
+    sourceIncludes(surfaceSource, "formatMessageTime(event.createdAt)") &&
+    sourceIncludes(surfaceSource, 'aria-label="Copy message"') &&
     runSource.includes("`${hours}h`") &&
     runSource.includes("`${minutes}m`") &&
     runSource.includes("`${seconds}s`") &&
-    surfaceSource.includes("buildRunModel(") &&
-    !surfaceSource.includes("providerActivityPathsMatch") &&
+    sourceIncludes(surfaceSource, "buildRunModel(") &&
+    !sourceIncludes(surfaceSource, "providerActivityPathsMatch") &&
     runSource.includes('case "file":') &&
     runSource.includes('"Ran command"') &&
     runSource.includes('case "context":') &&
@@ -4560,61 +4622,73 @@ expect(
     styleSource.includes(
       ".gyro-message.is-user:hover .gyro-user-message-meta",
     ) &&
-    !surfaceSource.includes("assistantEvents: SessionEvent[]") &&
-    !surfaceSource.includes("activityEvents: SessionEvent[]") &&
-    surfaceSource.includes("const isStopAction = Boolean(") &&
-    surfaceSource.includes("isStopAction ? (") &&
-    surfaceSource.includes('"Stop response"') &&
-    surfaceSource.includes('"Queue message"') &&
-    surfaceSource.includes("onStop?.();") &&
+    !sourceIncludes(surfaceSource, "assistantEvents: SessionEvent[]") &&
+    !sourceIncludes(surfaceSource, "activityEvents: SessionEvent[]") &&
+    sourceIncludes(surfaceSource, "const isStopAction = Boolean(") &&
+    sourceIncludes(surfaceSource, "isStopAction ? (") &&
+    sourceIncludes(surfaceSource, '"Stop response"') &&
+    sourceIncludes(surfaceSource, '"Queue message"') &&
+    sourceIncludes(surfaceSource, "onStop?.();") &&
     // Stop must be armed by a press on the control so empty-margin focus
     // re-layout cannot convert a foreign click into a stop.
-    surfaceSource.includes("stopArmedRef") &&
-    surfaceSource.includes("stopArmedRef.current = true") &&
-    surfaceSource.includes("event.detail === 0") &&
-    surfaceSource.includes(
+    sourceIncludes(surfaceSource, "stopArmedRef") &&
+    sourceIncludes(surfaceSource, "stopArmedRef.current = true") &&
+    sourceIncludes(surfaceSource, "event.detail === 0") &&
+    sourceIncludes(
+      surfaceSource,
       "!isStopAction && (!canSubmitComposer || draft.trim().length === 0)",
     ) &&
-    surfaceSource.includes('"gyro-send-button"') &&
-    surfaceSource.includes('isStopAction ? "is-stop"') &&
-    surfaceSource.includes('isSending ? "is-sending"') &&
+    sourceIncludes(surfaceSource, '"gyro-send-button"') &&
+    sourceIncludes(surfaceSource, 'isStopAction ? "is-stop"') &&
+    sourceIncludes(surfaceSource, 'isSending ? "is-sending"') &&
     styleSource.includes(".gyro-send-button.is-stop") &&
     styleSource.includes(".gyro-run.is-live") &&
     styleSource.includes(".gyro-run-problem.is-cancelled") &&
-    !surfaceSource.includes('className="gyro-composer-stop-button"') &&
+    !sourceIncludes(surfaceSource, 'className="gyro-composer-stop-button"') &&
     // Pane focus no longer re-renders mid-gesture when already focused.
     workbenchSource.includes("current.focusedPaneId !== action.paneId &&") &&
-    appSource.includes(
+    sourceIncludes(
+      appSource,
       'alreadyFocused && (pane.kind === "draft" || alreadyActiveSession)',
     ) &&
-    appSource.includes("sendingSessionIdsRef.current.has(turn.sessionId)") &&
+    sourceIncludes(
+      appSource,
+      "sendingSessionIdsRef.current.has(turn.sessionId)",
+    ) &&
     // Composer/transcript gutters follow the pane, not the window width.
     styleSource.includes("padding: 10px clamp(24px, 8%, 120px) 16px") &&
     // The transcript's live gutter is the shared chat column in chat-design.css.
     chatDesignSource.includes("clamp(20px, 4%, 64px)") &&
     // Backend reliability: ACP wall clock is 24h; chat CLIs ignore stdout silence.
-    tauriSource.includes("PROVIDER_CHAT_MAX_RUNTIME_SECS") &&
-    tauriSource.includes(
+    sourceIncludes(tauriSource, "PROVIDER_CHAT_MAX_RUNTIME_SECS") &&
+    sourceIncludes(
+      tauriSource,
       "timeout: Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS)",
     ) &&
-    tauriSource.includes("execution.inactivity_timeout = None") &&
-    tauriSource.includes("heartbeat_stop") &&
-    tauriSource.includes("run_kimi_acp_chat") &&
-    tauriSource.includes("spawn_provider_chat_heartbeat") &&
-    surfaceSource.includes("function ChatMessageQueue") &&
-    surfaceSource.includes("gyro-chat-message-queue-wrap") &&
-    surfaceSource.includes('aria-label="Queued message options"') &&
-    surfaceSource.includes("gyro-chat-message-queue-menu") &&
-    surfaceSource.includes("<span>Edit</span>") &&
-    surfaceSource.includes("<span>Delete</span>") &&
-    appSource.includes("const editQueuedChatMessage") &&
-    appSource.includes("onEditQueuedMessage={editQueuedChatMessage}") &&
-    appSource.includes("const steerQueuedChatMessage") &&
-    appSource.includes("promoteQueuedMessage") &&
-    appSource.includes("steeringChatSessionsRef") &&
-    appSource.includes("stopChatSession(sessionId, { pauseQueue: false })") &&
-    appSource.includes("steeringChatSessionsRef.current.add(sessionId)") &&
-    !appSource.includes('"Steering next"') &&
+    sourceIncludes(tauriSource, "execution.inactivity_timeout = None") &&
+    sourceIncludes(tauriSource, "heartbeat_stop") &&
+    sourceIncludes(tauriSource, "run_kimi_acp_chat") &&
+    sourceIncludes(tauriSource, "spawn_provider_chat_heartbeat") &&
+    sourceIncludes(surfaceSource, "function ChatMessageQueue") &&
+    sourceIncludes(surfaceSource, "gyro-chat-message-queue-wrap") &&
+    sourceIncludes(surfaceSource, 'aria-label="Queued message options"') &&
+    sourceIncludes(surfaceSource, "gyro-chat-message-queue-menu") &&
+    sourceIncludes(surfaceSource, "<span>Edit</span>") &&
+    sourceIncludes(surfaceSource, "<span>Delete</span>") &&
+    sourceIncludes(appSource, "const editQueuedChatMessage") &&
+    sourceIncludes(appSource, "onEditQueuedMessage={editQueuedChatMessage}") &&
+    sourceIncludes(appSource, "const steerQueuedChatMessage") &&
+    sourceIncludes(appSource, "promoteQueuedMessage") &&
+    sourceIncludes(appSource, "steeringChatSessionsRef") &&
+    sourceIncludes(
+      appSource,
+      "stopChatSession(sessionId, { pauseQueue: false })",
+    ) &&
+    sourceIncludes(
+      appSource,
+      "steeringChatSessionsRef.current.add(sessionId)",
+    ) &&
+    !sourceIncludes(appSource, '"Steering next"') &&
     styleSource.includes(".gyro-chat-message-queue-menu") &&
     styleSource.includes(".gyro-chat-message-queue-wrap") &&
     cssRules(
@@ -4624,38 +4698,41 @@ expect(
     styleSource.includes(
       ".gyro-chat-message-queue:has(.gyro-chat-message-queue-menu)",
     ) &&
-    appSource.includes('"Message queued"') &&
-    appSource.includes("MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8") &&
-    appSource.includes("MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24") &&
-    appSource.includes("const totalQueued = Object.values(current).reduce") &&
+    sourceIncludes(appSource, '"Message queued"') &&
+    sourceIncludes(appSource, "MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8") &&
+    sourceIncludes(appSource, "MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24") &&
+    sourceIncludes(
+      appSource,
+      "const totalQueued = Object.values(current).reduce",
+    ) &&
     /queuedChatDispatchMessageIdsRef\.current\.set\([\s\S]*?setChatMessageQueues\([\s\S]*?item\.id !== nextMessage\.id[\s\S]*?void sendDraft\(nextMessage\.message/.test(
       appSource,
     ) &&
-    appSource.includes(".then((accepted) =>") &&
-    appSource.includes("if (!accepted)") &&
-    appSource.includes("queuedChatDispatchMessageIdsRef") &&
-    appSource.includes("persistedChatTurnIdsRef") &&
-    appSource.includes("didDeliverProviderResponse") &&
-    appSource.includes("deliveryAttempts < 2") &&
-    appSource.includes('status: shouldRetry ? "waiting" : "failed"') &&
-    appSource.includes("Date.now() + 1_500") &&
-    appSource.includes("Queued delivery failed") &&
-    surfaceSource.includes('message.hasFailed ? "Retry" : "Steer"') &&
+    sourceIncludes(appSource, ".then((accepted) =>") &&
+    sourceIncludes(appSource, "if (!accepted)") &&
+    sourceIncludes(appSource, "queuedChatDispatchMessageIdsRef") &&
+    sourceIncludes(appSource, "persistedChatTurnIdsRef") &&
+    sourceIncludes(appSource, "didDeliverProviderResponse") &&
+    sourceIncludes(appSource, "deliveryAttempts < 2") &&
+    sourceIncludes(appSource, 'status: shouldRetry ? "waiting" : "failed"') &&
+    sourceIncludes(appSource, "Date.now() + 1_500") &&
+    sourceIncludes(appSource, "Queued delivery failed") &&
+    sourceIncludes(surfaceSource, 'message.hasFailed ? "Retry" : "Steer"') &&
     styleSource.includes(".gyro-chat-message-queue article.is-failed") &&
-    appSource.includes("sessionModel: { ...sessionModel }") &&
-    surfaceSource.includes("message.isDispatching") &&
-    surfaceSource.includes("disabled={message.isDispatching}") &&
-    !surfaceSource.includes("isRunning && onStopChat") &&
+    sourceIncludes(appSource, "sessionModel: { ...sessionModel }") &&
+    sourceIncludes(surfaceSource, "message.isDispatching") &&
+    sourceIncludes(surfaceSource, "disabled={message.isDispatching}") &&
+    !sourceIncludes(surfaceSource, "isRunning && onStopChat") &&
     runSource.includes('case "commentary":') &&
     runViewSource.includes("gyro-run-row-label") &&
     runSource.includes("stripUpdatedPrefix") &&
-    surfaceSource.includes("totalFileChangeCounts(files)") &&
+    sourceIncludes(surfaceSource, "totalFileChangeCounts(files)") &&
     runSource.includes("mergeFileChange") &&
     runSource.includes("files: FileChange[]") &&
-    !surfaceSource.includes("fileStats: (path)") &&
-    !surfaceSource.includes("sourceControlFileDelta") &&
-    surfaceSource.includes("FileChangeCountBadges counts={totals}") &&
-    surfaceSource.includes("turnSourceControlBaselines?.[turn.id]") &&
+    !sourceIncludes(surfaceSource, "fileStats: (path)") &&
+    !sourceIncludes(surfaceSource, "sourceControlFileDelta") &&
+    sourceIncludes(surfaceSource, "FileChangeCountBadges counts={totals}") &&
+    sourceIncludes(surfaceSource, "turnSourceControlBaselines?.[turn.id]") &&
     runViewSource.includes("gyro-run-row-stat") &&
     runSource.includes("mergeFileChange(files, item)") &&
     runSource.includes('item.kind === "file"') &&
@@ -4668,51 +4745,63 @@ expect(
     ) &&
     runViewSource.includes('status === "running" ? "is-running" : ""') &&
     runViewSource.includes("WORK_ICON[item.kind]") &&
-    !surfaceSource.includes("Hide changed files") &&
-    !surfaceSource.includes("Show changed files") &&
-    surfaceSource.includes("files.slice(0, 6)") &&
-    appSource.includes("refreshedFileActivityKeysRef") &&
-    appSource.includes("setTurnSourceControlBaselines") &&
-    appSource.includes("sourceControlLineStats(scopedIde.sourceControl)") &&
-    appSource.includes(
+    !sourceIncludes(surfaceSource, "Hide changed files") &&
+    !sourceIncludes(surfaceSource, "Show changed files") &&
+    sourceIncludes(surfaceSource, "files.slice(0, 6)") &&
+    sourceIncludes(appSource, "refreshedFileActivityKeysRef") &&
+    sourceIncludes(appSource, "setTurnSourceControlBaselines") &&
+    sourceIncludes(
+      appSource,
+      "sourceControlLineStats(scopedIde.sourceControl)",
+    ) &&
+    sourceIncludes(
+      appSource,
       "useScopedIdeState(workbench.ide, workspaceActionRoot)",
     ) &&
-    appSource.includes('payload.activityKind !== "file"') &&
-    appSource.includes("refreshIdeSourceControl(root)") &&
-    appSource.includes("refreshedFileActivityKeysRef.current.clear()") &&
-    surfaceSource.includes("deriveTranscriptState") &&
-    surfaceSource.includes("useDeferredValue") &&
-    surfaceSource.includes("const deferredEvents = useDeferredValue(events)") &&
-    surfaceSource.includes(
+    sourceIncludes(appSource, 'payload.activityKind !== "file"') &&
+    sourceIncludes(appSource, "refreshIdeSourceControl(root)") &&
+    sourceIncludes(appSource, "refreshedFileActivityKeysRef.current.clear()") &&
+    sourceIncludes(surfaceSource, "deriveTranscriptState") &&
+    sourceIncludes(surfaceSource, "useDeferredValue") &&
+    sourceIncludes(
+      surfaceSource,
+      "const deferredEvents = useDeferredValue(events)",
+    ) &&
+    sourceIncludes(
+      surfaceSource,
       "const transcriptEvents = isComposerSending ? events : deferredEvents",
     ) &&
-    surfaceSource.includes(
+    sourceIncludes(
+      surfaceSource,
       "activeTranscriptTurnId(turns) ?? turns.at(-1)?.id",
     ) &&
-    surfaceSource.includes("const transcriptContent = useMemo") &&
-    surfaceSource.includes(
+    sourceIncludes(surfaceSource, "const transcriptContent = useMemo") &&
+    sourceIncludes(
+      surfaceSource,
       "const [localDraft, setLocalDraft] = useState(draft)",
     ) &&
-    surfaceSource.includes("onSend(localDraft)") &&
-    surfaceSource.includes("const ChatEvent = memo") &&
-    surfaceSource.includes("const transcriptState = useMemo") &&
-    surfaceSource.includes("const turns: ChatTranscriptTurn[] = []") &&
-    surfaceSource.includes("const turnsById = new Map") &&
-    surfaceSource.includes("isStreamingAssistantEvent") &&
-    surfaceSource.includes("ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS") &&
-    surfaceSource.includes(
+    sourceIncludes(surfaceSource, "onSend(localDraft)") &&
+    sourceIncludes(surfaceSource, "const ChatEvent = memo") &&
+    sourceIncludes(surfaceSource, "const transcriptState = useMemo") &&
+    sourceIncludes(surfaceSource, "const turns: ChatTranscriptTurn[] = []") &&
+    sourceIncludes(surfaceSource, "const turnsById = new Map") &&
+    sourceIncludes(surfaceSource, "isStreamingAssistantEvent") &&
+    sourceIncludes(surfaceSource, "ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS") &&
+    sourceIncludes(
+      surfaceSource,
       '{ kind: "ordered-list"; items: string[]; start: number }',
     ) &&
     runViewSource.includes("renderSay(step.text)") &&
-    surfaceSource.includes("stripHiddenSessionTitleMarker") &&
-    surfaceSource.includes("isHiddenSessionTitleActivity") &&
-    surfaceSource.includes("const shouldUsePlainText") &&
-    surfaceSource.includes(
+    sourceIncludes(surfaceSource, "stripHiddenSessionTitleMarker") &&
+    sourceIncludes(surfaceSource, "isHiddenSessionTitleActivity") &&
+    sourceIncludes(surfaceSource, "const shouldUsePlainText") &&
+    sourceIncludes(
+      surfaceSource,
       "visibleMessage.length > ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS",
     ) &&
-    surfaceSource.includes("gyro-response-streaming-text") &&
+    sourceIncludes(surfaceSource, "gyro-response-streaming-text") &&
     styleSource.includes(".gyro-response-streaming-text") &&
-    runViewSource.includes('<RunPulse label="Thinking"') &&
+    sourceIncludes(runViewSource, '<RunPulse label="Thinking"') &&
     runSource.includes("steps.length === 0") &&
     styleSource.includes(".gyro-run-header") &&
     // Completed chats lead with the final answer; the work stays expandable.
@@ -4727,63 +4816,67 @@ expect(
     runViewSource.includes(
       "const showSteps = isLive || needsApproval || !isCollapsed",
     ) &&
-    surfaceSource.includes("responseEvent") &&
-    surfaceSource.includes("canContinue") &&
+    sourceIncludes(surfaceSource, "responseEvent") &&
+    sourceIncludes(surfaceSource, "canContinue") &&
     styleSource.includes(".gyro-run-row") &&
     styleSource.includes(".gyro-run-row-stat .is-added") &&
     styleSource.includes(".gyro-run-row-item") &&
     styleSource.includes(".gyro-run-rail") &&
     styleSource.includes("@keyframes gyro-chat-composer-dock-enter") &&
     styleSource.includes("@keyframes gyro-chat-final-response-enter") &&
-    surfaceSource.includes("isHiddenTranscriptEvent") &&
-    surfaceSource.includes('payload?.surface === "desktop-ide"') &&
-    surfaceSource.includes('"provider-diagnostics"') &&
+    sourceIncludes(surfaceSource, "isHiddenTranscriptEvent") &&
+    sourceIncludes(surfaceSource, 'payload?.surface === "desktop-ide"') &&
+    sourceIncludes(surfaceSource, '"provider-diagnostics"') &&
     styleSource.includes(".gyro-response-actions .gyro-message-token-count") &&
     !styleSource.includes(
       ".gyro-chat-transcript .gyro-message.is-assistant:hover .gyro-response-actions",
     ) &&
     typeSource.includes("ProviderChatStreamEvent") &&
     typeSource.includes("ProviderResumeCursor") &&
-    tauriSource.includes("SessionEventKind::AssistantMessage") &&
-    tauriSource.includes("ProviderResumeCursor") &&
-    tauriSource.includes("ProviderChatStreamEvent") &&
-    tauriSource.includes("extract_provider_activity") &&
-    tauriSource.includes("extract_provider_commentary_activity") &&
-    tauriSource.includes("provider_activities_for_response") &&
-    tauriSource.includes("strip_hidden_control_markers(&text)") &&
-    tauriSource.includes("SESSION_TITLE_LATER_TURN_INSTRUCTION") &&
-    tauriSource.includes("polished, scannable Markdown") &&
-    tauriSource.includes("provider_activity_event_entry") &&
-    tauriSource.includes("append_system_events_with_turn_id") &&
-    tauriSource.includes('phase: "activity".into()') &&
-    tauriSource.includes("run_provider_chat_with_retry") &&
-    tauriSource.includes("run_provider_chat_once") &&
-    tauriSource.includes("TEXT_TRUNCATION_SUFFIX") &&
-    tauriSource.includes("value.char_indices().nth(max_chars)") &&
-    tauriSource.includes("assistant_text_truncated") &&
-    tauriSource.includes("streaming_state_stops_emitting_after_response_cap") &&
-    tauriSource.includes("run_anthropic_claude_chat") &&
-    tauriSource.includes("codex_chat_args") &&
-    tauriSource.includes("claude_chat_args") &&
-    tauriSource.includes("extract_provider_session_id") &&
+    sourceIncludes(tauriSource, "SessionEventKind::AssistantMessage") &&
+    sourceIncludes(tauriSource, "ProviderResumeCursor") &&
+    sourceIncludes(tauriSource, "ProviderChatStreamEvent") &&
+    sourceIncludes(tauriSource, "extract_provider_activity") &&
+    sourceIncludes(tauriSource, "extract_provider_commentary_activity") &&
+    sourceIncludes(tauriSource, "provider_activities_for_response") &&
+    sourceIncludes(tauriSource, "strip_hidden_control_markers(&text)") &&
+    sourceIncludes(tauriSource, "SESSION_TITLE_LATER_TURN_INSTRUCTION") &&
+    sourceIncludes(tauriSource, "polished, scannable Markdown") &&
+    sourceIncludes(tauriSource, "provider_activity_event_entry") &&
+    sourceIncludes(tauriSource, "append_system_events_with_turn_id") &&
+    sourceIncludes(tauriSource, 'phase: "activity".into()') &&
+    sourceIncludes(tauriSource, "run_provider_chat_with_retry") &&
+    sourceIncludes(tauriSource, "run_provider_chat_once") &&
+    sourceIncludes(tauriSource, "TEXT_TRUNCATION_SUFFIX") &&
+    sourceIncludes(tauriSource, "value.char_indices().nth(max_chars)") &&
+    sourceIncludes(tauriSource, "assistant_text_truncated") &&
+    sourceIncludes(
+      tauriSource,
+      "streaming_state_stops_emitting_after_response_cap",
+    ) &&
+    sourceIncludes(tauriSource, "run_anthropic_claude_chat") &&
+    sourceIncludes(tauriSource, "codex_chat_args") &&
+    sourceIncludes(tauriSource, "claude_chat_args") &&
+    sourceIncludes(tauriSource, "extract_provider_session_id") &&
     coreProviderStreamSource.includes("pub enum ProviderTextChunk") &&
-    tauriSource.includes("ProviderTextChunk::Snapshot") &&
-    tauriSource.includes("push_assistant_snapshot") &&
+    sourceIncludes(tauriSource, "ProviderTextChunk::Snapshot") &&
+    sourceIncludes(tauriSource, "push_assistant_snapshot") &&
     coreProviderStreamSource.includes("extract_provider_text_value") &&
     coreProviderStreamSource.includes('Some("reasoning" | "reasoning_text")') &&
-    tauriSource.includes("extract_provider_text_delta") &&
-    tauriSource.includes("PROVIDER_CHAT_EVENT") &&
-    tauriSource.includes("clear_provider_session_binding") &&
-    tauriSource.includes("upsert_provider_session_binding") &&
-    tauriSource.includes("validate_chat_message") &&
-    tauriSource.includes("async fn run_provider_chat") &&
+    sourceIncludes(tauriSource, "extract_provider_text_delta") &&
+    sourceIncludes(tauriSource, "PROVIDER_CHAT_EVENT") &&
+    sourceIncludes(tauriSource, "clear_provider_session_binding") &&
+    sourceIncludes(tauriSource, "upsert_provider_session_binding") &&
+    sourceIncludes(tauriSource, "validate_chat_message") &&
+    sourceIncludes(tauriSource, "async fn run_provider_chat") &&
     // Interactive sends must be tagged as chat for the usage ledger, so an
     // automation can never be counted against the person at the keyboard.
     (/spawn_blocking\(move \|\|\s*\{?\s*(?:turn_timing::run_timed_provider_chat|run_provider_chat_blocking)\((?:app|worker_app),\s*request,\s*UsageOrigin::Chat\)/.test(
       tauriSource,
     ) ||
-      (tauriSource.includes(
-        "goal_runner::run(worker_app, request, expected_run)",
+      (sourceIncludes(
+        tauriSource,
+        "goal_runner::run(app, request, expected_run)",
       ) &&
         /run_timed_provider_chat_in_lease\(\s*app\.clone\(\),\s*request\.clone\(\),\s*UsageOrigin::Chat,\s*Some\(&lease\)/.test(
           readRepoFile("apps/desktop/src-tauri/src/goal_runner.rs"),
@@ -4791,125 +4884,131 @@ expect(
     /run_provider_chat_blocking(?:_in_lease)?\(app, request, origin(?:, lease)?\)/.test(
       turnTimingRustSource,
     ) &&
-    tauriSource.includes("async fn save_config") &&
-    tauriSource.includes("config save worker failed") &&
-    tauriSource.includes("async fn create_desktop_session") &&
-    tauriSource.includes("create_desktop_session_blocking") &&
-    tauriSource.includes("desktop session worker failed") &&
-    tauriSource.includes("async fn create_worktree_session") &&
-    tauriSource.includes("create_worktree_session_blocking") &&
-    tauriSource.includes("worktree session worker failed") &&
-    tauriSource.includes("async fn append_user_message") &&
-    tauriSource.includes("append_user_message_blocking") &&
-    tauriSource.includes("user message worker failed") &&
-    tauriSource.includes("async fn set_session_model") &&
-    tauriSource.includes("session model worker failed") &&
-    tauriSource.includes("async fn rename_session") &&
-    tauriSource.includes("session rename worker failed") &&
-    tauriSource.includes("extract_session_title_marker") &&
-    tauriSource.includes("GYRO_SESSION_TITLE:") &&
-    tauriSource.includes("run_streaming_command") &&
-    tauriSource.includes("PROVIDER_STREAM_FLUSH_INTERVAL") &&
-    tauriSource.includes("StreamingCommandState") &&
+    sourceIncludes(tauriSource, "async fn save_config") &&
+    sourceIncludes(tauriSource, "config save worker failed") &&
+    sourceIncludes(tauriSource, "async fn create_desktop_session") &&
+    sourceIncludes(tauriSource, "create_desktop_session_blocking") &&
+    sourceIncludes(tauriSource, "desktop session worker failed") &&
+    sourceIncludes(tauriSource, "async fn create_worktree_session") &&
+    sourceIncludes(tauriSource, "create_worktree_session_blocking") &&
+    sourceIncludes(tauriSource, "worktree session worker failed") &&
+    sourceIncludes(tauriSource, "async fn append_user_message") &&
+    sourceIncludes(tauriSource, "append_user_message_blocking") &&
+    sourceIncludes(tauriSource, "user message worker failed") &&
+    sourceIncludes(tauriSource, "async fn set_session_model") &&
+    sourceIncludes(tauriSource, "session model worker failed") &&
+    sourceIncludes(tauriSource, "async fn rename_session") &&
+    sourceIncludes(tauriSource, "session rename worker failed") &&
+    sourceIncludes(tauriSource, "extract_session_title_marker") &&
+    sourceIncludes(tauriSource, "GYRO_SESSION_TITLE:") &&
+    sourceIncludes(tauriSource, "run_streaming_command") &&
+    sourceIncludes(tauriSource, "PROVIDER_STREAM_FLUSH_INTERVAL") &&
+    sourceIncludes(tauriSource, "StreamingCommandState") &&
     coreExecutionSource.includes(".stdin(match request.stdin_file.as_ref()") &&
     coreExecutionSource.includes("None => Stdio::null()") &&
     coreExecutionSource.includes("finite_stdin_delivers_large_input_and_eof") &&
-    tauriSource.includes("sanitize_provider_text_delta") &&
-    tauriSource.includes("extract_codex_agent_message_text") &&
-    tauriSource.includes('"item.completed"') &&
-    tauriSource.includes("PROVIDER_CHAT_MAX_RUNTIME_SECS") &&
-    tauriSource.includes("PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS") &&
+    sourceIncludes(tauriSource, "sanitize_provider_text_delta") &&
+    sourceIncludes(tauriSource, "extract_codex_agent_message_text") &&
+    sourceIncludes(tauriSource, '"item.completed"') &&
+    sourceIncludes(tauriSource, "PROVIDER_CHAT_MAX_RUNTIME_SECS") &&
+    sourceIncludes(tauriSource, "PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS") &&
     // Chat provider CLIs do not kill quiet tools for stdout silence.
-    tauriSource.includes("execution.inactivity_timeout = None") &&
-    tauriSource.includes("ExecutionTermination::Inactive") &&
-    tauriSource.includes("ProviderRunPayload::new") &&
-    tauriSource.includes("Some(chat_message_preview(&request.message))") &&
-    tauriSource.includes("async fn list_sessions") &&
-    tauriSource.includes("list_sessions_blocking") &&
-    tauriSource.includes("session list worker failed") &&
-    tauriSource.includes("async fn delete_session") &&
-    tauriSource.includes("delete_session_blocking") &&
-    tauriSource.includes("session delete worker failed") &&
-    tauriSource.includes("async fn append_plan_event") &&
-    tauriSource.includes("append_plan_event_blocking") &&
-    tauriSource.includes("plan event worker failed") &&
-    tauriSource.includes("async fn append_editor_event") &&
-    tauriSource.includes("append_editor_event_blocking") &&
-    tauriSource.includes("editor event worker failed") &&
-    tauriSource.includes("async fn list_workspace_files") &&
-    tauriSource.includes("async fn list_workspace_tree") &&
-    tauriSource.includes("list_workspace_tree_blocking") &&
-    tauriSource.includes("workspace tree worker failed") &&
-    tauriSource.includes("async fn read_workspace_file") &&
-    tauriSource.includes("workspace file read worker failed") &&
-    tauriSource.includes("async fn read_workspace_file_full") &&
-    tauriSource.includes("full workspace file read worker failed") &&
-    tauriSource.includes("async fn stat_workspace_file") &&
-    tauriSource.includes("workspace file stat worker failed") &&
-    tauriSource.includes("async fn write_workspace_file") &&
-    tauriSource.includes("workspace file write worker failed") &&
-    tauriSource.includes("async fn watch_workspace") &&
-    tauriSource.includes("workspace watch worker failed") &&
-    tauriSource.includes("async fn create_workspace_file") &&
-    tauriSource.includes("workspace file create worker failed") &&
-    tauriSource.includes("async fn rename_workspace_path") &&
-    tauriSource.includes("workspace path rename worker failed") &&
-    tauriSource.includes("async fn delete_workspace_path") &&
-    tauriSource.includes("workspace path delete worker failed") &&
-    tauriSource.includes("async fn search_workspace") &&
-    tauriSource.includes("workspace search worker failed") &&
-    tauriSource.includes("async fn git_status") &&
-    tauriSource.includes("git status worker failed") &&
-    tauriSource.includes("async fn git_diff") &&
-    tauriSource.includes("git_diff_blocking") &&
-    tauriSource.includes("git diff worker failed") &&
-    tauriSource.includes("async fn git_stage") &&
-    tauriSource.includes("git_stage_blocking") &&
-    tauriSource.includes("git stage worker failed") &&
-    tauriSource.includes("async fn git_unstage") &&
-    tauriSource.includes("git_unstage_blocking") &&
-    tauriSource.includes("git unstage worker failed") &&
-    tauriSource.includes("async fn git_discard") &&
-    tauriSource.includes("git_discard_blocking") &&
-    tauriSource.includes("git discard worker failed") &&
-    tauriSource.includes("async fn git_commit") &&
-    tauriSource.includes("git_commit_blocking") &&
-    tauriSource.includes("git commit worker failed") &&
+    sourceIncludes(tauriSource, "execution.inactivity_timeout = None") &&
+    sourceIncludes(tauriSource, "ExecutionTermination::Inactive") &&
+    sourceIncludes(tauriSource, "ProviderRunPayload::new") &&
+    sourceIncludes(
+      tauriSource,
+      "Some(chat_message_preview(&request.message))",
+    ) &&
+    sourceIncludes(tauriSource, "async fn list_sessions") &&
+    sourceIncludes(tauriSource, "list_sessions_blocking") &&
+    sourceIncludes(tauriSource, "session list worker failed") &&
+    sourceIncludes(tauriSource, "async fn delete_session") &&
+    sourceIncludes(tauriSource, "delete_session_blocking") &&
+    sourceIncludes(tauriSource, "session delete worker failed") &&
+    sourceIncludes(tauriSource, "async fn append_plan_event") &&
+    sourceIncludes(tauriSource, "append_plan_event_blocking") &&
+    sourceIncludes(tauriSource, "plan event worker failed") &&
+    sourceIncludes(tauriSource, "async fn append_editor_event") &&
+    sourceIncludes(tauriSource, "append_editor_event_blocking") &&
+    sourceIncludes(tauriSource, "editor event worker failed") &&
+    sourceIncludes(tauriSource, "async fn list_workspace_files") &&
+    sourceIncludes(tauriSource, "async fn list_workspace_tree") &&
+    sourceIncludes(tauriSource, "list_workspace_tree_blocking") &&
+    sourceIncludes(tauriSource, "workspace tree worker failed") &&
+    sourceIncludes(tauriSource, "async fn read_workspace_file") &&
+    sourceIncludes(tauriSource, "workspace file read worker failed") &&
+    sourceIncludes(tauriSource, "async fn read_workspace_file_full") &&
+    sourceIncludes(tauriSource, "full workspace file read worker failed") &&
+    sourceIncludes(tauriSource, "async fn stat_workspace_file") &&
+    sourceIncludes(tauriSource, "workspace file stat worker failed") &&
+    sourceIncludes(tauriSource, "async fn write_workspace_file") &&
+    sourceIncludes(tauriSource, "workspace file write worker failed") &&
+    sourceIncludes(tauriSource, "async fn watch_workspace") &&
+    sourceIncludes(tauriSource, "workspace watch worker failed") &&
+    sourceIncludes(tauriSource, "async fn create_workspace_file") &&
+    sourceIncludes(tauriSource, "workspace file create worker failed") &&
+    sourceIncludes(tauriSource, "async fn rename_workspace_path") &&
+    sourceIncludes(tauriSource, "workspace path rename worker failed") &&
+    sourceIncludes(tauriSource, "async fn delete_workspace_path") &&
+    sourceIncludes(tauriSource, "workspace path delete worker failed") &&
+    sourceIncludes(tauriSource, "async fn search_workspace") &&
+    sourceIncludes(tauriSource, "workspace search worker failed") &&
+    sourceIncludes(tauriSource, "async fn git_status") &&
+    sourceIncludes(tauriSource, "git status worker failed") &&
+    sourceIncludes(tauriSource, "async fn git_diff") &&
+    sourceIncludes(tauriSource, "git_diff_blocking") &&
+    sourceIncludes(tauriSource, "git diff worker failed") &&
+    sourceIncludes(tauriSource, "async fn git_stage") &&
+    sourceIncludes(tauriSource, "git_stage_blocking") &&
+    sourceIncludes(tauriSource, "git stage worker failed") &&
+    sourceIncludes(tauriSource, "async fn git_unstage") &&
+    sourceIncludes(tauriSource, "git_unstage_blocking") &&
+    sourceIncludes(tauriSource, "git unstage worker failed") &&
+    sourceIncludes(tauriSource, "async fn git_discard") &&
+    sourceIncludes(tauriSource, "git_discard_blocking") &&
+    sourceIncludes(tauriSource, "git discard worker failed") &&
+    sourceIncludes(tauriSource, "async fn git_commit") &&
+    sourceIncludes(tauriSource, "git_commit_blocking") &&
+    sourceIncludes(tauriSource, "git commit worker failed") &&
     languageServerRustSource.includes("async fn lsp_start") &&
     languageServerRustSource.includes("struct LanguageServerManager") &&
     languageServerRustSource.includes("receive_lsp_response") &&
     languageServerRustSource.includes("write_lsp_message") &&
-    tauriSource.includes("async fn task_discover") &&
-    tauriSource.includes("task discover worker failed") &&
-    tauriSource.includes("async fn task_run") &&
-    tauriSource.includes("task_run_blocking") &&
-    tauriSource.includes("task run worker failed") &&
-    tauriSource.includes("async fn test_discover") &&
-    tauriSource.includes("test discover worker failed") &&
-    tauriSource.includes("async fn test_run") &&
-    tauriSource.includes("test_run_blocking") &&
-    tauriSource.includes("test run worker failed") &&
-    tauriSource.includes("async fn debug_start") &&
-    tauriSource.includes("struct DebugAdapterManager") &&
-    tauriSource.includes("impl DebugAdapterManager") &&
-    tauriSource.includes("fn start(&self, request: DebugStartRequest)") &&
-    tauriSource.includes("manager.start(request).map_err(to_string)") &&
-    tauriSource.includes("receive_dap_response") &&
-    tauriSource.includes("handle_dap_adapter_request") &&
-    tauriSource.includes("redact_json_strings") &&
-    tauriSource.includes("async fn check_provider_health") &&
-    tauriSource.includes("check_provider_health_blocking") &&
-    tauriSource.includes("provider health worker failed") &&
-    tauriSource.includes("async fn check_provider_auth") &&
-    tauriSource.includes("provider auth worker failed") &&
+    sourceIncludes(tauriSource, "async fn task_discover") &&
+    sourceIncludes(tauriSource, "task discover worker failed") &&
+    sourceIncludes(tauriSource, "async fn task_run") &&
+    sourceIncludes(tauriSource, "task_run_blocking") &&
+    sourceIncludes(tauriSource, "task run worker failed") &&
+    sourceIncludes(tauriSource, "async fn test_discover") &&
+    sourceIncludes(tauriSource, "test discover worker failed") &&
+    sourceIncludes(tauriSource, "async fn test_run") &&
+    sourceIncludes(tauriSource, "test_run_blocking") &&
+    sourceIncludes(tauriSource, "test run worker failed") &&
+    sourceIncludes(tauriSource, "async fn debug_start") &&
+    sourceIncludes(tauriSource, "struct DebugAdapterManager") &&
+    sourceIncludes(tauriSource, "impl DebugAdapterManager") &&
+    sourceIncludes(
+      tauriSource,
+      "fn start(&self, request: DebugStartRequest)",
+    ) &&
+    sourceIncludes(tauriSource, "manager.start(request).map_err(to_string)") &&
+    sourceIncludes(tauriSource, "receive_dap_response") &&
+    sourceIncludes(tauriSource, "handle_dap_adapter_request") &&
+    sourceIncludes(tauriSource, "redact_json_strings") &&
+    sourceIncludes(tauriSource, "async fn check_provider_health") &&
+    sourceIncludes(tauriSource, "check_provider_health_blocking") &&
+    sourceIncludes(tauriSource, "provider health worker failed") &&
+    sourceIncludes(tauriSource, "async fn check_provider_auth") &&
+    sourceIncludes(tauriSource, "provider auth worker failed") &&
     coreSessionsSource.includes("MAX_SESSION_EVENT_MESSAGE_CHARS") &&
     coreSessionsSource.includes("MAX_SESSION_EVENTS_READ") &&
     coreSessionsSource.includes("read_recent_events") &&
     coreSessionsSource.includes("read_recent_event_lines") &&
-    tauriSource.includes("MAX_DESKTOP_SESSION_EVENTS_READ") &&
-    tauriSource.includes("async fn read_session_events") &&
-    tauriSource.includes("read_session_events_blocking") &&
-    tauriSource.includes("session event read worker failed") &&
+    sourceIncludes(tauriSource, "MAX_DESKTOP_SESSION_EVENTS_READ") &&
+    sourceIncludes(tauriSource, "async fn read_session_events") &&
+    sourceIncludes(tauriSource, "read_session_events_blocking") &&
+    sourceIncludes(tauriSource, "session event read worker failed") &&
     coreSessionsSource.includes("ProviderSessionBinding") &&
     coreSessionsSource.includes("provider_session_bindings") &&
     coreSessionsSource.includes("get_provider_session_binding") &&
@@ -4926,13 +5025,13 @@ expect(
     !coreSessionsSource.includes(
       "update sessions set title = ?1, updated_at",
     ) &&
-    !tauriSource.includes('"userMessage": request.message.as_str()') &&
-    tauriSource.includes("codex") &&
-    tauriSource.includes("exec") &&
-    tauriSource.includes("claude") &&
-    tauriSource.includes("stream-json") &&
-    !appSource.includes("I can keep this local. Connect a provider") &&
-    !appSource.includes("shouldPreviewToolActivity"),
+    !sourceIncludes(tauriSource, '"userMessage": request.message.as_str()') &&
+    sourceIncludes(tauriSource, "codex") &&
+    sourceIncludes(tauriSource, "exec") &&
+    sourceIncludes(tauriSource, "claude") &&
+    sourceIncludes(tauriSource, "stream-json") &&
+    !sourceIncludes(appSource, "I can keep this local. Connect a provider") &&
+    !sourceIncludes(appSource, "shouldPreviewToolActivity"),
   "First send should create an optimistic thread, call the real provider runner, and persist assistant responses instead of fake previews.",
 );
 expect(
@@ -5363,7 +5462,9 @@ expect(
       // Every copy of the native traffic-light geometry must agree: the Rust
       // constant the app applies, the packaged config, and the CSS tokens the
       // title bar and its screenshot fixture read.
-      const rustChrome = readRepoFile("apps/desktop/src-tauri/src/window_controls.rs");
+      const rustChrome = readRepoFile(
+        "apps/desktop/src-tauri/src/window_controls.rs",
+      );
       const rustNumber = (name) => {
         const declaration = rustChrome
           .split("\n")
@@ -5382,9 +5483,11 @@ expect(
         conf.y === nativeY &&
         tokensCss.includes(`--gyro-traffic-light-inset-x: ${nativeX}px`) &&
         tokensCss.includes(`--gyro-traffic-light-inset-y: ${nativeY}px`) &&
-        barCss.includes(
-          "calc(var(--gyro-traffic-light-inset-y) + (var(--gyro-traffic-light-size) / 2) - 14px)",
-        )
+        barCss
+          .replace(/\s+/g, "")
+          .includes(
+            "calc(var(--gyro-traffic-light-inset-y)+(var(--gyro-traffic-light-size)/2)-14px)",
+          )
       );
     })() &&
     desktopRustSource.includes("apply_macos_traffic_light_position") &&
@@ -5834,66 +5937,79 @@ expect(
   "Tools destination should route to a hub for automations and providers.",
 );
 expect(
-  surfaceSource.includes("function SettingsSidebarContent") &&
-    surfaceSource.includes("settingsSidebarItems") &&
-    surfaceSource.includes('aria-label="Settings navigation"') &&
-    surfaceSource.includes('aria-label="Search settings"') &&
-    surfaceSource.includes("settingsSearchEntries") &&
-    surfaceSource.includes("settingsSearchResults(settingsQuery)") &&
-    surfaceSource.includes('role="combobox"') &&
-    surfaceSource.includes('role="listbox"') &&
-    surfaceSource.includes("data-setting-key={settingsSearchKey(label)}") &&
-    !surfaceSource.includes('className="gyro-settings-topbar"') &&
-    surfaceSource.includes('className="gyro-sidebar-windowbar is-settings"') &&
-    surfaceSource.includes('aria-label="Clear settings search"') &&
-    surfaceSource.includes("gyro-settings-sidebar-search") &&
-    !surfaceSource.includes("query={settingsQuery}") &&
+  sourceIncludes(surfaceSource, "function SettingsSidebarContent") &&
+    sourceIncludes(surfaceSource, "settingsSidebarItems") &&
+    sourceIncludes(surfaceSource, 'aria-label="Settings navigation"') &&
+    sourceIncludes(surfaceSource, 'aria-label="Search settings"') &&
+    sourceIncludes(surfaceSource, "settingsSearchEntries") &&
+    sourceIncludes(surfaceSource, "settingsSearchResults(settingsQuery)") &&
+    sourceIncludes(surfaceSource, 'role="combobox"') &&
+    sourceIncludes(surfaceSource, 'role="listbox"') &&
+    sourceIncludes(
+      surfaceSource,
+      "data-setting-key={settingsSearchKey(label)}",
+    ) &&
+    !sourceIncludes(surfaceSource, 'className="gyro-settings-topbar"') &&
+    sourceIncludes(
+      surfaceSource,
+      'className="gyro-sidebar-windowbar is-settings"',
+    ) &&
+    sourceIncludes(surfaceSource, 'aria-label="Clear settings search"') &&
+    sourceIncludes(surfaceSource, "gyro-settings-sidebar-search") &&
+    !sourceIncludes(surfaceSource, "query={settingsQuery}") &&
     styleSource.includes(".gyro-settings-topbar-search:focus-within") &&
     styleSource.includes(".gyro-settings-search-results") &&
     styleSource.includes(".gyro-settings-row.is-search-target") &&
-    surfaceSource.includes('aria-label="Settings pages"') &&
+    sourceIncludes(surfaceSource, 'aria-label="Settings pages"') &&
     styleSource.includes(
       ".gyro-main:has(> .gyro-settings-topbar) > .gyro-settings-surface",
     ) &&
-    surfaceSource.includes("gyro-settings-sidebar-group") &&
-    surfaceSource.includes("aria-label={`Back to ${backLabel}`}") &&
-    surfaceSource.includes("gyro-settings-back-button") &&
-    surfaceSource.includes("<h2 id={headingId}>{label}</h2>") &&
-    surfaceSource.includes("aria-pressed={themeMode === mode}") &&
-    surfaceSource.includes('onOpenSettingsSection("general")') &&
-    surfaceSource.includes('activeDestination !== "settings"') &&
-    surfaceSource.includes("General") &&
-    surfaceSource.includes("Appearance") &&
-    surfaceSource.includes('label: "Workspace"') &&
-    surfaceSource.includes('label: "Tools"') &&
-    surfaceSource.includes('label: "Models, Accounts & Limits"') &&
-    !surfaceSource.includes('id: "usage-limits"') &&
-    surfaceSource.includes("CLI Profiles") &&
-    surfaceSource.includes("Permissions") &&
-    surfaceSource.includes("Updates") &&
-    surfaceSource.includes("Keyboard") &&
-    surfaceSource.includes("Advanced") &&
-    surfaceSource.includes("Help") &&
-    surfaceSource.includes('activeSection === "general"') &&
-    surfaceSource.includes('activeSection === "editor-workspace"') &&
-    surfaceSource.includes('activeSection === "tools-contributions"') &&
-    surfaceSource.includes('activeSection === "providers"') &&
-    surfaceSource.includes('label: "Efficiency"') &&
-    surfaceSource.includes('activeSection === "efficiency"') &&
-    surfaceSource.includes('title="Efficiency"') &&
-    !surfaceSource.includes("isAccountMenuOpen") &&
-    !surfaceSource.includes("gyro-account-menu") &&
-    !surfaceSource.includes('<nav className="gyro-settings-nav"') &&
+    sourceIncludes(surfaceSource, "gyro-settings-sidebar-group") &&
+    sourceIncludes(surfaceSource, "aria-label={`Back to ${backLabel}`}") &&
+    sourceIncludes(surfaceSource, "gyro-settings-back-button") &&
+    sourceIncludes(
+      readRepoFile("packages/ui/src/settings-disclosure.tsx"),
+      "<h2 ><button",
+    ) &&
+    sourceIncludes(
+      readRepoFile("packages/ui/src/settings-disclosure.tsx"),
+      "aria-expanded={open}",
+    ) &&
+    sourceIncludes(surfaceSource, "aria-pressed={themeMode === mode}") &&
+    sourceIncludes(surfaceSource, 'onOpenSettingsSection("general")') &&
+    sourceIncludes(surfaceSource, 'activeDestination !== "settings"') &&
+    sourceIncludes(surfaceSource, "General") &&
+    sourceIncludes(surfaceSource, "Appearance") &&
+    sourceIncludes(surfaceSource, 'label: "Workspace"') &&
+    sourceIncludes(surfaceSource, 'label: "Tools"') &&
+    sourceIncludes(surfaceSource, 'label: "Models & accounts"') &&
+    sourceIncludes(surfaceSource, 'id: "usage-limits"') &&
+    sourceIncludes(surfaceSource, "CLI Profiles") &&
+    sourceIncludes(surfaceSource, "Permissions") &&
+    sourceIncludes(surfaceSource, "Updates") &&
+    sourceIncludes(surfaceSource, "Keyboard") &&
+    sourceIncludes(surfaceSource, "Advanced") &&
+    sourceIncludes(surfaceSource, "Help") &&
+    sourceIncludes(surfaceSource, 'activeSection === "general"') &&
+    sourceIncludes(surfaceSource, 'activeSection === "editor-workspace"') &&
+    sourceIncludes(surfaceSource, 'activeSection === "tools-contributions"') &&
+    sourceIncludes(surfaceSource, 'activeSection === "providers"') &&
+    sourceIncludes(surfaceSource, 'label: "Chat & agents"') &&
+    sourceIncludes(surfaceSource, 'activeSection === "efficiency"') &&
+    sourceIncludes(surfaceSource, 'title="Chat & agents"') &&
+    !sourceIncludes(surfaceSource, "isAccountMenuOpen") &&
+    !sourceIncludes(surfaceSource, "gyro-account-menu") &&
+    !sourceIncludes(surfaceSource, '<nav className="gyro-settings-nav"') &&
     styleSource.includes("grid-template-columns: minmax(0, 1fr);") &&
     styleSource.includes(".gyro-settings-back-button") &&
     styleSource.includes(".gyro-settings-section > header h1") &&
-    appSource.includes("lastNonSettingsDestinationRef") &&
-    appSource.includes("returnFromSettings"),
+    sourceIncludes(appSource, "lastNonSettingsDestinationRef") &&
+    sourceIncludes(appSource, "returnFromSettings"),
   "Settings should keep grouped page navigation and sidebar search that targets individual settings.",
 );
 const settingsSidebarSource = surfaceSource.slice(
   surfaceSource.indexOf("function SettingsSidebarContent"),
-  surfaceSource.indexOf("function WorkspaceSidebarContent"),
+  surfaceSource.indexOf("function subscribeExplorerAskSend"),
 );
 expect(
   settingsSidebarSource.includes('aria-label="Hide sidebar"') &&
@@ -5961,99 +6077,113 @@ const chatSurfaceSource = surfaceSource.slice(
 expect(
   typeSource.includes('| "plan-updated"') &&
     typeSource.includes("type SessionPlan") &&
-    tauriSource.includes("append_plan_event") &&
-    tauriSource.includes("SessionEventKind::PlanUpdated") &&
-    appSource.includes("deriveSessionPlan") &&
-    appSource.includes("appendPlanEvent") &&
-    surfaceSource.includes("ChatSurfaceControls") &&
-    surfaceSource.includes("ChatSidePanel") &&
-    surfaceSource.includes("function PlanDocument") &&
+    sourceIncludes(tauriSource, "append_plan_event") &&
+    sourceIncludes(tauriSource, "SessionEventKind::PlanUpdated") &&
+    sourceIncludes(appSource, "deriveSessionPlan") &&
+    sourceIncludes(appSource, "appendPlanEvent") &&
+    sourceIncludes(surfaceSource, "ChatSurfaceControls") &&
+    sourceIncludes(surfaceSource, "ChatSidePanel") &&
+    sourceIncludes(surfaceSource, "function PlanDocument") &&
     planModeSource.includes("export function ImplementPlanDock") &&
     typeSource.includes("content?: string") &&
-    appSource.includes("assistantContentByTurnId") &&
-    surfaceSource.includes("gyro-plan-inline-editor") &&
-    surfaceSource.includes('aria-label="Plan item title"') &&
-    surfaceSource.includes('aria-label="Save plan item"') &&
+    sourceIncludes(appSource, "assistantContentByTurnId") &&
+    sourceIncludes(surfaceSource, "gyro-plan-inline-editor") &&
+    sourceIncludes(surfaceSource, 'aria-label="Plan item title"') &&
+    sourceIncludes(surfaceSource, 'aria-label="Save plan item"') &&
     // Goal and plan stay separate: the goal is edited on the composer, never
     // inside the plan panel or the plan approval card.
-    !surfaceSource.includes('aria-label="Save session goal"') &&
-    !surfaceSource.includes("gyro-plan-goal-section") &&
-    !surfaceSource.includes("gyro-plan-decision-goal") &&
-    surfaceSource.includes('kind: "goal" | "item"') &&
-    surfaceSource.includes("editorRequest={planEditorRequest}") &&
-    surfaceSource.includes("onEditorRequestHandled?.()") &&
-    surfaceSource.includes("handledEditorRequestTokenRef") &&
-    surfaceSource.includes(
+    !sourceIncludes(surfaceSource, 'aria-label="Save session goal"') &&
+    !sourceIncludes(surfaceSource, "gyro-plan-goal-section") &&
+    !sourceIncludes(surfaceSource, "gyro-plan-decision-goal") &&
+    sourceIncludes(surfaceSource, 'kind: "goal" | "item"') &&
+    sourceIncludes(surfaceSource, "editorRequest={planEditorRequest}") &&
+    sourceIncludes(surfaceSource, "onEditorRequestHandled?.()") &&
+    sourceIncludes(surfaceSource, "handledEditorRequestTokenRef") &&
+    sourceIncludes(
+      surfaceSource,
       'const railPanel: ChatSidePanelId = activeRailPanel ?? "environment"',
     ) &&
-    surfaceSource.includes("const isEnvironmentPopoverOpen =") &&
-    surfaceSource.includes("!isEmptyStart &&") &&
-    surfaceSource.includes("const environmentPopover =") &&
-    surfaceSource.includes("{sidePanel}") &&
-    surfaceSource.includes('"Reopen goal"') &&
+    sourceIncludes(surfaceSource, "const isEnvironmentPopoverOpen =") &&
+    sourceIncludes(surfaceSource, "!isEmptyStart &&") &&
+    sourceIncludes(surfaceSource, "const environmentPopover =") &&
+    sourceIncludes(surfaceSource, "{sidePanel}") &&
+    sourceIncludes(surfaceSource, '"Reopen goal"') &&
     /sessionGoal\.status\s*===\s*"complete"\s*\?\s*"reopen"\s*:\s*"complete"/.test(
       surfaceSource,
     ) &&
-    appSource.includes('action === "set" || action === "reopen"') &&
-    appSource.includes("Goal reopened:") &&
-    surfaceSource.includes('event.kind === "goal-updated"') &&
-    surfaceSource.includes('event.kind === "chat-mode-changed"') &&
-    surfaceSource.includes('event.key === "Escape"') &&
-    appSource.includes("const title = value?.trim()") &&
-    appSource.includes("const appendGoalEvent = useCallback") &&
-    appSource.includes('case "add-goal"') &&
-    appSource.includes("setIsGoalComposerActive(true)") &&
-    surfaceSource.includes("isGoalComposerActive ?") &&
-    chatSurfaceSource.includes(
+    sourceIncludes(appSource, 'action === "set" || action === "reopen"') &&
+    sourceIncludes(appSource, "Goal reopened:") &&
+    sourceIncludes(surfaceSource, 'event.kind === "goal-updated"') &&
+    sourceIncludes(surfaceSource, 'event.kind === "chat-mode-changed"') &&
+    sourceIncludes(surfaceSource, 'event.key === "Escape"') &&
+    sourceIncludes(appSource, "const title = value?.trim()") &&
+    sourceIncludes(appSource, "const appendGoalEvent = useCallback") &&
+    sourceIncludes(appSource, 'case "add-goal"') &&
+    sourceIncludes(appSource, "setIsGoalComposerActive(true)") &&
+    sourceIncludes(surfaceSource, "isGoalComposerActive ?") &&
+    sourceIncludes(
+      chatSurfaceSource,
       "const [goalDraft, setGoalDraft] = useState<string>();",
     ) &&
-    chatSurfaceSource.includes("const composerDraft =") &&
-    chatSurfaceSource.includes(
+    sourceIncludes(chatSurfaceSource, "const composerDraft =") &&
+    sourceIncludes(
+      chatSurfaceSource,
       "isGoalComposerActive && sessionGoal?.text\n      ? (goalDraft ?? sessionGoal.text)\n      : localDraft",
     ) &&
-    chatSurfaceSource.includes("draft={composerDraft}") &&
-    chatSurfaceSource.includes(
-      "estimateComposerContextUsage(\n        transcriptEvents,\n        composerDraft,\n        contextModel,",
+    sourceIncludes(chatSurfaceSource, "draft={composerDraft}") &&
+    sourceIncludes(
+      chatSurfaceSource,
+      "estimateComposerContextUsage(\n        transcriptEvents,\n        composerDraft,\n        contextModel)",
     ) &&
-    chatSurfaceSource.includes("handleComposerDraftChange") &&
-    chatSurfaceSource.includes("cancelGoalComposer") &&
-    chatSurfaceSource.includes("onStartGoalChat(goal)") &&
+    sourceIncludes(chatSurfaceSource, "handleComposerDraftChange") &&
+    sourceIncludes(chatSurfaceSource, "cancelGoalComposer") &&
+    sourceIncludes(chatSurfaceSource, "onStartGoalChat(goal)") &&
     // A new goal is set and sent in one step; editing one only saves it.
-    chatSurfaceSource.includes(
+    sourceIncludes(
+      chatSurfaceSource,
       "startsGoalSession={Boolean(onStartGoalChat) && !sessionGoal?.text}",
     ) &&
-    chatSurfaceSource.includes("if (onStartGoalChat && !sessionGoal?.text)") &&
-    chatSurfaceSource.includes(
+    sourceIncludes(
+      chatSurfaceSource,
+      "if (onStartGoalChat && !sessionGoal?.text)",
+    ) &&
+    sourceIncludes(
+      chatSurfaceSource,
       'if (!onGoalAction) throw new Error("Goal saving unavailable")',
     ) &&
-    chatSurfaceSource.includes("const result = await onGoalAction(") &&
-    chatSurfaceSource.includes(
+    sourceIncludes(chatSurfaceSource, "const result = await onGoalAction(") &&
+    sourceIncludes(
+      chatSurfaceSource,
       'if (result === false) throw new Error("Goal was not saved")',
     ) &&
-    !chatSurfaceSource.includes('onDraftChange?.("");') &&
-    surfaceSource.includes('sessionGoal?.text ? "edit" : "set"') &&
-    appSource.includes("const changeGoal = useCallback(\n    async (") &&
-    appSource.includes("return false;") &&
-    appSource.includes("return true;") &&
-    appSource.includes('kind: "item",') &&
-    appSource.includes("planEditorRequestTokenRef.current += 1") &&
-    !appSource.includes('window.prompt("Session goal"') &&
-    !appSource.includes('window.prompt("Add plan item"') &&
-    appSource.includes("createGoalSessionEvent") &&
-    appSource.includes('kind: "goal-updated"') &&
+    !sourceIncludes(chatSurfaceSource, 'onDraftChange?.("");') &&
+    sourceIncludes(surfaceSource, 'sessionGoal?.text ? "edit" : "set"') &&
+    sourceIncludes(appSource, "const changeGoal = useCallback(\n    async (") &&
+    sourceIncludes(appSource, "return false;") &&
+    sourceIncludes(appSource, "return true;") &&
+    sourceIncludes(appSource, 'kind: "item",') &&
+    sourceIncludes(appSource, "planEditorRequestTokenRef.current += 1") &&
+    !sourceIncludes(appSource, 'window.prompt("Session goal"') &&
+    !sourceIncludes(appSource, 'window.prompt("Add plan item"') &&
+    sourceIncludes(appSource, "createGoalSessionEvent") &&
+    sourceIncludes(appSource, 'kind: "goal-updated"') &&
     styleSource.includes(".gyro-plan-inline-editor") &&
     styleSource.includes('.gyro-composer-chip.is-goal[aria-pressed="true"]') &&
     planModeStyleSource.includes(".gyro-plan-card") &&
     styleSource.includes(".gyro-plan-harness") &&
     styleSource.includes(".gyro-plan-progress") &&
-    surfaceSource.includes('aria-label="Plan harness"') &&
+    sourceIncludes(surfaceSource, 'aria-label="Plan harness"') &&
     planModeSource.includes('role="progressbar"') &&
     planModeSource.includes("export function PlanPanelHeader") &&
-    surfaceSource.includes('className="gyro-plan-harness gyro-plan-steps"') &&
-    surfaceSource.includes("<EnvironmentPlanSteps") &&
+    sourceIncludes(
+      surfaceSource,
+      'className="gyro-plan-harness gyro-plan-steps"',
+    ) &&
+    sourceIncludes(surfaceSource, "<EnvironmentPlanSteps") &&
     planModeSource.includes("export function EnvironmentPlanSteps") &&
     planModeSource.includes("export function PlanStepStatus") &&
-    surfaceSource.includes(
+    sourceIncludes(
+      surfaceSource,
       'activeRailPanel === "plan" && sessionPlan?.content ? "has-plan" : ""',
     ) &&
     styleSource.includes(".gyro-chat-environment-popover {") &&
@@ -6069,31 +6199,40 @@ expect(
 // becoming five empty panels that only look like Codex.
 const chatCompanionSource = readRepoFile("packages/ui/src/chat-companion.ts");
 expect(
-  surfaceSource.includes('aria-label="Chat companion"') &&
-    surfaceSource.includes(
+  sourceIncludes(surfaceSource, 'aria-label="Chat companion"') &&
+    sourceIncludes(
+      surfaceSource,
       'const isCompanionPanel = isChatCompanionTab(railPanel) || railPanel === "tools"',
     ) &&
-    surfaceSource.includes(
+    sourceIncludes(
+      surfaceSource,
       'activePanel={displayedRailPanel === "review" ? "changes" : displayedRailPanel}',
     ) &&
-    surfaceSource.includes("chromeless={hasCompanion}") &&
-    surfaceSource.includes('displayedRailPanel === "files" ? (') &&
-    surfaceSource.includes("<CompanionFiles") &&
-    surfaceSource.includes('displayedRailPanel === "side-chat" ? (') &&
-    surfaceSource.includes("<SideChatPanel") &&
-    surfaceSource.includes("onOpenFile={onOpenCompanionFile}") &&
-    surfaceSource.includes('className="gyro-chat-companion-tab-list"') &&
-    surfaceSource.includes('aria-label="Add companion tab"') &&
-    surfaceSource.includes('className="gyro-chat-companion-resizer"') &&
-    surfaceSource.includes("clampChatCompanionWidth") &&
+    sourceIncludes(surfaceSource, "chromeless={hasCompanion}") &&
+    sourceIncludes(surfaceSource, 'displayedRailPanel === "files" ? (') &&
+    sourceIncludes(surfaceSource, "<CompanionFiles") &&
+    sourceIncludes(surfaceSource, 'displayedRailPanel === "side-chat" ? (') &&
+    sourceIncludes(surfaceSource, "<SideChatPanel") &&
+    sourceIncludes(surfaceSource, "onOpenFile={onOpenCompanionFile}") &&
+    sourceIncludes(surfaceSource, 'className="gyro-chat-companion-tab-list"') &&
+    sourceIncludes(surfaceSource, 'aria-label="Add companion tab"') &&
+    sourceIncludes(surfaceSource, 'className="gyro-chat-companion-resizer"') &&
+    sourceIncludes(surfaceSource, "clampChatCompanionWidth") &&
     chatCompanionSource.includes('"review"') &&
     chatCompanionSource.includes('"terminal"') &&
     chatCompanionSource.includes('"browser"') &&
     chatCompanionSource.includes('"files"') &&
     chatCompanionSource.includes('"side-chat"') &&
-    appSource.includes("onOpenCompanionTab: (tab: ChatCompanionTabId)") &&
-    appSource.includes("onCloseCompanionTab: (tab: ChatCompanionTabId)") &&
-    appSource.includes(
+    sourceIncludes(
+      appSource,
+      "onOpenCompanionTab: (tab: ChatCompanionTabId)",
+    ) &&
+    sourceIncludes(
+      appSource,
+      "onCloseCompanionTab: (tab: ChatCompanionTabId)",
+    ) &&
+    sourceIncludes(
+      appSource,
       'dispatchCompanion({ type: "focus-pane", paneId: companionFocusPaneId })',
     ) &&
     styleSource.includes(".gyro-chat-companion {") &&
@@ -6133,111 +6272,136 @@ expect(
   "Side chat should inherit project and model without the parent transcript, stay out of history, and be swept on close and relaunch.",
 );
 expect(
-  surfaceSource.includes('activeRailPanel !== "environment"') &&
-    surfaceSource.includes('aria-label="Environment"') &&
-    surfaceSource.includes("function ChatEnvironmentPopover") &&
-    !surfaceSource.includes("function ChatCompanionWorkspaceSummary") &&
-    surfaceSource.includes('aria-label="Plan harness"') &&
-    surfaceSource.includes("function ChatEnvironmentLauncher") &&
-    surfaceSource.includes('className="gyro-chat-tool-launcher"') &&
-    surfaceSource.includes("<span>Changes</span>") &&
-    surfaceSource.includes("<span>Terminal</span>") &&
-    surfaceSource.includes("<span>Browser</span>") &&
-    surfaceSource.includes("<span>Files</span>") &&
-    surfaceSource.includes("<span>Plan</span>") &&
-    surfaceSource.includes("function chatToolBrowserStatusLabel") &&
-    surfaceSource.includes('return "Idle"') &&
-    surfaceSource.includes("aria-label={`Open Browser, ${browserLabel}`}") &&
-    surfaceSource.includes("aria-label={`Open Changes, ${changesLabel}`}") &&
-    surfaceSource.includes(
+  sourceIncludes(surfaceSource, 'activeRailPanel !== "environment"') &&
+    sourceIncludes(surfaceSource, 'aria-label="Environment"') &&
+    sourceIncludes(surfaceSource, "function ChatEnvironmentPopover") &&
+    !sourceIncludes(surfaceSource, "function ChatCompanionWorkspaceSummary") &&
+    sourceIncludes(surfaceSource, 'aria-label="Plan harness"') &&
+    sourceIncludes(surfaceSource, "function ChatEnvironmentLauncher") &&
+    sourceIncludes(surfaceSource, 'className="gyro-chat-tool-launcher"') &&
+    sourceIncludes(surfaceSource, "<span>Changes</span>") &&
+    sourceIncludes(surfaceSource, "<span>Terminal</span>") &&
+    sourceIncludes(surfaceSource, "<span>Browser</span>") &&
+    sourceIncludes(surfaceSource, "<span>Files</span>") &&
+    sourceIncludes(surfaceSource, "<span>Plan</span>") &&
+    sourceIncludes(surfaceSource, "function chatToolBrowserStatusLabel") &&
+    sourceIncludes(surfaceSource, 'return "Idle"') &&
+    sourceIncludes(
+      surfaceSource,
+      "aria-label={`Open Browser, ${browserLabel}`}",
+    ) &&
+    sourceIncludes(
+      surfaceSource,
+      "aria-label={`Open Changes, ${changesLabel}`}",
+    ) &&
+    sourceIncludes(
+      surfaceSource,
       "aria-label={`Open Files, ${workspaceName(workspacePath)}`}",
     ) &&
     // Launcher rows spend their detail slot on a state worth knowing and go
     // quiet otherwise. "Open" was neither — it restated the button it sat on.
-    surfaceSource.includes('changesLabel === "No changes" ? null') &&
-    surfaceSource.includes('terminalLabel === "Ready" ? null') &&
-    !surfaceSource.includes("<small>Open</small>") &&
-    surfaceSource.includes('"has-activity"') &&
-    surfaceSource.includes('"has-warning"') &&
-    !surfaceSource.includes('(browserPreview?.status ?? "Ready")') &&
-    surfaceSource.includes('onOpenTool("diff")') &&
-    surfaceSource.includes('onOpenTool("terminal")') &&
-    surfaceSource.includes('onOpenTool("browser")') &&
-    surfaceSource.includes("onToggleToolPanel={onToggleToolPanel}") &&
-    surfaceSource.includes("<span>Bottom drawer</span>") &&
-    surfaceSource.includes("aria-pressed={isToolPanelOpen}") &&
-    appSource.includes("const toggleChatToolPanel = useCallback") &&
-    appSource.includes('openToolPanel("terminal")') &&
-    appSource.includes('openToolPanel("terminal")') &&
-    !surfaceSource.includes('"Open last used panel"') &&
-    surfaceSource.includes("onToggleToolPanel?.();") &&
-    surfaceSource.includes('onComposerAction?.("open-files")') &&
-    appSource.includes('case "open-files":') &&
-    appSource.includes('layout: "code"') &&
+    sourceIncludes(surfaceSource, 'changesLabel === "No changes" ? null') &&
+    sourceIncludes(surfaceSource, 'terminalLabel === "Ready" ? null') &&
+    !sourceIncludes(surfaceSource, "<small>Open</small>") &&
+    sourceIncludes(surfaceSource, '"has-activity"') &&
+    sourceIncludes(surfaceSource, '"has-warning"') &&
+    !sourceIncludes(surfaceSource, '(browserPreview?.status ?? "Ready")') &&
+    sourceIncludes(surfaceSource, 'onOpenTool("diff")') &&
+    sourceIncludes(surfaceSource, 'onOpenTool("terminal")') &&
+    sourceIncludes(surfaceSource, 'onOpenTool("browser")') &&
+    sourceIncludes(surfaceSource, "onToggleToolPanel={onToggleToolPanel}") &&
+    sourceIncludes(surfaceSource, "<span>Bottom drawer</span>") &&
+    sourceIncludes(surfaceSource, "aria-pressed={isToolPanelOpen}") &&
+    sourceIncludes(appSource, "const toggleChatToolPanel = useCallback") &&
+    sourceIncludes(appSource, 'openToolPanel("terminal")') &&
+    sourceIncludes(appSource, 'openToolPanel("terminal")') &&
+    !sourceIncludes(surfaceSource, '"Open last used panel"') &&
+    sourceIncludes(surfaceSource, "onToggleToolPanel?.();") &&
+    sourceIncludes(surfaceSource, 'onComposerAction?.("open-files")') &&
+    sourceIncludes(appSource, 'case "open-files":') &&
+    sourceIncludes(appSource, 'layout: "code"') &&
     styleSource.includes(".gyro-chat-tool-launcher") &&
     styleSource.includes("button.has-activity > small") &&
     styleSource.includes("button.has-warning > small") &&
     styleSource.includes("minmax(260px, 40vh)") &&
     styleSource.includes("min-height: 36px;") &&
     styleSource.includes(".gyro-chat-tool-close") &&
-    appSource.includes('dispatchWorkbench({ type: "set-chat-panel" })') &&
-    surfaceSource.includes('action: "select-workspace"') &&
-    surfaceSource.includes('action: "set-workspace-mode:local"') &&
-    surfaceSource.includes('action: "set-workspace-mode:worktree"') &&
-    surfaceSource.includes('detail: "Chat without a project folder"') &&
-    surfaceSource.includes(
+    sourceIncludes(
+      appSource,
+      'dispatchWorkbench({ type: "set-chat-panel" })',
+    ) &&
+    sourceIncludes(surfaceSource, 'action: "select-workspace"') &&
+    sourceIncludes(surfaceSource, 'action: "set-workspace-mode:local"') &&
+    sourceIncludes(surfaceSource, 'action: "set-workspace-mode:worktree"') &&
+    sourceIncludes(surfaceSource, 'detail: "Chat without a project folder"') &&
+    sourceIncludes(
+      surfaceSource,
       'hasUserWorkspace ? "Change folder" : "Select folder"',
     ) &&
-    !surfaceSource.includes('onComposerAction?.("show-project-context")') &&
-    !surfaceSource.includes('onComposerAction?.("select-workspace-mode")') &&
-    surfaceSource.includes('onComposerAction?.("select-branch")') &&
-    surfaceSource.includes("sourceControl?.additions") &&
-    surfaceSource.includes("sourceControl?.deletions") &&
-    surfaceSource.includes("sourceControl?.files.length") &&
-    !surfaceSource.includes("gyro-thread-diff-pill") &&
+    !sourceIncludes(
+      surfaceSource,
+      'onComposerAction?.("show-project-context")',
+    ) &&
+    !sourceIncludes(
+      surfaceSource,
+      'onComposerAction?.("select-workspace-mode")',
+    ) &&
+    sourceIncludes(surfaceSource, 'onComposerAction?.("select-branch")') &&
+    sourceIncludes(surfaceSource, "sourceControl?.additions") &&
+    sourceIncludes(surfaceSource, "sourceControl?.deletions") &&
+    sourceIncludes(surfaceSource, "sourceControl?.files.length") &&
+    !sourceIncludes(surfaceSource, "gyro-thread-diff-pill") &&
     timelineSource.includes('kind: "file-summary"') &&
     runViewSource.includes("isRunPhaseLive(model.phase)") &&
-    surfaceSource.includes('onOpenToolPanel?.("diff")') &&
+    sourceIncludes(surfaceSource, 'onOpenToolPanel?.("diff")') &&
     styleSource.includes(".gyro-thread-diff-pill em.is-added") &&
     styleSource.includes(".gyro-thread-diff-pill em.is-removed") &&
-    appSource.includes("savedProjectsFromSessions") &&
-    appSource.includes(
+    sourceIncludes(appSource, "savedProjectsFromSessions") &&
+    sourceIncludes(
+      appSource,
       "!isTransientWorkspacePath(session.workspacePath),\n    )\n    .forEach((session) =>",
     ) &&
-    appSource.includes(
+    sourceIncludes(
+      appSource,
       'activeChatPane?.kind === "draft"\n          ? activeChatPane.workspacePath',
     ) &&
-    appSource.includes('"gyro.recent-project-paths"') &&
-    appSource.includes("loadRecentProjectPaths") &&
-    appSource.includes("setRecentProjectPaths((current)") &&
-    appSource.includes('"Recent project"') &&
-    appSource.includes("select-saved-project:") &&
-    surfaceSource.includes("savedProjectItems") &&
-    surfaceSource.includes(
+    sourceIncludes(appSource, '"gyro.recent-project-paths"') &&
+    sourceIncludes(appSource, "loadRecentProjectPaths") &&
+    sourceIncludes(appSource, "setRecentProjectPaths((current)") &&
+    sourceIncludes(appSource, '"Recent project"') &&
+    sourceIncludes(appSource, "select-saved-project:") &&
+    sourceIncludes(surfaceSource, "savedProjectItems") &&
+    sourceIncludes(
+      surfaceSource,
       "select-saved-project:${encodeURIComponent(project.path)}",
     ) &&
-    surfaceSource.includes("if (isHiddenTranscriptEvent(event))") &&
-    surfaceSource.includes("gyro-provider-status-row") &&
-    surfaceSource.includes("gyro-chat-turn") &&
-    surfaceSource.includes("gyro-chat-run") &&
+    sourceIncludes(surfaceSource, "if (isHiddenTranscriptEvent(event))") &&
+    sourceIncludes(surfaceSource, "gyro-provider-status-row") &&
+    sourceIncludes(surfaceSource, "gyro-chat-turn") &&
+    sourceIncludes(surfaceSource, "gyro-chat-run") &&
     styleSource.includes(".gyro-thread-topbar-actions") &&
     styleSource.includes(".gyro-chat-composer-dock .gyro-composer-shell") &&
-    surfaceSource.includes('aria-label="Jump to latest message"') &&
-    surfaceSource.includes("isTranscriptAwayFromBottom") &&
-    surfaceSource.includes("distanceFromBottom <= BOTTOM_SLACK") &&
-    surfaceSource.includes("isFollowingBottomRef") &&
-    surfaceSource.includes("const pinToBottom") &&
-    surfaceSource.includes("transcript.scrollTop = transcript.scrollHeight") &&
+    sourceIncludes(surfaceSource, 'aria-label="Jump to latest message"') &&
+    sourceIncludes(surfaceSource, "isTranscriptAwayFromBottom") &&
+    sourceIncludes(surfaceSource, "distanceFromBottom <= BOTTOM_SLACK") &&
+    sourceIncludes(surfaceSource, "isFollowingBottomRef") &&
+    sourceIncludes(surfaceSource, "const pinToBottom") &&
+    sourceIncludes(
+      surfaceSource,
+      "transcript.scrollTop = transcript.scrollHeight",
+    ) &&
     styleSource.includes(".gyro-chat-jump-to-bottom") &&
     styleSource.includes("bottom: calc(100% + 10px)") &&
-    surfaceSource.includes('popoverPlacement="up"') &&
-    surfaceSource.includes('variant="hero"') &&
-    surfaceSource.includes("constrainToParent={Boolean(") &&
-    surfaceSource.includes(
+    sourceIncludes(surfaceSource, 'popoverPlacement="up"') &&
+    sourceIncludes(surfaceSource, 'variant="hero"') &&
+    sourceIncludes(surfaceSource, "constrainToParent={Boolean(") &&
+    sourceIncludes(
+      surfaceSource,
       'activeRailPanel && activeRailPanel !== "environment"',
     ) &&
-    surfaceSource.includes('constrainToParent ? "stretch" : "center"') &&
-    surfaceSource.includes(
+    sourceIncludes(surfaceSource, 'constrainToParent ? "stretch" : "center"') &&
+    sourceIncludes(
+      surfaceSource,
       'isHero && constrainToParent ? "is-constrained" : ""',
     ) &&
     cssRules(
@@ -6247,12 +6411,13 @@ expect(
       (rule) =>
         rule.includes("max-width: none") && rule.includes("width: 100%"),
     ) &&
-    surfaceSource.includes("function ChatContextSection") &&
-    surfaceSource.includes("<ChatContextSection") &&
-    surfaceSource.includes(
+    sourceIncludes(surfaceSource, "function ChatContextSection") &&
+    sourceIncludes(surfaceSource, "<ChatContextSection") &&
+    sourceIncludes(
+      surfaceSource,
       '"gyro-composer-context-row gyro-composer-reveal"',
     ) &&
-    !surfaceSource.includes("gyro-chat-context-section") &&
+    !sourceIncludes(surfaceSource, "gyro-chat-context-section") &&
     !styleSource.includes("gyro-chat-context-section") &&
     styleSource.includes(".gyro-composer-shell textarea:focus-visible") &&
     styleSource.includes(
@@ -6288,8 +6453,8 @@ expect(
     !/\.gyro-chat-composer-dock\s*>\s*\.gyro-composer-shell[\s\S]{0,400}?align-self:\s*center/.test(
       styleSource,
     ) &&
-    surfaceSource.includes("!event.shiftKey") &&
-    surfaceSource.includes("event.preventDefault()") &&
+    sourceIncludes(surfaceSource, "!event.shiftKey") &&
+    sourceIncludes(surfaceSource, "event.preventDefault()") &&
     styleSource.includes("--gyro-chat-content-width: 760px") &&
     styleSource.includes("max-width: var(--gyro-chat-content-width)") &&
     cssRules(styleSource, ".gyro-chat-transcript").some(
@@ -6307,7 +6472,10 @@ expect(
     styleSource.includes(
       "grid-template-columns: minmax(0, 1fr) minmax(288px, 316px)",
     ) &&
-    surfaceSource.includes('"gyro-chat-surface",\n        "is-thread"') &&
+    sourceIncludes(
+      surfaceSource,
+      '"gyro-chat-surface",\n        "is-thread"',
+    ) &&
     styleSource.includes(
       ".gyro-chat-surface.is-thread > .gyro-chat-thread-topbar",
     ) &&
@@ -6320,7 +6488,9 @@ expect(
     ) &&
     styleSource.includes("grid-template-rows: minmax(0, 1fr) auto") &&
     threadSurfaceRules.some((rule) =>
-      rule.includes("grid-template-rows: 48px minmax(0, 1fr)"),
+      rule.includes(
+        "grid-template-rows: var(--gyro-chat-header-height, 48px) minmax(0, 1fr)",
+      ),
     ) &&
     threadTopbarRules.some(
       (rule) =>
@@ -6335,17 +6505,17 @@ expect(
     threadRailRules.some(
       (rule) => rule.includes("grid-column: 2") && rule.includes("grid-row: 2"),
     ) &&
-    surfaceSource.includes("function AssistantResponse") &&
-    surfaceSource.includes("gyro-response-body") &&
-    surfaceSource.includes('aria-label="Copy response"') &&
+    sourceIncludes(surfaceSource, "function AssistantResponse") &&
+    sourceIncludes(surfaceSource, "gyro-response-body") &&
+    sourceIncludes(surfaceSource, 'aria-label="Copy response"') &&
     styleSource.includes(".gyro-chat-transcript .gyro-message.is-user") &&
     styleSource.includes("justify-items: end") &&
     styleSource.includes("width: min(100%, var(--gyro-chat-content-width))") &&
     styleSource.includes("max-width: 100%") &&
     styleSource.includes("pointer-events: none") &&
-    surfaceSource.includes("isUser || isAssistant ? null") &&
-    !surfaceSource.includes("<strong>Workbench activity</strong>") &&
-    !surfaceSource.includes("Open terminal\n          </button>"),
+    sourceIncludes(surfaceSource, "isUser || isAssistant ? null") &&
+    !sourceIncludes(surfaceSource, "<strong>Workbench activity</strong>") &&
+    !sourceIncludes(surfaceSource, "Open terminal\n          </button>"),
   "First chat should default to a clean Codex-style thread with a fixed full-width topbar, provider status recovery, and matching docked composer.",
 );
 expect(
@@ -6578,75 +6748,91 @@ expect(
   "Automatic update checks should run every 30 minutes while Gyro remains open.",
 );
 expect(
-  appSource.includes("const handleComposerAction") &&
-    appSource.includes('case "select-model"') &&
-    appSource.includes('destination: "providers"') &&
-    appSource.includes('openSettingsSection("permissions")') &&
-    appSource.includes("const setComposerWorkspaceMode") &&
-    appSource.includes("const selectContextFile") &&
-    appSource.includes('title: "Select file"') &&
-    appSource.includes("relativeFilePath") &&
-    appSource.includes("isUserSelectedWorkspacePath(chatWorkspacePath)") &&
-    appSource.includes('"Council needs a folder before starting a chat."') &&
-    appSource.includes('case "select-no-folder":') &&
-    appSource.includes('startNewChat({ workspacePath: "" })') &&
-    appSource.includes("void openWorkspace();") &&
-    appSource.includes('void selectChatAttachment("workspace-file");') &&
-    appSource.includes('action.startsWith("start-new-chat-mode:")') &&
-    appSource.includes('type: "set-workbench-mode"') &&
-    appSource.includes('type: "close-tool-panel"') &&
-    surfaceSource.includes("workspaceModeLabel") &&
-    surfaceSource.includes("projectLabel") &&
-    surfaceSource.includes("composerProjectLabel") &&
-    surfaceSource.includes("isGeneratedGyroWorkspace") &&
-    surfaceSource.includes("startProjectLabel") &&
-    surfaceSource.includes("What should we work on?") &&
-    !surfaceSource.includes(': "Gyro";') &&
-    surfaceSource.includes("gyroLogoTransparentDark") &&
-    surfaceSource.includes("gyroLogoTransparentLight") &&
-    surfaceSource.includes("gyro-chat-start-brand-word") &&
-    surfaceSource.includes('style={{ width: "min(860px, 100%)" }}') &&
+  sourceIncludes(appSource, "const handleComposerAction") &&
+    sourceIncludes(appSource, 'case "select-model"') &&
+    sourceIncludes(appSource, 'destination: "providers"') &&
+    sourceIncludes(appSource, 'openSettingsSection("permissions")') &&
+    sourceIncludes(appSource, "const setComposerWorkspaceMode") &&
+    sourceIncludes(appSource, "const selectContextFile") &&
+    sourceIncludes(appSource, 'title: "Select file"') &&
+    sourceIncludes(appSource, "relativeFilePath") &&
+    sourceIncludes(
+      appSource,
+      "isUserSelectedWorkspacePath(chatWorkspacePath)",
+    ) &&
+    sourceIncludes(
+      appSource,
+      '"Council needs a folder before starting a chat."',
+    ) &&
+    sourceIncludes(appSource, 'case "select-no-folder":') &&
+    sourceIncludes(appSource, 'startNewChat({ workspacePath: "" })') &&
+    sourceIncludes(appSource, "void openWorkspace();") &&
+    sourceIncludes(
+      appSource,
+      'void selectChatAttachment("workspace-file", undefined, attachmentTarget);',
+    ) &&
+    sourceIncludes(appSource, 'action.startsWith("start-new-chat-mode:")') &&
+    sourceIncludes(appSource, 'type: "set-workbench-mode"') &&
+    sourceIncludes(appSource, 'type: "close-tool-panel"') &&
+    sourceIncludes(surfaceSource, "workspaceModeLabel") &&
+    sourceIncludes(surfaceSource, "projectLabel") &&
+    sourceIncludes(surfaceSource, "composerProjectLabel") &&
+    sourceIncludes(surfaceSource, "isGeneratedGyroWorkspace") &&
+    sourceIncludes(surfaceSource, "startProjectLabel") &&
+    sourceIncludes(surfaceSource, "What should we work on?") &&
+    !sourceIncludes(surfaceSource, ': "Gyro";') &&
+    sourceIncludes(surfaceSource, "gyroLogoTransparentDark") &&
+    sourceIncludes(surfaceSource, "gyroLogoTransparentLight") &&
+    sourceIncludes(surfaceSource, "gyro-chat-start-brand-word") &&
+    sourceIncludes(surfaceSource, 'style={{ width: "min(860px, 100%)" }}') &&
     // The composer measure lives in one token now, not in an inline style that
     // silently outranked the stylesheet.
-    !surfaceSource.includes('"min(820px, 100%)"') &&
+    !sourceIncludes(surfaceSource, '"min(820px, 100%)"') &&
     styleSource.includes("--gyro-composer-width: 720px") &&
     styleSource.includes("grid-template-columns: minmax(0, 1fr)") &&
     styleSource.includes("width: min(860px, 100%)") &&
-    !surfaceSource.includes("calc(100vw - 96px)") &&
+    !sourceIncludes(surfaceSource, "calc(100vw - 96px)") &&
     styleSource.includes("width: min(var(--gyro-composer-width), 100%)") &&
-    surfaceSource.includes("What should we do in ") &&
-    surfaceSource.includes("Choose folder") &&
-    surfaceSource.includes("canSendChat(hasReadyProvider, workspacePath)") &&
-    surfaceSource.includes(
+    sourceIncludes(surfaceSource, "What should we do in ") &&
+    sourceIncludes(surfaceSource, "Choose folder") &&
+    sourceIncludes(
+      surfaceSource,
+      "canSendChat(hasReadyProvider, workspacePath)",
+    ) &&
+    sourceIncludes(
+      surfaceSource,
       "isGoalComposerActive && !startsGoalSession ? true : canSubmitChat",
     ) &&
-    surfaceSource.includes(
+    sourceIncludes(
+      surfaceSource,
       "if (canSubmitComposer && draft.trim().length > 0)",
     ) &&
-    surfaceSource.includes(
+    sourceIncludes(
+      surfaceSource,
       "!isStopAction && (!canSubmitComposer || draft.trim().length === 0)",
     ) &&
-    surfaceSource.includes('action: "select-no-folder"') &&
-    surfaceSource.includes('label: "No folder"') &&
-    surfaceSource.includes("Choose a folder for Council") &&
-    surfaceSource.includes("Connect a provider before sending") &&
-    surfaceSource.includes("resolveCleanMachinePath") &&
-    surfaceSource.includes("branchLabel") &&
-    surfaceSource.includes('action: "select-file"') &&
-    surfaceSource.includes('action: "select-folder"') &&
-    surfaceSource.includes('"set-workspace-mode:worktree"') &&
-    surfaceSource.includes("New worktree branch") &&
-    surfaceSource.includes("Select folder") &&
-    surfaceSource.includes("Change folder") &&
+    sourceIncludes(surfaceSource, 'action: "select-no-folder"') &&
+    sourceIncludes(surfaceSource, 'label: "No folder"') &&
+    sourceIncludes(surfaceSource, "Choose a folder for Council") &&
+    sourceIncludes(surfaceSource, "Connect a provider before sending") &&
+    sourceIncludes(surfaceSource, "resolveCleanMachinePath") &&
+    sourceIncludes(surfaceSource, "branchLabel") &&
+    sourceIncludes(surfaceSource, 'action: "select-file"') &&
+    sourceIncludes(surfaceSource, 'action: "select-folder"') &&
+    sourceIncludes(surfaceSource, '"set-workspace-mode:worktree"') &&
+    sourceIncludes(surfaceSource, "New worktree branch") &&
+    sourceIncludes(surfaceSource, "Select folder") &&
+    sourceIncludes(surfaceSource, "Change folder") &&
     // Workspace-mode picker: card rows with full copy, badge (not trailing
     // "Recommended" that collides with truncated labels in a narrow menu).
     // Whitespace-tolerant: Prettier wraps the tuple once it outgrows a line.
     /\[\s*"workspace-mode",\s*Laptop,\s*modeChipLabel/.test(surfaceSource) &&
-    surfaceSource.includes('kind: "workspace-mode"') &&
+    sourceIncludes(surfaceSource, 'kind: "workspace-mode"') &&
     // Labels + optional Recommended only — no redundant title or detail rows.
-    !surfaceSource.includes('title="Where the agent works"') &&
-    surfaceSource.includes("badge:") &&
-    !surfaceSource.includes(
+    !sourceIncludes(surfaceSource, 'title="Where the agent works"') &&
+    sourceIncludes(surfaceSource, "badge:") &&
+    !sourceIncludes(
+      surfaceSource,
       'trailingLabel:\n                      hasUserWorkspace && workspaceMode !== "worktree"',
     ) &&
     styleSource.includes(".gyro-workspace-mode-picker") &&
@@ -6657,10 +6843,10 @@ expect(
     !workspaceModeSource.includes('"Shared folder"') &&
     !workspaceModeSource.includes("Work in shared folder") &&
     !workspaceModeSource.includes("Use agent workspace") &&
-    appSource.includes('action === "new-chat-select-workspace"') &&
-    appSource.includes('action === "new-local-chat-select-workspace"') &&
-    appSource.includes('action.startsWith("start-new-chat-mode:")') &&
-    appSource.includes("startNewChat();"),
+    sourceIncludes(appSource, 'action === "new-chat-select-workspace"') &&
+    sourceIncludes(appSource, 'action === "new-local-chat-select-workspace"') &&
+    sourceIncludes(appSource, 'action.startsWith("start-new-chat-mode:")') &&
+    sourceIncludes(appSource, "startNewChat();"),
   "Composer controls should route to real workspace, provider, permission, branch, and workspace-mode actions.",
 );
 expect(
@@ -7067,18 +7253,25 @@ expect(
 // Split-screen chats each bind their own model. Changing the picker in a new
 // draft must not rewrite the model chip on every other open pane.
 expect(
-  surfaceSource.includes("const boundToSession = Boolean(") &&
-    surfaceSource.includes("const effectiveModelId = boundToSession") &&
-    surfaceSource.includes("const providerModelLabel = boundToSession") &&
-    appSource.includes("chatDraftModels") &&
-    appSource.includes("setChatDraftModels") &&
-    appSource.includes("sessionModelSelectionFromSession") &&
-    appSource.includes(
+  sourceIncludes(surfaceSource, "const boundToSession = Boolean(") &&
+    sourceIncludes(surfaceSource, "const rawModelId = boundToSession") &&
+    sourceIncludes(
+      surfaceSource,
+      "const providerModelLabel = boundToSession",
+    ) &&
+    sourceIncludes(appSource, "chatDraftModels") &&
+    sourceIncludes(appSource, "setChatDraftModels") &&
+    sourceIncludes(appSource, "sessionModelSelectionFromSession") &&
+    sourceIncludes(
+      appSource,
       "// Bind the pick to this draft pane so other split chats keep theirs.",
     ) &&
-    appSource.includes("sessionModelSelectionFromSession(paneSession)") &&
-    appSource.includes("chatDraftModels[paneDraftKey]") &&
-    appSource.includes("chatDraftModels[activeDraftKey]"),
+    sourceIncludes(
+      appSource,
+      "sessionModelSelectionFromSession(paneSession)",
+    ) &&
+    sourceIncludes(appSource, "chatDraftModels[paneDraftKey]") &&
+    sourceIncludes(appSource, "chatDraftModels[activeDraftKey]"),
   "Composer model selection should be per session/draft so split panes stay independent.",
 );
 
@@ -7143,38 +7336,56 @@ expect(
 );
 // Model and effort have independent composer chips with direct menu access.
 expect(
-  /const modelChipLabel =\s*hasSelectedProvider\s*\?\s*providerModelLabel\s*:\s*"Choose model"/.test(
-    surfaceSource,
-  ) &&
-    surfaceSource.includes("sessionModel?.modelLabel") &&
-    surfaceSource.includes("{modelChipLabel}") &&
-    surfaceSource.includes('className="gyro-effort-chip-label"') &&
-    surfaceSource.includes("reasoningEffortLabel(providerReasoningEffort)") &&
-    surfaceSource.includes(
+  sourceIncludes(surfaceSource, "const modelChipLabel =hasSelectedProvider") &&
+    sourceIncludes(
+      surfaceSource,
+      "pickerModelLabel(modelProviderId, rawModelId,providerModelLabel)",
+    ) &&
+    sourceIncludes(surfaceSource, ':"Choose model"') &&
+    sourceIncludes(surfaceSource, "sessionModel?.modelLabel") &&
+    sourceIncludes(surfaceSource, "{modelChipLabel}") &&
+    sourceIncludes(surfaceSource, 'className="gyro-effort-chip-label"') &&
+    sourceIncludes(
+      surfaceSource,
+      "reasoningEffortLabel(providerReasoningEffort)",
+    ) &&
+    sourceIncludes(
+      surfaceSource,
       'className="gyro-composer-chip gyro-model-chip gyro-composer-model-trigger"',
     ) &&
-    surfaceSource.includes(
+    sourceIncludes(
+      surfaceSource,
       'className="gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger"',
     ) &&
-    surfaceSource.includes(
+    sourceIncludes(
+      surfaceSource,
       'toggleProviderPopover("model", event.currentTarget)',
     ) &&
-    surfaceSource.includes(
+    sourceIncludes(
+      surfaceSource,
       'toggleProviderPopover("root", event.currentTarget)',
     ) &&
-    surfaceSource.includes(
+    sourceIncludes(
+      surfaceSource,
       'className="gyro-composer-control gyro-composer-control-effort"',
     ) &&
-    surfaceSource.includes(
+    sourceIncludes(
+      surfaceSource,
       "<ProviderLogo providerId={displayProvider.id} />",
     ) &&
     styleSource.includes(".gyro-model-chip .gyro-provider-logo") &&
-    surfaceSource.includes("const modelMenuItems: ComposerPopoverItem[]") &&
-    surfaceSource.includes('menuPane: "effort" as const') &&
-    surfaceSource.includes('kind: "disclosure" as const') &&
-    surfaceSource.includes('modelMenuPane === "provider"') &&
-    surfaceSource.includes('"gyro-model-menu gyro-effort-picker"') &&
-    !surfaceSource.includes("`${providerLabel} · ${providerModelLabel}`") &&
+    sourceIncludes(
+      surfaceSource,
+      "const modelMenuItems: ComposerPopoverItem[]",
+    ) &&
+    sourceIncludes(surfaceSource, 'menuPane: "effort" as const') &&
+    sourceIncludes(surfaceSource, 'kind: "disclosure" as const') &&
+    sourceIncludes(surfaceSource, 'modelMenuPane === "provider"') &&
+    sourceIncludes(surfaceSource, '"gyro-model-menu gyro-effort-picker"') &&
+    !sourceIncludes(
+      surfaceSource,
+      "`${providerLabel} · ${providerModelLabel}`",
+    ) &&
     styleSource.includes(".gyro-composer-menu-item.is-setting") &&
     styleSource.includes(".gyro-composer-menu-item.is-disclosure") &&
     styleSource.includes(".gyro-model-chip-effort") &&
@@ -7291,35 +7502,39 @@ expect(
   "The menu bar popover should close when the press lands outside it, while the tray icon still toggles.",
 );
 expect(
-  surfaceSource.includes("const contextItems: ComposerPopoverItem[]") &&
-    surfaceSource.includes('action: "attach-files"') &&
-    surfaceSource.includes('label: "Attach"') &&
-    surfaceSource.includes("...(canAttachEditorSnapshot") &&
-    surfaceSource.includes('label: "Editor"') &&
-    surfaceSource.includes('label: "Goal"') &&
-    surfaceSource.includes('label: "Plan"') &&
-    !surfaceSource.includes('label: "Image"') &&
-    !surfaceSource.includes('label: "File"') &&
-    !surfaceSource.includes('label: "Folder"') &&
-    !surfaceSource.includes('label: "Search"') &&
-    surfaceSource.includes('action: "set-chat-mode-plan"') &&
-    surfaceSource.includes("icon: ListChecks") &&
-    !surfaceSource.includes('title="Add"') &&
-    !surfaceSource.includes('label: "Photos"') &&
-    !surfaceSource.includes('label: "Spreadsheet"') &&
-    !surfaceSource.includes('label: "Slides"') &&
-    !surfaceSource.includes('label: "Editor snapshot"') &&
-    !surfaceSource.includes('label: "Media"') &&
-    !surfaceSource.includes(
+  sourceIncludes(surfaceSource, "const contextItems: ComposerPopoverItem[]") &&
+    sourceIncludes(surfaceSource, 'action: "attach-files"') &&
+    sourceIncludes(surfaceSource, 'label: "Attach files"') &&
+    sourceIncludes(surfaceSource, "...(canAttachEditorSnapshot") &&
+    sourceIncludes(surfaceSource, 'label: "Editor"') &&
+    sourceIncludes(
+      surfaceSource,
+      'label: sessionGoal?.text ?"Edit goal" : "Save goal"',
+    ) &&
+    sourceIncludes(surfaceSource, 'label: "Plan"') &&
+    !sourceIncludes(surfaceSource, 'label: "Image"') &&
+    !sourceIncludes(surfaceSource, 'label: "File"') &&
+    !sourceIncludes(surfaceSource, 'label: "Folder"') &&
+    !sourceIncludes(surfaceSource, 'label: "Search"') &&
+    sourceIncludes(surfaceSource, 'action: "set-chat-mode-plan"') &&
+    sourceIncludes(surfaceSource, "icon: ListChecks") &&
+    sourceIncludes(surfaceSource, 'title="Add"') &&
+    !sourceIncludes(surfaceSource, 'label: "Photos"') &&
+    !sourceIncludes(surfaceSource, 'label: "Spreadsheet"') &&
+    !sourceIncludes(surfaceSource, 'label: "Slides"') &&
+    !sourceIncludes(surfaceSource, 'label: "Editor snapshot"') &&
+    !sourceIncludes(surfaceSource, 'label: "Media"') &&
+    !sourceIncludes(
+      surfaceSource,
       'detail: "Capture the current saved or unsaved editor text"',
     ) &&
-    !surfaceSource.includes("Attach a folder or file") &&
-    !surfaceSource.includes("Find commands and files") &&
-    appSource.includes('case "attach-files":') &&
-    appSource.includes('case "select-file":') &&
-    appSource.includes('case "add-plan":') &&
-    !appSource.includes("Coming soon") &&
-    appSource.includes('type: "set-chat-panel", panel: "plan"') &&
+    !sourceIncludes(surfaceSource, "Attach a folder or file") &&
+    !sourceIncludes(surfaceSource, "Find commands and files") &&
+    sourceIncludes(appSource, 'case "attach-files":') &&
+    sourceIncludes(appSource, 'case "select-file":') &&
+    sourceIncludes(appSource, 'case "add-plan":') &&
+    !sourceIncludes(appSource, "Coming soon") &&
+    sourceIncludes(appSource, 'type: "set-chat-panel", panel: "plan"') &&
     styleSource.includes("min-height: 32px"),
   "Composer add popover should stay compact and expose only working context actions.",
 );
@@ -7475,8 +7690,8 @@ expect(
     /\.gyro-composer-context-wheel\s*>\s*svg\s*\{[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/.test(
       styleSource,
     ) &&
-    surfaceSource.includes('r="7.5"') &&
-    surfaceSource.includes('pathLength="100"'),
+    sourceIncludes(surfaceSource, 'r="6.5"') &&
+    sourceIncludes(surfaceSource, 'pathLength="100"'),
   "Composer context wheel should stay compact while remaining legible.",
 );
 expect(
@@ -7586,31 +7801,41 @@ expect(
     timelineSource.includes("const firstFileEvent = fileEvents[0]") &&
     runSource.includes('case "file":') &&
     runViewSource.includes("displaySteps.map((step)") &&
-    surfaceSource.includes("<ChatRunChangeSummary") &&
-    surfaceSource.includes('!isRunning && runModel.phase.name === "done"') &&
-    surfaceSource.includes("const reviewFiles = () => {") &&
-    surfaceSource.includes("setOpenPath(files[0]?.path)") &&
+    sourceIncludes(surfaceSource, "<ChatRunChangeSummary") &&
+    sourceIncludes(
+      surfaceSource,
+      '!isRunning && runModel.phase.name === "done"',
+    ) &&
+    sourceIncludes(surfaceSource, "const reviewFiles = () => {") &&
+    sourceIncludes(surfaceSource, "setOpenPath(files[0]?.path)") &&
     styleSource.includes(".gyro-composer-image-fallback") &&
     styleSource.includes(
       ':root[data-theme="light"]\n  .gyro-chat-thread-topbar\n  .gyro-thread-pill-button',
     ) &&
     styleSource.includes("backdrop-filter: none") &&
-    surfaceSource.includes(") : sessionGoal?.text ? (") &&
-    appSource.includes("const changeChatMode = useCallback") &&
+    sourceIncludes(
+      surfaceSource,
+      ") : !hasGoalCaption &&sessionGoal?.text ? (",
+    ) &&
+    sourceIncludes(appSource, "const changeChatMode = useCallback") &&
     // A goal is the outcome and a mode is how the turn runs, so neither
     // cancels the other. Planning toward a stated outcome is the case the
     // goal exists for; entering Plan mode used to delete it and then hide it
     // from the very turn that needed it.
-    !appSource.includes("shouldClearGoal") &&
-    !appSource.includes(
+    !sourceIncludes(appSource, "shouldClearGoal") &&
+    !sourceIncludes(
+      appSource,
       'const turnGoal = turnMode === "plan" ? undefined : requestedTurnGoal',
     ) &&
-    appSource.includes('overrideContext && "goal" in overrideContext') &&
-    appSource.includes("const turnMode =") &&
+    sourceIncludes(appSource, 'overrideContext && "goal" in overrideContext') &&
+    sourceIncludes(appSource, "const turnMode =") &&
     /chatDraftModesRef\.current\[draftModeKey\]\s*\?\?\s*"normal"/.test(
       appSource,
     ) &&
-    appSource.includes("submittedChatMode={persistedSessionContext.mode}"),
+    sourceIncludes(
+      appSource,
+      "submittedChatMode={persistedSessionContext.mode}",
+    ),
   "Completion-only edit summaries, composer overlays, light context pills, and goal/mode independence should remain enforced.",
 );
 expect(
@@ -7639,40 +7864,49 @@ expect(
   "Light-mode composer popovers should keep labels, icons, details, and hover states comfortably readable.",
 );
 expect(
-  surfaceSource.includes("OpenAI permissions") &&
-    surfaceSource.includes("Anthropic permissions") &&
-    surfaceSource.includes('gatedLabel: "Ask for approval"') &&
-    surfaceSource.includes('autoLabel: "Approve for me"') &&
-    surfaceSource.includes('directLabel: "Full access"') &&
-    surfaceSource.includes("detail: approvalCopy.gatedDetail") &&
-    surfaceSource.includes("detail: approvalCopy.autoDetail") &&
-    surfaceSource.includes("detail: approvalCopy.directDetail") &&
-    surfaceSource.includes("Always ask before commands and file edits") &&
-    surfaceSource.includes(
+  sourceIncludes(surfaceSource, "OpenAI permissions") &&
+    sourceIncludes(surfaceSource, "Anthropic permissions") &&
+    sourceIncludes(surfaceSource, 'gatedLabel: "Ask for approval"') &&
+    sourceIncludes(surfaceSource, 'autoLabel: "Approve for me"') &&
+    sourceIncludes(surfaceSource, 'directLabel: "Full access"') &&
+    sourceIncludes(surfaceSource, "detail: approvalCopy.gatedDetail") &&
+    sourceIncludes(surfaceSource, "detail: approvalCopy.autoDetail") &&
+    sourceIncludes(surfaceSource, "detail: approvalCopy.directDetail") &&
+    sourceIncludes(
+      surfaceSource,
+      "Always ask before commands and file edits",
+    ) &&
+    sourceIncludes(
+      surfaceSource,
       "Unrestricted access to the internet and any file on your computer",
     ) &&
-    surfaceSource.includes("icon: Hand") &&
-    surfaceSource.includes("icon: Clock") &&
-    surfaceSource.includes("ApprovalChipIcon") &&
-    !surfaceSource.includes('action: "toggle-access"') &&
-    !surfaceSource.includes("Codex settings") &&
-    !surfaceSource.includes("Claude settings") &&
-    surfaceSource.includes("Command policy") &&
-    surfaceSource.includes("File edit policy") &&
-    surfaceSource.includes("approvalChipClassName") &&
-    surfaceSource.includes('approvalMode === "direct"') &&
-    surfaceSource.includes('approvalMode === "auto"') &&
-    surfaceSource.includes('action: "set-approval-auto"') &&
-    surfaceSource.includes('kind: "permission-direct"') &&
+    sourceIncludes(surfaceSource, "icon: Hand") &&
+    sourceIncludes(surfaceSource, "icon: Clock") &&
+    sourceIncludes(surfaceSource, "ApprovalChipIcon") &&
+    !sourceIncludes(surfaceSource, 'action: "toggle-access"') &&
+    !sourceIncludes(surfaceSource, "Codex settings") &&
+    !sourceIncludes(surfaceSource, "Claude settings") &&
+    sourceIncludes(surfaceSource, "Command policy") &&
+    sourceIncludes(surfaceSource, "File edit policy") &&
+    sourceIncludes(surfaceSource, "approvalChipClassName") &&
+    sourceIncludes(surfaceSource, 'approvalMode === "direct"') &&
+    sourceIncludes(surfaceSource, 'approvalMode === "auto"') &&
+    sourceIncludes(surfaceSource, 'action: "set-approval-auto"') &&
+    sourceIncludes(surfaceSource, 'kind: "permission-direct"') &&
     styleSource.includes(".gyro-composer-menu-item.is-permission-direct") &&
-    surfaceSource.includes('"gyro-composer-chip is-warning"') &&
-    surfaceSource.includes("className={approvalChipClassName}") &&
-    appSource.includes("approvalNotificationCopy") &&
-    appSource.includes("fullAccess: true") &&
-    desktopRustSource.includes("request.full_access = config.full_access") &&
-    desktopRustSource.includes('"danger-full-access"') &&
-    desktopRustSource.includes('"type": "dangerFullAccess"') &&
-    desktopRustSource.includes('"on-request"'),
+    sourceIncludes(surfaceSource, '"gyro-composer-chip is-warning"') &&
+    sourceIncludes(surfaceSource, "className={approvalChipClassName}") &&
+    sourceIncludes(appSource, "approvalNotificationCopy") &&
+    sourceIncludes(appSource, "fullAccess: true") &&
+    sourceIncludes(
+      desktopRustSource,
+      "request.full_access = config.full_access",
+    ) &&
+    sourceIncludes(desktopRustSource, '"danger-full-access"') &&
+    readRepoFile("crates/gyro-core/src/provider_permissions.rs").includes(
+      '"type": "dangerFullAccess"',
+    ) &&
+    sourceIncludes(desktopRustSource, '"on-request"'),
   "Permission controls should expose ask, sandboxed auto-approval, and orange Full Access as distinct backend modes.",
 );
 expect(
@@ -7765,22 +7999,32 @@ expect(
   "Backed session creation should not open the workspace picker.",
 );
 expect(
-  appSource.includes("const startNewChat") &&
-    appSource.includes("const suppressSessionAutoSelectRef = useRef(true)") &&
-    appSource.includes("suppressSessionAutoSelectRef.current = true") &&
-    appSource.includes("setActiveSessionId(undefined)") &&
-    appSource.includes(
-      'dispatchWorkbench({ type: "set-workbench-mode", mode: "local" });',
+  sourceIncludes(appSource, "const startNewChat") &&
+    sourceIncludes(
+      appSource,
+      "const suppressSessionAutoSelectRef = useRef(true)",
     ) &&
-    appSource.includes("onCreateSession={startNewChat}") &&
-    surfaceSource.includes("const transcriptState = useMemo") &&
-    surfaceSource.includes(
+    sourceIncludes(appSource, "suppressSessionAutoSelectRef.current = true") &&
+    sourceIncludes(appSource, "setActiveSessionId(undefined)") &&
+    sourceIncludes(
+      appSource,
+      'dispatchWorkbench({ type: "set-workbench-mode", mode: draftWorkspaceMode });',
+    ) &&
+    sourceIncludes(
+      appSource,
+      "draftWorkspaceModes.current[draftKey] ?? workbench.preferences.defaultWorkspaceMode",
+    ) &&
+    sourceIncludes(appSource, "onCreateSession={startNewChat}") &&
+    sourceIncludes(surfaceSource, "const transcriptState = useMemo") &&
+    sourceIncludes(
+      surfaceSource,
       "const isEmptyStart = turns.length === 0 && looseEvents.length === 0",
     ) &&
-    surfaceSource.includes("if (isEmptyStart)") &&
-    surfaceSource.includes('aria-label="New Chat"') &&
-    surfaceSource.includes("!isEmptyStart &&") &&
-    surfaceSource.includes(
+    sourceIncludes(surfaceSource, "if (isEmptyStart)") &&
+    sourceIncludes(surfaceSource, 'aria-label="New Chat"') &&
+    sourceIncludes(surfaceSource, "!isEmptyStart &&") &&
+    sourceIncludes(
+      surfaceSource,
       '!isEmptyStart && activeRailPanel === "environment" && !isCompanionPanel',
     ),
   "Cold launch and New chat should keep recent sessions unselected, reset to local mode, and render the start screen from transcript events.",
@@ -8038,14 +8282,17 @@ expect(
 );
 
 expect(
-  surfaceSource.includes("export function SessionDeleteConfirmOverlay") &&
-    surfaceSource.includes("gyro-chat-delete-card") &&
-    surfaceSource.includes("Delete this chat?") &&
+  sourceIncludes(
+    readRepoFile("packages/ui/src/workspace-sidebar.tsx"),
+    "export function SessionDeleteConfirmOverlay",
+  ) &&
+    sourceIncludes(surfaceSource, "gyro-chat-delete-card") &&
+    sourceIncludes(surfaceSource, "Delete this chat?") &&
     styleSource.includes(".gyro-chat-delete-card") &&
     styleSource.includes(".gyro-chat-delete-note") &&
-    surfaceSource.includes("setSessionDeleteCandidate({") &&
-    surfaceSource.includes("<SessionDeleteConfirmOverlay") &&
-    surfaceSource.includes("onDeleteSession?.(candidate.id)"),
+    sourceIncludes(surfaceSource, "setSessionDeleteCandidate({") &&
+    sourceIncludes(surfaceSource, "<SessionDeleteConfirmOverlay") &&
+    sourceIncludes(surfaceSource, "onDeleteSession?.(candidate.id)"),
   "Deleting a sidebar chat should confirm in a styled overlay before the session is removed.",
 );
 
@@ -8659,7 +8906,7 @@ const windowMaterialSource = readRepoFile(
   "packages/ui/src/window-material.css",
 );
 expect(
-  surfaceSource.includes('key={`rename:${file.path}`}') &&
+  surfaceSource.includes("key={`rename:${file.path}`}") &&
     surfaceSource.includes("file.path === explorerDraft.renamePath") &&
     surfaceSource.includes("acceptBlur.current") &&
     styleSource.includes(
@@ -8749,46 +8996,47 @@ expect(
 );
 
 expect(
-  surfaceSource.includes("estimateComposerContextUsage") &&
-    surfaceSource.includes("contextUsage.usedLabel") &&
-    surfaceSource.includes("contextUsage.windowLabel") &&
-    surfaceSource.includes("contextUsage.percentLabel") &&
-    surfaceSource.includes("composerModelPickerItem") &&
+  sourceIncludes(surfaceSource, "estimateComposerContextUsage") &&
+    sourceIncludes(surfaceSource, "contextUsage.usedLabel") &&
+    sourceIncludes(surfaceSource, "contextUsage.windowLabel") &&
+    sourceIncludes(surfaceSource, "contextUsage.percentLabel") &&
+    sourceIncludes(surfaceSource, "composerModelPickerItem") &&
     // Hovering a model in the picker must not open the context card over it.
-    !surfaceSource.includes("previewComposerContextModel") &&
+    !sourceIncludes(surfaceSource, "previewComposerContextModel") &&
     !styleSource.includes(".gyro-composer-context-meter.is-previewing") &&
     // Occupancy survives a model switch; only the window is model-scoped.
     readRepoFile("packages/ui/src/context-usage.ts").includes(
-      "reportedModelId !== model.modelId",
+      "eventModelId === model.modelId",
     ) &&
     readRepoFile("packages/ui/src/context-usage.ts").includes(
       "const matchesModel =",
     ) &&
     readRepoFile("packages/ui/src/context-usage.ts").includes(
-      "reportedTokens + liveEstimatedTokens",
+      "reportedInputTokens + reportedOutputTokens",
     ) &&
-    surfaceSource.includes("gyro-composer-context-bar") &&
+    sourceIncludes(surfaceSource, "gyro-composer-context-bar") &&
     styleSource.includes(
       ':root[data-theme="light"] .gyro-composer-context-tooltip',
     ) &&
     styleSource.includes(
       ':root[data-theme="light"] .gyro-composer-context-bar',
     ) &&
-    cssRules(styleSource, ".gyro-composer-context-bar").some(
-      (rule) =>
-        rule.includes("height: 5px") &&
-        rule.includes("var(--gyro-premium-hairline-soft)"),
+    cssRules(styleSource, ".gyro-composer-context-bar").some((rule) =>
+      rule.includes("height: 3px"),
     ) &&
     styleSource.includes("var(--gyro-accent-strong)") &&
     styleSource.includes("min-width: 316px") &&
     styleSource.includes("border-radius: 2px") &&
-    desktopRustSource.includes('"thread/tokenUsage/updated"') &&
-    desktopRustSource.includes('"thread/compacted"') &&
-    desktopRustSource.includes('Some("contextCompaction")') &&
-    desktopRustSource.includes("codex_context_compaction_activity") &&
-    desktopRustSource.includes('kind: "context".into()') &&
-    desktopRustSource.includes("provider_context_usage_from_codex_exec") &&
-    desktopRustSource.includes('"contextUsage".into()'),
+    sourceIncludes(desktopRustSource, '"thread/tokenUsage/updated"') &&
+    sourceIncludes(desktopRustSource, '"thread/compacted"') &&
+    sourceIncludes(desktopRustSource, 'Some("contextCompaction")') &&
+    sourceIncludes(desktopRustSource, "codex_context_compaction_activity") &&
+    sourceIncludes(desktopRustSource, 'kind: "context".into()') &&
+    sourceIncludes(
+      desktopRustSource,
+      "provider_context_usage_from_codex_exec",
+    ) &&
+    sourceIncludes(desktopRustSource, '"contextUsage".into()'),
   "Composer context usage should prefer provider telemetry and render a readable detail card.",
 );
 
@@ -8969,26 +9217,30 @@ expect(
   // The outcome is drawn on the composer, where the next message is typed,
   // instead of at the top of the transcript where it scrolled out of sight.
   // Nothing announces a save: a saved goal is simply the goal on screen.
-  surfaceSource.includes("function SessionGoalStrip") &&
-    surfaceSource.includes('className="gyro-goal-strip"') &&
+  sourceIncludes(surfaceSource, "function SessionGoalStrip") &&
+    sourceIncludes(surfaceSource, 'className="gyro-goal-strip"') &&
     goalWorkingStatesCorrect &&
     goalStripSource.includes('data-running={isWorking ? "true" : undefined}') &&
-    surfaceSource.includes("isRunning={isSending}") &&
-    surfaceSource.includes(
+    sourceIncludes(surfaceSource, "isRunning={isSending}") &&
+    sourceIncludes(
+      surfaceSource,
       'sessionGoal?.status === "active" &&\n      sessionGoal.text &&\n      !isGoalComposerActive',
     ) &&
-    !surfaceSource.includes("Send a message to start work") &&
+    !sourceIncludes(surfaceSource, "Send a message to start work") &&
     styleSource.includes(".gyro-goal-strip {") &&
     styleSource.includes(
-      '.gyro-goal-strip[data-running="true"] .gyro-goal-strip-mark svg',
+      '.gyro-goal-strip[data-running="true"] .gyro-goal-strip-mark ',
     ) &&
-    styleSource.includes(".gyro-chat-start .gyro-goal-strip") &&
-    styleSource.includes(".gyro-goal-strip-text::before") &&
+    styleSource.includes(".gyro-composer-shell.has-goal-caption") &&
+    sourceIncludes(
+      goalStripSource,
+      '<Circle size={8} fill={isWorking ?"currentColor":"none"} />',
+    ) &&
     // Opening the editor from `/goal` or the "+" menu puts this chip under
     // the pointer, so a native title surfaces an OS tooltip nobody asked
     // for. The draft promise lives in the accessible name instead.
-    surfaceSource.includes('aria-label="Close goal editor — draft is kept"') &&
-    !surfaceSource.includes('title="Close goal editor'),
+    sourceIncludes(surfaceSource, ':"Close goal editor — draft is kept"') &&
+    !sourceIncludes(surfaceSource, 'title="Close goal editor'),
   "The goal rides on the composer as a one-line strip with its clock and controls, its mark rotates only while a turn is running, no save is announced in prose, and closing the goal editor never fires a stray hover tooltip.",
 );
 

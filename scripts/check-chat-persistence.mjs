@@ -1,9 +1,10 @@
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 
-const source = readFileSync(
+const source = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );
@@ -47,6 +48,11 @@ const context = {
   activeSessionId: "existing",
   workspacePath: "/project",
   activeDraftKey: draftKey,
+  carryFolderlessDraft: () => {},
+  config: {},
+  configLoaded: false,
+  draftWorkspaceModes: { current: {} },
+  workbench: { preferences: { defaultWorkspaceMode: "local" } },
   chatGrid: { layouts: {} },
   chatProjectKey: (path) => path,
   suppressSessionAutoSelectRef: { current: false },

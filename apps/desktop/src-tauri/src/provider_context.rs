@@ -712,10 +712,9 @@ pub(super) fn catalog_context_window(provider_id: &str, model_id: Option<&str>) 
         "anthropic" => match model_id {
             // Claude Code runs bare Opus ids at 200K; the `-1m` rows select 1M.
             "claude-haiku-4-5" | "claude-opus-5-5" | "claude-opus-5" | "claude-opus-4-8" => 200_000,
-            "" | "claude-fable-5-1" | "claude-fable-5" | "claude-opus-5-5-1m" | "claude-opus-5-1m"
-            | "claude-opus-4-8-1m" | "claude-sonnet-5-5" | "claude-sonnet-5" | "claude-haiku-5-5" => {
-                1_000_000
-            }
+            "" | "claude-fable-5-1" | "claude-fable-5" | "claude-opus-5-5-1m"
+            | "claude-opus-5-1m" | "claude-opus-4-8-1m" | "claude-sonnet-5-5"
+            | "claude-sonnet-5" | "claude-haiku-5-5" => 1_000_000,
             _ => return None,
         },
         // K3 and K3.1 Pro entitlements depend on the plan; retain the Plus

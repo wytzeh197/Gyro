@@ -1,13 +1,13 @@
 use crate::execution::{
     run_command, CancellationToken, ExecutionOutcome, ExecutionRequest, ExecutionTermination,
 };
+use crate::provider_install::{install_guide, ProviderInstallGuide};
 use crate::{
     check_acp_health, check_kimi_acp_health, discover_ollama_models, health_kind_for,
     openai_compat_endpoint, openai_compat_host_is_loopback, openai_compat_list_models,
     provider_api_key_env_name, provider_has_api_key, try_stored_provider_api_key_env,
     KimiAcpHealthStatus, ProviderHealthKind,
 };
-use crate::provider_install::{install_guide, ProviderInstallGuide};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
@@ -1108,7 +1108,10 @@ mod tests {
             provider_runtime_status_from_output("Failed to authenticate: unauthorized"),
             "not-logged-in"
         );
-        assert_eq!(provider_runtime_status_from_output("Error: Please sign in to view available models."), "not-logged-in");
+        assert_eq!(
+            provider_runtime_status_from_output("Error: Please sign in to view available models."),
+            "not-logged-in"
+        );
     }
 
     #[cfg(unix)]

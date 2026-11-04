@@ -934,7 +934,7 @@
   cursor: pointer;
   flex: none;
   font: inherit;
-  font-size: var(--gyro-chat-font-meta, 12px);
+  font-size: var(--gyro-chat-font-meta);
   line-height: 1.2;
   margin: 2px 0;
   padding: 2px 8px;

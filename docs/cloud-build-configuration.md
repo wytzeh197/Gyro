@@ -1,0 +1,11 @@
+# Cloud build configuration
+
+Normal builds expose Account, Plan & billing and Cloud through one native `cloud_connection` coordinator. No local `.app` launcher or `GYRO_CLOUD_ENABLED` override is required. Local/BYO work remains account-free.
+
+`config/cloud-production.json` is the committed source for public production pins. It contains no credentials. The separate private service prepares the same shape after production resources are verified. Both Auth fields are currently null because the accessible Supabase organization contains only `gyro-staging`; paid Cloud therefore reports unconfigured. Never substitute that staging project or a simulated entitlement to make a production build appear connected.
+
+After separately approved production provisioning, copy only the reviewed public pins (API/share origins, production Auth project reference and publishable key) into this file, commit them, and rebuild normally with `pnpm desktop:bundle`. No runtime endpoint input is accepted from a webview. Compile-time `GYRO_CLOUD_V2_*` pins remain available for explicit builds; a partial or mixed pin set fails closed. Debug-only `GYRO_CLOUD_V2_STAGING_*` configuration uses separate native state and Keychain identities and is absent from release adapters.
+
+Access credentials remain in native memory. Remembered refresh credentials use macOS Keychain under `dev.gyro.cloud.refresh`, separated by environment/project. Restoring a remembered session is explicit; startup never signs in or requests an email. Subscribe is the only path that can create a service account. Refresh rotates the refresh credential, rechecks the service snapshot and updates every account/billing/Cloud surface. Sign out fences older responses, clears native state/Keychain and attempts server plus issuer revocation; pending revocation is reported rather than silently treated as success. A verified Auth session alone never grants a subscription or allowance.
+
+The legacy `gyro_cloud` in-memory login and staging API are no longer registered as installed-app commands. Historic previews are not production acceptance. Production restart, refresh, sign-out and fulfillment still need hosted end-to-end acceptance after deployment; local transport and native unit tests do not close that gate.

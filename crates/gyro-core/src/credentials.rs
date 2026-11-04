@@ -62,7 +62,10 @@ mod antigravity_auth_tests {
     fn google_sign_in_and_adc_do_not_use_the_retired_gemini_key() {
         assert!(!super::provider_supports_api_key("antigravity"));
         assert_eq!(super::provider_api_key_env_name("antigravity"), None);
-        assert_eq!(super::provider_credential_env_vars("antigravity"), ["GOOGLE_APPLICATION_CREDENTIALS"]);
+        assert_eq!(
+            super::provider_credential_env_vars("antigravity"),
+            ["GOOGLE_APPLICATION_CREDENTIALS"]
+        );
     }
 }
 

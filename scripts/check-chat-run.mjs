@@ -1,3 +1,4 @@
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
@@ -579,10 +580,7 @@ assert.equal(
   "a Keychain error that already says to unlock should not repeat the recovery line",
 );
 assert.equal(
-  failureDetail(
-    "The provider stopped responding.",
-    "Send again to continue.",
-  ),
+  failureDetail("The provider stopped responding.", "Send again to continue."),
   "The provider stopped responding. Send again to continue.",
   "recovery advice still follows an error that does not already include it",
 );
@@ -1520,7 +1518,7 @@ assert.ok(
 // already flip at `:root[data-theme="light"]`. One hardcoded colour and the rail
 // grows a ghost line in one theme, which is how `styles.css` accumulated its 280
 // light overrides. The rule is only real if it is checked.
-const stylesheet = readFileSync(
+const stylesheet = readRepoSource(
   new URL("../packages/ui/src/styles.css", import.meta.url),
   "utf8",
 );
@@ -1551,7 +1549,6 @@ assert.equal(
   1,
   "the run rail allows exactly one light override (icon opacity, which is optical)",
 );
-
 
 assert.equal(
   buildRunModel([], {
@@ -1874,7 +1871,11 @@ assert.equal(fileMatchesPathUndo(moved, topMove, roots), true);
 assert.equal(
   fileMatchesPathUndo(
     { path: "notes.md", lifecycle: "move" },
-    { action: "moved", path: "/repo/docs/notes.md", label: "Undo move of notes.md" },
+    {
+      action: "moved",
+      path: "/repo/docs/notes.md",
+      label: "Undo move of notes.md",
+    },
     roots,
   ),
   false,

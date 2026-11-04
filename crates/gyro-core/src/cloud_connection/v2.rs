@@ -166,6 +166,11 @@ impl Config {
         environment: Environment,
     ) -> Result<Self, Error> {
         let api_origin = Self::origin(api_origin)?;
+        if environment == Environment::Production
+            && (api_origin.contains("staging") || project_ref == "hqyahsvqjizmsfxclxzd")
+        {
+            return Err(Error::Input);
+        }
         let auth = StagingConfig::new(project_ref, publishable_key)?;
         #[cfg(debug_assertions)]
         let scope = format!(
@@ -195,6 +200,37 @@ impl Config {
         self.share_origin = Some(origin);
         Ok(self)
     }
+    /// Committed public deployment pins. Incomplete provisioning keeps paid
+    /// Cloud unconfigured; Account/local work remain available in every build.
+    fn bundled_production() -> Option<Self> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct PublicConfig {
+            environment: String,
+            api_origin: String,
+            share_origin: String,
+            auth_project: Option<String>,
+            auth_publishable_key: Option<String>,
+        }
+        let pins: PublicConfig = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../config/cloud-production.json"
+        )))
+        .ok()?;
+        if pins.environment != "production"
+            || pins.auth_project.as_deref() == Some("hqyahsvqjizmsfxclxzd")
+        {
+            return None;
+        }
+        Self::production(
+            &pins.api_origin,
+            pins.auth_project.as_deref()?,
+            pins.auth_publishable_key.as_deref()?,
+        )
+        .ok()?
+        .with_share_origin(&pins.share_origin)
+        .ok()
+    }
     fn production_pins() -> BuildPins<'static> {
         BuildPins {
             api: option_env!("GYRO_CLOUD_V2_API_ORIGIN"),
@@ -218,7 +254,7 @@ impl Config {
         if Self::staging_pins().any() {
             return true;
         }
-        Self::production_pins().any()
+        Self::production_pins().any() || Self::bundled_production().is_some()
     }
     #[cfg(debug_assertions)]
     fn debug_pins(production: BuildPins<'_>, staging: BuildPins<'_>) -> Option<Self> {
@@ -232,10 +268,20 @@ impl Config {
     pub fn from_build() -> Option<Self> {
         #[cfg(debug_assertions)]
         {
-            return Self::debug_pins(Self::production_pins(), Self::staging_pins());
+            return if Self::production_pins().any() || Self::staging_pins().any() {
+                Self::debug_pins(Self::production_pins(), Self::staging_pins())
+            } else {
+                Self::bundled_production()
+            };
         }
         #[cfg(not(debug_assertions))]
-        Self::production_pins().configure(Environment::Production)
+        {
+            if Self::production_pins().any() {
+                Self::production_pins().configure(Environment::Production)
+            } else {
+                Self::bundled_production()
+            }
+        }
     }
 }
 
@@ -1071,8 +1117,7 @@ pub fn checked_billing_url(value: &str) -> Result<String, Error> {
     let u = url::Url::parse(value).map_err(|_| Error::Protocol)?;
     // Stripe Checkout uses the fragment to open its hosted payment page.
     let stripe_checkout = u.host_str() == Some("checkout.stripe.com")
-        && (u.path().starts_with("/c/pay/cs_test_")
-            || u.path().starts_with("/c/pay/cs_live_"));
+        && (u.path().starts_with("/c/pay/cs_test_") || u.path().starts_with("/c/pay/cs_live_"));
     if value.len() > 8192
         || u.scheme() != "https"
         || !matches!(
@@ -1230,9 +1275,11 @@ mod tests {
             "https://cloud.example?token=x",
             "https://cloud.example#x",
             "https://cloud.example:4342",
+            "https://gyro-cloud-v2-staging-api.example",
         ] {
             assert!(Config::production(bad, "abcdefghijklmnopqrst", key).is_err());
         }
+        assert!(Config::production("https://cloud.example", "hqyahsvqjizmsfxclxzd", key).is_err());
         assert!(Config::production("https://cloud.example", "abcdefghijklmnopqrst", key).is_ok());
     }
     #[test]

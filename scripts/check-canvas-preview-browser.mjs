@@ -25,11 +25,15 @@ const browser = spawn(
   { stdio: "ignore" },
 );
 browser.once("error", (error) => {
-  console.error(`Could not launch Canvas test browser at ${browserPath}: ${error.message}`);
+  console.error(
+    `Could not launch Canvas test browser at ${browserPath}: ${error.message}`,
+  );
 });
 browser.once("exit", (code, signal) => {
   if (code !== null && code !== 0) {
-    console.error(`Canvas test browser exited early (code ${code}, signal ${signal})`);
+    console.error(
+      `Canvas test browser exited early (code ${code}, signal ${signal})`,
+    );
   }
 });
 const pause = () => new Promise((resolve) => setTimeout(resolve, 100));
@@ -229,5 +233,10 @@ try {
     if (browser.exitCode !== null) resolve();
     else browser.once("exit", resolve);
   });
-  await rm(profile, { recursive: true, force: true });
+  await rm(profile, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
 }

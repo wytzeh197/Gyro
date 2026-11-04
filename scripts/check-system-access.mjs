@@ -1,3 +1,4 @@
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
@@ -11,7 +12,7 @@ import {
   safeSetLocalStorage,
 } from "../apps/desktop/src/ui-storage.ts";
 
-const source = readFileSync(
+const source = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );

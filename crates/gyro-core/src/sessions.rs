@@ -1,5 +1,5 @@
-mod project_import_storage;
 mod context_query;
+mod project_import_storage;
 pub use project_import_storage::{ProjectImportCommit, SessionImportSource};
 
 use crate::capabilities::ProjectCapabilityPolicy;

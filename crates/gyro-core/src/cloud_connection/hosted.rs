@@ -131,8 +131,8 @@ impl HostedConnection {
         if !cfg!(debug_assertions) || port < 1024 {
             return Err(HostedError::Input);
         }
-        let project = option_env!("GYRO_CLOUD_LEGACY_STAGING_AUTH_PROJECT")
-            .ok_or(HostedError::Input)?;
+        let project =
+            option_env!("GYRO_CLOUD_LEGACY_STAGING_AUTH_PROJECT").ok_or(HostedError::Input)?;
         let public_key = option_env!("GYRO_CLOUD_LEGACY_STAGING_AUTH_PUBLISHABLE_KEY")
             .ok_or(HostedError::Input)?;
         let config = StagingConfig::new(project, public_key)?;

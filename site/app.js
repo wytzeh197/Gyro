@@ -7,6 +7,7 @@ import {
   formatBytes,
   formatPublishedDate,
   isUsableRelease,
+  releaseAppVersion,
   selectReleaseAssets,
   sha256FromDigest,
 } from "./release-utils.js";
@@ -91,7 +92,7 @@ function configureRelease(surface, release) {
   const checksums = find(surface, "checksums-link");
   const fallback = find(surface, "release-fallback");
 
-  if (version) version.textContent = release.tag_name.replace(/^v/, "Gyro ");
+  if (version) version.textContent = `Gyro ${releaseAppVersion(release)}`;
   if (date)
     date.textContent = formatPublishedDate(release.published_at, {
       short: true,
