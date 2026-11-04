@@ -74,3 +74,23 @@ export function stagingBuildPins(staging, production) {
     GYRO_CLOUD_V2_STAGING_SHARE_ORIGIN: staging.shareOrigin,
   });
 }
+
+// Finder identity and local data stay separate for every validated staging project.
+export function stagingAppIsolation(authProject) {
+  if (typeof authProject !== "string" || !/^[a-z]{20}$/.test(authProject))
+    throw new Error(
+      "A canonical staging Auth project is required for app isolation.",
+    );
+  const relativeDataDirectory = `Gyro Cloud Staging/${authProject}`;
+  return Object.freeze({
+    authProject,
+    productName: `Gyro Cloud Staging ${authProject.slice(0, 8)}`,
+    identifier: `dev.gyro.desktop.cloudstaging.${authProject}`,
+    relativeDataDirectory,
+    assetProtocolScope: Object.freeze([
+      `$DATA/${relativeDataDirectory}/sessions/attachments/**`,
+      `$DATA/${relativeDataDirectory}/browser-captures/**`,
+    ]),
+    launcherDefine: `-DGYRO_STAGING_PROJECT="${authProject}"`,
+  });
+}

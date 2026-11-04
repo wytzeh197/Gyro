@@ -3,7 +3,10 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { stagingBuildPins } from "./cloud-staging-configuration.mjs";
+import {
+  stagingBuildPins,
+  stagingAppIsolation,
+} from "./cloud-staging-configuration.mjs";
 
 if (process.platform !== "darwin")
   throw new Error("This script builds a macOS app.");
@@ -11,14 +14,14 @@ if (process.platform !== "darwin")
 const root = fileURLToPath(new URL("../", import.meta.url));
 const desktop = join(root, "apps/desktop");
 const targetDir = resolve(process.env.CARGO_TARGET_DIR || join(root, "target"));
-const productName = "Gyro Cloud Staging";
-const identifier = "dev.gyro.desktop.cloudstaging";
 const readConfig = (name) =>
   JSON.parse(readFileSync(join(root, "config", name), "utf8"));
 const pins = stagingBuildPins(
   readConfig("cloud-staging.json"),
   readConfig("cloud-production.json"),
 );
+const isolation = stagingAppIsolation(pins.GYRO_CLOUD_V2_STAGING_AUTH_PROJECT);
+const { productName, identifier } = isolation;
 // Validate before creating artifacts or invoking any build process.
 const buildDir = mkdtempSync(join(tmpdir(), "gyro-cloud-staging-"));
 
@@ -50,6 +53,14 @@ const frontend = join(buildDir, "frontend");
 const base = JSON.parse(
   readFileSync(join(desktop, "src-tauri/tauri.conf.json"), "utf8"),
 );
+const minimumSystemVersion = base.bundle?.macOS?.minimumSystemVersion;
+if (
+  typeof minimumSystemVersion !== "string" ||
+  !/^[0-9]+(?:\.[0-9]+){1,2}$/.test(minimumSystemVersion)
+)
+  throw new Error(
+    "A reviewed macOS deployment target is required for the staging launcher.",
+  );
 const config = join(buildDir, "tauri-staging.json");
 writeFileSync(
   config,
@@ -63,10 +74,7 @@ writeFileSync(
       })),
       security: {
         assetProtocol: {
-          scope: [
-            "$DATA/Gyro Cloud Staging/sessions/attachments/**",
-            "$DATA/Gyro Cloud Staging/browser-captures/**",
-          ],
+          scope: isolation.assetProtocolScope,
         },
       },
     },
@@ -108,9 +116,13 @@ const contents = join(bundle, "Contents");
 const plist = join(contents, "Info.plist");
 const launcher = "gyro-staging-launcher";
 run("/usr/bin/clang", [
+  "-std=c11",
+  "-pedantic",
   "-Wall",
   "-Wextra",
   "-Werror",
+  `-mmacosx-version-min=${minimumSystemVersion}`,
+  isolation.launcherDefine,
   join(root, "scripts/cloud-staging-launcher.c"),
   "-o",
   join(contents, "MacOS", launcher),

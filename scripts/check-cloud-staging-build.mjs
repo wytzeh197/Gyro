@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { stagingBuildPins } from "./cloud-staging-configuration.mjs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import {
+  stagingBuildPins,
+  stagingAppIsolation,
+} from "./cloud-staging-configuration.mjs";
 
 const read = (name) =>
   JSON.parse(
@@ -81,3 +86,55 @@ for (const change of [
 console.log(
   "Staging build pins passed: consistent public inputs, cutover isolation and production-origin/secret rejection.",
 );
+
+const identity = stagingAppIsolation(current.authProject);
+const replacementIdentity = stagingAppIsolation(replacement.authProject);
+assert.equal(
+  identity.identifier,
+  `dev.gyro.desktop.cloudstaging.${current.authProject}`,
+);
+assert.notEqual(identity.identifier, replacementIdentity.identifier);
+assert.equal(
+  identity.productName,
+  `Gyro Cloud Staging ${current.authProject.slice(0, 8)}`,
+);
+assert.equal(
+  identity.relativeDataDirectory,
+  `Gyro Cloud Staging/${current.authProject}`,
+);
+assert.notEqual(
+  identity.relativeDataDirectory,
+  replacementIdentity.relativeDataDirectory,
+);
+assert.deepEqual(identity.assetProtocolScope, [
+  `$DATA/Gyro Cloud Staging/${current.authProject}/sessions/attachments/**`,
+  `$DATA/Gyro Cloud Staging/${current.authProject}/browser-captures/**`,
+]);
+for (const project of [
+  undefined,
+  "short",
+  "../hqyahsvqjizmsfxclxzd",
+  "HQYAH SVQJIZMSFXCLXZD".replaceAll(" ", ""),
+  "00000000000000000000",
+  "hqyahsvqjizmsfxclxzd/",
+  "hqyahsvqjizmsfxclxzd\n",
+])
+  assert.throws(() => stagingAppIsolation(project));
+const productionTauri = JSON.parse(
+  readFileSync(
+    new URL("../apps/desktop/src-tauri/tauri.conf.json", import.meta.url),
+    "utf8",
+  ),
+);
+assert.equal(productionTauri.identifier, "dev.gyro.desktop");
+assert.equal(productionTauri.productName, "Gyro");
+assert.deepEqual(productionTauri.app.security.assetProtocol.scope, [
+  "$DATA/Gyro/sessions/attachments/**",
+  "$DATA/Gyro/browser-captures/**",
+]);
+const launcherCheck = spawnSync(
+  process.execPath,
+  [fileURLToPath(new URL("check-cloud-staging-launcher.mjs", import.meta.url))],
+  { stdio: "inherit" },
+);
+assert.equal(launcherCheck.status, 0);
