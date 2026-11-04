@@ -464,3 +464,19 @@ fn email_proof_rejects_other_issuers_ambiguous_tokens_and_recovery_links_before_
     }
     assert!(wire.calls.lock().unwrap().is_empty());
 }
+
+#[cfg(debug_assertions)]
+#[test]
+fn isolated_acceptance_namespaces_cannot_address_owner_refresh_entries() {
+    assert!(MacKeychain::acceptance_namespace(Uuid::nil()).is_err());
+    let first = MacKeychain::acceptance_namespace(Uuid::new_v4())
+        .unwrap()
+        .account();
+    let second = MacKeychain::acceptance_namespace(Uuid::new_v4())
+        .unwrap()
+        .account();
+    assert!(first.starts_with("supabase:acceptance-only:abcdefghijklmnopqrst:"));
+    assert_ne!(first, second);
+    assert_ne!(first, MacKeychain::production(&config()).account());
+    assert_ne!(first, MacKeychain::staging(&config()).account());
+}
