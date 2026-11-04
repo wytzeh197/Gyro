@@ -179,7 +179,7 @@ jobs:
             export APPLE_API_KEY="$GYRO_APPLE_API_KEY"
             export APPLE_API_KEY_PATH="$GYRO_APPLE_API_KEY_PATH"
           fi
-          pnpm --filter @gyro-dev/desktop tauri build --target ${{ matrix.target }}
+          pnpm --filter @gyro-dev/desktop tauri build --target ${{ matrix.target }} -- --locked
         env:
           # bundle_dmg drives Finder through osascript to paint the background
           # and place the two icons, and passes --skip-jenkins whenever CI is

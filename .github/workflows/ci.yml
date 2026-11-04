@@ -77,7 +77,7 @@ jobs:
       # browser and LSP smoke harnesses (browser_smoke.rs, lsp_smoke.rs) run
       # against the bundle and must write ok reports.
       - name: Build debug app bundle
-        run: pnpm --filter @gyro-dev/desktop tauri build --debug --bundles app --no-sign --ci
+        run: pnpm --filter @gyro-dev/desktop tauri build --debug --bundles app --no-sign --ci -- --locked
       # The LSP smoke starts rust-analyzer through the app's language-server
       # manager; rust-analyzer is not in the toolchain's default profile.
       - name: Install rust-analyzer

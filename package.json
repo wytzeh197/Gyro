@@ -17,7 +17,7 @@
     "test:code-mode-native": "pnpm --filter @gyro-dev/codemode build && node scripts/run-code-mode-native.mjs",
     "desktop:dev": "pnpm doctor && node scripts/desktop-dev.mjs",
     "desktop:build": "pnpm --filter @gyro-dev/desktop tauri build",
-    "desktop:bundle": "pnpm --filter @gyro-dev/desktop tauri build --bundles app --no-sign --ci",
+    "desktop:bundle": "pnpm --filter @gyro-dev/desktop tauri build --bundles app --no-sign --ci -- --locked",
     "desktop:install-local": "pnpm desktop:bundle && node scripts/install-local-app.mjs",
     "dmg:background": "swift scripts/render-dmg-background.swift",
     "dev": "pnpm desktop:dev",

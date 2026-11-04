@@ -655,3 +655,7 @@ if (failures.length > 0) {
 }
 
 console.log("Gyro release configuration looks ready.");
+
+if (!rootPackage.scripts?.["desktop:bundle"]?.endsWith("-- --locked")) {
+  throw new Error("Normal native bundles must enforce Cargo.lock.");
+}
