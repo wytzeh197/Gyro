@@ -3,23 +3,24 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stagingBuildPins } from "./cloud-staging-configuration.mjs";
 
 if (process.platform !== "darwin")
   throw new Error("This script builds a macOS app.");
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const desktop = join(root, "apps/desktop");
-const buildDir = mkdtempSync(join(tmpdir(), "gyro-cloud-staging-"));
 const targetDir = resolve(process.env.CARGO_TARGET_DIR || join(root, "target"));
 const productName = "Gyro Cloud Staging";
 const identifier = "dev.gyro.desktop.cloudstaging";
-const pins = {
-  GYRO_CLOUD_V2_STAGING_API_ORIGIN: "https://staging-api.usegyro.io",
-  GYRO_CLOUD_V2_STAGING_AUTH_PROJECT: "hqyahsvqjizmsfxclxzd",
-  GYRO_CLOUD_V2_STAGING_AUTH_PUBLISHABLE_KEY:
-    "sb_publishable_NKcgdQHudtPow-IGRu-1jw_QRrIoANs",
-  GYRO_CLOUD_V2_STAGING_SHARE_ORIGIN: "https://staging-reports.usegyro.io",
-};
+const readConfig = (name) =>
+  JSON.parse(readFileSync(join(root, "config", name), "utf8"));
+const pins = stagingBuildPins(
+  readConfig("cloud-staging.json"),
+  readConfig("cloud-production.json"),
+);
+// Validate before creating artifacts or invoking any build process.
+const buildDir = mkdtempSync(join(tmpdir(), "gyro-cloud-staging-"));
 
 const env = {};
 for (const name of [
@@ -94,6 +95,8 @@ run(
     "--ci",
     "--config",
     config,
+    "--",
+    "--locked",
   ],
   desktop,
 );

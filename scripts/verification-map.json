@@ -1,4 +1,8 @@
 {
+  "check-cloud-staging-build.mjs": {
+    "kind": "behavioral",
+    "note": "Executes staging build-pin validation across partial cutover, production collision, malformed origins and secret-key inputs without network or build side effects."
+  },
   "check-google-models.mjs": {
     "kind": "behavioral",
     "note": "Executes provider migration and discovered-model merges with explicit fixture metadata; no live Google transport."

@@ -61,7 +61,7 @@
     "test:first-run-tour-browser": "node scripts/check-first-run-tour-browser.mjs",
     "test:local-app": "node --experimental-strip-types scripts/check-assistant-response-headings.mjs && node --experimental-strip-types scripts/check-model-default-suggestion.mjs && node --experimental-strip-types scripts/check-settings-upgrade.mjs && node --experimental-strip-types scripts/check-ide-evidence-push.mjs",
     "test:local-check-browser": "node scripts/check-local-check-browser.mjs",
-    "test:cloud": "node --experimental-strip-types scripts/check-cloud-chat-continuation.mjs && node --experimental-strip-types scripts/check-cloud-connection-view.mjs && node --experimental-strip-types scripts/check-cloud-services-state.mjs && node --experimental-strip-types scripts/check-cloud-settings-render.mjs && node --experimental-strip-types scripts/check-cloud-v2-contract.mjs",
+    "test:cloud": "node --experimental-strip-types scripts/check-cloud-chat-continuation.mjs && node --experimental-strip-types scripts/check-cloud-connection-view.mjs && node --experimental-strip-types scripts/check-cloud-services-state.mjs && node --experimental-strip-types scripts/check-cloud-settings-render.mjs && node --experimental-strip-types scripts/check-cloud-v2-contract.mjs && node scripts/check-cloud-staging-build.mjs",
     "test:cloud:wire": "node scripts/check-cloud-connection-wire.mjs"
   },
   "devDependencies": {
