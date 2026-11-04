@@ -699,7 +699,9 @@ mod tests {
         let result = run_worker(
             &binary(),
             &fixture_tools(),
-            "let values=[]; while(true) values.push('a'.repeat(1048576));",
+            // Touch each page: repeat() can retain lazy V8 ropes instead of
+            // allocating the intended resident memory before the time limit.
+            "let values=[]; while(true) values.push(new Uint8Array(1048576).fill(97));",
             Arc::new(AtomicBool::new(false)),
             Duration::from_secs(5),
             || false,

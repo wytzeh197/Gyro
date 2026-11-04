@@ -1740,17 +1740,36 @@ mod tests {
                 }),
             })
             .unwrap();
-        let response = manager
-            .request(LspRequestPayload {
-                server_id: session.server_id.clone(),
-                method: "textDocument/rename".into(),
-                params: serde_json::json!({
-                    "textDocument": { "uri": helper_uri },
-                    "position": { "line": 0, "character": 7 },
-                    "newName": "increase",
-                }),
-            })
-            .unwrap();
+        let rename_deadline = Instant::now() + Duration::from_secs(120);
+        let response = loop {
+            let response = manager
+                .request(LspRequestPayload {
+                    server_id: session.server_id.clone(),
+                    method: "textDocument/rename".into(),
+                    params: serde_json::json!({
+                        "textDocument": { "uri": helper_uri },
+                        "position": { "line": 0, "character": 7 },
+                        "newName": "increase",
+                    }),
+                })
+                .unwrap();
+            // didOpen can invalidate an in-flight indexing snapshot. Rename
+            // only returns an edit here; retrying this explicit protocol error
+            // does not apply or duplicate any filesystem change.
+            if response
+                .pointer("/error/code")
+                .and_then(serde_json::Value::as_i64)
+                == Some(-32801)
+            {
+                assert!(
+                    Instant::now() < rename_deadline,
+                    "rust-analyzer did not finish indexing: {response}"
+                );
+                std::thread::sleep(Duration::from_millis(LSP_INDEXING_RETRY_AFTER_MS));
+                continue;
+            }
+            break response;
+        };
         assert_eq!(response["status"], "ok", "{response}");
         let edit = &response["result"];
         assert!(edit.to_string().contains(&helper_uri), "{edit}");

@@ -176,6 +176,11 @@ try {
     "Revision replaces the same item",
   );
   await click("Code");
+  await until(() =>
+    evaluate(
+      "document.querySelector('textarea[aria-label=\"Project card content\"]')?.value.includes('Make it yours.')",
+    ),
+  );
   assert.equal(
     await evaluate(
       "document.querySelector('textarea[aria-label=\"Project card content\"]').value.includes('Make it yours.')",
@@ -194,6 +199,13 @@ try {
     ),
   );
   await click("Build UI piece");
+  // React's discrete-event update can commit after Runtime.evaluate returns.
+  // Wait for the revision itself; a fixed delay races the CI browser.
+  await until(() =>
+    evaluate(
+      "document.querySelector('.gyro-canvas-draft-status')?.textContent.includes('preserved')",
+    ),
+  );
   assert.equal(
     await evaluate(
       "document.querySelector('.gyro-canvas-draft-status').textContent.includes('preserved')",
@@ -202,6 +214,11 @@ try {
     "A model revision preserves an unsent draft",
   );
   await click("Send to chat");
+  await until(() =>
+    evaluate(
+      "document.querySelector('output')?.textContent.includes('My edited UI')",
+    ),
+  );
   assert.equal(
     await evaluate(
       "document.querySelector('output').textContent.includes('My edited UI')",
@@ -218,6 +235,11 @@ try {
   );
   await evaluate(
     `const select=document.querySelector('select[aria-label="Preview width"]'); select.value='375'; select.dispatchEvent(new Event('change',{bubbles:true}));`,
+  );
+  await until(() =>
+    evaluate(
+      "document.querySelector('.gyro-canvas iframe')?.style.width === '375px'",
+    ),
   );
   assert.equal(
     await evaluate("document.querySelector('.gyro-canvas iframe').style.width"),
