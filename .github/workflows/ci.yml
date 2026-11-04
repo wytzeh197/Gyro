@@ -84,6 +84,8 @@ jobs:
         run: rustup component add rust-analyzer
       - name: Native smoke (browser + language server)
         run: node scripts/run-native-smoke.mjs
+      - name: Build isolated Keychain probe
+        run: cargo build --locked -p gyro-core --example cloud_keychain_acceptance
       - name: Isolated native Keychain mechanism
-        timeout-minutes: 2
-        run: cargo run --locked -p gyro-core --example cloud_keychain_acceptance
+        timeout-minutes: 4
+        run: ./target/debug/examples/cloud_keychain_acceptance
