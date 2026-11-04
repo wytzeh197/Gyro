@@ -82,6 +82,43 @@ impl Environment {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PublicConfig {
+    environment: String,
+    api_origin: String,
+    share_origin: String,
+    auth_project: Option<String>,
+    auth_publishable_key: Option<String>,
+    environment_isolation_verified: bool,
+    staging_auth_project: Option<String>,
+}
+impl PublicConfig {
+    fn reserves_project(&self, environment: Environment, project: &str) -> bool {
+        match environment {
+            Environment::Production => {
+                self.staging_auth_project.as_deref() == Some(project)
+                    || (project == "hqyahsvqjizmsfxclxzd" && !self.isolated())
+            }
+            #[cfg(debug_assertions)]
+            Environment::Staging => {
+                self.isolated() && self.auth_project.as_deref() == Some(project)
+            }
+        }
+    }
+    fn isolated(&self) -> bool {
+        self.environment_isolation_verified
+            && self.staging_auth_project.as_deref().is_some_and(|stage| {
+                stage.len() == 20
+                    && stage.bytes().all(|c| c.is_ascii_lowercase())
+                    && self
+                        .auth_project
+                        .as_deref()
+                        .is_some_and(|production| production != stage)
+            })
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 struct BuildPins<'a> {
     api: Option<&'a str>,
@@ -166,8 +203,8 @@ impl Config {
         environment: Environment,
     ) -> Result<Self, Error> {
         let api_origin = Self::origin(api_origin)?;
-        if environment == Environment::Production
-            && (api_origin.contains("staging") || project_ref == "hqyahsvqjizmsfxclxzd")
+        if (environment == Environment::Production && api_origin.contains("staging"))
+            || Self::reserved_project(environment, project_ref)
         {
             return Err(Error::Input);
         }
@@ -202,24 +239,22 @@ impl Config {
     }
     /// Committed public deployment pins. Incomplete provisioning keeps paid
     /// Cloud unconfigured; Account/local work remain available in every build.
-    fn bundled_production() -> Option<Self> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase", deny_unknown_fields)]
-        struct PublicConfig {
-            environment: String,
-            api_origin: String,
-            share_origin: String,
-            auth_project: Option<String>,
-            auth_publishable_key: Option<String>,
-        }
-        let pins: PublicConfig = serde_json::from_str(include_str!(concat!(
+    fn public_config() -> Option<PublicConfig> {
+        serde_json::from_str(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../config/cloud-production.json"
         )))
-        .ok()?;
-        if pins.environment != "production"
-            || pins.auth_project.as_deref() == Some("hqyahsvqjizmsfxclxzd")
-        {
+        .ok()
+    }
+    fn reserved_project(environment: Environment, project: &str) -> bool {
+        Self::public_config().map_or(
+            environment == Environment::Production && project == "hqyahsvqjizmsfxclxzd",
+            |pins| pins.reserves_project(environment, project),
+        )
+    }
+    fn bundled_production() -> Option<Self> {
+        let pins = Self::public_config()?;
+        if pins.environment != "production" || !pins.isolated() {
             return None;
         }
         Self::production(
@@ -1262,6 +1297,24 @@ mod tests {
         ));
         assert!(store.value.lock().unwrap().is_none());
         assert!(c.view().snapshot.is_none());
+    }
+    #[test]
+    fn bundled_production_requires_verified_separate_staging_auth() {
+        let mut pins = Config::public_config().unwrap();
+        assert!(!pins.isolated());
+        assert!(Config::bundled_production().is_none());
+        pins.environment_isolation_verified = true;
+        pins.staging_auth_project = pins.auth_project.clone();
+        assert!(!pins.isolated());
+        pins.staging_auth_project = Some("zyxwvutsrqponmlkjihg".into());
+        assert!(pins.isolated());
+        assert!(!pins.reserves_project(Environment::Production, "hqyahsvqjizmsfxclxzd"));
+        assert!(pins.reserves_project(Environment::Production, "zyxwvutsrqponmlkjihg"));
+        #[cfg(debug_assertions)]
+        {
+            assert!(pins.reserves_project(Environment::Staging, "hqyahsvqjizmsfxclxzd"));
+            assert!(!pins.reserves_project(Environment::Staging, "zyxwvutsrqponmlkjihg"));
+        }
     }
     #[test]
     fn production_origins_are_fixed_public_https_configuration() {
