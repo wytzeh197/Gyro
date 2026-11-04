@@ -10,6 +10,8 @@ Access credentials remain in native memory. Remembered refresh credentials use m
 
 The legacy `gyro_cloud` in-memory login and staging API are no longer registered as installed-app commands. Historic previews are not production acceptance. Production restart, refresh, sign-out and fulfillment still need hosted end-to-end acceptance after deployment; local transport and native unit tests do not close that gate.
 
+Use the [installed native Cloud acceptance checklist](releases/v0.1.0-native-cloud-acceptance.md) for the remaining authentication, Keychain, restart, refresh, revocation and paid-fulfillment gates. Preparing or running a local mock does not authorize email delivery, hosted mutations, charges or paid provider requests. A test data directory alone does not isolate the production Keychain entry; the checklist requires a separately controlled test user or an explicitly reviewed equivalent before remembered-session testing.
+
 ## Staging build during the project cutover
 
 `config/cloud-staging.json` is the public staging build handoff. The staging builder reads this file instead of embedding a project reference in its source. After an approved staging move, replace it with the private service's reviewed `desktop-cloud-staging.public.json` export and update the reviewed replacement reference in `config/cloud-production.json`. Neither file contains credentials. Do not copy the production pins into the staging file.
