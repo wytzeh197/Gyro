@@ -72,7 +72,7 @@ jobs:
             runner: macos-15
             updater_suffix: aarch64
           - target: x86_64-apple-darwin
-            runner: macos-15-intel
+            runner: macos-15
             updater_suffix: x64
     steps:
       - uses: actions/checkout@v4
@@ -105,6 +105,7 @@ jobs:
       - name: Build and check confined Code Mode worker
         run: pnpm --filter @gyro-dev/codemode build && pnpm --filter @gyro-dev/codemode test
       - run: cargo test --workspace --locked -- --test-threads=4
+        if: matrix.target == 'aarch64-apple-darwin'
       - name: Build native CLI
         run: cargo build --locked --release -p gyro-cli --target ${{ matrix.target }}
       - name: Package and verify native CLI
@@ -115,9 +116,11 @@ jobs:
             --version "$VERSION" \
             --target "${{ matrix.target }}" \
             --output release-assets
-          node scripts/package-cli-release.mjs \
-            --verify "release-assets/gyro-cli-${VERSION}-${{ matrix.target }}.tar.gz" \
-            --run
+          VERIFY_ARGS=(--verify "release-assets/gyro-cli-${VERSION}-${{ matrix.target }}.tar.gz")
+          if [ "${{ matrix.target }}" = "aarch64-apple-darwin" ]; then
+            VERIFY_ARGS+=(--run)
+          fi
+          node scripts/package-cli-release.mjs "${VERIFY_ARGS[@]}"
       # The certificate lives only in a throwaway keychain under RUNNER_TEMP,
       # and the App Store Connect key only in a 0600 file beside it. Both are
       # removed by the always-run cleanup step at the end of this job.
@@ -192,7 +195,7 @@ jobs:
           GYRO_APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           GYRO_APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           GYRO_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      - name: Sign, notarize, and staple macOS DMG
+      - name: Sign and notarize macOS DMG
         if: env.GYRO_MACOS_SIGNING == 'developer-id'
         run: |
           set -euo pipefail
@@ -266,16 +269,90 @@ jobs:
             exit 1
           fi
           echo "DMG notarization status: Accepted"
-          xcrun stapler staple "$DMG_PATH"
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      - name: Collect release assets
+        run: |
+          mkdir -p release-assets
+          cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg release-assets/
+          cp target/${{ matrix.target }}/release/bundle/macos/Gyro.app.tar.gz release-assets/Gyro_${{ matrix.updater_suffix }}.app.tar.gz
+          cp target/${{ matrix.target }}/release/bundle/macos/Gyro.app.tar.gz.sig release-assets/Gyro_${{ matrix.updater_suffix }}.app.tar.gz.sig
+      - name: Upload architecture bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: gyro-built-${{ matrix.target }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 1
+      - name: Remove signing keychain and notary key
+        if: always() && env.GYRO_MACOS_SIGNING == 'developer-id'
+        run: |
+          if [ -n "${GYRO_KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$GYRO_KEYCHAIN_PATH" || true
+          fi
+          rm -rf "$RUNNER_TEMP/gyro-notary" "$RUNNER_TEMP/gyro-developer-id.p12"
+
+  native_intel:
+    name: Native Intel Rust tests
+    needs: signing
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: brew install ripgrep
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm --filter @gyro-dev/codemode build && pnpm --filter @gyro-dev/codemode test
+      - run: cargo test --workspace --locked -- --test-threads=4
+
+  verify:
+    name: Native package verification (${{ matrix.target }})
+    needs: [signing, macos]
+    runs-on: ${{ matrix.runner }}
+    env:
+      GYRO_MACOS_SIGNING: ${{ needs.signing.outputs.mode }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            updater_suffix: aarch64
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            updater_suffix: x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Download signed build
+        uses: actions/download-artifact@v4
+        with:
+          name: gyro-built-${{ matrix.target }}
+          path: release-assets
+      - name: Staple accepted DMG with bounded ticket-service retries
+        if: env.GYRO_MACOS_SIGNING == 'developer-id'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          DMGS=(release-assets/*.dmg)
+          test "${#DMGS[@]}" -eq 1
+          node scripts/staple-macos-artifact.mjs "${DMGS[0]}"
       - name: Verify macOS DMG
         run: |
           set -euo pipefail
           shopt -s nullglob
-          DMGS=(target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+          DMGS=(release-assets/*.dmg)
           if [ "${#DMGS[@]}" -ne 1 ]; then
             echo "Expected exactly one DMG, found ${#DMGS[@]}." >&2
             exit 1
@@ -290,38 +367,33 @@ jobs:
           ) > "$DMG_CHECKSUMS"
           SIGNING_ARGS=(--signing "$GYRO_MACOS_SIGNING")
           if [ "$GYRO_MACOS_SIGNING" = "developer-id" ]; then
+            if [[ ! "$APPLE_SIGNING_IDENTITY" =~ \(([A-Z0-9]{10})\)$ ]]; then exit 1; fi
+            GYRO_APPLE_TEAM_ID="${BASH_REMATCH[1]}"
             SIGNING_ARGS+=(--team-id "$GYRO_APPLE_TEAM_ID")
           fi
           node scripts/verify-macos-release.mjs \
             --dmg "$DMG_PATH" \
             --target "${{ matrix.target }}" \
             --checksums "$DMG_CHECKSUMS" \
-            --updater-archive "target/${{ matrix.target }}/release/bundle/macos/Gyro.app.tar.gz" \
+            --updater-archive "release-assets/Gyro_${{ matrix.updater_suffix }}.app.tar.gz" \
             "${SIGNING_ARGS[@]}"
-      - name: Collect release assets
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      - name: Execute packaged CLI on its native architecture
         run: |
-          mkdir -p release-assets
-          cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg release-assets/
-          cp target/${{ matrix.target }}/release/bundle/macos/Gyro.app.tar.gz release-assets/Gyro_${{ matrix.updater_suffix }}.app.tar.gz
-          cp target/${{ matrix.target }}/release/bundle/macos/Gyro.app.tar.gz.sig release-assets/Gyro_${{ matrix.updater_suffix }}.app.tar.gz.sig
-      - name: Upload architecture bundle
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/package-cli-release.mjs --verify "release-assets/gyro-cli-${VERSION}-${{ matrix.target }}.tar.gz" --run
+      - name: Upload verified architecture bundle
         uses: actions/upload-artifact@v4
         with:
-          name: gyro-${{ matrix.target }}
+          name: gyro-verified-${{ matrix.target }}
           path: release-assets/
           if-no-files-found: error
           retention-days: 7
-      - name: Remove signing keychain and notary key
-        if: always() && env.GYRO_MACOS_SIGNING == 'developer-id'
-        run: |
-          if [ -n "${GYRO_KEYCHAIN_PATH:-}" ]; then
-            security delete-keychain "$GYRO_KEYCHAIN_PATH" || true
-          fi
-          rm -rf "$RUNNER_TEMP/gyro-notary" "$RUNNER_TEMP/gyro-developer-id.p12"
 
   finalize:
     name: Assemble deterministic update release
-    needs: [signing, macos]
+    needs: [signing, native_intel, verify]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -331,7 +403,7 @@ jobs:
       - name: Download both architecture bundles
         uses: actions/download-artifact@v4
         with:
-          pattern: gyro-*
+          pattern: gyro-verified-*
           path: release-assets
           merge-multiple: true
       - name: Build and validate updater manifest

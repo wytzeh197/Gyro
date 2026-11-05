@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
+import { runStapler, staplerFailureIsTransient } from "./macos-stapler.mjs";
 import { spawnSync } from "node:child_process";
 import {
   accessSync,
@@ -40,39 +41,8 @@ function argument(name) {
   return value;
 }
 
-function staplerFailureIsTransient(output) {
-  return /network connection was lost|NSURLErrorDomain Code=-1005|kCFErrorDomainCFNetwork Code=-1005|CloudKit's response is inconsistent/i.test(
-    output,
-  );
-}
-
 function validateStaple(targetPath) {
-  const attempts = 4;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const result = spawnSync("xcrun", ["stapler", "validate", targetPath], {
-      encoding: "utf8",
-      maxBuffer: 16 * 1024 * 1024,
-    });
-    if (!result.error && result.status === 0) return;
-    const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}${
-      result.error?.message ?? ""
-    }`.trim();
-    const error = new Error(
-      `xcrun stapler validate ${targetPath} exited ${result.status ?? "missing"}${
-        output ? `:\n${output}` : ""
-      }`,
-    );
-    if (attempt === attempts || !staplerFailureIsTransient(output)) throw error;
-    console.error(
-      `stapler validate lost Apple's ticket service (attempt ${attempt} of ${attempts}); retrying.`,
-    );
-    const wait = spawnSync("sleep", [String(10 * attempt)], {
-      encoding: "utf8",
-    });
-    if (wait.error || wait.status !== 0) {
-      throw new Error("could not wait before retrying stapler validate");
-    }
-  }
+  runStapler("validate", targetPath);
 }
 
 function run(command, args, options = {}) {

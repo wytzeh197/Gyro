@@ -277,13 +277,13 @@ for (const marker of [
   "security set-key-partition-list",
   "export APPLE_SIGNING_IDENTITY=",
   "export APPLE_API_KEY_PATH=",
-  "Sign, notarize, and staple macOS DMG",
+  "Sign and notarize macOS DMG",
   "codesign --force --timestamp",
   "xcrun notarytool submit",
   'if [ "$STATUS" != "Accepted" ]',
   "xcrun notarytool info",
   "submissions/",
-  'xcrun stapler staple "$DMG_PATH"',
+  'node scripts/staple-macos-artifact.mjs "${DMGS[0]}"',
   '--signing "$GYRO_MACOS_SIGNING"',
   '--team-id "$GYRO_APPLE_TEAM_ID"',
   "--updater-archive",
@@ -509,9 +509,7 @@ if (process.env.GYRO_REQUIRE_RELEASE_SECRETS === "1") {
 }
 
 function dmgNotarizationStep(workflow) {
-  const start = workflow.indexOf(
-    "- name: Sign, notarize, and staple macOS DMG",
-  );
+  const start = workflow.indexOf("- name: Sign and notarize macOS DMG");
   const end = workflow.indexOf("- name: Verify macOS DMG");
   if (start === -1 || end <= start) return "";
   return workflow.slice(start, end);
@@ -526,7 +524,10 @@ function dmgNotarizationPolicyFailures(step) {
   const acceptedAt = step.indexOf('if [ "$STATUS" != "Accepted" ]');
   const requeryAt = step.indexOf("xcrun notarytool info");
   const exitAt = acceptedAt === -1 ? -1 : step.indexOf("exit 1", acceptedAt);
-  const stapleAt = step.lastIndexOf('xcrun stapler staple "$DMG_PATH"');
+  const stapleAt = Math.max(
+    step.lastIndexOf('xcrun stapler staple "$DMG_PATH"'),
+    step.lastIndexOf("node scripts/staple-macos-artifact.mjs"),
+  );
   if (!step.includes("xcrun notarytool submit")) {
     found.push("DMG notarization must submit the disk image with notarytool.");
   }
