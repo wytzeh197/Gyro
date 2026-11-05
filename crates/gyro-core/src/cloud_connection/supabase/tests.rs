@@ -101,6 +101,26 @@ fn v2_staging_refresh_accounts_never_overlap_production_or_legacy_staging() {
     assert!(first.starts_with("supabase:staging-v2:"));
 }
 
+#[cfg(debug_assertions)]
+#[test]
+fn production_acceptance_uses_a_separate_keychain_account_without_os_access() {
+    let cfg = config();
+    let namespace = Uuid::new_v4();
+    let first = MacKeychain::production_acceptance(&cfg, namespace).unwrap();
+    let reopened = MacKeychain::production_acceptance(&cfg, namespace).unwrap();
+    let another = MacKeychain::production_acceptance(&cfg, Uuid::new_v4()).unwrap();
+    assert_eq!(first.account(), reopened.account());
+    assert_ne!(first.account(), another.account());
+    assert_ne!(first.account(), MacKeychain::production(&cfg).account());
+    assert_ne!(first.account(), MacKeychain::staging(&cfg).account());
+    assert_ne!(
+        first.account(),
+        MacKeychain::v2_staging(&cfg, "scope").account()
+    );
+    assert!(MacKeychain::production_acceptance(&cfg, Uuid::nil()).is_err());
+    assert!(matches!(first.load(), Err(AuthError::Storage)));
+}
+
 #[test]
 fn construction_is_idle_and_restore_codes_never_request_signup() {
     let wire = Script::new(vec![

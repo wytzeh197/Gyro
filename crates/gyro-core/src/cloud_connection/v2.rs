@@ -651,7 +651,17 @@ impl Connection {
         let config = Config::from_build()?;
         let transport = Arc::new(Https::new(&config));
         let store = Arc::new(match config.environment {
-            Environment::Production => MacKeychain::production(&config.auth),
+            Environment::Production => {
+                #[cfg(debug_assertions)]
+                if let Some(namespace) = option_env!("GYRO_CLOUD_V2_NATIVE_ACCEPTANCE_SCOPE") {
+                    let namespace = Uuid::parse_str(namespace).ok()?;
+                    MacKeychain::production_acceptance(&config.auth, namespace).ok()?
+                } else {
+                    MacKeychain::production(&config.auth)
+                }
+                #[cfg(not(debug_assertions))]
+                MacKeychain::production(&config.auth)
+            }
             #[cfg(debug_assertions)]
             Environment::Staging => MacKeychain::v2_staging(&config.auth, &config.scope),
         });
@@ -1324,8 +1334,10 @@ mod tests {
     #[test]
     fn bundled_production_requires_verified_separate_staging_auth() {
         let mut pins = Config::public_config().unwrap();
+        assert!(pins.isolated());
+        assert!(Config::bundled_production().is_some());
+        pins.environment_isolation_verified = false;
         assert!(!pins.isolated());
-        assert!(Config::bundled_production().is_none());
         pins.environment_isolation_verified = true;
         pins.staging_auth_project = pins.auth_project.clone();
         assert!(!pins.isolated());
@@ -1355,7 +1367,8 @@ mod tests {
         ] {
             assert!(Config::production(bad, "abcdefghijklmnopqrst", key).is_err());
         }
-        assert!(Config::production("https://cloud.example", "hqyahsvqjizmsfxclxzd", key).is_err());
+        assert!(Config::production("https://cloud.example", "hqyahsvqjizmsfxclxzd", key).is_ok());
+        assert!(Config::production("https://cloud.example", "tpskieaxnzltdmpebdfz", key).is_err());
         assert!(Config::production("https://cloud.example", "abcdefghijklmnopqrst", key).is_ok());
     }
     #[test]

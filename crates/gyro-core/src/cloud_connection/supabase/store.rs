@@ -75,6 +75,22 @@ impl MacKeychain {
             scope: None,
         }
     }
+    /// Controlled native acceptance keeps real production test credentials out
+    /// of the owner's normal entry. This factory is absent from release builds.
+    #[cfg(debug_assertions)]
+    pub(crate) fn production_acceptance(
+        config: &StagingConfig,
+        namespace: Uuid,
+    ) -> Result<Self, AuthError> {
+        if namespace.is_nil() {
+            return Err(AuthError::Input);
+        }
+        Ok(Self {
+            project_ref: config.project_ref.clone(),
+            environment: "production-acceptance",
+            scope: Some(namespace.to_string()),
+        })
+    }
     #[cfg(debug_assertions)]
     pub(crate) fn v2_staging(config: &StagingConfig, scope: &str) -> Self {
         Self {
