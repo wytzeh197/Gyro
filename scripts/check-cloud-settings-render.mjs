@@ -909,3 +909,22 @@ check(
     assert.equal(actionCalls, 0);
   },
 );
+
+check("app-only release shows Account and Cloud while blocking hosted controls", () => {
+  const snapshot = { status: "unavailable", availability: "coming-soon", productionCloud: true, cloudV2: true };
+  const actions = { subscribe: forbidden, restore: forbidden, requestSignin: forbidden, verifySignin: forbidden, refresh: forbidden, manage: forbidden };
+  const accountHtml = render(ui.AccountSettings, { account: { snapshot, actions } });
+  assert.match(text(accountHtml), /Account and Cloud are coming soon/);
+  assert.doesNotMatch(accountHtml, /type="email"|Send sign-in email|Restore purchases/);
+  const navigation = render(ui.AccountNavigation, { account: { snapshot, actions }, selected: "account", onSelect: forbidden });
+  assert.match(text(navigation), /Coming soon/);
+  assert.ok(button(navigation, "Cloud"));
+  const billingHtml = render(ui.BillingSettings, { snapshot, actions });
+  assert.ok(isDisabled(button(billingHtml, "Subscribe to Gyro Plus · Coming soon")));
+  assert.ok(isDisabled(button(billingHtml, "Subscribe to Gyro Premium · Coming soon")));
+  assert.doesNotMatch(billingHtml, /type="email"|Send sign-in email|Manage billing/);
+  const cloudHtml = render(ui.CloudSettings, { snapshot, actions });
+  assert.ok(isDisabled(button(cloudHtml, "Enable Cloud · Coming soon")));
+  assert.doesNotMatch(cloudHtml, /type="email"|Send sign-in email|fixture-paid-period/);
+  assert.equal(actionCalls, 0);
+});

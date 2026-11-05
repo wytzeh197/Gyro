@@ -42,10 +42,16 @@ export function AccountNavigation({
         </span>
         <span className="gyro-account-navigation-text">
           <strong>Gyro Account</strong>
-          <small>{signedIn ? "Signed in" : "Optional"}</small>
+          <small>
+            {account.snapshot.availability === "coming-soon"
+              ? "Coming soon"
+              : signedIn
+                ? "Signed in"
+                : "Optional"}
+          </small>
         </span>
       </button>
-      {signedIn && (
+      {(signedIn || account.snapshot.availability === "coming-soon") && (
         <button
           type="button"
           className={`is-compact${selected === "cloud" ? " is-active" : ""}`}
@@ -77,8 +83,16 @@ export function AccountSettings({ account }: { account: Account }) {
           defaultOpen
         >
           <SettingsRow
-            label="Cloud is not configured in this build"
-            detail="Local work remains available. A production Cloud connection needs the published service configuration."
+            label={
+              account.snapshot.availability === "coming-soon"
+                ? "Account and Cloud are coming soon"
+                : "Cloud is not configured in this build"
+            }
+            detail={
+              account.snapshot.availability === "coming-soon"
+                ? "These optional services are disabled for this release. The local app and your own providers remain available."
+                : "Local work remains available. A production Cloud connection needs the published service configuration."
+            }
           />
         </SettingsGroup>
       )}

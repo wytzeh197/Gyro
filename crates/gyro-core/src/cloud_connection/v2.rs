@@ -18,6 +18,20 @@ use std::{
 use uuid::Uuid;
 
 pub const VERSION: &str = "2.0.0";
+/// A release choice, separate from verified infrastructure and public pins.
+pub fn release_enabled() -> bool {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Availability {
+        enabled: bool,
+    }
+    serde_json::from_str::<Availability>(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/cloud-availability.json"
+    )))
+    .map(|availability| availability.enabled)
+    .unwrap_or(false)
+}
 const MAX_RESPONSE: usize = 72 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
@@ -285,6 +299,9 @@ impl Config {
     }
     /// A partial or mixed configuration never falls back to a mock adapter.
     pub fn build_requested() -> bool {
+        if !release_enabled() {
+            return true;
+        }
         #[cfg(debug_assertions)]
         if Self::staging_pins().any() {
             return true;
@@ -649,6 +666,9 @@ pub struct Outcome {
 impl Connection {
     pub fn from_build() -> Option<Self> {
         let config = Config::from_build()?;
+        if config.environment == Environment::Production && !release_enabled() {
+            return None;
+        }
         let transport = Arc::new(Https::new(&config));
         let store = Arc::new(match config.environment {
             Environment::Production => {
@@ -1330,6 +1350,13 @@ mod tests {
         ));
         assert!(store.value.lock().unwrap().is_none());
         assert!(c.view().snapshot.is_none());
+    }
+    #[test]
+    fn app_only_release_never_constructs_a_production_adapter() {
+        assert!(!release_enabled());
+        assert!(Config::build_requested());
+        assert!(Config::bundled_production().is_some());
+        assert!(Connection::from_build().is_none());
     }
     #[test]
     fn bundled_production_requires_verified_separate_staging_auth() {

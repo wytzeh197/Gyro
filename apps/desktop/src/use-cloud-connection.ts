@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { BillingActions } from "../../../packages/ui/src/billing-settings";
 import { isTauriRuntime } from "./tauri-runtime";
+import cloudAvailability from "../../../config/cloud-availability.json";
 import {
   cloudBillingView,
   disconnectedCloudView,
@@ -21,6 +22,8 @@ export function useCloudConnection(
   const actionRunning = useRef(false);
   const backgroundTask = useRef<Promise<void> | null>(null);
   const v2 = isV2CloudView(view);
+  const releaseEnabled =
+    cloudAvailability.enabled || view.environment === "staging";
   useEffect(() => {
     if (!isTauriRuntime()) return;
     let disposed = false;
@@ -58,6 +61,7 @@ export function useCloudConnection(
       | { customerUse: "personal" | "business" },
     background = false,
   ) => {
+    if (!releaseEnabled) return;
     if (background && actionRunning.current) return;
     // A foreground click waits for a short status read; sign-out always wins.
     if (!background && action !== "sign-out" && backgroundTask.current)
@@ -100,6 +104,7 @@ export function useCloudConnection(
   };
   useEffect(() => {
     if (
+      !releaseEnabled ||
       !["staging", "production"].includes(view.environment ?? "") ||
       !view.snapshot
     )
@@ -118,8 +123,8 @@ export function useCloudConnection(
       v2 ? 30000 : 15000,
     );
     return () => clearInterval(timer);
-  }, [view.environment, v2, !!view.snapshot]);
-  const enabled = view.state !== "unconfigured";
+  }, [view.environment, v2, !!view.snapshot, releaseEnabled]);
+  const enabled = releaseEnabled && view.state !== "unconfigured";
   const connected =
     !!view.snapshot && !["signed-out", "expired"].includes(view.state);
   const actions: BillingActions = enabled
@@ -241,7 +246,14 @@ export function useCloudConnection(
       }
     : {};
   return {
-    snapshot: { ...cloudBillingView(view), ...(error ? { error } : {}) },
+    snapshot: releaseEnabled
+      ? { ...cloudBillingView(view), ...(error ? { error } : {}) }
+      : {
+          status: "unavailable" as const,
+          availability: "coming-soon" as const,
+          productionCloud: true,
+          cloudV2: true,
+        },
     actions,
   };
 }

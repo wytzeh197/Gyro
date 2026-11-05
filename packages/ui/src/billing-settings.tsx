@@ -1,10 +1,7 @@
 import { CreditCard } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { SettingsSection } from "./settings-presentation";
-import {
-  SettingsGroup,
-  SettingsRow,
-} from "./settings-controls";
+import { SettingsGroup, SettingsRow } from "./settings-controls";
 import type { CloudServicesActions } from "./cloud-services-settings";
 import {
   CLOUD_SIGNIN_PROOF_MAX_LENGTH,
@@ -27,6 +24,7 @@ export type BillingStatus =
   | "unavailable";
 export type BillingSnapshot = {
   status: BillingStatus;
+  availability?: "coming-soon";
   simulation?: boolean;
   staging?: boolean;
   productionCloud?: boolean;
@@ -168,6 +166,7 @@ export function CloudConnectionSettings({
   const [email, setEmail] = useState("");
   const [proof, setProof] = useState("");
   const [remember, setRemember] = useState(false);
+  if (snapshot.availability === "coming-soon") actions = {};
   const modernCloud = snapshot.cloudV2 || snapshot.productionCloud;
   const issue =
     ["payment-problem", "offline"].includes(snapshot.status) ||
@@ -182,8 +181,16 @@ export function CloudConnectionSettings({
           <strong>
             {snapshot.plan && paidStates.includes(snapshot.status)
               ? `${planNames[snapshot.plan]} · ${statusLabels[snapshot.status]}`
-              : statusLabels[snapshot.status]}
+              : snapshot.availability === "coming-soon"
+                ? "Account & Cloud · Coming soon"
+                : statusLabels[snapshot.status]}
           </strong>
+          {snapshot.availability === "coming-soon" ? (
+            <p>
+              Sign-in, subscriptions and hosted features are not enabled yet.
+              Local work and your own providers remain available.
+            </p>
+          ) : null}
           {snapshot.simulation ? (
             <span> · Local simulation — no real payment or allowance</span>
           ) : null}
@@ -220,7 +227,10 @@ export function CloudConnectionSettings({
           </div>
         </div>
       ) : null}
-      {showStatus && (snapshot.staging || modernCloud) && snapshot.authStage ? (
+      {showStatus &&
+      snapshot.availability !== "coming-soon" &&
+      (snapshot.staging || modernCloud) &&
+      snapshot.authStage ? (
         <SettingsGroup
           id="staging-signin"
           label={
@@ -476,6 +486,7 @@ export function BillingSettings({
   actions?: BillingActions;
   onOpenCloud?: () => void;
 }) {
+  if (snapshot.availability === "coming-soon") actions = {};
   const [paymentRefresh, setPaymentRefresh] = useState(0);
   const [planChangeMessage, setPlanChangeMessage] = useState("");
   const [changingPlan, setChangingPlan] = useState(false);
@@ -490,7 +501,11 @@ export function BillingSettings({
     id: NonNullable<BillingSnapshot["plan"]>,
     name: string,
   ) =>
-    actions.subscribe ? (
+    snapshot.availability === "coming-soon" ? (
+      <button type="button" className="gyro-secondary-button" disabled>
+        Subscribe to {name} · Coming soon
+      </button>
+    ) : actions.subscribe ? (
       <button
         type="button"
         className="gyro-secondary-button"
@@ -652,7 +667,10 @@ export function BillingSettings({
               </p>
             ) : null}
             {actions.subscribe ? (
-              <p>Gyro Plus and Gyro Premium are currently available for personal use.</p>
+              <p>
+                Gyro Plus and Gyro Premium are currently available for personal
+                use.
+              </p>
             ) : null}
             <table
               className="gyro-plan-comparison"

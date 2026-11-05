@@ -26,6 +26,28 @@ export function CloudSettings({
   workspace?: boolean;
   onManageCloud?: () => void;
 }) {
+  if (snapshot.availability === "coming-soon")
+    return (
+      <SettingsSection
+        icon={Cloud}
+        title="Gyro Cloud"
+        description="Optional hosted services · Coming soon"
+      >
+        <SettingsGroup
+          id="cloud-release-availability"
+          label="Availability"
+          defaultOpen
+        >
+          <SettingsRow
+            label="Cloud is not enabled in this release"
+            detail="Account sign-in, subscriptions, backups, sharing and managed AI are disabled. Local work and your own providers remain available."
+          />
+          <button type="button" className="gyro-secondary-button" disabled>
+            Enable Cloud · Coming soon
+          </button>
+        </SettingsGroup>
+      </SettingsSection>
+    );
   const usage = snapshot.cloudUsage;
   const stale = snapshot.status === "offline";
   const storage = usage?.storage;
