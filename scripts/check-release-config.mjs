@@ -643,6 +643,15 @@ if (dmgRetryTest.status !== 0) {
   );
 }
 
+const dmgMountTest = spawnSync(
+  process.execPath,
+  [resolve(repoRoot, "scripts/verify-macos-release.mjs"), "--self-test"],
+  { stdio: "inherit" },
+);
+if (dmgMountTest.status !== 0) {
+  failures.push("DMG mount cleanup regression checks failed.");
+}
+
 if (failures.length > 0) {
   console.error("Gyro release configuration is not ready.\n");
   for (const failure of failures) {

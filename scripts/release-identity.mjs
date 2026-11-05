@@ -13,9 +13,9 @@ if (
   throw new Error("Release identity does not match the app version.");
 if (
   releaseIdentity.tag !== `v${version}` &&
-  !new RegExp(`^v${version.replaceAll(".", "\\.")}-launch\\.\\d{8}$`).test(
-    releaseIdentity.tag,
-  )
+  !new RegExp(
+    `^v${version.replaceAll(".", "\\.")}-launch\\.\\d{8}(?:\\.[1-9]\\d*)?$`,
+  ).test(releaseIdentity.tag)
 )
   throw new Error("Release tag must identify this app version.");
 export function requireReleaseTag(tag) {

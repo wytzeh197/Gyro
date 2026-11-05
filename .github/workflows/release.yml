@@ -44,7 +44,7 @@ jobs:
             echo "Developer ID signing is partially configured; missing secrets: ${missing[*]}" >&2
             exit 1
           fi
-          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-launch\.[0-9]{8})?$ ]] && [ "$MODE" != "developer-id" ]; then
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-launch\.[0-9]{8}(\.[1-9][0-9]*)?)?$ ]] && [ "$MODE" != "developer-id" ]; then
             echo "Stable release $GITHUB_REF_NAME must be Developer ID signed and notarized; missing secrets: ${missing[*]}" >&2
             exit 1
           fi
