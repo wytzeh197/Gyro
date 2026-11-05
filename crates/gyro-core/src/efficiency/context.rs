@@ -326,7 +326,6 @@ pub fn stable_tools(tools: &mut [Value]) {
 /// turn were already sent: rewriting one misses the provider cache for it and
 /// everything after it, which costs far more than the copy it removes.
 pub fn compact_duplicate_reads(messages: &mut [Value]) -> usize {
-    use sha2::{Digest, Sha256};
     use std::collections::HashMap;
     let mut latest = HashMap::<[u8; 32], String>::new();
     let mut saved = 0;
@@ -365,8 +364,9 @@ pub fn compact_duplicate_reads(messages: &mut [Value]) -> usize {
         };
         // Compare the whole evidence, including range, root resource, revision,
         // and truncation metadata. A hash alone cannot identify a read range.
-        let fingerprint: [u8; 32] =
-            Sha256::digest(serde_json::to_vec(result).unwrap_or_default()).into();
+        // Hash the compact JSON as it is written. `to_vec` copied the whole
+        // result, including the file body, only to throw the buffer away.
+        let fingerprint = evidence_fingerprint(result);
         if let Some(newest) = latest.get(&fingerprint) {
             payload["result"]["data"] = serde_json::json!({
                 "evidenceOmitted": true,
@@ -382,6 +382,21 @@ pub fn compact_duplicate_reads(messages: &mut [Value]) -> usize {
         }
     }
     saved
+}
+
+/// SHA-256 of the same compact JSON `serde_json::to_vec` would produce.
+///
+/// A failed write hashes nothing, matching the previous `unwrap_or_default`
+/// fallback. `Sha256`'s writer does not fail in practice; the branch keeps the
+/// two paths identical if a future writer can.
+fn evidence_fingerprint(result: &Value) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    if serde_json::to_writer(&mut hasher, result).is_ok() {
+        hasher.finalize().into()
+    } else {
+        Sha256::digest([]).into()
+    }
 }
 
 const STALE_RESULT_BYTES: usize = 2_048;
@@ -895,6 +910,18 @@ mod tests {
         assert_eq!(reference["callId"], "first");
         assert_eq!(reference["result"]["data"]["sameEvidenceAsCallId"], "last");
         assert_eq!(compact_duplicate_reads(&mut messages), 0);
+    }
+    #[test]
+    fn evidence_fingerprint_matches_the_compact_json_bytes() {
+        use sha2::{Digest, Sha256};
+        let result = serde_json::json!({
+            "capabilityId": "workspace-read",
+            "data": {"contentHash": "abc", "content": "x".repeat(8_000)}
+        });
+        let via_buffer: [u8; 32] = Sha256::digest(serde_json::to_vec(&result).unwrap()).into();
+        let empty: [u8; 32] = Sha256::digest([]).into();
+        assert_eq!(evidence_fingerprint(&result), via_buffer);
+        assert_ne!(evidence_fingerprint(&result), empty);
     }
     #[test]
     fn a_later_read_never_rewrites_an_already_sent_message() {
