@@ -52,7 +52,10 @@ export function useCloudConnection(
   }, [view.state, view.revocationPending]);
   const run = async (
     action: string,
-    extra?: { email: string; remember?: boolean } | { proof: string },
+    extra?:
+      | { email: string; remember?: boolean }
+      | { proof: string }
+      | { customerUse: "personal" | "business" },
     background = false,
   ) => {
     if (background && actionRunning.current) return;
@@ -73,7 +76,9 @@ export function useCloudConnection(
           : extra && "proof" in extra
             ? "cloud_connection_verify"
             : "cloud_connection_action",
-        extra ?? { action },
+        extra && "customerUse" in extra
+          ? { action, ...extra }
+          : (extra ?? { action }),
       );
       if (ticket === generation.current) setView(next);
     } catch (e) {
@@ -126,13 +131,14 @@ export function useCloudConnection(
               view.snapshot?.subscription.state ?? "",
             )))
           ? {
-              subscribe: (plan) =>
+              subscribe: (plan, customerUse) =>
                 void run(
                   plan === "lite"
                     ? "subscribe-lite"
                     : plan === "premium"
                       ? "subscribe-premium"
                       : "subscribe-plus",
+                  customerUse ? { customerUse } : undefined,
                 ),
               restore: () => void run("restore"),
             }

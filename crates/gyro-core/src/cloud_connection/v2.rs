@@ -326,6 +326,12 @@ pub enum Plan {
     Plus,
     Premium,
 }
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CustomerUse {
+    Personal,
+    Business,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Account {
@@ -620,6 +626,7 @@ struct Inner {
     session: Option<Arc<Session>>,
     pending: Option<Pending>,
     plan: Option<Plan>,
+    customer_use: Option<CustomerUse>,
     view: View,
     received: Option<Instant>,
     checkout_request: Uuid,
@@ -674,6 +681,7 @@ impl Connection {
                 session: None,
                 pending: None,
                 plan: None,
+                customer_use: None,
                 view,
                 received: None,
                 checkout_request: Uuid::new_v4(),
@@ -827,12 +835,20 @@ impl Connection {
         s.view.clone()
     }
     pub fn choose(&self, plan: Option<Plan>) -> Result<Outcome, Error> {
+        self.choose_for_customer(plan, None)
+    }
+    pub fn choose_for_customer(
+        &self,
+        plan: Option<Plan>,
+        customer_use: Option<CustomerUse>,
+    ) -> Result<Outcome, Error> {
         let mut s = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if s.busy {
             return Err(Error::Busy);
         }
         s.generation += 1;
         s.plan = plan;
+        s.customer_use = customer_use.filter(|_| plan.is_some());
         s.pending = None;
         s.checkout_request = Uuid::new_v4();
         if s.session.is_some() && plan.is_some() {
@@ -1082,11 +1098,10 @@ impl Connection {
         })
     }
     pub fn billing(&self, plan: Option<Plan>) -> Result<Outcome, Error> {
-        let request_id = self
-            .inner
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .checkout_request;
+        let (request_id, customer_use) = {
+            let state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            (state.checkout_request, state.customer_use)
+        };
         let handoff = self.authenticated(|s| {
             self.json(
                 "POST",
@@ -1096,9 +1111,16 @@ impl Connection {
                     "/v2/billing/portal"
                 },
                 Some(s),
-                Some(
-                    plan.map_or_else(|| json!({}), |p| json!({"planId":p,"requestId":request_id})),
-                ),
+                Some(plan.map_or_else(
+                    || json!({}),
+                    |p| {
+                        let mut body = json!({"planId":p,"requestId":request_id});
+                        if let Some(customer_use) = customer_use {
+                            body["customerUse"] = json!(customer_use);
+                        }
+                        body
+                    },
+                )),
             )
         })?;
         if handoff["accessGranted"] != false {
@@ -1124,6 +1146,7 @@ impl Connection {
             s.busy = false;
             s.pending = None;
             s.plan = None;
+            s.customer_use = None;
             s.received = None;
             s.previews.clear();
             let session = s.session.take();

@@ -106,6 +106,7 @@ impl AuthTransport for Auth {
 struct Backend {
     value: Snapshot,
     reads: AtomicUsize,
+    checkout_bodies: Mutex<Vec<Value>>,
 }
 impl Transport for Backend {
     fn request(
@@ -114,7 +115,7 @@ impl Transport for Backend {
         path: &str,
         token: Option<&str>,
         device: Uuid,
-        _: Option<&[u8]>,
+        request_body: Option<&[u8]>,
         _: &'static str,
         _: Option<&str>,
     ) -> Result<Response, Error> {
@@ -126,6 +127,11 @@ impl Transport for Backend {
                 serde_json::to_vec(&self.value).unwrap()
             }
             ("POST", "/v2/devices" | "/v2/sessions/revoke") => b"{}".to_vec(),
+            ("POST", "/v2/billing/checkout") => {
+                let body: Value = serde_json::from_slice(request_body.unwrap()).unwrap();
+                self.checkout_bodies.lock().unwrap().push(body);
+                serde_json::to_vec(&json!({"accessGranted":false,"expiresAt":Utc::now()+chrono::Duration::hours(1),"url":"https://checkout.stripe.com/c/pay/cs_live_Fixture"})).unwrap()
+            }
             _ => panic!("Unexpected backend request"),
         };
         Ok(Response { status: 200, body })
@@ -162,6 +168,7 @@ fn connection(
         Arc::new(Backend {
             value: snapshot(account, session_id, device),
             reads: AtomicUsize::new(0),
+            checkout_bodies: Mutex::new(vec![]),
         }),
         device,
     );
@@ -365,4 +372,35 @@ fn concurrent_refresh_is_single_flight_and_signout_blocks_late_credential_commit
     assert_eq!(store.saves.load(Ordering::SeqCst), 1);
     assert_eq!(c.view().state, "signed-out");
     assert!(c.view().snapshot.is_none());
+}
+
+#[test]
+fn customer_use_survives_native_checkout_dispatch_and_signout_clears_it() {
+    let (account, session, device) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let backend = Arc::new(Backend {
+        value: snapshot(account, session, device),
+        reads: AtomicUsize::new(0),
+        checkout_bodies: Mutex::new(vec![]),
+    });
+    let mut c = connection(Store::new(), Auth::new(vec![]), account, session, device);
+    c.transport = backend.clone();
+    establish(&c, account, session, device, false);
+    for use_case in [CustomerUse::Personal, CustomerUse::Business] {
+        let outcome = c
+            .choose_for_customer(Some(Plan::Plus), Some(use_case))
+            .unwrap();
+        assert!(outcome.open_url.is_some());
+        let bodies = backend.checkout_bodies.lock().unwrap();
+        let body = bodies.last().unwrap();
+        assert_eq!(body["customerUse"], json!(use_case));
+        assert_eq!(body["planId"], "plus");
+        assert!(Uuid::parse_str(body["requestId"].as_str().unwrap()).is_ok());
+    }
+    // Clear the native selection through the same sign-out transition; no OS store is involved.
+    {
+        let mut state = c.inner.lock().unwrap();
+        state.session = None;
+    }
+    c.sign_out().unwrap();
+    assert!(c.inner.lock().unwrap().customer_use.is_none());
 }

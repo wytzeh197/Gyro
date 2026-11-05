@@ -893,3 +893,19 @@ check(
 console.log(
   `Cloud settings render checks passed (${checks}). SSR verifies output and rendered controls; browser layout, focus and action execution are separate checks.`,
 );
+
+check(
+  "new paid checkout requires an explicit personal/business selection",
+  () => {
+    const html = render(ui.BillingSettings, {
+      snapshot: { status: "no-subscription", productionCloud: true },
+      actions: { subscribe: forbidden },
+    });
+    assert.ok(html.includes('aria-label="Subscription use"'));
+    assert.equal(option(html, "personal").label, "Personal use");
+    assert.equal(option(html, "business").label, "Business use");
+    assert.ok(isDisabled(button(html, "Subscribe to Gyro Plus")));
+    assert.ok(isDisabled(button(html, "Subscribe to Gyro Premium")));
+    assert.equal(actionCalls, 0);
+  },
+);

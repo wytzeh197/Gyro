@@ -76,9 +76,11 @@ const checkout =
   ].schema;
 assert.equal(checkout.additionalProperties, false);
 assert.deepEqual(Object.keys(checkout.properties).sort(), [
+  "customerUse",
   "planId",
   "requestId",
 ]);
+assert.deepEqual(checkout.properties.customerUse.enum, ["personal", "business"]);
 const text = JSON.stringify(snapshot);
 for (const secret of [
   "accessToken",

@@ -141,6 +141,7 @@ fn finish(app: &tauri::AppHandle, outcome: Outcome) -> Result<Value, String> {
 pub(crate) async fn cloud_connection_action(
     app: tauri::AppHandle,
     action: Action,
+    customer_use: Option<gyro_core::cloud_connection::v2::CustomerUse>,
 ) -> Result<Value, String> {
     let state = app.state::<CloudConnection>();
     match &state.0 {
@@ -153,8 +154,10 @@ pub(crate) async fn cloud_connection_action(
                         view: c.view(),
                         open_url: None,
                     }),
-                    Action::SubscribePlus => c.choose(Some(Plan::Plus)),
-                    Action::SubscribePremium => c.choose(Some(Plan::Premium)),
+                    Action::SubscribePlus => c.choose_for_customer(Some(Plan::Plus), customer_use),
+                    Action::SubscribePremium => {
+                        c.choose_for_customer(Some(Plan::Premium), customer_use)
+                    }
                     Action::Restore => c.restore(),
                     Action::Refresh => c.refresh(),
                     Action::SignOut => c.sign_out(),

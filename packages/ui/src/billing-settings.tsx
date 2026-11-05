@@ -1,7 +1,11 @@
 import { CreditCard } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { SettingsSection } from "./settings-presentation";
-import { SettingsGroup, SettingsRow } from "./settings-controls";
+import {
+  SettingsGroup,
+  SettingsRow,
+  SettingsSelect,
+} from "./settings-controls";
 import type { CloudServicesActions } from "./cloud-services-settings";
 import {
   CLOUD_SIGNIN_PROOF_MAX_LENGTH,
@@ -83,7 +87,10 @@ export type BillingActions = {
   requestSignin?: (email: string, remember?: boolean) => Promise<void>;
   verifySignin?: (proof: string) => Promise<void>;
   mockManagedRequest?: () => void;
-  subscribe?: (plan: "lite" | "plus" | "premium") => void;
+  subscribe?: (
+    plan: "lite" | "plus" | "premium",
+    customerUse?: "personal" | "business",
+  ) => void;
   cloud?: CloudServicesActions;
   restore?: () => void;
   signOut?: () => void;
@@ -471,6 +478,9 @@ export function BillingSettings({
   onOpenCloud?: () => void;
 }) {
   const [paymentRefresh, setPaymentRefresh] = useState(0);
+  const [customerUse, setCustomerUse] = useState<"personal" | "business" | "">(
+    "",
+  );
   const [planChangeMessage, setPlanChangeMessage] = useState("");
   const [changingPlan, setChangingPlan] = useState(false);
   const [pendingPlan, setPendingPlan] = useState<"plus" | "premium">();
@@ -488,7 +498,8 @@ export function BillingSettings({
       <button
         type="button"
         className="gyro-secondary-button"
-        onClick={() => actions.subscribe?.(id)}
+        disabled={!!modernCloud && !customerUse}
+        onClick={() => actions.subscribe?.(id, customerUse || undefined)}
       >
         Subscribe to {name}
       </button>
@@ -642,6 +653,26 @@ export function BillingSettings({
                 Sandbox prices only. Managed assistance is unavailable in
                 staging.
               </p>
+            ) : null}
+            {actions.subscribe ? (
+              <SettingsRow
+                label="Subscription use"
+                detail="Choose who will use this subscription so checkout can apply the matching tax category. Personal and business plans have the same price and limits."
+              >
+                <SettingsSelect
+                  aria-label="Subscription use"
+                  value={customerUse}
+                  onChange={(event) =>
+                    setCustomerUse(
+                      event.target.value as "personal" | "business" | "",
+                    )
+                  }
+                >
+                  <option value="">Choose personal or business use</option>
+                  <option value="personal">Personal use</option>
+                  <option value="business">Business use</option>
+                </SettingsSelect>
+              </SettingsRow>
             ) : null}
             <table
               className="gyro-plan-comparison"

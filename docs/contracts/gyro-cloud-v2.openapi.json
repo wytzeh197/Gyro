@@ -2083,7 +2083,7 @@
     },
     "/v2/billing/checkout": {
       "post": {
-        "description": "Server-owned EUR price, customer, return origin and allowance. Return grants no access.",
+        "description": "Server-owned EUR price, customer, return origin and allowance. Personal/business use is required for the mixed-audience production catalog. Return grants no access.",
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -2103,6 +2103,13 @@
                     "type": "string",
                     "format": "uuid",
                     "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "customerUse": {
+                    "type": "string",
+                    "enum": [
+                      "personal",
+                      "business"
+                    ]
                   }
                 },
                 "required": [
