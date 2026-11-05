@@ -4,7 +4,6 @@ import { SettingsSection } from "./settings-presentation";
 import {
   SettingsGroup,
   SettingsRow,
-  SettingsSelect,
 } from "./settings-controls";
 import type { CloudServicesActions } from "./cloud-services-settings";
 import {
@@ -478,9 +477,6 @@ export function BillingSettings({
   onOpenCloud?: () => void;
 }) {
   const [paymentRefresh, setPaymentRefresh] = useState(0);
-  const [customerUse, setCustomerUse] = useState<"personal" | "business" | "">(
-    "",
-  );
   const [planChangeMessage, setPlanChangeMessage] = useState("");
   const [changingPlan, setChangingPlan] = useState(false);
   const [pendingPlan, setPendingPlan] = useState<"plus" | "premium">();
@@ -498,8 +494,9 @@ export function BillingSettings({
       <button
         type="button"
         className="gyro-secondary-button"
-        disabled={!!modernCloud && !customerUse}
-        onClick={() => actions.subscribe?.(id, customerUse || undefined)}
+        onClick={() =>
+          actions.subscribe?.(id, modernCloud ? "personal" : undefined)
+        }
       >
         Subscribe to {name}
       </button>
@@ -655,24 +652,7 @@ export function BillingSettings({
               </p>
             ) : null}
             {actions.subscribe ? (
-              <SettingsRow
-                label="Subscription use"
-                detail="Choose who will use this subscription so checkout can apply the matching tax category. Personal and business plans have the same price and limits."
-              >
-                <SettingsSelect
-                  aria-label="Subscription use"
-                  value={customerUse}
-                  onChange={(event) =>
-                    setCustomerUse(
-                      event.target.value as "personal" | "business" | "",
-                    )
-                  }
-                >
-                  <option value="">Choose personal or business use</option>
-                  <option value="personal">Personal use</option>
-                  <option value="business">Business use</option>
-                </SettingsSelect>
-              </SettingsRow>
+              <p>Gyro Plus and Gyro Premium are currently available for personal use.</p>
             ) : null}
             <table
               className="gyro-plan-comparison"

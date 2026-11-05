@@ -895,17 +895,17 @@ console.log(
 );
 
 check(
-  "new paid checkout requires an explicit personal/business selection",
+  "personal launch has enabled subscription actions without a business selector",
   () => {
     const html = render(ui.BillingSettings, {
       snapshot: { status: "no-subscription", productionCloud: true },
       actions: { subscribe: forbidden },
     });
-    assert.ok(html.includes('aria-label="Subscription use"'));
-    assert.equal(option(html, "personal").label, "Personal use");
-    assert.equal(option(html, "business").label, "Business use");
-    assert.ok(isDisabled(button(html, "Subscribe to Gyro Plus")));
-    assert.ok(isDisabled(button(html, "Subscribe to Gyro Premium")));
+    assert.ok(html.includes("currently available for personal use"));
+    assert.ok(!html.includes('aria-label="Subscription use"'));
+    assert.ok(!html.includes("Business use"));
+    assert.ok(!isDisabled(button(html, "Subscribe to Gyro Plus")));
+    assert.ok(!isDisabled(button(html, "Subscribe to Gyro Premium")));
     assert.equal(actionCalls, 0);
   },
 );

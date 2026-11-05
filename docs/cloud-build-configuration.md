@@ -26,9 +26,9 @@ The bundle's C launcher embeds the validated project at compile time and uses th
 
 The focused `node scripts/check-cloud-staging-build.mjs` check also verifies project-specific app identities and asset paths. On macOS it strictly compiles the C launcher and runs its real startup logic only through a disposable-home harness with executable lookup/exec intercepted. The harness checks Finder-style empty/inherited environments, preserved old-profile sentinels, malformed project rejection, symlinks, directory permissions and ownership. It never starts Gyro or accesses an existing user profile/Keychain. Other platforms report the macOS compiler portion as skipped. These checks establish build/launcher isolation; actual native sign-in, restart and hosted acceptance still require the separately controlled staging run.
 
-## Personal and business subscriptions
+## Personal subscriptions
 
-Plan & billing requires an explicit personal/business use selection before a new checkout. The same native session coordinator carries that choice through sign-in and sends `customerUse` to the billing endpoint. The backend owns the distinct pinned price/product/tax-code profiles, checks payment ownership and amount, and keeps the selected category when a subscription changes plan at renewal. Changing the selector does not change an existing paid subscription or grant access. Public amounts and plan limits remain EUR 15/49 and the existing limits. Browser fixtures verify the selector only; they are not installed-app or hosted payment evidence.
+Gyro Plus and Premium are currently offered for personal use only. Plan & billing sends `customerUse: personal` automatically through the native session coordinator; there is no business selector. The production backend rejects business or omitted classifications before creating a checkout, selects the pinned personal price/tax-code profile, and preserves account/payment ownership checks. Personal prices and plan allowances remain EUR 15/49 and the existing limits. Private historical catalog entries are retained without making business checkout available. Browser fixtures are separate from installed-app and hosted payment evidence.
 
 ## Controlled production native acceptance
 

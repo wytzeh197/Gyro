@@ -14,7 +14,7 @@ const appSource = read("site/app.js").replace(
 const fixture = JSON.parse(read("site/fixtures/latest-release.json"));
 const launchRelease = {
   ...fixture,
-  tag_name: "v0.1.0-launch.20261104",
+  tag_name: "v0.1.0-launch.20261105",
   draft: false,
   prerelease: false,
 };
