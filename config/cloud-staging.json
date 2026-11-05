@@ -1,7 +1,7 @@
 {
   "environment": "staging",
-  "apiOrigin": "https://staging-api.usegyro.io",
-  "shareOrigin": "https://staging-reports.usegyro.io",
-  "authProject": "hqyahsvqjizmsfxclxzd",
-  "authPublishableKey": "sb_publishable_NKcgdQHudtPow-IGRu-1jw_QRrIoANs"
+  "apiOrigin": "https://staging-v2-api.usegyro.io",
+  "shareOrigin": "https://staging-v2-reports.usegyro.io",
+  "authProject": "tpskieaxnzltdmpebdfz",
+  "authPublishableKey": "sb_publishable_VWoCakC42amigItlt7ox8g_xnSj6X0I"
 }
