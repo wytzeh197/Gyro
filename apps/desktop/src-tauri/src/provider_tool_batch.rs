@@ -109,6 +109,10 @@ pub(super) fn observe_response(response: &CapabilityResponse, spill_requested: b
 }
 
 pub(super) const COMPACT_INVOKE: &str = "gyro_tool_invoke";
+const COMPACT_INVOKE_DESCRIPTION: &str =
+    "Call a Gyro tool discovered by gyro_tool_catalog. Existing policy and approvals still apply.";
+/// Absent means the full list, so panes and older launchers fail closed.
+pub(super) const COMPACT_CATALOG_ENV: &str = "GYRO_CAPABILITY_COMPACT_CATALOG";
 pub(super) const COMPACT_GUIDANCE: &str = "For tools not in the direct list, call gyro_tool_catalog with a domain prefix or exact tool name, then call gyro_tool_invoke with the discovered name and its arguments object. The same Gyro approval and execution rules apply. Prefixes include gyro_workspace_, gyro_code_, gyro_terminal_, gyro_browser_, gyro_git_, gyro_ide_, gyro_github_, gyro_memory_, gyro_research, gyro_agent_, and gyro_task_. Use gyro_ to browse the full catalog.";
 pub(super) const BASELINE_GUIDANCE: &str = "Deferred tools include a compact argument schema (names, types, and limits). Call them directly. Use gyro_tool_catalog with the tool's domain prefix only when an argument is still unclear or a call is rejected as invalid.";
 
@@ -119,6 +123,31 @@ pub(super) fn apply_compact_guidance(system: &mut String) {
         system.push('\n');
         system.push_str(COMPACT_GUIDANCE);
     }
+}
+
+fn compact_invoke_parameters() -> serde_json::Value {
+    serde_json::json!({"type":"object","properties":{
+        "name":{"type":"string","description":"Exact discovered Gyro tool name."},
+        "arguments":{"type":"object","description":"Arguments matching that tool's catalog schema."}
+    },"required":["name","arguments"],"additionalProperties":false})
+}
+
+/// Only CLIs whose allowlist and approval handling for a new tool were read.
+/// Request-owned routes use `compact_tool_catalog` instead.
+pub(super) fn compact_cli_catalog_active(
+    provider_id: &str,
+    config: &gyro_core::efficiency::Config,
+) -> bool {
+    config.policies()
+        && config.compact_cli_catalog
+        && matches!(provider_id, "anthropic" | "openai" | "xai" | "kimi")
+}
+
+pub(super) const BATCH_GUIDANCE: &str = "When several read-only lookups are already known, request them together in one response instead of one per response. Do not batch a call that depends on an earlier result, or any edit or command.";
+
+pub(super) fn apply_batch_guidance(system: &mut String) {
+    system.push('\n');
+    system.push_str(BATCH_GUIDANCE);
 }
 
 pub(super) const FULL_CATALOG_FALLBACK_NOTICE: &str = "The compact tool catalog could not be retained or read. All permitted tools are now supplied directly; call them by their own names and schemas. Existing approval rules still apply.";
@@ -179,15 +208,40 @@ pub(super) fn model_tools_for(
     {
         tools.push(serde_json::json!({"type":"function","function":{
             "name": COMPACT_INVOKE,
-            "description":"Call a Gyro tool discovered by gyro_tool_catalog. Existing policy and approvals still apply.",
-            "parameters":{"type":"object","properties":{
-                "name":{"type":"string","description":"Exact discovered Gyro tool name."},
-                "arguments":{"type":"object","description":"Arguments matching that tool's catalog schema."}
-            },"required":["name","arguments"],"additionalProperties":false}
+            "description": COMPACT_INVOKE_DESCRIPTION,
+            "parameters": compact_invoke_parameters(),
         }}));
     }
     if config.policies() && config.cache_assembly {
         gyro_core::efficiency::context::stable_tools(&mut tools);
+    }
+    tools
+}
+
+/// The list a CLI's capability server serves. It shortens the same way
+/// `model_tools_for` does, and keeps the descriptor order otherwise.
+pub(super) fn mcp_tools_for(
+    mode: CapabilityRunMode,
+    allow_delegation: bool,
+    compact: bool,
+) -> Vec<serde_json::Value> {
+    let mut tools: Vec<serde_json::Value> = advertised_capability_descriptors(mode)
+        .filter(|descriptor| allow_delegation || !delegated_agents::delegation_tool(descriptor.id))
+        .filter(|descriptor| !compact || inline_tool_schema(descriptor.id))
+        .map(|descriptor| {
+            serde_json::json!({
+                "name": descriptor.id.provider_tool_name(),
+                "description": advertised_description(descriptor.id, descriptor.description),
+                "inputSchema": advertised_tool_parameters(descriptor.id),
+            })
+        })
+        .collect();
+    if compact && tools.iter().any(|tool| tool["name"] == "gyro_tool_catalog") {
+        tools.push(serde_json::json!({
+            "name": COMPACT_INVOKE,
+            "description": COMPACT_INVOKE_DESCRIPTION,
+            "inputSchema": compact_invoke_parameters(),
+        }));
     }
     tools
 }
@@ -662,6 +716,77 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cli_catalog_needs_both_switches_and_a_reviewed_cli() {
+        let on = gyro_core::efficiency::Config {
+            experimental: true,
+            compact_cli_catalog: true,
+            ..Default::default()
+        };
+        for provider in ["anthropic", "openai", "xai", "kimi"] {
+            assert!(compact_cli_catalog_active(provider, &on), "{provider}");
+        }
+        for provider in ["gemini", "cursor", "opencode", "antigravity", "deepseek"] {
+            assert!(!compact_cli_catalog_active(provider, &on), "{provider}");
+        }
+        for off in [
+            gyro_core::efficiency::Config {
+                experimental: false,
+                ..on.clone()
+            },
+            gyro_core::efficiency::Config {
+                enabled: false,
+                ..on.clone()
+            },
+            gyro_core::efficiency::Config {
+                compact_cli_catalog: false,
+                ..on.clone()
+            },
+        ] {
+            assert!(!compact_cli_catalog_active("openai", &off));
+        }
+    }
+
+    #[test]
+    fn mcp_compact_list_stays_reachable_and_is_much_shorter() {
+        let names = |tools: &[serde_json::Value]| {
+            tools
+                .iter()
+                .map(|tool| tool["name"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        let full = mcp_tools_for(CapabilityRunMode::Normal, true, false);
+        let compact = mcp_tools_for(CapabilityRunMode::Normal, true, true);
+        let (full_names, compact_names) = (names(&full), names(&compact));
+        assert!(!full_names.iter().any(|name| name == COMPACT_INVOKE));
+        assert!(full_names.iter().any(|name| name == "gyro_browser_click"));
+        assert!(!compact_names
+            .iter()
+            .any(|name| name == "gyro_browser_click"));
+        assert!(compact_names.iter().any(|name| name == "gyro_tool_catalog"));
+        assert_eq!(compact.last().unwrap()["name"], COMPACT_INVOKE);
+        // Every tool the short list drops is still reachable through the wrapper.
+        for name in full_names
+            .iter()
+            .filter(|name| !compact_names.contains(name))
+        {
+            let id = CapabilityId::from_provider_tool_name(name).unwrap();
+            assert!(!inline_tool_schema(id), "{name}");
+        }
+        let (full_bytes, compact_bytes) = (
+            serde_json::to_string(&full).unwrap().len(),
+            serde_json::to_string(&compact).unwrap().len(),
+        );
+        println!("mcp tool list: full {full_bytes} bytes, compact {compact_bytes} bytes");
+        assert!(compact_bytes * 2 < full_bytes);
+
+        // The wrapper follows discovery: Plan keeps both, Council lists nothing.
+        let plan = names(&mcp_tools_for(CapabilityRunMode::Plan, false, true));
+        assert!(plan.iter().any(|name| name == COMPACT_INVOKE));
+        let council = mcp_tools_for(CapabilityRunMode::Council, false, true);
+        assert!(!names(&council).iter().any(|name| name == COMPACT_INVOKE));
+    }
+
+    #[test]
     fn deferred_parameters_keep_browser_and_git_argument_guidance() {
         let tools = model_tools_for(
             CapabilityRunMode::Normal,
@@ -1083,6 +1208,9 @@ mod tests {
         apply_compact_guidance(&mut system);
         assert!(system.contains(COMPACT_GUIDANCE));
         assert!(!system.contains(BASELINE_GUIDANCE));
+        let mut batched = String::from("start");
+        apply_batch_guidance(&mut batched);
+        assert_eq!(batched, format!("start\n{BATCH_GUIDANCE}"));
         let denied = CapabilityResponse::failed(
             "test",
             Uuid::new_v4(),

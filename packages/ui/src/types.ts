@@ -22,6 +22,7 @@ export type AppDestination =
   | "tools"
   | "settings"
   | "automations"
+  | "cloud"
   | "providers"
   | "onboarding";
 
@@ -344,7 +345,14 @@ export type ProviderCapabilitySupport = {
   supportsImages: boolean;
   supportsResume: boolean;
   supportsUsage: boolean;
-  efficiency?: { ownsRequests: boolean; nativeContinuation: "supported" | "unsupported" | "unknown"; effort: "supported" | "unsupported" | "unknown"; cacheControls: "supported" | "unsupported" | "unknown"; usage: "supported" | "unsupported" | "unknown"; hiddenContext: boolean };
+  efficiency?: {
+    ownsRequests: boolean;
+    nativeContinuation: "supported" | "unsupported" | "unknown";
+    effort: "supported" | "unsupported" | "unknown";
+    cacheControls: "supported" | "unsupported" | "unknown";
+    usage: "supported" | "unsupported" | "unknown";
+    hiddenContext: boolean;
+  };
   capabilities: CapabilityId[];
   reason?: string;
 };
@@ -427,7 +435,10 @@ export type ChatAttachment = {
 };
 
 export type SettingsSectionId =
+  | "account"
+  | "cloud"
   | "general"
+  | "billing"
   | "import-projects"
   | "editor-workspace"
   | "tools-contributions"
@@ -736,7 +747,8 @@ export type DiffReview = {
   lastAction?: string;
 };
 
-export type BrowserPreviewDevice = "responsive" | "desktop" | "tablet" | "mobile";
+export type BrowserPreviewDevice =
+  "responsive" | "desktop" | "tablet" | "mobile";
 export type BrowserViewportMode = "auto" | BrowserPreviewDevice;
 export type BrowserViewportState = {
   mode: BrowserViewportMode;
@@ -1113,6 +1125,8 @@ export type ProviderChatStreamEvent = {
   error?: string | null;
   /** How a failed turn can be repaired, as classified by the backend. */
   recoveryKind?: string | null;
+  /** On a heartbeat, how long the live run has shown nothing. */
+  quietSeconds?: number | null;
 };
 
 export type ProviderRunDiagnostics = {
@@ -2431,16 +2445,43 @@ export type GyroAccountOidcConfig = {
 };
 
 export type PriceSnapshot = {
-  id: string; provider: string; model: string; effectiveDate: string; currency: string;
-  inputMicrosPerMillion: number; cachedMicrosPerMillion: number | null;
-  cacheWriteMicrosPerMillion: number | null; outputMicrosPerMillion: number;
+  id: string;
+  provider: string;
+  model: string;
+  effectiveDate: string;
+  currency: string;
+  inputMicrosPerMillion: number;
+  cachedMicrosPerMillion: number | null;
+  cacheWriteMicrosPerMillion: number | null;
+  outputMicrosPerMillion: number;
 };
-export type EfficiencyRoute = {phase: string; provider: string; model: string};
+export type EfficiencyRoute = {
+  phase: string;
+  provider: string;
+  model: string;
+};
 export type EfficiencyConfig = {
-  enabled: boolean; experimental: boolean; profile: "routine" | "standard" | "deep";
-  parallelAgents: boolean; prices: PriceSnapshot[];
-  routing?: {enabled: boolean; routes: EfficiencyRoute[]; escalation: EfficiencyRoute | null};
-  structuredEvidence?: boolean; cacheAssembly?: boolean; taskState?: boolean; repositoryRetrieval?: boolean; progressDetection?: boolean; compactToolCatalog?: boolean; recoverableEvidence?: boolean; retainToolCatalog?: boolean;
+  enabled: boolean;
+  experimental: boolean;
+  profile: "routine" | "standard" | "deep";
+  parallelAgents: boolean;
+  prices: PriceSnapshot[];
+  routing?: {
+    enabled: boolean;
+    routes: EfficiencyRoute[];
+    escalation: EfficiencyRoute | null;
+  };
+  structuredEvidence?: boolean;
+  cacheAssembly?: boolean;
+  taskState?: boolean;
+  repositoryRetrieval?: boolean;
+  progressDetection?: boolean;
+  compactToolCatalog?: boolean;
+  recoverableEvidence?: boolean;
+  tightEvidence?: boolean;
+  batchReads?: boolean;
+  compactCliCatalog?: boolean;
+  retainToolCatalog?: boolean;
 };
 
 export type GyroConfig = {

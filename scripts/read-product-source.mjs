@@ -7,14 +7,11 @@ import { dirname, resolve } from "node:path";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const domains = new Map(
   [
-    ["apps/desktop/src/App.tsx", "apps/desktop/src/app-state-helpers.tsx"],
-    ["packages/ui/src/surfaces.tsx", "packages/ui/src/composer.tsx"],
-    [
-      "apps/desktop/src-tauri/src/lib.rs",
-      "apps/desktop/src-tauri/src/lib_tests.rs",
-    ],
-    ["packages/ui/src/styles.css", "packages/ui/src/base-surfaces.css"],
-  ].map(([entry, domain]) => [resolve(root, entry), resolve(root, domain)]),
+    ["apps/desktop/src/App.tsx", ["apps/desktop/src/app-state.tsx"]],
+    ["packages/ui/src/surfaces.tsx", ["packages/ui/src/workspace-sidebar.tsx"]],
+    ["apps/desktop/src-tauri/src/lib.rs", ["apps/desktop/src-tauri/src/tests.rs"]],
+    ["packages/ui/src/styles.css", ["packages/ui/src/settings-polish.css"]],
+  ].map(([entry, companions]) => [resolve(root, entry), companions.map((file) => resolve(root, file))]),
 );
 
 export function readFileSync(file, options) {
@@ -25,20 +22,15 @@ export function readFileSync(file, options) {
       : typeof file === "string"
         ? resolve(file)
         : undefined;
-  const domain = domains.get(path);
-  if (!domain) return content;
-  let extra = readPhysicalFile(domain, options);
-  // Private helpers gained exports for the file boundary; source-contract VM
-  // tests still exercise their bodies as the original local declarations.
-  if (domain.endsWith("app-state-helpers.tsx") && typeof extra === "string") {
-    extra = extra.replace(
-      /^export (?=(?:async )?(?:function|const|let|type|interface)\b)/gm,
-      "",
-    );
-  }
+  const companions = domains.get(path);
+  if (!companions) return content;
+  const extras = companions.map((domain) => {
+    const extra = readPhysicalFile(domain, options);
+    return typeof extra === "string" ? extra.replace(/^export /gm, "") : extra;
+  });
   return typeof content === "string"
-    ? `${content}\n${extra}`
-    : Buffer.concat([content, Buffer.from("\n"), extra]);
+    ? [content, ...extras].join("\n")
+    : Buffer.concat([content, ...extras.flatMap((extra) => [Buffer.from("\n"), extra])]);
 }
 
 export async function readFile(file, options) {

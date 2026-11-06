@@ -77,6 +77,7 @@ mod tests {
             attachments: Vec::new(),
             workspace_context: None,
             workspace_check: None,
+            side_chat_context: None,
         }
     }
 

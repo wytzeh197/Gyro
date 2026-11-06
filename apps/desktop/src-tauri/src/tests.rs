@@ -343,6 +343,7 @@ fn anthropic_provider_request() -> ProviderChatRequest {
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     }
 }
 
@@ -816,6 +817,7 @@ fn capability_child_fails_closed_without_the_desktop_host() {
         workspace_key: temp.path().display().to_string(),
         mode: CapabilityRunMode::Normal,
         allow_delegation: false,
+        compact_catalog: false,
         policy_revision: 0,
         workspace_context_revision: 0,
     };
@@ -833,6 +835,82 @@ fn capability_child_fails_closed_without_the_desktop_host() {
         .as_str()
         .unwrap()
         .contains("Gyro tools unavailable"));
+}
+
+#[test]
+fn compact_cli_wrapper_reaches_dispatch_only_when_the_run_serves_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+    let mut context = DesktopProviderCapabilityContext {
+        session_id: Uuid::new_v4().to_string(),
+        turn_id: Some(Uuid::new_v4().to_string()),
+        run_nonce: "test-run-nonce".into(),
+        provider_id: "openai".into(),
+        workspace_key: temp.path().display().to_string(),
+        mode: CapabilityRunMode::Normal,
+        allow_delegation: false,
+        compact_catalog: true,
+        policy_revision: 0,
+        workspace_context_revision: 0,
+    };
+    let text = |result: serde_json::Value| {
+        assert_eq!(result["isError"], true);
+        result["content"][0]["text"].as_str().unwrap().to_string()
+    };
+    let valid = serde_json::json!({
+        "name": provider_tool_batch::COMPACT_INVOKE,
+        "arguments": {
+            "name": "gyro_workspace_list",
+            "arguments": { "depth": 2 },
+        },
+    });
+    // No host is listening, so reaching dispatch fails closed with this message.
+    assert!(
+        text(desktop_capability_tool_call(&paths, &context, valid.clone()).unwrap())
+            .contains("Gyro tools unavailable")
+    );
+    for bad in [
+        serde_json::json!({ "name": "gyro_workspace_list" }),
+        serde_json::json!({ "name": "not_a_tool", "arguments": {} }),
+        serde_json::json!({ "name": provider_tool_batch::COMPACT_INVOKE, "arguments": {} }),
+    ] {
+        let message = text(
+            desktop_capability_tool_call(
+                &paths,
+                &context,
+                serde_json::json!({
+                    "name": provider_tool_batch::COMPACT_INVOKE,
+                    "arguments": bad,
+                }),
+            )
+            .unwrap(),
+        );
+        assert!(message.contains("invalid-arguments"), "{message}");
+        assert!(!message.contains("Gyro tools unavailable"), "{message}");
+    }
+    // Panes and full-list runs do not recognize the wrapper at all.
+    context.compact_catalog = false;
+    assert!(desktop_capability_tool_call(&paths, &context, valid).is_err());
+}
+
+#[test]
+fn compact_cli_allowlists_add_only_the_wrapper() {
+    let tools =
+        "mcp__gyro_capabilities__gyro_workspace_read,mcp__gyro_capabilities__gyro_tool_catalog";
+    assert_eq!(claude_allowed_capability_tools(tools.into(), false), tools);
+    assert_eq!(
+        claude_allowed_capability_tools(tools.into(), true),
+        format!("{tools},mcp__gyro_capabilities__gyro_tool_invoke")
+    );
+    assert_eq!(claude_allowed_capability_tools(String::new(), true), "");
+    assert_eq!(
+        codex_compact_invoke_approval_args(),
+        [
+            "-c".to_string(),
+            "mcp_servers.gyro_capabilities.tools.gyro_tool_invoke.approval_mode=\"approve\""
+                .to_string(),
+        ]
+    );
 }
 
 #[test]
@@ -2436,7 +2514,7 @@ fn desktop_task_runner_passes_ci_to_a_real_pnpm_script() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(
         workspace.path().join("package.json"),
-        r#"{"scripts":{"verify-ci":"node -e \"process.exit(process.env.CI === '1' ? 0 : 1)\""}}"#,
+        r#"{"packageManager":"pnpm@11.7.0","scripts":{"verify-ci":"node -e \"process.exit(process.env.CI === '1' ? 0 : 1)\""}}"#,
     )
     .unwrap();
     // This asks discovery for pnpm without requiring any dependency install.
@@ -2872,6 +2950,7 @@ fn prepares_and_revalidates_workspace_chat_attachments() {
         }],
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
     validate_chat_context(&request).unwrap();
     std::fs::write(&file, "changed\n").unwrap();
@@ -4719,12 +4798,97 @@ fn stream_failures_report_the_cli_error_not_the_transcript() {
 }
 
 #[test]
+fn claude_five_minute_cache_frames_count_writes_apart_from_reads() {
+    // Usage blocks as the Claude CLI printed them with FORCE_PROMPT_CACHING_5M=1.
+    let usage = serde_json::json!({
+        "input_tokens": 2,
+        "cache_creation_input_tokens": 2977,
+        "cache_read_input_tokens": 658,
+        "cache_creation": {
+            "ephemeral_5m_input_tokens": 2977,
+            "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 4,
+        "service_tier": "standard"
+    });
+    let mut parser = provider_accounting::ClaudeTurnUsage::default();
+    parser.observe(&serde_json::json!({
+        "type": "assistant",
+        "message": { "id": "msg_1", "stop_reason": null, "usage": usage }
+    }));
+    parser.observe(&serde_json::json!({
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "usage": usage
+    }));
+    let tokens = parser.tokens().expect("usage should be accounted");
+    assert_eq!(tokens.input_tokens, 3_637);
+    assert_eq!(tokens.cached_input_tokens, 658);
+    assert_eq!(tokens.cache_write_tokens, 2_977);
+    assert_eq!(tokens.output_tokens, 4);
+    assert!(tokens.effective_accounting().known.cache_write);
+}
+
+#[test]
+fn claude_runs_keep_cache_reads_and_writes_apart() {
+    let mut parser = provider_accounting::ClaudeTurnUsage::default();
+    parser.observe(&serde_json::json!({
+        "type": "result",
+        "subtype": "success",
+        "usage": {
+            "input_tokens": 10,
+            "cache_read_input_tokens": 900,
+            "cache_creation_input_tokens": 90,
+            "output_tokens": 5
+        }
+    }));
+    let accounted = parser.tokens();
+    for answer_cut_off in [false, true] {
+        let tokens = claude_runner_output(
+            StreamingCommandOutput {
+                activities: Vec::new(),
+                context_usage: None,
+                billed_usage: Some(ProviderContextUsage {
+                    input_tokens: Some(1_000),
+                    cached_input_tokens: Some(990),
+                    output_tokens: Some(5),
+                    total_tokens: Some(1_005),
+                    ..Default::default()
+                }),
+                accounted_usage: accounted,
+                rate_limits: Vec::new(),
+                status_success: !answer_cut_off,
+                status_label: "exit status: 0".into(),
+                stdout: String::new(),
+                stderr: String::new(),
+                assistant_text: Some("done".into()),
+                text_blocks: Vec::new(),
+                parsed_stream_json: true,
+                provider_session_id: Some("sess-1".into()),
+            },
+            "done".into(),
+            "sess-1".into(),
+            false,
+            answer_cut_off,
+        )
+        .accounted_usage
+        .expect("the parser's total reaches the runner output");
+        assert_eq!(tokens.input_tokens, 1_000);
+        assert_eq!(tokens.cached_input_tokens, 900);
+        assert_eq!(tokens.cache_write_tokens, 90);
+        assert!(tokens.effective_accounting().known.cache_write);
+    }
+}
+
+#[test]
 fn a_streamed_answer_survives_a_nonzero_cli_exit() {
     let failed =
         |assistant: Option<&str>, parsed_json: bool, stdout: &str| StreamingCommandOutput {
             activities: Vec::new(),
             context_usage: None,
             billed_usage: None,
+            accounted_usage: None,
             rate_limits: Vec::new(),
             status_success: false,
             status_label: "exit status: 1".into(),
@@ -5676,6 +5840,85 @@ fn only_unexplained_silence_counts_as_a_stall() {
     ));
 }
 
+/// Quiet means every frame since the last heartbeat was a heartbeat.
+#[test]
+fn only_heartbeats_let_a_run_go_quiet() {
+    let start = Instant::now();
+    let beat = PROVIDER_CHAT_HEARTBEAT_INTERVAL;
+    let mut clock = ProviderQuietClock::new(start);
+
+    assert_eq!(clock.tick(10, false, start), Duration::ZERO);
+    assert_eq!(clock.tick(11, false, start + beat), beat);
+    assert_eq!(clock.tick(12, false, start + beat * 2), beat * 2);
+
+    // Anything else took a number in between, so that was progress.
+    assert_eq!(clock.tick(20, false, start + beat * 3), Duration::ZERO);
+    assert_eq!(clock.tick(21, false, start + beat * 4), beat);
+}
+
+/// A long tool or an unanswered approval is not the run going quiet, and the
+/// wait does not count against it once the run picks back up.
+#[test]
+fn waiting_on_something_else_does_not_count_as_quiet() {
+    let start = Instant::now();
+    let beat = PROVIDER_CHAT_HEARTBEAT_INTERVAL;
+    let mut clock = ProviderQuietClock::new(start);
+
+    assert_eq!(clock.tick(1, true, start), Duration::ZERO);
+    assert_eq!(clock.tick(2, true, start + beat * 30), Duration::ZERO);
+    assert_eq!(clock.tick(3, false, start + beat * 31), beat);
+}
+
+/// The note only appears once the quiet is long enough to mean something.
+#[test]
+fn a_short_quiet_is_not_reported() {
+    let notice = PROVIDER_CHAT_QUIET_NOTICE;
+    assert_eq!(provider_quiet_seconds(Duration::ZERO), None);
+    assert_eq!(
+        provider_quiet_seconds(notice - Duration::from_secs(1)),
+        None
+    );
+    assert_eq!(provider_quiet_seconds(notice), Some(notice.as_secs()));
+}
+
+/// Frames from before this field keep their shape on the wire.
+#[test]
+fn a_frame_only_carries_quiet_seconds_when_quiet() {
+    let frame = |quiet_seconds| ProviderChatStreamEvent {
+        session_id: "session".into(),
+        turn_id: None,
+        provider_id: "provider".into(),
+        model_id: None,
+        event_id: "event".into(),
+        sequence: 1,
+        timeline: provider_timeline::TimelinePosition {
+            timeline_order: 1,
+            timeline_created_at: "2026-11-02T00:00:00Z".into(),
+        },
+        timeline_segments: None,
+        activity_sequence: None,
+        phase: "heartbeat".into(),
+        status: None,
+        text_delta: None,
+        activity_id: None,
+        activity_kind: None,
+        activity_label: None,
+        activity_detail: None,
+        activity_note: None,
+        additions: None,
+        deletions: None,
+        activity_status: None,
+        message: None,
+        error: None,
+        recovery_kind: None,
+        quiet_seconds,
+    };
+    let idle = serde_json::to_value(frame(None)).expect("serializes");
+    assert!(idle.get("quietSeconds").is_none());
+    let quiet = serde_json::to_value(frame(Some(360))).expect("serializes");
+    assert_eq!(quiet["quietSeconds"], 360);
+}
+
 /// A tool counts as running by its latest state, not its first.
 #[test]
 fn a_finished_tool_is_not_counted_as_running() {
@@ -5877,6 +6120,7 @@ fn stale_resume_binding_is_cleared_and_retried_without_cursor() {
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
     let mut attempts = Vec::new();
     let output = run_provider_chat_with_retry_using(
@@ -5956,6 +6200,7 @@ fn model_handoff_skips_incompatible_provider_binding() {
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
     assert!(compatible_provider_session_binding(binding.clone(), &request).is_none());
     let same_model = ProviderChatRequest {
@@ -6099,6 +6344,7 @@ fn provider_chat_request_for(
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     }
 }
 #[test]
@@ -6604,6 +6850,7 @@ fn provider_status_event_stores_run_metadata_without_tokens() {
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
 
     let event = append_provider_status_event(
@@ -6692,6 +6939,7 @@ fn native_provider_binding_owns_execution_authority() {
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
 
     bind_provider_chat_request(&mut request, &session, &config, store.paths()).unwrap();
@@ -6860,6 +7108,7 @@ fn provider_ipc_routes_to_owning_host_when_another_app_owns_public_socket() {
             workspace_key: temp.path().display().to_string(),
             mode: CapabilityRunMode::Normal,
             allow_delegation: false,
+            compact_catalog: false,
             policy_revision: 0,
             workspace_context_revision: 0,
         };
@@ -8867,6 +9116,150 @@ fn native_process_allowlists_reject_renderer_command_substitution() {
     assert!(error.contains("task definition changed"));
 }
 
+/// Sparse, so tests can reach the byte budget without writing a gigabyte.
+fn sized_attachment(path: &Path, bytes: u64) {
+    std::fs::File::create(path).unwrap().set_len(bytes).unwrap();
+}
+
+fn age_attachment(path: &Path, seconds_old: u64) {
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(seconds_old))
+        .unwrap();
+}
+
+#[test]
+fn full_draft_attachment_storage_gives_up_its_oldest_file_for_a_new_drop() {
+    let root = tempfile::tempdir().unwrap();
+    let draft_dir = root.path().join("new");
+    std::fs::create_dir(&draft_dir).unwrap();
+    for index in 0..MAX_STORED_DRAFT_ATTACHMENTS {
+        let path = draft_dir.join(format!("{index}.png"));
+        std::fs::write(&path, b"x").unwrap();
+        age_attachment(&path, 1_000 + index as u64);
+    }
+    let oldest = draft_dir.join(format!("{}.png", MAX_STORED_DRAFT_ATTACHMENTS - 1));
+    let destination = draft_dir.join("next.png");
+
+    make_room_in_draft_attachments(&draft_dir, &destination, 1).unwrap();
+
+    assert!(!oldest.exists());
+    assert_eq!(
+        std::fs::read_dir(&draft_dir).unwrap().count(),
+        MAX_STORED_DRAFT_ATTACHMENTS - 1
+    );
+    ensure_attachment_storage_quota(&draft_dir, &destination, 1).unwrap();
+}
+
+#[test]
+fn draft_attachment_storage_keeps_files_while_there_is_room() {
+    let root = tempfile::tempdir().unwrap();
+    let existing = root.path().join("existing.png");
+    std::fs::write(&existing, b"x").unwrap();
+
+    make_room_in_draft_attachments(root.path(), &root.path().join("next.png"), 1).unwrap();
+
+    assert!(existing.exists());
+}
+
+#[test]
+fn attaching_a_stored_draft_image_again_protects_it_from_eviction() {
+    let root = tempfile::tempdir().unwrap();
+    for index in 0..MAX_STORED_DRAFT_ATTACHMENTS {
+        let path = root.path().join(format!("{index}.png"));
+        std::fs::write(&path, b"x").unwrap();
+        age_attachment(&path, 1_000 + index as u64);
+    }
+    let reused = root
+        .path()
+        .join(format!("{}.png", MAX_STORED_DRAFT_ATTACHMENTS - 1));
+
+    make_room_in_draft_attachments(root.path(), &reused, 1).unwrap();
+    make_room_in_draft_attachments(root.path(), &root.path().join("next.png"), 1).unwrap();
+
+    assert!(reused.exists());
+    assert!(!root
+        .path()
+        .join(format!("{}.png", MAX_STORED_DRAFT_ATTACHMENTS - 2))
+        .exists());
+}
+
+#[test]
+fn draft_attachment_storage_gives_up_old_files_to_stay_inside_the_byte_budget() {
+    let root = tempfile::tempdir().unwrap();
+    let large = root.path().join("large.mov");
+    sized_attachment(&large, MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION);
+    age_attachment(&large, 2_000);
+    let recent = root.path().join("recent.png");
+    std::fs::write(&recent, b"x").unwrap();
+    let destination = root.path().join("next.png");
+
+    make_room_in_draft_attachments(root.path(), &destination, 1).unwrap();
+
+    assert!(!large.exists());
+    assert!(recent.exists());
+    ensure_attachment_storage_quota(root.path(), &destination, 1).unwrap();
+}
+
+// A file count below these would again end a chat long before its bytes run
+// out, and a draft folder this small would evict images from a full message.
+const _: () = assert!(
+    MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION as u64 * MAX_CHAT_IMAGE_BYTES
+        > MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION
+);
+const _: () = assert!(MAX_STORED_DRAFT_ATTACHMENTS > MAX_CHAT_ATTACHMENTS);
+
+#[test]
+fn session_outlives_many_full_turns_of_small_attachments() {
+    let root = tempfile::tempdir().unwrap();
+    // A limit of sixteen files used to end a chat after one full turn.
+    for index in 0..=16 * MAX_CHAT_ATTACHMENTS {
+        ensure_attachment_storage_quota(root.path(), &root.path().join(format!("{index}.png")), 1)
+            .unwrap();
+        std::fs::write(root.path().join(format!("{index}.png")), b"x").unwrap();
+    }
+}
+
+#[test]
+fn session_takes_full_size_images_until_the_byte_budget_runs_out() {
+    let root = tempfile::tempdir().unwrap();
+    let mut accepted = 0_u64;
+    let error = loop {
+        let path = root.path().join(format!("{accepted}.png"));
+        match ensure_attachment_storage_quota(root.path(), &path, MAX_CHAT_IMAGE_BYTES) {
+            Ok(()) => sized_attachment(&path, MAX_CHAT_IMAGE_BYTES),
+            Err(error) => break error,
+        }
+        accepted += 1;
+    };
+
+    assert_eq!(
+        accepted,
+        MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION / MAX_CHAT_IMAGE_BYTES
+    );
+    assert!(error.contains("1 GB"), "{error}");
+    assert!(error.contains("new chat"), "{error}");
+    assert_eq!(
+        std::fs::read_dir(root.path()).unwrap().count() as u64,
+        accepted,
+        "a session's files must survive a refused attachment"
+    );
+}
+
+#[test]
+fn full_session_can_take_a_smaller_file_or_one_it_already_stores() {
+    let root = tempfile::tempdir().unwrap();
+    let stored = root.path().join("stored.mov");
+    sized_attachment(&stored, MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION - 1);
+    let next = root.path().join("next.png");
+
+    ensure_attachment_storage_quota(root.path(), &stored, 1 << 20).unwrap();
+    ensure_attachment_storage_quota(root.path(), &next, 1).unwrap();
+    assert!(ensure_attachment_storage_quota(root.path(), &next, 2).is_err());
+}
+
 #[test]
 fn private_attachment_storage_is_quota_limited_and_staged_for_deletion() {
     let root = tempfile::tempdir().unwrap();
@@ -8878,7 +9271,11 @@ fn private_attachment_storage_is_quota_limited_and_staged_for_deletion() {
     }
     let error = ensure_attachment_storage_quota(&session_dir, &session_dir.join("next.png"), 1)
         .unwrap_err();
-    assert!(error.contains("storage limit"));
+    assert!(
+        error.contains(&MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION.to_string()),
+        "{error}"
+    );
+    assert!(error.contains("new chat"), "{error}");
 
     let (original, tombstone) = stage_session_attachments(root.path(), session_id)
         .unwrap()

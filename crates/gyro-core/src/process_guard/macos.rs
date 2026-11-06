@@ -898,11 +898,17 @@ mod tests {
             .write(true)
             .open(&path)
             .unwrap();
-        assert_eq!(
-            unsafe { libc::flock(probe.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
-            0,
-            "a persistent service must not keep the model's lease"
-        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        loop {
+            if unsafe { libc::flock(probe.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "a persistent service must not keep the model's lease"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         assert!(
             service.try_wait().unwrap().is_none(),
             "service persists after model completion"

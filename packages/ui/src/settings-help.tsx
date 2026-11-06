@@ -139,11 +139,9 @@ export function SettingsHelp({
   onSectionChange?: (section: SettingsSectionId) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [topic, setTopic] = useState("All topics");
   const searchId = useId();
   const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   const filtered = helpTopics
-    .filter((group) => topic === "All topics" || group.label === topic)
     .map((group) => ({
       ...group,
       articles: group.articles.filter((article) =>
@@ -178,51 +176,17 @@ export function SettingsHelp({
           </button>
         )}
       </div>
-      {onSectionChange && (
-        <nav className="gyro-help-shortcuts" aria-label="Settings shortcuts">
-          {(["providers", "permissions", "advanced"] as const).map(
-            (section) => (
-              <button
-                type="button"
-                key={section}
-                onClick={() => onSectionChange(section)}
-              >
-                {sectionLabels[section]}
-                <ArrowRight size={14} aria-hidden="true" />
-              </button>
-            ),
-          )}
-        </nav>
-      )}
-      <div
-        className="gyro-help-topics"
-        role="group"
-        aria-label="Filter help topics"
-      >
-        {["All topics", ...helpTopics.map((group) => group.label)].map(
-          (label) => (
-            <button
-              type="button"
-              key={label}
-              aria-pressed={topic === label}
-              onClick={() => setTopic(label)}
-            >
-              {label}
-            </button>
-          ),
-        )}
-      </div>
       <p className="gyro-help-count" role="status">
         {terms.length
           ? `${count} ${count === 1 ? "answer" : "answers"} found`
-          : "Browse questions"}
+          : ""}
       </p>
       <div className="gyro-help-answers">
         {filtered.map((group) => (
-          <SettingsDisclosure key={group.label} id={`help-${group.id}`} title={group.label} summary={`${group.articles.length} answers`} attention={terms.length > 0}>
+          <SettingsDisclosure key={group.label} id={`help-${group.id}`} title={group.label} summary={`${group.articles.length} ${group.articles.length === 1 ? "answer" : "answers"}`} attention={terms.length > 0}>
             {group.articles.map((article) => (
               <details
-                key={`${article.title}:${query}:${topic}`}
+                key={`${article.title}:${query}`}
                 open={terms.length ? true : undefined}
               >
                 <summary>
@@ -253,7 +217,6 @@ export function SettingsHelp({
               type="button"
               onClick={() => {
                 setQuery("");
-                setTopic("All topics");
               }}
             >
               Show all questions

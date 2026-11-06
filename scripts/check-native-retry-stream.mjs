@@ -1,4 +1,4 @@
-import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 import vm from "node:vm";
@@ -124,7 +124,7 @@ assert.equal(
 );
 
 // Exercise the actual host status updater, including a delayed heartbeat.
-const app = readFileSync(
+const app = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );
@@ -190,6 +190,31 @@ assert.equal(
   undefined,
   "terminal state removes the expired wait deadline",
 );
+// A quiet note lives on the heartbeat that reported it, so the next update that
+// has nothing to report takes it back off the row.
+update(optimistic, setEvents, "chat", "turn", "running", undefined, true);
+update(
+  optimistic,
+  setEvents,
+  "chat",
+  "turn",
+  "running",
+  undefined,
+  true,
+  undefined,
+  360,
+);
+assert.equal(
+  rendered[1].payload.quietForSeconds,
+  360,
+  "a quiet heartbeat reaches the status the run rail reads",
+);
+update(optimistic, setEvents, "chat", "turn", "running", undefined, true);
+assert.equal(
+  rendered[1].payload.quietForSeconds,
+  undefined,
+  "the next heartbeat clears the quiet note when the run has shown something",
+);
 console.log(
-  "Native retry stream: real deadline, retained work/start time, buffer refresh, resumed state, stream ordering, heartbeat and terminal cleanup pass.",
+  "Native retry stream: real deadline, retained work/start time, buffer refresh, resumed state, stream ordering, heartbeat, quiet note and terminal cleanup pass.",
 );

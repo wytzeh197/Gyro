@@ -266,6 +266,19 @@ pub(crate) fn provider_activity_status(
     }
 }
 
+/// The rail names the tool a compact-catalog call reaches, not the wrapper.
+fn compact_invoke_target<'a>(
+    name: &str,
+    input: &'a serde_json::Value,
+) -> Option<(String, &'a serde_json::Value)> {
+    let prefix = name
+        .strip_suffix(provider_tool_batch::COMPACT_INVOKE)
+        .filter(|prefix| prefix.is_empty() || prefix.ends_with("__"))?;
+    let target = input.get("name")?.as_str()?;
+    let arguments = input.get("arguments").filter(|value| value.is_object())?;
+    Some((format!("{prefix}{target}"), arguments))
+}
+
 /// Map a provider tool call onto the rail kind that already has wording, and
 /// keep a free-form `note` when the primary field is only a machine id.
 pub(crate) fn tool_use_activity(
@@ -275,6 +288,10 @@ pub(crate) fn tool_use_activity(
     status: &str,
 ) -> ProviderActivity {
     let input = input.unwrap_or(&serde_json::Value::Null);
+    let invoked = compact_invoke_target(name, input);
+    let (name, input) = invoked
+        .as_ref()
+        .map_or((name, input), |(name, input)| (name.as_str(), *input));
     let note = provider_tool_activity_note(name, input);
 
     // Well-known Claude Code tools carry enough structure to reclassify so the
@@ -376,5 +393,40 @@ pub(crate) fn tool_use_activity(
         file_counts: None,
         note,
         status: status.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compact_invoke_rows_name_the_tool_they_reach() {
+        let arguments = serde_json::json!({"query": "needle", "path": "src"});
+        for prefix in ["", "mcp__gyro_capabilities__"] {
+            let wrapped = tool_use_activity(
+                "call".into(),
+                &format!("{prefix}gyro_tool_invoke"),
+                Some(&serde_json::json!({
+                    "name": "gyro_browser_find",
+                    "arguments": arguments,
+                })),
+                "done",
+            );
+            let direct = tool_use_activity(
+                "call".into(),
+                &format!("{prefix}gyro_browser_find"),
+                Some(&arguments),
+                "done",
+            );
+            assert_eq!(wrapped.kind, direct.kind);
+            assert_eq!(wrapped.label, direct.label);
+            assert_eq!(wrapped.detail, direct.detail);
+            assert_eq!(wrapped.note, direct.note);
+        }
+        // Malformed wrappers keep their own name rather than inventing a target.
+        let malformed = serde_json::json!({"name": "gyro_browser_find"});
+        assert!(compact_invoke_target("gyro_tool_invoke", &malformed).is_none());
+        assert!(compact_invoke_target("not_gyro_tool_invoke", &malformed).is_none());
     }
 }

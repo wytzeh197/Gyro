@@ -46,13 +46,14 @@ jobs:
           set -euo pipefail
           FORMULA="release-assets/gyro.rb"
           VERSION="${TAG#v}"
+          VERSION="${VERSION%%-launch.*}"
           test "$TAG" != "$VERSION"
           test -s "$FORMULA"
           ! grep -q "REPLACE_WITH" "$FORMULA"
           grep -F 'homepage "https://github.com/wytzeh197/Gyro"' "$FORMULA"
           grep -F "version \"$VERSION\"" "$FORMULA"
-          grep -F 'url "https://github.com/wytzeh197/Gyro/releases/download/v#{version}/gyro-cli-#{version}-aarch64-apple-darwin.tar.gz"' "$FORMULA"
-          grep -F 'url "https://github.com/wytzeh197/Gyro/releases/download/v#{version}/gyro-cli-#{version}-x86_64-apple-darwin.tar.gz"' "$FORMULA"
+          grep -F "url \"https://github.com/wytzeh197/Gyro/releases/download/${TAG}/gyro-cli-#{version}-aarch64-apple-darwin.tar.gz\"" "$FORMULA"
+          grep -F "url \"https://github.com/wytzeh197/Gyro/releases/download/${TAG}/gyro-cli-#{version}-x86_64-apple-darwin.tar.gz\"" "$FORMULA"
           test "$(grep -Ec '^[[:space:]]+sha256 "[0-9a-f]{64}"$' "$FORMULA")" -eq 2
         env:
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
@@ -87,6 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${TAG#v}"
+          VERSION="${VERSION%%-launch.*}"
           brew tap-new gyro/release-validation
           FORMULA_DIRECTORY="$(brew --repository gyro/release-validation)/Formula"
           mkdir -p "$FORMULA_DIRECTORY"

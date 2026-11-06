@@ -202,6 +202,7 @@ fn execute(app: &tauri::AppHandle, paths: &GyroPaths, row: &AgentSessionRow) {
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
     match run_provider_chat_blocking(app.clone(), request, UsageOrigin::AgentSession) {
         Ok(response) => finish(Ok(response.assistant_event.message)),

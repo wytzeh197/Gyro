@@ -1,4 +1,5 @@
 import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 import { runInNewContext } from "node:vm";
@@ -6,7 +7,7 @@ import ts from "typescript";
 
 // Exercise the actual hooks with controlled slow RPCs. This tests scheduling
 // behavior without relying on wall-clock timing or a particular laptop.
-const source = readFileSync(
+const source = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );

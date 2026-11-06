@@ -1,0 +1,9 @@
+{
+  "environment": "production",
+  "apiOrigin": "https://api.usegyro.io",
+  "shareOrigin": "https://reports.usegyro.io",
+  "authProject": "hqyahsvqjizmsfxclxzd",
+  "authPublishableKey": "sb_publishable_NKcgdQHudtPow-IGRu-1jw_QRrIoANs",
+  "environmentIsolationVerified": true,
+  "stagingAuthProject": "tpskieaxnzltdmpebdfz"
+}

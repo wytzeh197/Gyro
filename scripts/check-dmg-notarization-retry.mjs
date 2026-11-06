@@ -3,7 +3,15 @@
 // stapler runs only after status is Accepted.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  chmodSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,14 +21,34 @@ const workflow = readFileSync(
   join(repoRoot, ".github/workflows/release.yml"),
   "utf8",
 );
-const stepStart = workflow.indexOf("- name: Sign, notarize, and staple macOS DMG");
+const stepStart = workflow.indexOf("- name: Sign and notarize macOS DMG");
 const stepEnd = workflow.indexOf("- name: Verify macOS DMG");
-assert.ok(stepStart !== -1 && stepEnd > stepStart, "DMG notarization step exists");
+const verifyJob = workflow.slice(
+  workflow.indexOf("\n  verify:"),
+  workflow.indexOf("\n  finalize:"),
+);
+assert.match(
+  verifyJob,
+  /needs: \[signing, macos\]/,
+  "native verification waits for accepted notarization builds",
+);
+assert.ok(verifyJob.includes("node scripts/staple-macos-artifact.mjs"));
+assert.ok(
+  workflow.includes("needs: [signing, native_intel, verify]"),
+  "publication waits for native Intel tests and verified packages",
+);
+assert.ok(
+  stepStart !== -1 && stepEnd > stepStart,
+  "DMG notarization step exists",
+);
 const step = workflow.slice(stepStart, stepEnd);
 const runHeader = "run: |\n";
 const runAt = step.indexOf(runHeader);
 const envAt = step.indexOf("\n        env:\n");
-assert.ok(runAt !== -1 && envAt > runAt, "DMG notarization step has a run script");
+assert.ok(
+  runAt !== -1 && envAt > runAt,
+  "DMG notarization step has a run script",
+);
 const script = step
   .slice(runAt + runHeader.length, envAt)
   .split("\n")
@@ -42,11 +70,15 @@ if [ "\${1:-}" = "stapler" ]; then
   printf '%s\\n' "$3" >> "$GYRO_FAKE_STAPLE_ATTEMPTS"
   n=$(wc -l < "$GYRO_FAKE_STAPLE_ATTEMPTS" | tr -d ' ')
   if [ "$n" -le "\${GYRO_FAKE_STAPLE_FAILURES:-0}" ]; then
-    if [ "\${GYRO_FAKE_STAPLE_ERROR:-transient}" = "permanent" ]; then
+    if [ "\${GYRO_FAKE_STAPLE_ERROR:-transient}" = "permanent" ] || [ "\${GYRO_FAKE_STAPLE_PERMANENT:-0}" = "1" ]; then
       echo "The ticket does not match this image." >&2
       exit 65
     fi
-    echo 'NSURLErrorDomain Code=-1005 The network connection was lost.' >&2
+    if [ "\${GYRO_FAKE_STAPLE_ERROR:-transient}" = "offline" ]; then
+      echo 'NSURLErrorDomain Code=-1009 The Internet connection appears to be offline.' >&2
+    else
+      echo 'NSURLErrorDomain Code=-1005 The network connection was lost.' >&2
+    fi
     exit 68
   fi
   printf '%s\\n' "$3" >> "$GYRO_FAKE_STAPLED"
@@ -114,7 +146,7 @@ function runCase(name, configure) {
   writeExecutable(join(bin, "codesign"), "#!/bin/bash\nexit 0\n");
   writeExecutable(
     join(bin, "sleep"),
-    "#!/bin/bash\nprintf '%s\\n' \"$*\" >> \"$GYRO_FAKE_SLEEPS\"\nexit 0\n",
+    '#!/bin/bash\nprintf \'%s\\n\' "$*" >> "$GYRO_FAKE_SLEEPS"\nexit 0\n',
   );
   const submitStderr = join(root, "submit-stderr.txt");
   const submitStdout = join(root, "submit-stdout.txt");
@@ -148,21 +180,38 @@ function runCase(name, configure) {
   };
   mkdirSync(env.RUNNER_TEMP);
   configure({ submitStderr, submitStdout, responses, env });
-  const result = spawnSync("bash", [scriptPath], {
+  let result = spawnSync("bash", [scriptPath], {
     cwd: root,
     env,
     encoding: "utf8",
     timeout: 15000,
   });
+  if (result.status === 0 && !existsSync(stapled)) {
+    const stapling = spawnSync(
+      process.execPath,
+      [join(repoRoot, "scripts/staple-macos-artifact.mjs"), dmg],
+      {
+        cwd: root,
+        env,
+        encoding: "utf8",
+        timeout: 15000,
+      },
+    );
+    result = {
+      ...stapling,
+      stdout: result.stdout + stapling.stdout,
+      stderr: result.stderr + stapling.stderr,
+    };
+  }
   const report = {
     name,
+    sleeps: existsSync(sleeps) ? readFileSync(sleeps, "utf8").trim() : "",
     status: result.status,
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? "",
     error: result.error,
     stapled: existsSync(stapled) ? readFileSync(stapled, "utf8").trim() : "",
     stapleAttempts: existsSync(stapleAttempts) ? readFileSync(stapleAttempts, "utf8").trim().split("\n").length : 0,
-    sleeps: existsSync(sleeps) ? readFileSync(sleeps, "utf8").trim() : "",
     infoIds: existsSync(infoIds) ? readFileSync(infoIds, "utf8").trim() : "",
     logIds: existsSync(logIds) ? readFileSync(logIds, "utf8").trim() : "",
   };
@@ -170,53 +219,86 @@ function runCase(name, configure) {
   return report;
 }
 
-const droppedWait = runCase("dropped wait then Accepted", ({ submitStderr, responses }) => {
-  writeFileSync(submitStderr, `${droppedWaitLog}\n`);
-  writeFileSync(responses + "/1", '{"status":"In Progress","id":"e8dbce3d-86ad-40ec-8d33-9553517736bf"}\n');
-  writeFileSync(responses + "/2", '{"status":"Accepted","id":"e8dbce3d-86ad-40ec-8d33-9553517736bf"}\n');
-});
+const droppedWait = runCase(
+  "dropped wait then Accepted",
+  ({ submitStderr, responses }) => {
+    writeFileSync(submitStderr, `${droppedWaitLog}\n`);
+    writeFileSync(
+      responses + "/1",
+      '{"status":"In Progress","id":"e8dbce3d-86ad-40ec-8d33-9553517736bf"}\n',
+    );
+    writeFileSync(
+      responses + "/2",
+      '{"status":"Accepted","id":"e8dbce3d-86ad-40ec-8d33-9553517736bf"}\n',
+    );
+  },
+);
 assert.equal(droppedWait.status, 0, droppedWait.stderr);
 assert.match(droppedWait.stderr, /re-querying/);
 assert.match(droppedWait.stderr, /DMG notarization status: Accepted/);
-assert.equal(droppedWait.infoIds, "e8dbce3d-86ad-40ec-8d33-9553517736bf\ne8dbce3d-86ad-40ec-8d33-9553517736bf");
+assert.equal(
+  droppedWait.infoIds,
+  "e8dbce3d-86ad-40ec-8d33-9553517736bf\ne8dbce3d-86ad-40ec-8d33-9553517736bf",
+);
 assert.match(droppedWait.stapled, /Gyro_0\.1\.0-preview_aarch64\.dmg$/);
 assert.equal(droppedWait.logIds, "");
 assert.doesNotMatch(droppedWait.stderr, /finished with status 'unknown'/);
 
-const alreadyAccepted = runCase("wait already Accepted", ({ submitStdout, env }) => {
-  writeFileSync(
-    submitStdout,
-    '{"id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","status":"Accepted"}\n',
-  );
-  env.GYRO_FAKE_SUBMIT_EXIT = "0";
-});
+const alreadyAccepted = runCase(
+  "wait already Accepted",
+  ({ submitStdout, env }) => {
+    writeFileSync(
+      submitStdout,
+      '{"id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","status":"Accepted"}\n',
+    );
+    env.GYRO_FAKE_SUBMIT_EXIT = "0";
+  },
+);
 assert.equal(alreadyAccepted.status, 0, alreadyAccepted.stderr);
 assert.equal(alreadyAccepted.infoIds, "");
 assert.match(alreadyAccepted.stapled, /Gyro_0\.1\.0-preview_aarch64\.dmg$/);
 assert.doesNotMatch(alreadyAccepted.stderr, /re-querying/);
 
-const rejected = runCase("re-query returns Invalid", ({ submitStderr, responses }) => {
-  writeFileSync(submitStderr, `${droppedWaitLog}\n`);
-  writeFileSync(responses + "/1", '{"status":"Invalid","id":"e8dbce3d-86ad-40ec-8d33-9553517736bf"}\n');
-});
+const rejected = runCase(
+  "re-query returns Invalid",
+  ({ submitStderr, responses }) => {
+    writeFileSync(submitStderr, `${droppedWaitLog}\n`);
+    writeFileSync(
+      responses + "/1",
+      '{"status":"Invalid","id":"e8dbce3d-86ad-40ec-8d33-9553517736bf"}\n',
+    );
+  },
+);
 assert.equal(rejected.status, 1, rejected.stderr);
 assert.equal(rejected.stapled, "");
 assert.equal(rejected.logIds, "e8dbce3d-86ad-40ec-8d33-9553517736bf");
 assert.match(rejected.stderr, /finished with status 'Invalid'/);
 
-const infoRecovers = runCase("info network failure then Accepted", ({ submitStderr, responses }) => {
-  writeFileSync(submitStderr, `${droppedWaitLog}\n`);
-  writeFileSync(responses + "/1", "FAIL\n");
-  writeFileSync(responses + "/2", '{"status":"Accepted","id":"e8dbce3d-86ad-40ec-8d33-9553517736bf"}\n');
-});
+const infoRecovers = runCase(
+  "info network failure then Accepted",
+  ({ submitStderr, responses }) => {
+    writeFileSync(submitStderr, `${droppedWaitLog}\n`);
+    writeFileSync(responses + "/1", "FAIL\n");
+    writeFileSync(
+      responses + "/2",
+      '{"status":"Accepted","id":"e8dbce3d-86ad-40ec-8d33-9553517736bf"}\n',
+    );
+  },
+);
 assert.equal(infoRecovers.status, 0, infoRecovers.stderr);
 assert.match(infoRecovers.stderr, /notarytool info failed/);
 assert.match(infoRecovers.stderr, /DMG notarization status: Accepted/);
 assert.match(infoRecovers.stapled, /Gyro_0\.1\.0-preview_aarch64\.dmg$/);
 
-const noSubmission = runCase("dropped wait with no submission id", ({ submitStderr }) => {
-  writeFileSync(submitStderr, "Error: The Internet connection appears to be offline.\n");
-});
+const noSubmission = runCase(
+  "dropped wait with no submission id",
+  ({ submitStderr }) => {
+    writeFileSync(
+      submitStderr,
+      "Error: The Internet connection appears to be offline.\n",
+    );
+  },
+);
 assert.equal(noSubmission.status, 1, noSubmission.stderr);
 assert.equal(noSubmission.stapled, "");
 assert.equal(noSubmission.infoIds, "");
@@ -235,12 +317,17 @@ assert.equal(stapleRecovers.status, 0, stapleRecovers.stderr);
 assert.equal(stapleRecovers.stapleAttempts, 3);
 assert.equal(stapleRecovers.sleeps, "10\n20");
 assert.match(stapleRecovers.stapled, /\.dmg$/);
+const stapleOffline = acceptedWithStapleFailures(1, "offline");
+assert.equal(stapleOffline.status, 0, stapleOffline.stderr);
+assert.equal(stapleOffline.stapleAttempts, 2);
+assert.equal(stapleOffline.sleeps, "10");
 const stapleExhausted = acceptedWithStapleFailures(4);
 assert.equal(stapleExhausted.status, 1, stapleExhausted.stderr);
 assert.equal(stapleExhausted.stapleAttempts, 4);
 assert.equal(stapleExhausted.sleeps, "10\n20\n30");
 assert.equal(stapleExhausted.stapled, "");
-assert.match(stapleExhausted.stderr, /refusing to upload an unstapled image/);
+assert.match(stapleExhausted.stderr, /xcrun stapler staple.*exited 68/);
+assert.ok(verifyJob.includes("refusing to upload an unstapled image"));
 const stapleInvalid = acceptedWithStapleFailures(1, "permanent");
 assert.equal(stapleInvalid.status, 1, stapleInvalid.stderr);
 assert.equal(stapleInvalid.stapleAttempts, 1);
@@ -249,4 +336,51 @@ assert.equal(stapleInvalid.stapled, "");
 
 console.log(
   "DMG notarization retry passed: dropped wait re-queries, Accepted staples, Invalid and a missing id do not; transient staple retries are bounded and permanent failures stop immediately.",
+);
+
+const ticketDrop = runCase(
+  "accepted DMG ticket connection drop recovers",
+  ({ submitStdout, env }) => {
+    writeFileSync(
+      submitStdout,
+      '{"id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","status":"Accepted"}\n',
+    );
+    env.GYRO_FAKE_SUBMIT_EXIT = "0";
+    env.GYRO_FAKE_STAPLE_FAILURES = "1";
+  },
+);
+assert.equal(ticketDrop.status, 0, ticketDrop.stderr);
+assert.equal(ticketDrop.stapleAttempts, 2);
+assert.equal(ticketDrop.sleeps, "10");
+const exhaustedTicket = runCase(
+  "ticket network retries are bounded",
+  ({ submitStdout, env }) => {
+    writeFileSync(
+      submitStdout,
+      '{"id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","status":"Accepted"}\n',
+    );
+    env.GYRO_FAKE_SUBMIT_EXIT = "0";
+    env.GYRO_FAKE_STAPLE_FAILURES = "10";
+  },
+);
+assert.notEqual(exhaustedTicket.status, 0);
+assert.equal(exhaustedTicket.stapleAttempts, 4);
+assert.equal(exhaustedTicket.sleeps, "10\n20\n30");
+const missingTicket = runCase(
+  "permanent missing ticket is not retried",
+  ({ submitStdout, env }) => {
+    writeFileSync(
+      submitStdout,
+      '{"id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","status":"Accepted"}\n',
+    );
+    env.GYRO_FAKE_SUBMIT_EXIT = "0";
+    env.GYRO_FAKE_STAPLE_FAILURES = "10";
+    env.GYRO_FAKE_STAPLE_PERMANENT = "1";
+  },
+);
+assert.notEqual(missingTicket.status, 0);
+assert.equal(missingTicket.stapleAttempts, 1);
+assert.equal(missingTicket.sleeps, "");
+console.log(
+  "Apple ticket tests passed: dropped connection recovers, retries are bounded, permanent failure stops.",
 );

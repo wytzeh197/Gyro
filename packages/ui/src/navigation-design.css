@@ -504,7 +504,7 @@
   background: color-mix(in srgb, var(--gyro-text) 2.5%, var(--gyro-sidebar));
   border: 1px solid color-mix(in srgb, var(--gyro-text) 6%, transparent);
   /* Nested radii: the chip's radius plus the 2px gutter and 1px border. */
-  border-radius: calc(var(--gyro-radius-sm) + 3px);
+  border-radius: var(--gyro-radius-md);
   box-shadow: none;
   gap: 2px;
   height: calc(26px * var(--gyro-ui-scale, 1));

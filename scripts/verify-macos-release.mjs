@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
+import { runStapler, staplerFailureIsTransient } from "./macos-stapler.mjs";
 import { spawnSync } from "node:child_process";
 import {
   accessSync,
@@ -40,37 +41,8 @@ function argument(name) {
   return value;
 }
 
-function staplerFailureIsTransient(output) {
-  return /network connection was lost|NSURLErrorDomain Code=-1005|kCFErrorDomainCFNetwork Code=-1005|CloudKit's response is inconsistent/i.test(
-    output,
-  );
-}
-
 function validateStaple(targetPath) {
-  const attempts = 4;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const result = spawnSync("xcrun", ["stapler", "validate", targetPath], {
-      encoding: "utf8",
-      maxBuffer: 16 * 1024 * 1024,
-    });
-    if (!result.error && result.status === 0) return;
-    const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}${
-      result.error?.message ?? ""
-    }`.trim();
-    const error = new Error(
-      `xcrun stapler validate ${targetPath} exited ${result.status ?? "missing"}${
-        output ? `:\n${output}` : ""
-      }`,
-    );
-    if (attempt === attempts || !staplerFailureIsTransient(output)) throw error;
-    console.error(
-      `stapler validate lost Apple's ticket service (attempt ${attempt} of ${attempts}); retrying.`,
-    );
-    const wait = spawnSync("sleep", [String(10 * attempt)], { encoding: "utf8" });
-    if (wait.error || wait.status !== 0) {
-      throw new Error("could not wait before retrying stapler validate");
-    }
-  }
+  runStapler("validate", targetPath);
 }
 
 function run(command, args, options = {}) {
@@ -262,7 +234,9 @@ function verifyBundle(appPath, config, target, signing) {
   const signature = run("codesign", ["--display", "--verbose=4", appPath]);
   const signatureDetails = `${signature.stdout}\n${signature.stderr}`;
   if (!signatureDetails.includes(`Identifier=${config.identifier}`)) {
-    throw new Error(`bundle signature is missing Identifier=${config.identifier}`);
+    throw new Error(
+      `bundle signature is missing Identifier=${config.identifier}`,
+    );
   }
   if (signing.mode === "developer-id") {
     verifyDeveloperIdBundle(appPath, signatureDetails, signing);
@@ -324,7 +298,9 @@ function verifyDeveloperIdBundle(appPath, signatureDetails, signing) {
   ]);
   const entitlementText = `${entitlements.stdout}\n${entitlements.stderr}`;
   if (entitlementText.includes("com.apple.security.get-task-allow")) {
-    throw new Error("bundle is signed with the debugging get-task-allow entitlement");
+    throw new Error(
+      "bundle is signed with the debugging get-task-allow entitlement",
+    );
   }
   // The hardened runtime gates audio input and speech recognition on these
   // entitlements. Without them macOS denies the microphone before any sheet is
@@ -451,6 +427,49 @@ function verifyDmgArtwork(mountPath, config) {
   }
 }
 
+function detachReadonlyDmg(mountPath, spawn = spawnSync) {
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const result = spawn("hdiutil", ["detach", mountPath], {
+      encoding: "utf8",
+    });
+    if (!result.error && result.status === 0) return;
+    const details = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+    const failure = new Error(
+      `hdiutil could not detach ${mountPath}${details ? `:\n${details}` : ""}`,
+    );
+    if (
+      result.error ||
+      attempt === 4 ||
+      !/busy|in use|couldn't unmount/i.test(details)
+    )
+      throw failure;
+    const wait = spawn("sleep", [String(attempt)], { encoding: "utf8" });
+    if (wait.error || wait.status !== 0) throw failure;
+  }
+}
+
+function cleanupDmgMount(
+  temporaryRoot,
+  mountPath,
+  failure,
+  detach = detachReadonlyDmg,
+  remove = rmSync,
+) {
+  try {
+    detach(mountPath);
+    // Never traverse or remove a volume that could still be mounted.
+    remove(temporaryRoot, { recursive: true, force: true });
+  } catch (cleanupError) {
+    if (failure)
+      return new Error(
+        `${failure.message}\nDMG cleanup also failed: ${cleanupError.message}`,
+        { cause: failure },
+      );
+    return cleanupError;
+  }
+  return failure;
+}
+
 function attachAndVerifyDmg(dmgPath, config, target, signing) {
   run("hdiutil", ["verify", dmgPath]);
   if (signing.mode === "developer-id") verifyDeveloperIdDmg(dmgPath, signing);
@@ -458,9 +477,10 @@ function attachAndVerifyDmg(dmgPath, config, target, signing) {
   const temporaryRoot = mkdtempSync(join(tmpdir(), "gyro-release-dmg-"));
   const mountPath = join(temporaryRoot, "mounted");
   mkdirSync(mountPath);
-  let attached = false;
+  let attachAttempted = false;
   let failure;
   try {
+    attachAttempted = true;
     run("hdiutil", [
       "attach",
       "-readonly",
@@ -470,8 +490,6 @@ function attachAndVerifyDmg(dmgPath, config, target, signing) {
       mountPath,
       dmgPath,
     ]);
-    attached = true;
-
     verifyApplicationsShortcut(mountPath);
     verifyDmgArtwork(mountPath, config);
     const appName = `${config.productName}.app`;
@@ -487,19 +505,9 @@ function attachAndVerifyDmg(dmgPath, config, target, signing) {
   } catch (error) {
     failure = error;
   } finally {
-    if (attached) {
-      const detach = spawnSync("hdiutil", ["detach", mountPath], {
-        encoding: "utf8",
-      });
-      if (detach.error || detach.status !== 0) {
-        const details = `${detach.stdout ?? ""}\n${detach.stderr ?? ""}`.trim();
-        const detachError = new Error(
-          `hdiutil could not detach ${mountPath}${details ? `:\n${details}` : ""}`,
-        );
-        failure ??= detachError;
-      }
-    }
-    rmSync(temporaryRoot, { recursive: true, force: true });
+    if (attachAttempted)
+      failure = cleanupDmgMount(temporaryRoot, mountPath, failure);
+    else rmSync(temporaryRoot, { recursive: true, force: true });
   }
   if (failure) throw failure;
 }
@@ -518,6 +526,53 @@ async function main() {
     ) {
       throw new Error("a missing staple must not be retried");
     }
+    let removed = false;
+    const original = new Error("original bundle verification failure");
+    const busy = new Error("resource busy");
+    const result = cleanupDmgMount(
+      "/fixture/root",
+      "/fixture/root/mounted",
+      original,
+      () => {
+        throw busy;
+      },
+      () => {
+        removed = true;
+      },
+    );
+    if (
+      removed ||
+      result.cause !== original ||
+      !result.message.includes(busy.message)
+    )
+      throw new Error(
+        "cleanup must preserve the verification error and leave a mounted volume untouched",
+      );
+    const order = [];
+    if (
+      cleanupDmgMount(
+        "/fixture/root",
+        "/fixture/root/mounted",
+        undefined,
+        () => order.push("detach"),
+        () => order.push("remove"),
+      ) ||
+      order.join() !== "detach,remove"
+    )
+      throw new Error(
+        "cleanup must detach before removing its temporary directory",
+      );
+    let attempts = 0;
+    detachReadonlyDmg("/fixture/mounted", (command) =>
+      command === "sleep"
+        ? { status: 0 }
+        : ++attempts < 3
+          ? { status: 16, stderr: "resource busy" }
+          : { status: 0 },
+    );
+    if (attempts !== 3)
+      throw new Error("a transient busy mount must be retried");
+    console.log("DMG cleanup regression checks passed.");
     console.log("Stapler validate retry classification passed.");
     return;
   }
@@ -556,7 +611,10 @@ tickets, and Gatekeeper acceptance of both the app and the DMG.`);
   if (!signingModes.has(signing.mode)) {
     throw new Error(`unsupported signing mode ${signing.mode}`);
   }
-  if (signing.mode === "developer-id" && !/^[A-Z0-9]{10}$/.test(signing.teamId ?? "")) {
+  if (
+    signing.mode === "developer-id" &&
+    !/^[A-Z0-9]{10}$/.test(signing.teamId ?? "")
+  ) {
     throw new Error("--signing developer-id requires a 10-character --team-id");
   }
   if (signing.mode === "adhoc" && signing.teamId) {

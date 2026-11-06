@@ -400,8 +400,8 @@ where
     let mut receipt = UsageReceipt::start(cancellation);
     let response = crate::provider_retry::http_response(cancellation, || {
         let mut payload = chat_payload(request, &endpoint, include_usage);
-        // Host check inside apply decides. api.openai.com keeps prompt_cache_key;
-        // other hosts, including DeepSeek, Mistral, and OpenRouter, do not.
+        // Host check inside apply decides. api.openai.com keeps prompt_cache_key and
+        // OpenRouter's Claude routes gain cache_control; DeepSeek and Mistral gain neither.
         crate::efficiency::cache::apply(&mut payload, &endpoint, model, true);
         observation = Some(crate::provider_observation::Request::start(&payload));
         let result = match post_chat(&url, api_key, &payload, &receipt.transport) {

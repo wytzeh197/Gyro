@@ -12,6 +12,9 @@
     "progress-detection",
     "compact-tool-catalog",
     "recoverable-evidence",
+    "tight-evidence",
+    "batch-reads",
+    "compact-cli-catalog",
     "catalog-retention",
     "combined"
   ],

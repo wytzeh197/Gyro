@@ -274,6 +274,13 @@ pub(super) fn run_openai_compatible_chat(
     if compact_catalog {
         provider_tool_batch::apply_compact_guidance(&mut system);
     }
+    if config.efficiency.policies()
+        && config.efficiency.batch_reads
+        && !compatibility
+        && request.mode != ChatMode::Council
+    {
+        provider_tool_batch::apply_batch_guidance(&mut system);
+    }
     let user = dynamic;
     let mut messages = vec![
         serde_json::json!({ "role": "system", "content": system }),
@@ -394,7 +401,7 @@ pub(super) fn run_openai_compatible_chat(
             }
             let retired = gyro_core::efficiency::context::prepare_owned_model_request_with_policy(
                 &mut messages,
-                config.efficiency.policies() && config.efficiency.recoverable_evidence,
+                config.efficiency.evidence_policy(),
             );
             gyro_core::provider_observation::retired_context(retired);
             let (request_tools, tools_offered) = if compatibility {

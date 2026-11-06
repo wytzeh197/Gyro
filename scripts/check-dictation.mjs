@@ -1,4 +1,5 @@
 import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 import {
@@ -32,7 +33,11 @@ assert.deepEqual(dictationDraft("Say .", 4, "hello"), {
 
 const base = "Please";
 const first = dictationDraft(base, base.length, "Add");
-const second = dictationDraft(base, base.length, "Add a microphone next to send");
+const second = dictationDraft(
+  base,
+  base.length,
+  "Add a microphone next to send",
+);
 assert.equal(first.draft, "Please Add");
 assert.equal(second.draft, "Please Add a microphone next to send");
 assert.equal(second.draft.includes("Please Add Add"), false);
@@ -173,7 +178,7 @@ assert.deepEqual(replacement.events, [["final", "next"]]);
 
 assert.equal(browserDictation(), browserDictation());
 
-const surfaces = readFileSync(
+const surfaces = readRepoSource(
   new URL("../packages/ui/src/surfaces.tsx", import.meta.url),
   "utf8",
 );
@@ -201,10 +206,7 @@ assert.equal(
   dictationAccessError({ microphone: "denied", speech: "unsupported" }),
   "Allow the microphone to dictate.",
 );
-assert.equal(
-  dictationAccessError(null),
-  "Allow the microphone to dictate.",
-);
+assert.equal(dictationAccessError(null), "Allow the microphone to dictate.");
 assert.equal(
   dictationAccessError({ microphone: "authorized", speech: "denied" }),
   "Allow Speech Recognition to dictate.",
@@ -225,7 +227,9 @@ createBrowserDictation(FakeRecognition).start(blocked);
 assert.equal(blocked.events.length, 0);
 await tick();
 assert.equal(FakeRecognition.constructed, blockedBefore);
-assert.deepEqual(blocked.events, [["error", "Allow the microphone to dictate."]]);
+assert.deepEqual(blocked.events, [
+  ["error", "Allow the microphone to dictate."],
+]);
 
 let asked = false;
 setDictationAccessRequest(async () => {
@@ -274,7 +278,9 @@ const failedBefore = FakeRecognition.constructed;
 createBrowserDictation(FakeRecognition).start(failed);
 await tick();
 assert.equal(FakeRecognition.constructed, failedBefore);
-assert.deepEqual(failed.events, [["error", "Allow the microphone to dictate."]]);
+assert.deepEqual(failed.events, [
+  ["error", "Allow the microphone to dictate."],
+]);
 
 setDictationAccessRequest(async () => "Allow the microphone to dictate.");
 const sharedListener = listen();
@@ -301,7 +307,7 @@ const plist = readFileSync(
   new URL("../apps/desktop/src-tauri/Info.plist", import.meta.url),
   "utf8",
 );
-const desktopLib = readFileSync(
+const desktopLib = readRepoSource(
   new URL("../apps/desktop/src-tauri/src/lib.rs", import.meta.url),
   "utf8",
 );
@@ -314,7 +320,14 @@ assert.match(desktopHook, /start_dictation/);
 assert.match(desktopHook, /stop_dictation/);
 assert.match(desktopHook, /dictation-update/);
 assert.match(desktopHook, /setSharedDictation/);
-assert.match(accessState, /import "\.\/dictation-access"/);
+assert.doesNotMatch(accessState, /import "\.\/dictation-access/);
+assert.match(
+  readFileSync(
+    new URL("../apps/desktop/src/main.tsx", import.meta.url),
+    "utf8",
+  ),
+  /import\("\.\/dictation-access"\)/,
+);
 assert.match(accessCommand, /requestAccessForMediaType/);
 assert.match(accessCommand, /requestAuthorization/);
 assert.match(accessCommand, /AVMediaTypeAudio/);

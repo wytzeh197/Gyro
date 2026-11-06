@@ -1,10 +1,11 @@
 import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 import vm from "node:vm";
 import ts from "typescript";
 
-const source = readFileSync(
+const source = readRepoSource(
   new URL("../packages/ui/src/surfaces.tsx", import.meta.url),
   "utf8",
 );

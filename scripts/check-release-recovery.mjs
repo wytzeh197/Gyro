@@ -1,7 +1,7 @@
 // Execute the workflow's source gates against disposable Git history.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,10 +32,10 @@ assert.ok(
   workflow.indexOf("Use TCP for Apple notarization tickets") <
     workflow.indexOf("- name: Build desktop app and sign updater archive"),
 );
-assert.equal(
-  workflow.match(/ref: \$\{\{ needs\.signing\.outputs\.commit \}\}/g)?.length,
-  2,
-);
+for (const job of ["macos", "native_intel", "verify", "finalize"]) {
+  const match = workflow.match(new RegExp(`\\n  ${job}:([\\s\\S]*?)(?=\\n  [a-z_]+:|$)`));
+  assert.ok(match?.[1].includes("ref: ${{ needs.signing.outputs.commit }}"), `${job} must checkout the approved commit`);
+}
 const root = mkdtempSync(join(tmpdir(), "gyro-release-source-"));
 function git(...args) {
   const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
@@ -86,7 +86,7 @@ try {
     assert.equal(result.status === 0, accepted, `${name}: ${result.stderr}`);
     assert.equal(
       readFileSync(output, "utf8"),
-      accepted ? `commit=${approved}\n` : "",
+      accepted ? `commit=${commit}\n` : "",
       `${name}: rejected requests must not expose a signing source`,
     );
   }
@@ -103,6 +103,19 @@ try {
   run("invalid tag input", { tag: "v0.1.0;exit 0" });
   run("missing commit input", { commit: "" });
   run("abbreviated commit", { commit: approved.slice(0, 7) });
+  git("checkout", "main");
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  copyFileSync(join(repo, "scripts/release-identity.mjs"), join(root, "scripts/release-identity.mjs"));
+  writeFileSync(join(root, "package.json"), '{"version":"0.1.0"}\n');
+  writeFileSync(join(root, "release-identity.json"), '{"version":"0.1.0","tag":"v0.1.0-launch.20261106"}\n');
+  git("add", "package.json", "release-identity.json", "scripts/release-identity.mjs");
+  git("commit", "-m", "Approved launch identity fixture");
+  const modern = git("rev-parse", "HEAD");
+  git("update-ref", "refs/remotes/origin/main", modern);
+  git("tag", "v0.1.0-launch.20261106");
+  git("tag", "v0.1.0-launch.20261107");
+  run("approved launch identity", { tag: "v0.1.0-launch.20261106", commit: modern, head: modern, accepted: true });
+  run("wrong launch identity", { tag: "v0.1.0-launch.20261107", commit: modern, head: modern });
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

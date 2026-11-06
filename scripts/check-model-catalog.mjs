@@ -1,4 +1,5 @@
 import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 import {
@@ -472,7 +473,11 @@ assert.throws(() =>
   const terra = provider.models.filter((model) => model.id === "gpt-6.1-terra");
   assert.equal(terra.length, 1);
   assert.equal(provider.models[1].id, "gpt-6.1-terra");
-  assert.equal(published.models.find((model) => model.id === "gpt-6.1-terra")?.minClientRevision, 2);
+  assert.equal(
+    published.models.find((model) => model.id === "gpt-6.1-terra")
+      ?.minClientRevision,
+    2,
+  );
   reset();
 }
 
@@ -487,8 +492,16 @@ assert.throws(() =>
   for (const retirement of facts.retirements) {
     const source = providerCatalog.find((p) => p.id === retirement.providerId);
     if (!source) {
-      assert.equal(retirement.providerId, "gemini", "Only a retired provider can lack a catalog entry");
-      assert.ok(!providersForConfig({modelProviders: [{id: "gemini", enabled: true}]}).some(p => p.id === "gemini"));
+      assert.equal(
+        retirement.providerId,
+        "gemini",
+        "Only a retired provider can lack a catalog entry",
+      );
+      assert.ok(
+        !providersForConfig({
+          modelProviders: [{ id: "gemini", enabled: true }],
+        }).some((p) => p.id === "gemini"),
+      );
       continue;
     }
     for (const id of retirement.modelIds) {
@@ -550,7 +563,7 @@ assert.throws(() =>
     provider.models.some((m) => m.id === "gpt-5.5"),
     "October 14 retirement must not remove October 13 access",
   );
-  const native = readFileSync(
+  const native = readRepoSource(
     new URL("../apps/desktop/src-tauri/src/lib.rs", import.meta.url),
     "utf8",
   );
@@ -685,7 +698,10 @@ assert.equal(
     const kind = connection[provider.id];
     assert.ok(kind, `${provider.id} has no catalog connection`);
     if (kind === "api") {
-      assert.equal(provider.capabilities.executionKind, "openai-compatible-api");
+      assert.equal(
+        provider.capabilities.executionKind,
+        "openai-compatible-api",
+      );
       assert.equal(provider.authMode, "env");
     } else if (kind === "local") {
       assert.equal(provider.capabilities.executionKind, "ollama-api");

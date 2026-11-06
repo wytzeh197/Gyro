@@ -10,6 +10,7 @@ mod chat_http;
 pub mod cli_install;
 pub mod cli_path;
 pub mod cli_updates;
+pub mod cloud_connection;
 pub mod config;
 pub mod council;
 pub mod credentials;

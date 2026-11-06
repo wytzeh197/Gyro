@@ -1,4 +1,5 @@
 import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 /**
  * Assert every browser capability descriptor has a provider tool name, class,
  * schema arm, and handler arm — the same table-driven contract used for the
@@ -14,7 +15,7 @@ const capabilities = readFileSync(
   join(root, "crates/gyro-core/src/capabilities.rs"),
   "utf8",
 );
-const lib = readFileSync(
+const lib = readRepoSource(
   join(root, "apps/desktop/src-tauri/src/lib.rs"),
   "utf8",
 );
@@ -34,11 +35,30 @@ const observationFixture = readFileSync(
 
 /** New drive-capable browser tools (plus the original four). */
 const BROWSER_TOOLS = [
-  {"id": "BrowserTargets", "tool": "gyro_browser_targets", "class": "BrowserInspect", "required": []},
-  {"id": "BrowserSelectTarget", "tool": "gyro_browser_select_target", "class": "BrowserNavigate", "required": ["targetId"]},
-  {"id": "BrowserCapturePreview", "tool": "gyro_browser_capture_preview", "class": "BrowserInspect", "required": []},
-  {"id": "BrowserPreviewClick", "tool": "gyro_browser_preview_click", "class": "BrowserNavigate", "required": ["captureId", "x", "y"]},
-
+  {
+    id: "BrowserTargets",
+    tool: "gyro_browser_targets",
+    class: "BrowserInspect",
+    required: [],
+  },
+  {
+    id: "BrowserSelectTarget",
+    tool: "gyro_browser_select_target",
+    class: "BrowserNavigate",
+    required: ["targetId"],
+  },
+  {
+    id: "BrowserCapturePreview",
+    tool: "gyro_browser_capture_preview",
+    class: "BrowserInspect",
+    required: [],
+  },
+  {
+    id: "BrowserPreviewClick",
+    tool: "gyro_browser_preview_click",
+    class: "BrowserNavigate",
+    required: ["captureId", "x", "y"],
+  },
   {
     id: "BrowserOpen",
     tool: "gyro_browser_open",
@@ -149,16 +169,27 @@ assert.match(
   "tauri unstable feature must be enabled for child webviews",
 );
 
-const knowledge = JSON.parse(readFileSync(join(root, "docs/product-knowledge/browser.contract.json"), "utf8"));
+const knowledge = JSON.parse(
+  readFileSync(
+    join(root, "docs/product-knowledge/browser.contract.json"),
+    "utf8",
+  ),
+);
 assert.equal(knowledge.schema, "gyro.product-knowledge.browser.v1");
 assert.deepEqual(
-  knowledge.commands.map(command => command.name).sort(),
-  BROWSER_TOOLS.map(command => command.tool).sort(),
+  knowledge.commands.map((command) => command.name).sort(),
+  BROWSER_TOOLS.map((command) => command.tool).sort(),
   "Product knowledge must cover the browser tool registry",
 );
 for (const tool of BROWSER_TOOLS) {
-  const command = knowledge.commands.find(command => command.name === tool.tool);
-  assert.deepEqual(command.inputSchema.required, tool.required, `${tool.tool} knowledge schema drift`);
+  const command = knowledge.commands.find(
+    (command) => command.name === tool.tool,
+  );
+  assert.deepEqual(
+    command.inputSchema.required,
+    tool.required,
+    `${tool.tool} knowledge schema drift`,
+  );
 }
 
 assert.match(
@@ -266,8 +297,14 @@ assert.match(lib, /screenshot_model_visible: false/);
 assert.match(lib, /fn browser_observation\(/);
 assert.match(lib, /fn user_requests_gyro_browser\(/);
 assert.match(lib, /browser_knowledge::context/);
-assert.match(readFileSync(join(root, "docs/product-knowledge/browser.md"), "utf8"), /Do not silently substitute/);
-assert.match(readFileSync(join(root, "docs/product-knowledge/browser.md"), "utf8"), /Do not silently substitute HTTP fetching, web search, or OS control/);
+assert.match(
+  readFileSync(join(root, "docs/product-knowledge/browser.md"), "utf8"),
+  /Do not silently substitute/,
+);
+assert.match(
+  readFileSync(join(root, "docs/product-knowledge/browser.md"), "utf8"),
+  /Do not silently substitute HTTP fetching, web search, or OS control/,
+);
 assert.match(sessionBrowser, /const pageState = \(\) =>/);
 assert.match(sessionBrowser, /deviceScaleFactor/);
 assert.match(sessionBrowser, /history: \{\{ length:/);

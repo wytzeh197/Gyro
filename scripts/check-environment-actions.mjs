@@ -1,4 +1,5 @@
 import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 
@@ -129,7 +130,9 @@ for (const state of [undefined, repo({ available: false })]) {
 // A deleted remote branch reports no ahead count, but pushing is what restores
 // it — and a pull request against a ref that is gone cannot open.
 {
-  const actions = byId(repo({ upstream: "origin/feature", upstreamGone: true }));
+  const actions = byId(
+    repo({ upstream: "origin/feature", upstreamGone: true }),
+  );
   assert.equal(actions["commit-or-push"].enabled, true);
   assert.equal(actions["commit-or-push"].detail, "Publish this branch again");
   assert.equal(actions["create-pull-request"].enabled, false);
@@ -145,7 +148,10 @@ for (const state of [undefined, repo({ available: false })]) {
 // Sync names where the branch stands, in the fewest characters.
 assert.equal(environmentSync(undefined), undefined);
 assert.equal(environmentSync(repo()).label, "Not published");
-assert.equal(environmentSync(repo({ upstream: "origin/main" })).label, "Up to date");
+assert.equal(
+  environmentSync(repo({ upstream: "origin/main" })).label,
+  "Up to date",
+);
 assert.equal(
   environmentSync(repo({ upstream: "origin/main", ahead: 2 })).label,
   "↑2",
@@ -179,7 +185,9 @@ assert.equal(
   "Rebase in progress with 1 conflict",
 );
 assert.equal(
-  environmentNotice(repo({ files: [{ ...file("a.ts"), state: "conflicted" }] })),
+  environmentNotice(
+    repo({ files: [{ ...file("a.ts"), state: "conflicted" }] }),
+  ),
   "1 conflicted file",
 );
 assert.equal(
@@ -218,7 +226,7 @@ assert.ok(
 
 // The rows have to be rendered, wired to the real git runner, and styled — a
 // pure module nothing calls would pass every assertion above and ship nothing.
-const surfaces = readFileSync(
+const surfaces = readRepoSource(
   new URL("../packages/ui/src/surfaces.tsx", import.meta.url),
   "utf8",
 );
@@ -236,7 +244,7 @@ assert.ok(
   ),
   "A git row with no handler behind it should read as unavailable",
 );
-const styles = readFileSync(
+const styles = readRepoSource(
   new URL("../packages/ui/src/styles.css", import.meta.url),
   "utf8",
 );

@@ -396,3 +396,17 @@
 .gyro-check-action-details > details {
   margin-left: 16px;
 }
+.gyro-check-share {
+  border-top: 1px solid var(--gyro-border);
+  padding-top: var(--gyro-space-standard);
+}
+.gyro-check-share > pre {
+  max-height: calc(320px * var(--gyro-ui-scale, 1));
+  overflow: auto;
+}
+.gyro-check-share > p {
+  color: var(--gyro-muted);
+}
+.gyro-check-share > .gyro-check-error {
+  color: var(--gyro-warn);
+}

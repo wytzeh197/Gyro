@@ -1,5 +1,5 @@
 import { createIdeEvidenceScheduler } from "../apps/desktop/src/ide-evidence-push.ts";
-import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 import ts from "typescript";
@@ -7,7 +7,7 @@ import ts from "typescript";
 // Exercise the production hooks without a Tauri window. Re-rendering with new
 // sessions must keep both capability subscriptions alive, and changing the
 // workspace root must send a snapshot belonging to that exact root.
-const source = readFileSync(
+const source = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );
@@ -140,9 +140,23 @@ assert.equal(
 
 const contextHooks = hooks();
 const requests = [];
+let pendingEvidence;
+const flushEvidence = () => {
+  const callback = pendingEvidence;
+  pendingEvidence = undefined;
+  callback?.();
+};
 const contextDependencies = {
-  // Cadence is covered by check-ide-evidence-push; isolate root ownership here.
-  createIdeEvidenceScheduler: send => createIdeEvidenceScheduler(send, { throttleMs: 0 }),
+  createIdeEvidenceScheduler: (send) =>
+    createIdeEvidenceScheduler(send, {
+      setTimeout: (callback) => {
+        pendingEvidence = callback;
+        return 1;
+      },
+      clearTimeout: () => {
+        pendingEvidence = undefined;
+      },
+    }),
   useEffect: contextHooks.useEffect,
   useMemo: contextHooks.useMemo,
   selectedFile: undefined,
@@ -179,10 +193,12 @@ const renderContext = compile(
 );
 contextHooks.render();
 renderContext(...Object.values(contextDependencies));
+flushEvidence();
 assert.equal(requests.at(-1).request.workspacePath, "/project/a");
 contextDependencies.workspaceActionRoot = "/project/b";
 contextHooks.render();
 renderContext(...Object.values(contextDependencies));
+flushEvidence();
 assert.equal(requests.at(-1).request.workspacePath, "/project/b");
 assert.equal(requests.at(-1).request.context.workspaceKey, "/project/b");
 assert.deepEqual(
@@ -196,6 +212,7 @@ assert.deepEqual(
 );
 contextHooks.render();
 renderContext(...Object.values(contextDependencies));
+flushEvidence();
 assert.equal(
   requests.length,
   2,
@@ -210,5 +227,6 @@ contextDependencies.invoke = async () => {
 };
 contextHooks.render();
 renderContext(...Object.values(contextDependencies));
-await new Promise(resolve => setImmediate(resolve));
+flushEvidence();
+await new Promise((resolve) => setImmediate(resolve));
 console.log("workspace capability sync checks passed");

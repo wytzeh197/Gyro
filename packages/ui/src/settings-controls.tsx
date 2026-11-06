@@ -2,12 +2,13 @@ import {
   createContext,
   useContext,
   useId,
+  useState,
   type ComponentProps,
   type ReactNode,
 } from "react";
 import { SettingsDisclosure } from "./settings-disclosure";
 import { SelectionTrack } from "./selection-track";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import "./settings-design.css";
 
 const SettingsRowDescription = createContext<string | undefined>(undefined);
@@ -61,7 +62,7 @@ export function SettingsRow({
 }: {
   label: string;
   value?: string;
-  detail: string;
+  detail?: string;
   onClick?: () => void;
   children?: ReactNode;
   tone?: "danger";
@@ -71,10 +72,10 @@ export function SettingsRow({
     <>
       <div>
         <strong>{label}</strong>
-        <span id={detailId}>{detail}</span>
+        {detail ? <span id={detailId}>{detail}</span> : null}
       </div>
       <div className="gyro-settings-control-column">
-        <SettingsRowDescription.Provider value={detailId}>
+        <SettingsRowDescription.Provider value={detail ? detailId : undefined}>
           {children ?? (
             <span className="gyro-settings-info-value">{value}</span>
           )}
@@ -107,12 +108,38 @@ export function SettingsRow({
   );
 }
 
-export function SettingsGroup({ label, id, badge, description, summary, actions, attention, children }: {
-  label: string; id?: string; badge?: string; description?: string; summary?: string; actions?: ReactNode; attention?: boolean; children: ReactNode;
+export function SettingsGroup({ label, id, icon, badge, description, summary, actions, attention, defaultOpen, children }: {
+  label: string; id?: string; icon?: ReactNode; badge?: string; description?: string; summary?: string; actions?: ReactNode; attention?: boolean; defaultOpen?: boolean; children: ReactNode;
 }) {
-  return <SettingsDisclosure id={id ?? settingsSearchKey(label)} title={label} description={description} summary={badge ?? summary} actions={actions} attention={attention}>
+  return <SettingsDisclosure id={id ?? settingsSearchKey(label)} title={label} icon={icon} description={description} summary={badge ?? summary} actions={actions} attention={attention} defaultOpen={defaultOpen}>
     {badge ? <p>{badge}</p> : null}<div className="gyro-settings-group-rows">{children}</div>
   </SettingsDisclosure>;
+}
+
+/**
+ * Secondary settings stay behind a click. A native disclosure keeps its rows
+ * mounted, so settings search can still find and open them. Opens by itself
+ * when `defaultOpen` says something inside already needs attention.
+ */
+export function SettingsMore({
+  label,
+  defaultOpen = false,
+  children,
+}: {
+  label: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [initiallyOpen] = useState(defaultOpen);
+  return (
+    <details className="gyro-settings-more" open={initiallyOpen}>
+      <summary>
+        <ChevronRight aria-hidden="true" size={13} />
+        {label}
+      </summary>
+      <div className="gyro-settings-more-body">{children}</div>
+    </details>
+  );
 }
 
 export function SettingsSegmented<T extends string>({

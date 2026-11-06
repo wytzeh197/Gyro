@@ -187,6 +187,9 @@ fn validate(spec: &Spec) -> anyhow::Result<()> {
                     | "progress-detection"
                     | "compact-tool-catalog"
                     | "recoverable-evidence"
+                    | "tight-evidence"
+                    | "batch-reads"
+                    | "compact-cli-catalog"
                     | "catalog-retention"
                     | "routine-profile"
                     | "combined"
@@ -468,6 +471,11 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                                 variant == "combined" || variant == "compact-tool-catalog";
                             e.recoverable_evidence =
                                 variant == "combined" || variant == "recoverable-evidence";
+                            // Not part of `combined`: tight evidence replaces recoverable
+                            // evidence, so each is measured on its own first.
+                            e.tight_evidence = variant == "tight-evidence";
+                            e.batch_reads = variant == "batch-reads";
+                            e.compact_cli_catalog = variant == "compact-cli-catalog";
                             e.retain_tool_catalog =
                                 variant == "combined" || variant == "catalog-retention";
                             e.profile = if variant == "routine-profile" {

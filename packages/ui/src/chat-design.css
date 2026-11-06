@@ -474,6 +474,12 @@
 :root[data-theme]
   .gyro-chat-surface
   .gyro-run.is-segments
+  .gyro-run-pulse.is-quiet {
+  animation: none;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments
   .gyro-run-pulse
   .gyro-run-row-icon {
   display: none;
@@ -825,7 +831,10 @@
   :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
   .gyro-response-body
   :is(.gyro-response-inline-code, .gyro-response-command-list code) {
-  background: var(--gyro-surface-soft);
+  /* Inline code is tinted ink, so it sits evenly on the canvas, a quote, or
+     a table row without a boxed edge. */
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  border: 0;
   box-shadow: none;
   color: var(--gyro-code-text);
   font-family: var(--gyro-font-mono);
@@ -835,8 +844,10 @@
 :root[data-theme]
   :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
   .gyro-response-code-block {
-  background: var(--gyro-code-bg);
-  border: 1px solid var(--gyro-border-soft);
+  /* A lifted sheet rather than a dark well: the block reads as part of the
+     reply and keeps one hairline in both themes. */
+  background: color-mix(in srgb, var(--gyro-text) 2.5%, var(--gyro-pane));
+  border: 1px solid var(--gyro-border);
   box-shadow: none;
   color: var(--gyro-code-text);
   font-family: var(--gyro-font-mono);

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { requireReleaseTag } from "./release-identity.mjs";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -22,7 +23,7 @@ const assetsDirectory = resolve(argument("--assets") ?? "release-assets");
 const tag = argument("--tag");
 if (!tag?.startsWith("v") || tag.length === 1)
   fail("--tag must be a v-prefixed version");
-const version = tag.slice(1);
+const { version } = requireReleaseTag(tag);
 const targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
 const checksums = new Map();
 
@@ -67,12 +68,12 @@ const formula = `class Gyro < Formula
 
   on_macos do
     on_arm do
-      url "${repository}/releases/download/v#{version}/gyro-cli-#{version}-aarch64-apple-darwin.tar.gz"
+      url "${repository}/releases/download/${tag}/gyro-cli-#{version}-aarch64-apple-darwin.tar.gz"
       sha256 "${checksums.get("aarch64-apple-darwin")}"
     end
 
     on_intel do
-      url "${repository}/releases/download/v#{version}/gyro-cli-#{version}-x86_64-apple-darwin.tar.gz"
+      url "${repository}/releases/download/${tag}/gyro-cli-#{version}-x86_64-apple-darwin.tar.gz"
       sha256 "${checksums.get("x86_64-apple-darwin")}"
     end
   end

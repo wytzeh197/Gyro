@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AppChrome,
+  createNotification,
   type Session,
   type UpdateState,
   type WorkspacePreparationProgress,
@@ -77,8 +78,27 @@ const workspacePreparation: WorkspacePreparationProgress | undefined =
       }
     : undefined;
 
+// `?failures=1` raises fixture failure notices in the same real shell.
+const failureFixtures = query.has("failures")
+  ? [
+      createNotification(
+        "fixture-rejected",
+        "command-failed",
+        "Media rejected",
+        "broken.png: unsupported image format\nholiday-photo-with-a-long-name.heic: session attachment storage limit reached",
+      ),
+      createNotification(
+        "fixture-limit",
+        "command-failed",
+        "Media limit reached",
+        "Attach up to 8 images and 2 videos per message",
+      ),
+    ]
+  : [];
+
 function Preview() {
   const [visible, setVisible] = useState(true);
+  const [notifications, setNotifications] = useState(failureFixtures);
   const installedState: UpdateState = visible
     ? {
         ...updateState,
@@ -97,8 +117,18 @@ function Preview() {
       activeSessionId="session-1"
       activeWorkspaceLayout="thread"
       commandProfiles={[]}
+      notifications={notifications}
       onCreateCliSession={() => undefined}
       onCreateSession={() => undefined}
+      onDismissNotification={(id) =>
+        setNotifications((current) =>
+          current.map((notification) =>
+            notification.id === id
+              ? { ...notification, read: true }
+              : notification,
+          ),
+        )
+      }
       onOpenCommandPalette={() => undefined}
       onOpenSettings={() => undefined}
       onOpenToolPanel={() => undefined}

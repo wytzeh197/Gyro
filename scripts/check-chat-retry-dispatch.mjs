@@ -1,4 +1,4 @@
-import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 import vm from "node:vm";
@@ -278,7 +278,7 @@ assert.equal(
 
 // Run the actual sendDraft busy branch: a recovery must not become a new turn
 // even when the original failed invoke has not released its sending flag yet.
-const source = readFileSync(
+const source = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );

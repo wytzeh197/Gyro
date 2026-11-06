@@ -1,4 +1,4 @@
-import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 import { isComposerCliUpdating } from "../apps/desktop/src/cli-update-scope.ts";
@@ -38,7 +38,7 @@ assert.equal(
   false,
 );
 
-const app = readFileSync(
+const app = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );

@@ -125,6 +125,7 @@ if (bootSurface === "embedded") {
     import("@gyro-dev/ui/styles.css"),
     import("@gyro-dev/ui/installed-update.css"),
     import("./menu-bar.css"),
+    import("./dictation-access"),
   ])
     .then(([{ App }]) => {
       root.render(

@@ -1,571 +1,643 @@
 import {
-Activity,
-Archive,
-ArrowDown,
-ArrowLeft,
-ArrowRight,
-ArrowUp,
-ArrowUpRight,
-Blocks,
-Box,
-CalendarClock,
-Camera,
-Check,
-ChevronDown,
-ChevronLeft,
-ChevronRight,
-ChevronUp,
-Circle,
-CircleDashed,
-Clock,
-CodeXml,
-Columns2,
-Command,
-Copy,
-CornerDownRight,
-Download,
-Edit3,
-FileCode2,
-FileDiff,
-FileText,
-Gauge,
-GitBranch,
-GitBranchPlus,
-GitCommitHorizontal,
-GitPullRequest,
-Globe,
-Globe2,
-GripVertical,
-HardDrive,
-HelpCircle,
-History,
-KeyRound,
-LayoutPanelLeft,
-ListChecks,
-LockKeyhole,
-Maximize2,
-MessageCirclePlus,
-MessageSquare,
-Minimize2,
-Minus,
-MoreHorizontal,
-MoreVertical,
-Palette,
-PanelBottom,
-PanelLeft,
-PanelRight,
-Paperclip,
-PauseCircle,
-Pin,
-Play,
-Plus,
-RefreshCw,
-RotateCcw,
-ScrollText,
-Search,
-Settings,
-ShieldCheck,
-SlidersHorizontal,
-Sparkles,
-Square,
-SquarePen,
-SquareTerminal,
-Tag,
-Terminal,
-Trash2,
-TriangleAlert,
-UserCircle,
-Users,
-X,
-XCircle
+  Activity,
+  Archive,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  ArrowUpRight,
+  Blocks,
+  CalendarClock,
+  Camera,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  Circle,
+  CircleDashed,
+  Clock,
+  Cloud,
+  Columns2,
+  Command,
+  Copy,
+  CornerDownRight,
+  Download,
+  Edit3,
+  FileCode2,
+  FileDiff,
+  FileText,
+  Gauge,
+  GitBranch,
+  GitCommitHorizontal,
+  GitPullRequest,
+  Globe,
+  Globe2,
+  Goal,
+  GripVertical,
+  Hand,
+  HardDrive,
+  HelpCircle,
+  History,
+  ImagePlus,
+  KeyRound,
+  Laptop,
+  LayoutPanelLeft,
+  ListChecks,
+  LockKeyhole,
+  Maximize2,
+  MessageCirclePlus,
+  MessageSquare,
+  Mic,
+  Minimize2,
+  Minus,
+  MoreHorizontal,
+  MoreVertical,
+  Palette,
+  PanelBottom,
+  PanelLeft,
+  PanelRight,
+  Paperclip,
+  Pause,
+  PauseCircle,
+  Pause as PauseIcon,
+  Pin,
+  Play,
+  PlugZap,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  ScrollText,
+  Search,
+  Settings,
+  ShieldAlert,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+  Square,
+  SquarePen,
+  SquareTerminal,
+  Terminal,
+  Trash2,
+  TriangleAlert,
+  UserCircle,
+  Users,
+  Video,
+  X,
+  XCircle,
+  createLucideIcon,
 } from "lucide-react";
 import {
-memo,
-useCallback,
-useContext,
-useDeferredValue,
-useEffect,
-useId,
-useLayoutEffect,
-useMemo,
-useRef,
-useState,
-type CSSProperties,
-type FormEvent,
-type MutableRefObject,
-type DragEvent as ReactDragEvent,
-type KeyboardEvent as ReactKeyboardEvent,
-type MouseEvent as ReactMouseEvent,
-type ReactNode,
-type PointerEvent as ReactPointerEvent,
-type RefObject
+  Fragment,
+  memo,
+  useCallback,
+  useContext,
+  useDeferredValue,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type FormEvent,
+  type MutableRefObject,
+  type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from "react";
 import { AppPreviewPanel } from "./app-preview-panel";
 import { AppearanceSettings } from "./appearance-settings";
 import {
-parseAssistantResponseHeading,
-type AssistantResponseHeading,
+  parseAssistantResponseHeading,
+  type AssistantResponseHeading,
 } from "./assistant-response-heading";
 import { AutomationChoice } from "./automation-choice.tsx";
 import "./automation-detail.css";
 import {
-BrowserCaptureView,
-browserPreviewLocationLabel,
+  BillingSettings,
+  type BillingActions,
+  type BillingSnapshot,
+} from "./billing-settings";
+import {
+  BrowserCaptureView,
+  browserPreviewLocationLabel,
 } from "./browser-capture-view";
 import { observeBrowserHostBounds } from "./browser-host-bounds";
 import { BrowserPreviewSurround } from "./browser-preview-surround";
 import {
-BrowserViewportControls,
-FittedBrowserFrame,
+  BrowserViewportControls,
+  FittedBrowserFrame,
 } from "./browser-viewport-controls";
 import { capabilityLabel } from "./capability-ui.ts";
 import {
-ChatFileCard,
-ChatImageHintContext,
-CitedChatImage
+  ChatFileCard,
+  ChatImageHintContext,
+  CitedChatImage,
 } from "./chat-file-card";
 import {
-bareChatUrl,
-chatBareUrlPattern,
-chatInlineTokenPattern,
-isCitedImageTarget,
-linkedChatFile,
-markdownImageTargets,
-parseChatMarkdownLink,
+  bareChatUrl,
+  chatBareUrlPattern,
+  chatInlineTokenPattern,
+  isCitedImageTarget,
+  linkedChatFile,
+  markdownImageTargets,
+  parseChatMarkdownLink,
 } from "./chat-file-links";
 import { createTranscriptTurnCache } from "./chat-history-efficiency";
 import {
-deliverChatMediaDrop,
-isMediaDrag
+  chatMediaFiles,
+  deliverChatMediaDrop,
+  isMediaDrag,
 } from "./chat-media-transfer";
 import type { ChatPointerDropTarget } from "./chat-pointer-drag";
 import {
-registerChatPointerDropTarget,
-startChatPointerDrag,
+  registerChatPointerDropTarget,
+  startChatPointerDrag,
 } from "./chat-pointer-drag";
 import { ChatQuestionPopup } from "./chat-question-popup";
-import { latestChatQuestions,parseChatAnswers } from "./chat-questions";
+import { latestChatQuestions, parseChatAnswers } from "./chat-questions";
 import {
-beginChatPaneDrag,
-beginChatSessionDrag,
-chatDragSource,
-currentChatDrag,
-endChatDrag,
-endChatDragForTransfer,
-readChatDrag,
-subscribeChatDrag
+  beginChatPaneDrag,
+  chatDragSource,
+  currentChatDrag,
+  endChatDrag,
+  endChatDragForTransfer,
+  readChatDrag,
+  subscribeChatDrag,
 } from "./chat-session-drag";
 import {
-ChatEventTaskSuggestions,
-ChatStartTaskSuggestions,
-ChatTaskOriginRow,
-ChatTaskSuggestionsContext,
-type ChatStartTaskSuggestionsSource,
-type ChatTaskOrigin,
-type ChatTaskSuggestionHandlers,
-type ChatTaskSuggestionsController,
+  ChatEventTaskSuggestions,
+  ChatStartTaskSuggestions,
+  ChatTaskOriginRow,
+  ChatTaskSuggestionsContext,
+  type ChatStartTaskSuggestionsSource,
+  type ChatTaskOrigin,
+  type ChatTaskSuggestionHandlers,
+  type ChatTaskSuggestionsController,
 } from "./chat-task-suggestions";
-import { CheckWorkMenuItem } from "./check-work-context";
-import { CliSessionList } from "./cli-session-list";
-import { groupWorkflowEvents,workflowDetails } from "./code-mode";
+import { CheckWorkStatus } from "./check-work-context";
+import { CloudChatBackup, type ChatBackupReview } from "./cloud-chat-backup";
+import { CloudSettings } from "./cloud-settings";
+import { groupWorkflowEvents, workflowDetails } from "./code-mode";
 import { CodeModeActivityCard } from "./code-mode-card";
 import "./companion-motion.css";
-import { AutoApproveIcon,BranchLabel,CONTEXT_METER_USAGE_REFRESH_MIN_AGE_MS,ChatContextSection,Composer,ComposerLimitRow,ComposerMediaPreview,ComposerPopover,NEW_CHAT_DRAFT_KEY,PLAN_USAGE_NOTICE_STORAGE_KEY,PlanUsageNotification,ProviderLogo,SessionGoalStrip,approvalBackendSummary,approvalModeForConfig,branchPopoverItems,composerModelPickerItem,composerProjectLabel,composerWantsFocus,contextMeterSeverity,explorerAskSendHeld,explorerAskSendListeners,formatAttachmentSize,isGeneratedGyroWorkspace,loadShownPlanUsageNotices,localMediaDrop,mediaDropTargets,modelRailProvidersFor,providerApprovalCopy,providerConnectionKind,providerMonogram,registerMediaDropTarget,setExplorerAskSendHeld,subscribeExplorerAskSend,usageNoticeKey,workspaceName,type ApprovalCopy,type ComposerPopoverId,type ComposerPopoverItem,type ComposerSlashCommand,type IconComponent,type MediaDropTarget,type SessionGoalAction } from "./composer";
+import { ComposerCompletionMenu } from "./composer-completion-menu";
+import {
+  ComposerContextCandidates,
+  contextMentionCandidates,
+} from "./composer-context.ts";
+import { ComposerEffortSelector } from "./composer-effort-selector";
+import { ComposerModelRail } from "./composer-model-rail";
+import { clippingBounds } from "./composer-popover-bounds";
 import { DesktopNotificationSettings } from "./desktop-notification-settings";
-import { buildDiffFileTree,type DiffTreeNode } from "./diff-file-tree";
+import { buildDiffFileTree, type DiffTreeNode } from "./diff-file-tree";
 import { LanguagePicker } from "./editor/languages/language-picker";
-import { resolveLanguage } from "./editor/languages/registry";
 import { EfficiencySettings } from "./efficiency-settings";
 import type { ReplyLinkMark } from "./external-links";
-import { openReplyLink,replyLinkHint,replyLinkMark } from "./external-links";
+import { openReplyLink, replyLinkHint, replyLinkMark } from "./external-links";
+import { visibleFailureNotifications } from "./failure-notifications";
 import { turnReviewPatches } from "./file-review.ts";
 import { InlineApprovalCard } from "./inline-approval-card";
-import { dismissOpenMenus,useOutsidePointerDismiss } from "./menu-dismiss";
-import { CheckReminderSettings,NewChatSettings,type SettingsPreferencePatch } from "./new-chat-settings";
+import { dismissOpenMenus, useOutsidePointerDismiss } from "./menu-dismiss";
 import {
-ChatQuestionAnswers,
-EnvironmentPlanSteps,
-ImplementPlanDock,
-PlanCard,
-PlanPanelHeader,
-PlanStepStatus,
+  CheckReminderSettings,
+  NewChatSettings,
+  type SettingsPreferencePatch,
+} from "./new-chat-settings";
+import {
+  ChatQuestionAnswers,
+  EnvironmentPlanSteps,
+  ImplementPlanDock,
+  PlanCard,
+  PlanPanelHeader,
+  PlanStepStatus,
 } from "./plan-mode";
 import {
-ProjectImportSettings,
-type ProjectImportSettingsProps,
+  ProjectImportSettings,
+  type ProjectImportSettingsProps,
 } from "./project-import-settings";
 import { providerAllowance } from "./provider-allowance";
 import "./provider-allowance.css";
 import {
-CustomProviderSection,
-ProviderApiKeySection,
-ProviderDetailsMenu,
-ProviderRemoveControl,
-RemovedProvidersSection,
+  composerFastMode,
+  pickerModelId,
+  pickerModelLabel,
+} from "./provider-fast-mode";
+import {
+  CustomProviderSection,
+  ProviderApiKeySection,
+  ProviderDetailsMenu,
+  ProviderRemoveControl,
+  RemovedProvidersSection,
 } from "./provider-settings-fields";
 import "./scheduled-work.css";
 import { automationScheduleLabel } from "./scheduled-work.ts";
-import { ScmCommitHover } from "./scm-commit-hover";
-import { ScmFileActions } from "./scm-file-actions";
-import { SelectionTrack } from "./selection-track";
 import {
-SettingsGroup,
-SettingsRow,SettingsSegmented,SettingsSelect,
-SettingsSwitch,
-settingsSearchKey
+  SettingsGroup,
+  SettingsMore,
+  SettingsRow,
+  SettingsSegmented,
+  SettingsSelect,
+  SettingsSwitch,
+  settingsSearchKey,
 } from "./settings-controls";
-import { SettingsDisclosure,SettingsDisclosureProvider,revealSettingsTarget } from "./settings-disclosure";
+import {
+  SettingsDisclosure,
+  SettingsDisclosureProvider,
+  revealSettingsTarget,
+} from "./settings-disclosure";
 import { SettingsHelp } from "./settings-help";
 import {
-SettingsSection,
-SettingsStatus,
-UsageCard,
-budgetOptions,
-usagePauseDetail
+  SettingsSection,
+  SettingsStatus,
+  UsageCard,
+  budgetOptions,
+  usagePauseDetail,
 } from "./settings-presentation";
 import { ProviderModelDefaults } from "./settings-provider-defaults";
-import { ShortcutConflicts,workspaceKeybindingSignature } from "./settings-shortcut-conflicts";
+import {
+  ShortcutConflicts,
+  workspaceKeybindingSignature,
+} from "./settings-shortcut-conflicts";
 import type { PortableSettings } from "./settings-transfer";
 import { SettingsTransferPanel } from "./settings-transfer-panel";
+import { type SidebarProjectSettings } from "./sidebar-project-card";
 import {
-SidebarProjectCard,
-type SidebarProjectSettings,
-} from "./sidebar-project-card";
-import {
-pendingSubagentApprovals,
-type SubagentSurfaceState,
+  pendingSubagentApprovals,
+  type SubagentSurfaceState,
 } from "./subagents";
 import { SubagentsEnvironment } from "./subagents-environment";
-import { SubagentMark,SubagentPanel,SubagentStrip } from "./subagents-view";
-import { runSurfaceSwitch } from "./surface-switch-transition";
+import { SubagentMark, SubagentPanel, SubagentStrip } from "./subagents-view";
 import { navigateTabList } from "./tab-navigation";
 import {
-activeTerminalPaneId,
-listedTerminalPanes,
-placeTerminalTab,
-type TerminalDropEdge,
-type TerminalSplitLayout,
+  activeTerminalPaneId,
+  listedTerminalPanes,
+  placeTerminalTab,
+  type TerminalDropEdge,
+  type TerminalSplitLayout,
 } from "./terminal-layout";
 import type { WorkbenchPreferences } from "./types";
 import { useChatTranscriptScroll } from "./use-chat-transcript-scroll";
 import {
-CompanionMotionContext,
-useCompanionMotion,
-useCompanionPresence,
+  CompanionMotionContext,
+  useCompanionMotion,
+  useCompanionPresence,
 } from "./use-companion-motion";
 import { useDialogDismiss } from "./use-dialog-dismiss";
 import { useNetworkOnline } from "./use-network-online";
 import { workspaceFileBadge } from "./workspace-file-icons";
-import { Folder,FolderOpen,Folders } from "./workspace-folder-icons";
+import { Folder, FolderOpen, Folders } from "./workspace-folder-icons";
 import "./workspace-folder-icons.css";
-import { validateWorkspaceEntryName } from "./workspace-names";
-import {
-WorkspaceRootIssues,
-type WorkspaceRootIssuesModel,
-} from "./workspace-root-issues";
-import { WorkspaceSearchResults } from "./workspace-search-results";
+import { type WorkspaceRootIssuesModel } from "./workspace-root-issues";
 import { resolvedWorkspaceSettings } from "./workspace-settings";
+import {
+  GlobalSearchMode,
+  IconComponent,
+  PrimarySurfaceSwitch,
+  ProviderLogo,
+  ScmBranchPicker,
+  SidebarDraftChat,
+  TerminalLaunchOptions,
+  WorkspaceSidebarContent,
+  explorerAskSendHeld,
+  explorerAskSendListeners,
+  guardChatDragsOutsideGrid,
+  isMacPlatform,
+  primaryGlobalSearchShortcut,
+  relativeSessionTime,
+  scmFileBadge,
+  terminalPaneHasActiveWork,
+  workspaceAncestorPaths,
+  workspaceName,
+} from "./workspace-sidebar";
+export {
+  SessionDeleteConfirmOverlay,
+  groupedRunTasks,
+  taskCommandLine,
+} from "./workspace-sidebar";
 
 import { createPortal } from "react-dom";
 import gyroLogoTransparentLight from "./assets/gyro-logo-white.svg";
 import gyroLogoTransparentDark from "./assets/gyro-logo.svg";
 import {
-ChatArtifacts,
-chatArtifactsFromEvent,
-type ChatArtifactActions,
+  ChatArtifacts,
+  chatArtifactsFromEvent,
+  type ChatArtifactActions,
 } from "./chat-artifacts";
 import { latestCanvasArtifacts } from "./chat-canvas";
-import { ChatCanvas,type CanvasDrafts } from "./chat-canvas-view";
+import { ChatCanvas, type CanvasDrafts } from "./chat-canvas-view";
 import "./chat-canvas.css";
 import {
-finalAssistantResponseText,
-stripHiddenControlMarkers,
+  finalAssistantResponseText,
+  stripHiddenControlMarkers,
 } from "./chat-commentary";
-import type { ChatCompanionTabId,ChatCompanionWidthMode } from "./chat-companion";
-import {
-BROWSER_COMPANION_DEFAULT_WIDTH,
-BROWSER_COMPANION_MAX_WIDTH,
-BROWSER_COMPANION_MIN_WIDTH,
-CHAT_COMPANION_DEFAULT_WIDTH,
-CHAT_COMPANION_MAX_WIDTH,
-CHAT_COMPANION_MIN_WIDTH,
-CHAT_PANEL_MAX_WIDTH,
-CHAT_PANEL_MIN_WIDTH,
-CHAT_PANEL_TRANSCRIPT_WIDTH,
-chatCompanionTabIds,
-chatCompanionTabLabels,
-clampBrowserCompanionWidth,
-clampChatCompanionWidth,
-clampChatPanelWidth,
-isChatCompanionTabId,
-keyboardChatCompanionWidth,
-shouldOverlayChatCompanion,
-shouldOverlayPaneChatCompanion,
+import type {
+  ChatCompanionTabId,
+  ChatCompanionWidthMode,
 } from "./chat-companion";
 import {
-ChatCompanionPaneRail,
-ChatCompanionPaneScope,
-ChatCompanionWorkspace,
-SharedChatCompanion,
-useChatCompanionHost,
-useSharedCompanionLayout,
-} from "./chat-companion-host";
-import type { ChatGridDropPlacement,ChatGridDropZone } from "./chat-grid-drop";
+  BROWSER_COMPANION_DEFAULT_WIDTH,
+  BROWSER_COMPANION_MAX_WIDTH,
+  BROWSER_COMPANION_MIN_WIDTH,
+  CHAT_COMPANION_DEFAULT_WIDTH,
+  CHAT_COMPANION_MAX_WIDTH,
+  CHAT_COMPANION_MIN_WIDTH,
+  CHAT_PANEL_MAX_WIDTH,
+  CHAT_PANEL_MIN_WIDTH,
+  CHAT_PANEL_TRANSCRIPT_WIDTH,
+  chatCompanionTabIds,
+  chatCompanionTabLabels,
+  clampBrowserCompanionWidth,
+  clampChatCompanionWidth,
+  clampChatPanelWidth,
+  isChatCompanionTabId,
+  keyboardChatCompanionWidth,
+  shouldOverlayChatCompanion,
+  shouldOverlayPaneChatCompanion,
+} from "./chat-companion";
 import {
-chatGridDropLayout,
-chatGridDropZoneBeforePaint,
-chatGridDropZones,
-nearestChatGridDropZone,
+  ChatCompanionPaneRail,
+  ChatCompanionPaneScope,
+  ChatCompanionWorkspace,
+  SharedChatCompanion,
+  useChatCompanionHost,
+  useSharedCompanionLayout,
+} from "./chat-companion-host";
+import type { ChatGridDropPlacement, ChatGridDropZone } from "./chat-grid-drop";
+import {
+  chatGridDropLayout,
+  chatGridDropZoneBeforePaint,
+  chatGridDropZones,
+  nearestChatGridDropZone,
 } from "./chat-grid-drop";
 import type { KeepAliveWatch } from "./chat-keep-alive";
 import { keepAliveWatchesFromPanes } from "./chat-keep-alive";
 import { ChatKeepAlive } from "./chat-keep-alive-view";
 import {
-buildRunModel,
-elapsedMsBetween,
-runNeedsFinalResponse
+  buildRunModel,
+  elapsedMsBetween,
+  formatRunDuration,
+  runNeedsFinalResponse,
 } from "./chat-run";
 import { ChatRun } from "./chat-run-view";
 import { browserCapabilityText } from "./chat-run.ts";
 import {
-interleaveModelSwitches,
-isModelSwitchEvent,
-modelSwitchLogoProvider,
-orderedChatTimelineEvents,
+  interleaveModelSwitches,
+  isModelSwitchEvent,
+  modelSwitchLogoProvider,
+  orderedChatTimelineEvents,
 } from "./chat-timeline";
-import { confirmAction } from "./confirm-action";
+import { resolveCleanMachinePath } from "./clean-machine-path";
 import {
-composerLimitWindows,
-estimateComposerContextUsage,
-isManualCompaction,
-manualCompactionMode,
-manualCompactionResultText
+  composerLimitWindows,
+  estimateComposerContextUsage,
+  isManualCompaction,
+  manualCompactionMode,
+  manualCompactionResultText,
+  type ComposerContextUsage,
+  type ComposerLimitWindow,
 } from "./context-usage";
 import {
-COUNCIL_COMING_SOON,
-COUNCIL_COMING_SOON_LABEL,
-normalizedCouncilConfig
+  COUNCIL_COMING_SOON,
+  COUNCIL_COMING_SOON_LABEL,
+  councilPreflightLabel,
+  normalizedCouncilConfig,
+  readyCouncilProviders,
+  resolveCouncilSeatRequests,
 } from "./council";
 import {
-type DictationController
+  browserDictation,
+  dictationDraft,
+  type DictationController,
 } from "./dictation";
 import type { EnvironmentActionIntent } from "./environment-actions";
 import {
-environmentActions,
-environmentNotice,
-environmentSync,
-middleTruncate,
+  environmentActions,
+  environmentNotice,
+  environmentSync,
+  middleTruncate,
 } from "./environment-actions";
 import {
-isAppliedFileMutationEvent,
-totalFileChangeCounts,
+  isAppliedFileMutationEvent,
+  totalFileChangeCounts,
 } from "./file-change-counts";
 import { FileChangeCountBadges } from "./file-change-counts-view";
-import type { DiffPreviewLine,FileReviewRecord } from "./file-review";
+import type { DiffPreviewLine, FileReviewRecord } from "./file-review";
 import {
-changeSummaryLine,
-diffPreviewLines,
-fileReviewDecisions,
-isKeptCurrent
+  changeSummaryLine,
+  diffPreviewLines,
+  fileReviewDecisions,
+  isKeptCurrent,
 } from "./file-review";
 import type { ComparisonDiffResult } from "./git-comparison-review";
 import { GitComparisonReview } from "./git-comparison-review";
 import {
-GlobalSearchRanker,
-createGlobalSearchTarget,
-normalizedGlobalSearchText,
-type GlobalSearchMatch,
-type GlobalSearchRange,
-type GlobalSearchTarget,
+  GlobalSearchRanker,
+  createGlobalSearchTarget,
+  normalizedGlobalSearchText,
+  type GlobalSearchMatch,
+  type GlobalSearchRange,
+  type GlobalSearchTarget,
 } from "./global-search";
 import {
-defaultModelLabel,
-getProviderModel,
-isCustomProviderId,
-isProviderExecutable,
-isProviderId,
-isProviderRuntimeUsable,
-providerCapabilities,
-providerDefaultModelId,
-providerNeedsSignInRepair,
-providerSupportsApiKey,
-providersForConfig,
-reasoningEffortLabel
+  defaultModelLabel,
+  getProviderModel,
+  isCustomProviderId,
+  isProviderExecutable,
+  isProviderId,
+  isProviderRuntimeUsable,
+  providerCapabilities,
+  providerDefaultModelId,
+  providerNeedsSignInRepair,
+  providerSupportsApiKey,
+  providerSupportsUsage,
+  providersForConfig,
+  reasoningEffortLabel,
+  selectedModelLabel,
+  selectedReasoningEffort,
 } from "./provider-catalog";
 import {
-defaultChatReview,
-reviewScopeFromSourceControl,
-reviewScopeTitle,
-type ReviewScope,
+  defaultChatReview,
+  reviewScopeFromSourceControl,
+  reviewScopeTitle,
+  type ReviewScope,
 } from "./review-scope";
 import {
-sourceControlHistoryMessage,
-sourceControlTotals,
-sourceControlTotalsBadge,
-sourceControlTotalsLabel,
-sourceControlTotalsScope,
+  sourceControlTotals,
+  sourceControlTotalsBadge,
+  sourceControlTotalsLabel,
+  sourceControlTotalsScope,
 } from "./source-control-stats";
 import { terminalOutputHasError } from "./terminal-failure";
-import { askTextValue } from "./text-prompt";
 import { TranscriptAttachmentsView } from "./transcript-attachments";
 import {
-turnTokenReadingForResponse,
-turnTokensDetail,
-turnTokensFromEvents,
-turnTokensFromValue,
-turnTokensLabel,
-type TurnTokenReading,
-type TurnTokens,
+  turnTokenReadingForResponse,
+  turnTokensDetail,
+  turnTokensFromEvents,
+  turnTokensFromValue,
+  turnTokensLabel,
+  type TurnTokenReading,
+  type TurnTokens,
 } from "./turn-tokens";
 import type {
-AppDestination,
-Automation,
-BrowserFeedback,
-BrowserPreview,
-BrowserPreviewDevice,
-BrowserViewportMode,
-CapabilityActivity,
-CapabilityCallEvent,
-ChatAttachment,
-ChatGridArrangement,
-ChatGridState,
-ChatMode,
-ChatPaneRef,
-ChatProjectLayout,
-ChatSidePanelId,
-CliLaunchPreset,
-CliUpdateOffer,
-CliUpdatePhase,
-CommandProfile,
-CouncilActionRequest,
-CouncilResponsePayload,
-CouncilSeatSummary,
-CouncilSynthesis,
-CustomProviderDraft,
-CustomTaskDraft,
-DebugSessionState,
-DesktopNotificationPreferences,
-DiffReview,
-EditorBuffer,
-EditorGroup,
-EditorRevealTarget,
-EditorSelection,
-EditorTab,
-FileReviewSummary,
-GitBranchCatalog,
-GitReviewActionId,
-GithubRunState,
-GithubState,
-GlobalSearchProject,
-GlobalSearchSelection,
-GyroConfig,
-IdeAssistantAction,
-IdeContribution,
-IdeState,
-IdeViewId,
-InterfaceSize,
-LanguageServerState,
-LaunchView,
-ModelFocus,
-ModelFollowMode,
-ModelProviderConfig,
-MotionSpeed,
-Notification,
-NotificationPermissionState,
-ProjectCapabilityPolicy,
-ProviderId,
-ProviderLedgerSummary,
-ProviderReadiness,
-ProviderStatus,
-ProviderUsageState,
-ReasoningEffort,
-Session,
-SessionEvent,
-SessionGoal,
-SessionPlan,
-SessionPlanItemStatus,
-SessionUsageTotals,
-SettingsSectionId,
-SourceControlFile,
-SourceControlState,
-SystemAccessScope,
-SystemAccessScopeId,
-Task,
-TaskDefinition,
-TerminalPane,
-TerminalPaneLayout,
-TerminalTemplate,
-TestTreeItem,
-ThemeMode,
-UpdateState,
-UsageSafetySnapshot,
-WorkbenchDensity,
-WorkbenchMode,
-WorkbenchPaneTab,
-WorkbenchTurn,
-WorkspaceFile,
-WorkspaceFileContent,
-WorkspaceKeybinding,
-WorkspaceLayoutId,
-WorkspacePreparationProgress,
-WorkspaceScopedSettings,
-WorkspaceSearchQuery,
-WorkspaceSettingScope
+  AppDestination,
+  Automation,
+  BrowserFeedback,
+  BrowserPreview,
+  BrowserPreviewDevice,
+  BrowserViewportMode,
+  CapabilityActivity,
+  CapabilityCallEvent,
+  ChatAttachment,
+  ChatGridArrangement,
+  ChatGridState,
+  ChatMode,
+  ChatPaneRef,
+  ChatProjectLayout,
+  ChatSidePanelId,
+  CliLaunchPreset,
+  CliUpdateOffer,
+  CliUpdatePhase,
+  CommandProfile,
+  CouncilActionRequest,
+  CouncilResponsePayload,
+  CouncilSeatSummary,
+  CouncilSynthesis,
+  CustomProviderDraft,
+  CustomTaskDraft,
+  DebugSessionState,
+  DesktopNotificationPreferences,
+  DiffReview,
+  EditorBuffer,
+  EditorGroup,
+  EditorRevealTarget,
+  EditorSelection,
+  EditorTab,
+  FileReviewSummary,
+  GitBranchCatalog,
+  GitReviewActionId,
+  GlobalSearchProject,
+  GlobalSearchSelection,
+  GyroConfig,
+  IdeAssistantAction,
+  IdeContribution,
+  IdeState,
+  IdeViewId,
+  InterfaceSize,
+  LanguageServerState,
+  LaunchView,
+  ModelFocus,
+  ModelFollowMode,
+  ModelProviderConfig,
+  MotionSpeed,
+  Notification,
+  NotificationPermissionState,
+  ProjectCapabilityPolicy,
+  ProviderId,
+  ProviderLedgerSummary,
+  ProviderReadiness,
+  ProviderStatus,
+  ProviderUsageState,
+  ReasoningEffort,
+  Session,
+  SessionEvent,
+  SessionGoal,
+  SessionPlan,
+  SessionPlanItemStatus,
+  SessionUsageTotals,
+  SettingsSectionId,
+  SourceControlFile,
+  SourceControlState,
+  SystemAccessScope,
+  SystemAccessScopeId,
+  Task,
+  TaskDefinition,
+  TerminalPane,
+  TerminalPaneLayout,
+  TerminalTemplate,
+  TestTreeItem,
+  ThemeMode,
+  UpdateState,
+  UsageSafetySnapshot,
+  WorkbenchDensity,
+  WorkbenchMode,
+  WorkbenchPaneTab,
+  WorkbenchTurn,
+  WorkspaceFile,
+  WorkspaceFileContent,
+  WorkspaceKeybinding,
+  WorkspaceLayoutId,
+  WorkspacePreparationProgress,
+  WorkspaceScopedSettings,
+  WorkspaceSearchQuery,
+  WorkspaceSettingScope,
 } from "./types";
 import {
-cliUpdateActionLabel,
-cliUpdateNoticeMessage,
-shouldShowSidebarUpdate,
-updateAnnouncement,
-updateFacts,
-updateInstalledVersion,
-updatePrimaryActionLabel,
-updateProgressPercent,
-updateSidebarLabel,
-updateSizeLabel,
-updateStatusLabel,
-updateStatusLevel,
-updateStatusSummary,
-updateVersionTag,
+  cliUpdateActionLabel,
+  cliUpdateNoticeMessage,
+  shouldShowSidebarUpdate,
+  updateAnnouncement,
+  updateFacts,
+  updateInstalledVersion,
+  updatePrimaryActionLabel,
+  updateProgressPercent,
+  updateSidebarLabel,
+  updateSizeLabel,
+  updateStatusLabel,
+  updateStatusLevel,
+  updateStatusSummary,
+  updateVersionTag,
 } from "./update-state";
 import {
-ledgerWindows
+  DAILY_PACE_NOTICE_PERCENT,
+  dailyPaceNotice,
+  estimateTurnCost,
+  ledgerWindows,
+  planUsageNotices,
+  summarizeUsageSafety,
+  type PlanUsageNotice,
 } from "./usage-ledger";
+import { remainingUsage } from "./usage-remaining";
 import {
-CLI_LAUNCH_PRESET_MAX_PANES,
-chatGridReducer,
-chatProjectKey,
-defaultCliLaunchPreset,
-isTransientWorkspacePath,
-isUserSelectedWorkspacePath,
-normalizedDesktopNotifications,
-resolveChatGridDropSlot
+  CLI_LAUNCH_PRESET_MAX_PANES,
+  canSendChat,
+  chatGridReducer,
+  chatProjectKey,
+  defaultCliLaunchPreset,
+  isUserSelectedWorkspacePath,
+  normalizedDesktopNotifications,
+  resolveChatGridDropSlot,
 } from "./workbench-state";
 import {
-workspaceModeLabel,
-workspaceModeTechnicalHint
+  workspaceModeDetail,
+  workspaceModeLabel,
+  workspaceModePopoverLabel,
+  workspaceModeTechnicalHint,
 } from "./workspace-mode";
+import { workspaceRelativeFilePath } from "./workspace-project";
 import {
-normalizedWorkspaceFolderPath,
-planWorkspaceMove,
-workspaceCopyAbsolutePath,
-workspaceCopyRelativePath,
-workspaceExplorerRootEntryGroup,
-workspaceRelativeFilePath,
-} from "./workspace-project";
-import {
-workspaceSearchGlobText,
-workspaceSearchGlobs,
-} from "./workspace-search";
-import {
-workspaceCommandRegistry,
-workspacePanelContributions,
-workspaceViewContainers,
-type WorkspaceShellIcon,
+  workspaceCommandRegistry,
+  workspacePanelContributions,
+  workspaceViewContainers,
+  type WorkspaceShellIcon,
 } from "./workspace-shell";
 
 type BrowserScreenshotAction = "capture" | "reveal" | "feedback";
 const CommandIcon = Command;
+const AutoApproveIcon = createLucideIcon("AutoApprove", [
+  [
+    "path",
+    {
+      d: "M10.8 2.8Q12 2.3 13.2 2.8L19.2 5.1Q21 5.8 21 7.8V12.5C21 18.2 17.3 21.5 12 21.5S3 18.2 3 12.5V7.8Q3 5.8 4.8 5.1Z",
+      key: "outline",
+    },
+  ],
+  ["path", { d: "m8 9 2 3-2 3M13 15h3", key: "terminal" }],
+]);
 const workspaceShellIcons: Record<WorkspaceShellIcon, IconComponent> = {
   ai: Sparkles,
   browser: Globe2,
@@ -794,7 +866,10 @@ type AppChromeProps = {
   ) => void;
   onRenameWorkspacePath?: (path: string, nextName: string) => void;
   onDeleteWorkspacePath?: (path: string) => void;
-  onMoveWorkspacePath?: (fromPath: string, destinationDirectory: string) => void;
+  onMoveWorkspacePath?: (
+    fromPath: string,
+    destinationDirectory: string,
+  ) => void;
   onDuplicateWorkspacePath?: (path: string) => void;
   onRevealWorkspacePath?: (path: string) => void;
   onAskWorkspacePath?: (
@@ -850,6 +925,8 @@ type AppChromeProps = {
   onSelectTerminalPane?: (paneId: string) => void;
   onPinSession?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string) => void;
+  onUploadCloudChat?: (sessionId: string) => void;
+  accountNavigation?: ReactNode;
   onRemoveProject?: (project: { path: string; label: string }) => void;
   projectSettings?: SidebarProjectSettings;
   onToggleChatsCollapsed?: () => void;
@@ -882,7 +959,8 @@ const settingsSidebarItems: Array<{
   id: SettingsSectionId;
   label: string;
   icon: IconComponent;
-  group: "Preferences" | "AI & Agents" | "Workspace" | "Gyro account" | "System";
+  group:
+    "Preferences" | "AI & Agents" | "Workspace" | "Gyro account" | "System";
 }> = [
   {
     id: "general",
@@ -915,6 +993,12 @@ const settingsSidebarItems: Array<{
     group: "AI & Agents",
   },
   {
+    id: "usage-limits",
+    label: "Usage & limits",
+    icon: Gauge,
+    group: "AI & Agents",
+  },
+  {
     id: "cli-profiles",
     label: "CLI Profiles",
     icon: Terminal,
@@ -933,20 +1017,26 @@ const settingsSidebarItems: Array<{
     group: "Workspace",
   },
   {
-    id: "tools-contributions",
-    label: "Tools",
-    icon: Blocks,
-    group: "Workspace",
-  },
-  {
     id: "import-projects",
     label: "Import projects",
     icon: Folder,
     group: "Workspace",
   },
-  { id: "usage-limits", label: "Usage & limits", icon: Gauge, group: "AI & Agents" },
-  { id: "updates", label: "Updates", icon: RefreshCw, group: "System" },
+  {
+    id: "tools-contributions",
+    label: "Tools",
+    icon: Blocks,
+    group: "Workspace",
+  },
+  { id: "cloud", label: "Gyro Cloud", icon: Cloud, group: "Gyro account" },
+  {
+    id: "billing",
+    label: "Plan & billing",
+    icon: Gauge,
+    group: "Gyro account",
+  },
   { id: "advanced", label: "Data & privacy", icon: Settings, group: "System" },
+  { id: "updates", label: "Updates", icon: RefreshCw, group: "System" },
   { id: "about", label: "Help", icon: HelpCircle, group: "System" },
 ];
 
@@ -958,10 +1048,55 @@ type SettingsSearchEntry = {
 };
 
 const settingsSearchEntries: SettingsSearchEntry[] = [
-  { section: "general", label: "Show chat and project names", detail: "Private notification previews", keywords: "privacy names titles paths" },
-  { section: "efficiency", label: "Provider for new chats", detail: "Last used or a connected provider", keywords: "new chat default model reasoning effort" },
-  { section: "efficiency", label: "Suggest checking finished work", detail: "Optional Check reminders after recorded edits", keywords: "check reminder verification" },
-  { section: "advanced", label: "Settings export/import", detail: "Preview and apply a safe settings file", keywords: "backup transfer json import export" },
+  {
+    section: "account",
+    label: "Gyro Account",
+    detail: "Your profile, name, and sign-in",
+    keywords: "email profile name password reset change sign in sign out",
+  },
+  {
+    section: "general",
+    label: "Show chat and project names",
+    detail: "Private notification previews",
+    keywords: "privacy names titles paths",
+  },
+  {
+    section: "efficiency",
+    label: "Provider for new chats",
+    detail: "Last used or a connected provider",
+    keywords: "new chat default model reasoning effort",
+  },
+  {
+    section: "efficiency",
+    label: "Suggest checking finished work",
+    detail: "Optional Check reminders after recorded edits",
+    keywords: "check reminder verification",
+  },
+  {
+    section: "advanced",
+    label: "Settings export/import",
+    detail: "Preview and apply a safe settings file",
+    keywords: "backup transfer json import export",
+  },
+  {
+    section: "cloud",
+    label: "Automatically back up chats",
+    detail: "Back up saved chat text after a turn finishes",
+    keywords: "auto automatic cloud backup sync",
+  },
+  {
+    section: "cloud",
+    label: "Gyro Cloud",
+    detail: "Selected backups, memory, assistance and connected devices",
+    keywords:
+      "cloud sync restore backup memory sharing report links devices export delete allowance",
+  },
+  {
+    section: "billing",
+    label: "Plan & billing",
+    detail: "Optional subscription and payments",
+    keywords: "plus premium subscribe payment invoice cancellation renewal",
+  },
   {
     section: "import-projects",
     label: "Import projects",
@@ -1420,39 +1555,6 @@ function WorkspaceActivityRail({
   );
 }
 
-/** Sessions / Workspace switch. The hidden-sidebar restore cluster renders it
-    too, so Workspace keeps the switch on the same pixel with its panel hidden. */
-function PrimarySurfaceSwitch({
-  isIdeSidebar,
-  onSelectSessions,
-  onSelectWorkspace,
-}: {
-  isIdeSidebar: boolean;
-  onSelectSessions: () => void;
-  onSelectWorkspace: () => void;
-}) {
-  return (
-    <SelectionTrack
-      label="Primary surfaces"
-      className="gyro-titlebar-switch"
-      value={isIdeSidebar ? "workspace" : "sessions"}
-    >
-      <SidebarModeRow
-        icon={<MessageSquare size={15} strokeWidth={1.5} />}
-        label="Sessions"
-        isActive={!isIdeSidebar}
-        onClick={onSelectSessions}
-      />
-      <SidebarModeRow
-        icon={<CodeXml size={15} strokeWidth={1.5} />}
-        label="Workspace"
-        isActive={isIdeSidebar}
-        onClick={onSelectWorkspace}
-      />
-    </SelectionTrack>
-  );
-}
-
 /** Provider name with its mark, for the CLI update notice headline. */
 function CliUpdateOfferName({ offer }: { offer: CliUpdateOffer }) {
   return (
@@ -1600,6 +1702,39 @@ export function CliUpdateBanner({
  * Provider readiness blocks the whole chat surface, so present it in the same
  * center-top notice area as CLI updates instead of shrinking the composer.
  */
+function FailureNotice({
+  notification,
+  onDismiss,
+}: {
+  notification: Notification;
+  onDismiss?: (id: string) => void;
+}) {
+  return (
+    <div
+      className="gyro-cli-update-banner gyro-failure-notice"
+      data-phase="failed"
+      role="alert"
+      title={notification.detail}
+    >
+      <span className="gyro-cli-update-banner-icon" aria-hidden="true">
+        <TriangleAlert size={13} />
+      </span>
+      <span className="gyro-cli-update-banner-copy">
+        <strong>{notification.title}</strong>
+        {notification.detail ? <small>{notification.detail}</small> : null}
+      </span>
+      <button
+        aria-label={`Dismiss ${notification.title}`}
+        className="gyro-cli-update-banner-dismiss"
+        onClick={() => onDismiss?.(notification.id)}
+        type="button"
+      >
+        <X size={13} />
+      </button>
+    </div>
+  );
+}
+
 function ProviderReadinessBanner({
   message,
   actionLabel,
@@ -1741,6 +1876,8 @@ export function AppChrome({
   onSelectTerminalPane,
   onPinSession,
   onRenameSession,
+  onUploadCloudChat,
+  accountNavigation,
   onRemoveProject,
   projectSettings,
   onToggleChatsCollapsed,
@@ -1788,6 +1925,7 @@ export function AppChrome({
     () => settingsSearchResults(settingsQuery),
     [settingsQuery],
   );
+  const failureNotices = visibleFailureNotifications(notifications);
   const [noticeLane, noticeLaneRef] = useState<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
     const main = noticeLane?.parentElement;
@@ -1991,19 +2129,19 @@ export function AppChrome({
             : null);
         revealSettingsTarget(target);
         window.requestAnimationFrame(() => {
-        target?.scrollIntoView({
-          behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
-            .matches
-            ? "auto"
-            : "smooth",
-          block: "center",
-        });
-        target?.focus({ preventScroll: true });
-        target?.classList.add("is-search-target");
-        window.setTimeout(
-          () => target?.classList.remove("is-search-target"),
-          1_400,
-        );
+          target?.scrollIntoView({
+            behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+              .matches
+              ? "auto"
+              : "smooth",
+            block: "center",
+          });
+          target?.focus({ preventScroll: true });
+          target?.classList.add("is-search-target");
+          window.setTimeout(
+            () => target?.classList.remove("is-search-target"),
+            1_400,
+          );
         });
       }),
     );
@@ -2325,6 +2463,7 @@ export function AppChrome({
           ) : null}
           {activeDestination === "settings" ? (
             <SettingsSidebarContent
+              accountNavigation={accountNavigation}
               activeSection={activeSettingsSection}
               backLabel={settingsBackLabel}
               pendingUpdate={showSidebarUpdate}
@@ -2511,6 +2650,7 @@ export function AppChrome({
               onSelectWorkspaceFolder={onSelectWorkspaceFolder}
               onPinSession={onPinSession}
               onRenameSession={onRenameSession}
+              onUploadCloudChat={onUploadCloudChat}
               onRemoveProject={onRemoveProject}
               projectSettings={projectSettings}
               onRefreshSourceControl={onRefreshSourceControl}
@@ -2678,18 +2818,27 @@ export function AppChrome({
             <span aria-hidden="true" className="gyro-seam-corner is-bottom" />
           </>
         ) : null}
-        {activeDestination !== "settings" &&
-        (providerReadinessNotice ||
-          cliUpdateOffers.some((offer) => offer.updateAvailable)) ? (
+        {failureNotices.length > 0 ||
+        (activeDestination !== "settings" &&
+          (providerReadinessNotice ||
+            cliUpdateOffers.some((offer) => offer.updateAvailable))) ? (
           <div className="gyro-global-status-notices" ref={noticeLaneRef}>
-            {providerReadinessNotice ? (
+            {failureNotices.map((notification) => (
+              <FailureNotice
+                key={notification.id}
+                notification={notification}
+                onDismiss={onDismissNotification}
+              />
+            ))}
+            {activeDestination !== "settings" && providerReadinessNotice ? (
               <ProviderReadinessBanner
                 actionLabel={providerReadinessNotice.actionLabel}
                 message={providerReadinessNotice.message}
                 onAction={onProviderReadinessAction}
               />
             ) : null}
-            {cliUpdateOffers.some((offer) => offer.updateAvailable) ? (
+            {activeDestination !== "settings" &&
+            cliUpdateOffers.some((offer) => offer.updateAvailable) ? (
               <CliUpdateBanner
                 failure={cliUpdateFailure}
                 offers={cliUpdateOffers}
@@ -3070,6 +3219,7 @@ function InstalledUpdateNotice({
 }
 
 function SettingsSidebarContent({
+  accountNavigation,
   activeSection,
   search,
   backLabel,
@@ -3079,6 +3229,7 @@ function SettingsSidebarContent({
   pendingUpdate,
 }: {
   activeSection: SettingsSectionId;
+  accountNavigation?: ReactNode;
   search: ReactNode;
   backLabel: string;
   onBack: () => void;
@@ -3125,3966 +3276,68 @@ function SettingsSidebarContent({
       </div>
 
       <div className="gyro-settings-sidebar-search">{search}</div>
+      {accountNavigation}
       <nav
         aria-label="Settings pages"
         className="gyro-sidebar-actions is-settings-pages"
       >
-        {(["Preferences", "AI & Agents", "Workspace", "Gyro account", "System"] as const).map(
-          (group) => {
-            const items = settingsSidebarItems.filter(
-              (item) => item.group === group,
-            );
-            if (items.length === 0) return null;
-            return (
-              <div className="gyro-settings-sidebar-group" key={group}>
-                <span>{group}</span>
-                {items.map(({ id, label, icon: Icon }) => (
-                  <button
-                    aria-current={activeSection === id ? "page" : undefined}
-                    className={
-                      activeSection === id
-                        ? "gyro-sidebar-action is-active is-settings-page"
-                        : "gyro-sidebar-action is-settings-page"
-                    }
-                    key={id}
-                    onClick={() => onSectionChange?.(id)}
-                    title={label}
-                    type="button"
-                  >
-                    <Icon size={15} />
-                    <span className="gyro-settings-page-label">{label}</span>
-                    {pendingUpdate && id === "updates" ? (
-                      <>
-                        <i
-                          aria-hidden="true"
-                          className="gyro-settings-page-flag"
-                        />
-                        <span className="gyro-sr-only">Update available</span>
-                      </>
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-            );
-          },
-        )}
+        {(
+          [
+            "Preferences",
+            "AI & Agents",
+            "Workspace",
+            "Gyro account",
+            "System",
+          ] as const
+        ).map((group) => {
+          const items = settingsSidebarItems.filter(
+            (item) =>
+              item.group === group &&
+              !(accountNavigation && item.id === "cloud"),
+          );
+          if (items.length === 0) return null;
+          return (
+            <div className="gyro-settings-sidebar-group" key={group}>
+              <span>{group}</span>
+              {items.map(({ id, label, icon: Icon }) => (
+                <button
+                  aria-current={activeSection === id ? "page" : undefined}
+                  className={
+                    activeSection === id
+                      ? "gyro-sidebar-action is-active is-settings-page"
+                      : "gyro-sidebar-action is-settings-page"
+                  }
+                  key={id}
+                  onClick={() => onSectionChange?.(id)}
+                  title={label}
+                  type="button"
+                >
+                  <Icon size={15} />
+                  <span className="gyro-settings-page-label">{label}</span>
+                  {pendingUpdate && id === "updates" ? (
+                    <>
+                      <i
+                        aria-hidden="true"
+                        className="gyro-settings-page-flag"
+                      />
+                      <span className="gyro-sr-only">Update available</span>
+                    </>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          );
+        })}
       </nav>
     </>
   );
 }
 
-function scmFileBadge(path: string) {
-  return workspaceFileBadge(path);
-}
-
-/**
- * Letter and colour tone per resource state, mirroring VS Code's git
- * decorations: M amber, A/U/R mint, D and conflicts red.
- */
-const SCM_STATE_DECORATIONS: Record<
-  SourceControlFile["state"],
-  { letter: string; tone: string; label: string }
-> = {
-  modified: { letter: "M", tone: "modified", label: "Modified" },
-  added: { letter: "A", tone: "added", label: "Added" },
-  deleted: { letter: "D", tone: "deleted", label: "Deleted" },
-  renamed: { letter: "R", tone: "renamed", label: "Renamed" },
-  untracked: { letter: "U", tone: "untracked", label: "Untracked" },
-  conflicted: { letter: "C", tone: "conflicted", label: "Conflict" },
-  staged: { letter: "S", tone: "staged", label: "Staged" },
-};
-
-function scmStateDecoration(state: SourceControlFile["state"]) {
-  return SCM_STATE_DECORATIONS[state] ?? SCM_STATE_DECORATIONS.modified;
-}
-
-/**
- * One hue per graph lane, reused as lanes are recycled. The colours are the
- * only thing that says two commits sit on different branches, so they are
- * spaced around the wheel rather than shaded from one accent.
- */
-const SCM_GRAPH_LANE_COLORS = [
-  "#4d9ee0",
-  "#e0a03c",
-  "#c76bd4",
-  "#4bbf9c",
-  "#e0715e",
-  "#948af0",
-];
-
-/** Lanes past this fold back onto the last one; the rail has to stay narrow. */
-const SCM_GRAPH_LANE_LIMIT = 5;
-
-type ScmGraphRow = {
-  /** Lane the commit's dot sits in. */
-  lane: number;
-  /** Paths from the upper row boundary through the dot to the lower boundary. */
-  edges: Array<{
-    from: number;
-    to: number;
-    half: "top" | "bottom";
-    color: number;
-  }>;
-  /** No child in the loaded window, so the lane's line starts at the dot. */
-  startsHere: boolean;
-  /** No parent in the loaded window, so the lane's line stops at the dot. */
-  endsHere: boolean;
-  isMerge: boolean;
-};
-
-/**
- * Lay the loaded commits out as `git log --graph` does: walk newest to oldest
- * carrying, per lane, the hash that lane is still waiting for. A commit claims
- * the lane that was waiting on it — that is what keeps a branch on one colour
- * down the rail — and hands the lane to its first parent, while a merge's
- * extra parents open lanes of their own.
- *
- * History arrives as a 30-commit window, so a lane can begin or end mid-view
- * simply because the other end is out of frame; those rows draw a half line
- * instead of pretending the branch stops there.
- */
-function scmGraphRows(
-  history: NonNullable<SourceControlState["history"]>,
-): ScmGraphRow[] {
-  const expected: Array<string | undefined> = [];
-  const claim = (hash: string | undefined) => {
-    const free = expected.indexOf(undefined);
-    const lane = free === -1 ? expected.length : free;
-    expected[lane] = hash;
-    return lane;
+function subscribeExplorerAskSend(listener: () => void) {
+  explorerAskSendListeners.add(listener);
+  return () => {
+    explorerAskSendListeners.delete(listener);
   };
-  return history.map((commit) => {
-    const parents = commit.parents ?? [];
-    const waiting = expected.indexOf(commit.hash);
-    const startsHere = waiting === -1;
-    const lane = startsHere ? claim(commit.hash) : waiting;
-    const edges: ScmGraphRow["edges"] = [];
-    for (let index = 0; index < expected.length; index += 1) {
-      if (expected[index] === undefined) continue;
-      const arrives = expected[index] === commit.hash;
-      if (!(startsHere && index === lane)) {
-        edges.push({
-          from: index,
-          to: arrives ? lane : index,
-          half: "top",
-          color: index,
-        });
-      }
-      if (arrives) expected[index] = undefined;
-    }
-    parents.forEach((parent, index) => {
-      let target = expected.indexOf(parent);
-      if (target === -1) {
-        if (index === 0) {
-          expected[lane] = parent;
-          target = lane;
-        } else {
-          target = claim(parent);
-        }
-      }
-      edges.push({ from: lane, to: target, half: "bottom", color: target });
-    });
-    for (let index = 0; index < expected.length; index += 1) {
-      if (
-        expected[index] !== undefined &&
-        !edges.some((edge) => edge.half === "bottom" && edge.to === index)
-      ) {
-        edges.push({ from: index, to: index, half: "bottom", color: index });
-      } else if (
-        expected[index] !== undefined &&
-        edges.some(
-          (edge) => edge.half === "top" && edge.to === index && index !== lane,
-        )
-      ) {
-        edges.push({ from: index, to: index, half: "bottom", color: index });
-      }
-    }
-    while (expected.length > 0 && expected[expected.length - 1] === undefined) {
-      expected.pop();
-    }
-    return {
-      lane,
-      edges,
-      startsHere,
-      endsHere: parents.length === 0,
-      isMerge: parents.length > 1,
-    };
-  });
-}
-
-/** Lane pitch in the rail, and the padding that keeps lane 0 off the edge. */
-const SCM_GRAPH_LANE_PITCH = 14;
-const SCM_GRAPH_LANE_INSET = 8;
-
-const scmGraphLaneOffset = (lane: number) =>
-  SCM_GRAPH_LANE_INSET +
-  Math.min(lane, SCM_GRAPH_LANE_LIMIT - 1) * SCM_GRAPH_LANE_PITCH;
-
-const scmGraphLaneColor = (lane: number) =>
-  SCM_GRAPH_LANE_COLORS[
-    Math.min(lane, SCM_GRAPH_LANE_LIMIT - 1) % SCM_GRAPH_LANE_COLORS.length
-  ] ?? "#4d9ee0";
-
-/**
- * The refs git prints for a commit, as the chips the graph shows: the checked
- * out branch first, then tags, then everything else. `HEAD -> main` is one
- * ref in git's output and two facts here — where HEAD is, and which branch.
- */
-function scmCommitRefs(refs: string) {
-  return refs
-    .split(",")
-    .map((ref) => ref.trim())
-    .filter(Boolean)
-    .map((ref) => {
-      if (ref.startsWith("HEAD -> ")) {
-        return { label: ref.slice("HEAD -> ".length), kind: "head" as const };
-      }
-      if (ref === "HEAD") {
-        return { label: "HEAD", kind: "head" as const };
-      }
-      if (ref.startsWith("tag: ")) {
-        return { label: ref.slice("tag: ".length), kind: "tag" as const };
-      }
-      return { label: ref, kind: "branch" as const };
-    })
-    .sort((first, second) => {
-      const rank = { head: 0, tag: 1, branch: 2 };
-      return rank[first.kind] - rank[second.kind];
-    });
-}
-
-/**
- * VS Code's sync badge: how far the branch has drifted from its remote, as
- * "1↓ 2↑". Behind comes first because a pull has to land before a push can,
- * and a direction that is level is left out rather than shown as a zero.
- */
-function scmSyncCountLabel(ahead: number, behind: number) {
-  const counts: string[] = [];
-  if (behind > 0) {
-    counts.push(`${behind}↓`);
-  }
-  if (ahead > 0) {
-    counts.push(`${ahead}↑`);
-  }
-  return counts.join(" ");
-}
-
-/**
- * The row that gets a commit off this machine.
- *
- * Committing writes history locally; nothing reaches GitHub until it is
- * pushed, so the panel says where the branch stands against its remote and
- * offers the one press that closes the gap. A branch that has never been
- * published says so plainly — "Publish branch" is a different act from a
- * push, and the count that would normally sit beside it does not exist yet.
- *
- * The row only earns its space while there is still something to commit: with
- * a clean tree the commit button itself becomes the push or pull, so repeating
- * it here would be a second copy of the same press. A branch level with its
- * remote has nothing to report either, so it says nothing rather than
- * announcing that it is up to date.
- */
-function ScmSyncRow({
-  ahead,
-  behind,
-  hasPendingChanges,
-  hasRemote,
-  onPull,
-  onPush,
-  syncing,
-  upstream,
-}: {
-  ahead: number;
-  behind: number;
-  hasPendingChanges: boolean;
-  hasRemote: boolean;
-  onPull?: () => void;
-  onPush?: () => void;
-  syncing: boolean;
-  upstream?: string;
-}) {
-  const published = Boolean(upstream);
-  if (!hasRemote || !hasPendingChanges) {
-    return null;
-  }
-  if (published && ahead === 0 && behind === 0) {
-    return null;
-  }
-  const pushLabel = published ? "Push" : "Publish branch";
-  const summary = !published
-    ? "This branch is not on the remote yet"
-    : behind > 0 && ahead > 0
-      ? `${ahead} to push, ${behind} to pull`
-      : ahead > 0
-        ? `${ahead} commit${ahead === 1 ? "" : "s"} to push`
-        : `${behind} commit${behind === 1 ? "" : "s"} to pull`;
-  return (
-    <div className="gyro-sidebar-scm-sync">
-      <span className="gyro-scm-sync-summary" title={upstream ?? undefined}>
-        {summary}
-      </span>
-      <div className="gyro-scm-sync-actions">
-        {behind > 0 ? (
-          <button
-            className="is-secondary"
-            disabled={syncing}
-            onClick={onPull}
-            title={`Pull ${behind} from ${upstream}`}
-            type="button"
-          >
-            <ArrowDown size={12} />
-            Pull
-            <span className="gyro-scm-sync-count">{`${behind}↓`}</span>
-          </button>
-        ) : null}
-        <button
-          disabled={syncing || (published && ahead === 0 && behind === 0)}
-          onClick={onPush}
-          title={
-            published
-              ? `Push to ${upstream}`
-              : "Push this branch to the remote and track it"
-          }
-          type="button"
-        >
-          <ArrowUp size={12} />
-          {syncing ? "Working…" : pushLabel}
-          {!syncing && published && ahead > 0 ? (
-            <span className="gyro-scm-sync-count">{`${ahead}↑`}</span>
-          ) : null}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-const SCM_HISTORY_OPEN_STORAGE_KEY = "gyro.scm-history-open-v1";
-
-/** Cap per group so a huge working tree cannot stall the sidebar. */
-const SCM_GROUP_LIMIT = 60;
-
-/**
- * One VS Code-style change group — "Staged Changes" or "Changes" — with a
- * collapsible header, a count, group actions, and colour-coded rows.
- */
-function ScmSectionDivider({
-  label,
-  target,
-  onResize,
-}: {
-  label: string;
-  target: "previous" | "next";
-  onResize: (height: number) => void;
-}) {
-  const drag = useRef<{
-    y: number;
-    height: number;
-    min: number;
-    max: number;
-  }>();
-  const measure = (divider: HTMLDivElement) => {
-    const section =
-      target === "previous"
-        ? divider.previousElementSibling
-        : divider.nextElementSibling;
-    const min = Math.max(
-      52,
-      section ? parseFloat(getComputedStyle(section).minHeight) || 0 : 0,
-    );
-    return {
-      height: section?.getBoundingClientRect().height ?? 100,
-      min,
-      max: Math.max(
-        min,
-        (divider.parentElement?.getBoundingClientRect().height ?? 400) * 0.6,
-      ),
-    };
-  };
-  return (
-    <div
-      className="gyro-scm-history-resizer gyro-scm-section-resizer"
-      role="separator"
-      aria-label={label}
-      aria-orientation="horizontal"
-      tabIndex={0}
-      onPointerDown={(event) => {
-        if (event.button !== 0) return;
-        event.preventDefault();
-        drag.current = { y: event.clientY, ...measure(event.currentTarget) };
-        event.currentTarget.setPointerCapture(event.pointerId);
-      }}
-      onPointerMove={(event) => {
-        const start = drag.current;
-        if (!start) return;
-        const delta =
-          (event.clientY - start.y) * (target === "previous" ? 1 : -1);
-        onResize(
-          Math.max(start.min, Math.min(start.max, start.height + delta)),
-        );
-      }}
-      onPointerUp={(event) => {
-        drag.current = undefined;
-        if (event.currentTarget.hasPointerCapture(event.pointerId))
-          event.currentTarget.releasePointerCapture(event.pointerId);
-      }}
-      onPointerCancel={() => {
-        drag.current = undefined;
-      }}
-      onLostPointerCapture={() => {
-        drag.current = undefined;
-      }}
-      onKeyDown={(event) => {
-        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-        event.preventDefault();
-        const current = measure(event.currentTarget);
-        const delta =
-          (event.key === "ArrowDown" ? 12 : -12) *
-          (target === "previous" ? 1 : -1);
-        onResize(
-          Math.max(current.min, Math.min(current.max, current.height + delta)),
-        );
-      }}
-    />
-  );
-}
-
-function ScmChangeGroup({
-  actions,
-  activeDiff,
-  className,
-  collapsed,
-  emptyCopy,
-  files,
-  onDiscardFile,
-  onOpenDiff,
-  onToggleCollapsed,
-  onToggleSelected,
-  onToggleStage,
-  selectedPaths,
-  title,
-}: {
-  actions?: ReactNode;
-  activeDiff?: EditorTab["sourceControlDiff"];
-  className?: string;
-  collapsed: boolean;
-  emptyCopy?: string;
-  files: SourceControlFile[];
-  onDiscardFile?: (path: string) => void | Promise<void>;
-  onOpenDiff?: (path: string, staged: boolean) => void;
-  onToggleCollapsed: () => void;
-  onToggleSelected: (path: string) => void;
-  onToggleStage?: (path: string, staged: boolean) => void | Promise<void>;
-  selectedPaths: Set<string>;
-  title: string;
-}) {
-  const visible = files.slice(0, SCM_GROUP_LIMIT);
-  const hidden = files.length - visible.length;
-  return (
-    <>
-      <div
-        className={
-          className
-            ? `gyro-sidebar-scm-group-label ${className}`
-            : "gyro-sidebar-scm-group-label"
-        }
-      >
-        <button
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`}
-          className="gyro-sidebar-scm-group-toggle"
-          onClick={onToggleCollapsed}
-          type="button"
-        >
-          {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-        </button>
-        <span className="gyro-scm-label-text">{title}</span>
-        <small className="gyro-sidebar-scm-count">{files.length}</small>
-        {actions ? (
-          <div className="gyro-sidebar-scm-batch-actions">{actions}</div>
-        ) : (
-          <span />
-        )}
-      </div>
-      {collapsed ? null : (
-        <>
-          {visible.map((file) => {
-            const parentFolder = workspaceParentFolder(file.path);
-            const decoration = scmStateDecoration(file.state);
-            const badge = scmFileBadge(file.path);
-            const BadgeIcon = badge.icon;
-            const isGone = file.state === "deleted" || file.state === "renamed";
-            return (
-              <div
-                className={`gyro-sidebar-scm-row${activeDiff?.path === file.path && activeDiff.staged === file.staged ? " is-active" : ""}${selectedPaths.size > 0 ? " is-selecting" : ""}`}
-                data-state={file.state}
-                key={`${file.path}:${file.staged}`}
-              >
-                <input
-                  aria-label={`Select ${file.path}`}
-                  checked={selectedPaths.has(file.path)}
-                  onChange={() => onToggleSelected(file.path)}
-                  type="checkbox"
-                />
-                <button
-                  aria-label={`Open diff for ${file.path}`}
-                  className="gyro-sidebar-scm-identity"
-                  onClick={() => onOpenDiff?.(file.path, file.staged)}
-                  title={`${file.path} — ${decoration.label}${
-                    file.staged ? ", staged" : ""
-                  }`}
-                  type="button"
-                >
-                  <BadgeIcon
-                    aria-hidden="true"
-                    className={`gyro-sidebar-scm-file-icon is-${badge.tone}`}
-                    size={14}
-                  />
-                  <span
-                    className={
-                      isGone
-                        ? "gyro-sidebar-scm-filename is-gone"
-                        : "gyro-sidebar-scm-filename"
-                    }
-                  >
-                    {workspaceName(file.path)}
-                  </span>
-                  {parentFolder ? (
-                    <small
-                      className={
-                        isGone
-                          ? "gyro-sidebar-scm-directory is-gone"
-                          : "gyro-sidebar-scm-directory"
-                      }
-                    >
-                      {parentFolder}
-                    </small>
-                  ) : null}
-                </button>
-                <ScmFileActions path={file.path} onDiscard={onDiscardFile} />
-                <button
-                  aria-label={`${file.staged ? "Unstage" : "Stage"} ${file.path}`}
-                  className="gyro-sidebar-scm-stage"
-                  onClick={() => void onToggleStage?.(file.path, file.staged)}
-                  title={file.staged ? "Unstage changes" : "Stage changes"}
-                  type="button"
-                >
-                  {file.staged ? <Minus size={12} /> : <Plus size={12} />}
-                </button>
-                <small
-                  className={`gyro-sidebar-scm-state is-${decoration.tone}`}
-                  title={decoration.label}
-                >
-                  {decoration.letter}
-                </small>
-              </div>
-            );
-          })}
-          {hidden > 0 ? (
-            <div className="gyro-sidebar-mini-copy">
-              {hidden} more file{hidden === 1 ? "" : "s"} not shown
-            </div>
-          ) : null}
-          {files.length === 0 && emptyCopy ? (
-            <div className="gyro-sidebar-mini-copy">{emptyCopy}</div>
-          ) : null}
-        </>
-      )}
-    </>
-  );
-}
-
-/** Explorer-only drag. Media drops ignore every `application/x-gyro-*` type. */
-const EXPLORER_PATH_DRAG_MIME = "application/x-gyro-explorer-path";
-
-/** Blocks composer Return while Ask Gyro is still attaching a file or folder. */
-
-function WorkspaceSidebarContent({
-  sessions,
-  commandProfiles,
-  savedProjects,
-  activeSessionId,
-  sendingSessionIds,
-  completedSessionIds = [],
-  approvalCountsBySessionId = {},
-  questionCountsBySessionId = {},
-  modelTerminalSessionIds = [],
-  activeSession,
-  activeDestination,
-  activeWorkspaceLayout,
-  activePaneTab,
-  terminalPanes,
-  selectedTerminalPaneId,
-  files,
-  ide,
-  isChatsCollapsed,
-  workspacePath,
-  pinnedSessionIds,
-  openChatSessionIds,
-  draftChats = [],
-  activeDraftId,
-  onSelectDraftChat,
-  onSelectSession,
-  onAddSessionToGrid,
-  onSelectDestination,
-  onSelectWorkspaceLayout,
-  onOpenToolPanel,
-  onCreateSession,
-  onCreateCliSession,
-  onSelectSessions,
-  onOpenWorkspace,
-  onAddWorkspaceFolder,
-  onRemoveWorkspaceFolder,
-  workspaceRootIssues,
-  onSelectWorkspaceFolder,
-  onOpenWorkspaceFile,
-  onPinEditorTab,
-  onExpandedWorkspaceDirectoriesChange,
-  onRefreshWorkspace,
-  onCreateWorkspacePath,
-  onRenameWorkspacePath,
-  onDeleteWorkspacePath,
-  onMoveWorkspacePath,
-  onDuplicateWorkspacePath,
-  onRevealWorkspacePath,
-  onAskWorkspacePath,
-  onOpenCommandPalette,
-  onSelectIdeView,
-  onRunWorkspaceSearch,
-  onApplyWorkspaceReplace,
-  onRefreshSourceControl,
-  onToggleSourceControlFile,
-  onStageAllSourceControl,
-  onDiscardSourceControlFile,
-  onOpenSourceControlDiff,
-  onCommitSourceControl,
-  onPushSourceControl,
-  onPullSourceControl,
-  onCheckRemote,
-  isRemoteChecking = false,
-  remoteCheckMessage,
-  remoteCheckFailed = false,
-  isSourceControlSyncing = false,
-  branchCatalog,
-  isBranchLoading = false,
-  onSelectWorkspaceBranch,
-  onCreateWorkspaceBranch,
-  onRefreshGithub,
-  onSelectGithubRun,
-  onViewGithubRunLogs,
-  onRerunGithubRun,
-  onOpenGithubUrl,
-  onRunIdeTask,
-  onFixIdeTaskWithAi,
-  onStopIdeTask,
-  onRefreshIdeTasks,
-  onCreateCustomTask,
-  onDeleteCustomTask,
-  onStartDebugSession,
-  onSendDebugCommand,
-  onStopDebugSession,
-  onAddTerminalPane,
-  onCloseTerminalPane,
-  onSelectTerminalPane,
-  onDeleteSession,
-  onPinSession,
-  onRenameSession,
-  onRemoveProject,
-  projectSettings,
-  onToggleChatsCollapsed,
-  onToggleSidebar,
-  renderAiChat,
-}: {
-  renderAiChat?: () => ReactNode;
-  sessions: Session[];
-  commandProfiles: CommandProfile[];
-  savedProjects: Array<{ path: string; label: string }>;
-  activeSessionId?: string;
-  sendingSessionIds: string[];
-  completedSessionIds?: string[];
-  approvalCountsBySessionId?: Record<string, number>;
-  questionCountsBySessionId?: Record<string, number>;
-  modelTerminalSessionIds?: string[];
-  activeSession?: Session;
-  activeDestination: AppDestination;
-  activeWorkspaceLayout: WorkspaceLayoutId;
-  activePaneTab: WorkbenchPaneTab;
-  terminalPanes: TerminalPane[];
-  selectedTerminalPaneId?: string;
-  files: WorkspaceFile[];
-  ide?: IdeState;
-  isChatsCollapsed: boolean;
-  workspacePath?: string;
-  pinnedSessionIds: string[];
-  openChatSessionIds: string[];
-  draftChats?: SidebarDraftChat[];
-  activeDraftId?: string;
-  onSelectDraftChat?: (draftId: string) => void;
-  onSelectSession: (sessionId: string) => void;
-  onAddSessionToGrid?: (sessionId: string) => void;
-  onSelectDestination: (destination: AppDestination) => void;
-  onSelectWorkspaceLayout: (layout: WorkspaceLayoutId) => void;
-  onOpenToolPanel: (tab: WorkbenchPaneTab) => void;
-  onCreateSession: () => void;
-  onCreateCliSession: (profileId: string, workspacePath: string) => void;
-  onSelectSessions: () => void;
-  onOpenWorkspace: () => void;
-  onAddWorkspaceFolder?: () => void;
-  onRemoveWorkspaceFolder?: (path: string) => void;
-  workspaceRootIssues?: WorkspaceRootIssuesModel;
-  onSelectWorkspaceFolder?: (path: string) => void;
-  onOpenWorkspaceFile?: (
-    path: string,
-    lineNumber?: number,
-    column?: number,
-  ) => void;
-  onPinEditorTab?: (path: string) => void;
-  onExpandedWorkspaceDirectoriesChange?: (paths: string[]) => void;
-  onRefreshWorkspace?: () => void;
-  onCreateWorkspacePath?: (
-    kind: "file" | "directory",
-    parentPath?: string,
-    path?: string,
-  ) => void;
-  onRenameWorkspacePath?: (path: string, nextName: string) => void;
-  onDeleteWorkspacePath?: (path: string) => void;
-  onMoveWorkspacePath?: (fromPath: string, destinationDirectory: string) => void;
-  onDuplicateWorkspacePath?: (path: string) => void;
-  onRevealWorkspacePath?: (path: string) => void;
-  onAskWorkspacePath?: (
-    path: string,
-  ) => void | boolean | Promise<void | boolean>;
-  onOpenCommandPalette: () => void;
-  onSelectIdeView?: (view: IdeViewId) => void;
-  onRunWorkspaceSearch?: (query: WorkspaceSearchQuery) => void;
-  onApplyWorkspaceReplace?: (
-    query: WorkspaceSearchQuery,
-    replacement: string,
-    paths: string[],
-  ) => void | Promise<void>;
-  onRefreshSourceControl?: () => void;
-  onToggleSourceControlFile?: (
-    path: string,
-    staged: boolean,
-  ) => void | Promise<void>;
-  onStageAllSourceControl?: () => void | Promise<void>;
-  onDiscardSourceControlFile?: (path: string) => void | Promise<void>;
-  onOpenSourceControlDiff?: (path: string, staged: boolean) => void;
-  onCommitSourceControl?: (message: string) => void;
-  onPushSourceControl?: () => void;
-  onPullSourceControl?: () => void;
-  onCheckRemote?: () => void;
-  isRemoteChecking?: boolean;
-  remoteCheckMessage?: string;
-  remoteCheckFailed?: boolean;
-  isSourceControlSyncing?: boolean;
-  branchCatalog?: GitBranchCatalog;
-  isBranchLoading?: boolean;
-  onSelectWorkspaceBranch?: (branch: string) => void;
-  onCreateWorkspaceBranch?: (startPoint?: string) => void;
-  onRefreshGithub?: () => void | Promise<void>;
-  onSelectGithubRun?: (runId: number) => void | Promise<void>;
-  onViewGithubRunLogs?: (runId: number) => void | Promise<void>;
-  onRerunGithubRun?: (
-    runId: number,
-    failedOnly: boolean,
-  ) => void | Promise<void>;
-  onOpenGithubUrl?: (url: string) => void | Promise<void>;
-  onRunIdeTask?: (task: TaskDefinition) => void;
-  /** Attach a failed command's output to the chat so a model can fix it. */
-  onFixIdeTaskWithAi?: (task: TaskDefinition) => void;
-  onStopIdeTask?: (task: TaskDefinition) => void | Promise<void>;
-  onRefreshIdeTasks?: () => void;
-  onCreateCustomTask?: (draft: CustomTaskDraft) => void | Promise<void>;
-  onDeleteCustomTask?: (task: TaskDefinition) => void | Promise<void>;
-  onStartDebugSession?: (command: string) => void;
-  onSendDebugCommand?: (session: DebugSessionState, command: string) => void;
-  onStopDebugSession?: (session: DebugSessionState) => void;
-  onAddTerminalPane?: (options?: TerminalLaunchOptions) => void;
-  onCloseTerminalPane?: (paneId: string) => void;
-  onSelectTerminalPane?: (paneId: string) => void;
-  onDeleteSession?: (sessionId: string) => void;
-  onPinSession?: (sessionId: string) => void;
-  onRenameSession?: (sessionId: string) => void;
-  onRemoveProject?: (project: { path: string; label: string }) => void;
-  projectSettings?: SidebarProjectSettings;
-  onToggleChatsCollapsed?: () => void;
-  onToggleSidebar: () => void;
-}) {
-  // CLI sessions belong to the terminal surface. Explicitly imported projects
-  // remain navigable even when their original folder is temporary.
-  const sidebarSessions = sessions.filter(
-    (session) =>
-      session.origin !== "cli" &&
-      (session.importSource ||
-        !isTransientWorkspacePath(session.workspacePath)),
-  );
-  const pinnedSessions = sidebarSessions.filter((session) =>
-    pinnedSessionIds.includes(session.id),
-  );
-  // Placeholder shells stay hidden until activity, including open chats.
-  const recentSessions = sidebarSessions.filter((session) => {
-    if (pinnedSessionIds.includes(session.id)) {
-      return false;
-    }
-    return sessionHasStartedForSidebar(session);
-  });
-  const projectSessions = recentSessions.filter((session) =>
-    isUserSelectedWorkspacePath(session.workspacePath),
-  );
-  const unprojectedRecentSessions = recentSessions
-    .filter((session) => !isUserSelectedWorkspacePath(session.workspacePath))
-    .sort(
-      (first, second) =>
-        new Date(second.updatedAt).getTime() -
-        new Date(first.updatedAt).getTime(),
-    );
-  const [openSessionMenuId, setOpenSessionMenuId] = useState<string>();
-  // Deleting a chat is two steps on the sidebar: a row menu's Delete opens
-  // this candidate, and the confirm overlay performs the removal.
-  const [sessionDeleteCandidate, setSessionDeleteCandidate] = useState<{
-    id: string;
-    label: string;
-  }>();
-  const [draggedSessionId, setDraggedSessionId] = useState<string>();
-  const sidebarDragId = useRef<number>();
-  useEffect(() => {
-    const unsubscribe = subscribeChatDrag((drag) => {
-      if (drag?.kind === "session") {
-        setDraggedSessionId(drag.sessionId);
-        if (drag.inputMode === "pointer") sidebarDragId.current = drag.dragId;
-      } else {
-        setDraggedSessionId(undefined);
-      }
-    });
-    return () => {
-      unsubscribe();
-      if (sidebarDragId.current !== undefined)
-        endChatDrag(sidebarDragId.current);
-    };
-  }, []);
-  useEffect(() => {
-    const drag = currentChatDrag();
-    if (
-      drag?.kind === "session" &&
-      drag.dragId === sidebarDragId.current &&
-      !sessions.some((session) => session.id === drag.sessionId)
-    ) {
-      endChatDrag(drag.dragId);
-    }
-  }, [sessions]);
-  const [newSessionMenuView, setNewSessionMenuView] = useState<
-    "closed" | "root" | "more"
-  >("closed");
-  const readyCommandProfiles = commandProfiles.filter(
-    (profile) => profile.readiness !== "blocked",
-  );
-  const blockedCommandProfiles = commandProfiles.filter(
-    (profile) => profile.readiness === "blocked",
-  );
-  const cliProjects = useMemo(() => {
-    const selectedProjectPath = terminalPanes.find(
-      (pane) => pane.id === selectedTerminalPaneId,
-    )?.projectPath;
-    const projects = [workspacePath, selectedProjectPath]
-      .filter((path): path is string => Boolean(path))
-      .map((path) => ({ path, label: projectSidebarName(path) }))
-      .concat(savedProjects);
-    return projects.filter(
-      (project, index) =>
-        isUserSelectedWorkspacePath(project.path) &&
-        projects.findIndex(
-          (candidate) =>
-            normalizeSidebarPath(candidate.path) ===
-            normalizeSidebarPath(project.path),
-        ) === index,
-    );
-  }, [savedProjects, selectedTerminalPaneId, terminalPanes, workspacePath]);
-  const newCliWorkspacePath = cliProjects[0]?.path ?? "";
-  const newSessionMenuRef = useOutsidePointerDismiss<HTMLDivElement>(
-    newSessionMenuView !== "closed",
-    () => setNewSessionMenuView("closed"),
-  );
-  const [collapsedProjectIds, setCollapsedProjectIds] = useState<string[]>(
-    loadCollapsedSidebarProjectIds,
-  );
-  const [projectVisibleCounts, setProjectVisibleCounts] = useState<
-    Record<string, number>
-  >({});
-  const discoveredSessionNavigation = useMemo(
-    () =>
-      sidebarProjectGroups(
-        projectSessions,
-        savedProjects,
-        workspacePath,
-        draftChats,
-      ),
-    [draftChats, projectSessions, savedProjects, workspacePath],
-  );
-  const discoveredProjectGroups = discoveredSessionNavigation;
-  const [projectOrder, setProjectOrder] = useState<string[]>(() =>
-    mergeSidebarProjectOrder(
-      loadSidebarProjectOrder(),
-      discoveredProjectGroups.map((project) => project.key),
-    ),
-  );
-  const [draggedProjectKey, setDraggedProjectKey] = useState<string>();
-  const [projectDropTarget, setProjectDropTarget] = useState<{
-    key: string;
-    position: "before" | "after";
-  }>();
-  const projectGroups = stableSidebarProjectGroups(
-    discoveredProjectGroups,
-    projectOrder,
-  )
-    .map((project) => ({
-      ...project,
-      label: projectSettings?.details[project.key]?.name || project.label,
-    }))
-    .sort(
-      (a, b) =>
-        Number(projectSettings?.details[b.key]?.pinned ?? false) -
-        Number(projectSettings?.details[a.key]?.pinned ?? false),
-    );
-  const draftsByProjectKey = new Map<string, SidebarDraftChat[]>();
-  const unprojectedDraftChats: SidebarDraftChat[] = [];
-  for (const draft of draftChats) {
-    // Empty draft panes remain available in the grid, but are not chats yet.
-    if (isSidebarPlaceholderSessionTitle(draft.title)) continue;
-    if (!isUserSelectedWorkspacePath(draft.workspacePath)) {
-      unprojectedDraftChats.push(draft);
-      continue;
-    }
-    const key = sidebarDraftGroupKey(
-      draft.workspacePath,
-      workspacePath,
-      savedProjects,
-    );
-    const list = draftsByProjectKey.get(key) ?? [];
-    list.push(draft);
-    draftsByProjectKey.set(key, list);
-  }
-  const renderDraftRow = (draft: SidebarDraftChat, isNested = false) => (
-    <DraftSidebarRow
-      isActive={draft.id === activeDraftId}
-      isNested={isNested}
-      key={draft.id}
-      onSelect={() => onSelectDraftChat?.(draft.id)}
-      title={draft.title.trim() || "New chat"}
-    />
-  );
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        SIDEBAR_PROJECT_COLLAPSE_STORAGE_KEY,
-        JSON.stringify(collapsedProjectIds),
-      );
-    } catch {
-      // The current sidebar state still works if local storage is unavailable.
-    }
-  }, [collapsedProjectIds]);
-  const [expandedWorkspaceDirectories, setExpandedWorkspaceDirectories] =
-    useState<Set<string>>(() => new Set());
-  useEffect(() => {
-    onExpandedWorkspaceDirectoriesChange?.([...expandedWorkspaceDirectories]);
-  }, [expandedWorkspaceDirectories, onExpandedWorkspaceDirectoriesChange]);
-  const [selectedExplorerPath, setSelectedExplorerPath] = useState<string>();
-  const [selectedExplorerPaths, setSelectedExplorerPaths] = useState<
-    Set<string>
-  >(() => new Set());
-  const [explorerContextMenu, setExplorerContextMenu] = useState<{
-    path: string;
-    x: number;
-    y: number;
-  }>();
-  const explorerDragPath = useRef<string | undefined>(undefined);
-  const [explorerDropPath, setExplorerDropPath] = useState<string>();
-  const explorerMoveRoots = useMemo(() => {
-    const roots = new Set<string>();
-    for (const file of files) {
-      if (file.isWorkspaceRoot) roots.add(file.workspacePath ?? file.path);
-      else if (file.workspacePath) roots.add(file.workspacePath);
-    }
-    if (roots.size === 0 && workspacePath) roots.add(workspacePath);
-    return [...roots];
-  }, [files, workspacePath]);
-  const explorerContextMenuRef = useOutsidePointerDismiss<HTMLDivElement>(
-    Boolean(explorerContextMenu),
-    () => setExplorerContextMenu(undefined),
-  );
-  /* VS Code-style creation: the toolbar and the context menu open one row in
-     the tree, and whatever is typed there names the new entry. The extension is
-     part of the name, so "notes.txt" becomes a text file. */
-  const [explorerDraft, setExplorerDraft] = useState<{
-    kind: "file" | "directory";
-    parentPath?: string;
-    value: string;
-    renamePath?: string;
-  }>();
-  const startExplorerDraft = (
-    kind: "file" | "directory",
-    parentPath?: string,
-  ) => {
-    setExplorerContextMenu(undefined);
-    // No selection means the workspace root. The field is drawn under that
-    // folder, so the parent has to be a real row rather than "somewhere".
-    const rawParent = parentPath || workspacePath;
-    const parent = rawParent
-      ? normalizedWorkspaceFolderPath(rawParent)
-      : undefined;
-    if (parent) {
-      setExpandedWorkspaceDirectories((current) =>
-        current.has(parent) ? current : new Set(current).add(parent),
-      );
-    }
-    setExplorerDraft({ kind, parentPath: parent, value: "" });
-  };
-  /* Rename seeds the same inline row with the current basename, the way the
-     Explorer's create row already works. That keeps rename off window.prompt,
-     which WKWebView answers with null, and off the absolute path: only the
-     basename is editable and the entry keeps its folder. */
-  const startExplorerRename = (path: string) => {
-    setExplorerContextMenu(undefined);
-    if (!path) return;
-    // The root is the folder Gyro has open. Renaming it is refused later, so
-    // the field would appear and then fail. Don't open it.
-    if (files.some((file) => file.path === path && file.isWorkspaceRoot)) {
-      return;
-    }
-    const separator = path.lastIndexOf("/");
-    const parentPath = separator > 0 ? path.slice(0, separator) : undefined;
-    if (parentPath) {
-      setExpandedWorkspaceDirectories((current) =>
-        current.has(parentPath) ? current : new Set(current).add(parentPath),
-      );
-    }
-    setExplorerDraft({
-      kind: "file",
-      parentPath,
-      value: path.slice(separator + 1),
-      renamePath: path,
-    });
-  };
-  const commitExplorerDraft = () => {
-    const draft = explorerDraft;
-    const name = draft?.value.trim().replace(/^\/+/, "");
-    if (!draft || !name) {
-      setExplorerDraft(undefined);
-      return;
-    }
-    // A name that cannot be a single path segment is refused here rather than
-    // sent to Rust; the inline row stays open so it can be corrected.
-    if (validateWorkspaceEntryName(name)) return;
-    setExplorerDraft(undefined);
-    if (draft.renamePath) {
-      const currentName = draft.renamePath.slice(
-        draft.renamePath.lastIndexOf("/") + 1,
-      );
-      if (name === currentName) return;
-      onRenameWorkspacePath?.(draft.renamePath, name);
-      return;
-    }
-    const parentPath = draft.parentPath?.replace(/\/+$/, "");
-    onCreateWorkspacePath?.(
-      draft.kind,
-      parentPath || undefined,
-      parentPath ? `${parentPath}/${name}` : name,
-    );
-  };
-  const selectedExplorerFile = files.find(
-    (file) => file.path === selectedExplorerPath,
-  );
-  const [sourceControlMessage, setSourceControlMessage] = useState("");
-  const scmTotals = sourceControlTotals(ide?.sourceControl);
-  const scmHistoryMessage = sourceControlHistoryMessage(ide?.sourceControl);
-  const [scmRepositoryHeight, setScmRepositoryHeight] = useState<number>();
-  const [scmRepositoryMinHeight, setScmRepositoryMinHeight] = useState(180);
-  const scmRepositoryContentRef = useRef<HTMLDivElement>(null);
-  const scmRepositoryMeasuredHeight = useRef(180);
-  useEffect(() => {
-    const content = scmRepositoryContentRef.current;
-    if (!content) return;
-    const update = () => {
-      const height = Math.ceil(content.getBoundingClientRect().height);
-      const delta = height - scmRepositoryMeasuredHeight.current;
-      scmRepositoryMeasuredHeight.current = height;
-      setScmRepositoryMinHeight(height);
-      // Keep the divider close when a conditional row (such as sync) vanishes.
-      // Preserve only the additional space the user deliberately dragged open.
-      if (delta !== 0)
-        setScmRepositoryHeight((previous) =>
-          previous === undefined
-            ? previous
-            : Math.max(height, previous + delta),
-        );
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(content);
-    return () => observer.disconnect();
-  });
-  const [scmGithubHeight, setScmGithubHeight] = useState<number>();
-  const [scmStagedHeight, setScmStagedHeight] = useState<number>();
-  const [scmHistoryShare, setScmHistoryShare] = useState<number>();
-  const [scmHistoryOpen, setScmHistoryOpen] = useState(() => {
-    try {
-      return window.localStorage.getItem(SCM_HISTORY_OPEN_STORAGE_KEY) !== "false";
-    } catch {
-      return true;
-    }
-  });
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        SCM_HISTORY_OPEN_STORAGE_KEY,
-        String(scmHistoryOpen),
-      );
-    } catch {
-      // History still remembers its state during navigation without storage.
-    }
-  }, [scmHistoryOpen]);
-  const scmHistoryDrag = useRef<{ y: number; share: number; height: number }>();
-  const [selectedSourceControlPaths, setSelectedSourceControlPaths] = useState<
-    Set<string>
-  >(() => new Set());
-  const [collapsedScmGroups, setCollapsedScmGroups] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const toggleScmGroup = useCallback((group: string) => {
-    setCollapsedScmGroups((current) => {
-      const next = new Set(current);
-      if (next.has(group)) next.delete(group);
-      else next.add(group);
-      return next;
-    });
-  }, []);
-  const toggleSourceControlSelection = useCallback((path: string) => {
-    setSelectedSourceControlPaths((current) => {
-      const next = new Set(current);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  }, []);
-  const sourceControlFiles = ide?.sourceControl.files;
-  const stagedSourceControlFiles = useMemo(
-    () =>
-      (sourceControlFiles ?? [])
-        .filter((file) => file.staged)
-        .sort((first, second) => first.path.localeCompare(second.path)),
-    [sourceControlFiles],
-  );
-  const unstagedSourceControlFiles = useMemo(
-    () =>
-      (sourceControlFiles ?? [])
-        .filter((file) => !file.staged)
-        .sort((first, second) => first.path.localeCompare(second.path)),
-    [sourceControlFiles],
-  );
-  // VS Code's source control panel keeps one primary button: it commits while
-  // there is something to commit, and once the tree is clean it turns into the
-  // press that moves that history — pull first when the branch is behind,
-  // otherwise push, or publish a branch the remote has never seen.
-  const hasSourceControlChanges =
-    stagedSourceControlFiles.length > 0 ||
-    unstagedSourceControlFiles.length > 0;
-  const sourceControlAhead = ide?.sourceControl.ahead ?? 0;
-  const sourceControlBehind = ide?.sourceControl.behind ?? 0;
-  const sourceControlPublished = Boolean(ide?.sourceControl.upstream);
-  const sourceControlSyncAction: "pull" | "push" | "publish" | undefined =
-    ide?.sourceControl.available !== true
-      ? undefined
-      : !sourceControlPublished
-        ? "publish"
-        : sourceControlBehind > 0
-          ? "pull"
-          : sourceControlAhead > 0
-            ? "push"
-            : undefined;
-  const showSourceControlSyncButton =
-    !hasSourceControlChanges && Boolean(sourceControlSyncAction);
-  // The button carries both counts, so a branch that is behind still says how
-  // much is waiting to go out once the pull lands.
-  const sourceControlSyncCounts = sourceControlPublished
-    ? scmSyncCountLabel(sourceControlAhead, sourceControlBehind)
-    : "";
-
-  const sourceControlHistory = ide?.sourceControl.history;
-  const scmHistoryGraph = useMemo(
-    () => scmGraphRows(sourceControlHistory ?? []),
-    [sourceControlHistory],
-  );
-  // The rail is only as wide as the branches actually in view, so a plain
-  // linear history does not pay for lanes it never uses.
-  const scmHistoryRailWidth = useMemo(
-    () =>
-      scmGraphLaneOffset(
-        scmHistoryGraph.reduce(
-          (widest, row) =>
-            Math.max(
-              widest,
-              row.lane,
-              ...row.edges.flatMap((edge) => [edge.from, edge.to]),
-            ),
-          0,
-        ),
-      ) + SCM_GRAPH_LANE_INSET,
-    [scmHistoryGraph],
-  );
-
-  const [debugAdapterCommand, setDebugAdapterCommand] = useState("lldb-dap");
-  const [isAddingRunCommand, setIsAddingRunCommand] = useState(false);
-  const [runCommandDraft, setRunCommandDraft] = useState("");
-  const [runCommandLabelDraft, setRunCommandLabelDraft] = useState("");
-  const [runCommandGroupDraft, setRunCommandGroupDraft] =
-    useState<TaskDefinition["group"]>("custom");
-  const [runCommandFilter, setRunCommandFilter] = useState("");
-  const runTaskGroups = useMemo(
-    () => groupedRunTasks(ide?.taskDefinitions ?? [], runCommandFilter),
-    [ide?.taskDefinitions, runCommandFilter],
-  );
-  const visibleFiles = useMemo(
-    () =>
-      files.filter((file) =>
-        workspaceAncestorPaths(file.path, file.workspacePath).every(
-          (ancestor) => expandedWorkspaceDirectories.has(ancestor),
-        ),
-      ),
-    [expandedWorkspaceDirectories, files],
-  );
-  const explorerTreeRef = useRef<HTMLDivElement>(null);
-  const explorerRowRefs = useRef(new Map<string, HTMLButtonElement>());
-  const activeIdeView = ide?.activeView ?? "explorer";
-  const defaultTestTask = ide?.taskDefinitions.find(
-    (task) => task.group === "test",
-  );
-  const [sidebarSearchDraft, setSidebarSearchDraft] = useState(
-    ide?.searchQuery.query ?? "",
-  );
-  const [sidebarSearchDetailsOpen, setSidebarSearchDetailsOpen] =
-    useState(false);
-  const [sidebarReplaceOpen, setSidebarReplaceOpen] = useState(false);
-  const [sidebarReplaceDraft, setSidebarReplaceDraft] = useState("");
-  const [selectedReplacePaths, setSelectedReplacePaths] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const [sidebarSearchIncludeDraft, setSidebarSearchIncludeDraft] = useState(
-    workspaceSearchGlobText(ide?.searchQuery.globs, "include"),
-  );
-  const [sidebarSearchExcludeDraft, setSidebarSearchExcludeDraft] = useState(
-    workspaceSearchGlobText(ide?.searchQuery.globs, "exclude"),
-  );
-  const workspaceFileRootKey = files
-    .filter((file) => file.isWorkspaceRoot)
-    .map((file) => file.path)
-    .join("\n");
-  const workspaceSearchCallbackRef = useRef(onRunWorkspaceSearch);
-  workspaceSearchCallbackRef.current = onRunWorkspaceSearch;
-  const sidebarSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  useEffect(() => {
-    if (activeIdeView !== "search" || !sidebarSearchDraft.trim()) return;
-    sidebarSearchTimerRef.current = setTimeout(() => {
-      sidebarSearchTimerRef.current = null;
-      const globs = workspaceSearchGlobs(
-        sidebarSearchIncludeDraft,
-        sidebarSearchExcludeDraft,
-      );
-      workspaceSearchCallbackRef.current?.({
-        query: sidebarSearchDraft,
-        globs: globs.length > 0 ? globs : undefined,
-      });
-    }, 250);
-    return () => {
-      if (sidebarSearchTimerRef.current !== null) {
-        clearTimeout(sidebarSearchTimerRef.current);
-        sidebarSearchTimerRef.current = null;
-      }
-    };
-  }, [
-    activeIdeView,
-    sidebarSearchDraft,
-    sidebarSearchIncludeDraft,
-    sidebarSearchExcludeDraft,
-    workspaceFileRootKey,
-  ]);
-  useEffect(() => {
-    setSidebarSearchDraft(ide?.searchQuery.query ?? "");
-    setSidebarSearchIncludeDraft(
-      workspaceSearchGlobText(ide?.searchQuery.globs, "include"),
-    );
-    setSidebarSearchExcludeDraft(
-      workspaceSearchGlobText(ide?.searchQuery.globs, "exclude"),
-    );
-  }, [ide?.searchQuery.globs, ide?.searchQuery.query]);
-  useEffect(() => {
-    if (!sidebarReplaceOpen) return;
-    setSelectedReplacePaths(
-      new Set((ide?.searchResults ?? []).map((result) => result.path)),
-    );
-  }, [ide?.searchResults, sidebarReplaceOpen]);
-  useEffect(() => {
-    const available = new Set(
-      (ide?.sourceControl.files ?? []).map((file) => file.path),
-    );
-    setSelectedSourceControlPaths((current) => {
-      const next = new Set([...current].filter((path) => available.has(path)));
-      return next.size === current.size ? current : next;
-    });
-  }, [ide?.sourceControl.files]);
-  useEffect(() => {
-    const discoveredKeys = discoveredProjectGroups.map(
-      (project) => project.key,
-    );
-    setProjectOrder((current) => {
-      const next = mergeSidebarProjectOrder(current, discoveredKeys);
-      return next.length === current.length &&
-        next.every((key, index) => key === current[index])
-        ? current
-        : next;
-    });
-  }, [discoveredProjectGroups]);
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        SIDEBAR_PROJECT_ORDER_STORAGE_KEY,
-        JSON.stringify(projectOrder),
-      );
-    } catch {
-      // Project order remains available for the current app session.
-    }
-  }, [projectOrder]);
-  useEffect(() => {
-    setExpandedWorkspaceDirectories(
-      new Set(
-        files.filter((file) => file.isWorkspaceRoot).map((file) => file.path),
-      ),
-    );
-    setSelectedExplorerPath(
-      ide?.activePath && files.some((file) => file.path === ide.activePath)
-        ? ide.activePath
-        : undefined,
-    );
-  }, [workspaceFileRootKey, workspacePath]);
-  useEffect(() => {
-    if (
-      !selectedExplorerPath ||
-      files.some((file) => file.path === selectedExplorerPath)
-    ) {
-      return;
-    }
-    const hadExplorerFocus = Boolean(
-      explorerTreeRef.current?.contains(document.activeElement),
-    );
-    const fallbackPath = [...workspaceAncestorPaths(selectedExplorerPath)]
-      .reverse()
-      .find((path) => files.some((file) => file.path === path));
-    const nextPath = fallbackPath ?? visibleFiles[0]?.path;
-    setSelectedExplorerPath(nextPath);
-    if (hadExplorerFocus && nextPath) {
-      window.requestAnimationFrame(() =>
-        explorerRowRefs.current.get(nextPath)?.focus(),
-      );
-    }
-  }, [files, selectedExplorerPath, visibleFiles]);
-  const isCliSidebar =
-    activeDestination === "workspace" &&
-    activeWorkspaceLayout === "terminal-grid";
-  const isIdeSidebar =
-    activeDestination === "workspace" && activeWorkspaceLayout === "code";
-  // Secondary pages retain chat navigation, even when opened from the IDE.
-  const isSessionsSidebar = !isIdeSidebar;
-  const toggleProject = (projectKey: string) => {
-    setCollapsedProjectIds((current) =>
-      current.includes(projectKey)
-        ? current.filter((id) => id !== projectKey)
-        : [...current, projectKey],
-    );
-  };
-  const showMoreProjectSessions = (projectKey: string, totalCount: number) => {
-    setProjectVisibleCounts((current) => {
-      const visibleCount =
-        current[projectKey] ?? SIDEBAR_INITIAL_PROJECT_SESSION_COUNT;
-      return {
-        ...current,
-        [projectKey]: Math.min(
-          totalCount,
-          visibleCount + SIDEBAR_PROJECT_SESSION_BATCH_SIZE,
-        ),
-      };
-    });
-  };
-  const [recentsVisibleCount, setRecentsVisibleCount] = useState(
-    SIDEBAR_INITIAL_RECENT_SESSION_COUNT,
-  );
-  const recentsHaveRevealedMore =
-    recentsVisibleCount > SIDEBAR_INITIAL_RECENT_SESSION_COUNT;
-  const firstRecentSessions = unprojectedRecentSessions.slice(
-    0,
-    recentsVisibleCount,
-  );
-  const activeRecentSession = unprojectedRecentSessions.find(
-    (session) => session.id === activeSessionId,
-  );
-  // The open chat stays listed even when it falls past the visible count.
-  const visibleRecentSessions =
-    activeRecentSession && !firstRecentSessions.includes(activeRecentSession)
-      ? [
-          ...firstRecentSessions.slice(0, Math.max(0, recentsVisibleCount - 1)),
-          activeRecentSession,
-        ]
-      : firstRecentSessions;
-  const hiddenRecentCount =
-    unprojectedRecentSessions.length - visibleRecentSessions.length;
-  const showLessProjectSessions = (projectKey: string) => {
-    setProjectVisibleCounts((current) => {
-      const next = { ...current };
-      delete next[projectKey];
-      return next;
-    });
-  };
-  const moveProject = (
-    sourceKey: string,
-    targetKey: string,
-    position: "before" | "after",
-  ) => {
-    if (sourceKey === targetKey) {
-      return;
-    }
-    setProjectOrder((current) => {
-      const visibleOrder = stableSidebarProjectGroups(
-        discoveredProjectGroups,
-        current,
-      ).map((project) => project.key);
-      const next = visibleOrder.filter((key) => key !== sourceKey);
-      const targetIndex = next.indexOf(targetKey);
-      if (targetIndex < 0) {
-        return current;
-      }
-      next.splice(targetIndex + (position === "after" ? 1 : 0), 0, sourceKey);
-      return next;
-    });
-  };
-  const finishProjectDrag = () => {
-    setDraggedProjectKey(undefined);
-    setProjectDropTarget(undefined);
-  };
-  const toggleWorkspaceDirectory = (path: string, collapsed?: boolean) => {
-    setExpandedWorkspaceDirectories((current) => {
-      const next = new Set(current);
-      if (collapsed ?? next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      return next;
-    });
-  };
-  const focusExplorerPath = (path?: string) => {
-    if (!path) return;
-    setSelectedExplorerPath(path);
-    explorerRowRefs.current.get(path)?.focus();
-  };
-  const handleExplorerKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const activePath = (document.activeElement as HTMLElement | null)?.dataset
-      .explorerPath;
-    const index = visibleFiles.findIndex((file) => file.path === activePath);
-    if (index < 0) return;
-    const file = visibleFiles[index];
-    if (!file) return;
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      focusExplorerPath(
-        visibleFiles[Math.min(index + 1, visibleFiles.length - 1)]?.path,
-      );
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      focusExplorerPath(visibleFiles[Math.max(index - 1, 0)]?.path);
-    } else if (event.key === "Home") {
-      event.preventDefault();
-      focusExplorerPath(visibleFiles[0]?.path);
-    } else if (event.key === "End") {
-      event.preventDefault();
-      focusExplorerPath(visibleFiles.at(-1)?.path);
-    } else if (event.key === "ArrowRight" && file.kind === "directory") {
-      event.preventDefault();
-      if (!expandedWorkspaceDirectories.has(file.path)) {
-        toggleWorkspaceDirectory(file.path, false);
-      } else {
-        const child = visibleFiles.find(
-          (candidate) =>
-            workspaceAncestorPaths(candidate.path, candidate.workspacePath).at(
-              -1,
-            ) === file.path,
-        );
-        focusExplorerPath(child?.path);
-      }
-    } else if (event.key === "ArrowLeft") {
-      const parentPath = workspaceAncestorPaths(
-        file.path,
-        file.workspacePath,
-      ).at(-1);
-      if (
-        file.kind === "directory" &&
-        expandedWorkspaceDirectories.has(file.path)
-      ) {
-        event.preventDefault();
-        toggleWorkspaceDirectory(file.path, true);
-      } else if (parentPath) {
-        event.preventDefault();
-        focusExplorerPath(parentPath);
-      }
-    } else if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      setSelectedExplorerPath(file.path);
-      if (file.kind === "directory") {
-        toggleWorkspaceDirectory(file.path);
-      } else {
-        onOpenWorkspaceFile?.(file.path);
-      }
-    } else if (event.key === "F2") {
-      event.preventDefault();
-      startExplorerRename(file.path);
-    } else if (
-      (event.key === "Delete" || event.key === "Backspace") &&
-      !event.metaKey &&
-      !event.altKey &&
-      !event.ctrlKey
-    ) {
-      event.preventDefault();
-      if (file.isWorkspaceRoot) {
-        onRemoveWorkspaceFolder?.(file.workspacePath ?? file.path);
-      } else {
-        onDeleteWorkspacePath?.(file.path);
-      }
-    }
-  };
-  const explorerCreateParent = () => {
-    const selected = files.find((file) => file.path === selectedExplorerPath);
-    if (!selected) return undefined;
-    if (selected.kind === "directory") return selected.path;
-    const separator = selected.path.lastIndexOf("/");
-    return separator > 0 ? selected.path.slice(0, separator) : undefined;
-  };
-  const renderSessionRow = (session: Session, isNested = false) => (
-    <SessionSidebarRow
-      isActive={session.id === activeSessionId}
-      isSending={sendingSessionIds.includes(session.id)}
-      isUnreadComplete={completedSessionIds.includes(session.id)}
-      approvalCount={approvalCountsBySessionId[session.id] ?? 0}
-      questionCount={questionCountsBySessionId[session.id] ?? 0}
-      isNested={isNested}
-      isMenuOpen={openSessionMenuId === session.id}
-      isPinned={pinnedSessionIds.includes(session.id)}
-      isOpen={openChatSessionIds.includes(session.id)}
-      isDragging={draggedSessionId === session.id}
-      key={session.id}
-      onDelete={() => {
-        setSessionDeleteCandidate({
-          id: session.id,
-          label: session.title?.trim() || "This chat",
-        });
-        setOpenSessionMenuId(undefined);
-      }}
-      onMenuClose={() => setOpenSessionMenuId(undefined)}
-      onMenuToggle={() =>
-        setOpenSessionMenuId((current) =>
-          current === session.id ? undefined : session.id,
-        )
-      }
-      onPin={() => onPinSession?.(session.id)}
-      onRename={() => {
-        onRenameSession?.(session.id);
-        setOpenSessionMenuId(undefined);
-      }}
-      onOpenInGrid={() => {
-        onAddSessionToGrid?.(session.id);
-        setOpenSessionMenuId(undefined);
-      }}
-      onSelect={() => {
-        onSelectSession(session.id);
-        setOpenSessionMenuId(undefined);
-      }}
-      onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = "copyMove";
-        const payload = {
-          sessionId: session.id,
-          projectKey: normalizeSidebarPath(session.workspacePath),
-        };
-        sidebarDragId.current = beginChatSessionDrag(
-          payload,
-          event.dataTransfer,
-        )?.dragId;
-        // Chat IDs are internal data, never text to insert into a composer.
-        guardChatDragsOutsideGrid();
-        setDraggedSessionId(session.id);
-      }}
-      onPointerDown={(event) => {
-        if (
-          !(event.target instanceof Element) ||
-          !event.target.closest(".gyro-sidebar-thread-main")
-        )
-          return;
-        startChatPointerDrag(event.nativeEvent, event.currentTarget, {
-          kind: "session",
-          sessionId: session.id,
-          projectKey: normalizeSidebarPath(session.workspacePath),
-        });
-      }}
-      onDragEnd={() => {
-        // The lifecycle checks the native event token before clearing state.
-        // A late dragend from an older source must leave the new drag alone.
-        if (!currentChatDrag()) setDraggedSessionId(undefined);
-      }}
-      session={session}
-    />
-  );
-
-  return (
-    <>
-      {sessionDeleteCandidate
-        ? createPortal(
-            <SessionDeleteConfirmOverlay
-              chatLabel={sessionDeleteCandidate.label}
-              isWorking={sendingSessionIds.includes(sessionDeleteCandidate.id)}
-              onCancel={() => setSessionDeleteCandidate(undefined)}
-              onDelete={() => {
-                const candidate = sessionDeleteCandidate;
-                setSessionDeleteCandidate(undefined);
-                onDeleteSession?.(candidate.id);
-              }}
-            />,
-            document.body,
-          )
-        : null}
-      <div className="gyro-sidebar-persistent-header">
-        <div className="gyro-sidebar-windowbar" aria-label="Window navigation">
-          {/* Both surfaces carry the toggle in the same slot, so the surface
-              switch never moves out from under the pointer that clicked it. */}
-          <div className="gyro-sidebar-window-actions">
-            <button
-              aria-label="Hide sidebar"
-              title="Hide sidebar"
-              className="gyro-sidebar-toggle-button"
-              onClick={onToggleSidebar}
-              type="button"
-            >
-              <PanelLeft size={16} strokeWidth={1.5} />
-            </button>
-          </div>
-          <PrimarySurfaceSwitch
-            isIdeSidebar={isIdeSidebar}
-            onSelectSessions={onSelectSessions}
-            onSelectWorkspace={() => onSelectWorkspaceLayout("code")}
-          />
-          <div
-            aria-hidden="true"
-            className="gyro-sidebar-titlebar-drag-region"
-            data-tauri-drag-region
-          />
-        </div>
-      </div>
-
-      {isIdeSidebar ? (
-        <>
-          {!workspacePath ? (
-            <SidebarSection grow title="Workspace">
-              <div className="gyro-sidebar-mini-copy">
-                Open a project to see its files, search, and changes here.
-              </div>
-            </SidebarSection>
-          ) : null}
-
-          {workspacePath && activeIdeView === "explorer" ? (
-            <SidebarSection
-              grow
-              headerActions={
-                workspacePath ? (
-                  <div className="gyro-sidebar-explorer-toolbar">
-                    <button
-                      aria-label="Add folder to workspace"
-                      onClick={onAddWorkspaceFolder}
-                      title="Add folder to workspace"
-                      type="button"
-                    >
-                      <HardDrive size={13} />
-                      <Plus size={9} />
-                    </button>
-                    <button
-                      aria-label="New file"
-                      onClick={() =>
-                        startExplorerDraft("file", explorerCreateParent())
-                      }
-                      title="New file"
-                      type="button"
-                    >
-                      <FileText size={13} />
-                      <Plus size={9} />
-                    </button>
-                    <button
-                      aria-label="New folder"
-                      onClick={() =>
-                        startExplorerDraft(
-                          "directory",
-                          explorerCreateParent(),
-                        )
-                      }
-                      title="New folder"
-                      type="button"
-                    >
-                      <Folder size={13} />
-                      <Plus size={9} />
-                    </button>
-                    <button
-                      aria-label="Rename selected path"
-                      disabled={
-                        (!selectedExplorerPath && !ide?.activePath) ||
-                        Boolean(selectedExplorerFile?.isWorkspaceRoot)
-                      }
-                      onClick={() =>
-                        startExplorerRename(
-                          selectedExplorerPath ?? ide?.activePath ?? "",
-                        )
-                      }
-                      title="Rename selected path"
-                      type="button"
-                    >
-                      <Edit3 size={13} />
-                    </button>
-                    <button
-                      aria-label={
-                        selectedExplorerFile?.isWorkspaceRoot
-                          ? "Remove folder from workspace"
-                          : "Delete selected path"
-                      }
-                      disabled={!selectedExplorerPath && !ide?.activePath}
-                      onClick={() => {
-                        const path =
-                          selectedExplorerPath ?? ide?.activePath ?? "";
-                        if (selectedExplorerFile?.isWorkspaceRoot) {
-                          onRemoveWorkspaceFolder?.(
-                            selectedExplorerFile.workspacePath ?? path,
-                          );
-                          return;
-                        }
-                        onDeleteWorkspacePath?.(path);
-                      }}
-                      title={
-                        selectedExplorerFile?.isWorkspaceRoot
-                          ? "Remove folder from workspace"
-                          : "Delete selected path"
-                      }
-                      type="button"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                    <button
-                      aria-label="Refresh workspace files"
-                      onClick={onRefreshWorkspace}
-                      title="Refresh workspace files"
-                      type="button"
-                    >
-                      <RefreshCw size={13} />
-                    </button>
-                  </div>
-                ) : null
-              }
-              title="Explorer"
-            >
-              {workspacePath ? (
-                <>
-                  <WorkspaceRootIssues model={workspaceRootIssues} />
-                  {files.some((file) => file.isWorkspaceRoot) ? null : (
-                    <SidebarProjectRow
-                      icon={Folder}
-                      label={workspaceName(workspacePath)}
-                      meta="workspace"
-                      onClick={onOpenWorkspace}
-                    />
-                  )}
-                  {visibleFiles.length > 0 || explorerDraft ? (
-                    <div
-                      aria-label="Workspace files"
-                      className="gyro-sidebar-explorer-tree"
-                      onKeyDown={handleExplorerKeyDown}
-                      ref={explorerTreeRef}
-                      role="tree"
-                    >
-                      {visibleFiles.flatMap((file, index) => {
-                        const decoration = ide?.fileDecorations.find(
-                          (item) => item.path === file.path,
-                        );
-                        const rootGroup = explorerRootGroupForFile(file);
-                        let previousRootGroup: typeof rootGroup;
-                        if (rootGroup) {
-                          for (let prior = index - 1; prior >= 0; prior -= 1) {
-                            const candidate = visibleFiles[prior];
-                            if (candidate?.workspacePath !== file.workspacePath)
-                              break;
-                            previousRootGroup =
-                              explorerRootGroupForFile(candidate);
-                            if (previousRootGroup) break;
-                          }
-                        }
-                        if (explorerDraft?.renamePath === file.path) {
-                          return (
-                            <ExplorerDraftRow
-                              depth={file.depth}
-                              draft={{
-                                ...explorerDraft,
-                                kind:
-                                  file.kind === "directory"
-                                    ? "directory"
-                                    : "file",
-                              }}
-                              key={`rename:${file.path}`}
-                              onCancel={() => setExplorerDraft(undefined)}
-                              onChange={(value) =>
-                                setExplorerDraft((current) =>
-                                  current ? { ...current, value } : current,
-                                )
-                              }
-                              onCommit={commitExplorerDraft}
-                            />
-                          );
-                        }
-                        const row = (
-                          <WorkspaceExplorerRow
-                            collapsed={
-                              !expandedWorkspaceDirectories.has(file.path)
-                            }
-                            decoration={decoration}
-                            depth={
-                              file.depth ?? file.path.split(/[\\/]/).length
-                            }
-                            bufferStatus={ide?.buffers[file.path]?.status}
-                            draggable={!file.isWorkspaceRoot}
-                            isDropTarget={explorerDropPath === file.path}
-                            isActive={
-                              selectedExplorerPaths.has(file.path) ||
-                              selectedExplorerPath === file.path ||
-                              (!selectedExplorerPath &&
-                                ide?.activePath === file.path)
-                            }
-                            isOpen={Boolean(
-                              ide?.tabs.some((tab) => tab.path === file.path),
-                            )}
-                            key={file.path}
-                            kind={file.kind}
-                            rootGroup={rootGroup}
-                            startsRootGroup={
-                              rootGroup !== undefined &&
-                              rootGroup !== "project" &&
-                              rootGroup !== previousRootGroup
-                            }
-                            label={
-                              file.isWorkspaceRoot
-                                ? workspaceName(file.workspacePath)
-                                : workspaceName(file.path)
-                            }
-                            path={file.path}
-                            rowRef={(element) => {
-                              if (element)
-                                explorerRowRefs.current.set(file.path, element);
-                              else explorerRowRefs.current.delete(file.path);
-                            }}
-                            tabIndex={
-                              selectedExplorerPath === file.path ||
-                              (!selectedExplorerPath && index === 0)
-                                ? 0
-                                : -1
-                            }
-                            onClick={(event) => {
-                              if (event.metaKey || event.ctrlKey) {
-                                setSelectedExplorerPaths((current) => {
-                                  const next = new Set(current);
-                                  if (next.has(file.path))
-                                    next.delete(file.path);
-                                  else next.add(file.path);
-                                  return next;
-                                });
-                              } else if (
-                                event.shiftKey &&
-                                selectedExplorerPath
-                              ) {
-                                const anchor = visibleFiles.findIndex(
-                                  (item) => item.path === selectedExplorerPath,
-                                );
-                                const target = visibleFiles.findIndex(
-                                  (item) => item.path === file.path,
-                                );
-                                const [start, end] =
-                                  anchor < target
-                                    ? [anchor, target]
-                                    : [target, anchor];
-                                setSelectedExplorerPaths(
-                                  new Set(
-                                    visibleFiles
-                                      .slice(start, end + 1)
-                                      .map((item) => item.path),
-                                  ),
-                                );
-                              } else {
-                                setSelectedExplorerPaths(new Set([file.path]));
-                              }
-                              setSelectedExplorerPath(file.path);
-                              if (file.workspacePath) {
-                                onSelectWorkspaceFolder?.(file.workspacePath);
-                              }
-                              if (file.kind === "file") {
-                                onOpenWorkspaceFile?.(file.path);
-                                return;
-                              }
-                              toggleWorkspaceDirectory(file.path);
-                            }}
-                            onContextMenu={(event) => {
-                              event.preventDefault();
-                              setSelectedExplorerPath(file.path);
-                              if (!selectedExplorerPaths.has(file.path)) {
-                                setSelectedExplorerPaths(new Set([file.path]));
-                              }
-                              setExplorerContextMenu({
-                                path: file.path,
-                                x: event.clientX,
-                                y: event.clientY,
-                              });
-                            }}
-                            onDragStart={(event) => {
-                              if (file.isWorkspaceRoot) {
-                                event.preventDefault();
-                                return;
-                              }
-                              explorerDragPath.current = file.path;
-                              event.dataTransfer.effectAllowed = "move";
-                              event.dataTransfer.setData(
-                                EXPLORER_PATH_DRAG_MIME,
-                                file.path,
-                              );
-                              event.dataTransfer.setData(
-                                "text/plain",
-                                file.path,
-                              );
-                            }}
-                            onDragEnd={() => {
-                              explorerDragPath.current = undefined;
-                              setExplorerDropPath(undefined);
-                            }}
-                            onDragOver={(event) => {
-                              if (file.kind !== "directory") return;
-                              const from = explorerDragPath.current;
-                              const types = Array.from(event.dataTransfer.types);
-                              if (
-                                !from &&
-                                !types.includes(EXPLORER_PATH_DRAG_MIME)
-                              ) {
-                                return;
-                              }
-                              // Highlight only a destination planWorkspaceMove
-                              // will accept. Another workspace root must not
-                              // look like a valid target.
-                              if (
-                                from &&
-                                planWorkspaceMove(
-                                  explorerMoveRoots,
-                                  from,
-                                  file.path,
-                                ).kind !== "move"
-                              ) {
-                                return;
-                              }
-                              event.preventDefault();
-                              event.dataTransfer.dropEffect = "move";
-                              setExplorerDropPath((current) =>
-                                current === file.path ? current : file.path,
-                              );
-                            }}
-                            onDragLeave={(event) => {
-                              const next = event.relatedTarget;
-                              if (
-                                next instanceof Node &&
-                                event.currentTarget.contains(next)
-                              ) {
-                                return;
-                              }
-                              setExplorerDropPath((current) =>
-                                current === file.path ? undefined : current,
-                              );
-                            }}
-                            onDrop={(event) => {
-                              if (file.kind !== "directory") return;
-                              const from =
-                                event.dataTransfer.getData(
-                                  EXPLORER_PATH_DRAG_MIME,
-                                ) ||
-                                explorerDragPath.current ||
-                                "";
-                              explorerDragPath.current = undefined;
-                              setExplorerDropPath(undefined);
-                              if (!from) return;
-                              event.preventDefault();
-                              event.stopPropagation();
-                              if (
-                                planWorkspaceMove(
-                                  explorerMoveRoots,
-                                  from,
-                                  file.path,
-                                ).kind !== "move"
-                              ) {
-                                return;
-                              }
-                              onMoveWorkspacePath?.(from, file.path);
-                            }}
-                            onDoubleClick={
-                              file.kind === "file"
-                                ? () => {
-                                    onOpenWorkspaceFile?.(file.path);
-                                    onPinEditorTab?.(file.path);
-                                  }
-                                : undefined
-                            }
-                          />
-                        );
-                        // The new name sits under the folder it will belong to.
-                        // A field at the bottom of the tree looks like a no-op
-                        // in a long project.
-                        if (
-                          explorerDraft &&
-                          !explorerDraft.renamePath &&
-                          explorerDraft.parentPath === file.path
-                        ) {
-                          return [
-                            row,
-                            <ExplorerDraftRow
-                              depth={(file.depth ?? 0) + 1}
-                              draft={explorerDraft}
-                              key="create-explorer-entry"
-                              onCancel={() => setExplorerDraft(undefined)}
-                              onChange={(value) =>
-                                setExplorerDraft((current) =>
-                                  current
-                                    ? { ...current, value }
-                                    : current,
-                                )
-                              }
-                              onCommit={commitExplorerDraft}
-                            />,
-                          ];
-                        }
-                        return row;
-                      })}
-                      {/* Rename replaces its own row above. A second field here
-                          autofocuses, blurs that row, and the unchanged name
-                          commits the rename shut before it can be typed. */}
-                      {explorerDraft &&
-                      !(
-                        explorerDraft.renamePath
-                          ? visibleFiles.some(
-                              (file) =>
-                                file.path === explorerDraft.renamePath,
-                            )
-                          : visibleFiles.some(
-                              (file) =>
-                                file.path === explorerDraft.parentPath,
-                            )
-                      ) ? (
-                        <ExplorerDraftRow
-                          draft={explorerDraft}
-                          key="create-explorer-entry"
-                          onCancel={() => setExplorerDraft(undefined)}
-                          onChange={(value) =>
-                            setExplorerDraft((current) =>
-                              current ? { ...current, value } : current,
-                            )
-                          }
-                          onCommit={commitExplorerDraft}
-                        />
-                      ) : null}
-                    </div>
-                  ) : (
-                    <div className="gyro-sidebar-mini-copy">
-                      This workspace has no files yet.
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="gyro-sidebar-mini-copy">
-                  Open a folder to browse and edit its files.
-                </div>
-              )}
-              {explorerContextMenu ? (
-                <div
-                  className="gyro-explorer-context-menu"
-                  ref={explorerContextMenuRef}
-                  role="menu"
-                  style={{
-                    left: explorerContextMenu.x,
-                    top: explorerContextMenu.y,
-                  }}
-                >
-                  <button
-                    onClick={() => {
-                      const file = files.find(
-                        (item) => item.path === explorerContextMenu.path,
-                      );
-                      if (file?.kind === "file") {
-                        onOpenWorkspaceFile?.(file.path);
-                      } else {
-                        startExplorerDraft("file", file?.path);
-                      }
-                      setExplorerContextMenu(undefined);
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    {files.find(
-                      (item) => item.path === explorerContextMenu.path,
-                    )?.kind === "file"
-                      ? "Open"
-                      : "New File"}
-                  </button>
-                  {files.find(
-                    (item) => item.path === explorerContextMenu.path,
-                  )?.kind === "directory" ? (
-                    <button
-                      onClick={() =>
-                        startExplorerDraft(
-                          "directory",
-                          explorerContextMenu.path,
-                        )
-                      }
-                      role="menuitem"
-                      type="button"
-                    >
-                      New Folder
-                    </button>
-                  ) : null}
-                  <button
-                    onClick={() => startExplorerRename(explorerContextMenu.path)}
-                    role="menuitem"
-                    type="button"
-                  >
-                    Rename
-                  </button>
-                  <button
-                    onClick={() => {
-                      const target = explorerContextMenu.path;
-                      setExplorerContextMenu(undefined);
-                      onDuplicateWorkspacePath?.(target);
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    Duplicate
-                  </button>
-                  {files.find((item) => item.path === explorerContextMenu.path)
-                    ?.isWorkspaceRoot ? null : (
-                    <button
-                      onClick={() => {
-                        const target = explorerContextMenu.path;
-                        const separator = target.lastIndexOf("/");
-                        const parent =
-                          separator > 0 ? target.slice(0, separator) : target;
-                        setExplorerContextMenu(undefined);
-                        void askTextValue({
-                          title: "Move",
-                          label: "Destination folder",
-                          message:
-                            "The file keeps its name. Leave the destination inside this workspace folder.",
-                          initialValue: parent,
-                          confirmLabel: "Move",
-                        }).then((destination) => {
-                          if (!destination) return;
-                          onMoveWorkspacePath?.(target, destination);
-                        });
-                      }}
-                      role="menuitem"
-                      type="button"
-                    >
-                      Move…
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      const target = explorerContextMenu.path;
-                      setExplorerContextMenu(undefined);
-                      // Return must not send the current draft while the
-                      // folder listing is still being attached. Focus only
-                      // after that attachment is in the composer.
-                      setExplorerAskSendHeld(true);
-                      void Promise.resolve(onAskWorkspacePath?.(target))
-                        .then((attached) => {
-                          if (attached === false) return;
-                          window.dispatchEvent(
-                            new Event("gyro-focus-composer"),
-                          );
-                        })
-                        .finally(() => {
-                          setExplorerAskSendHeld(false);
-                        });
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    Ask Gyro
-                  </button>
-                  <button
-                    onClick={() => {
-                      const target = explorerContextMenu.path;
-                      const entry = files.find((file) => file.path === target);
-                      setExplorerContextMenu(undefined);
-                      writeClipboardText(
-                        entry
-                          ? workspaceCopyAbsolutePath(entry)
-                          : target,
-                      );
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    Copy Path
-                  </button>
-                  <button
-                    onClick={() => {
-                      const target = explorerContextMenu.path;
-                      const entry = files.find((file) => file.path === target);
-                      setExplorerContextMenu(undefined);
-                      writeClipboardText(
-                        entry
-                          ? workspaceCopyRelativePath(entry)
-                          : target,
-                      );
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    Copy Relative Path
-                  </button>
-                  <button
-                    onClick={() => {
-                      const target = explorerContextMenu.path;
-                      setExplorerContextMenu(undefined);
-                      onRevealWorkspacePath?.(target);
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    Reveal in Finder
-                  </button>
-                  <button
-                    className="is-danger"
-                    onClick={() => {
-                      const file = files.find(
-                        (item) => item.path === explorerContextMenu.path,
-                      );
-                      if (file?.isWorkspaceRoot) {
-                        onRemoveWorkspaceFolder?.(
-                          file.workspacePath ?? file.path,
-                        );
-                      } else {
-                        onDeleteWorkspacePath?.(explorerContextMenu.path);
-                      }
-                      setExplorerContextMenu(undefined);
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    {files.find(
-                      (item) => item.path === explorerContextMenu.path,
-                    )?.isWorkspaceRoot
-                      ? "Remove Folder from Workspace"
-                      : "Delete"}
-                  </button>
-                </div>
-              ) : null}
-            </SidebarSection>
-          ) : null}
-
-          {workspacePath && activeIdeView === "search" ? (
-            <SidebarSection
-              grow
-              meta={String(ide?.searchResults.length ?? 0)}
-              title="Search"
-            >
-              <form
-                className="gyro-sidebar-search-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (sidebarSearchTimerRef.current !== null) {
-                    clearTimeout(sidebarSearchTimerRef.current);
-                    sidebarSearchTimerRef.current = null;
-                  }
-                  const globs = workspaceSearchGlobs(
-                    sidebarSearchIncludeDraft,
-                    sidebarSearchExcludeDraft,
-                  );
-                  onRunWorkspaceSearch?.({
-                    query: sidebarSearchDraft,
-                    globs: globs.length > 0 ? globs : undefined,
-                  });
-                }}
-              >
-                <Search size={14} />
-                <input
-                  // This view greps file contents; finding a file by name is
-                  // the palette's job, so the copy has to separate the two.
-                  aria-label="Search in files"
-                  onChange={(event) => {
-                    const draft = event.target.value;
-                    setSidebarSearchDraft(draft);
-                    // An empty box means an empty result list: matches from the
-                    // previous query must not outlive the query itself.
-                    if (!draft.trim()) {
-                      setSelectedReplacePaths(new Set());
-                      onRunWorkspaceSearch?.({ query: "" });
-                    }
-                  }}
-                  placeholder="Search in files"
-                  value={sidebarSearchDraft}
-                />
-                <button
-                  aria-expanded={sidebarReplaceOpen}
-                  aria-label="Toggle replace preview"
-                  className={sidebarReplaceOpen ? "is-active" : ""}
-                  onClick={() => setSidebarReplaceOpen((current) => !current)}
-                  title="Toggle replace preview"
-                  type="button"
-                >
-                  <Edit3 size={13} />
-                </button>
-                <button
-                  aria-expanded={sidebarSearchDetailsOpen}
-                  aria-label="Toggle search details"
-                  className={sidebarSearchDetailsOpen ? "is-active" : ""}
-                  onClick={() =>
-                    setSidebarSearchDetailsOpen((current) => !current)
-                  }
-                  title="Toggle search details"
-                  type="button"
-                >
-                  <SlidersHorizontal size={13} />
-                </button>
-                {sidebarReplaceOpen ? (
-                  <div className="gyro-sidebar-replace-row">
-                    <CornerDownRight size={13} />
-                    <input
-                      aria-label="Replace workspace matches with"
-                      onChange={(event) =>
-                        setSidebarReplaceDraft(event.target.value)
-                      }
-                      placeholder="Replace with"
-                      value={sidebarReplaceDraft}
-                    />
-                  </div>
-                ) : null}
-                {sidebarSearchDetailsOpen ? (
-                  <div className="gyro-sidebar-search-details">
-                    <label>
-                      <span>Files to include</span>
-                      <input
-                        aria-label="Files to include"
-                        onChange={(event) =>
-                          setSidebarSearchIncludeDraft(event.target.value)
-                        }
-                        placeholder="src/**, *.{ts,tsx}"
-                        value={sidebarSearchIncludeDraft}
-                      />
-                    </label>
-                    <label>
-                      <span>Files to exclude</span>
-                      <input
-                        aria-label="Files to exclude"
-                        onChange={(event) =>
-                          setSidebarSearchExcludeDraft(event.target.value)
-                        }
-                        placeholder="node_modules/**, dist/**"
-                        value={sidebarSearchExcludeDraft}
-                      />
-                    </label>
-                  </div>
-                ) : null}
-              </form>
-              {sidebarReplaceOpen && (ide?.searchResults.length ?? 0) > 0 ? (
-                <div className="gyro-sidebar-replace-preview">
-                  <div>
-                    <strong>Replace preview</strong>
-                    <span>
-                      {selectedReplacePaths.size} of{" "}
-                      {
-                        new Set(ide?.searchResults.map((result) => result.path))
-                          .size
-                      }{" "}
-                      files
-                    </span>
-                  </div>
-                  <button
-                    disabled={
-                      selectedReplacePaths.size === 0 ||
-                      !sidebarSearchDraft.trim()
-                    }
-                    onClick={() =>
-                      void onApplyWorkspaceReplace?.(
-                        {
-                          query: sidebarSearchDraft,
-                          globs: workspaceSearchGlobs(
-                            sidebarSearchIncludeDraft,
-                            sidebarSearchExcludeDraft,
-                          ),
-                        },
-                        sidebarReplaceDraft,
-                        [...selectedReplacePaths],
-                      )
-                    }
-                    type="button"
-                  >
-                    Replace in {selectedReplacePaths.size} files
-                  </button>
-                </div>
-              ) : null}
-              {(ide?.searchResults ?? []).length > 0 ? (
-                <WorkspaceSearchResults
-                  results={ide?.searchResults ?? []}
-                  query={ide?.searchQuery.query ?? ""}
-                  activePath={ide?.activePath}
-                  replaceOpen={sidebarReplaceOpen}
-                  selectedPaths={selectedReplacePaths}
-                  onToggleReplacePath={(path) =>
-                    setSelectedReplacePaths((current) => {
-                      const next = new Set(current);
-                      if (next.has(path)) next.delete(path);
-                      else next.add(path);
-                      return next;
-                    })
-                  }
-                  onOpenFile={onOpenWorkspaceFile}
-                />
-              ) : (
-                <div className="gyro-sidebar-mini-copy">
-                  {sidebarSearchDraft.trim()
-                    ? "No matches found."
-                    : "Type to search file contents in this workspace."}
-                </div>
-              )}
-            </SidebarSection>
-          ) : null}
-
-          {workspacePath && activeIdeView === "source-control" ? (
-            <SidebarSection
-              grow
-              title="Source control"
-              headerActions={
-                ide?.sourceControl.available ? (
-                  scmTotals.kind === "branch" ||
-                  scmTotals.kind === "working-tree" ? (
-                    <span
-                      className="gyro-scm-heading-totals"
-                      title={sourceControlTotalsScope(scmTotals)}
-                      aria-label={`${sourceControlTotalsScope(scmTotals)}: ${scmTotals.additions.toLocaleString()} additions, ${scmTotals.deletions.toLocaleString()} deletions`}
-                    >
-                      <span className="is-added">
-                        +{scmTotals.additions.toLocaleString()}
-                      </span>
-                      <span className="is-removed">
-                        −{scmTotals.deletions.toLocaleString()}
-                      </span>
-                      {scmTotals.kind === "working-tree" ? (
-                        <small>{sourceControlTotalsBadge(scmTotals)}</small>
-                      ) : null}
-                    </span>
-                  ) : (
-                    <span
-                      className="gyro-scm-heading-unavailable"
-                      title={sourceControlTotalsScope(scmTotals)}
-                    >
-                      {sourceControlTotalsLabel(scmTotals)}
-                    </span>
-                  )
-                ) : undefined
-              }
-            >
-              <div className="gyro-scm-panel">
-                <div
-                  className="gyro-scm-repository-section"
-                  style={{
-                    height: scmRepositoryHeight,
-                    minHeight: scmRepositoryMinHeight,
-                  }}
-                >
-                  <div
-                    ref={scmRepositoryContentRef}
-                    style={{ display: "flow-root" }}
-                  >
-                    <div className="gyro-sidebar-scm-group-label">
-                      <span className="gyro-scm-label-text">Repository</span>
-                    </div>
-                    {/* Repository and branch read as one line: what you are in,
-                    and where in it. They stack again when the sidebar is too
-                    narrow to hold both names. */}
-                    <div className="gyro-sidebar-scm-head">
-                      <div className="gyro-sidebar-scm-repository">
-                        <HardDrive size={12} aria-hidden="true" />
-                        <strong title={workspacePath}>
-                          {workspaceName(workspacePath)}
-                        </strong>
-                        <button
-                          aria-label="Refresh source control and check GitHub"
-                          disabled={isRemoteChecking}
-                          onClick={() => {
-                            onRefreshSourceControl?.();
-                            onCheckRemote?.();
-                          }}
-                          title="Refresh and check GitHub"
-                          type="button"
-                        >
-                          <RefreshCw size={12} />
-                        </button>
-                      </div>
-                      <ScmBranchPicker
-                        branchCatalog={branchCatalog}
-                        currentBranch={
-                          ide?.sourceControl.branch ?? branchCatalog?.current
-                        }
-                        disabled={isBranchLoading}
-                        error={
-                          ide?.sourceControl.error ??
-                          branchCatalog?.error ??
-                          (ide?.sourceControl.available === false
-                            ? "Git is not ready for this workspace."
-                            : undefined)
-                        }
-                        isLoading={isBranchLoading}
-                        onCreateBranch={() =>
-                          onCreateWorkspaceBranch?.(
-                            ide?.sourceControl.branch ?? branchCatalog?.current,
-                          )
-                        }
-                        onSelectBranch={(branch) =>
-                          onSelectWorkspaceBranch?.(branch)
-                        }
-                      />
-                    </div>
-                    <form
-                      className="gyro-sidebar-commit-form"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        const message = sourceControlMessage.trim();
-                        if (!message) {
-                          return;
-                        }
-                        onCommitSourceControl?.(message);
-                        setSourceControlMessage("");
-                      }}
-                    >
-                      <input
-                        aria-label="Source control message"
-                        onChange={(event) =>
-                          setSourceControlMessage(event.target.value)
-                        }
-                        placeholder={`Message (${
-                          isMacPlatform() ? "⌘Enter" : "Ctrl+Enter"
-                        } to commit${
-                          ide?.sourceControl.branch
-                            ? ` on "${ide.sourceControl.branch}"`
-                            : ""
-                        })`}
-                        value={sourceControlMessage}
-                        onKeyDown={(event) => {
-                          if (
-                            (event.metaKey || event.ctrlKey) &&
-                            event.key === "Enter"
-                          ) {
-                            event.currentTarget.form?.requestSubmit();
-                          }
-                        }}
-                      />
-                      <div className="gyro-sidebar-commit-actions">
-                        {showSourceControlSyncButton ? (
-                          <button
-                            disabled={
-                              isSourceControlSyncing || isRemoteChecking
-                            }
-                            onClick={
-                              sourceControlSyncAction === "pull"
-                                ? onPullSourceControl
-                                : onPushSourceControl
-                            }
-                            type="button"
-                            title={
-                              sourceControlSyncAction === "pull"
-                                ? `Pull ${sourceControlBehind} from ${ide?.sourceControl.upstream}`
-                                : sourceControlSyncAction === "push"
-                                  ? `Push to ${ide?.sourceControl.upstream}`
-                                  : "Push this branch to the remote and track it"
-                            }
-                          >
-                            {sourceControlSyncAction === "pull" ? (
-                              <ArrowDown size={13} />
-                            ) : (
-                              <ArrowUp size={13} />
-                            )}
-                            {isSourceControlSyncing
-                              ? "Working…"
-                              : sourceControlSyncAction === "pull"
-                                ? "Pull"
-                                : sourceControlSyncAction === "push"
-                                  ? "Push"
-                                  : "Publish branch"}
-                            {!isSourceControlSyncing &&
-                            sourceControlSyncCounts ? (
-                              <span className="gyro-scm-sync-count">
-                                {sourceControlSyncCounts}
-                              </span>
-                            ) : null}
-                          </button>
-                        ) : !hasSourceControlChanges &&
-                          sourceControlPublished &&
-                          ide?.sourceControl.available === true ? (
-                          <button
-                            disabled={
-                              isRemoteChecking || isSourceControlSyncing
-                            }
-                            onClick={onCheckRemote}
-                            title="Check the tracked GitHub branch for new commits"
-                            type="button"
-                          >
-                            <RefreshCw size={13} />
-                            {isRemoteChecking ? "Checking…" : "Check GitHub"}
-                          </button>
-                        ) : (
-                          <button
-                            disabled={
-                              !sourceControlMessage.trim() ||
-                              !hasSourceControlChanges
-                            }
-                            type="submit"
-                            title={
-                              stagedSourceControlFiles.length > 0
-                                ? "Commit staged changes"
-                                : "Stage all changes and commit"
-                            }
-                          >
-                            <Check size={13} />
-                            {stagedSourceControlFiles.length > 0
-                              ? "Commit"
-                              : "Commit all"}
-                          </button>
-                        )}
-                      </div>
-                    </form>
-                    <ScmSyncRow
-                      ahead={sourceControlAhead}
-                      behind={sourceControlBehind}
-                      hasRemote={ide?.sourceControl.available === true}
-                      hasPendingChanges={hasSourceControlChanges}
-                      onPull={onPullSourceControl}
-                      onPush={onPushSourceControl}
-                      syncing={isSourceControlSyncing || isRemoteChecking}
-                      upstream={ide?.sourceControl.upstream}
-                    />
-                    {remoteCheckMessage && ide?.sourceControl.available ? (
-                      <div
-                        className={`gyro-sidebar-mini-copy${remoteCheckFailed ? " is-error" : ""}`}
-                        role={remoteCheckFailed ? "alert" : "status"}
-                      >
-                        {remoteCheckMessage}
-                      </div>
-                    ) : null}
-                    {ide?.sourceControl.error ? (
-                      <div className="gyro-sidebar-mini-copy is-error">
-                        {ide.sourceControl.error}
-                      </div>
-                    ) : null}
-                    {ide?.sourceControl.available === false &&
-                    !ide?.sourceControl.error ? (
-                      <div className="gyro-sidebar-mini-copy">
-                        Git is not ready for this workspace.
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-                <ScmSectionDivider
-                  label="Resize repository section"
-                  target="previous"
-                  onResize={setScmRepositoryHeight}
-                />
-                <div
-                  className="gyro-scm-change-list"
-                  style={
-                    scmHistoryShare === undefined
-                      ? { flex: "0 1 auto" }
-                      : { flex: `${100 - scmHistoryShare} 1 0px` }
-                  }
-                >
-                  {stagedSourceControlFiles.length > 0 ? (
-                    <div
-                      className="gyro-scm-staged-section"
-                      style={{
-                        height: collapsedScmGroups.has("staged")
-                          ? undefined
-                          : scmStagedHeight,
-                      }}
-                    >
-                      <ScmChangeGroup
-                        activeDiff={
-                          ide?.tabs.find((tab) => tab.path === ide.activePath)
-                            ?.sourceControlDiff
-                        }
-                        actions={
-                          <button
-                            aria-label="Unstage all staged changes"
-                            onClick={async () => {
-                              for (const file of stagedSourceControlFiles) {
-                                await onToggleSourceControlFile?.(
-                                  file.path,
-                                  true,
-                                );
-                              }
-                              onRefreshSourceControl?.();
-                            }}
-                            title="Unstage all"
-                            type="button"
-                          >
-                            <Minus size={11} />
-                          </button>
-                        }
-                        className="is-staged"
-                        collapsed={collapsedScmGroups.has("staged")}
-                        files={stagedSourceControlFiles}
-                        onDiscardFile={onDiscardSourceControlFile}
-                        onOpenDiff={onOpenSourceControlDiff}
-                        onToggleCollapsed={() => toggleScmGroup("staged")}
-                        onToggleSelected={toggleSourceControlSelection}
-                        onToggleStage={onToggleSourceControlFile}
-                        selectedPaths={selectedSourceControlPaths}
-                        title="Staged Changes"
-                      />
-                    </div>
-                  ) : null}
-                  {stagedSourceControlFiles.length > 0 &&
-                  !collapsedScmGroups.has("staged") ? (
-                    <ScmSectionDivider
-                      label="Resize staged changes"
-                      target="previous"
-                      onResize={setScmStagedHeight}
-                    />
-                  ) : null}
-                  <ScmChangeGroup
-                    activeDiff={
-                      ide?.tabs.find((tab) => tab.path === ide.activePath)
-                        ?.sourceControlDiff
-                    }
-                    actions={
-                      <>
-                        <button
-                          aria-label="Stage all changes"
-                          title="Stage all changes"
-                          disabled={!unstagedSourceControlFiles.length}
-                          onClick={() => void onStageAllSourceControl?.()}
-                          type="button"
-                        >
-                          <Plus size={13} />
-                        </button>
-                        <button
-                          aria-label="Select all source control changes"
-                          disabled={unstagedSourceControlFiles.length === 0}
-                          onClick={() =>
-                            setSelectedSourceControlPaths(
-                              new Set(
-                                unstagedSourceControlFiles.map(
-                                  (file) => file.path,
-                                ),
-                              ),
-                            )
-                          }
-                          title="Select all"
-                          type="button"
-                        >
-                          <ListChecks size={11} />
-                        </button>
-                        {selectedSourceControlPaths.size > 0 ? (
-                          <>
-                            <button
-                              aria-label="Stage selected source control changes"
-                              onClick={async () => {
-                                const selected =
-                                  unstagedSourceControlFiles.filter((file) =>
-                                    selectedSourceControlPaths.has(file.path),
-                                  );
-                                for (const file of selected) {
-                                  await onToggleSourceControlFile?.(
-                                    file.path,
-                                    false,
-                                  );
-                                }
-                                onRefreshSourceControl?.();
-                              }}
-                              title="Stage selected"
-                              type="button"
-                            >
-                              <Plus size={11} />
-                            </button>
-                            <button
-                              aria-label="Discard selected source control changes"
-                              onClick={async () => {
-                                if (
-                                  !(await confirmAction(
-                                    `Discard changes in ${selectedSourceControlPaths.size} selected files? This cannot be undone.`,
-                                  ))
-                                ) {
-                                  return;
-                                }
-                                for (const path of selectedSourceControlPaths) {
-                                  await onDiscardSourceControlFile?.(path);
-                                }
-                                setSelectedSourceControlPaths(new Set());
-                                onRefreshSourceControl?.();
-                              }}
-                              title="Discard selected"
-                              type="button"
-                            >
-                              <Trash2 size={11} />
-                            </button>
-                          </>
-                        ) : null}
-                      </>
-                    }
-                    className="is-changes"
-                    collapsed={collapsedScmGroups.has("changes")}
-                    emptyCopy={
-                      ide?.sourceControl.available === false
-                        ? undefined
-                        : stagedSourceControlFiles.length > 0
-                          ? "Everything else is staged"
-                          : "No changes"
-                    }
-                    files={unstagedSourceControlFiles}
-                    onDiscardFile={onDiscardSourceControlFile}
-                    onOpenDiff={onOpenSourceControlDiff}
-                    onToggleCollapsed={() => toggleScmGroup("changes")}
-                    onToggleSelected={toggleSourceControlSelection}
-                    onToggleStage={onToggleSourceControlFile}
-                    selectedPaths={selectedSourceControlPaths}
-                    title="Uncommitted changes"
-                  />
-                </div>
-                <div
-                  className="gyro-scm-history-resizer"
-                  role="separator"
-                  aria-label="Resize changes and history"
-                  aria-orientation="horizontal"
-                  aria-valuemin={15}
-                  aria-valuemax={85}
-                  aria-valuenow={Math.round(scmHistoryShare ?? 40)}
-                  tabIndex={0}
-                  onKeyDown={(event) => {
-                    if (
-                      !["ArrowUp", "ArrowDown", "Home", "End"].includes(
-                        event.key,
-                      )
-                    )
-                      return;
-                    event.preventDefault();
-                    setScmHistoryShare((share) => {
-                      const current = share ?? 40;
-                      return event.key === "Home"
-                        ? 15
-                        : event.key === "End"
-                          ? 85
-                          : Math.max(
-                              15,
-                              Math.min(
-                                85,
-                                current + (event.key === "ArrowUp" ? 5 : -5),
-                              ),
-                            );
-                    });
-                  }}
-                  onPointerDown={(event) => {
-                    if (event.button !== 0) return;
-                    const divider = event.currentTarget;
-                    const changes = divider.previousElementSibling;
-                    const history = divider.nextElementSibling;
-                    if (!changes || !history) return;
-                    event.preventDefault();
-                    const height =
-                      changes.getBoundingClientRect().height +
-                      history.getBoundingClientRect().height;
-                    if (height <= 0) return;
-                    scmHistoryDrag.current = {
-                      y: event.clientY,
-                      share:
-                        (history.getBoundingClientRect().height / height) * 100,
-                      height,
-                    };
-                    divider.setPointerCapture(event.pointerId);
-                  }}
-                  onPointerMove={(event) => {
-                    const drag = scmHistoryDrag.current;
-                    if (!drag) return;
-                    setScmHistoryShare(
-                      Math.max(
-                        15,
-                        Math.min(
-                          85,
-                          drag.share -
-                            ((event.clientY - drag.y) / drag.height) * 100,
-                        ),
-                      ),
-                    );
-                  }}
-                  onPointerUp={(event) => {
-                    scmHistoryDrag.current = undefined;
-                    if (
-                      event.currentTarget.hasPointerCapture(event.pointerId)
-                    ) {
-                      event.currentTarget.releasePointerCapture(
-                        event.pointerId,
-                      );
-                    }
-                  }}
-                  onPointerCancel={() => {
-                    scmHistoryDrag.current = undefined;
-                  }}
-                  onLostPointerCapture={() => {
-                    scmHistoryDrag.current = undefined;
-                  }}
-                />
-                <details
-                  className="gyro-scm-history"
-                  style={
-                    scmHistoryShare === undefined
-                      ? { flex: "1 1 auto", minHeight: 0 }
-                      : { flexGrow: scmHistoryShare, flexBasis: 0 }
-                  }
-                  open={scmHistoryOpen}
-                  onToggle={(event) =>
-                    setScmHistoryOpen(event.currentTarget.open)
-                  }
-                >
-                  <summary>
-                    <ChevronRight size={12} aria-hidden="true" />
-                    <span>History</span>
-                    {ide?.sourceControl.history?.length ? (
-                      <small>{ide.sourceControl.history.length}</small>
-                    ) : null}
-                  </summary>
-                  <div className="gyro-scm-history-list">
-                    {scmHistoryMessage ? (
-                      <p className="gyro-sidebar-mini-copy">
-                        {scmHistoryMessage}
-                      </p>
-                    ) : (
-                      ide?.sourceControl.history?.map((commit, index) => {
-                        const row = scmHistoryGraph[index];
-                        const refs = commit.refs
-                          ? scmCommitRefs(commit.refs)
-                          : [];
-                        const isHead = refs.some((ref) => ref.kind === "head");
-                        return (
-                          <ScmCommitHover
-                            commit={commit}
-                            color={scmGraphLaneColor(row?.lane ?? 0)}
-                            className={[
-                              "gyro-scm-history-entry",
-                              isHead ? "is-head" : "",
-                              row?.isMerge ? "is-merge" : "",
-                            ]
-                              .filter(Boolean)
-                              .join(" ")}
-                            key={commit.hash}
-                            style={
-                              {
-                                "--gyro-scm-graph-width": `${scmHistoryRailWidth}px`,
-                              } as CSSProperties
-                            }
-                          >
-                            <span
-                              aria-hidden="true"
-                              className="gyro-scm-graph-rail"
-                            >
-                              <svg
-                                className="gyro-scm-graph-lines"
-                                viewBox={`0 0 ${scmHistoryRailWidth} 24`}
-                                preserveAspectRatio="none"
-                              >
-                                {(row?.edges ?? []).map((edge, edgeIndex) => {
-                                  const from = scmGraphLaneOffset(edge.from);
-                                  const to = scmGraphLaneOffset(edge.to);
-                                  const top = edge.half === "top" ? 0 : 12;
-                                  return (
-                                    <path
-                                      key={edgeIndex}
-                                      d={`M ${from} ${top} C ${from} ${top + 6}, ${to} ${top + 6}, ${to} ${top + 12}`}
-                                      stroke={scmGraphLaneColor(edge.color)}
-                                      vectorEffect="non-scaling-stroke"
-                                    />
-                                  );
-                                })}
-                              </svg>
-                              <span
-                                className="gyro-scm-graph-dot"
-                                style={{
-                                  color: scmGraphLaneColor(row?.lane ?? 0),
-                                  left: `${scmGraphLaneOffset(row?.lane ?? 0)}px`,
-                                }}
-                              />
-                            </span>
-                            <span className="gyro-scm-history-subject">
-                              {commit.subject}
-                            </span>
-                            {refs.length ? (
-                              <span className="gyro-scm-history-refs">
-                                {/* The sidebar is too narrow for two refs to
-                                    stay legible, and scmCommitRefs already
-                                    sorts head before tag before branch, so the
-                                    row shows the most meaningful one. The rest
-                                    stay in the commit hover card. */}
-                                {refs.slice(0, 1).map((ref) => (
-                                  <span
-                                    className={`gyro-scm-history-ref is-${ref.kind}`}
-                                    key={`${ref.kind}:${ref.label}`}
-                                  >
-                                    {ref.kind === "tag" ? (
-                                      <Tag size={9} aria-hidden="true" />
-                                    ) : (
-                                      <GitBranch size={9} aria-hidden="true" />
-                                    )}
-                                    {ref.label}
-                                  </span>
-                                ))}
-                              </span>
-                            ) : null}
-                            <small className="gyro-scm-history-author">
-                              {commit.author}
-                            </small>
-                          </ScmCommitHover>
-                        );
-                      })
-                    )}
-                  </div>
-                </details>
-                <ScmSectionDivider
-                  label="Resize GitHub section"
-                  target="next"
-                  onResize={setScmGithubHeight}
-                />
-                <div
-                  className="gyro-scm-github-section"
-                  style={
-                    scmGithubHeight === undefined
-                      ? undefined
-                      : { height: scmGithubHeight, maxHeight: "none" }
-                  }
-                >
-                  <GithubSidebarPanel
-                    github={ide?.github}
-                    branch={ide?.sourceControl.branch}
-                    onOpenUrl={onOpenGithubUrl}
-                    onRefresh={onRefreshGithub}
-                    onRerunRun={onRerunGithubRun}
-                    onSelectRun={onSelectGithubRun}
-                    onViewLogs={onViewGithubRunLogs}
-                  />
-                </div>
-              </div>
-            </SidebarSection>
-          ) : null}
-
-          {workspacePath && activeIdeView === "run-test" ? (
-            <SidebarSection
-              grow
-              headerActions={
-                <div className="gyro-sidebar-section-actions">
-                  <button
-                    aria-label="Add a command"
-                    onClick={() => setIsAddingRunCommand((open) => !open)}
-                    title="Add a command"
-                    type="button"
-                  >
-                    <Plus size={12} />
-                  </button>
-                  <button
-                    aria-label="Rescan workspace commands"
-                    onClick={() => onRefreshIdeTasks?.()}
-                    title="Rescan commands"
-                    type="button"
-                  >
-                    <RefreshCw size={12} />
-                  </button>
-                </div>
-              }
-              meta={String(ide?.taskDefinitions.length ?? 0)}
-              title="Run and Test"
-            >
-              {isAddingRunCommand ? (
-                <form
-                  className="gyro-run-command-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const commandLine = runCommandDraft.trim();
-                    if (!commandLine) {
-                      return;
-                    }
-                    void onCreateCustomTask?.({
-                      commandLine,
-                      label: runCommandLabelDraft.trim() || undefined,
-                      group: runCommandGroupDraft,
-                    });
-                    setRunCommandDraft("");
-                    setRunCommandLabelDraft("");
-                    setIsAddingRunCommand(false);
-                  }}
-                >
-                  <input
-                    aria-label="Command to run"
-                    autoFocus
-                    onChange={(event) => setRunCommandDraft(event.target.value)}
-                    placeholder="pnpm test --filter ui"
-                    value={runCommandDraft}
-                  />
-                  <input
-                    aria-label="Command name"
-                    onChange={(event) =>
-                      setRunCommandLabelDraft(event.target.value)
-                    }
-                    placeholder="Name (optional)"
-                    value={runCommandLabelDraft}
-                  />
-                  <div className="gyro-run-command-form-row">
-                    <select
-                      aria-label="Command group"
-                      onChange={(event) =>
-                        setRunCommandGroupDraft(
-                          event.target.value as TaskDefinition["group"],
-                        )
-                      }
-                      value={runCommandGroupDraft}
-                    >
-                      <option value="custom">Command</option>
-                      <option value="test">Test</option>
-                      <option value="build">Build</option>
-                      <option value="dev">Dev</option>
-                    </select>
-                    <button
-                      onClick={() => {
-                        setIsAddingRunCommand(false);
-                        setRunCommandDraft("");
-                        setRunCommandLabelDraft("");
-                      }}
-                      type="button"
-                    >
-                      Cancel
-                    </button>
-                    <button disabled={!runCommandDraft.trim()} type="submit">
-                      Save
-                    </button>
-                  </div>
-                  <p>
-                    Saved commands run from the workspace root and are kept in
-                    .gyro/tasks.json.
-                  </p>
-                </form>
-              ) : null}
-              {(ide?.taskDefinitions.length ?? 0) > 0 ? (
-                <input
-                  aria-label="Filter commands"
-                  className="gyro-run-command-filter"
-                  onChange={(event) => setRunCommandFilter(event.target.value)}
-                  placeholder="Filter commands"
-                  value={runCommandFilter}
-                />
-              ) : null}
-              {runTaskGroups.length > 0 ? (
-                runTaskGroups.map((group) => (
-                  <div className="gyro-run-task-group" key={group.id}>
-                    <div className="gyro-run-task-group-label">
-                      {group.label}
-                      <small>{group.tasks.length}</small>
-                    </div>
-                    {group.tasks.map((task) => (
-                      <RunTaskRow
-                        key={task.id}
-                        onRemove={
-                          task.source === "custom" && onDeleteCustomTask
-                            ? () => void onDeleteCustomTask(task)
-                            : undefined
-                        }
-                        onFixWithAi={
-                          task.status === "failed" && onFixIdeTaskWithAi
-                            ? () => onFixIdeTaskWithAi(task)
-                            : undefined
-                        }
-                        onRun={() => onRunIdeTask?.(task)}
-                        onStop={() => void onStopIdeTask?.(task)}
-                        task={task}
-                      />
-                    ))}
-                  </div>
-                ))
-              ) : (
-                <div className="gyro-sidebar-mini-copy">
-                  {runCommandFilter.trim()
-                    ? "No command matches this filter."
-                    : "No commands found. Add a command or scan the project again."}
-                  {!runCommandFilter.trim() ? (
-                    <div className="gyro-empty-actions">
-                      <button
-                        type="button"
-                        onClick={() => setIsAddingRunCommand(true)}
-                      >
-                        Add command
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onRefreshIdeTasks?.()}
-                      >
-                        Rescan
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-              {(ide?.testTree?.[0]?.children ?? []).length > 0 ? (
-                <div className="gyro-run-task-group">
-                  <div className="gyro-run-task-group-label">Last results</div>
-                  {(ide?.testTree?.[0]?.children ?? [])
-                    .slice(0, 8)
-                    .map((test) => (
-                      <SidebarDestinationRow
-                        icon={ListChecks}
-                        isActive={test.status === "running"}
-                        key={test.id}
-                        label={test.label}
-                        meta={test.status}
-                        onClick={() => {
-                          if (test.path) {
-                            onOpenWorkspaceFile?.(test.path);
-                            return;
-                          }
-                          const matchingTask = ide?.taskDefinitions.find(
-                            (task) => task.id === test.id,
-                          );
-                          const task = matchingTask ?? defaultTestTask;
-                          if (task) {
-                            onRunIdeTask?.(task);
-                          }
-                        }}
-                      />
-                    ))}
-                </div>
-              ) : null}
-              <details
-                className="gyro-run-task-group gyro-settings-disclosure"
-                open={
-                  (ide?.debugSessions ?? []).some(
-                    (session) =>
-                      session.status !== "stopped" &&
-                      session.status !== "failed",
-                  ) || undefined
-                }
-              >
-                <summary>Debug adapter</summary>
-                <form
-                  className="gyro-sidebar-debug-launch"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const command = debugAdapterCommand.trim();
-                    if (command) {
-                      onStartDebugSession?.(command);
-                    }
-                  }}
-                >
-                  <input
-                    aria-label="Debug adapter command"
-                    onChange={(event) =>
-                      setDebugAdapterCommand(event.target.value)
-                    }
-                    placeholder="lldb-dap or debugpy-adapter"
-                    value={debugAdapterCommand}
-                  />
-                  <button
-                    disabled={!debugAdapterCommand.trim()}
-                    title="Initialize local debug adapter"
-                    type="submit"
-                  >
-                    <Play size={13} />
-                    Start
-                  </button>
-                </form>
-                <div className="gyro-sidebar-mini-copy">
-                  Gyro uses adapters already installed on this device and never
-                  installs one automatically.
-                </div>
-                {(ide?.debugSessions ?? []).map((session) => (
-                  <div className="gyro-sidebar-debug-session" key={session.id}>
-                    <div>
-                      <span>{session.name}</span>
-                      <small>{session.status}</small>
-                    </div>
-                    <div className="gyro-sidebar-debug-controls">
-                      <button
-                        aria-label={`Refresh ${session.name}`}
-                        disabled={
-                          session.status === "stopped" ||
-                          session.status === "failed"
-                        }
-                        onClick={() => onSendDebugCommand?.(session, "threads")}
-                        title="Refresh threads"
-                        type="button"
-                      >
-                        <RefreshCw size={12} />
-                      </button>
-                      <button
-                        aria-label={`Continue ${session.name}`}
-                        disabled={
-                          session.status === "stopped" ||
-                          session.status === "failed"
-                        }
-                        onClick={() =>
-                          onSendDebugCommand?.(session, "continue")
-                        }
-                        title="Continue"
-                        type="button"
-                      >
-                        <Play size={12} />
-                      </button>
-                      <button
-                        aria-label={`Pause ${session.name}`}
-                        disabled={
-                          session.status === "stopped" ||
-                          session.status === "failed"
-                        }
-                        onClick={() => onSendDebugCommand?.(session, "pause")}
-                        title="Pause"
-                        type="button"
-                      >
-                        <PauseCircle size={12} />
-                      </button>
-                      <button
-                        aria-label={`Step over ${session.name}`}
-                        disabled={
-                          session.status === "stopped" ||
-                          session.status === "failed"
-                        }
-                        onClick={() => onSendDebugCommand?.(session, "next")}
-                        title="Step over"
-                        type="button"
-                      >
-                        <ArrowRight size={12} />
-                      </button>
-                      <button
-                        aria-label={`Stop ${session.name}`}
-                        disabled={session.status === "stopped"}
-                        onClick={() => onStopDebugSession?.(session)}
-                        title="Stop"
-                        type="button"
-                      >
-                        <Square size={11} />
-                      </button>
-                    </div>
-                    {session.message ? <p>{session.message}</p> : null}
-                  </div>
-                ))}
-              </details>
-            </SidebarSection>
-          ) : null}
-
-          {workspacePath && activeIdeView === "ai" ? (
-            renderAiChat ? (
-              // The workspace's only chat lives here now: the same ChatSurface
-              // the Sessions destination renders, at sidebar width.
-              <div className="gyro-sidebar-ai-chat gyro-ide-assistant-chat">
-                {renderAiChat()}
-              </div>
-            ) : (
-              <SidebarSection
-                grow
-                meta={String(ide?.aiToolCalls.length ?? 0)}
-                title="AI"
-              >
-                <div className="gyro-sidebar-mini-copy">
-                  Editor AI can read selected code, open tabs, diffs, terminal
-                  snapshots, and browser state. File edits still route through
-                  visible diff approval.
-                </div>
-                {ide?.lastAssistantRequest ? (
-                  <SidebarDestinationRow
-                    icon={Sparkles}
-                    isActive
-                    label={ide.lastAssistantRequest.action.replaceAll("-", " ")}
-                    meta={ide.lastAssistantRequest.path ?? "workspace"}
-                    onClick={() => onOpenToolPanel("diff")}
-                  />
-                ) : null}
-                {(ide?.aiToolCalls ?? []).slice(0, 10).map((toolCall) => (
-                  <SidebarDestinationRow
-                    icon={Sparkles}
-                    isActive={toolCall.status === "running"}
-                    key={toolCall.id}
-                    label={toolCall.name}
-                    meta={toolCall.status}
-                    onClick={() => onOpenToolPanel("output")}
-                  />
-                ))}
-              </SidebarSection>
-            )
-          ) : null}
-        </>
-      ) : null}
-
-      {isSessionsSidebar ? (
-        <>
-          <div className="gyro-sidebar-actions">
-            <div className="gyro-sidebar-new-session" ref={newSessionMenuRef}>
-              <button
-                aria-expanded={newSessionMenuView !== "closed"}
-                aria-haspopup="menu"
-                className="gyro-sidebar-action"
-                onClick={() =>
-                  setNewSessionMenuView((current) =>
-                    current === "closed" ? "root" : "closed",
-                  )
-                }
-                type="button"
-              >
-                <Plus size={15} />
-                New Session
-              </button>
-              {newSessionMenuView !== "closed" ? (
-                <div
-                  aria-label="Create Chat or CLI session"
-                  className="gyro-sidebar-new-session-menu is-root"
-                  role="menu"
-                >
-                  <div
-                    aria-label="Chat sessions"
-                    className="gyro-sidebar-session-group is-chat"
-                    role="group"
-                  >
-                    <button
-                      aria-label="New Chat"
-                      onClick={() => {
-                        setNewSessionMenuView("closed");
-                        onCreateSession();
-                      }}
-                      role="menuitem"
-                      type="button"
-                    >
-                      <MessageSquare size={15} />
-                      <strong>New Chat</strong>
-                    </button>
-                  </div>
-                  <div
-                    aria-label="Open CLI sessions"
-                    className="gyro-sidebar-session-group is-cli"
-                    role="group"
-                  >
-                    <span className="gyro-sidebar-session-group-label">
-                      CLI sessions
-                    </span>
-                    {terminalPanes.length > 0 ? (
-                      <button
-                        className="is-terminal-navigation"
-                        onClick={() => {
-                          setNewSessionMenuView("closed");
-                          onSelectWorkspaceLayout("terminal-grid");
-                        }}
-                        role="menuitem"
-                        type="button"
-                      >
-                        <Columns2 size={15} />
-                        <strong>View open terminals</strong>
-                      </button>
-                    ) : null}
-                    {cliProjects.length === 0 ? (
-                      <button
-                        onClick={() => {
-                          setNewSessionMenuView("closed");
-                          onOpenWorkspace();
-                        }}
-                        role="menuitem"
-                        type="button"
-                      >
-                        <Folder size={15} />
-                        <span>
-                          <strong>Open project</strong>
-                          <small>Choose where the CLI should run</small>
-                        </span>
-                      </button>
-                    ) : null}
-                    <div className="gyro-sidebar-cli-profiles">
-                      {readyCommandProfiles.map((profile) => (
-                        <button
-                          aria-label={profile.displayName}
-                          disabled={!newCliWorkspacePath}
-                          key={profile.id}
-                          title={
-                            newCliWorkspacePath
-                              ? profile.displayName
-                              : "Open a project to start a CLI session"
-                          }
-                          onClick={() => {
-                            if (!newCliWorkspacePath) return;
-                            onCreateCliSession(profile.id, newCliWorkspacePath);
-                            setNewSessionMenuView("closed");
-                          }}
-                          role="menuitem"
-                          type="button"
-                        >
-                          {profile.providerId ? (
-                            <ProviderLogo
-                              providerId={profile.providerId as ProviderId}
-                            />
-                          ) : (
-                            <Terminal size={15} />
-                          )}
-                          <span>
-                            <strong>{profile.displayName}</strong>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {blockedCommandProfiles.length > 0 ? (
-                    <div className="gyro-sidebar-session-group is-more">
-                      <button
-                        aria-expanded={newSessionMenuView === "more"}
-                        aria-label={`More tools, ${blockedCommandProfiles.length} ${blockedCommandProfiles.length === 1 ? "needs" : "need"} setup`}
-                        onClick={() =>
-                          setNewSessionMenuView((current) =>
-                            current === "more" ? "root" : "more",
-                          )
-                        }
-                        role="menuitem"
-                        type="button"
-                      >
-                        <Box size={16} />
-                        <strong>More tools</strong>
-                        <small
-                          aria-hidden="true"
-                          title={`${blockedCommandProfiles.length} tools need setup`}
-                        >
-                          {blockedCommandProfiles.length}
-                        </small>
-                        {newSessionMenuView === "more" ? (
-                          <ChevronDown size={15} />
-                        ) : (
-                          <ChevronRight size={15} />
-                        )}
-                      </button>
-                      {newSessionMenuView === "more" ? (
-                        <div
-                          aria-label="Tools requiring setup"
-                          className="gyro-sidebar-cli-profiles"
-                          role="group"
-                        >
-                          {blockedCommandProfiles.map((profile) => (
-                            <button
-                              disabled
-                              key={profile.id}
-                              role="menuitem"
-                              type="button"
-                            >
-                              {profile.providerId ? (
-                                <ProviderLogo
-                                  providerId={profile.providerId as ProviderId}
-                                />
-                              ) : (
-                                <Terminal size={15} />
-                              )}
-                              <strong>{profile.displayName}</strong>
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-            <button
-              className="gyro-sidebar-action"
-              onClick={() => {
-                setNewSessionMenuView("closed");
-                onOpenCommandPalette();
-              }}
-              type="button"
-            >
-              <Search size={15} />
-              <span>Search</span>
-              <kbd className="gyro-sidebar-shortcut">
-                {primaryGlobalSearchShortcut("global")}
-              </kbd>
-            </button>
-            <button
-              aria-current={
-                activeDestination === "automations" ? "page" : undefined
-              }
-              className={`gyro-sidebar-action${activeDestination === "automations" ? " is-active" : ""}`}
-              onClick={() => {
-                setNewSessionMenuView("closed");
-                onSelectDestination("automations");
-              }}
-              type="button"
-            >
-              <CalendarClock size={15} />
-              <span>Automations</span>
-            </button>
-          </div>
-
-          {isCliSidebar ? (
-            <CliSessionList
-              selectedId={selectedTerminalPaneId}
-              onBack={() => onSelectWorkspaceLayout("thread")}
-              onSelect={onSelectTerminalPane}
-              onClose={onCloseTerminalPane}
-              items={terminalPanes.map((pane) => {
-                const providerId = commandProfiles.find(
-                  (profile) => profile.id === pane.profileId,
-                )?.providerId;
-                return {
-                  pane,
-                  status:
-                    pane.attention ??
-                    (pane.status === "running" &&
-                    !terminalPaneHasActiveWork(pane)
-                      ? "idle"
-                      : pane.status),
-                  icon: providerId ? (
-                    <ProviderLogo providerId={providerId as ProviderId} />
-                  ) : (
-                    <Terminal size={16} />
-                  ),
-                };
-              })}
-            />
-          ) : (
-            <div className="gyro-sidebar-project-chat-list">
-              {pinnedSessions.length > 0 ? (
-                <>
-                  <div className="gyro-sidebar-small-title">Pinned</div>
-                  {pinnedSessions.map((session) => renderSessionRow(session))}
-                </>
-              ) : null}
-              {projectGroups.length > 0 ? (
-                <div className="gyro-sidebar-small-title">Projects</div>
-              ) : null}
-              {projectGroups.map((project, projectIndex) => {
-                const isCollapsed = collapsedProjectIds.includes(project.key);
-                const projectDrafts = draftsByProjectKey.get(project.key) ?? [];
-                const projectVisibleCount =
-                  projectVisibleCounts[project.key] ??
-                  SIDEBAR_INITIAL_PROJECT_SESSION_COUNT;
-                const collapsedProjectSessions = project.items.slice(
-                  0,
-                  projectVisibleCount,
-                );
-                const activeProjectSession = project.items.find(
-                  (session) => session.id === activeSessionId,
-                );
-                const visibleProjectSessions =
-                  activeProjectSession &&
-                  !collapsedProjectSessions.includes(activeProjectSession)
-                    ? [
-                        ...collapsedProjectSessions.slice(
-                          0,
-                          Math.max(0, projectVisibleCount - 1),
-                        ),
-                        activeProjectSession,
-                      ]
-                    : collapsedProjectSessions;
-                const hiddenCount = Math.max(
-                  0,
-                  project.items.length - visibleProjectSessions.length,
-                );
-                const hasRevealedMore =
-                  projectVisibleCount > SIDEBAR_INITIAL_PROJECT_SESSION_COUNT;
-                return (
-                  <div
-                    className={[
-                      "gyro-sidebar-project-group",
-                      draggedProjectKey === project.key ? "is-dragging" : "",
-                      projectDropTarget?.key === project.key
-                        ? `is-drop-${projectDropTarget.position}`
-                        : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    key={project.key}
-                    onDragOver={(event) => {
-                      if (
-                        !draggedProjectKey ||
-                        draggedProjectKey === project.key
-                      ) {
-                        return;
-                      }
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                      const rect =
-                        event.currentTarget
-                          .querySelector<HTMLElement>(
-                            ".gyro-sidebar-project-row",
-                          )
-                          ?.getBoundingClientRect() ??
-                        event.currentTarget.getBoundingClientRect();
-                      setProjectDropTarget({
-                        key: project.key,
-                        position:
-                          event.clientY < rect.top + rect.height / 2
-                            ? "before"
-                            : "after",
-                      });
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const sourceKey =
-                        event.dataTransfer.getData("text/plain") ||
-                        draggedProjectKey;
-                      if (sourceKey && projectDropTarget) {
-                        moveProject(
-                          sourceKey,
-                          project.key,
-                          projectDropTarget.position,
-                        );
-                      }
-                      finishProjectDrag();
-                    }}
-                  >
-                    <SidebarProjectCard
-                      path={project.key}
-                      name={project.label}
-                      taskCount={project.items.length}
-                      activeCount={
-                        project.items.filter((session) =>
-                          sendingSessionIds.includes(session.id),
-                        ).length
-                      }
-                      settings={
-                        project.hasWorkspace ? projectSettings : undefined
-                      }
-                      onRemove={
-                        project.hasWorkspace
-                          ? () =>
-                              onRemoveProject?.({
-                                path: project.key,
-                                label: project.label,
-                              })
-                          : undefined
-                      }
-                    >
-                      <SidebarProjectRow
-                        draggable
-                        icon={
-                          project.hasWorkspace
-                            ? isCollapsed
-                              ? Folder
-                              : FolderOpen
-                            : HardDrive
-                        }
-                        isDragging={draggedProjectKey === project.key}
-                        isCollapsed={isCollapsed}
-                        label={project.label}
-                        onDragEnd={finishProjectDrag}
-                        onDragStart={(event) => {
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", project.key);
-                          setDraggedProjectKey(project.key);
-                        }}
-                        onKeyDown={(event) => {
-                          if (!event.altKey) {
-                            return;
-                          }
-                          if (event.key === "ArrowUp" && projectIndex > 0) {
-                            event.preventDefault();
-                            const previous = projectGroups[projectIndex - 1];
-                            if (previous) {
-                              moveProject(project.key, previous.key, "before");
-                            }
-                          } else if (
-                            event.key === "ArrowDown" &&
-                            projectIndex < projectGroups.length - 1
-                          ) {
-                            event.preventDefault();
-                            const next = projectGroups[projectIndex + 1];
-                            if (next) {
-                              moveProject(project.key, next.key, "after");
-                            }
-                          }
-                        }}
-                        onClick={() => toggleProject(project.key)}
-                      />
-                    </SidebarProjectCard>
-                    {!isCollapsed ? (
-                      <>
-                        {projectDrafts.map((draft) =>
-                          renderDraftRow(draft, true),
-                        )}
-                        {visibleProjectSessions.length > 0 ? (
-                          visibleProjectSessions.map((session) =>
-                            renderSessionRow(session, true),
-                          )
-                        ) : projectDrafts.length > 0 ? null : (
-                          <button
-                            className="gyro-sidebar-thread is-empty"
-                            onClick={onCreateSession}
-                            type="button"
-                          >
-                            <span>No recent sessions</span>
-                          </button>
-                        )}
-                        {hiddenCount > 0 || hasRevealedMore ? (
-                          <div className="gyro-sidebar-more-actions">
-                            {hiddenCount > 0 ? (
-                              <button
-                                aria-expanded={hasRevealedMore}
-                                className="gyro-sidebar-more-button"
-                                onClick={() =>
-                                  showMoreProjectSessions(
-                                    project.key,
-                                    project.items.length,
-                                  )
-                                }
-                                type="button"
-                              >
-                                <ChevronDown aria-hidden="true" size={12} />
-                                <span>more</span>
-                              </button>
-                            ) : null}
-                            {hasRevealedMore ? (
-                              <button
-                                className="gyro-sidebar-more-button"
-                                onClick={() =>
-                                  showLessProjectSessions(project.key)
-                                }
-                                type="button"
-                              >
-                                <ChevronUp aria-hidden="true" size={12} />
-                                <span>less</span>
-                              </button>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </>
-                    ) : null}
-                  </div>
-                );
-              })}
-              <section
-                aria-label="Recent chats"
-                className="gyro-sidebar-recents"
-              >
-                <div className="gyro-sidebar-small-title">Recents</div>
-                {unprojectedDraftChats.map((draft) => renderDraftRow(draft))}
-                {unprojectedRecentSessions.length > 0 ? (
-                  visibleRecentSessions.map((session) =>
-                    renderSessionRow(session),
-                  )
-                ) : unprojectedDraftChats.length > 0 ? null : (
-                  <div className="gyro-sidebar-recents-empty">
-                    No standalone chats yet
-                  </div>
-                )}
-                {hiddenRecentCount > 0 || recentsHaveRevealedMore ? (
-                  <div className="gyro-sidebar-more-actions">
-                    {hiddenRecentCount > 0 ? (
-                      <button
-                        aria-expanded={recentsHaveRevealedMore}
-                        className="gyro-sidebar-more-button"
-                        onClick={() =>
-                          setRecentsVisibleCount((count) =>
-                            Math.min(
-                              unprojectedRecentSessions.length,
-                              count + SIDEBAR_PROJECT_SESSION_BATCH_SIZE,
-                            ),
-                          )
-                        }
-                        type="button"
-                      >
-                        <ChevronDown aria-hidden="true" size={12} />
-                        <span>more</span>
-                      </button>
-                    ) : null}
-                    {recentsHaveRevealedMore ? (
-                      <button
-                        className="gyro-sidebar-more-button"
-                        onClick={() =>
-                          setRecentsVisibleCount(
-                            SIDEBAR_INITIAL_RECENT_SESSION_COUNT,
-                          )
-                        }
-                        type="button"
-                      >
-                        <ChevronUp aria-hidden="true" size={12} />
-                        <span>less</span>
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </section>
-            </div>
-          )}
-        </>
-      ) : null}
-    </>
-  );
-}
-
-function SidebarSection({
-  title,
-  grow,
-  collapsible,
-  isCollapsed,
-  meta,
-  headerActions,
-  onToggle,
-  children,
-}: {
-  title: string;
-  grow?: boolean;
-  collapsible?: boolean;
-  isCollapsed?: boolean;
-  meta?: string;
-  headerActions?: ReactNode;
-  onToggle?: () => void;
-  children: ReactNode;
-}) {
-  const listId = useId();
-  const sectionClassName = [
-    "gyro-sidebar-section",
-    grow ? "is-grow" : "",
-    collapsible ? "is-collapsible" : "",
-    isCollapsed ? "is-collapsed" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const expanded = !isCollapsed;
-
-  return (
-    <section className={sectionClassName}>
-      {collapsible ? (
-        <button
-          aria-controls={listId}
-          aria-expanded={expanded}
-          className="gyro-sidebar-section-toggle"
-          onClick={onToggle}
-          type="button"
-        >
-          {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-          <span>{title}</span>
-          {meta ? <small>{meta}</small> : null}
-        </button>
-      ) : headerActions ? (
-        <div className="gyro-sidebar-section-heading">
-          <div className="gyro-nav-label">{title}</div>
-          {headerActions}
-        </div>
-      ) : (
-        <div className="gyro-nav-label">{title}</div>
-      )}
-      <div className="gyro-sidebar-list" hidden={isCollapsed} id={listId}>
-        {children}
-      </div>
-    </section>
-  );
 }
 
 function SidebarStaticRow({
@@ -7102,1076 +3355,6 @@ function SidebarStaticRow({
       <span>{label}</span>
       {meta ? <small>{meta}</small> : null}
     </div>
-  );
-}
-
-function SidebarProjectRow({
-  draggable = false,
-  icon: Icon,
-  isDragging,
-  isCollapsed,
-  label,
-  meta,
-  onClick,
-  onDragEnd,
-  onDragStart,
-  onKeyDown,
-  onRemove,
-}: {
-  draggable?: boolean;
-  icon: IconComponent;
-  isDragging?: boolean;
-  isCollapsed?: boolean;
-  label: string;
-  meta?: string;
-  onClick: () => void;
-  onDragEnd?: (event: ReactDragEvent<HTMLDivElement>) => void;
-  onDragStart?: (event: ReactDragEvent<HTMLDivElement>) => void;
-  onKeyDown?: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
-  onRemove?: () => void;
-}) {
-  return (
-    <div
-      aria-grabbed={draggable ? Boolean(isDragging) : undefined}
-      className={[
-        "gyro-sidebar-project-row",
-        draggable ? "is-draggable" : "",
-        isDragging ? "is-dragging" : "",
-        onRemove ? "has-remove" : "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      draggable={draggable}
-      onDragEnd={onDragEnd}
-      onDragStart={onDragStart}
-      onKeyDown={onKeyDown}
-    >
-      <button
-        aria-expanded={isCollapsed === undefined ? undefined : !isCollapsed}
-        aria-label={
-          isCollapsed === undefined
-            ? undefined
-            : `${isCollapsed ? "Expand" : "Collapse"} ${label}`
-        }
-        className="gyro-sidebar-project-toggle"
-        onClick={onClick}
-        type="button"
-      >
-        <Icon size={15} />
-        <span>{label}</span>
-        {isCollapsed === undefined ? meta ? <small>{meta}</small> : null : null}
-      </button>
-      {onRemove ? (
-        <button
-          aria-label={`Remove ${label} from Gyro app`}
-          className="gyro-sidebar-project-remove"
-          onClick={onRemove}
-          title="Remove from Gyro app"
-          type="button"
-        >
-          <Trash2 size={13} />
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function DraftSidebarRow({
-  title,
-  isActive,
-  isNested,
-  onSelect,
-}: {
-  title: string;
-  isActive: boolean;
-  isNested?: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <div
-      className={[
-        "gyro-session-row",
-        "is-draft",
-        isActive ? "is-active" : "",
-        isNested ? "is-nested" : "",
-      ].join(" ")}
-    >
-      <button
-        aria-current={isActive ? "page" : undefined}
-        aria-label={title}
-        className="gyro-sidebar-thread-main"
-        onClick={onSelect}
-        title={title}
-        type="button"
-      >
-        <span className="gyro-sidebar-thread-title">
-          <span>{title}</span>
-        </span>
-      </button>
-    </div>
-  );
-}
-
-function SessionSidebarRow({
-  session,
-  isActive,
-  isSending,
-  isUnreadComplete = false,
-  approvalCount = 0,
-  questionCount = 0,
-  isNested,
-  isPinned,
-  isOpen,
-  isDragging,
-  isMenuOpen,
-  onSelect,
-  onPin,
-  onMenuToggle,
-  onMenuClose,
-  onRename,
-  onOpenInGrid,
-  onDelete,
-  onDragStart,
-  onDragEnd,
-  onPointerDown,
-}: {
-  session: Session;
-  isActive: boolean;
-  isSending: boolean;
-  isUnreadComplete?: boolean;
-  approvalCount?: number;
-  questionCount?: number;
-  isNested?: boolean;
-  isPinned: boolean;
-  isOpen?: boolean;
-  isDragging?: boolean;
-  isMenuOpen: boolean;
-  onSelect: () => void;
-  onPin: () => void;
-  onMenuToggle: () => void;
-  onMenuClose: () => void;
-  onRename: () => void;
-  onOpenInGrid?: () => void;
-  onDelete: () => void;
-  onDragStart?: (event: ReactDragEvent<HTMLDivElement>) => void;
-  onDragEnd?: (event: ReactDragEvent<HTMLDivElement>) => void;
-  onPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void;
-}) {
-  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
-    isMenuOpen,
-    onMenuClose,
-    menuTriggerRef,
-  );
-  const sessionProviderId = providerIdForSession(session);
-  const modelTitle =
-    session.modelLabel ??
-    session.modelId ??
-    session.providerLabel ??
-    session.providerId ??
-    "No model saved";
-  const isAgentWorkspace = session.workspaceMode === "worktree";
-  const isCliOrigin = session.origin === "cli";
-  const isAwaitingQuestion = !approvalCount && questionCount > 0;
-  const isAwaitingInput = approvalCount > 0 || isAwaitingQuestion;
-  const badgeLabels = [
-    approvalCount > 0
-      ? `${approvalCount} ${approvalCount === 1 ? "approval" : "approvals"} required`
-      : undefined,
-    isAwaitingQuestion
-      ? `${questionCount} ${questionCount === 1 ? "question" : "questions"} awaiting an answer`
-      : undefined,
-    isUnreadComplete ? "Completed, unread" : undefined,
-    isAgentWorkspace ? "Isolated agent workspace" : undefined,
-    isCliOrigin ? "Started from CLI" : undefined,
-  ].filter(Boolean);
-  const ariaTitle = [session.title, session.summary, ...badgeLabels]
-    .filter(Boolean)
-    .join(". ");
-
-  return (
-    <div
-      className={[
-        "gyro-session-row",
-        isActive ? "is-active" : "",
-        isSending ? "is-sending" : "",
-        !isAwaitingInput && !isSending && !isUnreadComplete ? "has-idle-time" : "",
-        approvalCount > 0 ? "is-awaiting-approval" : "",
-        isAwaitingQuestion ? "is-awaiting-question" : "",
-        isNested ? "is-nested" : "",
-        isPinned ? "is-pinned" : "",
-        isOpen ? "is-open" : "",
-        isDragging ? "is-dragging" : "",
-        isMenuOpen ? "is-menu-open" : "",
-        isAgentWorkspace ? "is-agent-workspace" : "",
-      ].join(" ")}
-      aria-grabbed={onDragStart ? Boolean(isDragging) : undefined}
-      draggable={Boolean(onDragStart)}
-      onDragEnd={onDragEnd}
-      onDragStart={onDragStart}
-      onPointerDown={onPointerDown}
-    >
-      <button
-        aria-current={isActive ? "page" : undefined}
-        aria-label={ariaTitle}
-        title={session.title}
-        className={
-          sessionProviderId
-            ? "gyro-sidebar-thread-main has-model-logo"
-            : "gyro-sidebar-thread-main"
-        }
-        onClick={onSelect}
-        type="button"
-      >
-        {sessionProviderId ? (
-          <span className="gyro-sidebar-model-logo" title={modelTitle}>
-            <ProviderLogo providerId={sessionProviderId} />
-          </span>
-        ) : null}
-        <span className="gyro-sidebar-thread-title">
-          <span>{session.title}</span>
-          {isAgentWorkspace || isCliOrigin ? (
-            <span className="gyro-session-badges" aria-hidden="true">
-              {isAgentWorkspace ? (
-                <span
-                  className="gyro-session-badge is-agent-workspace"
-                  title="Agent workspace — private branch under Gyro"
-                >
-                  <GitBranch size={10} />
-                  Isolated
-                </span>
-              ) : null}
-              {isCliOrigin ? (
-                <span
-                  className="gyro-session-badge is-cli"
-                  title="Started from the gyro CLI"
-                >
-                  <Terminal size={10} />
-                  CLI
-                </span>
-              ) : null}
-            </span>
-          ) : null}
-        </span>
-        <small
-          aria-label={
-            approvalCount > 0
-              ? "Chat needs approval"
-              : isAwaitingQuestion
-                ? "Chat needs input"
-                : isSending
-                  ? "Chat working"
-                  : isUnreadComplete
-                    ? "Chat completed, unread"
-                    : undefined
-          }
-          className={[
-            "gyro-session-time",
-            approvalCount > 0 ? "is-approval" : "",
-            isAwaitingQuestion ? "is-question" : "",
-            !isAwaitingInput && isSending ? "is-working" : "",
-            !isAwaitingInput && !isSending && isUnreadComplete
-              ? "is-complete"
-              : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-          title={
-            approvalCount > 0
-              ? `${approvalCount} ${approvalCount === 1 ? "approval" : "approvals"} required — open this chat to review`
-              : isAwaitingQuestion
-                ? `${questionCount} ${questionCount === 1 ? "question" : "questions"} — open this chat to answer`
-                : isSending
-                  ? "Chat working in the background"
-                  : isUnreadComplete
-                    ? "Chat completed — open to view"
-                    : undefined
-          }
-        >
-          {approvalCount > 0 ? (
-            <span>Awaiting approval</span>
-          ) : isAwaitingQuestion ? (
-            <span>Needs input</span>
-          ) : isSending ? (
-            <CircleDashed aria-hidden="true" size={13} />
-          ) : isUnreadComplete ? (
-            <span aria-hidden="true" className="gyro-session-complete-dot" />
-          ) : (
-            relativeSessionTime(session.updatedAt)
-          )}
-        </small>
-      </button>
-      <div className="gyro-session-actions" aria-label="Chat actions">
-        <button
-          aria-label={isPinned ? "Unpin chat" : "Pin chat"}
-          aria-pressed={isPinned}
-          className={
-            isPinned ? "gyro-session-action is-pinned" : "gyro-session-action"
-          }
-          onClick={onPin}
-          title={isPinned ? "Unpin" : "Pin"}
-          type="button"
-        >
-          <Pin fill={isPinned ? "currentColor" : "none"} size={13} />
-        </button>
-        <button
-          aria-expanded={isMenuOpen}
-          aria-label="Chat options"
-          className="gyro-session-action is-more"
-          onClick={onMenuToggle}
-          ref={menuTriggerRef}
-          title="More"
-          type="button"
-        >
-          <MoreHorizontal size={15} />
-        </button>
-      </div>
-      {isMenuOpen ? (
-        <div className="gyro-session-menu" ref={menuRef} role="menu">
-          <CheckWorkMenuItem sessionId={session.id} disabled={isSending} onClose={onMenuClose} />
-          {onOpenInGrid ? (
-            <button onClick={onOpenInGrid} role="menuitem" type="button">
-              <Columns2 aria-hidden="true" size={14} />
-              Open in chat grid
-            </button>
-          ) : null}
-          <button onClick={onRename} role="menuitem" type="button">
-            <Edit3 aria-hidden="true" size={14} />
-            Rename
-          </button>
-          <button
-            className="is-danger"
-            onClick={onDelete}
-            role="menuitem"
-            type="button"
-          >
-            <Trash2 aria-hidden="true" size={14} />
-            Delete
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * The provider whose mark a sidebar row carries.
- *
- * This listed four ids by hand, so every provider added since — Kimi, Ollama,
- * Cursor, OpenCode, the API-key presets, and every endpoint a user defines —
- * rendered no mark, and the row lost the one thing that said which model wrote
- * the chat. The catalog already knows every id, and `ProviderLogo` falls back
- * to a monogram for a provider that publishes no mark of its own, so a
- * hand-kept list has nothing left to protect against.
- *
- * The guard stays for the case it actually answers: a chat saved against a
- * provider that has since left the catalog has an id nothing can draw.
- */
-function providerIdForSession(session: Session): ProviderId | undefined {
-  return isProviderId(session.providerId) ? session.providerId : undefined;
-}
-
-type SidebarDraftChat = {
-  id: string;
-  title: string;
-  workspacePath: string;
-};
-
-type SidebarProjectGroupData = {
-  hasWorkspace: boolean;
-  key: string;
-  label: string;
-  items: Session[];
-};
-
-const SIDEBAR_PROJECT_ORDER_STORAGE_KEY = "gyro.sidebar-project-order-v1";
-const SIDEBAR_PROJECT_COLLAPSE_STORAGE_KEY = "gyro.sidebar-project-collapse-v1";
-const SIDEBAR_INITIAL_PROJECT_SESSION_COUNT = 5;
-const SIDEBAR_INITIAL_RECENT_SESSION_COUNT = 7;
-const SIDEBAR_PROJECT_SESSION_BATCH_SIZE = 15;
-
-function sidebarProjectGroups(
-  sessions: Session[],
-  savedProjects: Array<{ path: string; label: string }>,
-  workspacePath?: string,
-  drafts: SidebarDraftChat[] = [],
-): SidebarProjectGroupData[] {
-  const groups = new Map<string, SidebarProjectGroupData>();
-  const primaryGyroProjectPath = [
-    workspacePath,
-    ...savedProjects.map((project) => project.path),
-  ]
-    .map(normalizeSidebarPath)
-    .find(
-      (path) =>
-        isUserSelectedWorkspacePath(path) &&
-        projectSidebarName(path) === "Gyro",
-    );
-  const groupKeyForPath = (path?: string) =>
-    projectGroupKey(path, primaryGyroProjectPath);
-  const currentProjectKey = groupKeyForPath(workspacePath);
-  for (const session of sessions) {
-    const key = groupKeyForPath(session.workspacePath);
-    const existing = groups.get(key);
-    if (existing) {
-      existing.items.push(session);
-    } else {
-      groups.set(key, {
-        hasWorkspace: key !== "gyro" && isUserSelectedWorkspacePath(key),
-        key,
-        label: projectSidebarName(session.workspacePath),
-        items: [session],
-      });
-    }
-  }
-
-  for (const draft of drafts) {
-    if (!isUserSelectedWorkspacePath(draft.workspacePath)) continue;
-    const key = groupKeyForPath(draft.workspacePath);
-    if (groups.has(key)) continue;
-    groups.set(key, {
-      hasWorkspace: key !== "gyro" && isUserSelectedWorkspacePath(key),
-      key,
-      label: projectSidebarName(draft.workspacePath),
-      items: [],
-    });
-  }
-
-  if (workspacePath && !groups.has(currentProjectKey)) {
-    groups.set(currentProjectKey, {
-      hasWorkspace: true,
-      key: currentProjectKey,
-      label: projectSidebarName(workspacePath),
-      items: [],
-    });
-  }
-
-  for (const group of groups.values()) {
-    group.items.sort(
-      (first, second) =>
-        (new Date(second.updatedAt).getTime() || 0) -
-        (new Date(first.updatedAt).getTime() || 0),
-    );
-  }
-  return [...groups.values()];
-}
-
-/** Placeholder titles used before the first real turn or auto-title. */
-function isSidebarPlaceholderSessionTitle(title: string) {
-  return [
-    "new chat",
-    "new mission",
-    "desktop session",
-    "worktree session",
-    "agent workspace",
-    "cli workspace",
-    "worktree cli workspace",
-    "agent workspace cli",
-  ].includes(title.trim().toLowerCase());
-}
-
-/**
- * Whether a chat should list in the Projects sidebar.
- * Unstarted shells (empty New chat / New mission) stay out until activity.
- */
-function sessionHasStartedForSidebar(session: Session) {
-  if (!isSidebarPlaceholderSessionTitle(session.title)) {
-    return true;
-  }
-  if (session.summary?.trim()) {
-    return true;
-  }
-  // Settings and other metadata also advance updatedAt. A timestamp alone
-  // must not make an empty placeholder appear as a started session.
-  return false;
-}
-
-function normalizeSidebarPath(path?: string) {
-  return path?.trim().replaceAll("\\", "/").replace(/\/+$/, "") ?? "";
-}
-
-function stableSidebarProjectGroups(
-  groups: SidebarProjectGroupData[],
-  projectOrder: string[],
-) {
-  const order = new Map(projectOrder.map((key, index) => [key, index]));
-  return groups
-    .map((group, discoveredIndex) => ({ group, discoveredIndex }))
-    .sort(
-      (first, second) =>
-        (order.get(first.group.key) ??
-          projectOrder.length + first.discoveredIndex) -
-        (order.get(second.group.key) ??
-          projectOrder.length + second.discoveredIndex),
-    )
-    .map(({ group }) => group);
-}
-
-function loadSidebarProjectOrder() {
-  if (typeof window === "undefined") {
-    return [];
-  }
-  try {
-    const value = window.localStorage.getItem(
-      SIDEBAR_PROJECT_ORDER_STORAGE_KEY,
-    );
-    const parsed: unknown = value ? JSON.parse(value) : [];
-    return Array.isArray(parsed)
-      ? parsed.filter((key): key is string => typeof key === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function loadCollapsedSidebarProjectIds() {
-  if (typeof window === "undefined") {
-    return [];
-  }
-  try {
-    const value = window.localStorage.getItem(
-      SIDEBAR_PROJECT_COLLAPSE_STORAGE_KEY,
-    );
-    const parsed: unknown = value ? JSON.parse(value) : [];
-    return Array.isArray(parsed)
-      ? parsed.filter((key): key is string => typeof key === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function mergeSidebarProjectOrder(current: string[], discovered: string[]) {
-  const discoveredSet = new Set(discovered);
-  return [
-    ...current.filter((key) => discoveredSet.has(key)),
-    ...discovered.filter((key) => !current.includes(key)),
-  ];
-}
-
-function sidebarDraftGroupKey(
-  draftPath: string | undefined,
-  workspacePath: string | undefined,
-  savedProjects: Array<{ path: string }>,
-) {
-  const primaryGyroProjectPath = [
-    workspacePath,
-    ...savedProjects.map((project) => project.path),
-  ]
-    .map(normalizeSidebarPath)
-    .find(
-      (path) =>
-        isUserSelectedWorkspacePath(path) &&
-        projectSidebarName(path) === "Gyro",
-    );
-  return projectGroupKey(draftPath, primaryGyroProjectPath);
-}
-
-function projectGroupKey(path?: string, primaryGyroProjectPath?: string) {
-  const normalizedPath = normalizeSidebarPath(path);
-  if (projectSidebarName(normalizedPath) === "Gyro") {
-    return primaryGyroProjectPath || "gyro";
-  }
-  return normalizedPath || "gyro";
-}
-
-function isInteractiveShellPane(pane: TerminalPane) {
-  if (pane.profileId === "shell") {
-    return true;
-  }
-  const command = pane.command.trim().split(/\s+/, 1)[0] ?? "";
-  const executable = command.split("/").pop()?.toLowerCase();
-  return (
-    pane.title.trim().toLowerCase() === "shell" &&
-    executable !== undefined &&
-    ["sh", "bash", "zsh", "fish"].includes(executable)
-  );
-}
-
-function terminalPaneHasActiveWork(pane: TerminalPane) {
-  if (pane.status === "waiting") {
-    return true;
-  }
-  if (pane.status !== "running") {
-    return false;
-  }
-  return !isInteractiveShellPane(pane) || pane.hasForegroundJob !== false;
-}
-
-const RUN_TASK_GROUP_LABELS: Array<{
-  id: TaskDefinition["group"];
-  label: string;
-}> = [
-  { id: "test", label: "Tests" },
-  { id: "build", label: "Build" },
-  { id: "dev", label: "Dev servers" },
-  { id: "custom", label: "Other commands" },
-];
-
-export function taskCommandLine(task: TaskDefinition): string {
-  return [task.command, ...task.args].join(" ");
-}
-
-/**
- * Buckets the discovered catalog for the sidebar: saved commands stay on top,
- * then suggestions by what they do.
- */
-export function groupedRunTasks(
-  tasks: TaskDefinition[],
-  filter: string,
-): Array<{ id: string; label: string; tasks: TaskDefinition[] }> {
-  const needle = filter.trim().toLowerCase();
-  const matching = needle
-    ? tasks.filter(
-        (task) =>
-          task.label.toLowerCase().includes(needle) ||
-          taskCommandLine(task).toLowerCase().includes(needle),
-      )
-    : tasks;
-  const saved = matching.filter((task) => task.source === "custom");
-  const suggested = matching.filter((task) => task.source !== "custom");
-  const groups: Array<{ id: string; label: string; tasks: TaskDefinition[] }> =
-    saved.length > 0
-      ? [{ id: "saved", label: "Saved commands", tasks: saved }]
-      : [];
-  for (const group of RUN_TASK_GROUP_LABELS) {
-    const grouped = suggested.filter((task) => task.group === group.id);
-    if (grouped.length > 0) {
-      groups.push({ id: group.id, label: group.label, tasks: grouped });
-    }
-  }
-  return groups;
-}
-
-function runTaskStatusCopy(task: TaskDefinition): string | undefined {
-  switch (task.status) {
-    case "running":
-      return task.group === "dev" ? "live" : "running";
-    case "done":
-      return task.group === "test" ? "passed" : "done";
-    case "failed":
-      return "failed";
-    case "cancelled":
-      return "stopped";
-    default:
-      return undefined;
-  }
-}
-
-function RunTaskRow({
-  task,
-  onFixWithAi,
-  onRun,
-  onStop,
-  onRemove,
-}: {
-  task: TaskDefinition;
-  onFixWithAi?: () => void;
-  onRun: () => void;
-  onStop: () => void;
-  onRemove?: () => void;
-}) {
-  const commandLine = taskCommandLine(task);
-  const isRunning = task.status === "running";
-  const status = runTaskStatusCopy(task);
-  const LaunchIcon = task.group === "test" ? ListChecks : Play;
-
-  return (
-    <div className="gyro-run-task-row" data-status={task.status}>
-      <button
-        aria-label={
-          isRunning ? `Stop ${task.label}` : `Run ${task.label}: ${commandLine}`
-        }
-        className="gyro-run-task-main"
-        onClick={isRunning ? onStop : onRun}
-        title={isRunning ? `Stop ${commandLine}` : commandLine}
-        type="button"
-      >
-        {isRunning ? <Square size={11} /> : <LaunchIcon size={13} />}
-        <span>
-          <strong>
-            {task.source === "suggested" && task.args[0] === "run"
-              ? task.args.slice(1).join(" ")
-              : task.label}
-          </strong>
-          {commandLine !== task.label || task.args[0] === "run" ? (
-            <small>{commandLine}</small>
-          ) : null}
-        </span>
-      </button>
-      {status ? <em className="gyro-run-task-status">{status}</em> : null}
-      {onFixWithAi ? (
-        <button
-          aria-label={`Fix ${task.label} with AI`}
-          className="gyro-run-task-fix"
-          onClick={onFixWithAi}
-          title="Attach this failure to the chat so a model can fix it"
-          type="button"
-        >
-          <Sparkles size={11} />
-          <span>Fix with AI</span>
-        </button>
-      ) : null}
-      {onRemove ? (
-        <button
-          aria-label={`Remove ${task.label}`}
-          className="gyro-run-task-remove"
-          onClick={onRemove}
-          title="Remove saved command"
-          type="button"
-        >
-          <Trash2 size={11} />
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function SidebarDestinationRow({
-  icon: Icon,
-  label,
-  meta,
-  isActive,
-  onClick,
-  title,
-}: {
-  icon: IconComponent;
-  label: string;
-  meta?: string;
-  isActive?: boolean;
-  onClick: () => void;
-  title?: string;
-}) {
-  return (
-    <button
-      className={isActive ? "gyro-sidebar-row is-active" : "gyro-sidebar-row"}
-      onClick={onClick}
-      title={title}
-      type="button"
-    >
-      <Icon size={15} />
-      <span>{label}</span>
-      {meta ? <small>{meta}</small> : null}
-    </button>
-  );
-}
-
-/** Copy during the click. The async clipboard API drops the user gesture in
- *  the macOS webview and then fails with nothing on the clipboard. */
-function writeClipboardText(value: string) {
-  // Start the async write while this click is still the user gesture, then
-  // also copy synchronously. Either path is enough; one of them fails in the
-  // macOS webview depending on the page.
-  const pending = navigator.clipboard?.writeText(value);
-  const area = document.createElement("textarea");
-  area.value = value;
-  area.setAttribute("readonly", "");
-  area.style.position = "fixed";
-  area.style.top = "0";
-  area.style.left = "0";
-  area.style.opacity = "0";
-  document.body.appendChild(area);
-  area.focus();
-  area.select();
-  try {
-    document.execCommand("copy");
-  } catch {
-    // The async write above is the other attempt.
-  }
-  area.remove();
-  void pending?.catch(() => undefined);
-}
-
-function explorerRootGroupForFile(file: WorkspaceFile | undefined) {
-  if (!file || file.isWorkspaceRoot) return undefined;
-  const relativePath =
-    file.relativePath ??
-    workspaceRelativeFilePath(file.path, file.workspacePath);
-  if (!relativePath || relativePath.includes("/")) return undefined;
-  return workspaceExplorerRootEntryGroup(workspaceName(file.path));
-}
-
-function WorkspaceExplorerRow({
-  label,
-  decoration,
-  bufferStatus,
-  kind,
-  rootGroup,
-  startsRootGroup,
-  depth,
-  collapsed,
-  isActive,
-  isOpen,
-  isDropTarget,
-  path,
-  rowRef,
-  tabIndex,
-  draggable,
-  onClick,
-  onDoubleClick,
-  onContextMenu,
-  onDragStart,
-  onDragEnd,
-  onDragOver,
-  onDragLeave,
-  onDrop,
-}: {
-  label: string;
-  decoration?: IdeState["fileDecorations"][number];
-  bufferStatus?: EditorBuffer["status"];
-  kind: WorkspaceFile["kind"];
-  rootGroup?: ReturnType<typeof workspaceExplorerRootEntryGroup>;
-  startsRootGroup?: boolean;
-  depth: number;
-  collapsed: boolean;
-  isActive: boolean;
-  isOpen: boolean;
-  isDropTarget?: boolean;
-  path: string;
-  rowRef: (element: HTMLButtonElement | null) => void;
-  tabIndex: number;
-  draggable?: boolean;
-  onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
-  onDoubleClick?: () => void;
-  onContextMenu?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
-  onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
-  onDragEnd?: (event: ReactDragEvent<HTMLButtonElement>) => void;
-  onDragOver?: (event: ReactDragEvent<HTMLButtonElement>) => void;
-  onDragLeave?: (event: ReactDragEvent<HTMLButtonElement>) => void;
-  onDrop?: (event: ReactDragEvent<HTMLButtonElement>) => void;
-}) {
-  const badge = kind === "file" ? scmFileBadge(path) : undefined;
-  const FileIcon = badge?.icon ?? FileCode2;
-  const FolderIcon = collapsed ? Folder : FolderOpen;
-
-  return (
-    <button
-      aria-expanded={kind === "directory" ? !collapsed : undefined}
-      aria-label={`${kind === "directory" ? "Folder" : "File"} ${path}${decoration?.tooltip ? `, ${decoration.tooltip}` : ""}${bufferStatus === "dirty" ? ", unsaved changes" : ""}`}
-      aria-level={Math.max(1, depth)}
-      aria-selected={isActive}
-      className={
-        [
-          "gyro-sidebar-row gyro-sidebar-explorer-row",
-          isActive ? "is-active" : "",
-          isDropTarget ? "is-drop-target" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")
-      }
-      data-buffer-state={bufferStatus}
-      data-explorer-path={path}
-      data-file-state={decoration?.color}
-      data-file-tone={badge?.tone}
-      data-root-group={rootGroup}
-      data-root-group-start={startsRootGroup || undefined}
-      data-open={isOpen || undefined}
-      draggable={draggable || undefined}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      onDoubleClick={onDoubleClick}
-      onDragEnd={onDragEnd}
-      onDragLeave={onDragLeave}
-      onDragOver={onDragOver}
-      onDragStart={onDragStart}
-      onDrop={onDrop}
-      ref={rowRef}
-      role="treeitem"
-      style={{ paddingLeft: `${Math.max(8, Math.min(depth, 8) * 11)}px` }}
-      tabIndex={tabIndex}
-      title={`${path}${decoration?.tooltip ? ` · ${decoration.tooltip}` : ""}`}
-      type="button"
-    >
-      {kind === "directory" ? (
-        <>
-          <ChevronRight
-            aria-hidden="true"
-            className="gyro-explorer-chevron"
-            size={12}
-          />
-          <FolderIcon
-            aria-hidden="true"
-            className="gyro-explorer-folder-icon"
-            size={14}
-          />
-        </>
-      ) : (
-        <FileIcon
-          aria-hidden="true"
-          className="gyro-explorer-file-icon"
-          size={14}
-        />
-      )}
-      <span>{label}</span>
-      {decoration?.badge ? (
-        <small className="gyro-explorer-decoration">{decoration.badge}</small>
-      ) : null}
-    </button>
-  );
-}
-
-/* Inline naming row for Explorer creation. The typed extension is what decides
-   the file type, so the row previews the detected language and icon live. */
-function ExplorerDraftRow({
-  draft,
-  depth,
-  onChange,
-  onCommit,
-  onCancel,
-}: {
-  draft: {
-    kind: "file" | "directory";
-    parentPath?: string;
-    value: string;
-    renamePath?: string;
-  };
-  depth?: number;
-  onChange: (value: string) => void;
-  onCommit: () => void;
-  onCancel: () => void;
-}) {
-  const selectedRenameText = useRef(false);
-  const rowRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    rowRef.current?.scrollIntoView({ block: "nearest" });
-  }, []);
-  /* The click that opens this row unmounts the menu that held focus. That
-     focus move can blur the new field in the same turn and commit it shut.
-     Blur only counts once the field has actually been shown. */
-  const acceptBlur = useRef(false);
-  useEffect(() => {
-    acceptBlur.current = true;
-    return () => {
-      acceptBlur.current = false;
-    };
-  }, []);
-  const isRename = Boolean(draft.renamePath);
-  const indent =
-    depth ??
-    (draft.parentPath
-      ? draft.parentPath.split("/").filter(Boolean).length + 2
-      : 2);
-  const name = draft.value.trim();
-  const typeLabel =
-    draft.kind === "directory"
-      ? "Folder"
-      : name.includes(".")
-        ? resolveLanguage({ path: name }).name
-        : "Plain Text";
-  const DraftFileIcon = workspaceFileBadge(name || "untitled").icon;
-  return (
-    <div
-      className="gyro-explorer-draft"
-      ref={rowRef}
-      style={{ paddingLeft: `${Math.max(8, Math.min(indent, 8) * 11)}px` }}
-    >
-      {draft.kind === "directory" ? (
-        <Folder
-          aria-hidden="true"
-          className="gyro-explorer-folder-icon"
-          size={14}
-        />
-      ) : (
-        <DraftFileIcon
-          aria-hidden="true"
-          className="gyro-explorer-file-icon"
-          size={14}
-        />
-      )}
-      <input
-        aria-label={
-          isRename
-            ? "New name"
-            : draft.kind === "directory"
-              ? "New folder name"
-              : "New file name"
-        }
-        autoFocus
-        onChange={(event) => onChange(event.target.value)}
-        onFocus={(event) => {
-          /* VS Code selects the basename so typing replaces it and keeps the
-             extension; only do that once, on entry, so editing is untouched. */
-          if (!isRename || selectedRenameText.current) return;
-          selectedRenameText.current = true;
-          const input = event.currentTarget;
-          const extension = draft.value.lastIndexOf(".");
-          if (extension > 0) {
-            input.setSelectionRange(0, extension);
-          } else {
-            input.select();
-          }
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            event.stopPropagation();
-            onCommit();
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            // Unmount blurs the field before this guard resets, and blur
-            // commits. Ignore that blur or Escape keeps the typed name.
-            acceptBlur.current = false;
-            onCancel();
-          }
-        }}
-        onBlur={(event) => {
-          if (!acceptBlur.current) {
-            const input = event.currentTarget;
-            requestAnimationFrame(() => {
-              if (input.isConnected && document.activeElement !== input) {
-                input.focus();
-              }
-            });
-            return;
-          }
-          onCommit();
-        }}
-        placeholder={
-          isRename
-            ? "name"
-            : draft.kind === "directory"
-              ? "folder name"
-              : "name.ext"
-        }
-        spellCheck={false}
-        value={draft.value}
-      />
-      <small>{typeLabel}</small>
-    </div>
-  );
-}
-
-/* Icon-only in the title bar: the label is the accessible name and the tooltip,
-   so the switch stays narrow enough to share the row with window navigation. */
-function SidebarModeRow({
-  icon,
-  label,
-  isActive,
-  onClick,
-}: {
-  icon: ReactNode;
-  label: string;
-  isActive?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      aria-label={label}
-      aria-pressed={isActive === true}
-      className={
-        isActive
-          ? "gyro-titlebar-switch-option is-active"
-          : "gyro-titlebar-switch-option"
-      }
-      data-sidebar-mode={label.toLowerCase()}
-      data-tour={label === "Workspace" ? "sidebar.ide" : undefined}
-      onClick={() => (isActive ? onClick() : runSurfaceSwitch(onClick))}
-      title={label}
-      type="button"
-    >
-      {icon}
-    </button>
   );
 }
 
@@ -8730,8 +3913,7 @@ export function ChatGridSurface({
   };
 
   return (
-    <ChatCompanionWorkspace isTiled={hasMultiplePanes && !isMaximized}
-    >
+    <ChatCompanionWorkspace isTiled={hasMultiplePanes && !isMaximized}>
       <div
         ref={gridRef}
         className={[
@@ -8880,7 +4062,11 @@ export function ChatGridSurface({
               key={pane?.paneId ?? `empty-${slotIndex}`}
               paneId={pane?.paneId ?? `empty-${slotIndex}`}
               number={slotIndex + 1}
-              isFocused={Boolean(pane) && (paneFocused || (isMaximized && paneMaximized)) && !hiddenByMaximize}
+              isFocused={
+                Boolean(pane) &&
+                (paneFocused || (isMaximized && paneMaximized)) &&
+                !hiddenByMaximize
+              }
               isTiled={hasMultiplePanes && !paneMaximized}
             >
               <section
@@ -9017,34 +4203,6 @@ export function ChatGridSurface({
 }
 
 /**
- * Only the chat grid takes a chat drag. Released anywhere else — a composer
- * outside the grid, a search field — the webview's default drop inserted the
- * drag's text (the chat's id). Installed once, on the first chat drag.
- */
-let chatDragGuardInstalled = false;
-function guardChatDragsOutsideGrid() {
-  if (chatDragGuardInstalled || typeof window === "undefined") return;
-  chatDragGuardInstalled = true;
-  const block = (event: DragEvent) => {
-    if (!event.dataTransfer || !chatDragSource(event.dataTransfer)) return;
-    if (
-      event.target instanceof Element &&
-      event.target.closest(".gyro-chat-grid")
-    ) {
-      return;
-    }
-    event.preventDefault();
-    if (event.type === "dragover") event.dataTransfer.dropEffect = "none";
-    else {
-      event.stopPropagation();
-      endChatDragForTransfer(event.dataTransfer);
-    }
-  };
-  window.addEventListener("dragover", block, true);
-  window.addEventListener("drop", block, true);
-}
-
-/**
  * WebKit exposes DataTransfer.types as a DOMStringList, whereas Chromium uses
  * an array. DOMStringList has `contains`, but no `includes`; calling the
  * latter made dragover throw on macOS before the grid could enable its drop
@@ -9065,6 +4223,26 @@ function dataTransferHasType(dataTransfer: DataTransfer, type: string) {
     (_, index) => types[index] ?? types.item?.(index),
   ).includes(type);
 }
+
+/** Draft key shared by a chat that has no session yet; the host uses the same. */
+export const NEW_CHAT_DRAFT_KEY = "new";
+
+/**
+ * The composer a drop belongs to, keyed by the draft it edits.
+ *
+ * Registered rather than passed because a drop can land on the app chrome
+ * around a chat — the drop is delivered to the window, and only the composer
+ * knows which chat its rectangle covers.
+ */
+type MediaDropTarget = {
+  attach: (files: File[]) => void;
+  attachPaths?: (paths: string[]) => void;
+  reportError: (message: string) => void;
+  paneKey: string;
+  rect: () => DOMRect;
+};
+
+const mediaDropTargets = new Map<string, MediaDropTarget[]>();
 
 /** One rectangle that can claim a drop, newest first within its draft. */
 function mediaTargetsFor(paneKey: string | undefined) {
@@ -9090,6 +4268,23 @@ const NO_MEDIA_DROP_TARGET: MediaDropTarget = {
   paneKey: "",
   rect: () => new DOMRect(),
 };
+
+/** Nothing is armed yet on the very first drag-over, so fall back to the host. */
+let localMediaDrop: MediaDropTarget | undefined;
+
+function registerMediaDropTarget(target: MediaDropTarget) {
+  const targets = mediaDropTargets.get(target.paneKey) ?? [];
+  const next = [...targets.filter((item) => item !== target), target];
+  mediaDropTargets.set(target.paneKey, next);
+  return () => {
+    const current = mediaDropTargets.get(target.paneKey) ?? [];
+    const remaining = current.filter((item) => item !== target);
+    if (remaining.length) mediaDropTargets.set(target.paneKey, remaining);
+    else mediaDropTargets.delete(target.paneKey);
+    // The armed key is left alone on purpose: a surface that unmounts between
+    // the drag-over and the drop must not retarget a drop already in flight.
+  };
+}
 
 /** The chat surface a drop landed on, when the pointer is inside one. */
 function mediaDropTargetAt(point: { x: number; y: number }) {
@@ -9311,6 +4506,7 @@ type ChatSurfaceProps = {
    * from `activeChatPanel`, so a chat with tabs open but no active one shows
    * the transcript alone until the dock is reopened.
    */
+  backupReview?: ChatBackupReview;
   companionTabs?: ChatCompanionTabId[];
   onOpenCompanionTab?: (tab: ChatCompanionTabId) => void;
   onCloseCompanionTab?: (tab: ChatCompanionTabId) => void;
@@ -9565,6 +4761,7 @@ export function ChatSurface({
   chatSwitcher,
   workspaceMode = "local",
   activeChatPanel,
+  backupReview,
   companionTabs,
   onOpenCompanionTab,
   onCloseCompanionTab,
@@ -9654,7 +4851,9 @@ export function ChatSurface({
           : undefined,
       effortsFor: (providerId, modelId) => {
         const provider = providerConfigs.find((item) => item.id === providerId);
-        const model = provider ? getProviderModel(provider, modelId) : undefined;
+        const model = provider
+          ? getProviderModel(provider, modelId)
+          : undefined;
         return (model?.supportedReasoningEfforts ?? []).map((effort) => ({
           value: effort,
           label: reasoningEffortLabel(effort),
@@ -10049,7 +5248,12 @@ export function ChatSurface({
   // Occupancy is the latest measured request, including a smaller prompt after
   // provider-side compaction. A historical peak is not current context usage.
   const contextUsage = useMemo(
-    () => estimateComposerContextUsage(transcriptEvents, composerDraft, contextModel),
+    () =>
+      estimateComposerContextUsage(
+        transcriptEvents,
+        composerDraft,
+        contextModel,
+      ),
     [composerDraft, contextModel, transcriptEvents],
   );
   const composerProviderUsage = contextModel.providerId
@@ -10329,6 +5533,21 @@ export function ChatSurface({
   );
   // The Environment is a transient context popover. The persistent right-hand
   // surface is reserved for companion tabs and the plan document.
+  const [openBackupKey, setOpenBackupKey] = useState<string>();
+  const [manualBackupUploads, setManualBackupUploads] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const backupKey = backupReview
+    ? `${backupReview.accountKey}:${backupReview.localId}`
+    : undefined;
+  const backupUploading = Boolean(
+    backupReview?.uploading ||
+    (backupKey && manualBackupUploads.has(backupKey)),
+  );
+  const backupDialogOpen = Boolean(backupKey && openBackupKey === backupKey);
+  useEffect(() => {
+    setOpenBackupKey(undefined);
+  }, [backupKey]);
   const railPanel: ChatSidePanelId = activeRailPanel ?? "environment";
   const isCompanionPanel =
     isChatCompanionTab(railPanel) || railPanel === "tools";
@@ -10587,7 +5806,9 @@ export function ChatSurface({
         className={[
           "gyro-chat-surface",
           "is-empty",
-          !sharedCompanion && (hasCompanion || (activeRailPanel && activeRailPanel !== "environment"))
+          !sharedCompanion &&
+          (hasCompanion ||
+            (activeRailPanel && activeRailPanel !== "environment"))
             ? "has-environment"
             : "",
           isEnvironmentPopoverOpen ? "has-environment-popover" : "",
@@ -10768,14 +5989,17 @@ export function ChatSurface({
       className={[
         "gyro-chat-surface",
         "is-thread",
-        !sharedCompanion && (hasCompanion || (activeRailPanel && activeRailPanel !== "environment"))
+        !sharedCompanion &&
+        (hasCompanion || (activeRailPanel && activeRailPanel !== "environment"))
           ? "has-environment"
           : "",
         isEnvironmentPopoverOpen ? "has-environment-popover" : "",
         !sharedCompanion && hasCompanion ? "has-companion" : "",
         sharedCompanion ? "has-shared-companion" : "",
         isTiled ? "is-tiled" : "",
-        !sharedCompanion && activeRailPanel === "plan" && sessionPlan?.content ? "has-plan" : "",
+        !sharedCompanion && activeRailPanel === "plan" && sessionPlan?.content
+          ? "has-plan"
+          : "",
         workspaceMode === "worktree" ? "is-agent-workspace" : "",
       ]
         .filter(Boolean)
@@ -10834,6 +6058,51 @@ export function ChatSurface({
           ) : null}
         </div>
         <div className="gyro-thread-topbar-actions">
+          {backupReview?.available || backupUploading ? (
+            <button
+              type="button"
+              className="gyro-chat-surface-button"
+              title={backupUploading ? "Uploading chat backup" : "Back up chat"}
+              aria-label={
+                backupUploading ? "Uploading chat backup" : "Back up chat"
+              }
+              aria-busy={backupUploading}
+              aria-haspopup="dialog"
+              aria-expanded={backupDialogOpen}
+              onClick={() => setOpenBackupKey(backupKey)}
+            >
+              <span className="gyro-chat-backup-icon" aria-hidden="true">
+                <Cloud size={16} />
+                {backupUploading ? (
+                  <CircleDashed
+                    className="gyro-chat-backup-spinner is-spinning"
+                    size={10}
+                  />
+                ) : null}
+              </span>
+            </button>
+          ) : null}
+          {backupReview && backupKey && backupDialogOpen ? (
+            <CloudChatBackup
+              key={backupKey}
+              {...backupReview}
+              uploading={backupUploading}
+              onDismiss={() => setOpenBackupKey(undefined)}
+              onUploadStateChange={(uploading) =>
+                setManualBackupUploads((current) => {
+                  const next = new Set(current);
+                  if (uploading) next.add(backupKey);
+                  else next.delete(backupKey);
+                  return next;
+                })
+              }
+            />
+          ) : null}
+          {backupReview ? (
+            <span className="gyro-sr-only" role="status">
+              {backupUploading ? "Uploading chat backup" : ""}
+            </span>
+          ) : null}
           <ChatSurfaceControls
             isDockOpen={isCompanionPanel}
             isEnvironmentOpen={isEnvironmentPopoverOpen}
@@ -12675,9 +7944,7 @@ function useCompanionResize(
     startWidth: number;
   } | null>(null);
   const reservedAvailable = (available?: number) =>
-    available === undefined
-      ? undefined
-      : available - (transcriptReserve - 480);
+    available === undefined ? undefined : available - (transcriptReserve - 480);
   const clamp = (value: number, available?: number) =>
     mode === "panel"
       ? clampChatPanelWidth(value, available)
@@ -12856,9 +8123,10 @@ function CompanionFiles({
  * question, kept beside the main chat rather than inside it.
  *
  * It runs against a session of its own so the model answers with the same
- * workspace, branch and permissions as the chat it sits next to, and reads none
- * of that chat's transcript. That session is transient — it never reaches the
- * sidebar or history, and closing the tab deletes it.
+ * workspace, branch and permissions as the chat it sits next to, and reads that
+ * chat's transcript as background. Nothing said here goes back into that chat.
+ * The session is transient — it never reaches the sidebar or history, and
+ * closing the tab deletes it.
  */
 function SideChatPanel({
   onOpenBrowserUrl,
@@ -12896,7 +8164,7 @@ function SideChatPanel({
   return (
     <div className="gyro-side-chat">
       <p className="gyro-side-chat-context">
-        Separate conversation · cleared when this tab closes.
+        Reads this chat · replies stay here · cleared when this tab closes.
       </p>
       <div className="gyro-side-chat-transcript" ref={transcriptRef}>
         {messages.length === 0 && !sideChat?.streamingMessage ? (
@@ -13008,6 +8276,220 @@ function ChatRailToolHeader({
   );
 }
 
+/**
+ * Project, isolation, branch, and spend — the chat's standing context.
+ *
+ * They live in the strip under the composer, on the hero and in an active
+ * thread alike — the same place the send controls are, so switching project,
+ * isolation, or branch never costs a trip to the rail.
+ *
+ * Its popover state is its own: the composer's `activePopover` drives the
+ * attach, model, and effort menus in the row above, and one shared cursor
+ * across both rows would let a context menu close a composer one.
+ */
+function ChatContextSection({
+  branchCatalog,
+  branchName,
+  isBranchLoading,
+  isSending = false,
+  onAction,
+  savedProjects = [],
+  workspaceMode = "local",
+  workspacePath,
+}: {
+  branchCatalog?: GitBranchCatalog;
+  branchName?: string;
+  isBranchLoading?: boolean;
+  isSending?: boolean;
+  onAction?: (action: string) => void;
+  savedProjects?: Array<{ path: string; label: string; detail?: string }>;
+  workspaceMode?: WorkbenchMode;
+  workspacePath?: string;
+}) {
+  const [activePopover, setActivePopover] = useState<
+    "project" | "workspace-mode" | "branch" | null
+  >(null);
+  const popoverScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
+    Boolean(activePopover),
+    () => setActivePopover(null),
+  );
+  const popoverBaseId = useId();
+  const hasUserWorkspace = Boolean(isUserSelectedWorkspacePath(workspacePath));
+  const projectLabel = composerProjectLabel(workspacePath);
+  const modeChipLabel = workspaceModeLabel(workspaceMode);
+  const branchLabel =
+    branchName ??
+    (workspaceMode === "worktree" ? "New worktree branch" : "main");
+  const savedProjectItems: ComposerPopoverItem[] = savedProjects
+    .filter((project) => project.path)
+    .slice(0, 6)
+    .map((project) => ({
+      action: `select-saved-project:${encodeURIComponent(project.path)}`,
+      active: project.path === workspacePath,
+      detail: project.detail,
+      icon: Folder,
+      kind: "project" as const,
+      label: project.label,
+      removeAction: `remove-saved-project:${encodeURIComponent(project.path)}`,
+    }));
+  const runAction = (action?: string) => {
+    setActivePopover(null);
+    if (action) {
+      onAction?.(action);
+    }
+  };
+  const items: ComposerPopoverItem[] =
+    activePopover === "project"
+      ? [
+          ...(hasUserWorkspace && workspacePath
+            ? [
+                {
+                  action: `select-saved-project:${encodeURIComponent(workspacePath)}`,
+                  active: true,
+                  detail: workspacePath,
+                  icon: Folder,
+                  label: projectLabel,
+                  removeAction: `remove-saved-project:${encodeURIComponent(workspacePath)}`,
+                },
+              ]
+            : []),
+          {
+            action: "select-no-folder",
+            active: !hasUserWorkspace,
+            detail: "Chat without a project folder",
+            icon: HardDrive,
+            label: "No folder",
+          },
+          ...savedProjectItems.filter(
+            (project) =>
+              project.action !==
+              `select-saved-project:${encodeURIComponent(workspacePath ?? "")}`,
+          ),
+          {
+            action: "select-workspace",
+            icon: Folder,
+            label: hasUserWorkspace ? "Change folder" : "Select folder",
+            sectionLabel: "Actions",
+          },
+          {
+            action: "search-workspace",
+            disabled: !hasUserWorkspace,
+            icon: Search,
+            label: "Search workspace",
+          },
+        ]
+      : activePopover === "workspace-mode"
+        ? [
+            {
+              action: "set-workspace-mode:local",
+              active: workspaceMode === "local",
+              icon: Laptop,
+              kind: "workspace-mode",
+              label: workspaceModePopoverLabel("local"),
+              tooltip: workspaceModeTechnicalHint("local"),
+            },
+            {
+              action: "set-workspace-mode:worktree",
+              active: workspaceMode === "worktree",
+              badge:
+                hasUserWorkspace && workspaceMode !== "worktree"
+                  ? "Recommended"
+                  : undefined,
+              detail: hasUserWorkspace
+                ? undefined
+                : workspaceModeDetail("worktree", { hasWorkspace: false }),
+              icon: GitBranch,
+              kind: "workspace-mode",
+              label: workspaceModePopoverLabel("worktree"),
+              tooltip: workspaceModeTechnicalHint("worktree"),
+            },
+          ]
+        : branchPopoverItems({
+            branchCatalog,
+            branchName: branchLabel,
+            isDisabled: isSending,
+            isLoading: isBranchLoading,
+            workspaceMode,
+            workspacePath,
+          });
+  return (
+    <section className="gyro-composer-context-row gyro-composer-reveal">
+      <div className="gyro-composer-control" ref={popoverScopeRef}>
+        {(
+          [
+            [
+              "project",
+              Folder,
+              projectLabel,
+              "Project",
+              workspacePath ?? projectLabel,
+            ],
+            [
+              "workspace-mode",
+              Laptop,
+              modeChipLabel,
+              "Workspace mode",
+              modeChipLabel,
+            ],
+            ["branch", GitBranch, branchLabel, "Branch", branchLabel],
+          ] as const
+        ).map(([popover, Icon, label, name, title]) => (
+          <button
+            aria-controls={
+              activePopover === popover ? `${popoverBaseId}-context` : undefined
+            }
+            aria-expanded={activePopover === popover}
+            aria-haspopup="menu"
+            aria-label={`${name}: ${label}`}
+            className={`gyro-composer-chip gyro-context-summary-item is-${popover}`}
+            data-tour={popover === "project" ? "composer.project" : undefined}
+            key={popover}
+            onClick={() => {
+              setActivePopover((current) =>
+                current === popover ? null : popover,
+              );
+              if (popover === "branch" && activePopover !== "branch") {
+                onAction?.("select-branch");
+              }
+            }}
+            title={title}
+            type="button"
+          >
+            <Icon size={14} aria-hidden="true" />
+            <span>{label}</span>
+            {popover === "branch" ? (
+              <ChevronDown size={13} aria-hidden="true" />
+            ) : null}
+          </button>
+        ))}
+        {activePopover ? (
+          <ComposerPopover
+            className={`gyro-chat-context-picker ${
+              activePopover === "project"
+                ? "gyro-project-picker"
+                : activePopover === "branch"
+                  ? "gyro-chat-context-branch-picker"
+                  : "gyro-workspace-mode-picker"
+            }`}
+            id={`${popoverBaseId}-context`}
+            keepInBounds
+            items={items}
+            onAction={runAction}
+            placement="up"
+            title={
+              activePopover === "workspace-mode"
+                ? "Workspace mode"
+                : activePopover === "project"
+                  ? "Project"
+                  : "Branch"
+            }
+          />
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 /** 358444 is unreadable at a glance; 358,444 is not. */
 function formatEnvironmentCount(value: number) {
   return value.toLocaleString("en-US");
@@ -13112,8 +8594,7 @@ export function ChatEnvironmentPopover({
   const repoName = workspaceName(workspacePath);
   // A status read that has not landed yet must not claim the tree is clean.
   const treeKnown =
-    Boolean(sourceControl?.available) &&
-    sourceControl?.detailsLoaded !== false;
+    Boolean(sourceControl?.available) && sourceControl?.detailsLoaded !== false;
   const changedFileCount = treeKnown ? (sourceControl?.files?.length ?? 0) : 0;
   const changeScope = sourceControlTotalsScope(changeTotals);
   // Branch totals answer "how far from main", not "what is uncommitted".
@@ -13636,6 +9117,12 @@ function nextPlanStatus(status: SessionPlanItemStatus): SessionPlanItemStatus {
   return "todo";
 }
 
+function formatAttachmentSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /** One register with the activity thread: a step reports state in words. */
 function planStatusLabel(status: SessionPlanItemStatus) {
   switch (status) {
@@ -14153,8 +9640,7 @@ function WorkspaceSettingsEditor({
         <>
           <h2 className="gyro-workspace-scope-heading">Settings scope</h2>
           <p className="gyro-workspace-scope-description">
-            Choose where these settings apply. Project and folder settings
-            override your app-wide defaults.
+            Project and folder settings override your app-wide defaults.
           </p>
           <div
             aria-label="Settings scope"
@@ -14204,111 +9690,117 @@ function WorkspaceSettingsEditor({
               </select>
             </label>
           ) : null}
-          <SettingsDisclosure id="files-search" title="Files & search" summary={`${settings.searchMaxResults ?? inherited.searchMaxResults} maximum results`}><div className="gyro-workspace-settings-list">
-            <label>
-              <span>
-                <strong>Hidden files</strong>
-                <small>Comma-separated globs hidden from Explorer.</small>
-              </span>
-              <SettingsDraftInput
-                key={`files-${scope}-${path}`}
-                onCommit={(value) =>
-                  update({
-                    ...settings,
-                    filesExclude: value.trim()
-                      ? workspaceSettingsList(value)
-                      : undefined,
-                  })
-                }
-                placeholder={`${inheritedLabel}: ${inherited.filesExclude.join(", ")}`}
-                value={(settings.filesExclude ?? []).join(", ")}
-              />
-            </label>
-            <label>
-              <span>
-                <strong>Excluded from search</strong>
-                <small>
-                  Comma-separated globs skipped by workspace search.
-                </small>
-              </span>
-              <SettingsDraftInput
-                key={`search-${scope}-${path}`}
-                onCommit={(value) =>
-                  update({
-                    ...settings,
-                    searchExclude: value.trim()
-                      ? workspaceSettingsList(value)
-                      : undefined,
-                  })
-                }
-                placeholder={`${inheritedLabel}: ${inherited.searchExclude.join(", ")}`}
-                value={(settings.searchExclude ?? []).join(", ")}
-              />
-            </label>
-            <label>
-              <span>
-                <strong>Max search results</strong>
-                <small>Caps results between 10 and 1,000.</small>
-              </span>
-              <SettingsDraftInput
-                key={`max-${scope}-${path}`}
-                max={1000}
-                min={10}
-                onCommit={(draft) => {
-                  const value = draft.trim() ? Number(draft) : NaN;
-                  update({
-                    ...settings,
-                    searchMaxResults: Number.isFinite(value)
-                      ? value
-                      : undefined,
-                  });
-                }}
-                placeholder={`${inheritedLabel}: ${inherited.searchMaxResults}`}
-                type="number"
-                value={settings.searchMaxResults ?? ""}
-              />
-            </label>
-          </div></SettingsDisclosure>
-          <SettingsDisclosure id="editor" title="Editor"><div className="gyro-workspace-settings-list">
-            <label>
-              <span>
-                <strong>Minimap</strong>
-                <small>
-                  Shows a compact document overview beside the editor.
-                </small>
-              </span>
-              <SettingsSelect
-                onChange={(event) =>
-                  update({
-                    ...settings,
-                    editorMinimapEnabled:
-                      event.target.value === "inherit"
-                        ? undefined
-                        : event.target.value === "on",
-                  })
-                }
-                value={
-                  settings.editorMinimapEnabled === undefined
-                    ? "inherit"
-                    : settings.editorMinimapEnabled
-                      ? "on"
-                      : "off"
-                }
-              >
-                <option value="inherit">
-                  {inheritedLabel} (
-                  {inherited.editorMinimapEnabled ? "On" : "Off"})
-                </option>
-                <option value="on">On</option>
-                <option value="off">Off</option>
-              </SettingsSelect>
-            </label>
-          </div>
+          <SettingsDisclosure
+            id="files-search"
+            title="Files & search"
+            summary={`${settings.searchMaxResults ?? inherited.searchMaxResults} maximum results`}
+          >
+            <div className="gyro-workspace-settings-list">
+              <label>
+                <span>
+                  <strong>Hidden files</strong>
+                  <small>Comma-separated globs hidden from Explorer.</small>
+                </span>
+                <SettingsDraftInput
+                  key={`files-${scope}-${path}`}
+                  onCommit={(value) =>
+                    update({
+                      ...settings,
+                      filesExclude: value.trim()
+                        ? workspaceSettingsList(value)
+                        : undefined,
+                    })
+                  }
+                  placeholder={`${inheritedLabel}: ${inherited.filesExclude.join(", ")}`}
+                  value={(settings.filesExclude ?? []).join(", ")}
+                />
+              </label>
+              <label>
+                <span>
+                  <strong>Excluded from search</strong>
+                  <small>
+                    Comma-separated globs skipped by workspace search.
+                  </small>
+                </span>
+                <SettingsDraftInput
+                  key={`search-${scope}-${path}`}
+                  onCommit={(value) =>
+                    update({
+                      ...settings,
+                      searchExclude: value.trim()
+                        ? workspaceSettingsList(value)
+                        : undefined,
+                    })
+                  }
+                  placeholder={`${inheritedLabel}: ${inherited.searchExclude.join(", ")}`}
+                  value={(settings.searchExclude ?? []).join(", ")}
+                />
+              </label>
+              <label>
+                <span>
+                  <strong>Max search results</strong>
+                  <small>Caps results between 10 and 1,000.</small>
+                </span>
+                <SettingsDraftInput
+                  key={`max-${scope}-${path}`}
+                  max={1000}
+                  min={10}
+                  onCommit={(draft) => {
+                    const value = draft.trim() ? Number(draft) : NaN;
+                    update({
+                      ...settings,
+                      searchMaxResults: Number.isFinite(value)
+                        ? value
+                        : undefined,
+                    });
+                  }}
+                  placeholder={`${inheritedLabel}: ${inherited.searchMaxResults}`}
+                  type="number"
+                  value={settings.searchMaxResults ?? ""}
+                />
+              </label>
+            </div>
           </SettingsDisclosure>
-          {scope !== "user" ? (
+          <SettingsDisclosure id="editor" title="Editor">
+            <div className="gyro-workspace-settings-list">
+              <label>
+                <span>
+                  <strong>Minimap</strong>
+                  <small>
+                    Shows a compact document overview beside the editor.
+                  </small>
+                </span>
+                <SettingsSelect
+                  onChange={(event) =>
+                    update({
+                      ...settings,
+                      editorMinimapEnabled:
+                        event.target.value === "inherit"
+                          ? undefined
+                          : event.target.value === "on",
+                    })
+                  }
+                  value={
+                    settings.editorMinimapEnabled === undefined
+                      ? "inherit"
+                      : settings.editorMinimapEnabled
+                        ? "on"
+                        : "off"
+                  }
+                >
+                  <option value="inherit">
+                    {inheritedLabel} (
+                    {inherited.editorMinimapEnabled ? "On" : "Off"})
+                  </option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </SettingsSelect>
+              </label>
+            </div>
+          </SettingsDisclosure>
+          {scope !== "user" && Object.keys(settings).length > 0 ? (
             <button
               className="gyro-workspace-settings-reset"
-              disabled={Object.keys(settings).length === 0}
               onClick={() => update({})}
               type="button"
             >
@@ -14318,125 +9810,137 @@ function WorkspaceSettingsEditor({
         </>
       ) : (
         <>
-          <SettingsDisclosure id="language-services" title="Language services" summary={`${languageServers.length} detected`}><section className="gyro-workspace-services">
-            <header>
-              <h2>Language services</h2>
-              <p>
-                Detected locally for the active project. Gyro does not
-                auto-install external tools.
-              </p>
-            </header>
-            <div>
-              {languageServers.length > 0 ? (
-                languageServers.map((server) => (
-                  <article key={server.id}>
-                    <span>
-                      <strong>{server.languageId}</strong>
-                      <small>{server.message ?? server.command}</small>
-                    </span>
-                    <em data-status={server.status}>{server.status}</em>
-                  </article>
-                ))
-              ) : (
-                <p>No language services detected for the current project.</p>
-              )}
-            </div>
-          </section></SettingsDisclosure>
-          <SettingsDisclosure id="local-contributions" title="Local contributions" summary={`${contributions.length} registered`}><section className="gyro-workspace-contributions">
-            <header>
-              <div>
-                <h2>Local contributions</h2>
+          <SettingsDisclosure
+            id="language-services"
+            title="Language services"
+            summary={`${languageServers.length} detected`}
+          >
+            <section className="gyro-workspace-services">
+              <header>
                 <p>
-                  Declarative commands and views loaded from a local manifest.
-                  Contributions stay disabled until you enable them.
+                  Detected locally for the active project. Gyro does not
+                  auto-install external tools.
                 </p>
-              </div>
-              <button
-                onClick={() => contributionInputRef.current?.click()}
-                type="button"
-              >
-                <Plus size={13} /> Install from manifest
-              </button>
-              <input
-                accept=".json,.gyro-extension"
-                aria-label="Install local contribution manifest"
-                hidden
-                onChange={async (event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (!file) return;
-                  try {
-                    const contribution = parsedLocalIdeContribution(
-                      JSON.parse(await file.text()),
-                      file.name,
-                    );
-                    onRegisterContribution?.(contribution);
-                    setContributionError("");
-                  } catch (error) {
-                    setContributionError(String(error));
-                  }
-                }}
-                ref={contributionInputRef}
-                type="file"
-              />
-            </header>
-            {contributionError ? (
-              <p className="gyro-workspace-contribution-error" role="alert">
-                {contributionError}
-              </p>
-            ) : null}
-            <div className="gyro-workspace-contribution-list">
-              {contributions.map((contribution) => (
-                <article key={contribution.id}>
-                  <div className="gyro-workspace-contribution-title">
-                    <Settings size={14} />
-                    <span>
-                      <strong>{contribution.label}</strong>
-                      <small>
-                        {contribution.publisher} · v{contribution.version} ·{" "}
-                        {contribution.source === "core"
-                          ? "bundled with Gyro"
-                          : (contribution.manifestName ?? "local manifest")}
-                      </small>
-                    </span>
-                    <em className={`is-${contribution.source}`}>
-                      {contribution.source}
-                    </em>
-                  </div>
-                  <div className="gyro-workspace-contribution-permissions">
-                    {contribution.permissions.map((permission) => (
-                      <span key={permission}>
-                        <ShieldCheck size={10} /> {permission}
+              </header>
+              <div>
+                {languageServers.length > 0 ? (
+                  languageServers.map((server) => (
+                    <article key={server.id}>
+                      <span>
+                        <strong>{server.languageId}</strong>
+                        <small>{server.message ?? server.command}</small>
                       </span>
-                    ))}
-                  </div>
-                  <div className="gyro-workspace-contribution-actions">
-                    <button
-                      disabled={contribution.source === "core"}
-                      onClick={() =>
-                        onToggleContribution?.(
-                          contribution.id,
-                          !contribution.enabled,
-                        )
-                      }
-                      type="button"
-                    >
-                      {contribution.enabled ? "Disable" : "Enable"}
-                    </button>
-                    {contribution.source === "local" ? (
+                      <em data-status={server.status}>{server.status}</em>
+                    </article>
+                  ))
+                ) : (
+                  <p>No language services detected for the current project.</p>
+                )}
+              </div>
+            </section>
+          </SettingsDisclosure>
+          <SettingsDisclosure
+            id="local-contributions"
+            title="Local contributions"
+            summary={`${contributions.length} registered`}
+          >
+            <section className="gyro-workspace-contributions">
+              <header>
+                <div>
+                  <p>
+                    Declarative commands and views loaded from a local manifest.
+                    Contributions stay disabled until you enable them.
+                  </p>
+                </div>
+                <button
+                  onClick={() => contributionInputRef.current?.click()}
+                  type="button"
+                >
+                  <Plus size={13} /> Install from manifest
+                </button>
+                <input
+                  accept=".json,.gyro-extension"
+                  aria-label="Install local contribution manifest"
+                  hidden
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (!file) return;
+                    try {
+                      const contribution = parsedLocalIdeContribution(
+                        JSON.parse(await file.text()),
+                        file.name,
+                      );
+                      onRegisterContribution?.(contribution);
+                      setContributionError("");
+                    } catch (error) {
+                      setContributionError(String(error));
+                    }
+                  }}
+                  ref={contributionInputRef}
+                  type="file"
+                />
+              </header>
+              {contributionError ? (
+                <p className="gyro-workspace-contribution-error" role="alert">
+                  {contributionError}
+                </p>
+              ) : null}
+              <div className="gyro-workspace-contribution-list">
+                {contributions.map((contribution) => (
+                  <article key={contribution.id}>
+                    <div className="gyro-workspace-contribution-title">
+                      <Settings size={14} />
+                      <span>
+                        <strong>{contribution.label}</strong>
+                        <small>
+                          {contribution.publisher} · v{contribution.version} ·{" "}
+                          {contribution.source === "core"
+                            ? "bundled with Gyro"
+                            : (contribution.manifestName ?? "local manifest")}
+                        </small>
+                      </span>
+                      <em className={`is-${contribution.source}`}>
+                        {contribution.source}
+                      </em>
+                    </div>
+                    <div className="gyro-workspace-contribution-permissions">
+                      {contribution.permissions.map((permission) => (
+                        <span key={permission}>
+                          <ShieldCheck size={10} /> {permission}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="gyro-workspace-contribution-actions">
                       <button
-                        className="is-danger"
-                        onClick={() => onRemoveContribution?.(contribution.id)}
+                        disabled={contribution.source === "core"}
+                        onClick={() =>
+                          onToggleContribution?.(
+                            contribution.id,
+                            !contribution.enabled,
+                          )
+                        }
                         type="button"
                       >
-                        Remove
+                        {contribution.enabled ? "Disable" : "Enable"}
                       </button>
-                    ) : null}
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section></SettingsDisclosure>
+                      {contribution.source === "local" ? (
+                        <button
+                          className="is-danger"
+                          onClick={() =>
+                            onRemoveContribution?.(contribution.id)
+                          }
+                          type="button"
+                        >
+                          Remove
+                        </button>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </SettingsDisclosure>
         </>
       )}
     </section>
@@ -14542,7 +10046,6 @@ function parsedLocalIdeContribution(
     commands,
   };
 }
-
 
 function workspaceKeybindingLabel(binding: WorkspaceKeybinding) {
   const mac = isMacPlatform();
@@ -15389,102 +10892,102 @@ function EditorGroupPane({
         }}
       >
         <div className="gyro-editor-tab-strip" ref={editorTabStripRef}>
-        {group.tabs.length > 0 ? (
-          group.tabs.map((tab) => {
-            const badge = scmFileBadge(tab.path);
-            const FileIcon = badge.icon;
-            return (
-              <button
-                className={[
-                  activePath === tab.path ? "is-active" : "",
-                  tab.dirty ? "is-dirty" : "",
-                  tab.sourceControlDiff ? "is-diff" : "",
-                  tab.preview && !tab.pinned ? "is-preview" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                draggable
-                key={tab.path}
-                onClick={() => onSelectFile(tab.path)}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  openFileMenu(
-                    event.currentTarget,
-                    tab.path,
-                    event.clientX,
-                    event.clientY,
-                  );
-                }}
-                onKeyDown={(event) => {
-                  if (
-                    event.key !== "ContextMenu" &&
-                    !(event.shiftKey && event.key === "F10")
-                  )
-                    return;
-                  event.preventDefault();
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  openFileMenu(
-                    event.currentTarget,
-                    tab.path,
-                    rect.left,
-                    rect.bottom,
-                  );
-                }}
-                title={`${tab.path} · Right-click for file actions`}
-                onDoubleClick={() => onPinTab?.(tab.path)}
-                onDragStart={(event) => {
-                  event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData(
-                    "application/x-gyro-editor-tab",
-                    tab.path,
-                  );
-                  event.dataTransfer.setData(
-                    "application/x-gyro-editor-group",
-                    group.id,
-                  );
-                }}
-                type="button"
-              >
-                <FileIcon
-                  aria-hidden="true"
-                  className="gyro-editor-file-icon"
-                  data-file-tone={badge.tone}
-                  size={14}
-                />
-                <span>{tab.title || workspaceName(tab.path)}</span>
-                <span
-                  aria-label={`Close ${tab.title || workspaceName(tab.path)}`}
-                  className="gyro-editor-tab-close"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCloseTab?.(tab.path);
+          {group.tabs.length > 0 ? (
+            group.tabs.map((tab) => {
+              const badge = scmFileBadge(tab.path);
+              const FileIcon = badge.icon;
+              return (
+                <button
+                  className={[
+                    activePath === tab.path ? "is-active" : "",
+                    tab.dirty ? "is-dirty" : "",
+                    tab.sourceControlDiff ? "is-diff" : "",
+                    tab.preview && !tab.pinned ? "is-preview" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  draggable
+                  key={tab.path}
+                  onClick={() => onSelectFile(tab.path)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    openFileMenu(
+                      event.currentTarget,
+                      tab.path,
+                      event.clientX,
+                      event.clientY,
+                    );
                   }}
                   onKeyDown={(event) => {
-                    if (event.key !== "Enter" && event.key !== " ") {
+                    if (
+                      event.key !== "ContextMenu" &&
+                      !(event.shiftKey && event.key === "F10")
+                    )
                       return;
-                    }
                     event.preventDefault();
-                    event.stopPropagation();
-                    onCloseTab?.(tab.path);
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    openFileMenu(
+                      event.currentTarget,
+                      tab.path,
+                      rect.left,
+                      rect.bottom,
+                    );
                   }}
-                  role="button"
-                  tabIndex={0}
+                  title={`${tab.path} · Right-click for file actions`}
+                  onDoubleClick={() => onPinTab?.(tab.path)}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData(
+                      "application/x-gyro-editor-tab",
+                      tab.path,
+                    );
+                    event.dataTransfer.setData(
+                      "application/x-gyro-editor-group",
+                      group.id,
+                    );
+                  }}
+                  type="button"
                 >
-                  <X size={12} />
-                  {tab.dirty ? <i aria-hidden="true" /> : null}
-                </span>
-              </button>
-            );
-          })
-        ) : (
-          <button className="is-empty" disabled type="button">
-            <FileCode2 size={14} />
-            <span>No file selected</span>
-          </button>
-        )}
-        {groupCount > 1 ? (
-          <span className="gyro-preview-tag">{group.title}</span>
-        ) : null}
+                  <FileIcon
+                    aria-hidden="true"
+                    className="gyro-editor-file-icon"
+                    data-file-tone={badge.tone}
+                    size={14}
+                  />
+                  <span>{tab.title || workspaceName(tab.path)}</span>
+                  <span
+                    aria-label={`Close ${tab.title || workspaceName(tab.path)}`}
+                    className="gyro-editor-tab-close"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCloseTab?.(tab.path);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") {
+                        return;
+                      }
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onCloseTab?.(tab.path);
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <X size={12} />
+                    {tab.dirty ? <i aria-hidden="true" /> : null}
+                  </span>
+                </button>
+              );
+            })
+          ) : (
+            <button className="is-empty" disabled type="button">
+              <FileCode2 size={14} />
+              <span>No file selected</span>
+            </button>
+          )}
+          {groupCount > 1 ? (
+            <span className="gyro-preview-tag">{group.title}</span>
+          ) : null}
         </div>
         <div className="gyro-editor-tab-actions">
           {editorNavigation &&
@@ -15661,7 +11164,7 @@ function EditorGroupPane({
             onSelectionChange: onEditorSelectionChange ?? (() => undefined),
           })
         ) : fileLoadState === "loading" ? (
-          <div className="gyro-code-empty">Loading file preview...</div>
+          <div className="gyro-code-empty">Loading file preview…</div>
         ) : fileLoadState === "error" ? (
           <div className="gyro-code-empty">
             {fileError || "File preview failed."}
@@ -15908,12 +11411,6 @@ export type ChatRailTerminalTools = Omit<
   TerminalPanelProps,
   "terminalPanes" | "terminalSourceControl" | "revealWorkspaceOnLaunch"
 >;
-
-type TerminalLaunchOptions = {
-  reveal?: boolean;
-  directory?: "home" | "choose";
-  folderPath?: string;
-};
 
 type TerminalPanelProps = {
   panelActions?: ReactNode;
@@ -17876,10 +13373,10 @@ function maxToolPanelHeight() {
 }
 
 export {
-TOOL_PANEL_BROWSER_HEIGHT,
-TOOL_PANEL_DEFAULT_HEIGHT,
-TOOL_PANEL_MIN_HEIGHT,
-maxToolPanelHeight
+  TOOL_PANEL_BROWSER_HEIGHT,
+  TOOL_PANEL_DEFAULT_HEIGHT,
+  TOOL_PANEL_MIN_HEIGHT,
+  maxToolPanelHeight,
 };
 
 export function ToolsSurface({
@@ -19368,446 +14865,6 @@ export function DiffReviewSurface({
   );
 }
 
-/** Icon for a normalized GitHub run state. */
-function githubRunStateIcon(state: GithubRunState): IconComponent {
-  if (state === "success") {
-    return Check;
-  }
-  if (state === "queued" || state === "in-progress") {
-    return CircleDashed;
-  }
-  if (
-    state === "failure" ||
-    state === "timed-out" ||
-    state === "action-required" ||
-    state === "stale"
-  ) {
-    return XCircle;
-  }
-  return Minus;
-}
-
-/**
- * GitHub pull requests and Actions runs for the current workspace.
- *
- * Renders nothing but a short hint when `gh` is missing, logged out, or the
- * repository is not on GitHub — the states where showing controls would only
- * promise something Gyro cannot deliver.
- */
-function scmBranchMenuStyle(trigger: HTMLElement): CSSProperties {
-  const rect = trigger.getBoundingClientRect();
-  const padding = 8;
-  const minWidth = Math.max(rect.width, 260);
-  const width = Math.min(
-    minWidth,
-    Math.max(160, window.innerWidth - padding * 2),
-  );
-  const spaceBelow = window.innerHeight - rect.bottom - padding;
-  const spaceAbove = rect.top - padding;
-  const openUp = spaceBelow < 148 && spaceAbove > spaceBelow;
-  const left = Math.min(
-    Math.max(padding, rect.right - width),
-    Math.max(padding, window.innerWidth - width - padding),
-  );
-  const maxHeight = Math.min(
-    280,
-    Math.max(96, (openUp ? spaceAbove : spaceBelow) - 4),
-  );
-  return openUp
-    ? {
-        left,
-        width,
-        maxHeight,
-        top: "auto",
-        bottom: window.innerHeight - rect.top + 4,
-      }
-    : {
-        left,
-        width,
-        maxHeight,
-        top: rect.bottom + 4,
-        bottom: "auto",
-      };
-}
-
-function ScmBranchPicker({
-  branchCatalog,
-  currentBranch,
-  disabled = false,
-  error,
-  isLoading = false,
-  onCreateBranch,
-  onSelectBranch,
-}: {
-  branchCatalog?: GitBranchCatalog;
-  currentBranch?: string;
-  disabled?: boolean;
-  error?: string;
-  isLoading?: boolean;
-  onCreateBranch?: () => void;
-  onSelectBranch?: (branch: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
-    open,
-    () => setOpen(false),
-    triggerRef,
-  );
-  const branches = branchCatalog?.branches ?? [];
-  const label =
-    currentBranch && currentBranch !== "(detached)"
-      ? currentBranch
-      : currentBranch === "(detached)"
-        ? "Detached HEAD"
-        : branchCatalog?.available === false
-          ? "No repository"
-          : "Select branch";
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    const update = () => {
-      const trigger = triggerRef.current;
-      if (!trigger) return;
-      setMenuStyle(scmBranchMenuStyle(trigger));
-    };
-    update();
-    window.addEventListener("resize", update);
-    document.addEventListener("scroll", update, true);
-    return () => {
-      window.removeEventListener("resize", update);
-      document.removeEventListener("scroll", update, true);
-    };
-  }, [open]);
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    menuRef.current
-      ?.querySelector<HTMLElement>(".gyro-scm-branch-item.is-current")
-      ?.scrollIntoView({ block: "nearest" });
-  }, [open, menuRef, currentBranch]);
-
-  return (
-    <div className="gyro-scm-branch-picker">
-      <button
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        className="gyro-scm-branch-trigger"
-        disabled={disabled || isLoading}
-        onClick={() => {
-          if (open) {
-            setOpen(false);
-            return;
-          }
-          if (triggerRef.current) {
-            setMenuStyle(scmBranchMenuStyle(triggerRef.current));
-          }
-          setOpen(true);
-        }}
-        ref={triggerRef}
-        title={error ?? label}
-        type="button"
-      >
-        <GitBranch size={12} aria-hidden="true" />
-        <span>{isLoading ? "Loading…" : label}</span>
-        <ChevronDown size={12} aria-hidden="true" />
-      </button>
-      {open
-        ? createPortal(
-            // The repository section clips overflow, so this menu has to live
-            // on document.body or the current branch is cut off over the form.
-            <div
-              className="gyro-scm-branch-menu"
-              ref={menuRef}
-              role="listbox"
-              style={menuStyle}
-            >
-              <button
-                className="gyro-scm-branch-item is-action"
-                onClick={() => {
-                  setOpen(false);
-                  onCreateBranch?.();
-                }}
-                type="button"
-              >
-                <GitBranchPlus size={12} aria-hidden="true" />
-                Create new branch…
-              </button>
-              {branches.length === 0 ? (
-                <div className="gyro-scm-branch-empty">
-                  {branchCatalog?.error ?? error ?? "No local branches found."}
-                </div>
-              ) : (
-                branches.map((branch) => {
-                  const isCurrent = branch === currentBranch;
-                  return (
-                    <button
-                      aria-selected={isCurrent}
-                      className={[
-                        "gyro-scm-branch-item",
-                        isCurrent ? "is-current" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                      key={branch}
-                      onClick={() => {
-                        setOpen(false);
-                        if (!isCurrent) {
-                          onSelectBranch?.(branch);
-                        }
-                      }}
-                      role="option"
-                      title={branch}
-                      type="button"
-                    >
-                      <GitBranch size={12} aria-hidden="true" />
-                      <span>{branch}</span>
-                      {isCurrent ? (
-                        <Check size={12} aria-hidden="true" />
-                      ) : null}
-                    </button>
-                  );
-                })
-              )}
-            </div>,
-            document.body,
-          )
-        : null}
-    </div>
-  );
-}
-
-function GithubSidebarPanel({
-  github,
-  branch,
-  onOpenUrl,
-  onRefresh,
-  onRerunRun,
-  onSelectRun,
-  onViewLogs,
-}: {
-  github?: GithubState;
-  branch?: string;
-  onOpenUrl?: (url: string) => void | Promise<void>;
-  onRefresh?: () => void | Promise<void>;
-  onRerunRun?: (runId: number, failedOnly: boolean) => void | Promise<void>;
-  onSelectRun?: (runId: number) => void | Promise<void>;
-  onViewLogs?: (runId: number) => void | Promise<void>;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const availability = github?.availability;
-  const header = (
-    <div className="gyro-sidebar-scm-group-label is-github">
-      <button
-        aria-expanded={expanded}
-        aria-label={
-          expanded ? "Collapse GitHub details" : "Expand GitHub details"
-        }
-        className="gyro-sidebar-scm-group-toggle"
-        onClick={() => setExpanded((current) => !current)}
-        type="button"
-      >
-        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-      </button>
-      <span className="gyro-scm-label-text">GitHub</span>
-      {github?.loading ? <small>…</small> : null}
-      <button
-        aria-label="Refresh GitHub"
-        disabled={github?.loading}
-        onClick={() => void onRefresh?.()}
-        title="Refresh"
-        type="button"
-      >
-        <RefreshCw size={12} />
-      </button>
-    </div>
-  );
-
-  if (!expanded) {
-    return header;
-  }
-
-  if (!github || !availability?.available) {
-    return (
-      <>
-        {header}
-        <div className="gyro-sidebar-mini-copy">
-          {github?.error ??
-            availability?.error ??
-            availability?.hint ??
-            (github?.loading
-              ? "Checking GitHub availability…"
-              : "Refresh to check GitHub availability.")}
-          {availability?.hint &&
-          (github?.error || availability.error) &&
-          availability.hint !== (github?.error ?? availability.error)
-            ? ` ${availability.hint}`
-            : null}
-        </div>
-      </>
-    );
-  }
-
-  // Runs for the checked-out branch first: that is what the user just pushed.
-  const runs = [...github.runs].sort((first, second) => {
-    const firstMatches = branch && first.branch === branch ? 0 : 1;
-    const secondMatches = branch && second.branch === branch ? 0 : 1;
-    return firstMatches - secondMatches;
-  });
-  const selectedRun = github.runs.find(
-    (run) => run.id === github.selectedRunId,
-  );
-  const detail =
-    github.runDetail?.run.id === github.selectedRunId
-      ? github.runDetail
-      : undefined;
-
-  return (
-    <>
-      {header}
-      {github.error ? (
-        <div className="gyro-sidebar-mini-copy">{github.error}</div>
-      ) : null}
-      <div className="gyro-sidebar-mini-copy">
-        {github.error
-          ? "PR refresh failed. Previously loaded results may be stale."
-          : github.loading
-            ? "Refreshing pull requests…"
-            : github.lastCheckedAt &&
-                !github.pullRequests.some((pr) => pr.headRef === branch)
-              ? `No open pull request for ${branch ?? "this branch"}`
-              : null}
-      </div>
-      {github.pullRequests.length > 0 ? (
-        <>
-          <div className="gyro-sidebar-scm-group-label">
-            <span className="gyro-scm-label-text">Pull requests</span>
-            <small>{github.pullRequests.length}</small>
-          </div>
-          {[...github.pullRequests]
-            .sort(
-              (a, b) =>
-                Number(b.headRef === branch) - Number(a.headRef === branch),
-            )
-            .slice(0, 8)
-            .map((pullRequest) => {
-              const ChecksIcon = pullRequest.checks
-                ? githubRunStateIcon(pullRequest.checks)
-                : undefined;
-              return (
-                <button
-                  className="gyro-sidebar-github-row"
-                  key={pullRequest.number}
-                  onClick={() => void onOpenUrl?.(pullRequest.url)}
-                  title={`Open GitHub for comments, review, and merge · #${pullRequest.number} ${pullRequest.title} · Checks: ${pullRequest.checks ?? "not reported"}`}
-                  type="button"
-                >
-                  <GitPullRequest size={12} aria-hidden="true" />
-                  <span className="gyro-sidebar-github-title">
-                    {pullRequest.headRef === branch ? "Current branch · " : ""}
-                    {pullRequest.title}
-                  </span>
-                  <small>#{pullRequest.number}</small>
-                  {ChecksIcon ? (
-                    <ChecksIcon
-                      className={`gyro-github-state is-${pullRequest.checks}`}
-                      size={11}
-                    />
-                  ) : null}
-                </button>
-              );
-            })}
-        </>
-      ) : null}
-      <div className="gyro-sidebar-scm-group-label">
-        <span className="gyro-scm-label-text">Actions</span>
-        <small>{runs.length}</small>
-      </div>
-      {runs.length === 0 ? (
-        <div className="gyro-sidebar-mini-copy">No workflow runs</div>
-      ) : (
-        runs.slice(0, 10).map((run) => {
-          const StateIcon = githubRunStateIcon(run.state);
-          const isSelected = run.id === github.selectedRunId;
-          return (
-            <div className="gyro-sidebar-github-run" key={run.id}>
-              <button
-                className={`gyro-sidebar-github-row${isSelected ? " is-active" : ""}`}
-                onClick={() => void onSelectRun?.(run.id)}
-                title={`${run.workflowName} · ${run.title} · ${run.branch}`}
-                type="button"
-              >
-                <StateIcon
-                  className={`gyro-github-state is-${run.state}`}
-                  size={12}
-                />
-                <span className="gyro-sidebar-github-title">
-                  {run.workflowName}
-                </span>
-                <small>{run.branch}</small>
-              </button>
-              {isSelected ? (
-                <div className="gyro-sidebar-github-detail">
-                  {detail ? (
-                    detail.jobs.map((job) => {
-                      const JobIcon = githubRunStateIcon(job.state);
-                      return (
-                        <div
-                          className="gyro-sidebar-github-job"
-                          key={job.id}
-                          title={`${job.name} — ${job.state}`}
-                        >
-                          <JobIcon
-                            className={`gyro-github-state is-${job.state}`}
-                            size={12}
-                          />
-                          <span>{job.name}</span>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className="gyro-sidebar-mini-copy">Loading jobs…</div>
-                  )}
-                  <div className="gyro-sidebar-github-actions">
-                    <button
-                      onClick={() => void onViewLogs?.(run.id)}
-                      title="Show failed-step logs in the Output panel"
-                      type="button"
-                    >
-                      <ScrollText size={12} />
-                      Logs
-                    </button>
-                    <button
-                      // Re-running only the failed jobs is the common repair;
-                      // it is also far cheaper than a full re-run.
-                      disabled={!selectedRun?.state}
-                      onClick={() => void onRerunRun?.(run.id, true)}
-                      title="Re-run the failed jobs in this run"
-                      type="button"
-                    >
-                      <RotateCcw size={12} />
-                      Re-run failed
-                    </button>
-                    <button
-                      onClick={() => void onOpenUrl?.(run.url)}
-                      title="Open this run on GitHub"
-                      type="button"
-                    >
-                      <Globe2 size={12} />
-                      Open
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          );
-        })
-      )}
-    </>
-  );
-}
-
 function gitReviewActionIcon(actionId: GitReviewActionId): IconComponent {
   if (actionId === "create-branch") {
     return GitBranch;
@@ -20202,12 +15259,21 @@ function ResizableBrowserRail({
   );
 }
 
-export function BrowserPreviewSurface(props: Parameters<typeof WebBrowserPreviewSurface>[0]) {
+export function BrowserPreviewSurface(
+  props: Parameters<typeof WebBrowserPreviewSurface>[0],
+) {
   const runtime = props.browserPreview?.runtime;
-  return runtime ? <AppPreviewPanel key={runtime.key} runtime={runtime}
-    onHideWeb={() => props.onHostBoundsChange?.(null)}>
+  return runtime ? (
+    <AppPreviewPanel
+      key={runtime.key}
+      runtime={runtime}
+      onHideWeb={() => props.onHostBoundsChange?.(null)}
+    >
+      <WebBrowserPreviewSurface {...props} />
+    </AppPreviewPanel>
+  ) : (
     <WebBrowserPreviewSurface {...props} />
-  </AppPreviewPanel> : <WebBrowserPreviewSurface {...props} />;
+  );
 }
 
 function WebBrowserPreviewSurface({
@@ -20412,6 +15478,10 @@ function WebBrowserPreviewSurface({
     <div className={previewClassName}>
       {/* The browser owns navigation; the surrounding dock owns tool tabs. */}
       <div className="gyro-browser-preview-head">
+        {/* Drawn over the head's edge so loading never resizes the page's host. */}
+        {isChat && (isLoading || isCapturing) ? (
+          <span aria-hidden="true" className="gyro-browser-progress" />
+        ) : null}
         <div className="gyro-browser-preview-toolbar" ref={browserToolbarRef}>
           <div
             className="gyro-browser-nav-group"
@@ -20457,7 +15527,21 @@ function WebBrowserPreviewSurface({
               onNavigate?.(isChat ? addressValue : frameUrl);
             }}
           >
-            <Globe2 size={14} />
+            {isChat ? (
+              <span aria-hidden="true" className="gyro-url-glyph">
+                {isBlank ? (
+                  <Search size={14} />
+                ) : preview.status === "verification-failed" ? (
+                  <TriangleAlert size={14} />
+                ) : isLocalPreview ? (
+                  <Laptop size={14} />
+                ) : (
+                  <Globe2 size={14} />
+                )}
+              </span>
+            ) : (
+              <Globe2 size={14} />
+            )}
             <input
               aria-label="Browser URL"
               onChange={(event) => {
@@ -20568,17 +15652,21 @@ function WebBrowserPreviewSurface({
               type="button"
             >
               <Camera size={14} />
+              {isChat ? <span>Screenshot</span> : null}
             </button>
-            <button
-              aria-label="Open in system browser"
-              className="gyro-browser-external-button"
-              disabled={isBlank}
-              onClick={onOpenExternal}
-              title="Open in system browser"
-              type="button"
-            >
-              <Globe2 size={14} />
-            </button>
+            {/* The chat address bar already has this action. */}
+            {!isChat ? (
+              <button
+                aria-label="Open in system browser"
+                className="gyro-browser-external-button"
+                disabled={isBlank}
+                onClick={onOpenExternal}
+                title="Open in system browser"
+                type="button"
+              >
+                <Globe2 size={14} />
+              </button>
+            ) : null}
           </div>
         </div>
         {isChat && agentActivity ? (
@@ -20602,31 +15690,68 @@ function WebBrowserPreviewSurface({
         ) : null}
       </div>
       <div className="gyro-browser-frame">
-        <BrowserPreviewSurround preview={preview} disabled={isBlank || showingCapture}>
-        <div
-          className={`gyro-browser-page is-${preview.device}`}
-          data-device-label={deviceLabel(preview.device)}
+        <BrowserPreviewSurround
+          preview={preview}
+          // Only a page gets a viewport frame; messages fill the panel.
+          disabled={
+            isBlank ||
+            showingCapture ||
+            preview.status === "idle" ||
+            preview.status === "verification-failed"
+          }
         >
-          {isBlank ? (
-            <div className="gyro-browser-new-tab">
-              <Globe aria-hidden="true" size={28} />
-              <strong>Start browsing</strong>
-              <span>Enter a URL to open a page</span>
-            </div>
-          ) : useNativeHost ? (
-            <div
-              ref={hostRef}
-              aria-hidden={showingCapture || undefined}
-              aria-label="Native browser surface"
-              className={[
-                "gyro-browser-native-host",
-                showingCapture ? "is-capture-hidden" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              data-browser-host="true"
-            >
-              {showPlaceholder ? (
+          <div
+            className={`gyro-browser-page is-${preview.device}`}
+            data-device-label={deviceLabel(preview.device)}
+          >
+            {isBlank ? (
+              <div className="gyro-browser-new-tab">
+                <Globe aria-hidden="true" size={28} />
+                <strong>Start browsing</strong>
+                <span>Enter a URL to open a page</span>
+              </div>
+            ) : useNativeHost ? (
+              <div
+                ref={hostRef}
+                aria-hidden={showingCapture || undefined}
+                aria-label="Native browser surface"
+                className={[
+                  "gyro-browser-native-host",
+                  showingCapture ? "is-capture-hidden" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                data-browser-host="true"
+              >
+                {showPlaceholder ? (
+                  <BrowserFramePlaceholder
+                    compactLoading={isChat}
+                    captureSrc={showCaptureBackdrop ? captureSrc : undefined}
+                    hostLabel={hostLabel}
+                    isLoading={isLoading}
+                    isOccluded={overlayOccluded}
+                    isUnreachable={preview.status === "verification-failed"}
+                    onNavigate={onNavigate}
+                    onOpenExternal={onOpenExternal}
+                    onReload={reloadFrame}
+                    suggestedUrl={frameUrl}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+            {isBlank ? null : showingCapture && captureSrc ? (
+              <BrowserCaptureView
+                key={`${preview.latestCapture!.path}:${preview.latestCapture!.createdAt}`}
+                capture={preview.latestCapture!}
+                src={captureSrc}
+                fallbackUrl={preview.url}
+                deviceLabel={deviceLabel(preview.device)}
+                isChat={isChat}
+                onBackToLive={() => setFrameMode("live")}
+                onScreenshot={onScreenshot}
+              />
+            ) : !useNativeHost ? (
+              showPlaceholder ? (
                 <BrowserFramePlaceholder
                   compactLoading={isChat}
                   captureSrc={showCaptureBackdrop ? captureSrc : undefined}
@@ -20639,66 +15764,42 @@ function WebBrowserPreviewSurface({
                   onReload={reloadFrame}
                   suggestedUrl={frameUrl}
                 />
-              ) : null}
-            </div>
-          ) : null}
-          {isBlank ? null : showingCapture && captureSrc ? (
-            <BrowserCaptureView
-              key={`${preview.latestCapture!.path}:${preview.latestCapture!.createdAt}`}
-              capture={preview.latestCapture!}
-              src={captureSrc}
-              fallbackUrl={preview.url}
-              deviceLabel={deviceLabel(preview.device)}
-              isChat={isChat}
-              onBackToLive={() => setFrameMode("live")}
-              onScreenshot={onScreenshot}
-            />
-          ) : !useNativeHost ? (
-            showPlaceholder ? (
-              <BrowserFramePlaceholder
-                compactLoading={isChat}
-                captureSrc={showCaptureBackdrop ? captureSrc : undefined}
-                hostLabel={hostLabel}
-                isLoading={isLoading}
-                isOccluded={overlayOccluded}
-                isUnreachable={preview.status === "verification-failed"}
-                onNavigate={onNavigate}
-                onOpenExternal={onOpenExternal}
-                onReload={reloadFrame}
-                suggestedUrl={frameUrl}
-              />
-            ) : (
-              <FittedBrowserFrame
-                key={`${frameUrl}:${frameRevision}`}
-                preview={preview}
-                url={frameUrl}
-              />
-            )
-          ) : null}
-          {!isChat && (isLoading || isCapturing) ? (
-            <div aria-live="polite" className="gyro-browser-activity-strip">
-              <span className="gyro-ring is-running" />
-              <span>
-                {isCapturing
-                  ? "Capturing screenshot…"
-                  : hostLabel
-                    ? `Loading ${hostLabel}…`
-                    : "Loading preview…"}
-              </span>
-            </div>
-          ) : null}
-        </div>
+              ) : (
+                <FittedBrowserFrame
+                  key={`${frameUrl}:${frameRevision}`}
+                  preview={preview}
+                  url={frameUrl}
+                />
+              )
+            ) : null}
+            {!isChat && (isLoading || isCapturing) ? (
+              <div aria-live="polite" className="gyro-browser-activity-strip">
+                <span className="gyro-ring is-running" />
+                <span>
+                  {isCapturing
+                    ? "Capturing screenshot…"
+                    : hostLabel
+                      ? `Loading ${hostLabel}…`
+                      : "Loading preview…"}
+                </span>
+              </div>
+            ) : null}
+          </div>
         </BrowserPreviewSurround>
       </div>
       <div
-        className={`gyro-browser-statusbar${isChat && !showingCapture && preview.captureStatus === "idle" && !hasDiagnostics ? " is-hidden" : ""}`}
+        // In chat this row appears only for something to act on: its other readouts
+        // live elsewhere, and showing it would resize the native page mid-load.
+        className={`gyro-browser-statusbar${isChat && preview.captureStatus !== "failed" && !hasDiagnostics ? " is-hidden" : ""}`}
       >
         <div>
           <span className={statusRingClass} />
           <span>
             {showingCapture
               ? `Capture · ${captureSourceLabel || "preview"} · ${deviceLabel(preview.device)}`
-              : browserStatusLabel(preview)}
+              : isChat && hasDiagnostics
+                ? "This page reported errors"
+                : browserStatusLabel(preview)}
           </span>
         </div>
         {preview.captureStatus !== "idle" ? (
@@ -20729,7 +15830,7 @@ function WebBrowserPreviewSurface({
           >
             <Camera size={13} />
             {preview.captureStatus === "capturing"
-              ? "Capturing..."
+              ? "Capturing…"
               : preview.captureStatus === "failed"
                 ? "Capture failed"
                 : showingCapture
@@ -20825,7 +15926,7 @@ function BrowserFramePlaceholder({
     : isLoading
       ? "Loading preview"
       : isUnreachable
-        ? "Can't reach this URL"
+        ? "Can't reach this page"
         : "No live preview yet";
   const detail = isOccluded
     ? "Close the overlay to show the native browser surface again."
@@ -20834,10 +15935,15 @@ function BrowserFramePlaceholder({
         ? `Connecting to ${hostLabel}…`
         : "Connecting…"
       : isUnreachable
-        ? "Start the app, or try another local URL."
+        ? isLoopbackBrowserPreviewUrl(suggestedUrl)
+          ? `Nothing is responding at ${hostLabel || "this address"}. Start the app, then try again.`
+          : "Check the address or your connection, then try again."
         : hasUrl
           ? "Point the browser at a running app, or open this URL externally."
           : "Enter a URL above to preview a running app or website.";
+  // A chat panel's toolbar already offers reload, so its loading state stays quiet.
+  const showActions = !isOccluded && !(isLoading && compactLoading);
+  const showHostAction = hasUrl && !isLoading && !isUnreachable;
 
   return (
     <div
@@ -20871,30 +15977,28 @@ function BrowserFramePlaceholder({
           </div>
         ) : (
           <div className="gyro-browser-placeholder-icon" aria-hidden="true">
-            <Globe2 size={22} />
+            {isUnreachable ? <TriangleAlert size={22} /> : <Globe2 size={22} />}
           </div>
         )}
         <strong>{title}</strong>
         <p>{detail}</p>
-        {!isOccluded ? (
+        {showActions ? (
           <div className="gyro-browser-placeholder-actions">
-            {hasUrl ? (
+            {showHostAction ? (
               <button onClick={() => onNavigate?.(suggestedUrl)} type="button">
-                {hostLabel || "localhost:3000"}
+                Open {hostLabel || "localhost:3000"}
               </button>
             ) : null}
             {isUnreachable || isLoading ? (
               <button onClick={onReload} type="button">
-                Retry
+                Try again
               </button>
             ) : null}
-            <button
-              disabled={!hasUrl || !onOpenExternal}
-              onClick={onOpenExternal}
-              type="button"
-            >
-              Open external
-            </button>
+            {hasUrl && onOpenExternal ? (
+              <button onClick={onOpenExternal} type="button">
+                Open in system browser
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -21159,25 +16263,6 @@ const globalSearchActions: GlobalSearchAction[] = [
     requiresTrust: command.requiresTrust,
   })),
 ];
-
-function isMacPlatform() {
-  return (
-    typeof navigator !== "undefined" &&
-    /Mac|iPhone|iPad/.test(navigator.platform)
-  );
-}
-
-type GlobalSearchMode = "commands" | "files" | "global";
-
-function primaryGlobalSearchShortcut(mode: GlobalSearchMode) {
-  if (mode === "commands") {
-    return isMacPlatform() ? "⇧⌘P" : "Ctrl Shift P";
-  }
-  if (mode === "files") {
-    return isMacPlatform() ? "⌘P" : "Ctrl P";
-  }
-  return isMacPlatform() ? "⌘K" : "Ctrl K";
-}
 
 /** Holds one ranker per collection so keystrokes narrow the previous survivors. */
 function useGlobalSearchRanker(entries: GlobalSearchEntry[]) {
@@ -21712,9 +16797,7 @@ export function ModelStandardPromptOverlay({
         Used successfully {usageCount} {usageCount === 1 ? "time" : "times"}{" "}
         across {chatCount} {chatCount === 1 ? "chat" : "chats"}.
       </p>
-      <p id={detailId}>
-        New {providerLabel} chats will start with this model.
-      </p>
+      <p id={detailId}>New {providerLabel} chats will start with this model.</p>
       {error ? (
         <p className="gyro-model-default-error" role="alert">
           {error}
@@ -21949,88 +17032,6 @@ export function ChatCloseConfirmOverlay({
             type="button"
           >
             Stop and close
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-type SessionDeleteConfirmOverlayProps = {
-  chatLabel: string;
-  /**
-   * A live provider turn blocks deletion in the backend, so a working chat
-   * explains that here rather than failing after the user commits.
-   */
-  isWorking?: boolean;
-  onCancel: () => void;
-  onDelete: () => void;
-};
-
-/**
- * Deleting a sidebar chat is the one sidebar action that cannot be undone —
- * it removes the transcript, saved attachments, panes, and terminals bound to
- * the session — so the row menu's Delete asks here first.
- */
-export function SessionDeleteConfirmOverlay({
-  chatLabel,
-  isWorking = false,
-  onCancel,
-  onDelete,
-}: SessionDeleteConfirmOverlayProps) {
-  const { ref: dialogRef, dismiss } = useDialogDismiss(onCancel);
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        dismiss();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [dismiss]);
-
-  return (
-    <div
-      ref={dialogRef}
-      aria-modal="true"
-      className="gyro-terminal-terminate-overlay"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) {
-          dismiss();
-        }
-      }}
-      role="alertdialog"
-    >
-      <section
-        aria-label={`Delete ${chatLabel}`}
-        className="gyro-terminal-terminate-card gyro-chat-delete-card"
-      >
-        <div className="gyro-terminal-terminate-heading">
-          <Trash2 size={16} />
-          <h2>Delete this chat?</h2>
-        </div>
-        <p>
-          Deleting <strong>{chatLabel}</strong> removes its messages and saved
-          attachments from Gyro, and this can't be undone. Files in the project
-          are not touched.
-        </p>
-        {isWorking ? (
-          <p className="gyro-chat-delete-note">
-            This chat is still working. Stop its turn before deleting it.
-          </p>
-        ) : null}
-        <div className="gyro-terminal-terminate-actions">
-          <button autoFocus onClick={dismiss} type="button">
-            Cancel
-          </button>
-          <button
-            className="is-danger"
-            disabled={isWorking}
-            onClick={onDelete}
-            type="button"
-          >
-            Delete chat
           </button>
         </div>
       </section>
@@ -22314,6 +17315,8 @@ export type SettingsSurfaceProps = {
   preferences?: WorkbenchPreferences;
   onSettingsPreferencesChange?: (patch: SettingsPreferencePatch) => void;
   onImportSettings?: (settings: Partial<PortableSettings>) => void;
+  billingSnapshot?: BillingSnapshot;
+  billingActions?: BillingActions;
 
   projectImport?: ProjectImportSettingsProps;
   config: GyroConfig;
@@ -22341,6 +17344,8 @@ export type SettingsSurfaceProps = {
   /** Where Gyro lands on launch; `last` restores the previous view. */
   launchView?: LaunchView;
   onLaunchViewChange?: (view: LaunchView) => void;
+  accountSettings?: ReactNode;
+  cloudSettings?: ReactNode;
   activeSection?: SettingsSectionId;
   onThemeChange: (mode: ThemeMode) => void;
   onUseProvider?: (providerId: ProviderId, modelId: string) => void;
@@ -22582,7 +17587,13 @@ function CliLaunchPresetEditor({
 }
 
 export function SettingsSurface({
-  preferences, onSettingsPreferencesChange, onImportSettings,
+  accountSettings,
+  cloudSettings,
+  preferences,
+  onSettingsPreferencesChange,
+  onImportSettings,
+  billingSnapshot,
+  billingActions,
 
   projectImport,
   config,
@@ -22703,7 +17714,9 @@ export function SettingsSurface({
       ),
   );
   const needsProviderSetup = !providerConfigs.some((provider) => {
-    const health = providerStatuses?.find((status) => status.id === provider.id);
+    const health = providerStatuses?.find(
+      (status) => status.id === provider.id,
+    );
     return (
       isProviderExecutable(provider.id) &&
       isProviderRuntimeUsable(provider, health) &&
@@ -22800,806 +17813,970 @@ export function SettingsSurface({
   const revealProviderConnection = (id: string) => {
     const container = document.getElementById(id);
     const section =
-      container?.querySelector<HTMLElement>("[data-settings-disclosure]") ?? container;
+      container?.querySelector<HTMLElement>("[data-settings-disclosure]") ??
+      container;
     revealSettingsTarget(section);
     section?.scrollIntoView({ behavior: "instant", block: "start" });
     section?.focus({ preventScroll: true });
   };
-  const providerConnectionTable = (rows: ModelProviderConfig[]) => rows.length ? (
-<div className="gyro-provider-table is-native-list">
-              <div className="gyro-provider-table-head">
-                <span>Provider</span>
-                <span>Default model</span>
-                <span>Connection</span>
-                <span>Actions</span>
-              </div>
-              {rows.map((provider) => {
-                const capabilities = providerCapabilities(provider.id);
-                const defaultModelId = providerDefaultModelId(provider);
-                const health = providerStatuses?.find(
-                  (status) => status.id === provider.id,
-                );
-                const needsModelInstall =
-                  provider.id === "ollama" &&
-                  health?.runtimeStatus === "no-models";
-                // The guide rides every health check, so a missing binary is
-                // enough: the panel owns the command and the confirmation.
-                const installGuide = health?.healthDetails?.install ?? null;
-                const needsCliInstall =
-                  !needsModelInstall &&
-                  health?.runtimeStatus === "not-installed" &&
-                  Boolean(installGuide);
-                const needsSignInRepair =
-                  !needsModelInstall &&
-                  !needsCliInstall &&
-                  providerNeedsSignInRepair(provider, health);
-                const isConnecting =
-                  connectingProviderIds.includes(provider.id) ||
-                  provider.authStatus === "connecting";
-                const isChecking =
-                  isConnecting || health?.connectionStatus === "checking";
-                const canUseInChat =
-                  capabilities?.executable &&
-                  isProviderRuntimeUsable(provider, health) &&
-                  !needsSignInRepair &&
-                  health?.connectionStatus !== "failed" &&
-                  !isChecking &&
-                  Boolean(defaultModelId);
-                const setupMessage = isConnecting
-                  ? "Connecting. Follow the sign-in instructions if prompted."
-                  : needsModelInstall
-                    ? "Install a model, then refresh."
-                    : health?.connectionStatus === "failed" || needsSignInRepair
-                      ? (health?.healthSummary ??
-                        "Connection needs attention. Try signing in again.")
-                      : undefined;
-                return (
-                  <div
-                    id={
-                      provider.id === "ollama"
-                        ? "gyro-provider-ollama"
-                        : undefined
-                    }
-                    tabIndex={provider.id === "ollama" ? -1 : undefined}
-                    className={`gyro-provider-row${capabilities?.executable ? "" : " is-readiness-only"}${config.selectedProviderId === provider.id ? " is-selected-provider" : ""}`}
-                    key={provider.id}
-                  >
-                    <div className="gyro-provider-identity">
-                      <ProviderLogo
-                        label={provider.displayName}
-                        providerId={provider.id}
-                      />
-                      <div>
-                        <strong>{provider.displayName}</strong>
-                        {config.selectedProviderId === provider.id ? (
-                          <small className="gyro-provider-default-label">
-                            Selected provider
-                          </small>
-                        ) : null}
-                        {needsCliInstall && installGuide ? (
-                          <ProviderInstallPanel
-                            guide={installGuide}
-                            onInstall={onInstallProvider}
-                          />
-                        ) : setupMessage ? (
-                          <small
-                            className="gyro-provider-setup-message"
-                            role="status"
-                          >
-                            {setupMessage}
-                          </small>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="gyro-provider-default-model">
-                      <strong>{defaultModelLabel(provider)}</strong>
-                      {needsModelInstall ? (
-                        <small>
-                          Run <code>ollama pull &lt;model&gt;</code>.
-                        </small>
-                      ) : null}
-                    </div>
-                    <SettingsStatus
-                      status={
-                        needsModelInstall ||
-                        needsSignInRepair ||
-                        isChecking ||
-                        health?.connectionStatus === "failed"
-                          ? "warning"
-                          : provider.authStatus === "connected"
-                            ? "good"
-                            : "neutral"
-                      }
+  const providerConnectionTable = (rows: ModelProviderConfig[]) =>
+    rows.length ? (
+      <div className="gyro-provider-table is-native-list">
+        <div className="gyro-provider-table-head">
+          <span>Provider</span>
+          <span>Default model</span>
+          <span>Connection</span>
+          <span>Actions</span>
+        </div>
+        {rows.map((provider) => {
+          const capabilities = providerCapabilities(provider.id);
+          const defaultModelId = providerDefaultModelId(provider);
+          const health = providerStatuses?.find(
+            (status) => status.id === provider.id,
+          );
+          const needsModelInstall =
+            provider.id === "ollama" && health?.runtimeStatus === "no-models";
+          // The guide rides every health check, so a missing binary is
+          // enough: the panel owns the command and the confirmation.
+          const installGuide = health?.healthDetails?.install ?? null;
+          const needsCliInstall =
+            !needsModelInstall &&
+            health?.runtimeStatus === "not-installed" &&
+            Boolean(installGuide);
+          const needsSignInRepair =
+            !needsModelInstall &&
+            !needsCliInstall &&
+            providerNeedsSignInRepair(provider, health);
+          const isConnecting =
+            connectingProviderIds.includes(provider.id) ||
+            provider.authStatus === "connecting";
+          const isChecking =
+            isConnecting || health?.connectionStatus === "checking";
+          const canUseInChat =
+            capabilities?.executable &&
+            isProviderRuntimeUsable(provider, health) &&
+            !needsSignInRepair &&
+            health?.connectionStatus !== "failed" &&
+            !isChecking &&
+            Boolean(defaultModelId);
+          const setupMessage = isConnecting
+            ? "Connecting. Follow the sign-in instructions if prompted."
+            : needsModelInstall
+              ? "Install a model, then refresh."
+              : health?.connectionStatus === "failed" || needsSignInRepair
+                ? (health?.healthSummary ??
+                  "Connection needs attention. Try signing in again.")
+                : undefined;
+          // An idle provider is a name and a way to connect; its model
+          // and status mean nothing until it is connected.
+          const isIdle =
+            provider.authStatus !== "connected" &&
+            !needsCliInstall &&
+            !isChecking &&
+            !setupMessage;
+          return (
+            <div
+              id={provider.id === "ollama" ? "gyro-provider-ollama" : undefined}
+              tabIndex={provider.id === "ollama" ? -1 : undefined}
+              className={`gyro-provider-row${capabilities?.executable ? "" : " is-readiness-only"}${config.selectedProviderId === provider.id ? " is-selected-provider" : ""}${isIdle ? " is-idle" : ""}`}
+              key={provider.id}
+            >
+              <div className="gyro-provider-identity">
+                <ProviderLogo
+                  label={provider.displayName}
+                  providerId={provider.id}
+                />
+                <div>
+                  <strong>{provider.displayName}</strong>
+                  {config.selectedProviderId === provider.id ? (
+                    <small className="gyro-provider-default-label">
+                      Selected provider
+                    </small>
+                  ) : null}
+                  {needsCliInstall && installGuide ? (
+                    <ProviderInstallPanel
+                      guide={installGuide}
+                      onInstall={onInstallProvider}
+                    />
+                  ) : setupMessage ? (
+                    <small
+                      className="gyro-provider-setup-message"
+                      role="status"
                     >
-                      {isChecking
-                        ? "Connecting…"
-                        : providerConnectionLabel(provider, health)}
-                    </SettingsStatus>
-                    <div className="gyro-settings-provider-actions">
-                      {canUseInChat && onUseProvider ? (
-                        <button
-                          className="gyro-secondary-button"
-                          type="button"
-                          onClick={() =>
-                            onUseProvider(provider.id, defaultModelId!)
-                          }
-                        >
-                          Use in chat
-                        </button>
-                      ) : null}
-                      {!canUseInChat &&
-                      !isChecking &&
-                      !needsSignInRepair &&
-                      !needsModelInstall &&
-                      provider.authStatus === "connected" &&
-                      health?.connectionStatus === "failed" ? (
-                        <button
-                          className="gyro-secondary-button"
-                          type="button"
-                          onClick={() => onTestProvider?.(provider.id)}
-                        >
-                          Check connection
-                        </button>
-                      ) : null}
-                      {provider.id === "ollama" ? (
-                        <button
-                          className="gyro-secondary-button"
-                          disabled={isChecking}
-                          onClick={() => onTestProvider?.(provider.id)}
-                          type="button"
-                        >
-                          Refresh models
-                        </button>
-                      ) : null}
-                      {provider.authStatus !== "connected" ||
-                      needsSignInRepair ||
+                      {setupMessage}
+                    </small>
+                  ) : null}
+                </div>
+              </div>
+              <div className="gyro-provider-default-model">
+                <strong>{defaultModelLabel(provider)}</strong>
+                {needsModelInstall ? (
+                  <small>
+                    Run <code>ollama pull &lt;model&gt;</code>.
+                  </small>
+                ) : null}
+              </div>
+              <SettingsStatus
+                status={
+                  needsModelInstall ||
+                  needsSignInRepair ||
+                  isChecking ||
+                  health?.connectionStatus === "failed"
+                    ? "warning"
+                    : provider.authStatus === "connected"
+                      ? "good"
+                      : "neutral"
+                }
+              >
+                {isChecking
+                  ? "Connecting…"
+                  : sentenceCase(providerConnectionLabel(provider, health))}
+              </SettingsStatus>
+              <div className="gyro-settings-provider-actions">
+                {canUseInChat && onUseProvider ? (
+                  <button
+                    className="gyro-secondary-button"
+                    type="button"
+                    onClick={() => onUseProvider(provider.id, defaultModelId!)}
+                  >
+                    Use in chat
+                  </button>
+                ) : null}
+                {!canUseInChat &&
+                !isChecking &&
+                !needsSignInRepair &&
+                !needsModelInstall &&
+                provider.authStatus === "connected" &&
+                health?.connectionStatus === "failed" ? (
+                  <button
+                    className="gyro-secondary-button"
+                    type="button"
+                    onClick={() => onTestProvider?.(provider.id)}
+                  >
+                    Check connection
+                  </button>
+                ) : null}
+                {provider.id === "ollama" && !isIdle ? (
+                  <button
+                    className="gyro-secondary-button"
+                    disabled={isChecking}
+                    onClick={() => onTestProvider?.(provider.id)}
+                    type="button"
+                  >
+                    Refresh models
+                  </button>
+                ) : null}
+                {provider.authStatus !== "connected" ||
+                needsSignInRepair ||
+                needsCliInstall ||
+                needsModelInstall ? (
+                  <button
+                    className={
+                      needsSignInRepair
+                        ? "gyro-primary-button"
+                        : "gyro-secondary-button"
+                    }
+                    disabled={
+                      isChecking ||
                       needsCliInstall ||
-                      needsModelInstall ? (
-                        <button
-                          className={
-                            needsSignInRepair
-                              ? "gyro-primary-button"
-                              : "gyro-secondary-button"
-                          }
-                          disabled={
-                            isChecking ||
-                            needsCliInstall ||
-                            needsModelInstall ||
-                            (provider.authStatus === "connected" &&
-                              !needsSignInRepair)
-                          }
-                          onClick={() => {
-                            if (
-                              provider.authMode === "env" &&
-                              providerSupportsApiKey(provider.id)
-                            ) {
-                              setApiKeyProviderId(provider.id);
-                              revealProviderConnection("gyro-provider-api-keys");
-                            } else if (needsSignInRepair) {
-                              onSignInProvider?.(provider.id);
-                            } else {
-                              onToggleProvider?.(provider.id);
-                            }
-                          }}
-                          type="button"
-                        >
-                          {isChecking
-                            ? "Connecting…"
-                            : needsCliInstall
-                              ? "Install required"
-                              : needsModelInstall
-                                ? "Model required"
-                                : needsSignInRepair
-                                  ? "Sign in again"
-                                  : provider.authStatus === "connected"
-                                    ? "Connected"
-                                    : provider.authMode === "env"
-                                      ? providerSupportsApiKey(provider.id)
-                                        ? "Add API key"
-                                        : "Check environment"
-                                      : providerPrimaryActionLabel(provider)}
-                        </button>
-                      ) : null}
-                      <ProviderDetailsMenu
-                        label={`${provider.displayName} details`}
+                      needsModelInstall ||
+                      (provider.authStatus === "connected" &&
+                        !needsSignInRepair)
+                    }
+                    onClick={() => {
+                      if (
+                        provider.authMode === "env" &&
+                        providerSupportsApiKey(provider.id)
+                      ) {
+                        setApiKeyProviderId(provider.id);
+                        revealProviderConnection("gyro-provider-api-keys");
+                      } else if (needsSignInRepair) {
+                        onSignInProvider?.(provider.id);
+                      } else {
+                        onToggleProvider?.(provider.id);
+                      }
+                    }}
+                    type="button"
+                  >
+                    {isChecking
+                      ? "Connecting…"
+                      : needsCliInstall
+                        ? "Install required"
+                        : needsModelInstall
+                          ? "Model required"
+                          : needsSignInRepair
+                            ? "Sign in again"
+                            : provider.authStatus === "connected"
+                              ? "Connected"
+                              : provider.authMode === "env"
+                                ? providerSupportsApiKey(provider.id)
+                                  ? "Add API key"
+                                  : "Check environment"
+                                : providerPrimaryActionLabel(provider)}
+                  </button>
+                ) : null}
+                <ProviderDetailsMenu label={`${provider.displayName} details`}>
+                  <div>
+                    <button
+                      className="gyro-secondary-button"
+                      disabled={isChecking}
+                      onClick={() => onTestProvider?.(provider.id)}
+                      type="button"
+                    >
+                      {needsModelInstall
+                        ? "Test after install"
+                        : providerTestActionLabel(provider)}
+                    </button>
+                    <strong>Technical details</strong>
+                    <code>{provider.apiKeyRef}</code>
+                    <span>
+                      {provider.authMode.toUpperCase()} authentication
+                    </span>
+                    {provider.authStatus === "connected" ? (
+                      <button
+                        className="gyro-danger-button"
+                        onClick={() => onToggleProvider?.(provider.id)}
+                        type="button"
                       >
-                        <div>
-                          <button
-                            className="gyro-secondary-button"
-                            disabled={isChecking}
-                            onClick={() => onTestProvider?.(provider.id)}
-                            type="button"
-                          >
-                            {needsModelInstall
-                              ? "Test after install"
-                              : providerTestActionLabel(provider)}
-                          </button>
-                          <strong>Technical details</strong>
-                          <code>{provider.apiKeyRef}</code>
-                          <span>
-                            {provider.authMode.toUpperCase()} authentication
-                          </span>
-                          {provider.authStatus === "connected" ? (
-                            <button
-                              className="gyro-danger-button"
-                              onClick={() => onToggleProvider?.(provider.id)}
-                              type="button"
-                            >
-                              Disable in Gyro
-                            </button>
-                          ) : null}
-                          <ProviderRemoveControl
-                            provider={provider}
-                            onRemove={
-                              onRemoveProvider ??
-                              (isCustomProviderId(provider.id)
-                                ? onRemoveCustomProvider
-                                : undefined)
-                            }
-                          />
-                        </div>
-                      </ProviderDetailsMenu>
-                    </div>
+                        Disable in Gyro
+                      </button>
+                    ) : null}
+                    <ProviderRemoveControl
+                      provider={provider}
+                      onRemove={
+                        onRemoveProvider ??
+                        (isCustomProviderId(provider.id)
+                          ? onRemoveCustomProvider
+                          : undefined)
+                      }
+                    />
                   </div>
-                );
-              })}
+                </ProviderDetailsMenu>
+              </div>
             </div>
-  ) : null;
+          );
+        })}
+      </div>
+    ) : null;
 
   return (
-    <SettingsDisclosureProvider page={activeSection} values={preferences?.settingsSections} onChange={onSettingsPreferencesChange ? values => onSettingsPreferencesChange({ settingsSections: values }) : undefined}>
-    <div className="gyro-settings-surface" ref={settingsScrollRef}>
-      <section
-        className="gyro-settings-content"
-        aria-label="Settings"
-        data-settings-page={activeSection}
-      >
-        {activeSection === "import-projects" && projectImport ? (
-          <SettingsSection
-            icon={Folder}
-            title="Import projects"
-            description="Bring your Claude Code and Codex chats into Gyro."
-          >
-            <ProjectImportSettings {...projectImport} />
-          </SettingsSection>
-        ) : null}
-        {activeSection === "general" ? (
-          <SettingsSection
-            icon={SlidersHorizontal}
-            title="General"
-            description="Choose how Gyro stays available and responds to model activity."
-          >
-            {notificationPermission === "denied" ? <p className="gyro-settings-page-status" role="alert">Notifications are blocked by macOS. Open Notifications below to review access.</p> : null}
-            <SettingsGroup id="app-behavior" label="Startup & menu bar">
-              <SettingsRow
-                label="Open on launch"
-                detail="Choose what Gyro shows when it starts. Applies the next time Gyro opens."
-              >
-                <SettingsSelect
-                  aria-label="Open on launch"
-                  onChange={(event) =>
-                    onLaunchViewChange?.(event.target.value as LaunchView)
-                  }
-                  value={launchView}
-                >
-                  <option value="last">Where you left off</option>
-                  <option value="workspace">Workspace</option>
-                  <option value="sessions">Sessions</option>
-                  <option value="terminals">CLI terminals</option>
-                </SettingsSelect>
-              </SettingsRow>
-              <SettingsRow
-                label="Menu bar"
-                detail="Show Gyro in the macOS menu bar for quick access to running work."
-              >
-                <SettingsSwitch
-                  checked={showMenuBarIcon}
-                  label="Show Gyro in menu bar"
-                  onChange={(visible) => onMenuBarVisibilityChange?.(visible)}
-                />
-              </SettingsRow>
-            </SettingsGroup>
-            <DesktopNotificationSettings
-              isTesting={isTestingNotification}
-              permission={notificationPermission}
-              preferences={desktopNotifications}
-              onChange={onDesktopNotificationsChange}
-              onTest={onTestNotification}
-            />
-            <SettingsGroup id="model-activity" label="Model activity">
-              <SettingsRow
-                label="Model activity previews"
-                detail={
-                  modelFollow === "off"
-                    ? "Keep your current view. Model activity previews are hidden."
-                    : modelFollow === "follow"
-                      ? "Switch to the editor, terminal, or browser as the model works."
-                      : "Preview model activity above the composer and keep your current view."
-                }
-              >
-                <SettingsSegmented
-                  label="Model activity behavior"
-                  value={modelFollow}
-                  options={[
-                    { label: "Off", value: "off" },
-                    { label: "Peek", value: "peek" },
-                    { label: "Follow", value: "follow" },
-                  ]}
-                  onChange={(value) => onModelFollowChange?.(value)}
-                />
-              </SettingsRow>
-              <SettingsRow
-                label="Post-edit summaries"
-                detail="Use one extra provider call after an edited turn to describe each changed file."
-              >
-                <SettingsSwitch
-                  label="Generate post-edit summaries"
-                  disabled={!onConfigChange}
-                  checked={Boolean(config.changeSummariesEnabled)}
-                  onChange={(checked) =>
-                    onConfigChange?.({
-                      ...config,
-                      changeSummariesEnabled: checked,
-                    })
-                  }
-                />
-              </SettingsRow>
-            </SettingsGroup>
-          </SettingsSection>
-        ) : null}
-
-        {activeSection === "appearance" ? (
-          <SettingsSection
-            icon={Palette}
-            title="Appearance"
-            description="Make Gyro comfortable to read and use."
-          >
-            <AppearanceSettings
-              saveStatus={appearanceSaveStatus}
-              onRetrySave={onRetryAppearanceSave}
-              themeMode={themeMode}
-              onThemeChange={onThemeChange}
-              density={density}
-              onDensityChange={onDensityChange}
-              interfaceSize={interfaceSize}
-              onInterfaceSizeChange={onInterfaceSizeChange}
-              motionSpeed={motionSpeed}
-              onMotionSpeedChange={onMotionSpeedChange}
-              reduceMotion={reduceMotion}
-              mainColor={mainColor}
-              secondaryColor={secondaryColor}
-              onAppearanceColorsChange={onAppearanceColorsChange}
-            />
-          </SettingsSection>
-        ) : null}
-
-        {activeSection === "editor-workspace" ? (
-          <WorkspaceSettingsEditor
-            activeWorkspaceRoot={activeWorkspaceRoot}
-            folderSettings={workspaceSettingsByFolder}
-            keybindings={workspaceKeybindings}
-            onChange={onWorkspaceSettingsChange}
-            userSettings={workspaceUserSettings}
-            view="editor"
-            workspacePath={workspacePath}
-            workspaceRoots={workspaceRoots}
-            workspaceSettings={workspaceSettingsByWorkspace}
-          />
-        ) : null}
-
-        {activeSection === "tools-contributions" ? (
-          <WorkspaceSettingsEditor
-            activeWorkspaceRoot={activeWorkspaceRoot}
-            contributions={workspaceContributions}
-            folderSettings={workspaceSettingsByFolder}
-            keybindings={workspaceKeybindings}
-            languageServers={workspaceLanguageServers}
-            onKeybindingChange={onWorkspaceKeybindingChange}
-            onRegisterContribution={onRegisterWorkspaceContribution}
-            onRemoveContribution={onRemoveWorkspaceContribution}
-            onToggleContribution={onToggleWorkspaceContribution}
-            userSettings={workspaceUserSettings}
-            view="tools"
-            workspacePath={workspacePath}
-            workspaceRoots={workspaceRoots}
-            workspaceSettings={workspaceSettingsByWorkspace}
-          />
-        ) : null}
-
-        {activeSection === "efficiency" ? (
-          <SettingsSection
-            icon={Sparkles}
-            title="Chat & agents"
-            description="Decide how hard Gyro works: context handling, experiments, and agent concurrency."
-          >
-            <NewChatSettings config={config} preferences={{ ...preferences, defaultWorkspaceMode }} onChange={onSettingsPreferencesChange} onDefaultModel={onSelectProviderDefaultModel} onWorkspaceMode={onDefaultWorkspaceModeChange}/>
-            <EfficiencySettings
-              contextControls={<><SettingsRow
-                label="Auto-compact context"
-                detail="When the last request has filled this share of the model's window, Gyro replaces the oldest tool results so later rounds carry less. Local, with no extra provider call; applies to API and local models, not vendor CLIs."
-              >
-                <SettingsSelect
-                  aria-label="Auto-compact context threshold"
-                  disabled={!onAutoCompactPercentChange}
-                  onChange={(event) =>
-                    onAutoCompactPercentChange?.(Number(event.target.value))
-                  }
-                  value={String(config.usageGuard?.autoCompactPercent ?? 80)}
-                >
-                  <option value="0">Off</option>
-                  {[50, 60, 70, 80, 90, 95].map((percent) => (
-                    <option key={percent} value={String(percent)}>
-                      {percent}%
-                    </option>
-                  ))}
-                </SettingsSelect>
-              </SettingsRow></>}
-              advancedControls={<><SettingsRow
-                label="Command output"
-                value="Bounded"
-                detail="Large terminal output is summarized into readable command blocks."
-              />
-              <SettingsRow
-                label="Approval budget"
-                value={
-                  config.fullAccess
-                    ? "Full access"
-                    : config.requireCommandApproval ||
-                        config.requireFileEditApproval
-                      ? "Ask for approval"
-                      : "Approve for me"
-                }
-                detail="Approval behavior follows Permissions and the chat’s selected approval mode."
-              /></>}
-              reminders={<CheckReminderSettings enabled={preferences?.checkReminders === true} onChange={value => onSettingsPreferencesChange?.({ checkReminders: value })}/>}
-              config={config}
-              onChange={onEfficiencyChange}
-              onRoute={onEfficiencyRoute}
-            />
-
-
-          </SettingsSection>
-        ) : null}
-
-        {activeSection === "providers" ? (
-          <SettingsSection
-            dataTour="settings.providers"
-            icon={Gauge}
-            title="Models & accounts"
-            description="Connect providers and choose their default models."
-          >
-            {providersForConfig(config).filter(provider => connectingProviderIds.includes(provider.id) || provider.authStatus === "connecting" || providerStatuses?.some(status => status.id === provider.id && status.connectionStatus === "failed")).map(provider => <div key={provider.id} className="gyro-settings-page-status" role={connectingProviderIds.includes(provider.id) || provider.authStatus === "connecting" ? "status" : "alert"}><strong>{provider.displayName}</strong><p>{connectingProviderIds.includes(provider.id) || provider.authStatus === "connecting" ? "Sign-in in progress. Complete the provider sign-in to continue." : providerStatuses?.find(status => status.id === provider.id)?.healthSummary ?? "Connection needs attention."}</p><button className="gyro-secondary-button" type="button" onClick={()=>onTestProvider?.(provider.id)}>Check connection</button></div>)}
-            {connectedRemoteProviders.length > 0 ? (
-            <SettingsDisclosure id="provider-accounts" title="Connected providers" summary={`${connectedRemoteProviders.length} connected`}>
-            {connectedCliProviders.length > 0 ? (
-              <ConnectedProviderAllowances
-                providers={connectedCliProviders}
-                usageByProvider={providerUsageByProvider}
-              />
-            ) : null}
-            <div
-              className="gyro-provider-connect-help"
-              id="gyro-connected-provider-accounts"
-              tabIndex={-1}
+    <SettingsDisclosureProvider
+      page={activeSection}
+      values={preferences?.settingsSections}
+      onChange={
+        onSettingsPreferencesChange
+          ? (values) =>
+              onSettingsPreferencesChange({ settingsSections: values })
+          : undefined
+      }
+    >
+      <div className="gyro-settings-surface" ref={settingsScrollRef}>
+        <section
+          className="gyro-settings-content"
+          aria-label="Settings"
+          data-settings-page={activeSection}
+        >
+          {activeSection === "import-projects" && projectImport ? (
+            <SettingsSection
+              icon={Folder}
+              title="Import projects"
+              description="Bring your Claude Code and Codex chats into Gyro."
             >
-              <h3 className="gyro-settings-subsection-title">Providers</h3>
-            </div>
-            {providerConnectionTable(connectedRemoteProviders)}
-            {COUNCIL_COMING_SOON ? (
-              <details className="gyro-settings-disclosure gyro-model-council-disclosure">
-                <summary>
-                  <ChevronRight aria-hidden="true" size={14} />
-                  <span>Model Council</span>
-                  <small>Coming soon</small>
-                </summary>
-                <p>
-                  Compare answers from multiple providers in one conversation.
-                  This feature is still in development.
+              <ProjectImportSettings {...projectImport} />
+            </SettingsSection>
+          ) : null}
+          {activeSection === "account" ? accountSettings : null}
+          {activeSection === "cloud" && cloudSettings ? cloudSettings : null}
+          {activeSection === "cloud" && !cloudSettings ? (
+            <CloudSettings
+              snapshot={billingSnapshot}
+              actions={billingActions}
+              onOpenBilling={() => onSectionChange?.("billing")}
+            />
+          ) : null}
+          {activeSection === "billing" ? (
+            <BillingSettings
+              snapshot={billingSnapshot}
+              actions={billingActions}
+              onOpenCloud={() => onSectionChange?.("cloud")}
+            />
+          ) : null}
+          {activeSection === "general" ? (
+            <SettingsSection
+              icon={SlidersHorizontal}
+              title="General"
+              description="Choose how Gyro stays available and responds to model activity."
+            >
+              {notificationPermission === "denied" ? (
+                <p className="gyro-settings-page-status" role="alert">
+                  Notifications are blocked by macOS. Open Notifications below
+                  to review access.
                 </p>
-              </details>
-            ) : (
-              <SettingsGroup
-                badge={
-                  COUNCIL_COMING_SOON ? COUNCIL_COMING_SOON_LABEL : undefined
-                }
-                label="Model Council"
-              >
+              ) : null}
+              <SettingsGroup id="app-behavior" label="Startup & menu bar">
                 <SettingsRow
-                  label="Enable Council mode"
-                  detail={
-                    COUNCIL_COMING_SOON
-                      ? "Parallel multi-provider answers with synthesis. Still in development and not yet available to run."
-                      : "Parallel multi-provider answers with synthesis for high-stakes coding decisions."
-                  }
-                >
-                  <SettingsSwitch
-                    label="Enable Council mode"
-                    checked={normalizedCouncilConfig(config.council).enabled}
-                    disabled={COUNCIL_COMING_SOON}
-                    onChange={(checked) =>
-                      onConfigChange?.({
-                        ...config,
-                        council: {
-                          ...normalizedCouncilConfig(config.council),
-                          enabled: checked,
-                        },
-                      })
-                    }
-                  />
-                </SettingsRow>
-                <SettingsRow
-                  label="Default preset"
-                  detail="Which council membership to use when you enable Council mode."
+                  label="Open on launch"
+                  detail="Choose what Gyro shows when it starts. Applies the next time Gyro opens."
                 >
                   <SettingsSelect
-                    aria-label="Default Council preset"
-                    disabled={COUNCIL_COMING_SOON}
+                    aria-label="Open on launch"
                     onChange={(event) =>
-                      onConfigChange?.({
-                        ...config,
-                        council: {
-                          ...normalizedCouncilConfig(config.council),
-                          defaultPresetId: event.target.value,
-                        },
-                      })
+                      onLaunchViewChange?.(event.target.value as LaunchView)
                     }
-                    value={
-                      normalizedCouncilConfig(config.council).defaultPresetId
-                    }
+                    value={launchView}
                   >
-                    {normalizedCouncilConfig(config.council).presets.map(
-                      (preset) => (
-                        <option key={preset.id} value={preset.id}>
-                          {preset.name}
-                        </option>
-                      ),
-                    )}
+                    <option value="last">Where you left off</option>
+                    <option value="workspace">Workspace</option>
+                    <option value="sessions">Sessions</option>
+                    <option value="terminals">CLI terminals</option>
                   </SettingsSelect>
                 </SettingsRow>
                 <SettingsRow
-                  label="Synthesize on partial"
-                  detail="When one seat fails, still synthesize from the seats that finished."
+                  label="Menu bar"
+                  detail="Show Gyro in the macOS menu bar for quick access to running work."
                 >
                   <SettingsSwitch
-                    label="Synthesize on partial"
-                    checked={
-                      normalizedCouncilConfig(config.council)
-                        .synthesizeOnPartial
-                    }
-                    disabled={COUNCIL_COMING_SOON}
+                    checked={showMenuBarIcon}
+                    label="Show Gyro in menu bar"
+                    onChange={(visible) => onMenuBarVisibilityChange?.(visible)}
+                  />
+                </SettingsRow>
+              </SettingsGroup>
+              <DesktopNotificationSettings
+                isTesting={isTestingNotification}
+                permission={notificationPermission}
+                preferences={desktopNotifications}
+                onChange={onDesktopNotificationsChange}
+                onTest={onTestNotification}
+              />
+              <SettingsGroup id="model-activity" label="Model activity">
+                <SettingsRow
+                  label="Model activity previews"
+                  detail={
+                    modelFollow === "off"
+                      ? "Keep your current view. Model activity previews are hidden."
+                      : modelFollow === "follow"
+                        ? "Switch to the editor, terminal, or browser as the model works."
+                        : "Preview model activity above the composer and keep your current view."
+                  }
+                >
+                  <SettingsSegmented
+                    label="Model activity behavior"
+                    value={modelFollow}
+                    options={[
+                      { label: "Off", value: "off" },
+                      { label: "Peek", value: "peek" },
+                      { label: "Follow", value: "follow" },
+                    ]}
+                    onChange={(value) => onModelFollowChange?.(value)}
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  label="Post-edit summaries"
+                  detail="Use one extra provider call after an edited turn to describe each changed file."
+                >
+                  <SettingsSwitch
+                    label="Generate post-edit summaries"
+                    disabled={!onConfigChange}
+                    checked={Boolean(config.changeSummariesEnabled)}
                     onChange={(checked) =>
                       onConfigChange?.({
                         ...config,
-                        council: {
-                          ...normalizedCouncilConfig(config.council),
-                          synthesizeOnPartial: checked,
-                        },
+                        changeSummariesEnabled: checked,
                       })
                     }
                   />
                 </SettingsRow>
               </SettingsGroup>
-            )}
-            </SettingsDisclosure>
-            ) : null}
-            <SettingsDisclosure id="add-provider" title="Add a provider" description="Choose a provider, add an API key, or connect local models." defaultOpen={needsProviderSetup}>
-            <nav className="gyro-provider-setup-methods" aria-label="Connection methods">
-              {([
-                ["gyro-provider-accounts", "Existing account"],
-                ["gyro-provider-api-keys", "API key"],
-                ["gyro-provider-ollama", "Local models"],
-              ] as const).map(([target, label]) => (
-                <button key={target} type="button" onClick={() => revealProviderConnection(target)}>{label}</button>
-              ))}
-            </nav>
-            <div id="gyro-provider-accounts" tabIndex={-1}>
-              {providerConnectionTable(disabledProviders.filter(provider=>provider.id !== "ollama"))}
-            </div>
-            <div id="gyro-provider-api-keys" tabIndex={-1}>
-              <ProviderApiKeySection
-                connectingProviderIds={connectingProviderIds}
-                selectedProviderId={apiKeyProviderId}
-                onSelectedProviderChange={setApiKeyProviderId}
-                onUseProvider={onUseProvider}
-                providerStatuses={providerStatuses}
-                config={config}
-                providerApiKeyConfigured={providerApiKeyConfigured}
-                savingProviderApiKeyId={savingProviderApiKeyId}
-                renderProviderMark={(id) => (
-                  <span aria-hidden="true">
-                    <ProviderLogo providerId={id} />
-                  </span>
-                )}
-                onSaveProviderApiKey={onSaveProviderApiKey}
-                onClearProviderApiKey={onClearProviderApiKey}
+            </SettingsSection>
+          ) : null}
+
+          {activeSection === "appearance" ? (
+            <SettingsSection
+              icon={Palette}
+              title="Appearance"
+              description="Make Gyro comfortable to read and use."
+            >
+              <AppearanceSettings
+                saveStatus={appearanceSaveStatus}
+                onRetrySave={onRetryAppearanceSave}
+                themeMode={themeMode}
+                onThemeChange={onThemeChange}
+                density={density}
+                onDensityChange={onDensityChange}
+                interfaceSize={interfaceSize}
+                onInterfaceSizeChange={onInterfaceSizeChange}
+                motionSpeed={motionSpeed}
+                onMotionSpeedChange={onMotionSpeedChange}
+                reduceMotion={reduceMotion}
+                mainColor={mainColor}
+                secondaryColor={secondaryColor}
+                onAppearanceColorsChange={onAppearanceColorsChange}
               />
-            </div>
-            <CustomProviderSection
-              config={config}
-              savingProviderApiKeyId={savingProviderApiKeyId}
-              onAddCustomProvider={onAddCustomProvider}
-              onRemoveCustomProvider={onRemoveCustomProvider}
-              onFetchCustomProviderModels={onFetchCustomProviderModels}
+            </SettingsSection>
+          ) : null}
+
+          {activeSection === "editor-workspace" ? (
+            <WorkspaceSettingsEditor
+              activeWorkspaceRoot={activeWorkspaceRoot}
+              folderSettings={workspaceSettingsByFolder}
+              keybindings={workspaceKeybindings}
+              onChange={onWorkspaceSettingsChange}
+              userSettings={workspaceUserSettings}
+              view="editor"
+              workspacePath={workspacePath}
+              workspaceRoots={workspaceRoots}
+              workspaceSettings={workspaceSettingsByWorkspace}
             />
-            <RemovedProvidersSection
-              config={config}
-              onRestoreProvider={onRestoreProvider}
+          ) : null}
+
+          {activeSection === "tools-contributions" ? (
+            <WorkspaceSettingsEditor
+              activeWorkspaceRoot={activeWorkspaceRoot}
+              contributions={workspaceContributions}
+              folderSettings={workspaceSettingsByFolder}
+              keybindings={workspaceKeybindings}
+              languageServers={workspaceLanguageServers}
+              onKeybindingChange={onWorkspaceKeybindingChange}
+              onRegisterContribution={onRegisterWorkspaceContribution}
+              onRemoveContribution={onRemoveWorkspaceContribution}
+              onToggleContribution={onToggleWorkspaceContribution}
+              userSettings={workspaceUserSettings}
+              view="tools"
+              workspacePath={workspacePath}
+              workspaceRoots={workspaceRoots}
+              workspaceSettings={workspaceSettingsByWorkspace}
             />
-            </SettingsDisclosure>
-            <ProviderModelDefaults config={config} onChange={onSelectProviderDefaultModel} mark={id => <ProviderLogo providerId={id}/>}/>
-            <SettingsDisclosure id="local-models" title="Local models" summary={providersForConfig(config).find(p => p.id === "ollama")?.authStatus === "connected" ? "Ollama connected" : "Ollama not connected"} defaultOpen={!needsProviderSetup && connectedRemoteProviders.length === 0}>
-              <p>Use models served by Ollama on this Mac. Gyro does not download models automatically.</p>
-              {providerConnectionTable(providerConfigs.filter(provider=>provider.id === "ollama"))}
-            </SettingsDisclosure>
-          </SettingsSection>
-        ) : null}
-        {activeSection === "usage-limits" ? (
-          <SettingsSection icon={Gauge} title="Usage & limits" description="Provider allowances, local observations and run budgets.">
-            <SettingsDisclosure id="provider-usage" title="Provider-reported allowances" description="Only windows actually reported by your provider are shown.">
-            {usageProvider ? (
-              <div className="gyro-usage-dashboard">
-                <label className="gyro-usage-provider-select">
-                  <span>Provider</span>
-                  <SettingsSelect
-                    aria-label="Usage provider"
-                    value={usageProvider.id}
-                    onChange={(event) =>
-                      onUsageProviderChange?.(event.target.value as ProviderId)
+          ) : null}
+
+          {activeSection === "efficiency" ? (
+            <SettingsSection
+              icon={Sparkles}
+              title="Chat & agents"
+              description="Decide how hard Gyro works: context handling, experiments, and agent concurrency."
+            >
+              <NewChatSettings
+                config={config}
+                preferences={{ ...preferences, defaultWorkspaceMode }}
+                onChange={onSettingsPreferencesChange}
+                onDefaultModel={onSelectProviderDefaultModel}
+                onWorkspaceMode={onDefaultWorkspaceModeChange}
+              />
+              <EfficiencySettings
+                contextControls={
+                  <>
+                    <SettingsRow
+                      label="Auto-compact context"
+                      detail="When the last request has filled this share of the model's window, Gyro replaces the oldest tool results so later rounds carry less. Local, with no extra provider call; applies to API and local models, not vendor CLIs."
+                    >
+                      <SettingsSelect
+                        aria-label="Auto-compact context threshold"
+                        disabled={!onAutoCompactPercentChange}
+                        onChange={(event) =>
+                          onAutoCompactPercentChange?.(
+                            Number(event.target.value),
+                          )
+                        }
+                        value={String(
+                          config.usageGuard?.autoCompactPercent ?? 80,
+                        )}
+                      >
+                        <option value="0">Off</option>
+                        {[50, 60, 70, 80, 90, 95].map((percent) => (
+                          <option key={percent} value={String(percent)}>
+                            {percent}%
+                          </option>
+                        ))}
+                      </SettingsSelect>
+                    </SettingsRow>
+                  </>
+                }
+                advancedControls={
+                  <>
+                    <SettingsRow
+                      label="Command output"
+                      value="Bounded"
+                      detail="Large terminal output is summarized into readable command blocks."
+                    />
+                    <SettingsRow
+                      label="Approval budget"
+                      value={
+                        config.fullAccess
+                          ? "Full access"
+                          : config.requireCommandApproval ||
+                              config.requireFileEditApproval
+                            ? "Ask for approval"
+                            : "Approve for me"
+                      }
+                      detail="Approval behavior follows Permissions and the chat’s selected approval mode."
+                    />
+                  </>
+                }
+                reminders={
+                  <CheckReminderSettings
+                    enabled={preferences?.checkReminders === true}
+                    onChange={(value) =>
+                      onSettingsPreferencesChange?.({ checkReminders: value })
+                    }
+                  />
+                }
+                config={config}
+                onChange={onEfficiencyChange}
+                onRoute={onEfficiencyRoute}
+              />
+            </SettingsSection>
+          ) : null}
+
+          {activeSection === "providers" ? (
+            <SettingsSection
+              dataTour="settings.providers"
+              icon={Gauge}
+              title="Models & accounts"
+              description="Connect providers and choose their default models. Your Gyro subscription is managed separately."
+            >
+              {providersForConfig(config)
+                .filter(
+                  (provider) =>
+                    connectingProviderIds.includes(provider.id) ||
+                    provider.authStatus === "connecting" ||
+                    providerStatuses?.some(
+                      (status) =>
+                        status.id === provider.id &&
+                        status.connectionStatus === "failed",
+                    ),
+                )
+                .map((provider) => (
+                  <div
+                    key={provider.id}
+                    className="gyro-settings-page-status"
+                    role={
+                      connectingProviderIds.includes(provider.id) ||
+                      provider.authStatus === "connecting"
+                        ? "status"
+                        : "alert"
                     }
                   >
-                    {providerConfigs.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.displayName} ·{" "}
-                        {providerConnectionLabel(
-                          provider,
-                          providerStatuses?.find(
+                    <strong>{provider.displayName}</strong>
+                    <p>
+                      {connectingProviderIds.includes(provider.id) ||
+                      provider.authStatus === "connecting"
+                        ? "Sign-in in progress. Complete the provider sign-in to continue."
+                        : (providerStatuses?.find(
                             (status) => status.id === provider.id,
-                          ),
-                        )}
-                      </option>
-                    ))}
-                  </SettingsSelect>
-                </label>
-                <div className="gyro-usage-toolbar">
-                  <div>
-                    <strong>
-                      {usageProvider.id === "openai" ||
-                      usageProvider.id === "anthropic" ||
-                      usageProvider.id === "xai" ||
-                      usageProvider.id === "kimi"
-                        ? `${usageProvider.displayName} plan windows`
-                        : `${usageProvider.displayName} spend`}
-                    </strong>
-                    <span>
-                      {providerUsage?.status === "available" &&
-                      providerUsage.windows.length > 0
-                        ? providerUsage.fetchedAt
-                          ? `Updated ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(providerUsage.fetchedAt))}${providerUsage.stale ? " · stale" : ""} · % of window spent`
-                          : "Percent of each plan window spent"
-                        : providerUsage?.status === "loading"
-                          ? "Checking with the provider…"
-                          : usageProvider.id === "openai" ||
-                              usageProvider.id === "anthropic" ||
-                              usageProvider.id === "xai" ||
-                              usageProvider.id === "kimi"
-                            ? usageProvider.id === "xai"
-                              ? "Refresh to load Grok Build weekly credit usage"
-                              : "Plan windows appear after the first chat or refresh"
-                            : "No plan window API on this provider — local spend measured by Gyro is below"}
-                    </span>
-                  </div>
-                  <div className="gyro-usage-toolbar-actions">
-                    {hasProviderUsageWindows ? (
-                      <SettingsSegmented
-                        label="Usage visualization"
-                        value={usageVisualization}
-                        options={[
-                          { label: "Bars", value: "bars" },
-                          { label: "Wheels", value: "wheels" },
-                        ]}
-                        onChange={(value) =>
-                          onUsageVisualizationChange?.(value)
-                        }
-                      />
-                    ) : null}
-                    <button
-                      aria-label="Refresh provider usage"
-                      className="gyro-icon-button is-subtle"
-                      disabled={providerUsage?.status === "loading"}
-                      onClick={() => onRefreshProviderUsage?.(usageProvider.id)}
-                      title="Refresh provider usage"
-                      type="button"
-                    >
-                      <RefreshCw
-                        className={
-                          providerUsage?.status === "loading"
-                            ? "is-spinning"
-                            : ""
-                        }
-                        size={14}
-                      />
-                    </button>
-                  </div>
-                </div>
-                {providerUsage?.status === "available" &&
-                providerUsage.stale &&
-                providerUsage.error ? (
-                  <p className="gyro-usage-stale-note" role="status">
-                    {providerUsage.error}
-                  </p>
-                ) : null}
-                {providerUsage?.status === "available" &&
-                providerUsage.windows.length > 0 ? (
-                  <div className="gyro-usage-cards">
-                    {/* Show every window the provider (or ledger) reported —
-                        five-hour, weekly, weekly-opus, etc. — not only two slots. */}
-                    {[...providerUsage.windows]
-                      .sort((left, right) => {
-                        const order = ["five-hour", "weekly"];
-                        const leftRank = order.indexOf(left.id);
-                        const rightRank = order.indexOf(right.id);
-                        return (
-                          (leftRank === -1 ? order.length : leftRank) -
-                          (rightRank === -1 ? order.length : rightRank)
-                        );
-                      })
-                      .map((window) => (
-                        <UsageCard
-                          key={window.id}
-                          visualization={usageVisualization}
-                          window={window}
-                        />
-                      ))}
-                  </div>
-                ) : providerUsage?.status === "loading" ||
-                  providerUsage?.status === "error" ? (
-                  <div className="gyro-usage-empty" role="status">
-                    <Gauge size={22} />
-                    <div>
-                      <strong>
-                        {providerUsage.status === "loading"
-                          ? "Loading provider allowance…"
-                          : "Provider allowance could not be loaded"}
-                      </strong>
-                      <span>
-                        {providerUsage.error ??
-                          "Connect or refresh this provider to load plan usage."}
-                      </span>
-                    </div>
+                          )?.healthSummary ?? "Connection needs attention.")}
+                    </p>
                     <button
                       className="gyro-secondary-button"
-                      disabled={providerUsage.status === "loading"}
-                      onClick={() => onRefreshProviderUsage?.(usageProvider.id)}
                       type="button"
+                      onClick={() => onTestProvider?.(provider.id)}
                     >
-                      <RefreshCw size={14} />
-                      Refresh
+                      Check connection
                     </button>
                   </div>
+                ))}
+              {connectedRemoteProviders.length > 0 ? (
+                <SettingsDisclosure
+                  id="provider-accounts"
+                  title="Connected providers"
+                  summary={`${connectedRemoteProviders.length} connected`}
+                >
+                  {connectedCliProviders.length > 0 ? (
+                    <ConnectedProviderAllowances
+                      providers={connectedCliProviders}
+                      usageByProvider={providerUsageByProvider}
+                    />
+                  ) : null}
+                  <div
+                    className="gyro-provider-connect-help"
+                    id="gyro-connected-provider-accounts"
+                    tabIndex={-1}
+                  >
+                    <h3 className="gyro-settings-subsection-title">
+                      Providers
+                    </h3>
+                  </div>
+                  {providerConnectionTable(connectedRemoteProviders)}
+                  {COUNCIL_COMING_SOON ? (
+                    <details className="gyro-settings-disclosure gyro-model-council-disclosure">
+                      <summary>
+                        <ChevronRight aria-hidden="true" size={14} />
+                        <span>Model Council</span>
+                        <small>Coming soon</small>
+                      </summary>
+                      <p>
+                        Compare answers from multiple providers in one
+                        conversation. This feature is still in development.
+                      </p>
+                    </details>
+                  ) : (
+                    <SettingsGroup
+                      badge={
+                        COUNCIL_COMING_SOON
+                          ? COUNCIL_COMING_SOON_LABEL
+                          : undefined
+                      }
+                      label="Model Council"
+                    >
+                      <SettingsRow
+                        label="Enable Council mode"
+                        detail={
+                          COUNCIL_COMING_SOON
+                            ? "Parallel multi-provider answers with synthesis. Still in development and not yet available to run."
+                            : "Parallel multi-provider answers with synthesis for high-stakes coding decisions."
+                        }
+                      >
+                        <SettingsSwitch
+                          label="Enable Council mode"
+                          checked={
+                            normalizedCouncilConfig(config.council).enabled
+                          }
+                          disabled={COUNCIL_COMING_SOON}
+                          onChange={(checked) =>
+                            onConfigChange?.({
+                              ...config,
+                              council: {
+                                ...normalizedCouncilConfig(config.council),
+                                enabled: checked,
+                              },
+                            })
+                          }
+                        />
+                      </SettingsRow>
+                      <SettingsRow
+                        label="Default preset"
+                        detail="Which council membership to use when you enable Council mode."
+                      >
+                        <SettingsSelect
+                          aria-label="Default Council preset"
+                          disabled={COUNCIL_COMING_SOON}
+                          onChange={(event) =>
+                            onConfigChange?.({
+                              ...config,
+                              council: {
+                                ...normalizedCouncilConfig(config.council),
+                                defaultPresetId: event.target.value,
+                              },
+                            })
+                          }
+                          value={
+                            normalizedCouncilConfig(config.council)
+                              .defaultPresetId
+                          }
+                        >
+                          {normalizedCouncilConfig(config.council).presets.map(
+                            (preset) => (
+                              <option key={preset.id} value={preset.id}>
+                                {preset.name}
+                              </option>
+                            ),
+                          )}
+                        </SettingsSelect>
+                      </SettingsRow>
+                      <SettingsRow
+                        label="Synthesize on partial"
+                        detail="When one seat fails, still synthesize from the seats that finished."
+                      >
+                        <SettingsSwitch
+                          label="Synthesize on partial"
+                          checked={
+                            normalizedCouncilConfig(config.council)
+                              .synthesizeOnPartial
+                          }
+                          disabled={COUNCIL_COMING_SOON}
+                          onChange={(checked) =>
+                            onConfigChange?.({
+                              ...config,
+                              council: {
+                                ...normalizedCouncilConfig(config.council),
+                                synthesizeOnPartial: checked,
+                              },
+                            })
+                          }
+                        />
+                      </SettingsRow>
+                    </SettingsGroup>
+                  )}
+                </SettingsDisclosure>
+              ) : null}
+              <SettingsDisclosure
+                id="add-provider"
+                title="Add a provider"
+                description="Choose a provider, add an API key, or connect local models."
+                defaultOpen={needsProviderSetup}
+              >
+                <nav
+                  className="gyro-provider-setup-methods"
+                  aria-label="Connection methods"
+                >
+                  {(
+                    [
+                      ["gyro-provider-accounts", "Existing account"],
+                      ["gyro-provider-api-keys", "API key"],
+                      ["gyro-provider-ollama", "Local models"],
+                    ] as const
+                  ).map(([target, label]) => (
+                    <button
+                      key={target}
+                      type="button"
+                      onClick={() => revealProviderConnection(target)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </nav>
+                <div id="gyro-provider-accounts" tabIndex={-1}>
+                  {providerConnectionTable(
+                    disabledProviders.filter(
+                      (provider) => provider.id !== "ollama",
+                    ),
+                  )}
+                </div>
+                <div id="gyro-provider-api-keys" tabIndex={-1}>
+                  <ProviderApiKeySection
+                    connectingProviderIds={connectingProviderIds}
+                    selectedProviderId={apiKeyProviderId}
+                    onSelectedProviderChange={setApiKeyProviderId}
+                    onUseProvider={onUseProvider}
+                    providerStatuses={providerStatuses}
+                    config={config}
+                    providerApiKeyConfigured={providerApiKeyConfigured}
+                    savingProviderApiKeyId={savingProviderApiKeyId}
+                    renderProviderMark={(id) => (
+                      <span aria-hidden="true">
+                        <ProviderLogo providerId={id} />
+                      </span>
+                    )}
+                    onSaveProviderApiKey={onSaveProviderApiKey}
+                    onClearProviderApiKey={onClearProviderApiKey}
+                  />
+                </div>
+                <CustomProviderSection
+                  config={config}
+                  savingProviderApiKeyId={savingProviderApiKeyId}
+                  onAddCustomProvider={onAddCustomProvider}
+                  onRemoveCustomProvider={onRemoveCustomProvider}
+                  onFetchCustomProviderModels={onFetchCustomProviderModels}
+                />
+                <RemovedProvidersSection
+                  config={config}
+                  onRestoreProvider={onRestoreProvider}
+                />
+              </SettingsDisclosure>
+              <ProviderModelDefaults
+                config={config}
+                onChange={onSelectProviderDefaultModel}
+                mark={(id) => <ProviderLogo providerId={id} />}
+              />
+              <SettingsDisclosure
+                id="local-models"
+                title="Local models"
+                summary={
+                  providersForConfig(config).find((p) => p.id === "ollama")
+                    ?.authStatus === "connected"
+                    ? "Ollama connected"
+                    : "Ollama not connected"
+                }
+                defaultOpen={
+                  !needsProviderSetup && connectedRemoteProviders.length === 0
+                }
+              >
+                <p>
+                  Use models served by Ollama on this Mac. Gyro does not
+                  download models automatically.
+                </p>
+                {providerConnectionTable(
+                  providerConfigs.filter(
+                    (provider) => provider.id === "ollama",
+                  ),
+                )}
+              </SettingsDisclosure>
+            </SettingsSection>
+          ) : null}
+          {activeSection === "usage-limits" ? (
+            <SettingsSection
+              icon={Gauge}
+              title="Usage & limits"
+              description="Provider allowances, local observations and run budgets. Gyro subscription billing is separate."
+            >
+              <SettingsDisclosure
+                id="provider-usage"
+                title="Provider-reported allowances"
+                description="Only windows actually reported by your provider are shown."
+              >
+                {usageProvider ? (
+                  <div className="gyro-usage-dashboard">
+                    <label className="gyro-usage-provider-select">
+                      <span>Provider</span>
+                      <SettingsSelect
+                        aria-label="Usage provider"
+                        value={usageProvider.id}
+                        onChange={(event) =>
+                          onUsageProviderChange?.(
+                            event.target.value as ProviderId,
+                          )
+                        }
+                      >
+                        {providerConfigs.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.displayName} ·{" "}
+                            {providerConnectionLabel(
+                              provider,
+                              providerStatuses?.find(
+                                (status) => status.id === provider.id,
+                              ),
+                            )}
+                          </option>
+                        ))}
+                      </SettingsSelect>
+                    </label>
+                    <div className="gyro-usage-toolbar">
+                      <div>
+                        <strong>
+                          {usageProvider.id === "openai" ||
+                          usageProvider.id === "anthropic" ||
+                          usageProvider.id === "xai" ||
+                          usageProvider.id === "kimi"
+                            ? `${usageProvider.displayName} plan windows`
+                            : `${usageProvider.displayName} spend`}
+                        </strong>
+                        <span>
+                          {providerUsage?.status === "available" &&
+                          providerUsage.windows.length > 0
+                            ? providerUsage.fetchedAt
+                              ? `Updated ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(providerUsage.fetchedAt))}${providerUsage.stale ? " · stale" : ""} · % of window spent`
+                              : "Percent of each plan window spent"
+                            : providerUsage?.status === "loading"
+                              ? "Checking with the provider…"
+                              : usageProvider.id === "openai" ||
+                                  usageProvider.id === "anthropic" ||
+                                  usageProvider.id === "xai" ||
+                                  usageProvider.id === "kimi"
+                                ? usageProvider.id === "xai"
+                                  ? "Refresh to load Grok Build weekly credit usage"
+                                  : "Plan windows appear after the first chat or refresh"
+                                : "No plan window API on this provider — local spend measured by Gyro is below"}
+                        </span>
+                      </div>
+                      <div className="gyro-usage-toolbar-actions">
+                        {hasProviderUsageWindows ? (
+                          <SettingsSegmented
+                            label="Usage visualization"
+                            value={usageVisualization}
+                            options={[
+                              { label: "Bars", value: "bars" },
+                              { label: "Wheels", value: "wheels" },
+                            ]}
+                            onChange={(value) =>
+                              onUsageVisualizationChange?.(value)
+                            }
+                          />
+                        ) : null}
+                        <button
+                          aria-label="Refresh provider usage"
+                          className="gyro-icon-button is-subtle"
+                          disabled={providerUsage?.status === "loading"}
+                          onClick={() =>
+                            onRefreshProviderUsage?.(usageProvider.id)
+                          }
+                          title="Refresh provider usage"
+                          type="button"
+                        >
+                          <RefreshCw
+                            className={
+                              providerUsage?.status === "loading"
+                                ? "is-spinning"
+                                : ""
+                            }
+                            size={14}
+                          />
+                        </button>
+                      </div>
+                    </div>
+                    {providerUsage?.status === "available" &&
+                    providerUsage.stale &&
+                    providerUsage.error ? (
+                      <p className="gyro-usage-stale-note" role="status">
+                        {providerUsage.error}
+                      </p>
+                    ) : null}
+                    {providerUsage?.status === "available" &&
+                    providerUsage.windows.length > 0 ? (
+                      <div className="gyro-usage-cards">
+                        {/* Show every window the provider (or ledger) reported —
+                        five-hour, weekly, weekly-opus, etc. — not only two slots. */}
+                        {[...providerUsage.windows]
+                          .sort((left, right) => {
+                            const order = ["five-hour", "weekly"];
+                            const leftRank = order.indexOf(left.id);
+                            const rightRank = order.indexOf(right.id);
+                            return (
+                              (leftRank === -1 ? order.length : leftRank) -
+                              (rightRank === -1 ? order.length : rightRank)
+                            );
+                          })
+                          .map((window) => (
+                            <UsageCard
+                              key={window.id}
+                              visualization={usageVisualization}
+                              window={window}
+                            />
+                          ))}
+                      </div>
+                    ) : providerUsage?.status === "loading" ||
+                      providerUsage?.status === "error" ? (
+                      <div className="gyro-usage-empty" role="status">
+                        <Gauge size={22} />
+                        <div>
+                          <strong>
+                            {providerUsage.status === "loading"
+                              ? "Loading provider allowance…"
+                              : "Provider allowance could not be loaded"}
+                          </strong>
+                          <span>
+                            {providerUsage.error ??
+                              "Connect or refresh this provider to load plan usage."}
+                          </span>
+                        </div>
+                        <button
+                          className="gyro-secondary-button"
+                          disabled={providerUsage.status === "loading"}
+                          onClick={() =>
+                            onRefreshProviderUsage?.(usageProvider.id)
+                          }
+                          type="button"
+                        >
+                          <RefreshCw size={14} />
+                          Refresh
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="gyro-usage-empty" role="status">
+                        <Gauge size={22} />
+                        <div>
+                          <strong>No usage recorded yet</strong>
+                          <span>
+                            Start a chat or refresh to check provider usage.
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 ) : (
-                  <div className="gyro-usage-empty" role="status">
+                  <div className="gyro-usage-empty">
                     <Gauge size={22} />
                     <div>
-                      <strong>No usage recorded yet</strong>
-                      <span>
-                        Start a chat or refresh to check provider usage.
-                      </span>
+                      <strong>No providers configured</strong>
+                      <span>Connect a provider to inspect reported usage.</span>
                     </div>
                   </div>
                 )}
-              </div>
-            ) : (
-              <div className="gyro-usage-empty">
-                <Gauge size={22} />
-                <div>
-                  <strong>No providers configured</strong>
-                  <span>Connect a provider to inspect reported usage.</span>
-                </div>
-              </div>
-            )}
-            </SettingsDisclosure>
-            <SettingsDisclosure id="local-usage" title="Local usage" description="Locally observed tokens, not a provider invoice.">
-              {localUsageWindows.length ? (
+              </SettingsDisclosure>
+              <SettingsDisclosure
+                id="local-usage"
+                title="Local usage"
+                description="Locally observed tokens, not a provider invoice."
+              >
+                {localUsageWindows.length ? (
                   <div className="gyro-usage-cards">
                     {localUsageWindows.map((window) => (
                       <UsageCard
@@ -23614,538 +18791,578 @@ export function SettingsSurface({
                       />
                     ))}
                   </div>
-
-              ) : <p>No local usage recorded.</p>}
-            </SettingsDisclosure>
-            <SettingsGroup id="usage-limits" label="Budgets & warnings">
-              <SettingsRow
-                label={
-                  usageProvider
-                    ? `${usageProvider.displayName} daily budget`
-                    : "Daily budget"
-                }
-                detail={
-                  providerLedger?.budget
-                    ? "Holds council runs and automations at 10% left and stops the provider when observed usage reaches the token budget. An in-flight request can exceed it; this is not an invoice limit."
-                    : "Set an observed token budget instead of the default reference. In-flight requests can exceed it; provider billing is separate."
-                }
-              >
-                <SettingsSelect
-                  aria-label="Daily token budget"
-                  className="gyro-settings-select"
-                  disabled={!usageProvider}
-                  onChange={(event) =>
-                    usageProvider &&
-                    onProviderBudgetChange?.(
-                      usageProvider.id,
-                      Number(event.target.value),
-                    )
+                ) : (
+                  <p>No local usage recorded.</p>
+                )}
+              </SettingsDisclosure>
+              <SettingsGroup id="usage-limits" label="Budgets & warnings">
+                <SettingsRow
+                  label={
+                    usageProvider
+                      ? `${usageProvider.displayName} daily budget`
+                      : "Daily budget"
                   }
-                  value={String(providerLedger?.budget?.maxTokens ?? 0)}
+                  detail={
+                    providerLedger?.budget
+                      ? "Holds council runs and automations at 10% left and stops the provider when observed usage reaches the token budget. An in-flight request can exceed it; this is not an invoice limit."
+                      : "Set an observed token budget instead of the default reference. In-flight requests can exceed it; provider billing is separate."
+                  }
                 >
-                  {budgetOptions(providerLedger?.budget?.maxTokens).map(
-                    (option) => (
-                      <option key={option.value} value={String(option.value)}>
-                        {option.label}
-                      </option>
-                    ),
-                  )}
-                </SettingsSelect>
-              </SettingsRow>
-              <SettingsRow
-                label="Daily pace warning"
-                detail="Warn when today’s usage reaches about one seventh (14%) of the weekly allowance."
-              >
-                <SettingsSwitch
-                  checked={dailyPaceWarning}
-                  label="Daily pace warning"
-                  onChange={(enabled) => onDailyPaceWarningChange?.(enabled)}
-                />
-              </SettingsRow>
-              <SettingsRow
-                label="Pause provider runs"
-                detail={
-                  usageSafety?.pause.active
-                    ? usagePauseDetail(usageSafety)
-                    : "Hold every provider run until you resume. Automations included."
-                }
-              >
-                <SettingsSwitch
-                  checked={Boolean(usageSafety?.pause.active)}
-                  label="Pause provider runs"
-                  onChange={(checked) => onUsagePauseChange?.(checked)}
-                />
-              </SettingsRow>
-              <SettingsRow
-                label="Provider spend"
-                value="Manual"
-                detail="Provider billing and allowance controls remain provider-owned."
-              />
-            </SettingsGroup>
-          </SettingsSection>
-        ) : null}
-
-        {activeSection === "cli-profiles" ? (
-          <SettingsSection
-            icon={Terminal}
-            title="CLI Profiles"
-            description="Choose which saved command profiles open with New Terminal, and how many panes to create."
-          >
-            <SettingsGroup id="launch-preset" label="Launch preset">
-              <CliLaunchPresetEditor
-                onChange={onCliLaunchPresetChange}
-                preset={cliLaunchPreset}
-                profiles={commandProfiles}
-              />
-            </SettingsGroup>
-            <SettingsGroup id="saved-profiles" label="Saved profiles">
-              <div className="gyro-cli-profile-list">
-                {commandProfiles.map((profile) => (
-                  <div className="gyro-provider-row" key={profile.id}>
-                    <div>
-                      <strong>{profile.displayName}</strong>
-                      <span>
-                        {profile.workingDirectory ?? "Workspace root"}
-                      </span>
-                    </div>
-                    <code>
-                      {profile.command} {profile.args.join(" ")}
-                    </code>
-                  </div>
-                ))}
-              </div>
-            </SettingsGroup>
-            <SettingsGroup id="notifications" label="Notifications">
-              <SettingsRow
-                label="Hook notifications"
-                value="Subtle"
-                detail="Done, waiting, failed, and approval states show in app chrome."
-              />
-            </SettingsGroup>
-          </SettingsSection>
-        ) : null}
-
-        {activeSection === "permissions" ? (
-          <SettingsSection
-            icon={LockKeyhole}
-            title="Permissions"
-            description={`Provider: ${providerConfigs.find((provider) => provider.id === config.selectedProviderId)?.displayName ?? "Selected provider"}. Choose when Gyro asks before commands and file edits.`}
-          >
-            <SettingsGroup id="agent-approvals" label="Agent approvals">
-              <SettingsRow
-                label="Command policy"
-                detail="Ask before the configured provider runs commands."
-              >
-                <SettingsSwitch
-                  label="Require command approval"
-                  checked={config.requireCommandApproval}
-                  onChange={(checked) =>
-                    onConfigChange?.({
-                      ...config,
-                      requireCommandApproval: checked,
-                      fullAccess: false,
-                    })
-                  }
-                />
-              </SettingsRow>
-              <SettingsRow
-                label="File edit policy"
-                detail="Ask before the configured provider changes files."
-              >
-                <SettingsSwitch
-                  label="Require file edit approval"
-                  checked={config.requireFileEditApproval}
-                  onChange={(checked) =>
-                    onConfigChange?.({
-                      ...config,
-                      requireFileEditApproval: checked,
-                      fullAccess: false,
-                    })
-                  }
-                />
-              </SettingsRow>
-            </SettingsGroup>
-            <SettingsGroup id="workspace-protection" label="Workspace protection">
-              <SettingsRow
-                label="Workspace boundary"
-                value="Provider-dependent"
-                detail="File access depends on the provider and approval mode. Full access can allow work outside the project folder."
-              />
-              <SettingsRow
-                label="Network access"
-                value="Provider-dependent"
-                detail="Network restrictions depend on the provider and CLI profile; these approval switches do not guarantee that network access is blocked."
-              />
-              <SettingsRow
-                label="Secrets redaction"
-                value="On"
-                detail="Gyro masks recognized secret patterns in diagnostics and supported output. Review exported files before sharing."
-              />
-            </SettingsGroup>
-            {(
-              <SettingsGroup id="macos-system-access" label="macOS system access">
-                {!systemAccess ? <p>Unavailable. macOS access can be checked in the desktop app.</p> : null}
-                {(systemAccess ?? []).map((scope) => (
-                  <SettingsRow
-                    key={scope.id}
-                    label={scope.label}
-                    value={systemAccessValue(scope)}
-                    detail={systemAccessDetail(scope)}
+                  <SettingsSelect
+                    aria-label="Daily token budget"
+                    className="gyro-settings-select"
+                    disabled={!usageProvider}
+                    onChange={(event) =>
+                      usageProvider &&
+                      onProviderBudgetChange?.(
+                        usageProvider.id,
+                        Number(event.target.value),
+                      )
+                    }
+                    value={String(providerLedger?.budget?.maxTokens ?? 0)}
                   >
-                    {scope.status === "granted" ||
-                    scope.status === "unavailable" ? (
-                      <span className="gyro-settings-info-value">
-                        {systemAccessValue(scope)}
+                    {budgetOptions(providerLedger?.budget?.maxTokens).map(
+                      (option) => (
+                        <option key={option.value} value={String(option.value)}>
+                          {option.label}
+                        </option>
+                      ),
+                    )}
+                  </SettingsSelect>
+                </SettingsRow>
+                <SettingsRow
+                  label="Daily pace warning"
+                  detail="Warn when today’s usage reaches about one seventh (14%) of the weekly allowance."
+                >
+                  <SettingsSwitch
+                    checked={dailyPaceWarning}
+                    label="Daily pace warning"
+                    onChange={(enabled) => onDailyPaceWarningChange?.(enabled)}
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  label="Pause provider runs"
+                  detail={
+                    usageSafety?.pause.active
+                      ? usagePauseDetail(usageSafety)
+                      : "Hold every provider run until you resume. Automations included."
+                  }
+                >
+                  <SettingsSwitch
+                    checked={Boolean(usageSafety?.pause.active)}
+                    label="Pause provider runs"
+                    onChange={(checked) => onUsagePauseChange?.(checked)}
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  label="Provider spend"
+                  value="Manual"
+                  detail="Provider billing and allowance controls remain provider-owned."
+                />
+              </SettingsGroup>
+            </SettingsSection>
+          ) : null}
+
+          {activeSection === "cli-profiles" ? (
+            <SettingsSection
+              icon={Terminal}
+              title="CLI Profiles"
+              description="Choose which saved command profiles open with New Terminal, and how many panes to create."
+            >
+              <SettingsGroup id="launch-preset" label="Launch preset">
+                <CliLaunchPresetEditor
+                  onChange={onCliLaunchPresetChange}
+                  preset={cliLaunchPreset}
+                  profiles={commandProfiles}
+                />
+              </SettingsGroup>
+              <SettingsGroup id="saved-profiles" label="Saved profiles">
+                <div className="gyro-cli-profile-list">
+                  {commandProfiles.map((profile) => (
+                    <div className="gyro-provider-row" key={profile.id}>
+                      <div>
+                        <strong>{profile.displayName}</strong>
+                        <span>
+                          {profile.workingDirectory ?? "Workspace root"}
+                        </span>
+                      </div>
+                      <code>
+                        {profile.command} {profile.args.join(" ")}
+                      </code>
+                    </div>
+                  ))}
+                </div>
+              </SettingsGroup>
+              <SettingsGroup id="notifications" label="Notifications">
+                <SettingsRow
+                  label="Hook notifications"
+                  value="Subtle"
+                  detail="Done, waiting, failed, and approval states show in app chrome."
+                />
+              </SettingsGroup>
+            </SettingsSection>
+          ) : null}
+
+          {activeSection === "permissions" ? (
+            <SettingsSection
+              icon={LockKeyhole}
+              title="Permissions"
+              description={`Provider: ${providerConfigs.find((provider) => provider.id === config.selectedProviderId)?.displayName ?? "Selected provider"}. Choose when Gyro asks before commands and file edits.`}
+            >
+              <SettingsGroup id="agent-approvals" label="Agent approvals">
+                <SettingsRow
+                  label="Command policy"
+                  detail="Ask before the configured provider runs commands."
+                >
+                  <SettingsSwitch
+                    label="Require command approval"
+                    checked={config.requireCommandApproval}
+                    onChange={(checked) =>
+                      onConfigChange?.({
+                        ...config,
+                        requireCommandApproval: checked,
+                        fullAccess: false,
+                      })
+                    }
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  label="File edit policy"
+                  detail="Ask before the configured provider changes files."
+                >
+                  <SettingsSwitch
+                    label="Require file edit approval"
+                    checked={config.requireFileEditApproval}
+                    onChange={(checked) =>
+                      onConfigChange?.({
+                        ...config,
+                        requireFileEditApproval: checked,
+                        fullAccess: false,
+                      })
+                    }
+                  />
+                </SettingsRow>
+              </SettingsGroup>
+              <SettingsGroup
+                id="workspace-protection"
+                label="Workspace protection"
+              >
+                <SettingsRow
+                  label="Workspace boundary"
+                  value="Provider-dependent"
+                  detail="File access depends on the provider and approval mode. Full access can allow work outside the project folder."
+                />
+                <SettingsRow
+                  label="Network access"
+                  value="Provider-dependent"
+                  detail="Network restrictions depend on the provider and CLI profile; these approval switches do not guarantee that network access is blocked."
+                />
+                <SettingsRow
+                  label="Secrets redaction"
+                  value="On"
+                  detail="Gyro masks recognized secret patterns in diagnostics and supported output. Review exported files before sharing."
+                />
+              </SettingsGroup>
+              {
+                <SettingsGroup
+                  id="macos-system-access"
+                  label="macOS system access"
+                >
+                  {!systemAccess ? (
+                    <p>
+                      Unavailable. macOS access can be checked in the desktop
+                      app.
+                    </p>
+                  ) : null}
+                  {(systemAccess ?? []).map((scope) => (
+                    <SettingsRow
+                      key={scope.id}
+                      label={scope.label}
+                      value={systemAccessValue(scope)}
+                      detail={systemAccessDetail(scope)}
+                    >
+                      {scope.status === "granted" ||
+                      scope.status === "unavailable" ? (
+                        <span className="gyro-settings-info-value">
+                          {systemAccessValue(scope)}
+                        </span>
+                      ) : (
+                        <button
+                          className="gyro-secondary-button"
+                          disabled={!onOpenSystemAccessSettings}
+                          onClick={() => onOpenSystemAccessSettings?.(scope.id)}
+                          type="button"
+                        >
+                          Open System Settings
+                        </button>
+                      )}
+                    </SettingsRow>
+                  ))}
+                  <SettingsRow
+                    label="Re-check access"
+                    detail="Results are from the last check. Check again after changing access in System Settings; macOS may ask about unchecked folders."
+                  >
+                    <button
+                      className="gyro-secondary-button"
+                      disabled={
+                        isCheckingSystemAccess || !onRecheckSystemAccess
+                      }
+                      onClick={onRecheckSystemAccess}
+                      type="button"
+                    >
+                      {isCheckingSystemAccess ? "Checking…" : "Check again"}
+                    </button>
+                  </SettingsRow>
+                </SettingsGroup>
+              }
+            </SettingsSection>
+          ) : null}
+
+          {activeSection === "updates" ? (
+            <SettingsSection
+              icon={RefreshCw}
+              title="Updates"
+              description="Keep Gyro on the newest signed Alpha build."
+            >
+              <section
+                aria-busy={isCheckingUpdate}
+                aria-label="Update status"
+                className="gyro-update-card"
+                data-level={updateLevel}
+                data-status={updateState?.status ?? "unavailable"}
+              >
+                <div className="gyro-update-card-head">
+                  <span aria-hidden="true" className="gyro-update-mark">
+                    <RefreshCw
+                      className={isCheckingUpdate ? "is-spinning" : ""}
+                      size={18}
+                    />
+                  </span>
+                  <div className="gyro-update-copy">
+                    <div className="gyro-update-heading">
+                      <strong className="gyro-update-version">
+                        {updateVersion ? `Gyro ${updateVersion}` : "Gyro"}
+                      </strong>
+                      <span className="gyro-update-channel">Public Alpha</span>
+                      <SettingsStatus status={updateLevel}>
+                        {updateStatusLabel(updateState)}
+                      </SettingsStatus>
+                    </div>
+                    {updateSummary ? (
+                      <p className="gyro-update-summary">{updateSummary}</p>
+                    ) : null}
+                    {updateState?.status === "downloading" &&
+                    updatePercent !== undefined ? (
+                      <span
+                        aria-label="Download progress"
+                        aria-valuemax={100}
+                        aria-valuemin={0}
+                        aria-valuenow={Math.round(updatePercent)}
+                        aria-valuetext={`${Math.round(updatePercent)}% downloaded`}
+                        className="gyro-update-progress"
+                        role="progressbar"
+                      >
+                        <span
+                          className="gyro-update-progress-fill"
+                          style={{ width: `${updatePercent}%` }}
+                        />
                       </span>
-                    ) : (
+                    ) : null}
+                  </div>
+                  <div className="gyro-update-actions">
+                    {canRunUpdateAction && updateState ? (
                       <button
-                        className="gyro-secondary-button"
-                        disabled={!onOpenSystemAccessSettings}
-                        onClick={() => onOpenSystemAccessSettings?.(scope.id)}
+                        className="gyro-primary-button gyro-update-card-primary"
+                        onClick={() => onUpdateAction?.(updateState)}
                         type="button"
                       >
-                        Open System Settings
+                        {updatePrimaryActionLabel(updateState)}
+                      </button>
+                    ) : null}
+                    {canRunUpdateAction ? null : (
+                      <button
+                        className="gyro-secondary-button"
+                        disabled={isUpdateBusy}
+                        onClick={onCheckForUpdates}
+                        type="button"
+                      >
+                        <RefreshCw
+                          className={isCheckingUpdate ? "is-spinning" : ""}
+                          size={14}
+                        />
+                        {isCheckingUpdate ? "Checking…" : "Check for updates"}
                       </button>
                     )}
-                  </SettingsRow>
-                ))}
+                  </div>
+                </div>
+                {updateFactRows.length > 0 ? (
+                  <SettingsMore label="Details">
+                    <dl className="gyro-update-facts">
+                      {updateFactRows.map((fact) => (
+                        <div key={fact.label}>
+                          <dt>{fact.label}</dt>
+                          <dd>{fact.value}</dd>
+                        </div>
+                      ))}
+                      <div>
+                        <dt>Source</dt>
+                        <dd>GitHub Releases</dd>
+                      </div>
+                    </dl>
+                  </SettingsMore>
+                ) : null}
+                <span aria-live="polite" className="gyro-sr-only">
+                  {updateNotice}
+                </span>
+              </section>
+              <SettingsGroup id="preferences" label="Preferences">
                 <SettingsRow
-                  label="Re-check access"
-                  detail="Results are from the last check. Check again after changing access in System Settings; macOS may ask about unchecked folders."
+                  label="Automatic checks"
+                  detail="Checks after launch and when Gyro regains focus. Downloads still require a click."
+                >
+                  <SettingsSwitch
+                    label="Automatic update checks"
+                    checked={config.automaticUpdateChecks !== false}
+                    onChange={(checked) =>
+                      onConfigChange?.({
+                        ...config,
+                        automaticUpdateChecks: checked,
+                      })
+                    }
+                  />
+                </SettingsRow>
+              </SettingsGroup>
+              {updateState?.releaseNotes ? (
+                <SettingsDisclosure id="release-notes" title="Release notes">
+                  <section
+                    aria-label="What’s new"
+                    className="gyro-update-card gyro-update-notes"
+                  >
+                    <div className="gyro-update-notes-head">
+                      <strong>What’s new</strong>
+                      <span>
+                        {updateState.nextVersion
+                          ? `in ${updateState.nextVersion}`
+                          : "in this release"}
+                      </span>
+                    </div>
+                    <p>{updateState.releaseNotes}</p>
+                  </section>
+                </SettingsDisclosure>
+              ) : null}
+            </SettingsSection>
+          ) : null}
+
+          {activeSection === "keyboard" ? (
+            <SettingsSection
+              icon={CommandIcon}
+              title="Keyboard Shortcuts"
+              description="View app shortcuts and customize workspace shortcuts."
+            >
+              <SettingsGroup
+                id="app-shortcuts"
+                label="App shortcuts"
+                summary="Navigation, sessions and terminals"
+              >
+                {(
+                  [
+                    {
+                      label: "Navigation",
+                      items: [
+                        ["Command palette", "Cmd+Shift+P"],
+                        ["Search everything", "Cmd+K"],
+                        ["Find files", "Cmd+P"],
+                        ["Open settings", "Cmd+,"],
+                      ],
+                    },
+                    {
+                      label: "Sessions",
+                      items: [
+                        ["New chat", "Cmd+N"],
+                        ["Show chats", "Cmd+1"],
+                        ["Show terminals", "Cmd+2"],
+                        ["Show Workspace", "Cmd+3"],
+                      ],
+                    },
+                    {
+                      label: "Terminal",
+                      items: [["New terminal", "Cmd+T"]],
+                    },
+                  ] as Array<{ label: string; items: Array<[string, string]> }>
+                ).map((group) => (
+                  <div key={group.label}>
+                    <h3 className="gyro-settings-subheading">{group.label}</h3>
+                    {group.items.map(([label, value]) => (
+                      <SettingsRow key={label} label={label}>
+                        <kbd className="gyro-settings-key">{value}</kbd>
+                      </SettingsRow>
+                    ))}
+                  </div>
+                ))}
+              </SettingsGroup>
+              <SettingsDisclosure
+                id="workspace-shortcuts"
+                title="Workspace shortcuts"
+                description="Customize bindings and resolve conflicts."
+              >
+                <WorkspaceKeyboardSettings
+                  keybindings={workspaceKeybindings}
+                  onKeybindingChange={onWorkspaceKeybindingChange}
+                />
+              </SettingsDisclosure>
+              <ShortcutConflicts
+                keybindings={workspaceKeybindings}
+                onChange={onWorkspaceKeybindingChange}
+              />
+            </SettingsSection>
+          ) : null}
+
+          {activeSection === "advanced" ? (
+            <SettingsSection
+              icon={Settings}
+              title="Data & privacy"
+              description="Find local data, export diagnostics, and reset presentation preferences."
+            >
+              <SettingsGroup
+                id="storage-and-diagnostics"
+                label="Local data locations"
+              >
+                <SettingsRow
+                  label="Session store"
+                  detail="All sessions and terminal layouts are stored on this Mac."
                 >
                   <button
-                    className="gyro-secondary-button"
-                    disabled={isCheckingSystemAccess || !onRecheckSystemAccess}
-                    onClick={onRecheckSystemAccess}
+                    className="gyro-copy-value"
+                    onClick={() =>
+                      void copySettingsPath(
+                        "~/Library/Application Support/Gyro",
+                      )
+                    }
                     type="button"
                   >
-                    {isCheckingSystemAccess ? "Checking..." : "Check again"}
+                    <code>~/Library/Application Support/Gyro</code>
+                    <Copy size={13} />
+                  </button>
+                </SettingsRow>
+                <SettingsRow
+                  label="Logs path"
+                  detail="Diagnostics are local until explicitly exported."
+                >
+                  <button
+                    className="gyro-copy-value"
+                    onClick={() =>
+                      void copySettingsPath(
+                        "~/Library/Application Support/Gyro/logs",
+                      )
+                    }
+                    type="button"
+                  >
+                    <code>~/Library/Application Support/Gyro/logs</code>
+                    <Copy size={13} />
                   </button>
                 </SettingsRow>
               </SettingsGroup>
-            )}
-          </SettingsSection>
-        ) : null}
-
-        {activeSection === "updates" ? (
-          <SettingsSection
-            icon={RefreshCw}
-            title="Updates"
-            description="Keep Gyro on the newest signed Alpha build."
-          >
-            <section
-              aria-busy={isCheckingUpdate}
-              aria-label="Update status"
-              className="gyro-update-card"
-              data-level={updateLevel}
-              data-status={updateState?.status ?? "unavailable"}
-            >
-              <div className="gyro-update-card-head">
-                <span aria-hidden="true" className="gyro-update-mark">
-                  <RefreshCw
-                    className={isCheckingUpdate ? "is-spinning" : ""}
-                    size={18}
-                  />
-                </span>
-                <div className="gyro-update-copy">
-                  <div className="gyro-update-heading">
-                    <strong className="gyro-update-version">
-                      {updateVersion ? `Gyro ${updateVersion}` : "Gyro"}
-                    </strong>
-                    <span className="gyro-update-channel">Public Alpha</span>
-                    <SettingsStatus status={updateLevel}>
-                      {updateStatusLabel(updateState)}
-                    </SettingsStatus>
-                  </div>
-                  {updateSummary ? (
-                    <p className="gyro-update-summary">{updateSummary}</p>
-                  ) : null}
-                  {updateState?.status === "downloading" &&
-                  updatePercent !== undefined ? (
-                    <span
-                      aria-label="Download progress"
-                      aria-valuemax={100}
-                      aria-valuemin={0}
-                      aria-valuenow={Math.round(updatePercent)}
-                      aria-valuetext={`${Math.round(updatePercent)}% downloaded`}
-                      className="gyro-update-progress"
-                      role="progressbar"
-                    >
-                      <span
-                        className="gyro-update-progress-fill"
-                        style={{ width: `${updatePercent}%` }}
-                      />
-                    </span>
-                  ) : null}
-                </div>
-                <div className="gyro-update-actions">
-                  {canRunUpdateAction && updateState ? (
-                    <button
-                      className="gyro-primary-button gyro-update-card-primary"
-                      onClick={() => onUpdateAction?.(updateState)}
-                      type="button"
-                    >
-                      {updatePrimaryActionLabel(updateState)}
-                    </button>
-                  ) : null}
+              {preferences && onImportSettings ? (
+                <SettingsTransferPanel
+                  preferences={preferences}
+                  onApply={onImportSettings}
+                />
+              ) : null}
+              <SettingsGroup
+                id="diagnostics"
+                label="Diagnostics"
+                summary="Export only when requested"
+              >
+                <SettingsRow
+                  label="Export diagnostics"
+                  detail="Creates a redacted bundle for issue reports."
+                >
                   <button
                     className="gyro-secondary-button"
-                    disabled={isUpdateBusy}
-                    onClick={onCheckForUpdates}
+                    onClick={onExportDiagnostics}
                     type="button"
                   >
-                    <RefreshCw
-                      className={isCheckingUpdate ? "is-spinning" : ""}
-                      size={14}
-                    />
-                    {isCheckingUpdate ? "Checking…" : "Check for updates"}
+                    <Download aria-hidden="true" size={13} />
+                    Export diagnostics
                   </button>
-                </div>
-              </div>
-              {updateFactRows.length > 0 ? (
-                <dl className="gyro-update-facts">
-                  {updateFactRows.map((fact) => (
-                    <div key={fact.label}>
-                      <dt>{fact.label}</dt>
-                      <dd>{fact.value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              ) : null}
-              <span aria-live="polite" className="gyro-sr-only">
-                {updateNotice}
-              </span>
-            </section>
-            <SettingsGroup id="preferences" label="Preferences">
-              <SettingsRow
-                label="Update source"
-                value="GitHub Releases"
-                detail="Signed Alpha archives are published to GitHub Releases and checked against Gyro's updater key before install."
-              />
-              <SettingsRow
-                label="Automatic checks"
-                detail="Checks after launch and when Gyro regains focus. Downloads still require a click."
-              >
-                <SettingsSwitch
-                  label="Automatic update checks"
-                  checked={config.automaticUpdateChecks !== false}
-                  onChange={(checked) =>
-                    onConfigChange?.({
-                      ...config,
-                      automaticUpdateChecks: checked,
-                    })
-                  }
-                />
-              </SettingsRow>
-            </SettingsGroup>
-            {updateState?.releaseNotes ? (
-              <SettingsDisclosure id="release-notes" title="Release notes">
-              <section
-                aria-label="What’s new"
-                className="gyro-update-card gyro-update-notes"
-              >
-                <div className="gyro-update-notes-head">
-                  <strong>What’s new</strong>
-                  <span>
-                    {updateState.nextVersion
-                      ? `in ${updateState.nextVersion}`
-                      : "in this release"}
-                  </span>
-                </div>
-                <p>{updateState.releaseNotes}</p>
-              </section></SettingsDisclosure>
-            ) : null}
-          </SettingsSection>
-        ) : null}
-
-        {activeSection === "keyboard" ? (
-          <SettingsSection
-            icon={CommandIcon}
-            title="Keyboard Shortcuts"
-            description="View app shortcuts and customize workspace shortcuts."
-          >
-            <SettingsGroup id="app-shortcuts" label="App shortcuts" summary="Navigation, sessions and terminals">
-            {(
-              [
-                {
-                  label: "Navigation",
-                  items: [
-                    ["Command palette", "Cmd+Shift+P"],
-                    ["Search everything", "Cmd+K"],
-                    ["Find files", "Cmd+P"],
-                    ["Open settings", "Cmd+,"],
-                  ],
-                },
-                {
-                  label: "Sessions",
-                  items: [
-                    ["New chat", "Cmd+N"],
-                    ["Show chats", "Cmd+1"],
-                    ["Show terminals", "Cmd+2"],
-                    ["Show Workspace", "Cmd+3"],
-                  ],
-                },
-                {
-                  label: "Terminal",
-                  items: [["New terminal", "Cmd+T"]],
-                },
-              ] as Array<{ label: string; items: Array<[string, string]> }>
-            ).map((group) => (
-              <div key={group.label}><h3 className="gyro-settings-subheading">{group.label}</h3>
-                {group.items.map(([label, value]) => (
-                  <SettingsRow
-                    detail="Read-only app shortcut"
-                    key={label}
-                    label={label}
+                </SettingsRow>
+              </SettingsGroup>
+              <SettingsGroup id="reset" label="Reset">
+                {copyStatus ? <p role="status">{copyStatus}</p> : null}
+                <SettingsRow
+                  label="Reset UI state"
+                  detail="Clears layout preferences without touching workspace files or provider credentials."
+                  tone="danger"
+                >
+                  <button
+                    className="gyro-secondary-button"
+                    onClick={() => setIsResetConfirmOpen(true)}
+                    type="button"
                   >
-                    <kbd className="gyro-settings-key">{value}</kbd>
-                  </SettingsRow>
-                ))}
-              </div>
-            ))}
-            </SettingsGroup>
-            <SettingsDisclosure id="workspace-shortcuts" title="Workspace shortcuts" description="Customize bindings and resolve conflicts.">
-            <WorkspaceKeyboardSettings
-              keybindings={workspaceKeybindings}
-              onKeybindingChange={onWorkspaceKeybindingChange}
-            />
-            </SettingsDisclosure>
-            <ShortcutConflicts keybindings={workspaceKeybindings} onChange={onWorkspaceKeybindingChange}/>
-          </SettingsSection>
-        ) : null}
+                    <RotateCcw aria-hidden="true" size={13} />
+                    Reset UI state
+                  </button>
+                </SettingsRow>
+              </SettingsGroup>
+            </SettingsSection>
+          ) : null}
 
-        {activeSection === "advanced" ? (
-          <SettingsSection
-            icon={Settings}
-            title="Data & privacy"
-            description="Find local data, export diagnostics, and reset presentation preferences."
+          {activeSection === "about" ? (
+            <SettingsSection
+              icon={HelpCircle}
+              title="Help"
+              description="Get started, understand permissions, and find answers when you need them."
+            >
+              <SettingsHelp
+                version={updateState?.currentVersion}
+                onSectionChange={onSectionChange}
+              />
+            </SettingsSection>
+          ) : null}
+        </section>
+        {isResetConfirmOpen ? (
+          <div
+            className="gyro-settings-confirm-overlay"
+            role="presentation"
+            onPointerDown={(event) => {
+              if (event.target === event.currentTarget)
+                setIsResetConfirmOpen(false);
+            }}
           >
-            <SettingsGroup id="storage-and-diagnostics" label="Local data locations">
-              <SettingsRow
-                label="Session store"
-                detail="All sessions and terminal layouts are stored on this Mac."
-              >
-                <button
-                  className="gyro-copy-value"
-                  onClick={() =>
-                    void copySettingsPath("~/Library/Application Support/Gyro")
-                  }
-                  type="button"
-                >
-                  <code>~/Library/Application Support/Gyro</code>
-                  <Copy size={13} />
-                </button>
-              </SettingsRow>
-              <SettingsRow
-                label="Logs path"
-                detail="Diagnostics are local until explicitly exported."
-              >
-                <button
-                  className="gyro-copy-value"
-                  onClick={() =>
-                    void copySettingsPath(
-                      "~/Library/Application Support/Gyro/logs",
-                    )
-                  }
-                  type="button"
-                >
-                  <code>~/Library/Application Support/Gyro/logs</code>
-                  <Copy size={13} />
-                </button>
-              </SettingsRow>
-            </SettingsGroup>
-            {preferences && onImportSettings ? <SettingsTransferPanel preferences={preferences} onApply={onImportSettings}/> : null}
-            <SettingsGroup id="diagnostics" label="Diagnostics" summary="Export only when requested">
-              <SettingsRow
-                label="Export diagnostics"
-                detail="Creates a redacted bundle for issue reports."
-              >
+            <section
+              aria-label="Reset UI state"
+              aria-modal="true"
+              ref={resetDialogRef}
+              role="alertdialog"
+            >
+              <h2>Reset UI state?</h2>
+              <p>
+                This clears layout and presentation preferences. Workspace
+                files, sessions, and provider credentials stay untouched.
+              </p>
+              <div>
                 <button
                   className="gyro-secondary-button"
-                  onClick={onExportDiagnostics}
+                  onClick={() => setIsResetConfirmOpen(false)}
                   type="button"
                 >
-                  <Download aria-hidden="true" size={13} />
-                  Export diagnostics
+                  Cancel
                 </button>
-              </SettingsRow>
-            </SettingsGroup>
-            <SettingsGroup id="reset" label="Reset">
-              {copyStatus ? <p role="status">{copyStatus}</p> : null}
-              <SettingsRow
-                label="Reset UI state"
-                detail="Clears layout preferences without touching workspace files or provider credentials."
-                tone="danger"
-              >
                 <button
                   className="gyro-danger-button"
-                  onClick={() => setIsResetConfirmOpen(true)}
+                  onClick={() => {
+                    setIsResetConfirmOpen(false);
+                    onResetUiState?.();
+                  }}
                   type="button"
                 >
-                  <RotateCcw aria-hidden="true" size={13} />
                   Reset UI state
                 </button>
-              </SettingsRow>
-            </SettingsGroup>
-          </SettingsSection>
+              </div>
+            </section>
+          </div>
         ) : null}
-
-        {activeSection === "about" ? (
-          <SettingsSection
-            icon={HelpCircle}
-            title="Help"
-            description="Get started, understand permissions, and find answers when you need them."
-          >
-            <SettingsHelp
-              version={updateState?.currentVersion}
-              onSectionChange={onSectionChange}
-            />
-          </SettingsSection>
-        ) : null}
-      </section>
-      {isResetConfirmOpen ? (
-        <div
-          className="gyro-settings-confirm-overlay"
-          role="presentation"
-          onPointerDown={(event) => {
-            if (event.target === event.currentTarget)
-              setIsResetConfirmOpen(false);
-          }}
-        >
-          <section
-            aria-label="Reset UI state"
-            aria-modal="true"
-            ref={resetDialogRef}
-            role="alertdialog"
-          >
-            <h2>Reset UI state?</h2>
-            <p>
-              This clears layout and presentation preferences. Workspace files,
-              sessions, and provider credentials stay untouched.
-            </p>
-            <div>
-              <button
-                className="gyro-secondary-button"
-                onClick={() => setIsResetConfirmOpen(false)}
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                className="gyro-danger-button"
-                onClick={() => {
-                  setIsResetConfirmOpen(false);
-                  onResetUiState?.();
-                }}
-                type="button"
-              >
-                Reset UI state
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
-    </div>
+      </div>
     </SettingsDisclosureProvider>
   );
 }
@@ -24324,6 +19541,8 @@ function WorkspaceKeyboardSettings({
  * "you have used none of it" — the two look identical once a bar is filled.
  */
 const LIMIT_CLOCK_INTERVAL_MS = 20_000;
+/** A reading younger than this already answers a hover on the context meter. */
+const CONTEXT_METER_USAGE_REFRESH_MIN_AGE_MS = 15_000;
 
 /**
  * The time plan limits are read against.
@@ -24349,6 +19568,719 @@ function useLimitClock(enabled: boolean) {
     };
   }, [enabled]);
   return now;
+}
+
+/** Plan limits turn at 80% and 95%. Context uses the same bands. */
+function contextMeterSeverity(
+  usage: { contextWindowTokens: number; percent: number } | undefined,
+  source: "reported" | "estimated" | "empty",
+) {
+  if (!usage || source === "empty" || usage.contextWindowTokens <= 0) {
+    return "normal" as const;
+  }
+  if (usage.percent >= 95) return "critical" as const;
+  if (usage.percent >= 80) return "warning" as const;
+  return "normal" as const;
+}
+
+function ComposerLimitRow({ window }: { window: ComposerLimitWindow }) {
+  const measured = window.remainingPercent !== undefined;
+  return (
+    <div className={`gyro-composer-limit-row is-${window.severity}`}>
+      <div className="gyro-composer-limit-heading">
+        <strong>{window.label}</strong>
+        <b className={measured ? undefined : "is-unmeasured"}>
+          {measured
+            ? `${window.remainingPercentLabel} left`
+            : window.status === "exhausted"
+              ? window.percentLabel
+              : "Not reported"}
+        </b>
+      </div>
+      <div
+        aria-label={`${window.label}: ${
+          measured
+            ? `${window.remainingPercentLabel} left`
+            : "level not reported"
+        }`}
+        aria-valuemax={100}
+        aria-valuemin={0}
+        {...(measured ? { "aria-valuenow": window.remainingPercent } : {})}
+        className={`gyro-composer-limit-bar${measured ? "" : " is-unmeasured"}`}
+        role="progressbar"
+      >
+        {measured ? (
+          <span style={{ width: `${window.remainingPercent}%` }} />
+        ) : null}
+      </div>
+      {window.resetsLabel ? (
+        <em className="gyro-composer-limit-reset">{window.resetsLabel}</em>
+      ) : null}
+    </div>
+  );
+}
+
+const PLAN_USAGE_NOTICE_STORAGE_KEY = "gyro.plan-usage-notices.v1";
+
+function usageNoticeKey(notice: PlanUsageNotice) {
+  return [
+    notice.providerId,
+    notice.windowId,
+    notice.cycleId,
+    notice.threshold,
+  ].join(":");
+}
+
+function loadShownPlanUsageNotices() {
+  if (typeof window === "undefined") return {} as Record<string, true>;
+  try {
+    const value = window.localStorage.getItem(PLAN_USAGE_NOTICE_STORAGE_KEY);
+    const parsed = value ? JSON.parse(value) : undefined;
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, true>)
+      : {};
+  } catch {
+    return {} as Record<string, true>;
+  }
+}
+
+/** A progressive, once-per-window notice for provider-reported plan usage. */
+function PlanUsageNotification({
+  dailyPaceWarning = true,
+  onHandoff,
+  paused = false,
+  providerId,
+  providerLedger,
+  providers,
+  windows,
+}: {
+  dailyPaceWarning?: boolean;
+  onHandoff: (providerId: ProviderId) => void;
+  paused?: boolean;
+  providerId: ProviderId;
+  providerLedger?: ProviderLedgerSummary;
+  providers: Array<{ id: ProviderId; label: string }>;
+  windows: ProviderUsageState["windows"];
+}) {
+  const [shown, setShown] = useState(loadShownPlanUsageNotices);
+  const [notice, setNotice] = useState<PlanUsageNotice>();
+  const candidates = useMemo(() => {
+    const plan = planUsageNotices(providerId, windows);
+    const daily = dailyPaceNotice(providerId, {
+      enabled: dailyPaceWarning,
+      ledger: providerLedger,
+      paused,
+      windows,
+    });
+    return daily
+      ? [...plan, daily].sort((left, right) => right.threshold - left.threshold)
+      : plan;
+  }, [dailyPaceWarning, paused, providerId, providerLedger, windows]);
+
+  useEffect(() => {
+    const next = candidates.find(
+      (candidate) => !shown[usageNoticeKey(candidate)],
+    );
+    if (!next) return;
+    const key = usageNoticeKey(next);
+    setShown((current) => {
+      const updated: Record<string, true> = { ...current, [key]: true };
+      try {
+        window.localStorage.setItem(
+          PLAN_USAGE_NOTICE_STORAGE_KEY,
+          JSON.stringify(updated),
+        );
+      } catch {
+        // Notifications remain correct for this open chat even when storage is unavailable.
+      }
+      return updated;
+    });
+    setNotice(next);
+  }, [candidates, shown]);
+
+  if (!notice) return null;
+  const isDailyPace = notice.threshold === DAILY_PACE_NOTICE_PERCENT;
+  const handoffTarget =
+    !isDailyPace && notice.threshold >= 95 ? providers[0] : undefined;
+  const tone =
+    notice.threshold >= 95
+      ? "critical"
+      : notice.threshold >= 80
+        ? "warning"
+        : "info";
+  const title = isDailyPace
+    ? "Daily pace warning"
+    : notice.threshold >= 95
+      ? "Plan limit nearly reached"
+      : notice.threshold >= 90
+        ? "Plan limit is close"
+        : notice.threshold >= 80
+          ? "Plan allowance is running low"
+          : "Half of this plan window is left";
+  const detail = isDailyPace
+    ? notice.windowId === "day"
+      ? `Today’s activity is above an even weekly pace (~${DAILY_PACE_NOTICE_PERCENT}% per day).`
+      : `${notice.windowLabel} has ${remainingUsage(notice.percent).percentLabel} left and is more than a day ahead of an even weekly pace (~${DAILY_PACE_NOTICE_PERCENT}% per day).`
+    : `${notice.windowLabel} has ${remainingUsage(notice.percent).percentLabel} left.${
+        notice.threshold >= 90 ? " Consider wrapping up this window." : ""
+      }`;
+
+  return (
+    <section
+      aria-live="polite"
+      className={`gyro-plan-usage-notice is-${tone}`}
+      role="status"
+    >
+      <TriangleAlert aria-hidden="true" size={17} />
+      <div>
+        <strong>{title}</strong>
+        <span>{detail}</span>
+      </div>
+      <div className="gyro-plan-usage-notice-actions">
+        {handoffTarget ? (
+          <button
+            className="gyro-secondary-button"
+            onClick={() => {
+              onHandoff(handoffTarget.id);
+              setNotice(undefined);
+            }}
+            type="button"
+          >
+            Continue with {handoffTarget.label}
+            <ChevronRight aria-hidden="true" size={15} />
+          </button>
+        ) : null}
+        <button
+          aria-label="Dismiss usage notice"
+          className="gyro-plan-usage-notice-dismiss"
+          onClick={() => setNotice(undefined)}
+          type="button"
+        >
+          <X aria-hidden="true" size={16} />
+        </button>
+      </div>
+    </section>
+  );
+}
+
+type ComposerPopoverId =
+  "approval" | "branch" | "context" | "project" | "provider" | "workspace-mode";
+
+type ComposerPopoverItem = {
+  label: string;
+  detail?: string;
+  tooltip?: string;
+  action?: string;
+  removeAction?: string;
+  icon: IconComponent;
+  kind?:
+    | "back"
+    | "branch"
+    | "branch-action"
+    | "disclosure"
+    | "effort"
+    | "model"
+    | "permission-direct"
+    | "project"
+    | "provider"
+    | "setting"
+    | "warning"
+    | "workspace-mode";
+  /** Disclosure rows draw a caret instead of a value; which way it points. */
+  caret?: "up" | "down";
+  /**
+   * Navigation inside a drill-down menu. These rows move between panels
+   * rather than doing anything, so they carry a destination instead of an
+   * action string the composer would have to pretend to handle.
+   */
+  menuPane?:
+    "root" | "model" | "effort" | "provider" | "provider-model" | "settings";
+  sectionLabel?: string;
+  providerId?: ProviderId;
+  active?: boolean;
+  disabled?: boolean;
+  showChevron?: boolean;
+  trailingLabel?: string;
+  /** Accent chip next to the title (e.g. Recommended) — not the trailing slot. */
+  badge?: string;
+  /** Soften connected/disconnected contrast without washing brand color out. */
+  disconnected?: boolean;
+  hideIcon?: boolean;
+  /** Catalog window for a model row, used to preview remaining context live. */
+  contextWindowTokens?: number;
+};
+
+type ComposerSlashCommand = {
+  command: string;
+  label: string;
+  /** Concise copy shown in the full `/help` catalog. */
+  description: string;
+  icon: IconComponent;
+  /** Commands whose provider or workspace cannot support them stay out of the menu. */
+  available?: boolean;
+  action?: string;
+  popover?: Extract<ComposerPopoverId, "approval" | "branch" | "provider">;
+  /** Plain-language explainer shown when hovering the row's "?" marker. */
+  hint?: string;
+};
+
+function branchPopoverItems({
+  branchCatalog,
+  branchName,
+  isDisabled,
+  isLoading,
+  workspaceMode,
+  workspacePath,
+}: {
+  branchCatalog?: GitBranchCatalog;
+  branchName: string;
+  isDisabled?: boolean;
+  isLoading?: boolean;
+  workspaceMode: WorkbenchMode;
+  workspacePath?: string;
+}): ComposerPopoverItem[] {
+  if (!workspacePath) {
+    return [
+      {
+        action: "select-workspace",
+        detail: "Choose a Git repository first",
+        icon: Folder,
+        label: "Choose folder",
+      },
+    ];
+  }
+  if (isLoading && !branchCatalog) {
+    return [
+      {
+        disabled: true,
+        detail: "Reading local branches",
+        icon: CircleDashed,
+        label: "Loading branches",
+      },
+    ];
+  }
+  if (!branchCatalog?.available) {
+    return [
+      {
+        disabled: true,
+        detail: branchCatalog?.error ?? "No local branches are available",
+        icon: TriangleAlert,
+        label: "Branches unavailable",
+      },
+    ];
+  }
+  if (branchCatalog.branches.length === 0) {
+    return [
+      {
+        disabled: true,
+        detail: "Create the repository's first commit before switching",
+        icon: GitBranch,
+        label: "No local branches yet",
+      },
+    ];
+  }
+  if (workspaceMode === "worktree") {
+    return [
+      {
+        active: true,
+        disabled: true,
+        detail: "Agent workspace keeps this private branch for the chat",
+        icon: GitBranch,
+        label: branchName,
+      },
+    ];
+  }
+  const busy = isDisabled ? "Wait for the active turn to finish" : undefined;
+  const createBranchItem: ComposerPopoverItem = {
+    action: `create-branch-from:${encodeURIComponent(branchCatalog.current ?? "")}`,
+    disabled: isDisabled,
+    icon: Plus,
+    kind: "branch-action",
+    label: "New branch",
+    tooltip:
+      busy ??
+      (branchCatalog.current
+        ? `Branch from ${branchCatalog.current}`
+        : "Branch from the current commit"),
+  };
+  // One line per branch: what each row does lives in its tooltip, and the
+  // current branch leads the list so it never scrolls out of view.
+  const branchItems = [...branchCatalog.branches]
+    .sort(
+      (a, b) =>
+        Number(b === branchCatalog.current) -
+        Number(a === branchCatalog.current),
+    )
+    .map((branch): ComposerPopoverItem => {
+      const inWorktree =
+        branch !== branchCatalog.current &&
+        Boolean(
+          branchCatalog.worktrees?.some(
+            (worktree) => worktree.branch === branch,
+          ),
+        );
+      return {
+        action: `select-branch:${encodeURIComponent(branch)}`,
+        active: branch === branchCatalog.current,
+        badge: inWorktree ? "worktree" : undefined,
+        disabled: isDisabled,
+        icon: GitBranch,
+        kind: "branch",
+        label: branch,
+        removeAction: inWorktree
+          ? `remove-worktree:${encodeURIComponent(branch)}`
+          : undefined,
+        tooltip:
+          busy ??
+          (branch === branchCatalog.current
+            ? "Current workspace branch"
+            : inWorktree
+              ? "Checked out in a linked worktree"
+              : "Switch branch; keep compatible local changes"),
+      };
+    });
+  return [
+    ...branchItems,
+    createBranchItem,
+    ...(branchCatalog.current
+      ? [
+          {
+            action: `rename-current-branch:${encodeURIComponent(branchCatalog.current)}`,
+            disabled: isDisabled,
+            icon: Edit3,
+            kind: "branch-action" as const,
+            label: "Rename",
+            tooltip:
+              busy ?? `Rename current branch… (${branchCatalog.current})`,
+          },
+        ]
+      : []),
+  ];
+}
+
+/**
+ * Dim the folder part of `release/v0.1.0` and let it give way first when the
+ * row is narrow, so the part that tells branches apart stays readable.
+ */
+function BranchLabel({ name }: { name: string }) {
+  const slash = name.lastIndexOf("/");
+  if (slash < 0) return <span className="gyro-branch-label-leaf">{name}</span>;
+  return (
+    <>
+      <span className="gyro-branch-label-prefix">
+        {name.slice(0, slash + 1)}
+      </span>
+      <span className="gyro-branch-label-leaf">{name.slice(slash + 1)}</span>
+    </>
+  );
+}
+
+function ComposerPopover({
+  align = "start",
+  className,
+  keepInBounds = false,
+  id,
+  items,
+  onAction,
+  placement = "up",
+  title,
+}: {
+  align?: "start" | "end";
+  className?: string;
+  keepInBounds?: boolean;
+  id: string;
+  items: ComposerPopoverItem[];
+  onAction: (action?: string, item?: ComposerPopoverItem) => void;
+  placement?: "up" | "down";
+  title?: string;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [query, setQuery] = useState("");
+  const hasBranchList = items.some((item) => item.kind === "branch");
+  // Long branch lists get a filter; short ones stay a plain menu.
+  const searchable = items.filter((item) => item.kind === "branch").length >= 6;
+  const needle = query.trim().toLowerCase();
+  const visibleItems = needle
+    ? items.filter(
+        (item) =>
+          item.kind !== "branch" || item.label.toLowerCase().includes(needle),
+      )
+    : items;
+  const listItems = visibleItems.filter(
+    (item) => item.kind !== "branch-action",
+  );
+  const footerItems = visibleItems.filter(
+    (item) => item.kind === "branch-action",
+  );
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!keepInBounds || !panel) return;
+    const position = (event?: Event) => {
+      if (
+        event?.type === "scroll" &&
+        event.target instanceof Node &&
+        panel.contains(event.target)
+      )
+        return;
+      const scrollTop = panel.scrollTop;
+      // Start from the CSS anchor each time so resizing never accumulates drift.
+      panel.style.top = "";
+      panel.style.bottom = "";
+      panel.style.maxHeight = "";
+      panel.style.translate = "";
+      const bounds = clippingBounds(panel);
+      const anchorElement =
+        panel.offsetParent instanceof HTMLElement
+          ? panel.offsetParent
+          : panel.parentElement!;
+      const anchor = anchorElement.getBoundingClientRect();
+      const anchorStyle = window.getComputedStyle(anchorElement);
+      const scaleX = anchor.width / parseFloat(anchorStyle.width) || 1;
+      const scaleY = anchor.height / parseFloat(anchorStyle.height) || 1;
+      const pad = 8;
+      const gap = 8 * scaleY;
+      if (panel.closest(".gyro-chat-surface.is-tiled")) {
+        panel.style.minWidth = "0";
+        panel.style.maxWidth = `${Math.max(0, bounds.right - bounds.left - pad * 2) / scaleX}px`;
+      }
+      const anchorTop = anchor.top;
+      const anchorBottom = anchor.bottom;
+      const above = Math.max(0, anchorTop - bounds.top - pad - gap);
+      const below = Math.max(0, bounds.bottom - anchorBottom - pad - gap);
+      const preferred = placement === "up" ? above : below;
+      const opposite = placement === "up" ? below : above;
+      const flip =
+        panel.offsetHeight * scaleY > preferred && opposite > preferred;
+      const direction = flip ? (placement === "up" ? "down" : "up") : placement;
+      panel.style.top = direction === "down" ? "calc(100% + 8px)" : "auto";
+      panel.style.bottom = direction === "up" ? "calc(100% + 8px)" : "auto";
+      panel.style.maxHeight = `${Math.min(420, (direction === "up" ? above : below) / scaleY)}px`;
+      const positioned = panel.getBoundingClientRect();
+      const shift = Math.max(
+        bounds.left + pad - positioned.left,
+        Math.min(0, bounds.right - pad - positioned.right),
+      );
+      panel.style.translate = `${shift / scaleX}px 0`;
+      panel.scrollTop = scrollTop;
+    };
+    position();
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    const observer = new ResizeObserver(() => position());
+    for (
+      let ancestor = panel.parentElement;
+      ancestor && ancestor !== document.body;
+      ancestor = ancestor.parentElement
+    ) {
+      observer.observe(ancestor);
+    }
+    return () => {
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
+      observer.disconnect();
+    };
+  }, [keepInBounds, placement, items]);
+  return (
+    <div
+      ref={panelRef}
+      style={
+        keepInBounds
+          ? {
+              gridAutoRows: "max-content",
+              alignContent: "start",
+              overflowY: hasBranchList ? "hidden" : "auto",
+            }
+          : undefined
+      }
+      aria-label={title ?? "Menu"}
+      className={[
+        "gyro-composer-popover",
+        hasBranchList ? "has-branch-list" : "",
+        className ?? "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      data-align={align}
+      data-placement={placement}
+      id={id}
+      role="menu"
+    >
+      {title ? (
+        <div className="gyro-composer-popover-title">{title}</div>
+      ) : null}
+      {searchable ? (
+        <label className="gyro-composer-menu-search">
+          <Search aria-hidden="true" size={13} />
+          <input
+            aria-label="Find branch"
+            autoFocus
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+              const rows =
+                panelRef.current?.querySelectorAll<HTMLButtonElement>(
+                  '.gyro-composer-menu-list [role="menuitem"]:not(:disabled)',
+                );
+              const row =
+                event.key === "ArrowDown" ? rows?.[0] : rows?.[rows.length - 1];
+              if (!row) return;
+              event.preventDefault();
+              row.focus();
+            }}
+            placeholder="Find branch…"
+            spellCheck={false}
+            type="search"
+            value={query}
+          />
+        </label>
+      ) : null}
+      {hasBranchList ? (
+        <div
+          className="gyro-composer-menu-list"
+          role="group"
+          aria-label="Local branches"
+        >
+          {searchable &&
+          needle &&
+          !listItems.some((item) => item.kind === "branch") ? (
+            <div className="gyro-composer-menu-empty" role="status">
+              No matching branches
+            </div>
+          ) : null}
+          {listItems.map(renderItem)}
+        </div>
+      ) : (
+        listItems.map(renderItem)
+      )}
+      {footerItems.length ? (
+        <div className="gyro-composer-menu-footer" role="group">
+          {footerItems.map(renderItem)}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  function renderItem(item: ComposerPopoverItem, index: number) {
+    const Icon = item.icon;
+    const itemClassName = [
+      "gyro-composer-menu-item",
+      item.active ? "is-active" : "",
+      item.removeAction ? "has-remove" : "",
+      item.hideIcon ? "has-no-icon" : "",
+      item.disconnected ? "is-disconnected" : "",
+      item.kind ? `is-${item.kind}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const itemContent = (
+      <>
+        {item.hideIcon ? null : item.providerId ? (
+          <ProviderLogo label={item.label} providerId={item.providerId} />
+        ) : (
+          <Icon size={14} />
+        )}
+        <span>
+          <span className="gyro-composer-menu-item-title">
+            <strong>
+              {item.kind === "branch" ? (
+                <BranchLabel name={item.label} />
+              ) : (
+                item.label
+              )}
+            </strong>
+            {item.badge ? (
+              <em className="gyro-composer-menu-badge">{item.badge}</em>
+            ) : null}
+          </span>
+          {item.detail ? <small>{item.detail}</small> : null}
+        </span>
+        {item.kind === "setting" || item.kind === "disclosure" ? (
+          <>
+            {item.trailingLabel ? (
+              <em className="gyro-composer-menu-trailing">
+                {item.trailingLabel}
+              </em>
+            ) : null}
+            {/* Settings rows drill into their own list; disclosure rows
+                    fold a section open in place, so they point differently.
+                    Both are navigation, so they carry the caret class that
+                    keeps them quiet — the accent belongs to the checkmark. */}
+            {item.kind === "disclosure" ? (
+              item.caret === "up" ? (
+                <ChevronUp className="gyro-composer-menu-caret" size={13} />
+              ) : (
+                <ChevronDown className="gyro-composer-menu-caret" size={13} />
+              )
+            ) : (
+              <ChevronRight className="gyro-composer-menu-caret" size={13} />
+            )}
+          </>
+        ) : item.trailingLabel ? (
+          <em className="gyro-composer-menu-trailing">{item.trailingLabel}</em>
+        ) : item.active ? (
+          <Check size={13} />
+        ) : item.providerId && item.showChevron !== false ? (
+          <ChevronRight className="gyro-composer-menu-caret" size={13} />
+        ) : null}
+      </>
+    );
+    if (item.removeAction) {
+      return (
+        <Fragment key={`${item.label}-${index}`}>
+          {item.sectionLabel ? (
+            <div className="gyro-composer-popover-section-title">
+              {item.sectionLabel}
+            </div>
+          ) : null}
+          <div className={itemClassName}>
+            <button
+              aria-current={item.active ? "true" : undefined}
+              className="gyro-composer-menu-primary"
+              disabled={item.disabled}
+              onClick={() => onAction(item.action, item)}
+              role="menuitem"
+              title={
+                item.tooltip ? `${item.label} — ${item.tooltip}` : item.label
+              }
+              type="button"
+            >
+              {itemContent}
+            </button>
+            <button
+              aria-label={`Remove ${item.label}`}
+              className="gyro-composer-menu-remove"
+              disabled={item.disabled}
+              onClick={() => onAction(item.removeAction, item)}
+              title="Remove"
+              type="button"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </Fragment>
+      );
+    }
+    return (
+      <Fragment key={`${item.label}-${index}`}>
+        {item.sectionLabel ? (
+          <div className="gyro-composer-popover-section-title">
+            {item.sectionLabel}
+          </div>
+        ) : null}
+        <button
+          aria-current={item.active ? "true" : undefined}
+          className={itemClassName}
+          disabled={item.disabled}
+          onClick={() => onAction(item.action, item)}
+          role="menuitem"
+          title={item.tooltip ? `${item.label} — ${item.tooltip}` : item.label}
+          type="button"
+        >
+          {itemContent}
+        </button>
+      </Fragment>
+    );
+  }
 }
 
 function providerAuthOwnerLabel(owner?: ProviderStatus["authOwner"]) {
@@ -24419,6 +20351,10 @@ function providerCredentialSummary(secretStorage?: string) {
  * support it. Reading `authStatus` alone is what let Settings report a verified
  * Claude Code sign-in while every send in chat came back rejected.
  */
+function sentenceCase(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 function providerConnectionLabel(
   provider: Pick<ModelProviderConfig, "authStatus" | "enabled"> & {
     id: ProviderId;
@@ -24480,6 +20416,35 @@ function providerConnectedHealthCopy(provider: { id: ProviderId }) {
   return "Provider-owned credentials were verified on this Mac.";
 }
 
+/** CLI, API, and local runtimes are separate catalog connections. */
+/** Same order as the provider list: connected A–Z, then the rest A–Z. */
+function modelRailProvidersFor(providerConfigs: ModelProviderConfig[]) {
+  return providerConfigs
+    .filter((provider) => isProviderExecutable(provider.id))
+    .map((provider) => ({
+      id: provider.id,
+      label: provider.displayName,
+      connection: providerConnectionKind(provider.capabilities?.executionKind),
+      connected: provider.authStatus === "connected",
+      models: provider.models,
+    }))
+    .sort(
+      (left, right) =>
+        Number(right.connected) - Number(left.connected) ||
+        left.label.localeCompare(right.label, undefined, {
+          sensitivity: "base",
+        }),
+    );
+}
+
+function providerConnectionKind(
+  executionKind: string | undefined,
+): "CLI" | "API" | "Local" {
+  if (executionKind === "openai-compatible-api") return "API";
+  if (executionKind === "ollama-api") return "Local";
+  return "CLI";
+}
+
 function providerPrimaryActionLabel(provider: {
   authMode: string;
   authStatus: string;
@@ -24526,6 +20491,2643 @@ function providerTestActionLabel(provider: {
     return "Test env";
   }
   return "Test";
+}
+
+type ApprovalCopy = {
+  chipLabel: string;
+  title: string;
+  gatedLabel: string;
+  gatedDetail: string;
+  autoLabel: string;
+  autoDetail: string;
+  directLabel: string;
+  directDetail: string;
+  settingsDetail: string;
+  commandValue: string;
+  commandDetail: string;
+  editValue: string;
+  editDetail: string;
+};
+
+function approvalModeForConfig(config: GyroConfig) {
+  if (config.fullAccess) {
+    return "direct";
+  }
+  if (config.requireCommandApproval && config.requireFileEditApproval) {
+    return "gated";
+  }
+  if (!config.requireCommandApproval && !config.requireFileEditApproval) {
+    return "auto";
+  }
+  return "custom";
+}
+
+function approvalBackendSummary(config: GyroConfig) {
+  if (config.fullAccess) {
+    return "full access · sandbox bypassed";
+  }
+  if (!config.requireCommandApproval && !config.requireFileEditApproval) {
+    return "auto approve · provider boundary retained";
+  }
+  const command = config.requireCommandApproval
+    ? "commands ask"
+    : "commands allow";
+  const edits = config.requireFileEditApproval ? "edits ask" : "edits allow";
+  return `${command} · ${edits}`;
+}
+
+function providerApprovalCopy(
+  providerId: ProviderId | undefined,
+  config: GyroConfig,
+): ApprovalCopy {
+  const mode = approvalModeForConfig(config);
+  const backendSummary = approvalBackendSummary(config);
+  const isAnthropic = providerId === "anthropic";
+  const providerTitle =
+    providerId === "anthropic"
+      ? "Anthropic permissions"
+      : providerId === "kimi"
+        ? "Kimi permissions"
+        : providerId === "xai"
+          ? "xAI permissions"
+          : providerId === "gemini"
+            ? "Gemini permissions"
+            : "OpenAI permissions";
+  const base = isAnthropic
+    ? {
+        title: providerTitle,
+        gatedLabel: "Ask for approval",
+        gatedDetail: "Always ask before commands and file edits",
+        autoLabel: "Approve for me",
+        autoDetail: "Allow work within provider and project limits",
+        directLabel: "Full access",
+        directDetail:
+          "Unrestricted access to the internet and any file on your computer",
+        commandValue: config.requireCommandApproval ? "Ask first" : "Allow",
+        commandDetail: "Claude tool calls use the backend command policy.",
+        editValue: config.requireFileEditApproval ? "Review" : "Auto-accept",
+        editDetail: "Claude edits follow the backend diff policy.",
+      }
+    : {
+        title: providerTitle,
+        gatedLabel: "Ask for approval",
+        gatedDetail: "Always ask before commands and file edits",
+        autoLabel: "Approve for me",
+        autoDetail: "Allow work within provider and project limits",
+        directLabel: "Full access",
+        directDetail:
+          "Unrestricted access to the internet and any file on your computer",
+        commandValue: config.requireCommandApproval ? "Ask" : "Allow",
+        commandDetail: "Codex command execution uses the backend policy.",
+        editValue: config.requireFileEditApproval ? "Review" : "Auto-apply",
+        editDetail: "Codex file edits follow the backend diff policy.",
+      };
+
+  return {
+    ...base,
+    chipLabel:
+      mode === "direct"
+        ? base.directLabel
+        : mode === "auto"
+          ? base.autoLabel
+          : base.gatedLabel,
+    settingsDetail: `Backend: ${backendSummary}`,
+  };
+}
+
+function composerModelPickerItem(
+  providerId: ProviderId,
+  model: { id: string; displayName: string; contextWindowTokens?: number },
+  activeModelId: string | undefined,
+): ComposerPopoverItem {
+  return {
+    action: `select-provider-model:${providerId}:${model.id}`,
+    active: model.id === activeModelId,
+    contextWindowTokens: model.contextWindowTokens,
+    hideIcon: true,
+    icon: Sparkles,
+    kind: "model",
+    label: model.displayName,
+  };
+}
+
+/**
+ * Every way the goal can be changed. The composer, the chat surface and the
+ * plan rail all speak this one set, so a control added to any of them is a
+ * control the others already handle.
+ */
+type SessionGoalAction =
+  "set" | "edit" | "complete" | "reopen" | "clear" | "pause" | "resume";
+
+/**
+ * The composer renders from three sibling branches (start screen, thread dock,
+ * side-chat dock), so a branch flip unmounts the textarea and focus falls to
+ * <body>: keystrokes then vanish with nothing on screen to explain it. A removed
+ * element does not fire `blur`, so this module flag survives the swap and the
+ * replacement composer reclaims the caret.
+ */
+let composerWantsFocus = false;
+
+function Composer({
+  attachments = [],
+  chatMode = "normal",
+  draftKey = NEW_CHAT_DRAFT_KEY,
+  constrainToParent = false,
+  draft,
+  branchName,
+  branchCatalog,
+  onDraftChange,
+  onRemoveAttachment,
+  canAttachEditorSnapshot = false,
+  onAttachMediaFiles,
+  onAttachMediaPaths,
+  onMediaDropError,
+  onSend,
+  onStop,
+  worktreeName,
+  workspacePath,
+  workspaceMode = "local",
+  config,
+  providerReadiness,
+  providerStatuses,
+  providerUsage,
+  providerUsageByProvider,
+  providerLedger,
+  dailyPaceWarning = true,
+  limitWindows = [],
+  canCompactContext = false,
+  onComposerAction,
+  onCancelGoalComposer,
+  dictation = browserDictation(),
+  overlay,
+  onGoalAction,
+  sessionModel,
+  sessionGoal,
+  promptHistory = [],
+  contextUsage,
+  sessionUsage,
+  usageSafety,
+  onResumeUsage,
+  isGoalComposerActive = false,
+  isGoalModeActive = false,
+  startsGoalSession = false,
+  savedProjects = [],
+  surfaceControls,
+  isSending = false,
+  isBranchLoading,
+  maxDraftLength,
+  popoverPlacement,
+  /** False while the desktop shell is still warming the backend. */
+  shellReady = true,
+  isCliUpdating = false,
+  sendDisabledReason,
+  showContextRow,
+  variant = "thread",
+}: {
+  attachments?: ChatAttachment[];
+  chatMode?: ChatMode;
+  /**
+   * Which draft this composer edits, so a drop routed from the window reaches
+   * the chat it landed on rather than whichever one happens to be focused.
+   */
+  draftKey?: string;
+  constrainToParent?: boolean;
+  draft: string;
+  branchName?: string;
+  branchCatalog?: GitBranchCatalog;
+  onDraftChange: (value: string) => void;
+  onRemoveAttachment?: (attachmentId: string) => void;
+  /** True when an open project file can be captured for the Editor action. */
+  canAttachEditorSnapshot?: boolean;
+  onAttachMediaFiles?: (files: File[]) => void;
+  onAttachMediaPaths?: (paths: string[]) => void;
+  onMediaDropError?: (message: string) => void;
+  onSend: () => void;
+  onStop?: () => void;
+  worktreeName?: string;
+  workspacePath?: string;
+  workspaceMode?: WorkbenchMode;
+  config: GyroConfig;
+  providerReadiness?: ProviderReadiness;
+  providerStatuses?: ProviderStatus[];
+  providerUsage?: ProviderUsageState;
+  providerUsageByProvider?: Partial<Record<ProviderId, ProviderUsageState>>;
+  providerLedger?: ProviderLedgerSummary;
+  dailyPaceWarning?: boolean;
+  limitWindows?: ComposerLimitWindow[];
+  /** This chat has a provider-backed context that can be compacted manually. */
+  canCompactContext?: boolean;
+  onComposerAction?: (action: string) => void;
+  onCancelGoalComposer?: () => void;
+  /** Local speech-to-text. Defaults to the browser microphone. */
+  dictation?: DictationController;
+  /** Covers the whole composer while it asks for a decision, e.g. plan approval. */
+  overlay?: ReactNode;
+  /**
+   * Complete, reopen or clear the goal from the strip that rides on the
+   * composer. Absent in read-only embeds, where the strip shows state only.
+   */
+  onGoalAction?: (
+    action: SessionGoalAction,
+    value?: string,
+  ) => boolean | void | Promise<boolean | void>;
+  sessionModel?: {
+    modelId?: string;
+    modelLabel?: string;
+    providerId?: ProviderId;
+    providerLabel?: string;
+    reasoningEffort?: ReasoningEffort;
+  };
+  sessionGoal?: SessionGoal;
+  promptHistory?: string[];
+  contextUsage?: ComposerContextUsage;
+  /** Ledger totals for this chat, shown as the running cost line. */
+  sessionUsage?: SessionUsageTotals;
+  usageSafety?: UsageSafetySnapshot;
+  onResumeUsage?: () => void;
+  isGoalComposerActive?: boolean;
+  /** Goal mode stays selected after the goal is saved, like Plan. */
+  isGoalModeActive?: boolean;
+  /** The Goal chip will create a new chat and send the same text. */
+  startsGoalSession?: boolean;
+  savedProjects?: Array<{
+    path: string;
+    label: string;
+    detail: string;
+    sessionCount: number;
+  }>;
+  surfaceControls?: ReactNode;
+  isSending?: boolean;
+  isBranchLoading?: boolean;
+  maxDraftLength?: number;
+  popoverPlacement?: "down" | "up";
+  shellReady?: boolean;
+  /** A provider executable is updating; wait before starting a run. */
+  isCliUpdating?: boolean;
+  sendDisabledReason?: string;
+  /** Defaults to the hero layout: project, mode, and branch only at the start. */
+  showContextRow?: boolean;
+  variant?: "thread" | "hero";
+}) {
+  const [activePopover, setActivePopover] = useState<ComposerPopoverId | null>(
+    null,
+  );
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    // Reclaim the caret after a branch swap removed the focused textarea.
+    const textarea = composerTextareaRef.current;
+    if (!composerWantsFocus || !textarea) return;
+    composerWantsFocus = false;
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== textarea) return;
+    textarea.focus({ preventScroll: true });
+    const end = textarea.value.length;
+    textarea.setSelectionRange(end, end);
+  }, []);
+  const dictationAnchorRef = useRef<{ base: string; caret: number } | null>(
+    null,
+  );
+  const dictationAppliedRef = useRef<string | null>(null);
+  const dictationCaretRef = useRef<number | null>(null);
+  /** Caret the user last placed. Unset means dictation appends. */
+  const dictationCaretChoiceRef = useRef<number | null>(null);
+  const dictationSessionRef = useRef<AbortController | null>(null);
+  /** Pending settle timer: a stop shows the processing ring, then clears. */
+  const dictationSettleRef = useRef<number | null>(null);
+  const [dictationPhase, setDictationPhase] = useState<
+    "idle" | "listening" | "processing"
+  >("idle");
+  const [dictationNotice, setDictationNotice] = useState("");
+  const releaseDictation = useCallback(
+    (restoreBase: boolean) => {
+      const anchor = dictationAnchorRef.current;
+      if (dictationSettleRef.current !== null) {
+        window.clearTimeout(dictationSettleRef.current);
+        dictationSettleRef.current = null;
+      }
+      dictationSessionRef.current?.abort();
+      dictationSessionRef.current = null;
+      dictationAnchorRef.current = null;
+      if (restoreBase) dictationCaretRef.current = null;
+      dictation?.stop();
+      setDictationPhase("idle");
+      if (
+        restoreBase &&
+        anchor &&
+        anchor.base !== dictationAppliedRef.current
+      ) {
+        dictationAppliedRef.current = anchor.base;
+        dictationCaretRef.current = anchor.caret;
+        dictationCaretChoiceRef.current = anchor.caret;
+        onDraftChange(anchor.base);
+      }
+    },
+    [dictation, onDraftChange],
+  );
+  /**
+   * Stop from the mic: keep the words already applied to the draft, show the
+   * processing ring, and clear the badge once the session settles.
+   */
+  const settleDictation = useCallback(() => {
+    const session = dictationSessionRef.current;
+    setDictationPhase("processing");
+    dictation?.stop();
+    if (dictationSettleRef.current !== null) {
+      window.clearTimeout(dictationSettleRef.current);
+    }
+    // A late final still lands in the draft, so hold the session open briefly.
+    dictationSettleRef.current = window.setTimeout(() => {
+      dictationSettleRef.current = null;
+      session?.abort();
+      dictationSessionRef.current = null;
+      dictationAnchorRef.current = null;
+      dictationCaretRef.current = null;
+      setDictationPhase("idle");
+    }, 900);
+  }, [dictation]);
+  const toggleDictation = useCallback(() => {
+    if (!dictation) return;
+    if (dictationPhase === "processing") return;
+    if (dictationAnchorRef.current) {
+      settleDictation();
+      return;
+    }
+    const textarea = composerTextareaRef.current;
+    const caret = dictationCaretChoiceRef.current ?? draft.length;
+    const at = Math.min(Math.max(0, caret), draft.length);
+    dictationAnchorRef.current = { base: draft, caret: at };
+    dictationAppliedRef.current = draft;
+    const session = new AbortController();
+    dictationSessionRef.current = session;
+    setDictationNotice("");
+    setDictationPhase("listening");
+    textarea?.focus({ preventScroll: true });
+    const limit = isGoalComposerActive ? 1000 : maxDraftLength;
+    const applyUtterance = (utterance: string) => {
+      const anchor = dictationAnchorRef.current;
+      if (!anchor || session.signal.aborted) return;
+      const next = dictationDraft(anchor.base, anchor.caret, utterance, limit);
+      dictationAppliedRef.current = next.draft;
+      dictationCaretRef.current = next.caret;
+      dictationCaretChoiceRef.current = next.caret;
+      onDraftChange(next.draft);
+    };
+    dictation.start({
+      signal: session.signal,
+      onPartial: applyUtterance,
+      onFinal: (utterance) => {
+        if (session.signal.aborted) return;
+        applyUtterance(utterance);
+        if (dictationSettleRef.current !== null) {
+          window.clearTimeout(dictationSettleRef.current);
+          dictationSettleRef.current = null;
+        }
+        dictationAnchorRef.current = null;
+        dictationSessionRef.current = null;
+        setDictationPhase("idle");
+        dictation.stop();
+      },
+      onError: (message) => {
+        if (session.signal.aborted) return;
+        session.abort();
+        dictationSessionRef.current = null;
+        const anchor = dictationAnchorRef.current;
+        dictationAnchorRef.current = null;
+        if (anchor && anchor.base !== dictationAppliedRef.current) {
+          dictationAppliedRef.current = anchor.base;
+          dictationCaretRef.current = anchor.caret;
+          dictationCaretChoiceRef.current = anchor.caret;
+          onDraftChange(anchor.base);
+        }
+        setDictationNotice(message);
+        setDictationPhase("idle");
+        dictation.stop();
+      },
+    });
+  }, [
+    dictation,
+    draft,
+    isGoalComposerActive,
+    maxDraftLength,
+    onDraftChange,
+    settleDictation,
+  ]);
+  useEffect(() => {
+    return () => {
+      if (dictationSettleRef.current !== null) {
+        window.clearTimeout(dictationSettleRef.current);
+        dictationSettleRef.current = null;
+      }
+      dictationSessionRef.current?.abort();
+      dictationSessionRef.current = null;
+      dictationAnchorRef.current = null;
+      dictation?.stop();
+    };
+  }, [dictation]);
+  useLayoutEffect(() => {
+    const caret = dictationCaretRef.current;
+    const textarea = composerTextareaRef.current;
+    if (caret == null || !textarea) return;
+    textarea.setSelectionRange(caret, caret);
+    if (dictationPhase !== "listening") dictationCaretRef.current = null;
+  }, [dictationPhase, draft]);
+  const hadComposerOverlayRef = useRef(Boolean(overlay));
+  useEffect(() => {
+    const wasCovered = hadComposerOverlayRef.current;
+    hadComposerOverlayRef.current = Boolean(overlay);
+    // Closing a decision card unmounts its focused control. Return to the
+    // revealed composer, while preserving focus if the user moved elsewhere.
+    if (wasCovered && !overlay && document.activeElement === document.body) {
+      composerTextareaRef.current?.focus({ preventScroll: true });
+    }
+  }, [overlay]);
+  /**
+   * Stop only when the press started on the stop control itself.
+   *
+   * Grid slots focus the pane on pointerdown. That used to re-layout the
+   * composer under the finger so a press that began on empty margin could
+   * finish as a click on Stop — reading as "click empty margin → stop".
+   * Arming on pointerdown and requiring it on click keeps stop intentional.
+   */
+  const stopArmedRef = useRef(false);
+  const [modelPickerProviderId, setModelPickerProviderId] = useState<
+    ProviderId | undefined
+  >(undefined);
+  // Model and effort open from independent composer controls.
+  const modelMenuEntry = useRef<"root" | "model">("root");
+  const modelMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [modelMenuPane, setModelMenuPane] = useState<
+    "root" | "model" | "effort" | "provider" | "provider-model" | "settings"
+  >("root");
+  const [isModelMenuAdvancedOpen, setIsModelMenuAdvancedOpen] = useState(false);
+  const [historyIndex, setHistoryIndex] = useState<number>();
+  const [activeSlashCommandIndex, setActiveSlashCommandIndex] = useState(0);
+  const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
+  /** `/help` keeps the catalog open after removing its inline trigger. */
+  const [isSlashHelpOpen, setIsSlashHelpOpen] = useState(false);
+  // Hover explainer for a slash command. Positioned fixed against the "?"
+  // marker so it can escape the menu's own scroll clipping.
+  const [slashHint, setSlashHint] = useState<{
+    text: string;
+    top: number;
+    left: number;
+  }>();
+  const slashCommandRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const dismissActiveComposerPopover = useCallback(() => {
+    setActivePopover(null);
+    setModelPickerProviderId(undefined);
+  }, [setModelPickerProviderId]);
+  // Scoped to the open control (its trigger plus panel) rather than the whole
+  // composer, so pressing the textarea or any other chip closes the dropdown.
+  const popoverScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
+    Boolean(activePopover),
+    dismissActiveComposerPopover,
+    activePopover === "provider" ? modelMenuTriggerRef : undefined,
+    () => {
+      if (
+        activePopover !== "provider" ||
+        modelMenuPane === "root" ||
+        modelMenuEntry.current === "model"
+      )
+        return false;
+      // The model rail is one level deep: Escape goes straight back to root.
+      setModelMenuPane("root");
+      requestAnimationFrame(() =>
+        popoverScopeRef.current
+          ?.querySelector<HTMLElement>('[role="menuitem"], input[type="range"]')
+          ?.focus(),
+      );
+      return true;
+    },
+  );
+  const popoverBaseId = useId();
+  // Closing the control forgets its previous submenu.
+  useEffect(() => {
+    if (activePopover !== "provider") {
+      setModelMenuPane("root");
+      setIsModelMenuAdvancedOpen(false);
+    }
+  }, [activePopover]);
+  useEffect(() => {
+    if (isGoalComposerActive) {
+      composerTextareaRef.current?.focus();
+    }
+  }, [isGoalComposerActive]);
+  useEffect(() => {
+    const focus = () => {
+      const textarea = composerTextareaRef.current;
+      if (!textarea || textarea.getClientRects().length === 0) return;
+      textarea.focus();
+    };
+    window.addEventListener("gyro-focus-composer", focus);
+    return () => window.removeEventListener("gyro-focus-composer", focus);
+  }, []);
+  useLayoutEffect(() => {
+    const textarea = composerTextareaRef.current;
+    if (!textarea) return;
+
+    const updateHeight = () => {
+      // Collapse the previous height before measuring wrapped text. An empty
+      // field uses the same height as one line, so the first character does
+      // not shrink the composer.
+      textarea.style.height = "0px";
+      const contentHeight = textarea.scrollHeight;
+      const lineHeight = 52;
+      const nextHeight =
+        draft.length === 0
+          ? lineHeight
+          : Math.min(Math.max(contentHeight, lineHeight), 148);
+      textarea.style.height = `${nextHeight}px`;
+      textarea.style.overflowY =
+        draft.length > 0 && contentHeight > 148 ? "auto" : "hidden";
+    };
+    updateHeight();
+
+    let frame = 0;
+    let disposed = false;
+    let width = textarea.clientWidth;
+    const scheduleHeightUpdate = () => {
+      if (disposed) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updateHeight);
+    };
+    const observer = new ResizeObserver(() => {
+      const nextWidth = textarea.clientWidth;
+      // Height changes from autosizing must not feed back into this observer.
+      if (nextWidth > 0 && nextWidth !== width) {
+        width = nextWidth;
+        scheduleHeightUpdate();
+      }
+    });
+    observer.observe(textarea);
+    void document.fonts.ready.then(scheduleHeightUpdate);
+
+    return () => {
+      disposed = true;
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [attachments.length, draft]);
+  const providerConfigs = providersForConfig(config);
+  // Each chat pane may bind its own provider/model. Prefer that over the
+  // workbench-wide selection so split-screen composers can diverge.
+  const boundToSession = Boolean(sessionModel?.providerId);
+  const effectiveProviderId = boundToSession
+    ? sessionModel?.providerId
+    : config.selectedProviderId;
+  const selectedProvider = providerConfigs.find(
+    (provider) => provider.id === effectiveProviderId,
+  );
+  const sessionProvider = sessionModel?.providerId
+    ? providerConfigs.find(
+        (provider) => provider.id === sessionModel.providerId,
+      )
+    : undefined;
+  const displayProvider = selectedProvider ?? sessionProvider;
+  const [previewedAttachmentId, setPreviewedAttachmentId] = useState<string>();
+  const previewedTerminalAttachment = attachments.find(
+    (attachment) =>
+      attachment.id === previewedAttachmentId &&
+      attachment.kind === "terminal-output",
+  );
+  const usageProviderId = providerUsage?.providerId ?? effectiveProviderId;
+  const usageFetchedAt = providerUsage?.fetchedAt;
+  const usageLoading = providerUsage?.status === "loading";
+  // An empty thread has nothing to measure yet. Printing "0 of 1M" there
+  // claims a reading nobody took — the system prompt alone is not zero.
+  const contextSource: "reported" | "estimated" | "empty" = !contextUsage
+    ? "empty"
+    : contextUsage.source === "reported"
+      ? "reported"
+      : contextUsage.usedTokens > 0
+        ? "estimated"
+        : "empty";
+  // The meter shows a provider measurement or nothing. The tilde caption
+  // stays only for a positive count that is still marked estimated.
+  const providerMeasured = Boolean(
+    contextUsage &&
+    (contextUsage.detail.startsWith("Latest context usage") ||
+      contextUsage.detail.startsWith("Provider-reported")),
+  );
+  const contextSeverity = contextMeterSeverity(contextUsage, contextSource);
+  const refreshContextMeterUsage = useCallback(() => {
+    if (!usageProviderId || !providerSupportsUsage(usageProviderId)) return;
+    const fetchedMs = usageFetchedAt ? Date.parse(usageFetchedAt) : NaN;
+    if (
+      usageLoading ||
+      Date.now() - fetchedMs < CONTEXT_METER_USAGE_REFRESH_MIN_AGE_MS
+    ) {
+      return;
+    }
+    onComposerAction?.(`refresh-provider-usage:${usageProviderId}`);
+  }, [onComposerAction, usageFetchedAt, usageLoading, usageProviderId]);
+  const hasSelectedProvider = Boolean(
+    selectedProvider ?? sessionModel?.modelLabel ?? sessionModel?.modelId,
+  );
+  const selectedProviderHealth = providerStatuses?.find(
+    (status) => status.id === selectedProvider?.id,
+  );
+  const sessionProviderHealth = providerStatuses?.find(
+    (status) => status.id === sessionProvider?.id,
+  );
+  const hasReadyProvider = Boolean(
+    (selectedProvider &&
+      isProviderRuntimeUsable(selectedProvider, selectedProviderHealth)) ||
+    (sessionProvider &&
+      isProviderRuntimeUsable(sessionProvider, sessionProviderHealth)),
+  );
+  const rawModelId = boundToSession
+    ? sessionModel?.modelId
+    : selectedProvider?.selectedModelId;
+  const modelProviderId = boundToSession
+    ? (sessionProvider?.id ?? selectedProvider?.id)
+    : selectedProvider?.id;
+  // A stored fast-pool id is still Grok 4.7. Fast mode keeps the raw id so a
+  // chat launched on that pool stays fast until the user turns it off.
+  const effectiveModelId = pickerModelId(modelProviderId, rawModelId);
+  const resolvedBoundModel =
+    selectedProvider && effectiveModelId
+      ? getProviderModel(selectedProvider, effectiveModelId)
+      : undefined;
+  const providerModelLabel = boundToSession
+    ? (sessionModel?.modelLabel ??
+      resolvedBoundModel?.displayName ??
+      sessionModel?.modelId ??
+      selectedProvider?.displayName ??
+      "Select provider")
+    : selectedProvider
+      ? selectedModelLabel(selectedProvider)
+      : (sessionModel?.modelLabel ?? "Select provider");
+  const modelChipLabel = hasSelectedProvider
+    ? (pickerModelLabel(modelProviderId, rawModelId, providerModelLabel) ??
+      providerModelLabel)
+    : "Choose model";
+  const providerReasoningEffort = boundToSession
+    ? (sessionModel?.reasoningEffort ??
+      (selectedProvider
+        ? selectedReasoningEffort(selectedProvider)
+        : undefined))
+    : selectedProvider
+      ? selectedReasoningEffort(selectedProvider)
+      : sessionModel?.reasoningEffort;
+  const approvalMode = approvalModeForConfig(config);
+  const approvalCopy = providerApprovalCopy(selectedProvider?.id, config);
+  const approvalChipClassName =
+    approvalMode === "direct"
+      ? "gyro-composer-chip is-warning"
+      : approvalMode === "auto"
+        ? "gyro-composer-chip is-auto-approve"
+        : "gyro-composer-chip";
+  const ApprovalChipIcon =
+    approvalMode === "direct"
+      ? ShieldAlert
+      : approvalMode === "auto"
+        ? AutoApproveIcon
+        : Hand;
+  const isStopAction = Boolean(
+    !isGoalComposerActive && isSending && onStop && draft.trim().length === 0,
+  );
+  const hasUserWorkspace = Boolean(isUserSelectedWorkspacePath(workspacePath));
+  const councilResolution = useMemo(() => {
+    if (chatMode !== "council") {
+      return undefined;
+    }
+    return resolveCouncilSeatRequests(
+      config,
+      readyCouncilProviders(config, providerStatuses),
+    );
+  }, [chatMode, config, providerStatuses]);
+  const councilEnabled = config.council?.enabled !== false;
+  const providerRuntimeBlock =
+    selectedProvider?.id === "ollama" &&
+    selectedProviderHealth?.runtimeStatus === "no-models"
+      ? {
+          action: "open-settings:providers",
+          actionLabel: "Open provider settings",
+          message:
+            "Ollama is running, but no models are installed. Run `ollama pull <model>`, then test Ollama in provider settings.",
+          placeholder: "Run ollama pull <model>, then test Ollama…",
+          stepLabel: "Ollama needs a model",
+        }
+      : undefined;
+  const providerErrorMessage =
+    providerRuntimeBlock?.message ??
+    (providerReadiness?.status === "blocked" && !hasReadyProvider
+      ? providerReadiness.message
+      : undefined);
+  const canSubmitChat =
+    shellReady &&
+    !sendDisabledReason &&
+    !isCliUpdating &&
+    !isBranchLoading &&
+    (chatMode === "council"
+      ? councilEnabled &&
+        !councilResolution?.error &&
+        (councilResolution?.seats.length ?? 0) >= 2 &&
+        hasUserWorkspace
+      : canSendChat(hasReadyProvider, workspacePath));
+  // Starting a goal sends a message, so it needs everything a send needs.
+  const askAttachmentPending = useSyncExternalStore(
+    subscribeExplorerAskSend,
+    () => explorerAskSendHeld,
+    () => false,
+  );
+  const canSubmitComposer =
+    !askAttachmentPending &&
+    (isGoalComposerActive && !startsGoalSession ? true : canSubmitChat);
+  const needsProviderSetup =
+    !boundToSession &&
+    !providerConfigs.some((provider) =>
+      isProviderRuntimeUsable(
+        provider,
+        providerStatuses?.find((status) => status.id === provider.id),
+      ),
+    );
+  const cleanMachinePath = resolveCleanMachinePath({
+    hasReadyProvider,
+    preferredProviderId:
+      hasSelectedProvider && !needsProviderSetup
+        ? selectedProvider?.id
+        : undefined,
+    preferredProviderLabel: selectedProvider?.displayName,
+    providerBlockAction: providerRuntimeBlock?.action,
+    providerBlockActionLabel: providerRuntimeBlock?.actionLabel,
+    providerBlockMessage: providerErrorMessage,
+    providerBlockPlaceholder: providerRuntimeBlock?.placeholder,
+    providerBlockStepLabel: providerRuntimeBlock?.stepLabel,
+    workspacePath,
+  });
+  const isHero = variant === "hero";
+  const shouldShowContextRow = showContextRow ?? isHero;
+  const modelRailProviders = modelRailProvidersFor(providerConfigs);
+  const isModelRailPane =
+    modelMenuPane === "model" ||
+    modelMenuPane === "provider" ||
+    modelMenuPane === "provider-model";
+  const handoffProviders = providerConfigs
+    .filter(
+      (provider) =>
+        provider.authStatus === "connected" &&
+        provider.id !== effectiveProviderId,
+    )
+    .map((provider) => ({ id: provider.id, label: provider.displayName }));
+  const effortSourceModel = selectedProvider
+    ? getProviderModel(selectedProvider, effectiveModelId)
+    : undefined;
+  const effortItems: ComposerPopoverItem[] = selectedProvider
+    ? (effortSourceModel?.supportedReasoningEfforts ?? []).map((effort) => ({
+        action: `select-provider-effort:${selectedProvider.id}:${effort}`,
+        active: effort === providerReasoningEffort,
+        hideIcon: true,
+        icon: Gauge,
+        kind: "effort" as const,
+        label: reasoningEffortLabel(effort),
+      }))
+    : [];
+  // Direct access to models for the provider already in use.
+  const currentModelItems: ComposerPopoverItem[] = displayProvider
+    ? displayProvider.models.map((model) =>
+        composerModelPickerItem(displayProvider.id, model, effectiveModelId),
+      )
+    : [];
+  const hasEffortChoice = Boolean(
+    providerReasoningEffort && effortItems.length > 0,
+  );
+  const modelMenuItems: ComposerPopoverItem[] = [
+    ...(providerErrorMessage
+      ? [
+          {
+            disabled: true,
+            detail: providerErrorMessage,
+            icon: ShieldCheck,
+            kind: "warning" as const,
+            label: "Provider needs attention",
+          },
+        ]
+      : []),
+    {
+      hideIcon: true,
+      icon: Sparkles,
+      kind: "setting" as const,
+      label: "Model",
+      // With no provider chosen there is no model list to show, so the row
+      // leads to the providers instead of dead-ending on an empty panel.
+      menuPane:
+        currentModelItems.length > 0
+          ? ("model" as const)
+          : ("provider" as const),
+      trailingLabel: modelChipLabel,
+    },
+    ...(hasEffortChoice && providerReasoningEffort
+      ? [
+          {
+            hideIcon: true,
+            icon: Gauge,
+            kind: "setting" as const,
+            label: "Effort",
+            menuPane: "effort" as const,
+            trailingLabel: reasoningEffortLabel(providerReasoningEffort),
+          },
+        ]
+      : []),
+    {
+      caret: isModelMenuAdvancedOpen ? ("up" as const) : ("down" as const),
+      hideIcon: true,
+      icon: Sparkles,
+      kind: "disclosure" as const,
+      label: "Advanced",
+    },
+    ...(isModelMenuAdvancedOpen
+      ? [
+          {
+            hideIcon: true,
+            icon: Sparkles,
+            kind: "setting" as const,
+            label: "Provider",
+            menuPane: "provider" as const,
+            trailingLabel: displayProvider?.displayName ?? "Choose",
+          },
+        ]
+      : []),
+  ];
+  const modelMenuBackItem = (label: string): ComposerPopoverItem => ({
+    icon: ChevronLeft,
+    kind: "back" as const,
+    label,
+    menuPane: "root" as const,
+  });
+  // One compact menu: attach, capture the open editor, plan, goal. The folder
+  // chip and ⌘K already cover folder and search, and Council stays out of the
+  // menu until it can run. Slash commands keep every action reachable.
+  const contextItems: ComposerPopoverItem[] = [
+    {
+      action: "attach-files",
+      icon: Paperclip,
+      label: "Attach files",
+      detail: "Add context to your message",
+      tooltip: "Images, videos, or project files",
+    },
+    ...(canAttachEditorSnapshot
+      ? [
+          {
+            action: "attach-editor-snapshot",
+            icon: FileCode2,
+            label: "Editor",
+            detail: "Capture saved or unsaved editor text",
+            tooltip: "Capture saved or unsaved editor text",
+          },
+        ]
+      : []),
+    // A mode that is already on shows its check, and picking it again turns
+    // it off, so the menu never offers to switch on what is already running.
+    {
+      action:
+        chatMode === "plan" ? "set-chat-mode-normal" : "set-chat-mode-plan",
+      active: chatMode === "plan",
+      icon: ListChecks,
+      label: "Plan",
+      detail:
+        chatMode === "plan"
+          ? "Turn Plan mode off"
+          : "Think through the approach",
+      tooltip: chatMode === "plan" ? "Turn Plan mode off" : undefined,
+    },
+    {
+      action: "add-goal",
+      active: isGoalModeActive,
+      icon: Goal,
+      label: "Set goal",
+      detail: "Define the outcome",
+    },
+  ];
+  const slashCommands: ComposerSlashCommand[] = [
+    {
+      command: "/help",
+      description: "Browse every chat command",
+      icon: HelpCircle,
+      label: "Show command help",
+    },
+    {
+      action: "compact-context",
+      command: "/compact",
+      description: "Condense earlier conversation",
+      hint: canCompactContext
+        ? "Keep a short record of earlier messages and make room for the rest of the chat."
+        : "Compact this chat after the first reply.",
+      icon: Archive,
+      label: "Compact context",
+    },
+    {
+      action: "add-goal",
+      command: "/goal",
+      description: sessionGoal?.text
+        ? "Edit this chat's goal"
+        : "Set a goal for this chat",
+      hint: "Say what a good result looks like, and Gyro keeps it in mind for the whole chat.",
+      icon: Goal,
+      label: sessionGoal?.text ? "Edit goal" : "Save goal",
+    },
+    chatMode === "plan" || chatMode === "council"
+      ? {
+          action: "set-chat-mode-normal",
+          command: "/normal",
+          description: "Return to normal chat mode",
+          hint: "Go back to the usual way of working, where Gyro just does what you ask.",
+          icon: Play,
+          label: "Normal mode",
+        }
+      : {
+          action: "set-chat-mode-plan",
+          command: "/plan",
+          description: "Plan before making changes",
+          hint: "Gyro works out the steps and shows them to you first. Nothing on your computer changes until you agree.",
+          icon: ListChecks,
+          label: "Plan mode",
+        },
+    // No `/council` while frozen: a slash command has no disabled state, so
+    // listing one that cannot start a run would just be a dead end.
+    ...(COUNCIL_COMING_SOON || chatMode === "council"
+      ? []
+      : [
+          {
+            action: "set-chat-mode-council" as const,
+            command: "/council",
+            description: "Ask several models for one answer",
+            hint: "Asks several AI models the same question at the same time, then hands you one combined answer.",
+            icon: Users,
+            label: "Council mode",
+          },
+        ]),
+    {
+      action: "attach-editor-snapshot",
+      command: "/editor",
+      description: "Attach the open editor file",
+      hint: "Sends a copy of the file you have open, exactly as it looks right now.",
+      icon: FileCode2,
+      label: "Attach editor snapshot",
+    },
+    {
+      action: "select-image",
+      command: "/image",
+      description: "Attach an image",
+      icon: ImagePlus,
+      label: "Attach image",
+    },
+    {
+      action: "select-video",
+      command: "/video",
+      description: "Attach a video",
+      icon: Video,
+      label: "Attach video",
+    },
+    {
+      action: "select-file",
+      command: "/file",
+      description: "Attach a workspace file",
+      icon: Paperclip,
+      label: "Attach file",
+    },
+    {
+      action: "select-folder",
+      command: "/folder",
+      description: "Choose the workspace folder",
+      hint: "Pick the project folder this chat is allowed to work in.",
+      icon: Folder,
+      label: "Choose folder",
+    },
+    {
+      action: "search-workspace",
+      command: "/search",
+      description: "Search workspace files",
+      icon: Search,
+      label: "Search workspace",
+    },
+    {
+      command: "/model",
+      description: "Choose a provider and model",
+      icon: Sparkles,
+      label: "Choose model",
+      popover: "provider",
+    },
+    {
+      command: "/permissions",
+      description: "Change approval settings",
+      hint: "Choose how often Gyro checks with you before it does something.",
+      icon: ShieldCheck,
+      label: "Change permissions",
+      popover: "approval",
+    },
+    {
+      action: "new-chat",
+      command: "/new",
+      description: "Start a new chat",
+      icon: Edit3,
+      label: "New chat",
+    },
+    {
+      available: hasUserWorkspace,
+      command: "/branch",
+      description: "Create or switch a Git branch",
+      icon: GitBranch,
+      label: "Choose branch",
+      popover: "branch",
+    },
+    {
+      action: "open-source-control",
+      available: hasUserWorkspace,
+      command: "/review",
+      description: "Review current workspace changes",
+      icon: GitPullRequest,
+      label: "Review changes",
+    },
+    {
+      action: "run-workspace-test",
+      available: hasUserWorkspace,
+      command: "/test",
+      description: "Run the detected test task",
+      icon: Play,
+      label: "Run workspace tests",
+    },
+    {
+      action: "open-diff",
+      available: hasUserWorkspace,
+      command: "/diff",
+      description: "Open the current workspace diff",
+      icon: ScrollText,
+      label: "Show diff",
+    },
+  ];
+  // What the next send is about to buy. A Council send is its seats plus a
+  // synthesis, so the multiplier is disclosed before Enter commits it.
+  const councilSeatCount = councilResolution?.seats.length;
+  const turnCost = useMemo(
+    () =>
+      estimateTurnCost({
+        chatMode: chatMode ?? "normal",
+        contextTokens: contextUsage?.usedTokens ?? 0,
+        reasoningEffort: providerReasoningEffort,
+        seatCount: councilSeatCount,
+        sessionTotals: sessionUsage,
+      }),
+    [
+      chatMode,
+      contextUsage?.usedTokens,
+      councilSeatCount,
+      providerReasoningEffort,
+      sessionUsage,
+    ],
+  );
+  const requestSend = () => {
+    if (explorerAskSendHeld) return;
+    if (draft.trim().toLowerCase() === "/compact" && onComposerAction) {
+      onDraftChange("");
+      onComposerAction("compact-context");
+      return;
+    }
+    onSend();
+  };
+  const costPreviewTitle = `Each seat carries this chat's context, and the synthesizer then reads their answers. Estimated total for one send: ${turnCost.label}.`;
+  // Why runs are stopped, or which budget is about to stop them. A pause
+  // outranks a budget warning: the banner explains the block, not every number.
+  const safetyNotice = useMemo(
+    () => summarizeUsageSafety(usageSafety),
+    [usageSafety],
+  );
+  // Slash commands work at the start of a draft and after whitespace, so a
+  // person can write naturally and then add `/plan`, `/image`, etc. Paths and
+  // URLs stay quiet because a slash in the middle of a word is not a command.
+  const contextCandidates = useContext(ComposerContextCandidates);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
+  const mentionMatch = !isGoalComposerActive
+    ? draft.match(/(?:^|\s)@([^\s]*)$/)
+    : null;
+  const mentions = mentionMatch
+    ? contextMentionCandidates(
+        contextCandidates,
+        mentionMatch[1] ?? "",
+        workspacePath,
+      )
+    : [];
+  const mentionOpen = !mentionDismissed && mentions.length > 0;
+  const selectedMention = Math.min(
+    mentionIndex,
+    Math.max(0, mentions.length - 1),
+  );
+  const attachMention = (index: number) => {
+    const item = mentions[index];
+    if (!item || !mentionMatch) return;
+    onDraftChange(draft.slice(0, draft.lastIndexOf("@")));
+    onComposerAction?.(
+      `${item.kind === "open-tab" ? "attach-open-tab" : "attach-workspace-path"}:${encodeURIComponent(item.path)}`,
+    );
+    setMentionIndex(0);
+  };
+  const slashMatch = isGoalComposerActive
+    ? null
+    : draft.match(/(?:^|\s)\/([^\s/]*)$/);
+  const slashQuery = slashMatch?.[1]?.toLocaleLowerCase();
+  const availableSlashCommands = slashCommands.filter(
+    (command) => command.available !== false,
+  );
+  const filteredSlashCommands =
+    slashQuery === undefined
+      ? []
+      : availableSlashCommands.filter((command) => {
+          const commandName = command.command.slice(1).toLocaleLowerCase();
+          const labelWords = command.label.toLocaleLowerCase().split(/\s+/);
+          return (
+            commandName.startsWith(slashQuery) ||
+            labelWords.some((word) => word.startsWith(slashQuery))
+          );
+        });
+  const visibleSlashCommands = isSlashHelpOpen
+    ? availableSlashCommands
+    : filteredSlashCommands;
+  const isSlashMenuOpen =
+    !isSlashMenuDismissed && visibleSlashCommands.length > 0;
+  // The slash menu is driven by the draft, so it stays open while the textarea
+  // is in use and closes on a press anywhere outside the composer.
+  const slashMenuScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
+    isSlashMenuOpen,
+    () => {
+      setIsSlashHelpOpen(false);
+      setIsSlashMenuDismissed(true);
+    },
+  );
+  const selectedSlashCommandIndex = Math.min(
+    activeSlashCommandIndex,
+    Math.max(0, visibleSlashCommands.length - 1),
+  );
+
+  const togglePopover = (popover: ComposerPopoverId) => {
+    setActivePopover((current) => (current === popover ? null : popover));
+  };
+  const toggleProviderPopover = (
+    entry: "root" | "model",
+    trigger: HTMLButtonElement,
+  ) => {
+    const pane =
+      entry === "root"
+        ? "root"
+        : currentModelItems.length
+          ? "model"
+          : "provider";
+    modelMenuEntry.current = entry;
+    modelMenuTriggerRef.current = trigger;
+    setModelPickerProviderId(undefined);
+    setModelMenuPane(pane);
+    setIsModelMenuAdvancedOpen(false);
+    setActivePopover(
+      activePopover === "provider" && modelMenuPane === pane
+        ? null
+        : "provider",
+    );
+  };
+  // Navigation inside the chip's menu must not reach the composer's action
+  // handler — only leaf choices (a model, an effort, a provider) do.
+  const runModelMenuAction = (action?: string, item?: ComposerPopoverItem) => {
+    if (item?.kind === "disclosure") {
+      setIsModelMenuAdvancedOpen((current) => !current);
+      return;
+    }
+    if (item?.menuPane) {
+      if (item.menuPane === "root") {
+        setModelPickerProviderId(undefined);
+      }
+      setModelMenuPane(item.menuPane);
+      return;
+    }
+    runPopoverAction(action, item);
+  };
+  const runPopoverAction = (action?: string, item?: ComposerPopoverItem) => {
+    if (item?.providerId) {
+      // Browse models in-place; commit the provider only with a model choice.
+      const provider = providerConfigs.find(
+        (entry) => entry.id === item.providerId,
+      );
+      if (provider?.authStatus === "connected") {
+        setModelPickerProviderId(item.providerId);
+        setModelMenuPane("provider-model");
+        return;
+      }
+      setActivePopover("provider");
+      if (action) {
+        onComposerAction?.(action);
+      }
+      return;
+    }
+
+    setActivePopover(null);
+    setModelPickerProviderId(undefined);
+    if (action) {
+      onComposerAction?.(action);
+    }
+  };
+  const showSlashHint = (text: string, marker: HTMLElement) => {
+    const rect = marker.getBoundingClientRect();
+    const width = 216;
+    const gap = 8;
+    const fitsRight = rect.right + gap + width <= window.innerWidth - 8;
+    setSlashHint({
+      left: fitsRight ? rect.right + gap : Math.max(8, rect.left - gap - width),
+      text,
+      // Centred on the marker, but kept clear of the viewport edges.
+      top: Math.min(
+        Math.max(rect.top + rect.height / 2, 44),
+        window.innerHeight - 44,
+      ),
+    });
+  };
+  const runSlashCommand = (command: ComposerSlashCommand) => {
+    setSlashHint(undefined);
+    setIsSlashMenuDismissed(true);
+    setHistoryIndex(undefined);
+    // Remove just the active `/command`, keeping the thought the person was
+    // already writing. The retained space makes the command feel like a small
+    // inline action instead of a destructive mode switch.
+    onDraftChange(draft.replace(/(^|\s)\/[^\s/]*$/, "$1"));
+    if (command.command === "/help") {
+      setIsSlashHelpOpen(true);
+      setIsSlashMenuDismissed(false);
+      composerTextareaRef.current?.focus();
+      return;
+    }
+    setIsSlashHelpOpen(false);
+    if (command.popover) {
+      setModelPickerProviderId(undefined);
+      if (command.popover === "provider") {
+        modelMenuEntry.current = "model";
+        modelMenuTriggerRef.current = null;
+        setModelMenuPane(currentModelItems.length ? "model" : "provider");
+      }
+      setActivePopover(command.popover);
+      composerTextareaRef.current?.focus();
+      return;
+    }
+    setActivePopover(null);
+    if (command.action) {
+      onComposerAction?.(command.action);
+    }
+  };
+  const menuProps = (popover: ComposerPopoverId) => ({
+    "aria-controls":
+      activePopover === popover ? `${popoverBaseId}-${popover}` : undefined,
+    "aria-expanded": activePopover === popover,
+    "aria-haspopup": "menu" as const,
+  });
+  const preferredProviderPlacement =
+    popoverPlacement ?? (hasEffortChoice ? "up" : isHero ? "down" : "up");
+  // Prefer the space above the effort chip. Measure the current panel so
+  // taller model lists can flip to the side with room in a short window.
+  const [providerPopoverPlacement, setProviderPopoverPlacement] = useState<
+    "up" | "down"
+  >(preferredProviderPlacement);
+  useLayoutEffect(() => {
+    if (activePopover !== "provider") {
+      setProviderPopoverPlacement(preferredProviderPlacement);
+      return;
+    }
+    const scope = popoverScopeRef.current;
+    const panel = scope?.querySelector<HTMLElement>(
+      ":scope > .gyro-composer-popover, :scope > .gyro-provider-picker",
+    );
+    // The model rail owns its pane-aware placement and resize observation.
+    if (!scope || !panel || isModelRailPane) {
+      return;
+    }
+    const anchor = scope.getBoundingClientRect();
+    const bounds = clippingBounds(panel);
+    const gap = 6;
+    const edgePad = 12;
+    panel.style.maxHeight = "";
+    const height = panel.offsetHeight;
+    const fitsBelow = anchor.bottom + gap + height <= bounds.bottom - edgePad;
+    const fitsAbove = anchor.top - gap - height >= bounds.top + edgePad;
+    setProviderPopoverPlacement(
+      preferredProviderPlacement === "down"
+        ? fitsBelow || !fitsAbove
+          ? "down"
+          : "up"
+        : fitsAbove || !fitsBelow
+          ? "up"
+          : "down",
+    );
+  }, [
+    activePopover,
+    isModelMenuAdvancedOpen,
+    isModelRailPane,
+    modelMenuPane,
+    preferredProviderPlacement,
+    popoverScopeRef,
+  ]);
+
+  useEffect(() => {
+    setActiveSlashCommandIndex(0);
+    setSlashHint(undefined);
+  }, [isSlashHelpOpen, slashQuery]);
+
+  useEffect(() => {
+    if (activeSlashCommandIndex >= visibleSlashCommands.length) {
+      setActiveSlashCommandIndex(0);
+    }
+  }, [activeSlashCommandIndex, visibleSlashCommands.length]);
+
+  useEffect(() => {
+    if (isSlashMenuOpen) {
+      slashCommandRefs.current[selectedSlashCommandIndex]?.scrollIntoView({
+        block: "nearest",
+      });
+    }
+  }, [isSlashMenuOpen, selectedSlashCommandIndex]);
+
+  // Drops land on a chat, not on a textarea: the rectangle that claims one is
+  // the whole chat surface this composer sits in, falling back to the composer
+  // itself when the surface is not the shell's ancestor.
+  const composerShellRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const attach = (files: File[]) => onAttachMediaFiles?.(files);
+    const reportError = (message: string) => onMediaDropError?.(message);
+    const host: MediaDropTarget = {
+      attach,
+      attachPaths: onAttachMediaPaths,
+      reportError,
+      paneKey: draftKey,
+      rect: () => new DOMRect(),
+    };
+    // Any mounted composer can take a drop that landed off every chat, so there
+    // is always somewhere for it to go.
+    localMediaDrop = host;
+    const deregister = registerMediaDropTarget({
+      attach,
+      attachPaths: onAttachMediaPaths,
+      reportError,
+      paneKey: draftKey,
+      rect: () => {
+        const shell = composerShellRef.current;
+        const surface = shell?.closest(".gyro-chat-surface");
+        return (surface ?? shell)?.getBoundingClientRect() ?? new DOMRect();
+      },
+    });
+    return () => {
+      deregister();
+      if (localMediaDrop === host) localMediaDrop = undefined;
+    };
+  }, [draftKey, onAttachMediaFiles, onAttachMediaPaths, onMediaDropError]);
+
+  const hasGoalCaption = Boolean(
+    sessionGoal?.status === "active" &&
+    sessionGoal.text &&
+    !isGoalComposerActive,
+  );
+
+  return (
+    <div
+      className={[
+        "gyro-composer-shell",
+        hasGoalCaption ? "has-goal-caption" : "",
+        isHero ? "is-hero" : "",
+        hasSelectedProvider || isHero
+          ? "has-provider"
+          : "is-provider-collapsed",
+        isHero && constrainToParent ? "is-constrained" : "",
+        isSending ? "is-sending" : "",
+        overlay ? "has-overlay" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      style={
+        isHero
+          ? { justifySelf: constrainToParent ? "stretch" : "center" }
+          : undefined
+      }
+      ref={(node) => {
+        slashMenuScopeRef.current = node;
+        composerShellRef.current = node;
+      }}
+    >
+      {overlay}
+      <CheckWorkStatus sessionId={draftKey} />
+      {/* An open goal rides on the composer, above the message that pursues
+          it, and steps aside for the goal editor. A goal the model marks done
+          leaves this spot: the outcome stays in the chat, and the strip does
+          not. */}
+      {sessionGoal?.status === "active" &&
+      sessionGoal.text &&
+      !isGoalComposerActive ? (
+        <SessionGoalStrip
+          goal={sessionGoal}
+          isRunning={isSending}
+          onClear={onGoalAction ? () => void onGoalAction("clear") : undefined}
+          onComplete={
+            onGoalAction
+              ? () =>
+                  void onGoalAction(
+                    sessionGoal.status === "complete" ? "reopen" : "complete",
+                  )
+              : undefined
+          }
+          onEdit={() => onComposerAction?.("add-goal")}
+          onPause={onGoalAction ? () => void onGoalAction("pause") : undefined}
+          onResume={
+            onGoalAction ? () => void onGoalAction("resume") : undefined
+          }
+        />
+      ) : null}
+      {attachments.length > 0 ? (
+        <>
+          <div className="gyro-composer-attachments" aria-label="Attachments">
+            {attachments.map((attachment) => (
+              <div
+                className={`gyro-composer-attachment is-${attachment.kind}${attachment.kind === "video" ? " is-image" : ""}${attachment.stale ? " is-stale" : ""}${attachment.pending ? " is-pending" : ""}`}
+                aria-busy={attachment.pending || undefined}
+                key={attachment.id}
+                title={`${attachment.name} · ${formatAttachmentSize(attachment.size)}${attachment.stale ? " · the command ran again after this was captured" : ""}`}
+              >
+                {attachment.kind === "image" || attachment.kind === "video" ? (
+                  <ComposerMediaPreview attachment={attachment} />
+                ) : attachment.kind === "terminal-output" &&
+                  attachment.previewText ? (
+                  <button
+                    aria-expanded={previewedAttachmentId === attachment.id}
+                    aria-label={`Preview ${attachment.name}`}
+                    className="gyro-composer-attachment-preview-toggle"
+                    onClick={() =>
+                      setPreviewedAttachmentId((current) =>
+                        current === attachment.id ? undefined : attachment.id,
+                      )
+                    }
+                    title="Preview exactly what the model will receive"
+                    type="button"
+                  >
+                    <SquareTerminal size={15} />
+                  </button>
+                ) : (
+                  <FileText size={15} />
+                )}
+                <span>
+                  <strong>{attachment.name}</strong>
+                  <small>
+                    {attachment.stale
+                      ? "Out of date"
+                      : formatAttachmentSize(attachment.size)}
+                  </small>
+                </span>
+                <button
+                  aria-label={`Remove ${attachment.name}`}
+                  onClick={() => onRemoveAttachment?.(attachment.id)}
+                  title={`Remove ${attachment.name}`}
+                  type="button"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+          {previewedTerminalAttachment?.previewText ? (
+            <pre
+              aria-label={`${previewedTerminalAttachment.name} preview`}
+              className="gyro-composer-attachment-preview"
+            >
+              {previewedTerminalAttachment.previewText}
+            </pre>
+          ) : null}
+        </>
+      ) : null}
+      {chatMode === "council" && councilResolution ? (
+        <div
+          className={[
+            "gyro-council-preflight",
+            councilResolution.error || !councilEnabled ? "is-blocked" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          role="status"
+        >
+          <Users size={13} />
+          <span>
+            {!councilEnabled
+              ? "Model Council is disabled in Settings → Providers."
+              : councilPreflightLabel(councilResolution)}
+          </span>
+          {councilResolution.seats.length > 0 ? (
+            <span className="gyro-council-preflight-seats">
+              {councilResolution.seats.map((seat) => (
+                <span
+                  className="gyro-council-preflight-chip"
+                  key={seat.providerId}
+                >
+                  {seat.providerLabel ?? seat.providerId}
+                </span>
+              ))}
+            </span>
+          ) : null}
+          {councilResolution.seats.length > 0 && !councilResolution.error ? (
+            <span
+              className="gyro-council-preflight-cost"
+              title={costPreviewTitle}
+            >
+              {turnCost.label}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {safetyNotice ? (
+        <div
+          className={`gyro-composer-safety-notice is-${safetyNotice.tone}`}
+          role="status"
+        >
+          {safetyNotice.tone === "paused" ? (
+            <PauseIcon aria-hidden="true" size={14} />
+          ) : (
+            <Gauge aria-hidden="true" size={14} />
+          )}
+          <span>
+            <strong>{safetyNotice.title}</strong>
+            {safetyNotice.detail ? <small>{safetyNotice.detail}</small> : null}
+          </span>
+          {safetyNotice.canResume && onResumeUsage ? (
+            <button onClick={onResumeUsage} type="button">
+              Resume
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {mentionOpen ? (
+        <ComposerCompletionMenu
+          className="gyro-composer-slash-menu"
+          role="listbox"
+          id={`${popoverBaseId}-context-menu`}
+          aria-label="Attach context"
+        >
+          <header>
+            <strong>Context · @file or @open-tab</strong>
+            <span>↑↓ navigate · Enter attach · Esc close</span>
+          </header>
+          {mentions.map((item, index) => (
+            <button
+              type="button"
+              role="option"
+              aria-selected={index === selectedMention}
+              id={`${popoverBaseId}-context-${index}`}
+              className={index === selectedMention ? "is-selected" : ""}
+              key={`${item.kind}:${item.path}`}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => attachMention(index)}
+            >
+              <FileText size={14} />
+              <code>@{item.kind}</code>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </ComposerCompletionMenu>
+      ) : null}
+      {isSlashMenuOpen ? (
+        <ComposerCompletionMenu
+          aria-label="Chat commands"
+          className="gyro-composer-slash-menu is-commands"
+          id={`${popoverBaseId}-slash-menu`}
+          role="menu"
+        >
+          <header role="presentation">
+            <strong>Chat commands</strong>
+            <span>{visibleSlashCommands.length} available</span>
+          </header>
+          <div
+            className="gyro-composer-slash-list"
+            onScroll={() => setSlashHint(undefined)}
+            role="presentation"
+          >
+            {visibleSlashCommands.map((command, index) => {
+              const Icon = command.icon;
+              return (
+                <button
+                  aria-current={
+                    index === selectedSlashCommandIndex ? "true" : undefined
+                  }
+                  className={
+                    index === selectedSlashCommandIndex ? "is-selected" : ""
+                  }
+                  id={`${popoverBaseId}-slash-command-${index}`}
+                  key={command.command}
+                  onClick={() => runSlashCommand(command)}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onPointerEnter={() => {
+                    setActiveSlashCommandIndex(index);
+                    setSlashHint(undefined);
+                  }}
+                  ref={(element) => {
+                    slashCommandRefs.current[index] = element;
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Icon aria-hidden="true" size={16} />
+                  <code>{command.command}</code>
+                  <span className="gyro-composer-slash-command-copy">
+                    <strong>{command.label}</strong>
+                    {isSlashHelpOpen ? (
+                      <small>{command.description}</small>
+                    ) : null}
+                  </span>
+                  {command.hint ? (
+                    <>
+                      <span
+                        aria-hidden="true"
+                        className="gyro-composer-slash-hint-mark"
+                        onPointerEnter={(event) =>
+                          showSlashHint(command.hint ?? "", event.currentTarget)
+                        }
+                        onPointerLeave={() => setSlashHint(undefined)}
+                      >
+                        ?
+                      </span>
+                      <span className="gyro-sr-only">{command.hint}</span>
+                    </>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+          <footer className="gyro-composer-slash-footer" role="presentation">
+            <span>
+              <kbd>↑</kbd>
+              <kbd>↓</kbd> Navigate
+            </span>
+            <span>
+              <kbd>↵</kbd> Select
+            </span>
+            <span>
+              <kbd>esc</kbd> Close
+            </span>
+          </footer>
+        </ComposerCompletionMenu>
+      ) : null}
+      {activePopover === "branch" ? (
+        <div
+          className="gyro-composer-command-popover"
+          ref={activePopover === "branch" ? popoverScopeRef : undefined}
+        >
+          <ComposerPopover
+            align="end"
+            className="gyro-composer-branch-picker"
+            keepInBounds
+            id={`${popoverBaseId}-branch`}
+            items={branchPopoverItems({
+              branchCatalog,
+              branchName:
+                branchName ??
+                (workspaceMode === "worktree" ? "New worktree branch" : "main"),
+              isDisabled: isSending,
+              isLoading: isBranchLoading,
+              workspaceMode,
+              workspacePath,
+            })}
+            onAction={runPopoverAction}
+            placement="up"
+            title="Branches"
+          />
+        </div>
+      ) : null}
+      {effectiveProviderId &&
+      selectedProvider?.capabilities?.supportsUsage === true &&
+      selectedProvider.capabilities.executionKind !== "openai-compatible-api" &&
+      selectedProvider.authMode !== "env" ? (
+        <PlanUsageNotification
+          key={effectiveProviderId}
+          dailyPaceWarning={dailyPaceWarning}
+          onHandoff={(providerId) =>
+            onComposerAction?.(`handoff-provider:${providerId}`)
+          }
+          paused={Boolean(usageSafety?.pause.active)}
+          providerId={effectiveProviderId}
+          providerLedger={providerLedger}
+          providers={handoffProviders}
+          windows={providerUsage?.windows ?? []}
+        />
+      ) : null}
+      {/* Portalled to the body: the hero composer carries a drop-shadow
+          filter, which would otherwise become the containing block for this
+          fixed bubble and offset it by the composer's own position. */}
+      {isSlashMenuOpen && slashHint
+        ? createPortal(
+            <div
+              className="gyro-composer-slash-hint-bubble"
+              role="tooltip"
+              style={{ left: slashHint.left, top: slashHint.top }}
+            >
+              {slashHint.text}
+            </div>,
+            document.body,
+          )
+        : null}
+      <textarea
+        data-tour="composer.input"
+        ref={composerTextareaRef}
+        aria-label={
+          isGoalComposerActive
+            ? startsGoalSession
+              ? "Set goal and send"
+              : "Set session goal"
+            : "Message Gyro"
+        }
+        aria-controls={
+          mentionOpen
+            ? `${popoverBaseId}-context-menu`
+            : isSlashMenuOpen
+              ? `${popoverBaseId}-slash-menu`
+              : undefined
+        }
+        aria-activedescendant={
+          mentionOpen
+            ? `${popoverBaseId}-context-${selectedMention}`
+            : isSlashMenuOpen
+              ? `${popoverBaseId}-slash-command-${selectedSlashCommandIndex}`
+              : undefined
+        }
+        aria-expanded={mentionOpen || isSlashMenuOpen}
+        aria-haspopup={mentionOpen ? "listbox" : "menu"}
+        onPaste={(event) => {
+          const files = chatMediaFiles(event.clipboardData);
+          if (files.length) {
+            event.preventDefault();
+            onAttachMediaFiles?.(files);
+          }
+        }}
+        onFocus={() => {
+          composerWantsFocus = true;
+          setActivePopover(null);
+          setIsSlashMenuDismissed(false);
+        }}
+        onBlur={(event) => {
+          // A detached node means a branch swap removed the textarea rather
+          // than the user moving on: keep the flag so the composer replacing
+          // this one reclaims the caret.
+          if (!event.currentTarget.isConnected) return;
+          composerWantsFocus = false;
+        }}
+        maxLength={isGoalComposerActive ? 1000 : maxDraftLength}
+        onSelect={(event) => {
+          if (dictationAnchorRef.current) return;
+          dictationCaretChoiceRef.current = event.currentTarget.selectionStart;
+        }}
+        onChange={(event) => {
+          const value = event.target.value;
+          if (
+            dictationAnchorRef.current &&
+            value !== dictationAppliedRef.current
+          ) {
+            releaseDictation(false);
+          }
+          dictationCaretChoiceRef.current = event.target.selectionStart;
+          setMentionDismissed(false);
+          setMentionIndex(0);
+          setIsSlashHelpOpen(false);
+          setIsSlashMenuDismissed(false);
+          onDraftChange(value);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && dictationAnchorRef.current) {
+            event.preventDefault();
+            releaseDictation(true);
+            return;
+          }
+          if (mentionOpen && !event.nativeEvent.isComposing) {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              setMentionIndex(
+                (current) =>
+                  (current +
+                    (event.key === "ArrowDown" ? 1 : -1) +
+                    mentions.length) %
+                  mentions.length,
+              );
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setMentionDismissed(true);
+              return;
+            }
+            if (
+              (event.key === "Enter" || event.key === "Tab") &&
+              !event.shiftKey
+            ) {
+              event.preventDefault();
+              attachMention(selectedMention);
+              return;
+            }
+          }
+          if (isGoalComposerActive && event.key === "Escape") {
+            event.preventDefault();
+            onCancelGoalComposer?.();
+            return;
+          }
+          if (isSlashMenuOpen) {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              const direction = event.key === "ArrowDown" ? 1 : -1;
+              setActiveSlashCommandIndex(
+                (current) =>
+                  (current + direction + visibleSlashCommands.length) %
+                  visibleSlashCommands.length,
+              );
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setIsSlashHelpOpen(false);
+              setIsSlashMenuDismissed(true);
+              return;
+            }
+            if (
+              (event.key === "Enter" || event.key === "Tab") &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing
+            ) {
+              const command =
+                visibleSlashCommands[selectedSlashCommandIndex] ??
+                visibleSlashCommands[0];
+              if (command) {
+                event.preventDefault();
+                runSlashCommand(command);
+                return;
+              }
+            }
+          }
+          if (
+            !isGoalComposerActive &&
+            (event.key === "ArrowUp" || event.key === "ArrowDown") &&
+            !event.shiftKey &&
+            (draft.length === 0 || historyIndex !== undefined)
+          ) {
+            const next =
+              event.key === "ArrowUp"
+                ? Math.min(promptHistory.length - 1, (historyIndex ?? -1) + 1)
+                : Math.max(-1, (historyIndex ?? 0) - 1);
+            if (promptHistory.length > 0 && next >= 0) {
+              event.preventDefault();
+              setHistoryIndex(next);
+              onDraftChange(
+                promptHistory[promptHistory.length - 1 - next] ?? "",
+              );
+              return;
+            }
+            if (next < 0 && historyIndex !== undefined) {
+              event.preventDefault();
+              setHistoryIndex(undefined);
+              onDraftChange("");
+              return;
+            }
+          }
+          const shouldSend =
+            event.key === "Enter" &&
+            !event.shiftKey &&
+            !event.nativeEvent.isComposing;
+          if (shouldSend) {
+            event.preventDefault();
+            setActivePopover(null);
+            if (dictationAnchorRef.current) releaseDictation(false);
+            if (explorerAskSendHeld) return;
+            if (canSubmitComposer && draft.trim().length > 0) {
+              setHistoryIndex(undefined);
+              requestSend();
+            }
+          }
+        }}
+        placeholder={
+          !shellReady
+            ? "Draft freely — send unlocks when Gyro finishes optimizing"
+            : isGoalComposerActive
+              ? startsGoalSession
+                ? "What should this chat achieve? Send to set the goal and start"
+                : "Edit the goal, then save it"
+              : chatMode === "council"
+                ? "Ask for architecture, review, or alternatives — models answer in parallel"
+                : !canSubmitChat
+                  ? isCliUpdating
+                    ? "Updating a provider CLI — sending unlocks when it finishes…"
+                    : cleanMachinePath.placeholder
+                  : variant === "hero"
+                    ? "Describe a task or attach images"
+                    : "Ask for follow-up changes or attach images"
+        }
+        value={draft}
+      />
+      {!isGoalComposerActive &&
+      shellReady &&
+      !canSubmitChat &&
+      chatMode !== "council" &&
+      !isCliUpdating &&
+      (!hasUserWorkspace || needsProviderSetup || !hasSelectedProvider) ? (
+        <div className="gyro-composer-blocker" role="status">
+          <span>
+            <PlugZap
+              className="gyro-composer-blocker-icon"
+              size={15}
+              aria-hidden="true"
+            />
+            {isCliUpdating
+              ? "Updating a provider CLI. Sending will unlock when it finishes."
+              : cleanMachinePath.readinessLabel}
+          </span>
+          {!isCliUpdating &&
+          cleanMachinePath.nextAction &&
+          cleanMachinePath.nextActionLabel ? (
+            <button
+              onClick={() => {
+                const action = cleanMachinePath.nextAction;
+                if (action) onComposerAction?.(action);
+              }}
+              type="button"
+            >
+              {cleanMachinePath.nextActionLabel}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      <div
+        className="gyro-composer-bar"
+        // The full-width Add menu must anchor to the shell, including in
+        // hero/tiled layouts whose toolbar rules establish a positioning box.
+        style={activePopover === "context" ? { position: "static" } : undefined}
+      >
+        {hasSelectedProvider || isHero ? (
+          <>
+            <div
+              className="gyro-composer-control gyro-composer-control-context gyro-composer-reveal"
+              ref={activePopover === "context" ? popoverScopeRef : undefined}
+            >
+              <button
+                aria-label="Add context"
+                className="gyro-composer-tool"
+                onClick={() => togglePopover("context")}
+                title="Add context"
+                type="button"
+                {...menuProps("context")}
+              >
+                <Plus size={17} />
+              </button>
+              {activePopover === "context" ? (
+                <ComposerPopover
+                  className="gyro-context-picker"
+                  title="Add"
+                  keepInBounds
+                  id={`${popoverBaseId}-context`}
+                  items={contextItems}
+                  onAction={runPopoverAction}
+                />
+              ) : null}
+            </div>
+            <div
+              className="gyro-composer-control gyro-composer-control-approval gyro-composer-reveal"
+              ref={activePopover === "approval" ? popoverScopeRef : undefined}
+            >
+              <button
+                aria-label={`Approval mode: ${approvalCopy.chipLabel}`}
+                className={approvalChipClassName}
+                onClick={() => togglePopover("approval")}
+                title={`Approval mode: ${approvalCopy.chipLabel}`}
+                type="button"
+                {...menuProps("approval")}
+              >
+                <ApprovalChipIcon size={14} />
+                <span className="gyro-composer-label">
+                  {approvalCopy.chipLabel}
+                </span>
+                <ChevronDown size={13} />
+              </button>
+              {activePopover === "approval" ? (
+                <ComposerPopover
+                  className="gyro-approval-picker"
+                  keepInBounds
+                  id={`${popoverBaseId}-approval`}
+                  items={[
+                    {
+                      action: "set-approval-gated",
+                      active: approvalMode === "gated",
+                      detail: approvalCopy.gatedDetail,
+                      icon: Hand,
+                      label: approvalCopy.gatedLabel,
+                    },
+                    {
+                      action: "set-approval-auto",
+                      active: approvalMode === "auto",
+                      detail: approvalCopy.autoDetail,
+                      icon: Clock,
+                      label: approvalCopy.autoLabel,
+                    },
+                    {
+                      action: "set-approval-direct",
+                      active: approvalMode === "direct",
+                      detail: approvalCopy.directDetail,
+                      icon: ShieldAlert,
+                      kind: "permission-direct",
+                      label: approvalCopy.directLabel,
+                    },
+                  ]}
+                  onAction={runPopoverAction}
+                />
+              ) : null}
+            </div>
+          </>
+        ) : null}
+        {surfaceControls}
+        {/* Mode and goal are independent, so both chips can sit here at once. */}
+        {chatMode === "plan" ? (
+          <button
+            aria-label={
+              isSending ? "Remove Plan from next message" : "Remove Plan mode"
+            }
+            aria-pressed="true"
+            className="gyro-composer-chip is-plan"
+            onClick={() => onComposerAction?.("set-chat-mode-normal")}
+            title={
+              isSending
+                ? "Plan applies to the next message"
+                : "Remove Plan mode"
+            }
+            type="button"
+          >
+            <ListChecks size={13} />
+            <span className="gyro-composer-label">
+              {isSending ? "Plan next" : "Plan"}
+            </span>
+            <X
+              aria-hidden="true"
+              className="gyro-composer-chip-remove"
+              size={12}
+            />
+          </button>
+        ) : chatMode === "council" ? (
+          <button
+            aria-label="Remove Council mode"
+            aria-pressed="true"
+            className="gyro-composer-chip is-council"
+            onClick={() => onComposerAction?.("set-chat-mode-normal")}
+            title="Remove Council mode — multi-model parallel answers with synthesis"
+            type="button"
+          >
+            <Users size={13} />
+            <span className="gyro-composer-label">Council</span>
+            <X
+              aria-hidden="true"
+              className="gyro-composer-chip-remove"
+              size={12}
+            />
+          </button>
+        ) : null}
+        {!hasGoalCaption && (isGoalModeActive || isGoalComposerActive) ? (
+          <button
+            aria-label={
+              sessionGoal?.text
+                ? "Remove Goal mode — the goal stays on this chat"
+                : "Close goal editor — draft is kept"
+            }
+            aria-pressed="true"
+            className="gyro-composer-chip is-goal"
+            onClick={onCancelGoalComposer}
+            type="button"
+          >
+            <Goal size={13} />
+            <span className="gyro-composer-label">Goal</span>
+            <X
+              aria-hidden="true"
+              className="gyro-composer-chip-remove"
+              size={12}
+            />
+          </button>
+        ) : !hasGoalCaption && sessionGoal?.text ? (
+          <button
+            className="gyro-composer-chip is-goal"
+            onClick={() => onComposerAction?.("add-goal")}
+            title={sessionGoal.text}
+            type="button"
+          >
+            <Goal size={13} />
+            <span className="gyro-composer-label">Goal</span>
+          </button>
+        ) : null}
+        <div className="gyro-composer-spacer" />
+        {contextUsage ? (
+          <div
+            className="gyro-composer-context-meter"
+            // Opening the meter asks for the plan's current level; the account
+            // poll coalesces repeat hovers into one request.
+            onFocus={refreshContextMeterUsage}
+            onPointerEnter={refreshContextMeterUsage}
+          >
+            <div
+              aria-describedby={`${popoverBaseId}-context-usage-tooltip`}
+              aria-label={contextUsage.label}
+              aria-valuemax={100}
+              aria-valuemin={0}
+              aria-valuenow={
+                contextUsage.contextWindowTokens > 0
+                  ? contextUsage.percent
+                  : undefined
+              }
+              className={`gyro-composer-context-wheel is-${contextSeverity}`}
+              role="progressbar"
+              tabIndex={0}
+            >
+              <svg
+                aria-hidden="true"
+                height="18"
+                viewBox="0 0 18 18"
+                width="18"
+              >
+                <circle
+                  className="gyro-composer-context-track"
+                  cx="9"
+                  cy="9"
+                  r="6.5"
+                />
+                <circle
+                  className="gyro-composer-context-progress"
+                  cx="9"
+                  cy="9"
+                  pathLength="100"
+                  r="6.5"
+                  strokeDasharray={`${contextUsage.percent ?? 0} 100`}
+                  strokeLinecap={contextUsage.percent > 0 ? "round" : "butt"}
+                  transform="rotate(-90 9 9)"
+                />
+              </svg>
+            </div>
+            <div
+              className="gyro-composer-context-tooltip"
+              id={`${popoverBaseId}-context-usage-tooltip`}
+              role="tooltip"
+            >
+              <section
+                className={`gyro-composer-context-section is-${contextSeverity}`}
+              >
+                <header>
+                  <div className="gyro-composer-context-heading">
+                    <strong>Context</strong>
+                    <span
+                      className="gyro-composer-context-model"
+                      title={contextUsage.modelLabel}
+                    >
+                      {contextUsage.modelLabel}
+                    </span>
+                  </div>
+                </header>
+                <div
+                  className="gyro-composer-context-value"
+                  title={
+                    contextSource === "empty"
+                      ? "Waiting for provider measurement"
+                      : contextUsage.detail
+                  }
+                >
+                  <strong>
+                    {contextSource === "empty"
+                      ? "—"
+                      : `${contextSource === "estimated" && !providerMeasured ? "~" : ""}${contextUsage.usedLabel}`}
+                  </strong>
+                  {contextUsage.contextWindowTokens > 0 ? (
+                    <span>of {contextUsage.windowLabel}</span>
+                  ) : null}
+                  {contextSource === "empty" ||
+                  contextUsage.contextWindowTokens <= 0 ? null : (
+                    <b>{contextUsage.percentLabel}</b>
+                  )}
+                </div>
+                <p className="gyro-composer-context-caption">
+                  {contextSource === "empty"
+                    ? "Waiting for provider measurement"
+                    : contextUsage.contextWindowTokens <= 0
+                      ? "Window unknown"
+                      : contextSource === "estimated" && !providerMeasured
+                        ? "Estimated from this thread"
+                        : "Reported by the provider"}
+                </p>
+                <div
+                  aria-label="Context window used"
+                  aria-valuemax={100}
+                  aria-valuemin={0}
+                  aria-valuenow={
+                    contextSource !== "empty" &&
+                    contextUsage.contextWindowTokens > 0
+                      ? contextUsage.percent
+                      : undefined
+                  }
+                  aria-valuetext={
+                    contextSource === "empty"
+                      ? "Context usage not reported"
+                      : contextUsage.contextWindowTokens > 0
+                        ? undefined
+                        : "Context window unknown"
+                  }
+                  className="gyro-composer-context-bar"
+                  role="progressbar"
+                >
+                  <span style={{ width: `${contextUsage.percent ?? 0}%` }} />
+                </div>
+              </section>
+              {usageProviderId ? (
+                <section
+                  aria-label="Plan usage limits"
+                  className="gyro-composer-limit-summary"
+                >
+                  <header className="gyro-composer-limit-title">
+                    <span>Plan usage</span>
+                  </header>
+                  {providerUsage?.stale ? (
+                    <small>Last known usage · retrying</small>
+                  ) : null}
+                  {limitWindows.length > 0 ? (
+                    limitWindows.map((window) => (
+                      <ComposerLimitRow key={window.id} window={window} />
+                    ))
+                  ) : (
+                    <small>
+                      {providerUsage?.status === "loading"
+                        ? "Reading your plan…"
+                        : "Your provider has not reported plan limits."}
+                    </small>
+                  )}
+                </section>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        <div
+          className="gyro-composer-control gyro-composer-control-model"
+          ref={
+            activePopover === "provider" && modelMenuPane !== "root"
+              ? popoverScopeRef
+              : undefined
+          }
+        >
+          <button
+            /* Narrow panes hide .gyro-composer-label, so the visible text
+               cannot be the only name this control has. */
+            aria-label={`Model: ${modelChipLabel}`}
+            className="gyro-composer-chip gyro-model-chip gyro-composer-model-trigger"
+            onClick={(event) =>
+              toggleProviderPopover("model", event.currentTarget)
+            }
+            type="button"
+            {...menuProps("provider")}
+            aria-haspopup="menu"
+            aria-expanded={activePopover === "provider" && isModelRailPane}
+            aria-controls={
+              activePopover === "provider" && isModelRailPane
+                ? `${popoverBaseId}-provider`
+                : undefined
+            }
+          >
+            {displayProvider ? (
+              <ProviderLogo providerId={displayProvider.id} />
+            ) : null}
+            <span className="gyro-composer-label">{modelChipLabel}</span>
+            <ChevronDown aria-hidden="true" size={13} />
+          </button>
+          {activePopover === "provider" && isModelRailPane ? (
+            <ComposerModelRail
+              activeModelId={
+                effectiveModelId ?? displayProvider?.selectedModelId
+              }
+              activeProviderId={effectiveProviderId}
+              id={`${popoverBaseId}-provider`}
+              onConnect={(providerId) =>
+                onComposerAction?.(`connect-provider:${providerId}`)
+              }
+              onManageProviders={() => {
+                dismissActiveComposerPopover();
+                onComposerAction?.("open-settings:providers");
+              }}
+              onSelectModel={(providerId, modelId) => {
+                dismissActiveComposerPopover();
+                onComposerAction?.(
+                  `select-provider-model:${providerId}:${modelId}`,
+                );
+              }}
+              placement={providerPopoverPlacement}
+              providers={modelRailProviders}
+              renderLogo={(provider) => (
+                <ProviderLogo
+                  label={provider.label}
+                  providerId={provider.id as ProviderId}
+                />
+              )}
+              warning={providerErrorMessage}
+            />
+          ) : activePopover === "provider" && modelMenuPane !== "root" ? (
+            <ComposerPopover
+              align="end"
+              className={
+                modelMenuPane === "effort"
+                  ? "gyro-model-menu gyro-effort-picker"
+                  : "gyro-model-menu"
+              }
+              id={`${popoverBaseId}-provider`}
+              items={
+                modelMenuPane === "effort"
+                  ? [modelMenuBackItem("Effort"), ...effortItems]
+                  : modelMenuPane === "settings"
+                    ? [modelMenuBackItem("Model settings"), ...modelMenuItems]
+                    : modelMenuItems
+              }
+              onAction={runModelMenuAction}
+              placement={providerPopoverPlacement}
+            />
+          ) : null}
+        </div>
+        {hasEffortChoice && providerReasoningEffort ? (
+          <div
+            className="gyro-composer-control gyro-composer-control-effort"
+            ref={
+              activePopover === "provider" && modelMenuPane === "root"
+                ? popoverScopeRef
+                : undefined
+            }
+          >
+            <button
+              className="gyro-composer-chip gyro-effort-chip gyro-composer-effort-trigger"
+              aria-label={`Reasoning effort: ${reasoningEffortLabel(providerReasoningEffort)}`}
+              aria-haspopup="dialog"
+              aria-expanded={
+                activePopover === "provider" && modelMenuPane === "root"
+              }
+              aria-controls={
+                activePopover === "provider" && modelMenuPane === "root"
+                  ? `${popoverBaseId}-provider`
+                  : undefined
+              }
+              onClick={(event) =>
+                toggleProviderPopover("root", event.currentTarget)
+              }
+              type="button"
+            >
+              <span
+                className="gyro-effort-chip-label"
+                data-max-effort={
+                  effortItems.length > 1 &&
+                  effortItems[effortItems.length - 1]?.active
+                }
+              >
+                {reasoningEffortLabel(providerReasoningEffort)}
+              </span>
+              <ChevronDown aria-hidden="true" size={13} />
+              <Gauge
+                className="gyro-composer-effort-compact"
+                aria-hidden="true"
+                size={14}
+              />
+            </button>
+            {activePopover === "provider" && modelMenuPane === "root" ? (
+              <ComposerEffortSelector
+                key={`${effectiveProviderId}:${effectiveModelId}`}
+                id={`${popoverBaseId}-provider`}
+                fastMode={composerFastMode(
+                  config,
+                  effectiveProviderId,
+                  rawModelId,
+                  onComposerAction,
+                )}
+                labels={effortItems.map((item) => item.label)}
+                selectedIndex={Math.max(
+                  0,
+                  effortItems.findIndex((item) => item.active),
+                )}
+                placement={providerPopoverPlacement}
+                onSelect={(index) => {
+                  const action = effortItems[index]?.action;
+                  if (action) onComposerAction?.(action);
+                }}
+              />
+            ) : null}
+          </div>
+        ) : null}
+        {dictation ? (
+          <button
+            aria-label={
+              dictationPhase === "listening"
+                ? "Stop dictation"
+                : dictationPhase === "processing"
+                  ? "Transcribing your words"
+                  : "Dictate"
+            }
+            aria-pressed={dictationPhase === "listening"}
+            className={[
+              "gyro-composer-tool",
+              "gyro-dictation-button",
+              dictationPhase === "listening" ? "is-listening" : "",
+              dictationPhase === "processing" ? "is-processing" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            data-dictation-phase={dictationPhase}
+            onClick={() => {
+              setActivePopover(null);
+              toggleDictation();
+            }}
+            title={
+              dictationPhase === "listening"
+                ? "Stop dictation"
+                : dictationPhase === "processing"
+                  ? "Transcribing your words"
+                  : "Dictate"
+            }
+            type="button"
+          >
+            <Mic aria-hidden="true" size={17} />
+            <span aria-hidden="true" className="gyro-dictation-badge">
+              <span className="gyro-dictation-wave">
+                <span />
+                <span />
+                <span />
+              </span>
+              <Square
+                className="gyro-dictation-stop"
+                fill="currentColor"
+                size={7}
+                strokeWidth={0}
+              />
+              <span className="gyro-dictation-spinner" />
+            </span>
+          </button>
+        ) : null}
+        <button
+          aria-label={
+            isStopAction
+              ? "Stop response"
+              : isGoalComposerActive
+                ? startsGoalSession
+                  ? "Set goal and send"
+                  : "Save goal"
+                : isSending
+                  ? "Queue message"
+                  : "Send message"
+          }
+          aria-busy={false}
+          className={[
+            "gyro-send-button",
+            isStopAction ? "is-stop" : "",
+            isSending && !isStopAction ? "is-queue" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          disabled={
+            !isStopAction && (!canSubmitComposer || draft.trim().length === 0)
+          }
+          onClick={(event) => {
+            setActivePopover(null);
+            if (isStopAction) {
+              // Only honor stop when the press began on this button. A click
+              // that migrated here after a layout shift (empty margin focus)
+              // must not cancel the run. Keyboard activation (Enter/Space)
+              // synthesizes a click with detail 0 and no pointerdown arm.
+              const armed = stopArmedRef.current || event.detail === 0;
+              stopArmedRef.current = false;
+              if (!armed) {
+                return;
+              }
+              onStop?.();
+              return;
+            }
+            stopArmedRef.current = false;
+            requestSend();
+          }}
+          // Grid slots focus their pane on pointerdown. Stopping that here
+          // keeps a stop click from also re-focusing / re-laying out the chat
+          // under the finger — which was reading as "click empty margin → stop".
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            if (!isStopAction) {
+              stopArmedRef.current = false;
+              return;
+            }
+            stopArmedRef.current = true;
+            const button = event.currentTarget;
+            const disarmIfReleasedAway = (up: PointerEvent) => {
+              document.removeEventListener(
+                "pointerup",
+                disarmIfReleasedAway,
+                true,
+              );
+              document.removeEventListener(
+                "pointercancel",
+                disarmIfReleasedAway,
+                true,
+              );
+              if (!up.composedPath().includes(button)) {
+                stopArmedRef.current = false;
+              }
+            };
+            document.addEventListener("pointerup", disarmIfReleasedAway, true);
+            document.addEventListener(
+              "pointercancel",
+              disarmIfReleasedAway,
+              true,
+            );
+          }}
+          title={
+            isStopAction
+              ? "Stop response"
+              : sendDisabledReason
+                ? sendDisabledReason
+                : isGoalComposerActive
+                  ? startsGoalSession
+                    ? "Set goal and send"
+                    : "Save goal"
+                  : isCliUpdating
+                    ? "Wait for the CLI update to finish"
+                    : !hasReadyProvider
+                      ? "Connect a provider before sending"
+                      : chatMode === "council" && !hasUserWorkspace
+                        ? "Choose a folder for Council"
+                        : isBranchLoading
+                          ? "Wait for the branch switch to finish"
+                          : isSending
+                            ? "Queue message"
+                            : "Send"
+          }
+          type="button"
+        >
+          {isStopAction ? (
+            <Square fill="currentColor" size={10} strokeWidth={0} />
+          ) : isGoalComposerActive && !startsGoalSession ? (
+            <Check size={17} />
+          ) : (
+            <svg
+              aria-hidden="true"
+              className="gyro-send-arrow"
+              fill="none"
+              viewBox="0 0 30 30"
+            >
+              <path
+                d="M15 21.4V8.6M9.6 14.5 15 8.6 20.4 14.5"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2.15"
+              />
+            </svg>
+          )}
+        </button>
+      </div>
+      {dictation && dictationNotice ? (
+        <p className="gyro-dictation-status" role="status">
+          {dictationNotice}
+        </p>
+      ) : null}
+      {shouldShowContextRow ? (
+        <ChatContextSection
+          branchCatalog={branchCatalog}
+          branchName={branchName}
+          isBranchLoading={isBranchLoading}
+          isSending={isSending}
+          onAction={onComposerAction}
+          savedProjects={savedProjects}
+          workspaceMode={workspaceMode}
+          workspacePath={workspacePath}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ComposerMediaPreview({ attachment }: { attachment: ChatAttachment }) {
+  const [hasFailed, setHasFailed] = useState(false);
+  if (!attachment.previewUrl || hasFailed) {
+    return attachment.kind === "video" ? (
+      <Video
+        aria-hidden="true"
+        className="gyro-composer-image-fallback"
+        size={20}
+      />
+    ) : (
+      <ImagePlus
+        aria-hidden="true"
+        className="gyro-composer-image-fallback"
+        size={20}
+      />
+    );
+  }
+  if (attachment.kind === "video") {
+    return (
+      <video
+        aria-hidden="true"
+        muted
+        onError={() => setHasFailed(true)}
+        playsInline
+        preload="metadata"
+        src={attachment.previewUrl}
+      />
+    );
+  }
+  return (
+    <img
+      alt={attachment.name}
+      onError={() => setHasFailed(true)}
+      src={attachment.previewUrl}
+    />
+  );
 }
 
 export function ModelSwitchMarker({ event }: { event: SessionEvent }) {
@@ -24876,6 +23478,7 @@ function MutationApprovalCard({
       icon={<FileCode2 size={18} />}
       description={[approval.effect, approval.risk]
         .filter((value, index, all) => value && all.indexOf(value) === index)
+        .map((value) => (/[.!?]$/.test(value) ? value : `${value}.`))
         .join(" ")}
       files={[{ path: approval.path }]}
       scope={
@@ -25495,6 +24098,8 @@ function ChatTurn({
               error: providerStatus.error,
               recoveryKind: providerStatus.recoveryKind,
               recoveryMessage: providerStatus.recoveryMessage,
+              at: turn.statusEvent?.createdAt,
+              quietForSeconds: runQuietSeconds(turn.statusEvent),
             }
           : undefined,
         // Native capacity recovery owns its wait while this invoke stays alive;
@@ -25513,7 +24118,9 @@ function ChatTurn({
     [
       turn.timelineEvents,
       turn.durationMs,
+      turn.statusEvent?.createdAt,
       turn.statusEvent?.message,
+      turn.statusEvent?.payload,
       isRunning,
       startedAt,
       completedAt,
@@ -26133,6 +24740,183 @@ function ChatRunChangeSummary({
   );
 }
 
+/** A quiet outcome caption above the composer, with secondary actions in More. */
+function SessionGoalStrip({
+  goal,
+  isRunning = false,
+  onClear,
+  onComplete,
+  onEdit,
+  onPause,
+  onResume,
+}: {
+  goal: SessionGoal;
+  /** Only an executing turn earns the active status mark and ticking clock. */
+  isRunning?: boolean;
+  onClear?: () => void;
+  onComplete?: () => void;
+  onEdit?: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useOutsidePointerDismiss<HTMLSpanElement>(
+    isMenuOpen,
+    () => setIsMenuOpen(false),
+    triggerRef,
+  );
+  const isActive = goal.status === "active";
+  const runStatus = goal.run?.status;
+  const isWorking =
+    isActive &&
+    isRunning &&
+    (!runStatus ||
+      ["running", "queued", "waiting-approval"].includes(runStatus));
+  useEffect(() => {
+    if (!isWorking) return;
+    const interval = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [isWorking]);
+
+  const startedAt = Date.parse(
+    goal.run?.startedAt ?? goal.createdAt ?? goal.updatedAt ?? "",
+  );
+  const finishedAt = Date.parse(goal.updatedAt ?? "");
+  const durationEnd =
+    isWorking || !Number.isFinite(finishedAt) ? now : finishedAt;
+  const duration = Number.isFinite(startedAt)
+    ? formatRunDuration(
+        Math.max(0, Math.floor((durationEnd - startedAt) / 1_000)),
+      )
+    : undefined;
+  const label = !isActive
+    ? "Goal completed"
+    : runStatus === "blocked"
+      ? "Goal blocked"
+      : runStatus === "paused"
+        ? "Goal paused"
+        : runStatus === "waiting-approval"
+          ? "Waiting for approval"
+          : runStatus === "queued"
+            ? "Goal queued"
+            : isRunning
+              ? "Pursuing goal"
+              : "Goal active";
+  const statusText =
+    runStatus === "paused"
+      ? "Paused"
+      : runStatus === "blocked"
+        ? "Blocked"
+        : runStatus === "waiting-approval"
+          ? "Needs approval"
+          : runStatus === "queued"
+            ? "Queued"
+            : undefined;
+  const menuItems: ComposerPopoverItem[] = [
+    ...(onEdit ? [{ action: "edit", icon: Edit3, label: "Edit goal" }] : []),
+    ...(onComplete
+      ? [
+          {
+            action: "complete",
+            icon: isActive ? Check : RefreshCw,
+            label: isActive ? "Complete goal" : "Reopen goal",
+          },
+        ]
+      : []),
+    ...(onClear
+      ? [{ action: "clear", icon: Trash2, label: "Clear goal" }]
+      : []),
+  ];
+
+  return (
+    <section
+      aria-label={`${label}: ${goal.text}${goal.run?.reason ? ` — ${goal.run.reason}` : ""}`}
+      className="gyro-goal-strip"
+      data-running={isWorking ? "true" : undefined}
+      data-status={goal.status}
+      data-run-status={runStatus}
+    >
+      <span aria-hidden="true" className="gyro-goal-strip-mark" title={label}>
+        {isActive ? (
+          <Circle size={8} fill={isWorking ? "currentColor" : "none"} />
+        ) : (
+          <Check size={12} />
+        )}
+      </span>
+      <span
+        className="gyro-goal-strip-text"
+        title={`${goal.text}${goal.run?.reason ? ` — ${goal.run.reason}` : ""}`}
+      >
+        {goal.text}
+      </span>
+      {statusText ? (
+        <span className="gyro-goal-strip-status" title={goal.run?.reason}>
+          {statusText}
+        </span>
+      ) : null}
+      {duration ? (
+        <time className="gyro-goal-strip-time">{duration}</time>
+      ) : null}
+      <span className="gyro-goal-strip-actions" ref={menuRef}>
+        {isActive && isRunning && onPause ? (
+          <button
+            aria-label="Pause goal"
+            onClick={onPause}
+            title="Pause goal"
+            type="button"
+          >
+            <Pause aria-hidden="true" size={13} />
+          </button>
+        ) : null}
+        {isActive && !isRunning && onResume ? (
+          <button
+            aria-label="Resume goal"
+            onClick={onResume}
+            title="Resume goal from its checkpoint"
+            type="button"
+          >
+            <Play aria-hidden="true" size={13} />
+          </button>
+        ) : null}
+        {menuItems.length > 0 ? (
+          <button
+            aria-label="Goal options"
+            aria-haspopup="menu"
+            aria-expanded={isMenuOpen}
+            aria-controls={isMenuOpen ? menuId : undefined}
+            onClick={() => setIsMenuOpen((open) => !open)}
+            ref={triggerRef}
+            title="Goal options"
+            type="button"
+          >
+            <MoreHorizontal aria-hidden="true" size={15} />
+          </button>
+        ) : null}
+        {isMenuOpen ? (
+          <ComposerPopover
+            align="end"
+            className="gyro-goal-options"
+            id={menuId}
+            items={menuItems}
+            keepInBounds
+            title="Goal"
+            onAction={(action) => {
+              setIsMenuOpen(false);
+              triggerRef.current?.focus();
+              if (action === "edit") onEdit?.();
+              if (action === "complete") onComplete?.();
+              if (action === "clear") onClear?.();
+            }}
+          />
+        ) : null}
+      </span>
+    </section>
+  );
+}
+
 /** The change itself, inline, so reading a file does not leave the thread. */
 function ChangeSummaryDiff({
   onLoad,
@@ -26659,6 +25443,40 @@ function CouncilResponseCard({
   );
 }
 
+/** Render archived chat text without a live session or workspace actions. */
+export function ReadOnlyChatMessage({
+  kind,
+  text,
+}: {
+  kind: "user" | "assistant" | "tool";
+  text: string;
+}) {
+  if (kind === "user") {
+    return (
+      <div className="gyro-user-message-bubble">
+        <pre>{text}</pre>
+      </div>
+    );
+  }
+  if (
+    kind === "tool" ||
+    text.length > ASSISTANT_RESPONSE_RICH_PARSE_MAX_CHARS
+  ) {
+    return <pre className="gyro-response-code-block">{text}</pre>;
+  }
+  return (
+    <div className="gyro-response">
+      <div className="gyro-response-body">
+        {assistantResponseBlocks(finalAssistantResponseText(text)).map(
+          (block, index) => (
+            <AssistantResponseBlockView key={index} block={block} />
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AssistantResponseBlockView({
   block,
   onOpenBrowserUrl,
@@ -26669,12 +25487,7 @@ function AssistantResponseBlockView({
   const imageHint = useContext(ChatImageHintContext);
   if (block.kind === "heading") {
     const Heading = `h${block.level}` as
-      | "h1"
-      | "h2"
-      | "h3"
-      | "h4"
-      | "h5"
-      | "h6";
+      "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
     return (
       <Heading>
         {renderAssistantInlineContent(block.content, onOpenBrowserUrl)}
@@ -27137,7 +25950,9 @@ function replyLinkNode(
   return (
     <a
       className={
-        mark ? `gyro-response-link gyro-response-link--${mark}` : "gyro-response-link"
+        mark
+          ? `gyro-response-link gyro-response-link--${mark}`
+          : "gyro-response-link"
       }
       href={href}
       key={key}
@@ -27197,7 +26012,9 @@ function stripHiddenSessionTitleMarker(message: string) {
   return lines
     .filter((line) => {
       const trimmed = line.trim();
-      return !/^GYRO_(?:SESSION_TITLE|ARTIFACTS|QUESTIONS|TASKS):/.test(trimmed);
+      return !/^GYRO_(?:SESSION_TITLE|ARTIFACTS|QUESTIONS|TASKS):/.test(
+        trimmed,
+      );
     })
     .join("\n")
     .trim();
@@ -27571,6 +26388,11 @@ function eventPayloadRecord(event: SessionEvent) {
     return event.payload as Record<string, unknown>;
   }
   return undefined;
+}
+
+function runQuietSeconds(event?: SessionEvent) {
+  const seconds = recordFromUnknown(event?.payload)?.quietForSeconds;
+  return typeof seconds === "number" ? seconds : undefined;
 }
 
 function recordFromUnknown(value: unknown) {
@@ -28079,46 +26901,19 @@ function defaultTerminalOutput(profileName?: string) {
   return `Gyro ${profileName ?? "Shell"}\n~/Documents/Gyro\n\n$ gyro doctor\n✓ workspace store ready\n✓ CLI attach socket ready\n✓ approvals required\n\n$ gyro run \"inspect this repo\"\nWorking locally. Command execution will require approval.`;
 }
 
-function workspaceParentFolder(path?: string) {
-  if (!path) return "";
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+function isGeneratedGyroWorkspace(path?: string) {
+  return Boolean(path && !isUserSelectedWorkspacePath(path));
 }
 
-function projectSidebarName(path?: string) {
-  const name = workspaceName(path);
-  if (name === "No workspace" || /^gyro(?:-|$)/i.test(name)) {
-    return "Gyro";
+function composerProjectLabel(path?: string) {
+  if (!path || isGeneratedGyroWorkspace(path)) {
+    return "No folder";
   }
-  return name;
+  return workspaceName(path);
 }
 
 function parentSegments(path: string) {
   return path.split(/[\\/]/).filter(Boolean).slice(0, -1);
-}
-
-function workspaceAncestorPaths(path: string, workspacePath?: string) {
-  if (workspacePath) {
-    const root = workspacePath.replaceAll("\\", "/").replace(/\/+$/, "");
-    const normalizedPath = path.replaceAll("\\", "/");
-    if (normalizedPath === root) return [];
-    if (normalizedPath.startsWith(`${root}/`)) {
-      const parts = normalizedPath
-        .slice(root.length + 1)
-        .split("/")
-        .filter(Boolean);
-      return [
-        root,
-        ...parts
-          .slice(0, -1)
-          .map((_, index) => `${root}/${parts.slice(0, index + 1).join("/")}`),
-      ];
-    }
-  }
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts
-    .slice(0, -1)
-    .map((_, index) => parts.slice(0, index + 1).join("/"));
 }
 
 function deviceLabel(device: BrowserPreviewDevice) {
@@ -28190,25 +26985,6 @@ function browserStatusLabel(preview: BrowserPreview) {
   }
 }
 
-function relativeSessionTime(value: string) {
-  const updated = new Date(value).getTime();
-  if (Number.isNaN(updated)) {
-    return "";
-  }
-  const minutes = Math.max(0, Math.round((Date.now() - updated) / 60_000));
-  if (minutes < 1) {
-    return "now";
-  }
-  if (minutes < 60) {
-    return `${minutes}m`;
-  }
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) {
-    return `${hours}h`;
-  }
-  return `${Math.round(hours / 24)}d`;
-}
-
 function formatBytes(value: number) {
   if (value < 1024) {
     return `${value} B`;
@@ -28218,5 +26994,3 @@ function formatBytes(value: number) {
   }
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
-
-export { AutoApproveIcon,BranchLabel,CONTEXT_METER_USAGE_REFRESH_MIN_AGE_MS,ChatContextSection,Composer,ComposerLimitRow,ComposerMediaPreview,ComposerPopover,NEW_CHAT_DRAFT_KEY,PLAN_USAGE_NOTICE_STORAGE_KEY,PlanUsageNotification,ProviderLogo,SessionGoalStrip,approvalBackendSummary,approvalModeForConfig,branchPopoverItems,composerModelPickerItem,composerProjectLabel,composerWantsFocus,contextMeterSeverity,explorerAskSendHeld,explorerAskSendListeners,formatAttachmentSize,isGeneratedGyroWorkspace,loadShownPlanUsageNotices,localMediaDrop,mediaDropTargets,modelRailProvidersFor,providerApprovalCopy,providerConnectionKind,providerMonogram,registerMediaDropTarget,subscribeExplorerAskSend,usageNoticeKey,workspaceName,type ApprovalCopy,type ComposerPopoverId,type ComposerPopoverItem,type ComposerSlashCommand,type IconComponent,type MediaDropTarget,type SessionGoalAction };

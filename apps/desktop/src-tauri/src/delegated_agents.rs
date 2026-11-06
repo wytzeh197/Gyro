@@ -1184,6 +1184,7 @@ fn restore_entry(
         attachments: Vec::new(),
         workspace_context: None,
         workspace_check: None,
+        side_chat_context: None,
     };
     app.state::<AgentManager>()
         .entries

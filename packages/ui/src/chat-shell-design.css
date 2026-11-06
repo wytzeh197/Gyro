@@ -33,12 +33,8 @@
    reading canvas, and white controls with a quiet but legible edge. */
 :root[data-theme="light"] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) {
   --gyro-app: var(--gyro-pane);
-  --gyro-border: color-mix(in srgb, var(--gyro-text) 18%, var(--gyro-surface));
-  --gyro-border-soft: color-mix(
-    in srgb,
-    var(--gyro-text) 10%,
-    var(--gyro-surface)
-  );
+  --gyro-border: color-mix(in srgb, var(--gyro-text) 15%, transparent);
+  --gyro-border-soft: color-mix(in srgb, var(--gyro-text) 8%, transparent);
 }
 
 /* Keep the same separation with native material, including the system's
@@ -465,7 +461,7 @@
 }
 
 :root[data-theme] .gyro-chat-surface .gyro-response-code-block {
-  border-radius: var(--gyro-radius-lg);
+  border-radius: var(--gyro-radius-xl);
 }
 
 :root[data-theme="light"] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) .gyro-chat-grid {
@@ -535,5 +531,62 @@
     > .gyro-chat-companion-tab-close {
     opacity: 0.7;
     pointer-events: auto;
+  }
+}
+
+/* Scrolling content dissolves into the canvas edge instead of being cut off.
+   Each edge fades only once there is something beyond it: the scroll timeline
+   grows the top fade as the reader leaves the start and shrinks the bottom one
+   on arrival at the end. Short lists never scroll, so they never fade. The
+   sidebar keeps its top edge crisp under the sticky project titles. */
+@property --gyro-edge-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --gyro-edge-fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes gyro-edge-fade-top {
+  0% { --gyro-edge-fade-top: 0px; }
+  4%, 100% { --gyro-edge-fade-top: var(--gyro-edge-fade-size); }
+}
+
+@keyframes gyro-edge-fade-bottom {
+  0%, 96% { --gyro-edge-fade-bottom: var(--gyro-edge-fade-size); }
+  100% { --gyro-edge-fade-bottom: 0px; }
+}
+
+@supports (animation-timeline: scroll()) {
+  :root[data-theme] .gyro-chat-surface.is-thread .gyro-chat-transcript,
+  :root[data-theme] .gyro-sidebar .gyro-sidebar-project-chat-list {
+    --gyro-edge-fade-size: calc(22px * var(--gyro-ui-scale, 1));
+    animation:
+      gyro-edge-fade-top linear both,
+      gyro-edge-fade-bottom linear both;
+    animation-timeline: scroll(self), scroll(self);
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      black var(--gyro-edge-fade-top),
+      black calc(100% - var(--gyro-edge-fade-bottom)),
+      transparent
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      black var(--gyro-edge-fade-top),
+      black calc(100% - var(--gyro-edge-fade-bottom)),
+      transparent
+    );
+  }
+
+  :root[data-theme] .gyro-sidebar .gyro-sidebar-project-chat-list {
+    animation: gyro-edge-fade-bottom linear both;
+    animation-timeline: scroll(self);
   }
 }

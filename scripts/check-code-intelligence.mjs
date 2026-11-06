@@ -11,7 +11,9 @@ const read = (path) => readFile(new URL(path, root), "utf8");
 const capabilities = await read("crates/gyro-core/src/capabilities.rs");
 const lib = await read("apps/desktop/src-tauri/src/lib.rs");
 const lsp = await read("apps/desktop/src-tauri/src/lsp_capability.rs");
-const languageServer = await read("apps/desktop/src-tauri/src/language_server.rs");
+const languageServer = await read(
+  "apps/desktop/src-tauri/src/language_server.rs",
+);
 const smoke = await read("apps/desktop/src-tauri/src/lsp_smoke.rs");
 const types = await read("packages/ui/src/types.ts");
 const chatRun = await read("packages/ui/src/chat-run.ts");
@@ -49,12 +51,20 @@ for (const [variant, id, tool] of tools) {
 
 // lib.rs keeps delegation only: one dispatcher arm, one schema guard, one
 // module, and the same sensitive-path upgrade workspace reads get.
-assert.ok(lib.includes("mod lsp_capability;"), "lsp_capability module not declared");
 assert.ok(
-  lib.includes("| CapabilityId::CodeSymbols => lsp_capability::execute(app, bound, request)?"),
+  lib.includes("mod lsp_capability;"),
+  "lsp_capability module not declared",
+);
+assert.ok(
+  lib.includes(
+    "| CapabilityId::CodeSymbols => lsp_capability::execute(app, bound, request)?",
+  ),
   "dispatcher arm for the code capabilities is missing",
 );
-assert.ok(lib.includes("lsp_capability::schema(id)"), "schema delegation is missing");
+assert.ok(
+  lib.includes("lsp_capability::schema(id)"),
+  "schema delegation is missing",
+);
 assert.match(
   lib,
   /CapabilityId::WorkspaceRead\s*\n\s*\| CapabilityId::WorkspaceReadRange\s*\n\s*\| CapabilityId::WorkspaceReadEditor\s*\n\s*\| CapabilityId::CodeDefinition/,
@@ -68,7 +78,10 @@ assert.ok(
 
 // The capability module owns the observation envelope and the honest
 // indexing outcome.
-assert.ok(lsp.includes('"gyro.code-observation.v1"'), "observation schema missing");
+assert.ok(
+  lsp.includes('"gyro.code-observation.v1"'),
+  "observation schema missing",
+);
 assert.ok(lsp.includes('"indexing"'), "indexing outcome missing");
 assert.ok(lsp.includes("retryAfterMs"), "retryAfterMs missing");
 assert.ok(
@@ -82,7 +95,10 @@ assert.ok(languageServer.includes("pub fn language_server_for_path"));
 assert.ok(languageServer.includes("LANGUAGE_SERVER_BY_SUFFIX"));
 assert.ok(languageServer.includes("textDocument/didOpen"));
 assert.ok(languageServer.includes("textDocument/didClose"));
-assert.ok(smoke.includes("GYRO_LSP_SMOKE"), "smoke harness not gated on its env var");
+assert.ok(
+  smoke.includes("GYRO_LSP_SMOKE"),
+  "smoke harness not gated on its env var",
+);
 assert.ok(smoke.includes("lsp-smoke.json"), "smoke harness writes no report");
 
 // Renderer parity: union member, human label, activity beat, tool chip.

@@ -3,12 +3,12 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, v0.1.0]
 
 jobs:
   node:
     name: Node
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -16,7 +16,7 @@ jobs:
           version: 11.7.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
@@ -35,7 +35,7 @@ jobs:
 
   rust:
     name: Rust
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -43,7 +43,7 @@ jobs:
           version: 11.7.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - uses: dtolnay/rust-toolchain@stable
@@ -51,13 +51,14 @@ jobs:
         run: brew install ripgrep
       - name: Build confined Code Mode worker for native tests
         run: pnpm --filter @gyro-dev/codemode build
-      - run: cargo test --workspace
-      - run: cargo build -p gyro-cli
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace --locked -- --test-threads=4
+      - run: cargo build --locked -p gyro-cli
       - run: node scripts/check-cli-release-packaging.mjs
 
   tauri:
     name: Tauri build smoke
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -65,7 +66,7 @@ jobs:
           version: 11.7.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
       - run: pnpm install --frozen-lockfile
@@ -74,15 +75,20 @@ jobs:
         run: brew install ripgrep
       - name: Build confined Code Mode worker for native tests
         run: pnpm --filter @gyro-dev/codemode build
-      - run: cargo test --workspace
+      - run: cargo test --workspace --locked -- --test-threads=4
       # The packaged app is built and actually launched: the debug-only
       # browser and LSP smoke harnesses (browser_smoke.rs, lsp_smoke.rs) run
       # against the bundle and must write ok reports.
       - name: Build debug app bundle
-        run: pnpm --filter @gyro-dev/desktop tauri build --debug --bundles app --no-sign --ci
+        run: pnpm --filter @gyro-dev/desktop tauri build --debug --bundles app --no-sign --ci -- --locked
       # The LSP smoke starts rust-analyzer through the app's language-server
       # manager; rust-analyzer is not in the toolchain's default profile.
       - name: Install rust-analyzer
         run: rustup component add rust-analyzer
       - name: Native smoke (browser + language server)
         run: node scripts/run-native-smoke.mjs
+      - name: Build isolated Keychain probe
+        run: cargo build --locked -p gyro-core --example cloud_keychain_acceptance
+      - name: Isolated native Keychain mechanism
+        timeout-minutes: 4
+        run: ./target/debug/examples/cloud_keychain_acceptance

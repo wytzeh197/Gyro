@@ -3,6 +3,9 @@ import type { BrowserPreview } from "./types";
 import { browserViewportGeometry } from "./browser-viewport";
 import "./browser-preview-surround.css";
 
+// Room reserved under a framed page for the stage label.
+const LABEL_ROOM = 26;
+
 /** Presentation only: the child remains a web viewport, never a native app. */
 export function BrowserPreviewSurround({
   preview, disabled, children,
@@ -21,14 +24,31 @@ export function BrowserPreviewSurround({
   const framed = !disabled && preview.device !== "responsive";
   const mobile = preview.device === "mobile";
   const tablet = preview.device === "tablet";
-  const bezel = mobile || tablet ? 10 : 1;
-  const chrome = mobile || tablet ? 16 : 32;
+  const isDevice = mobile || tablet;
+  // A desktop fit is the page itself, flush beneath the toolbar like any browser
+  // tab. Only device presets keep a bezel, and only they need a gutter around it.
+  const gutter = isDevice ? 12 : 0;
+  const bezel = isDevice ? 10 : 0;
+  const chrome = isDevice ? 16 : 0;
   const viewport = browserViewportGeometry(preview.device, host, preview.viewport);
   const outerWidth = viewport.width + bezel * 2;
   const outerHeight = viewport.height + bezel * 2 + chrome;
-  const scale = Math.max(0, Math.min((host.width - 24) / outerWidth, (host.height - 24) / outerHeight, 1));
+  const scale = Math.max(
+    0,
+    Math.min(
+      (host.width - gutter * 2) / outerWidth,
+      (host.height - gutter - LABEL_ROOM) / outerHeight,
+      1,
+    ),
+  );
+  const zoom = scale < 1 ? ` · ${Math.round(scale * 100)}%` : "";
   return (
-    <div ref={ref} className="gyro-preview-stage" data-framed={framed}>
+    <div
+      ref={ref}
+      className="gyro-preview-stage"
+      data-framed={framed}
+      style={framed ? { paddingTop: gutter } : undefined}
+    >
       <div
         className="gyro-preview-surround"
         data-kind={mobile ? "phone" : tablet ? "tablet" : "browser"}
@@ -37,17 +57,23 @@ export function BrowserPreviewSurround({
           height: outerHeight * scale,
           padding: bezel * scale,
           paddingTop: (bezel + chrome) * scale,
-          borderRadius: (mobile ? 36 : tablet ? 24 : 10) * scale,
+          // The native page cannot be clipped, so the outer radius has to stay
+          // small enough that the square screen never crosses the bezel's curve.
+          borderRadius: (mobile ? 24 : tablet ? 18 : 0) * scale,
         } : undefined}
       >
-        {framed && (
-          <div className="gyro-preview-surround-caption" style={{ height: chrome * scale, top: bezel * scale, fontSize: Math.max(9, 12 * scale) }}>
-            {mobile || tablet ? <span className="gyro-preview-device-speaker" aria-hidden="true" /> : <span>Web preview</span>}
+        {framed && isDevice && (
+          <div className="gyro-preview-surround-caption" style={{ height: chrome * scale, top: bezel * scale }}>
+            <span className="gyro-preview-device-speaker" aria-hidden="true" />
           </div>
         )}
         {children}
       </div>
-      {framed && <span className="gyro-preview-stage-label">{mobile ? "Phone" : tablet ? "Tablet" : "Desktop"} · Web preview</span>}
+      {framed && (
+        <span className="gyro-preview-stage-label">
+          Web preview · {mobile ? "Phone" : tablet ? "Tablet" : "Desktop"} · {viewport.width} × {viewport.height}{zoom}
+        </span>
+      )}
     </div>
   );
 }

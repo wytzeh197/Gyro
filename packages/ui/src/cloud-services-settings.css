@@ -1,0 +1,40 @@
+/* Existing Gyro settings control dimensions and semantic tokens. */
+.gyro-settings-surface .gyro-cloud-content-input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-height: 31px;
+  padding: 6px 10px;
+  border: 1px solid var(--gyro-border-strong);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-text);
+  background: var(--gyro-control-bg);
+  font: inherit;
+  font-size: var(--gyro-font-support);
+}
+.gyro-settings-surface textarea.gyro-cloud-content-input {
+  resize: vertical;
+}
+.gyro-settings-surface .gyro-cloud-text-field {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+.gyro-settings-surface .gyro-cloud-block-feedback:empty {
+  display: none;
+}
+.gyro-settings-surface .gyro-cloud-block-feedback [role="alert"] {
+  color: var(--gyro-danger);
+}
+.gyro-settings-surface .gyro-cloud-read-only-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--gyro-text);
+  font: inherit;
+}
+.gyro-settings-surface .gyro-cloud-source-list code {
+  overflow-wrap: anywhere;
+  font-size: var(--gyro-font-support);
+}

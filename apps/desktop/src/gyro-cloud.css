@@ -1,0 +1,327 @@
+/* Cloud is built from Settings groups and rows; this file only adds what those
+   lack: inputs, the recovery code, inline action clusters and the dialog. */
+.gyro-cloud-panel,
+.gyro-cloud-fieldset {
+  display: grid;
+  gap: inherit;
+  min-width: 0;
+}
+.gyro-cloud-fieldset {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.gyro-cloud-panel {
+  gap: var(--gyro-space-section);
+}
+.gyro-cloud-fieldset:disabled {
+  opacity: 1;
+}
+
+.gyro-cloud-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--gyro-space-standard);
+  min-width: 0;
+}
+.gyro-cloud-input {
+  box-sizing: border-box;
+  flex: 1 1 200px;
+  width: 200px;
+  min-width: 0;
+  min-height: calc(32px * var(--gyro-ui-scale, 1));
+  padding: 0 var(--gyro-space-comfortable);
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: var(--gyro-font-micro);
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+}
+.gyro-cloud-input::placeholder {
+  color: var(--gyro-faint);
+}
+.gyro-cloud-icon-button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 1px;
+}
+/* One quiet ring: the field's own border, not a second box around it. */
+:root[data-theme] .gyro-cloud-input:focus,
+:root[data-theme] .gyro-cloud-input:focus-visible {
+  border-color: var(--gyro-focus-ring);
+  outline: 1px solid var(--gyro-focus-ring);
+  outline-offset: -1px;
+  box-shadow: none;
+}
+.gyro-cloud-icon-button {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: calc(32px * var(--gyro-ui-scale, 1));
+  height: calc(32px * var(--gyro-ui-scale, 1));
+  color: var(--gyro-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+}
+.gyro-cloud-icon-button:hover:not(:disabled) {
+  color: var(--gyro-text);
+  background: var(--gyro-control-hover);
+}
+
+/* Sign-up and sign-in: label on the left, field on the right, inside one card. */
+.gyro-auth-card {
+  padding: var(--gyro-space-panel) calc(20px * var(--gyro-ui-scale, 1));
+  background: var(--gyro-settings-card, var(--gyro-pane));
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+}
+.gyro-auth-card > h2 {
+  margin: 0;
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+  font-weight: 600;
+}
+.gyro-auth-card > p {
+  margin: 2px 0 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  overflow-wrap: anywhere;
+}
+.gyro-auth-card > .gyro-auth-field:first-of-type {
+  margin-top: var(--gyro-space-standard);
+}
+.gyro-auth-card .gyro-auth-field,
+.gyro-auth-card .gyro-auth-footer {
+  padding-inline: 0;
+}
+.gyro-auth-card .gyro-auth-footer {
+  padding-bottom: 0;
+}
+.gyro-auth-field {
+  display: grid;
+  grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--gyro-space-standard) var(--gyro-space-panel);
+  padding: var(--gyro-space-comfortable) calc(16px * var(--gyro-ui-scale, 1));
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-auth-field > span:first-child {
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+}
+.gyro-auth-field .gyro-cloud-input {
+  width: 100%;
+}
+.gyro-auth-password {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+.gyro-auth-password .gyro-cloud-input {
+  padding-right: calc(34px * var(--gyro-ui-scale, 1));
+}
+.gyro-auth-password .gyro-cloud-icon-button {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+.gyro-auth-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gyro-space-comfortable);
+  padding: var(--gyro-space-comfortable) calc(16px * var(--gyro-ui-scale, 1));
+}
+.gyro-auth-footer.is-end {
+  justify-content: flex-end;
+  gap: var(--gyro-space-standard);
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-auth-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gyro-space-standard) var(--gyro-space-comfortable);
+  min-width: 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-auth-link {
+  padding: 0;
+  color: var(--gyro-accent);
+  font: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+}
+.gyro-auth-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.gyro-auth-link:focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 2px;
+}
+@container gyro-settings (max-width: 480px) {
+  .gyro-auth-field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.gyro-cloud-recovery {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gyro-space-comfortable);
+  padding: calc(16px * var(--gyro-ui-scale, 1));
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-cloud-recovery code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--gyro-text);
+  font-family: var(--gyro-mono);
+  font-size: var(--gyro-font-support);
+  letter-spacing: 0.04em;
+  user-select: all;
+}
+
+.gyro-cloud-empty {
+  margin: 0;
+  padding: calc(16px * var(--gyro-ui-scale, 1));
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-cloud-note {
+  margin: 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  line-height: 1.5;
+}
+/* Delete waits for the row it belongs to. */
+.gyro-settings-row .gyro-cloud-icon-button {
+  opacity: 0;
+}
+.gyro-settings-row:hover .gyro-cloud-icon-button,
+.gyro-settings-row:focus-within .gyro-cloud-icon-button {
+  opacity: 1;
+}
+.gyro-cloud-more {
+  display: flex;
+  justify-content: center;
+  padding: var(--gyro-space-comfortable);
+}
+.gyro-cloud-message {
+  padding: calc(16px * var(--gyro-ui-scale, 1));
+  border-bottom: 1px solid var(--gyro-border-soft);
+  overflow-wrap: anywhere;
+}
+.gyro-cloud-message:last-child {
+  border-bottom: 0;
+}
+.gyro-cloud-message header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gyro-space-standard);
+  margin-bottom: var(--gyro-space-standard);
+}
+.gyro-cloud-message strong {
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+}
+.gyro-cloud-message small {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+}
+
+.gyro-cloud-notice {
+  position: sticky;
+  z-index: 5;
+  bottom: var(--gyro-space-panel);
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: var(--gyro-space-comfortable) auto 0;
+  padding: var(--gyro-space-standard) var(--gyro-space-panel);
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-micro);
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--gyro-shadow) 22%, transparent);
+}
+/* Stays mounted while empty so screen readers announce the next message. */
+.gyro-cloud-notice:empty {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+}
+.gyro-cloud-notice.is-failed {
+  color: var(--gyro-danger);
+  border-color: color-mix(in srgb, var(--gyro-danger) 40%, transparent);
+}
+
+.gyro-cloud-dialog {
+  box-sizing: border-box;
+  width: min(40rem, calc(100% - var(--gyro-space-section) * 2));
+  max-height: calc(100% - var(--gyro-space-section) * 2);
+  padding: 0;
+  overflow: hidden;
+  color: var(--gyro-text);
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+  box-shadow: 0 16px 48px color-mix(in srgb, var(--gyro-shadow) 35%, transparent);
+}
+.gyro-cloud-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.gyro-cloud-dialog::backdrop {
+  background: color-mix(in srgb, var(--gyro-shadow) 30%, transparent);
+}
+.gyro-cloud-dialog > header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--gyro-space-comfortable) var(--gyro-space-comfortable)
+    var(--gyro-space-comfortable) var(--gyro-space-section);
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-cloud-dialog > header h2 {
+  margin: 0;
+  font-size: var(--gyro-font-support);
+  font-weight: 600;
+}
+:root[data-theme] .gyro-cloud-dialog > .gyro-settings-surface {
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--gyro-space-section);
+  background: transparent;
+}
+
+/* A disclosure body has no card, so these line up with its flush rows. */
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-disclosure-body
+  :is(
+    .gyro-auth-field,
+    .gyro-auth-footer,
+    .gyro-account-identity,
+    .gyro-cloud-empty,
+    .gyro-cloud-recovery,
+    .gyro-cloud-message
+  ) {
+  padding-inline: 0;
+}

@@ -1,4 +1,5 @@
 import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 import { buildRunModel } from "../packages/ui/src/chat-run.ts";
 
@@ -373,11 +374,23 @@ assert.deepEqual(
 // --- The inline diff ---------------------------------------------------------
 
 for (const activityKind of ["edit", "delete", "move"]) {
-  const run = buildRunModel([fileEdit("src/native.ts", {
-    activityKind, additions: 0, deletions: 3,
-  })]);
-  assert.equal(run.files[0].additions, 0, `${activityKind} retains zero additions`);
-  assert.equal(run.files[0].deletions, 3, `${activityKind} retains measured deletions`);
+  const run = buildRunModel([
+    fileEdit("src/native.ts", {
+      activityKind,
+      additions: 0,
+      deletions: 3,
+    }),
+  ]);
+  assert.equal(
+    run.files[0].additions,
+    0,
+    `${activityKind} retains zero additions`,
+  );
+  assert.equal(
+    run.files[0].deletions,
+    3,
+    `${activityKind} retains measured deletions`,
+  );
   assert.match(renderCounts(totalFileChangeCounts(run.files)), />\+0<.*>−3</);
 }
 
@@ -415,7 +428,7 @@ assert.equal(askAboutFilePrompt("src/a.ts"), "About src/a.ts: ");
 
 // --- The card cannot claim work it did not do --------------------------------
 
-const surfaces = readFileSync(
+const surfaces = readRepoSource(
   new URL("../packages/ui/src/surfaces.tsx", import.meta.url),
   "utf8",
 );

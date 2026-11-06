@@ -1,4 +1,4 @@
-import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 import ts from "typescript";
@@ -6,7 +6,7 @@ import { limitOptimisticSessionEvents } from "../apps/desktop/src/provider-strea
 
 // Execute the actual composer action with deferred native calls to exercise
 // the race between compaction and the next user action.
-const source = readFileSync("apps/desktop/src/App.tsx", "utf8");
+const source = readRepoSource("apps/desktop/src/App.tsx", "utf8");
 const start = source.indexOf('case "compact-context": {');
 const end = source.indexOf('case "open-terminal-panel":', start);
 const action = ts.transpileModule(

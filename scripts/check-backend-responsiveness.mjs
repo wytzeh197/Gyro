@@ -1,4 +1,5 @@
 import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 import { runInNewContext } from "node:vm";
@@ -108,7 +109,7 @@ await afterFailure;
 
 // Exercise the actual desktop callback so paging, the optimistic buffer and
 // stale-read guards are checked together, including a real rejected RPC.
-const source = readFileSync(
+const source = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );
@@ -165,7 +166,9 @@ const callback = runInNewContext(callbackSource, {
   sessionEventsByIdRef,
   optimisticEventsRef,
   liveCapabilityResourceIdsRef: { current: new Set() },
-  replaceSessionContextEvents: () => { contextUpdates++; },
+  replaceSessionContextEvents: () => {
+    contextUpdates++;
+  },
   setHasMoreBeforeBySession: (update) => {
     hasMoreBefore = update({})[sessionId];
   },
@@ -202,17 +205,19 @@ assert.ok(completeHistorySessionsRef.current.has(sessionId));
 
 const unchangedRead = callback(sessionId);
 assert.equal(rpc[0].args.knownRevision, "revision-1");
-rpc
-  .shift()
-  .resolve({
-    events: [],
-    contextEvents: [],
-    hasMoreBefore: false,
-    revision: "revision-1",
-    unchanged: true,
-  });
+rpc.shift().resolve({
+  events: [],
+  contextEvents: [],
+  hasMoreBefore: false,
+  revision: "revision-1",
+  unchanged: true,
+});
 await unchangedRead;
-assert.equal(contextUpdates, 1, "metadata-only reads cannot erase goal and plan context");
+assert.equal(
+  contextUpdates,
+  1,
+  "metadata-only reads cannot erase goal and plan context",
+);
 assert.equal(
   rendered.length,
   3102,
@@ -315,9 +320,16 @@ historyRevisionsRef.current[sessionId] = "cached-revision";
 const evictedOpen = callback(sessionId);
 assert.equal(rpc[0].args.fullHistory, true);
 assert.equal(rpc[0].args.knownRevision, undefined);
-rpc.shift().resolve({events:Array.from({length:801},(_,i)=>event(i)),contextEvents:[],hasMoreBefore:false,revision:"fresh-revision"});
+rpc
+  .shift()
+  .resolve({
+    events: Array.from({ length: 801 }, (_, i) => event(i)),
+    contextEvents: [],
+    hasMoreBefore: false,
+    revision: "fresh-revision",
+  });
 await evictedOpen;
-assert.equal(rendered.length,801);
+assert.equal(rendered.length, 801);
 
 // The real RPC completion must commit at the same priority as clearing the
 // sending flag. A delayed transition otherwise exposes a stale running status

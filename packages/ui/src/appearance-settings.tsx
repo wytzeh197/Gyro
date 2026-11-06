@@ -97,15 +97,11 @@ export function AppearanceSettings({
         >
           {(
             [
-              {
-                mode: "system",
-                label: "System",
-                detail: "Match your Mac",
-              },
-              { mode: "light", label: "Light", detail: "Always light" },
-              { mode: "dark", label: "Dark", detail: "Always dark" },
+              { mode: "system", label: "System" },
+              { mode: "light", label: "Light" },
+              { mode: "dark", label: "Dark" },
             ] as const
-          ).map(({ mode, label, detail }) => (
+          ).map(({ mode, label }) => (
             <button
               key={mode}
               aria-pressed={themeMode === mode}
@@ -119,7 +115,6 @@ export function AppearanceSettings({
                 {label}
                 <Check aria-hidden="true" size={13} />
               </span>
-              <small>{detail}</small>
             </button>
           ))}
         </div>

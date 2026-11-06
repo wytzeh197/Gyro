@@ -2,9 +2,5 @@
   "apps/desktop/src/App.tsx": 20329,
   "apps/desktop/src-tauri/src/lib.rs": 31217,
   "packages/ui/src/styles.css": 42464,
-  "packages/ui/src/surfaces.tsx": 29926,
-  "apps/desktop/src/app-state-helpers.tsx": 2813,
-  "packages/ui/src/composer.tsx": 4781,
-  "apps/desktop/src-tauri/src/lib_tests.rs": 9101,
-  "packages/ui/src/base-surfaces.css": 388
+  "packages/ui/src/surfaces.tsx": 29926
 }

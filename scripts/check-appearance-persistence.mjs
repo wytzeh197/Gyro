@@ -1,4 +1,4 @@
-import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 import vm from "node:vm";
@@ -80,7 +80,7 @@ assert.deepEqual(
   "A failed write preserves the last saved values",
 );
 // Exercise the real app's debounced flush, including the latest queued values.
-const appSource = readFileSync(
+const appSource = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );

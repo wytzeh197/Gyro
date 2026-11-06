@@ -1,0 +1,627 @@
+/* --- keycard: mark · provider · key · action on one 54px band --------- */
+:root[data-theme] .gyro-provider-api-key-section {
+  display: block;
+  max-width: none;
+  padding: 0;
+}
+
+:root[data-theme] .gyro-provider-api-key {
+  display: block;
+  gap: 0;
+}
+
+:root[data-theme] .gyro-provider-api-key-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  min-height: 54px;
+  padding: 10px 14px;
+}
+
+/* The selected provider is identity, not a form value: same mark the list
+   rows carry, sized for a control band. */
+:root[data-theme] .gyro-provider-api-key-row .gyro-provider-logo {
+  border-radius: 7px;
+  flex: 0 0 auto;
+  height: 22px;
+  width: 22px;
+}
+
+/* Every provider that can take a key is visible. A native select here only
+   showed the selected name, which read as OpenAI being the only choice. */
+:root[data-theme] .gyro-provider-api-key-choices {
+  gap: 6px;
+  padding: 12px 14px 2px;
+}
+
+:root[data-theme] .gyro-provider-api-key-choices button {
+  background: transparent;
+  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border-radius: var(--gyro-radius-pill);
+  box-shadow: none !important;
+  color: var(--gyro-muted) !important;
+  font-size: var(--gyro-font-micro) !important;
+  font-weight: 500 !important;
+  height: 28px !important;
+  min-height: 0 !important;
+  padding: 0 10px 0 6px !important;
+}
+
+:root[data-theme] .gyro-provider-api-key-choices button.is-selected {
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-text) 28%,
+    var(--gyro-premium-hairline-strong)
+  ) !important;
+  color: var(--gyro-text) !important;
+}
+
+:root[data-theme] .gyro-provider-api-key-choices button:disabled {
+  opacity: 0.6;
+}
+
+:root[data-theme] .gyro-provider-api-key-choices .gyro-provider-logo {
+  border-radius: var(--gyro-radius-sm) !important;
+  height: 16px !important;
+  width: 16px !important;
+}
+
+:root[data-theme] .gyro-provider-api-key-row > input {
+  background: var(--gyro-premium-control) !important;
+  border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
+  border-radius: 8px !important;
+  color: var(--gyro-text) !important;
+  flex: 1 1 200px !important;
+  font-size: var(--gyro-font-micro) !important;
+  height: 32px !important;
+  min-height: 0 !important;
+  padding: 0 9px !important;
+}
+
+:root[data-theme] .gyro-provider-api-key-row > input::placeholder {
+  color: var(--gyro-faint);
+}
+
+:root[data-theme] .gyro-provider-api-key-row > input:focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent) 55%,
+    var(--gyro-premium-hairline-strong)
+  ) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gyro-accent) 14%, transparent);
+  outline: none;
+}
+
+/* Save and "Use in chat" are the same ghost chrome as the list's actions. */
+:root[data-theme] .gyro-provider-api-key-row > button {
+  background: transparent !important;
+  border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  color: var(--gyro-text) !important;
+  font-size: var(--gyro-font-caption) !important;
+  font-weight: 500 !important;
+  height: 30px !important;
+  min-height: 0 !important;
+  padding: 0 12px !important;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+:root[data-theme] .gyro-provider-api-key-row > button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 10%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent) 40%,
+    var(--gyro-premium-hairline-strong)
+  ) !important;
+}
+
+:root[data-theme] .gyro-provider-api-key-row > button:disabled {
+  color: var(--gyro-faint) !important;
+}
+
+/* The consequence line is a footer band, not a third line of the form. */
+:root[data-theme] .gyro-provider-api-key > span {
+  border-top: 0.5px solid var(--gyro-premium-hairline-soft);
+  color: var(--gyro-muted) !important;
+  display: block !important;
+  font-size: var(--gyro-font-caption) !important;
+  line-height: 1.45 !important;
+  margin: 0 !important;
+  padding: 8px 14px 9px !important;
+}
+
+/* --- custom endpoints: configured rows, then one form, all in the panel */
+:root[data-theme] .gyro-provider-custom-section {
+  display: block !important;
+  gap: 0 !important;
+  padding: 0 !important;
+}
+
+:root[data-theme] .gyro-provider-custom-list {
+  gap: 0 !important;
+  margin: 0 !important;
+  max-width: none !important;
+}
+
+/* A configured endpoint is a band in the panel, not a card inside a card. */
+:root[data-theme] .gyro-provider-custom-list > li {
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 0.5px solid var(--gyro-premium-hairline-soft) !important;
+  border-radius: 0 !important;
+  gap: 10px !important;
+  padding: 10px 14px !important;
+}
+
+:root[data-theme] .gyro-provider-custom-list > li:hover {
+  background: color-mix(in srgb, var(--gyro-text) 2.4%, transparent) !important;
+}
+
+:root[data-theme] .gyro-provider-custom-list > li > div > strong {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-micro);
+  font-weight: 600;
+}
+
+:root[data-theme] .gyro-provider-custom-list > li > div > span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+}
+
+/* Removing an endpoint is a quiet text action; it stays red only on hover. */
+:root[data-theme] .gyro-provider-custom-list .gyro-danger-button {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: var(--gyro-radius-md) !important;
+  box-shadow: none !important;
+  color: var(--gyro-muted) !important;
+  font-size: var(--gyro-font-caption) !important;
+  font-weight: 500 !important;
+  height: 24px !important;
+  min-height: 0 !important;
+  padding: 0 7px !important;
+}
+
+:root[data-theme]
+  .gyro-provider-custom-list
+  .gyro-danger-button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-danger) 10%,
+    transparent
+  ) !important;
+  color: var(--gyro-danger) !important;
+}
+
+:root[data-theme] .gyro-provider-custom-form {
+  display: grid !important;
+  gap: 12px 16px !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  max-width: none !important;
+  padding: 14px 14px 0 !important;
+}
+
+:root[data-theme] .gyro-provider-custom-form > label {
+  display: grid !important;
+  gap: 6px !important;
+  min-width: 0;
+}
+
+:root[data-theme] .gyro-provider-custom-form > label > span {
+  color: var(--gyro-muted) !important;
+  font-size: var(--gyro-font-caption) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+}
+
+:root[data-theme] .gyro-provider-custom-form > label.is-wide,
+:root[data-theme] .gyro-provider-custom-actions,
+:root[data-theme] .gyro-provider-custom-note,
+:root[data-theme] .gyro-provider-custom-error {
+  grid-column: 1 / -1;
+}
+
+:root[data-theme] .gyro-provider-custom-form :is(input, textarea) {
+  background: var(--gyro-premium-control) !important;
+  border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
+  border-radius: 8px !important;
+  color: var(--gyro-text) !important;
+  font-size: var(--gyro-font-micro) !important;
+  min-width: 0;
+  width: 100% !important;
+}
+
+:root[data-theme] .gyro-provider-custom-form input {
+  height: 32px !important;
+  min-height: 0 !important;
+  padding: 0 9px !important;
+}
+
+/* Model ids is a short list, not a document: four lines is the whole form's
+   height budget, so it does not push the actions out of view. */
+:root[data-theme] .gyro-provider-custom-form textarea {
+  line-height: 1.55 !important;
+  min-height: 68px !important;
+  padding: 7px 9px !important;
+  resize: vertical;
+}
+
+:root[data-theme]
+  .gyro-provider-custom-form
+  :is(input, textarea):focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent) 55%,
+    var(--gyro-premium-hairline-strong)
+  ) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gyro-accent) 14%, transparent);
+  outline: none;
+}
+
+/* "Fetch models" trails the key it reads, on the key's baseline. */
+:root[data-theme] .gyro-provider-custom-fetch {
+  align-self: end !important;
+  display: flex !important;
+  justify-content: flex-start !important;
+  padding-bottom: 1px !important;
+}
+
+:root[data-theme] .gyro-provider-custom-actions {
+  align-items: center !important;
+  display: flex !important;
+  gap: 10px !important;
+  margin-top: 2px;
+}
+
+/* Adding an endpoint is not the section's loudest pixel. */
+:root[data-theme] .gyro-provider-custom-actions > button {
+  background: transparent !important;
+  border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  color: var(--gyro-text) !important;
+  font-size: var(--gyro-font-caption) !important;
+  font-weight: 500 !important;
+  gap: 6px;
+  height: 30px !important;
+  min-height: 0 !important;
+  padding: 0 12px !important;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+:root[data-theme] .gyro-provider-custom-actions > button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 10%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent) 40%,
+    var(--gyro-premium-hairline-strong)
+  ) !important;
+}
+
+:root[data-theme] .gyro-provider-custom-fetch > button {
+  background: transparent !important;
+  border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  color: var(--gyro-muted) !important;
+  font-size: var(--gyro-font-caption) !important;
+  font-weight: 500 !important;
+  gap: 6px;
+  height: 28px !important;
+  min-height: 0 !important;
+  padding: 0 10px !important;
+}
+
+:root[data-theme] .gyro-provider-custom-fetch > button:hover:not(:disabled) {
+  border-color: var(--gyro-premium-hairline-strong) !important;
+  color: var(--gyro-text) !important;
+}
+
+:root[data-theme] .gyro-provider-custom-error {
+  margin: 0 !important;
+}
+
+:root[data-theme] .gyro-provider-custom-note {
+  border-top: 0.5px solid var(--gyro-premium-hairline-soft) !important;
+  color: var(--gyro-muted) !important;
+  font-size: var(--gyro-font-caption) !important;
+  line-height: 1.45 !important;
+  margin: 2px -14px 0 !important;
+  padding: 8px 14px 9px !important;
+}
+
+@media (max-width: 760px) {
+  :root[data-theme] .gyro-provider-custom-form {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  :root[data-theme] .gyro-provider-custom-fetch {
+    padding-bottom: 0 !important;
+  }
+
+  :root[data-theme] .gyro-provider-api-key-choices {
+    padding-right: 12px;
+  }
+}
+
+/* --- usage: the provider picker is a value, not a stretched control ---- */
+:root[data-theme] .gyro-usage-provider-select {
+  align-items: center !important;
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 4px 10px !important;
+}
+
+:root[data-theme] .gyro-usage-provider-select > span {
+  color: var(--gyro-muted) !important;
+  font-size: var(--gyro-font-tiny) !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.07em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+:root[data-theme] .gyro-usage-provider-select .gyro-settings-select-field {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+:root[data-theme]
+  .gyro-usage-provider-select
+  .gyro-settings-select-field
+  > select.gyro-settings-select {
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--gyro-text) !important;
+  field-sizing: content;
+  font-size: var(--gyro-font-micro) !important;
+  font-weight: 500 !important;
+  height: 24px !important;
+  min-height: 0 !important;
+  padding: 0 20px 0 1px !important;
+  width: auto;
+}
+
+:root[data-theme]
+  .gyro-usage-provider-select
+  .gyro-settings-select-field
+  > svg {
+  height: 12px;
+  right: 3px;
+  width: 12px;
+}
+
+:root[data-theme]
+  .gyro-usage-provider-select
+  .gyro-settings-select-field
+  > select.gyro-settings-select:focus-visible {
+  border-radius: 5px;
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 2px;
+}
+
+/* Removing a saved key is a band action, red only once it is hovered. */
+:root[data-theme] .gyro-provider-api-key-row > .gyro-danger-button {
+  color: var(--gyro-muted) !important;
+}
+
+:root[data-theme]
+  .gyro-provider-api-key-row
+  > .gyro-danger-button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-danger) 10%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-danger) 38%,
+    var(--gyro-premium-hairline-strong)
+  ) !important;
+  color: var(--gyro-danger) !important;
+}
+
+/* The open chat is marked, not announced: a quiet row, a neutral focus
+   hairline, and no accent fill, accent bar, or blue ring. */
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar
+  .gyro-session-row.is-active {
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  box-shadow: none;
+  color: var(--gyro-text);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar
+  .gyro-session-row.is-active:hover,
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar
+  .gyro-session-row.is-active:focus-within {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar
+  .gyro-session-row.is-active::before {
+  display: none;
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar
+  .gyro-session-row.is-active
+  .gyro-sidebar-thread-title
+  > span:first-child {
+  color: var(--gyro-text);
+  font-weight: 500;
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-chat-shell
+  .gyro-sidebar
+  .gyro-session-row.is-active
+  .gyro-sidebar-thread-main:focus-visible {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--gyro-text) 12%, transparent);
+  outline: 0;
+}
+
+/* IDE polish pass -----------------------------------------------------------
+   The workbench chrome already states its hierarchy: a hairline under the tab
+   strip, muted inactive tabs, and an accent rule on the selected explorer row.
+   This pass only removes noise and adds the affordances that were missing:
+   tabs read as file names until the pointer or keyboard arrives, status
+   metrics stop jittering, hover and keyboard focus become visible, empty
+   editors read as captions, and motion is optional. */
+
+/* A tab is a file name first. Its close affordance appears with the pointer,
+   for the active tab, or while the tab holds keyboard focus; the 20px hit
+   target is unchanged, so nothing moves when it appears. */
+.gyro-editor-tab-strip > button {
+  transition: background-color 120ms ease;
+}
+
+.gyro-editor-tab-strip > button .gyro-editor-tab-close {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.gyro-editor-tab-strip > button:hover .gyro-editor-tab-close,
+.gyro-editor-tab-strip > button.is-active .gyro-editor-tab-close,
+.gyro-editor-tab-strip > button:focus-within .gyro-editor-tab-close {
+  opacity: 0.85;
+}
+
+.gyro-editor-tab-strip > button .gyro-editor-tab-close:hover {
+  background: color-mix(in srgb, var(--gyro-text) 14%, transparent);
+  opacity: 1;
+}
+
+/* Hovering an inactive tab previews the switch without competing with the
+   active tab accent underline. */
+.gyro-editor-tab-strip > button:hover:not(.is-active) {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+}
+
+.gyro-editor-tab-strip > button:focus-visible,
+.gyro-editor-tab-close:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--gyro-accent) 70%, transparent);
+  outline-offset: -1px;
+}
+
+/* Status metrics are compared, not just read: tabular figures stop the column
+   from shifting as the cursor crosses a digit boundary. */
+.gyro-editor-statusbar {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The explorer row already marks selection. It still needs a hover hint that
+   the row is a target, and a visible ring when it is reached from the
+   keyboard. */
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-sidebar-row.gyro-sidebar-explorer-row:hover:not(
+    [aria-selected="true"]
+  ) {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-sidebar-row.gyro-sidebar-explorer-row:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--gyro-accent) 60%, transparent);
+  outline-offset: -1px;
+}
+
+/* An empty editor is a caption, not loose text pinned to the top-left. */
+.gyro-code-empty {
+  color: var(--gyro-ide-secondary-foreground);
+  line-height: 1.5;
+  margin-inline: auto;
+  max-width: 44ch;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-editor-tab-strip > button,
+  .gyro-editor-tab-strip > button .gyro-editor-tab-close {
+    transition: none;
+  }
+}
+
+/* Workspace titlebar: one quiet strip above the rail and editor. A single
+   editor group needs no focus rim running through the window controls. */
+.gyro-app-shell.is-workspace-chrome-active
+  .gyro-workspace-route.is-code
+  .gyro-editor-groups[data-group-count="1"]
+  > .gyro-editor-pane.is-active-group {
+  box-shadow: none;
+}
+
+.gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
+  > .gyro-workspace-activity-rail::after {
+  top: 48px;
+}
+
+.gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
+  .gyro-workspace-route.is-code
+  .gyro-editor-pane:first-child
+  > .gyro-editor-tabs {
+  background: var(--gyro-workspace-chrome);
+  padding-left: calc(210px + 108px * (var(--gyro-ui-scale, 1) - 1));
+}
+
+.gyro-app-shell.is-workspace-chrome-active .gyro-titlebar-switch {
+  border-radius: var(--gyro-radius-md);
+  height: calc(26px * var(--gyro-ui-scale, 1));
+  padding: 2px;
+}
+
+.gyro-app-shell.is-workspace-chrome-active .gyro-titlebar-switch-option {
+  border-radius: var(--gyro-radius-sm);
+  height: calc(26px * var(--gyro-ui-scale, 1) - 6px);
+}
+
+:root
+  .gyro-app-shell.is-workspace-chrome-active
+  .gyro-titlebar-switch
+  > .gyro-selection-indicator {
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
+}
+
+.gyro-app-shell.is-workspace-chrome-active
+  .gyro-workspace-route.is-code
+  .gyro-editor-tab-strip
+  > button.is-empty {
+  border-right: 0;
+  color: var(--gyro-faint);
+  gap: 8px;
+  font-weight: 400;
+}
+
+.gyro-app-shell.is-workspace-chrome-active
+  .gyro-workspace-route.is-code
+  .gyro-editor-tab-strip
+  > button.is-empty
+  > svg {
+  opacity: 0.65;
+}

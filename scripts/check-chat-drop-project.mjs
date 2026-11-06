@@ -1,4 +1,4 @@
-import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 import ts from "typescript";
@@ -10,7 +10,7 @@ import {
 
 // Execute the actual App callback, including its side effects. Reducer-only
 // tests cannot catch a rejected drop changing the selected session/project.
-const source = readFileSync(
+const source = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );

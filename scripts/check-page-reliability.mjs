@@ -97,6 +97,7 @@ async function runBoot(surface, failure) {
         return exports;
       }
       if (id === failure) throw new Error("failed module");
+      if (id === "./dictation-access") return {};
       if (id === "./App") return { App: "app" };
       if (id === "./MenuBarPopover") return { MenuBarPopover: "menu" };
       if (id.endsWith(".css")) return {};

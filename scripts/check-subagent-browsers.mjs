@@ -1,4 +1,5 @@
 import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 import vm from "node:vm";
@@ -354,7 +355,7 @@ const browser = readFileSync(
   new URL("../apps/desktop/src-tauri/src/session_browser.rs", import.meta.url),
   "utf8",
 );
-const native = readFileSync(
+const native = readRepoSource(
   new URL("../apps/desktop/src-tauri/src/lib.rs", import.meta.url),
   "utf8",
 );
@@ -430,7 +431,10 @@ assert.equal(
   true,
 );
 assert.equal(installedEvents.at(-1).type, "click");
-assert.match(browser, /if snapshot.background_only \|\| !snapshot.visible \{\s*return call_agent\(/);
+assert.match(
+  browser,
+  /if snapshot.background_only \|\| !snapshot.visible \{\s*return call_agent\(/,
+);
 assert.match(browser, /if manager.background_only\(session_id\)\? \{/);
 assert.match(
   browser,

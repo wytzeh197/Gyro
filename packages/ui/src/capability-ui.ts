@@ -41,12 +41,7 @@ export type BrowserAction =
 
 /** The rail row — and therefore the icon — a capability call becomes. */
 export type CapabilityRowKind =
-  | "tool"
-  | "command"
-  | "search"
-  | "read"
-  | "file"
-  | "browser";
+  "tool" | "command" | "search" | "read" | "file" | "browser";
 
 export type CapabilityUi = {
   /** Settled title in the rail, and the name approval prompts show. */

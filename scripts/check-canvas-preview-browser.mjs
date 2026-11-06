@@ -25,11 +25,15 @@ const browser = spawn(
   { stdio: "ignore" },
 );
 browser.once("error", (error) => {
-  console.error(`Could not launch Canvas test browser at ${browserPath}: ${error.message}`);
+  console.error(
+    `Could not launch Canvas test browser at ${browserPath}: ${error.message}`,
+  );
 });
 browser.once("exit", (code, signal) => {
   if (code !== null && code !== 0) {
-    console.error(`Canvas test browser exited early (code ${code}, signal ${signal})`);
+    console.error(
+      `Canvas test browser exited early (code ${code}, signal ${signal})`,
+    );
   }
 });
 const pause = () => new Promise((resolve) => setTimeout(resolve, 100));
@@ -172,6 +176,11 @@ try {
     "Revision replaces the same item",
   );
   await click("Code");
+  await until(() =>
+    evaluate(
+      "document.querySelector('textarea[aria-label=\"Project card content\"]')?.value.includes('Make it yours.')",
+    ),
+  );
   assert.equal(
     await evaluate(
       "document.querySelector('textarea[aria-label=\"Project card content\"]').value.includes('Make it yours.')",
@@ -190,6 +199,13 @@ try {
     ),
   );
   await click("Build UI piece");
+  // React's discrete-event update can commit after Runtime.evaluate returns.
+  // Wait for the revision itself; a fixed delay races the CI browser.
+  await until(() =>
+    evaluate(
+      "document.querySelector('.gyro-canvas-draft-status')?.textContent.includes('preserved')",
+    ),
+  );
   assert.equal(
     await evaluate(
       "document.querySelector('.gyro-canvas-draft-status').textContent.includes('preserved')",
@@ -198,6 +214,11 @@ try {
     "A model revision preserves an unsent draft",
   );
   await click("Send to chat");
+  await until(() =>
+    evaluate(
+      "document.querySelector('output')?.textContent.includes('My edited UI')",
+    ),
+  );
   assert.equal(
     await evaluate(
       "document.querySelector('output').textContent.includes('My edited UI')",
@@ -215,6 +236,11 @@ try {
   await evaluate(
     `const select=document.querySelector('select[aria-label="Preview width"]'); select.value='375'; select.dispatchEvent(new Event('change',{bubbles:true}));`,
   );
+  await until(() =>
+    evaluate(
+      "document.querySelector('.gyro-canvas iframe')?.style.width === '375px'",
+    ),
+  );
   assert.equal(
     await evaluate("document.querySelector('.gyro-canvas iframe').style.width"),
     "375px",
@@ -229,5 +255,10 @@ try {
     if (browser.exitCode !== null) resolve();
     else browser.once("exit", resolve);
   });
-  await rm(profile, { recursive: true, force: true });
+  await rm(profile, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
 }

@@ -1,0 +1,130 @@
+/* The rail's account block shares the search box's inset and the page list's
+   row treatment, so it reads as part of the list rather than a card on top. */
+.gyro-account-navigation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex-shrink: 0;
+  gap: calc(2px * var(--gyro-ui-scale, 1));
+  padding: 0 1px 4px;
+}
+.gyro-account-navigation button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  min-height: calc(44px * var(--gyro-ui-scale, 1));
+  padding: 4px 9px;
+  color: var(--gyro-text);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-lg);
+}
+.gyro-account-navigation button.is-compact {
+  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  padding-block: 0;
+}
+.gyro-account-navigation button:hover {
+  background: var(--gyro-control-hover);
+}
+.gyro-account-navigation button.is-active {
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
+}
+.gyro-account-navigation button:focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: -2px;
+}
+.gyro-account-navigation button > svg {
+  flex: none;
+  color: var(--gyro-muted);
+}
+.gyro-account-navigation-text {
+  flex: 1;
+  min-width: 0;
+}
+.gyro-account-navigation strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-account-navigation-text small {
+  display: block;
+  overflow: hidden;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-account-navigation button.is-compact strong {
+  flex: 1;
+  font-weight: 400;
+}
+.gyro-account-navigation button.is-compact small {
+  flex: none;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+}
+
+.gyro-account-profile-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(26px * var(--gyro-ui-scale, 1));
+  height: calc(26px * var(--gyro-ui-scale, 1));
+  color: var(--gyro-accent);
+  font-size: var(--gyro-font-micro);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--gyro-accent) 14%, var(--gyro-pane));
+  border-radius: 50%;
+}
+
+/* Name and address are the row; editing swaps the text for a field in place. */
+.gyro-account-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gyro-space-comfortable);
+  padding: calc(16px * var(--gyro-ui-scale, 1));
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-account-identity:last-child {
+  border-bottom: 0;
+}
+.gyro-account-identity .gyro-account-profile-avatar {
+  width: calc(40px * var(--gyro-ui-scale, 1));
+  height: calc(40px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-support);
+}
+.gyro-account-identity-text {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.gyro-account-identity-text strong {
+  display: block;
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.gyro-account-plan {
+  margin-left: var(--gyro-space-standard);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  font-weight: 400;
+}
+.gyro-account-identity-text strong.is-placeholder {
+  color: var(--gyro-muted);
+}
+.gyro-account-identity-text small {
+  display: block;
+  margin-top: 2px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  overflow-wrap: anywhere;
+}
+.gyro-account-identity > .gyro-cloud-input {
+  flex: 1 1 200px;
+}

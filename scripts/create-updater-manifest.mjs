@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { releaseIdentity, requireReleaseTag } from "./release-identity.mjs";
+
 import {
   existsSync,
   readFileSync,
@@ -30,11 +32,20 @@ if (!tag?.startsWith("v") || tag.length === 1) {
   throw new Error("Provide a version tag such as v0.1.0-alpha.7 with --tag.");
 }
 
+requireReleaseTag(tag);
+
 if (!Object.hasOwn(signingDisclosures, signing)) {
-  throw new Error(`Unsupported --signing ${signing}; use adhoc or developer-id.`);
+  throw new Error(
+    `Unsupported --signing ${signing}; use adhoc or developer-id.`,
+  );
 }
-if (/^v\d+\.\d+\.\d+$/.test(tag) && signing !== "developer-id") {
-  throw new Error(`Stable release ${tag} must be Developer ID signed and notarized.`);
+if (
+  /^\d+\.\d+\.\d+$/.test(releaseIdentity.version) &&
+  signing !== "developer-id"
+) {
+  throw new Error(
+    `Stable release ${tag} must be Developer ID signed and notarized.`,
+  );
 }
 
 if (!existsSync(assetsDirectory)) {
@@ -87,10 +98,12 @@ const releaseSummary = readFileSync(releaseNotesPath, "utf8")
   .replace(/\s+/g, " ")
   .trim();
 if (releaseSummary.length < 40) {
-  throw new Error(`Versioned release notes have no useful summary: ${releaseNotesPath}`);
+  throw new Error(
+    `Versioned release notes have no useful summary: ${releaseNotesPath}`,
+  );
 }
 const manifest = {
-  version: tag.slice(1),
+  version: releaseIdentity.version,
   notes: `${releaseSummary} ${signingDisclosures[signing]}`,
   pub_date: new Date().toISOString(),
   platforms: {

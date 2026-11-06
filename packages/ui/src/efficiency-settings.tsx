@@ -16,6 +16,9 @@ export const DEFAULT_EFFICIENCY: EfficiencyConfig = {
   prices: [],
   compactToolCatalog: false,
   recoverableEvidence: false,
+  tightEvidence: false,
+  batchReads: false,
+  compactCliCatalog: false,
   retainToolCatalog: false,
 };
 export function EfficiencySettings({
@@ -141,6 +144,9 @@ export function EfficiencySettings({
         ? (
             [
               ["recoverableEvidence", "Complete evidence recovery"],
+              ["tightEvidence", "Shorter stale tool results"],
+              ["batchReads", "Ask models to batch known reads"],
+              ["compactCliCatalog", "Shorter tool list for CLI providers"],
               ["retainToolCatalog", "Retain discovered tool schemas"],
             ] as const
           ).map(([key, label]) => (

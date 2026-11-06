@@ -1,5 +1,6 @@
 import {
   absoluteWorkspaceFilePath,
+  applyLaunchView,
   createInitialChatGridState,
   createInitialWorkbenchState,
   createTerminalPane,
@@ -26,6 +27,7 @@ import {
   type ChatMode,
   type ChatPaneRef,
   type CommandProfile,
+  type CouncilRun,
   type EditorBuffer,
   type GyroConfig,
   type HarnessRunStatus,
@@ -34,8 +36,12 @@ import {
   type OutputChannel,
   type ProblemDiagnostic,
   type ProviderChatStreamEvent,
+  type ProviderId,
+  type ProviderResumeCursor,
   type Session,
   type SessionEvent,
+  type SessionGoal,
+  type SessionPlan,
   type SessionsLayoutId,
   type SourceControlState,
   type Task,
@@ -47,11 +53,19 @@ import {
   type WorkbenchPaneTab,
   type WorkbenchState,
   type WorkbenchTurn,
+  type WorkspaceContextSnapshot,
   type WorkspaceFile,
   type WorkspaceFileContent,
   type WorkspaceLayoutId,
 } from "@gyro-dev/ui";
 import "@xterm/xterm/css/xterm.css";
+import { lazy } from "react";
+import { recoverWorkspaceBuffers } from "./editor/edit-recovery";
+import {
+  MODEL_DEFAULT_SUGGESTION_MAX_STORAGE_CHARS,
+  MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
+  parseModelDefaultSuggestionState,
+} from "./model-default-suggestion";
 import { applyNativeProviderRetryStatus } from "./provider-retry-stream";
 import {
   isProviderStatusEvent,
@@ -71,10 +85,39 @@ import {
 import { normalizeProjectPath } from "./session-listing";
 import {
   readBoundedLocalStorage,
+  readStoredAppearance,
   safeSetLocalStorage,
   saveAppearancePreferences,
 } from "./ui-storage";
+import { type SessionModelSelection } from "./use-session-model-save";
 import { storedThemeMode, THEME_STORAGE_KEY } from "./use-workbench-appearance";
+
+export type AppNotification = {
+  kind: "open-session" | "attach-session";
+  sessionId: string;
+  workspacePath: string;
+  workspaceMode?: WorkbenchState["workspaceMode"];
+  branch?: string;
+  worktreeName?: string;
+};
+
+export type ProviderApprovalNotificationOpen = {
+  sessionId: string;
+  approvalId: string;
+};
+
+export type MenuBarNavigationTarget = {
+  kind: "chat" | "automation" | "settings";
+  id: string;
+};
+
+export type ProviderCapabilityResourceEvent = {
+  sessionId: string;
+  turnId?: string;
+  callId: string;
+  resource: CapabilityResourceRef;
+  data: unknown;
+};
 
 export type TerminalPaneSnapshot = {
   paneId: string;
@@ -94,6 +137,109 @@ export type TerminalPaneSnapshot = {
   governedProviderId?: string | null;
 };
 
+export type LspBridgeResponse = {
+  status: string;
+  result?: unknown;
+  error?: unknown;
+  messages?: unknown[];
+};
+
+export type ProviderChatResponse = {
+  activityEvents?: SessionEvent[];
+  assistantEvent: SessionEvent;
+  resumeCursor?: ProviderResumeCursor | null;
+  session?: Session | null;
+  sessionTitle?: string | null;
+  statusEvent: SessionEvent;
+};
+
+export type ProviderContextCompactionResponse = {
+  activityEvents?: SessionEvent[];
+};
+
+export type CouncilChatInvokeResponse = {
+  councilRun: CouncilRun;
+  assistantEvent: SessionEvent;
+  statusEvent: SessionEvent;
+  session?: Session | null;
+};
+
+export type DiagnosticsExportResult = {
+  path: string;
+};
+
+export type ProviderStreamBatch = {
+  streamEvent: ProviderChatStreamEvent;
+  textDelta: string;
+};
+
+export type SourceControlLineStats = {
+  additions: number;
+  deletions: number;
+};
+
+export type TurnSourceControlBaselines = Record<
+  string,
+  Record<string, SourceControlLineStats>
+>;
+
+export type ChatTurnContextSnapshot = {
+  mode?: ChatMode;
+  /** Captured when a send must focus another chat pane first. */
+  draftModeKey?: string;
+  draftModeRevision?: number;
+  consumeDraftMode?: boolean;
+  goal?: SessionGoal;
+  plan?: SessionPlan;
+  attachments?: ChatAttachment[];
+  sessionModel?: SessionModelSelection;
+  requireCommandApproval?: boolean;
+  requireFileEditApproval?: boolean;
+  /**
+   * Internal delivery target for queued turns. A queued message must keep
+   * running in its original chat after the user switches to another one.
+   */
+  sessionId?: string;
+  fullAccess?: boolean;
+  workspacePath?: string;
+  workspaceContext?: WorkspaceContextSnapshot;
+  preserveDraft?: boolean;
+  turnId?: string;
+  retryTurnId?: string;
+  /** Cancel a retry that is still preparing when Stop or a new send wins. */
+  retryDispatchGuard?: () => boolean;
+};
+
+export type QueuedChatMessage = {
+  deliveryAttempts?: number;
+  id: string;
+  message: string;
+  context: ChatTurnContextSnapshot;
+  retryAt?: number;
+  status: "failed" | "waiting" | "sending";
+};
+
+export type WorkspaceFileWriteRequest = {
+  workspacePath: string;
+  path: string;
+  content: string;
+  expectedHash?: string;
+};
+
+export type IdeCommandOutput = {
+  /** Mirrors the Rust bounded-command terminations, not just done/failed. */
+  status:
+    "done" | "failed" | "cancelled" | "timed-out" | "inactive" | "output-limit";
+  stdout: string;
+  stderr: string;
+};
+
+/** Result of git_push / git_pull / git_fetch: output plus refreshed status. */
+export type GitSyncResult = {
+  output: IdeCommandOutput;
+  status: SourceControlState;
+};
+
 export type AutomationDraft = Pick<
   Automation,
   | "branch"
@@ -108,6 +254,15 @@ export type AutomationDraft = Pick<
   | "worktreeName"
   | "execution"
 >;
+
+export type ModelStandardPrompt = {
+  usageCount: number;
+  chatCount: number;
+  modelId: string;
+  modelLabel: string;
+  providerId: ProviderId;
+  providerLabel: string;
+};
 
 export type SavedProject = {
   path: string;
@@ -134,6 +289,8 @@ export const EMPTY_CONFIG: GyroConfig = {
   commandProfiles: [],
 };
 
+export const PREVIEW_WORKSPACE_PATH = "/preview/Gyro";
+
 export const WORKBENCH_STORAGE_KEY = "gyro.workbench-state";
 
 export const CHAT_TASK_METADATA_KEY = "gyro.chat-task-metadata.v1";
@@ -146,6 +303,9 @@ export const RECENT_PROJECTS_STORAGE_KEY = "gyro.recent-project-paths";
 
 export const PREVIEW_CONFIG_STORAGE_KEY = "gyro.preview-config";
 
+/** Lines shown either side of the revealed line in a model focus peek. */
+export const MODEL_FOCUS_PEEK_CONTEXT_LINES = 12;
+
 export const CHAT_DRAFTS_STORAGE_KEY = "gyro.chat-drafts-v1";
 
 export const CHAT_DRAFT_MODES_STORAGE_KEY = "gyro.chat-draft-modes-v1";
@@ -154,9 +314,82 @@ export const CHAT_ATTACHMENTS_STORAGE_KEY = "gyro.chat-attachments-v1";
 
 export const CHAT_GRID_STORAGE_KEY = "gyro.chat-grid-layouts-v1";
 
+/** Record the first automatic request before macOS opens a permission sheet. */
+export const SYSTEM_ACCESS_PROMPTED_STORAGE_KEY =
+  "gyro.system-access-prompted-v1";
+
+export const DEFAULT_TOOL_PANEL_HEIGHT = 280;
+
+export const BROWSER_TOOL_PANEL_HEIGHT = 420;
+
+/** ~65% of viewport — Browser focus mode; never shrink a taller panel. */
+export const BROWSER_FOCUS_PANEL_HEIGHT_RATIO = 0.65;
+
+export const PROVIDER_AUTH_POLL_INTERVAL_MS = 3_000;
+
+export const PROVIDER_AUTH_POLL_ATTEMPTS = 40;
+
+// A sign-in Gyro asked for waits longer than a background readiness poll: it
+// runs a browser login someone has to complete by hand, and giving up early
+// means dropping the message that was waiting on it.
+export const PROVIDER_SIGN_IN_POLL_ATTEMPTS = 100;
+
+// The model popover shows the sign-in link as soon as the CLI prints it, so an
+// inline sign-in reads its terminal quickly for the first few seconds.
+export const PROVIDER_SIGN_IN_FAST_POLL_MS = 500;
+
+export const PROVIDER_SIGN_IN_FAST_POLL_ATTEMPTS = 12;
+
+// npm installs of a provider CLI finish in well under five minutes.
+export const PROVIDER_INSTALL_POLL_ATTEMPTS = 600;
+
 export const MAX_CHAT_MESSAGE_CHARS = 24_000;
 
+export const MAX_CHAT_IMAGES_PER_MESSAGE = 10;
+
+export const MAX_CHAT_VIDEOS_PER_MESSAGE = 2;
+
+// Mirrors the native limits so oversized files are rejected before they are
+// read into memory.
+export const MAX_CHAT_IMAGE_BYTES = 10 * 1024 * 1024;
+
+export const MAX_CHAT_VIDEO_BYTES = 200 * 1024 * 1024;
+
+export const MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8;
+
+export const MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24;
+
+// The draft key for a chat with no session yet. Shared with the UI package so
+// a drop and the composer holding it always name the same draft.
+export const PROVIDER_STREAM_FLUSH_MS = 80;
+
+export const WORKBENCH_PERSIST_DEBOUNCE_MS = 500;
+
 export const WORKBENCH_PERSIST_IDLE_TIMEOUT_MS = 1_500;
+
+export const TERMINAL_POLL_INTERVAL_MS = 1_000;
+
+export type BrowserPreviewCheck = {
+  reachable: boolean;
+  statusCode?: number;
+  message: string;
+  diagnostics: BrowserPreviewDiagnostic[];
+  diagnosticsSupported: boolean;
+  diagnosticsCaptured: boolean;
+};
+
+export type OllamaDiscovery = {
+  baseUrl: string;
+  models: Array<{
+    id: string;
+    displayName: string;
+    description: string;
+    contextWindowTokens?: number;
+    supportsTools: boolean;
+  }>;
+};
+
+export const TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS = 4_000;
 
 export const MAX_PERSISTED_TERMINAL_OUTPUT_CHARS = 8_000;
 
@@ -175,6 +408,92 @@ export const MAX_PINNED_SESSIONS = 200;
 export const MAX_REMOVED_PROJECTS = 200;
 
 export const MAX_RECENT_PROJECTS = 12;
+
+export const AUTOMATION_SCHEDULER_COMMANDS = {
+  claimDue: "claim_due_automation",
+  completeLease: "complete_automation_lease",
+  list: "list_automations",
+  listDue: "list_due_automations",
+  recoverLeases: "recover_automation_leases",
+} as const;
+
+export const ACTIVE_TURN_IDLE_MS = 5 * 60 * 1000;
+
+/**
+ * Propose a branch name from the pending commit message, so the common case is
+ * one keystroke instead of typing a slug by hand.
+ */
+/** Provider-facing name of the capability that creates reviewable edits. */
+export const GYRO_PROPOSE_EDIT_TOOL = "gyro_workspace_propose_edit";
+
+export function suggestedBranchName(commitMessage: string) {
+  const slug = commitMessage
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/g, "");
+  return slug ? `gyro/${slug}` : "gyro/review";
+}
+
+/**
+ * What a git command that did not succeed actually said.
+ *
+ * Git explains itself on stderr, but not always — a rejected commit hook can
+ * write its reason to stdout instead — so both are read before falling back
+ * to nothing, which lets the caller supply wording of its own.
+ */
+export function gitOutputDetail(output: IdeCommandOutput) {
+  const spoken = [output.stderr, output.stdout]
+    .map((text) => text?.trim())
+    .find(Boolean);
+  return spoken ? spoken.split("\n")[0] : undefined;
+}
+
+export function waitFor(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+export function waitForNextPaint() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
+export function loadModelDefaultSuggestionState() {
+  return parseModelDefaultSuggestionState(
+    readBoundedLocalStorage(
+      MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
+      MODEL_DEFAULT_SUGGESTION_MAX_STORAGE_CHARS,
+    ),
+    Date.now(),
+  );
+}
+
+/** Pane key for the chat surfaces that render outside the tiled grid. */
+export const SOLO_CHAT_PANE_ID = "solo-chat";
+
+export const EMPTY_BROWSER_PREVIEW =
+  createInitialWorkbenchState().browserPreview;
+
+export type BrowserOwner = {
+  sessionId: string;
+  workspaceKey: string;
+  draftKey: string;
+};
+
+export function loadInitialWorkbenchState(): WorkbenchState {
+  const stored = loadStoredWorkbenchState();
+  return applyLaunchView(
+    recoverWorkspaceBuffers({
+      ...stored,
+      preferences: { ...stored.preferences, ...readStoredAppearance() },
+    }),
+  );
+}
 
 export function loadStoredWorkbenchState(): WorkbenchState {
   const base = createInitialWorkbenchState({
@@ -300,11 +619,15 @@ export function loadStoredWorkbenchState(): WorkbenchState {
       modelFocus: undefined,
       modelFocusHistory: [],
       notifications: Array.isArray(parsed.notifications)
-        ? parsed.notifications.filter(
-            (notification) =>
-              notification.id !== "note-approval" &&
-              notification.id !== "note-tests",
-          )
+        ? parsed.notifications
+            .filter(
+              (notification) =>
+                notification.id !== "note-approval" &&
+                notification.id !== "note-tests",
+            )
+            // A failure from an earlier launch is not a current one, so it
+            // must not reappear as a notice when Gyro starts.
+            .map((notification) => ({ ...notification, read: true }))
         : base.notifications,
       onboarding: {
         ...base.onboarding,
@@ -607,7 +930,7 @@ export function loadChatDrafts(): Record<string, string> {
         (entry): entry is [string, string] =>
           typeof entry[0] === "string" &&
           typeof entry[1] === "string" &&
-          entry[1].length <= MAX_CHAT_MESSAGE_CHARS,
+          chatMessageLength(entry[1]) <= MAX_CHAT_MESSAGE_CHARS,
       ),
     );
   } catch {
@@ -2166,6 +2489,8 @@ export function applyProviderChatStreamEvent(
         (streamEvent.phase === "completed" ? "done" : "running"),
       undefined,
       streamEvent.phase === "heartbeat",
+      undefined,
+      streamEvent.quietSeconds ?? undefined,
     );
     return;
   }
@@ -2217,6 +2542,7 @@ export function updateOptimisticProviderStatus(
   /** Move createdAt forward so idle watches see the run is still alive. */
   touchTimestamp = false,
   recoveryKind?: string,
+  quietForSeconds?: number,
 ) {
   const updateEvents = (items: SessionEvent[]) => {
     const targetIndex = items.findLastIndex(
@@ -2283,6 +2609,8 @@ export function updateOptimisticProviderStatus(
             ? Math.max(0, completedAtMs - startedAtMs)
             : undefined,
         error,
+        // Every update replaces this, so the note cannot outlive its heartbeat.
+        quietForSeconds,
         startedAt,
         status,
       },

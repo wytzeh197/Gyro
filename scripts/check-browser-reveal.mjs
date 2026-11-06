@@ -1,4 +1,5 @@
 import { readFileSync } from "./read-product-source.mjs";
+import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 
 
@@ -177,7 +178,7 @@ assert.ok(
   "The panel should only open when the decision says to reveal",
 );
 // The layout has to reach the listener, or every navigation would look solo.
-const app = readFileSync(
+const app = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
   "utf8",
 );

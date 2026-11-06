@@ -38,6 +38,8 @@ export default defineConfig(({ mode }) => ({
     host: "127.0.0.1",
     port: 1420,
     strictPort: true,
+    // Development-only subscription simulator. Not part of the built app.
+    proxy: { "/__gyro-cloud": { target: "http://127.0.0.1:4340", changeOrigin: true, rewrite: path => path.replace(/^\/__gyro-cloud/, ""), configure: proxy => { proxy.on("proxyReq", req => req.setHeader("Origin", "http://127.0.0.1:4340")); } } },
     warmup: {
       clientFiles: [
         "./src/main.tsx",

@@ -1,0 +1,13 @@
+name = "gyro-cloud-staging"
+main = "worker.mjs"
+compatibility_date = "2026-07-22"
+
+[[r2_buckets]]
+binding = "CHATS"
+bucket_name = "gyro-cloud-staging"
+
+[vars]
+OIDC_ISSUER = "https://hqyahsvqjizmsfxclxzd.supabase.co/auth/v1"
+OIDC_AUDIENCE = "authenticated"
+OIDC_JWKS_URL = "https://hqyahsvqjizmsfxclxzd.supabase.co/auth/v1/.well-known/jwks.json"
+SUPABASE_PUBLISHABLE_KEY = "sb_publishable_NKcgdQHudtPow-IGRu-1jw_QRrIoANs"
