@@ -8,6 +8,20 @@ const NOTICE_REPETITIONS: usize = 3;
 const PAUSE_REPETITIONS: usize = 6;
 type Fingerprint = [u8; 32];
 
+/// SHA-256 of the same compact JSON `serde_json::to_vec` would produce.
+///
+/// Progress detection runs on every finished tool call, and the outcome can
+/// be a whole file. The buffer existed only to be hashed. A failed write
+/// hashes nothing, matching the previous `unwrap_or_default` fallback.
+fn fingerprint(tool: &str, args: &Value, state: &Value, outcome: &Value) -> Fingerprint {
+    let mut hasher = Sha256::new();
+    if serde_json::to_writer(&mut hasher, &(tool, args, state, outcome)).is_ok() {
+        hasher.finalize().into()
+    } else {
+        Sha256::digest([]).into()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Decision {
@@ -40,9 +54,7 @@ impl Detector {
             self.warned_cycle = None;
             return Decision::Continue;
         }
-        let fingerprint: Fingerprint =
-            Sha256::digest(serde_json::to_vec(&(tool, args, state, outcome)).unwrap_or_default())
-                .into();
+        let fingerprint = fingerprint(tool, args, state, outcome);
         self.history.push_back(fingerprint);
         if self.history.len() > MAX_CYCLE * PAUSE_REPETITIONS {
             self.history.pop_front();
@@ -285,5 +297,23 @@ mod tests {
             );
             assert!(detector.history.len() <= 24);
         }
+    }
+
+    #[test]
+    fn fingerprint_matches_the_compact_json_bytes() {
+        use sha2::{Digest, Sha256};
+        let tool = "workspace.read";
+        let args = json!({"path": "src/lib.rs", "note": "界"});
+        let state = json!({"workspace": "demo", "rootRevision": 4, "revision": 9});
+        let outcome = json!({
+            "content": format!("{}界", "line\n".repeat(2_048)),
+            "contentHash": "abc",
+            "truncated": false
+        });
+        let via_buffer: Fingerprint =
+            Sha256::digest(serde_json::to_vec(&(tool, &args, &state, &outcome)).unwrap()).into();
+        let empty: Fingerprint = Sha256::digest([]).into();
+        assert_eq!(fingerprint(tool, &args, &state, &outcome), via_buffer);
+        assert_ne!(via_buffer, empty);
     }
 }
