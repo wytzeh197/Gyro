@@ -33,7 +33,7 @@
     "site:check": "node scripts/check-download-site.mjs",
     "site:deploy": "node scripts/refuse-public-site-deploy.mjs",
     "smoke:native": "node scripts/run-native-smoke.mjs",
-    "smoke:workbench": "node scripts/check-workbench-ui.mjs && node scripts/check-ui-tokens.mjs",
+    "smoke:workbench": "node scripts/check-workbench-ui.mjs && node scripts/check-ui-tokens.mjs && node scripts/check-sidebar-project-groups.mjs",
     "test": "pnpm test:reliability && pnpm test:cloud && pnpm -r test",
     "test:chat-drag-browser": "node scripts/run-chat-drag-browser.mjs",
     "test:chat-retry-browser": "node scripts/run-chat-retry-browser.mjs",

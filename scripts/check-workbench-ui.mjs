@@ -5838,9 +5838,8 @@ expect(
     ) &&
     chatSidebarSource.includes("projectGroups.map") &&
     chatSidebarSource.includes("SIDEBAR_INITIAL_PROJECT_SESSION_COUNT") &&
-    surfaceSource.includes("const primaryGyroProjectPath = [") &&
-    surfaceSource.includes("projectGroupKey(path, primaryGyroProjectPath)") &&
-    surfaceSource.includes('projectSidebarName(normalizedPath) === "Gyro"') &&
+    surfaceSource.includes("const groupKeyForPath = projectGroupKey") &&
+    surfaceSource.includes('return normalizeSidebarPath(path) || "gyro"') &&
     chatSidebarSource.includes(
       "const activeProjectSession = project.items.find",
     ) &&

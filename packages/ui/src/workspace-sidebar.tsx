@@ -4523,23 +4523,12 @@ export const SIDEBAR_PROJECT_SESSION_BATCH_SIZE = 15;
 
 export function sidebarProjectGroups(
   sessions: Session[],
-  savedProjects: Array<{ path: string; label: string }>,
+  _savedProjects: Array<{ path: string; label: string }>,
   workspacePath?: string,
   drafts: SidebarDraftChat[] = [],
 ): SidebarProjectGroupData[] {
   const groups = new Map<string, SidebarProjectGroupData>();
-  const primaryGyroProjectPath = [
-    workspacePath,
-    ...savedProjects.map((project) => project.path),
-  ]
-    .map(normalizeSidebarPath)
-    .find(
-      (path) =>
-        isUserSelectedWorkspacePath(path) &&
-        projectSidebarName(path) === "Gyro",
-    );
-  const groupKeyForPath = (path?: string) =>
-    projectGroupKey(path, primaryGyroProjectPath);
+  const groupKeyForPath = projectGroupKey;
   const currentProjectKey = groupKeyForPath(workspacePath);
   for (const session of sessions) {
     const key = groupKeyForPath(session.workspacePath);
@@ -4685,31 +4674,17 @@ export function mergeSidebarProjectOrder(
 
 export function sidebarDraftGroupKey(
   draftPath: string | undefined,
-  workspacePath: string | undefined,
-  savedProjects: Array<{ path: string }>,
+  _workspacePath: string | undefined,
+  _savedProjects: Array<{ path: string }>,
 ) {
-  const primaryGyroProjectPath = [
-    workspacePath,
-    ...savedProjects.map((project) => project.path),
-  ]
-    .map(normalizeSidebarPath)
-    .find(
-      (path) =>
-        isUserSelectedWorkspacePath(path) &&
-        projectSidebarName(path) === "Gyro",
-    );
-  return projectGroupKey(draftPath, primaryGyroProjectPath);
+  return projectGroupKey(draftPath);
 }
 
 export function projectGroupKey(
   path?: string,
-  primaryGyroProjectPath?: string,
+  _primaryGyroProjectPath?: string,
 ) {
-  const normalizedPath = normalizeSidebarPath(path);
-  if (projectSidebarName(normalizedPath) === "Gyro") {
-    return primaryGyroProjectPath || "gyro";
-  }
-  return normalizedPath || "gyro";
+  return normalizeSidebarPath(path) || "gyro";
 }
 
 export function isInteractiveShellPane(pane: TerminalPane) {
@@ -6050,7 +6025,7 @@ export function workspaceParentFolder(path?: string) {
 
 export function projectSidebarName(path?: string) {
   const name = workspaceName(path);
-  if (name === "No workspace" || /^gyro(?:-|$)/i.test(name)) {
+  if (name === "No workspace") {
     return "Gyro";
   }
   return name;
