@@ -1,0 +1,29 @@
+{
+  "schema": "gyro.backend-upgrade-final-snapshot.v1",
+  "date": "2026-10-08",
+  "nativeBinarySha256": "ccdac14201d4bc9aca8efbb7271c2b4d86ca37424de074c897a09d7142a65b68",
+  "sourceSha256": {
+    "crates/gyro-core/src/keychain.rs": "ae65ccd09088b4dd5c9ca79813653543ab2298001766b3bd710b368cc67edbee",
+    "crates/gyro-core/src/keychain/macos_read.rs": "5d7d44dc898a63d4169d050a9bf573dc44a59cf08d491bfe63ceb1956731cd5d",
+    "crates/gyro-core/src/credentials.rs": "fa67c89349f9ab081aee14e57703189bcb342906573abfd7366c3ea6c22cab9d",
+    "crates/gyro-core/src/ollama.rs": "4751291f3f5807c1597690df6680ab7741ae0dc005667e4cbf761290c26262e8",
+    "apps/desktop/src/responsiveness.ts": "6de3f2406a44a688637c1c80f3cfff73f402081912ca294b6c243b2c7c01139e",
+    "apps/desktop/src/provider-stream-dispatcher.ts": "0381dcae46e876a91f737fab1d63f617137caea6165fb22445b30fc6aa64fe10",
+    "scripts/check-command-blocking.mjs": "a60113da030fbcd753fb98c61f8512b2607a830e09dbde3a9d540c868d3dd17e"
+  },
+  "rustChecks": {
+    "passedAcrossSuiteAndIsolatedRetry": 1061,
+    "originalFullRunFailures": 1,
+    "isolatedGitDeadlinePassed": true
+  },
+  "nativeBrowserSmokeSteps": 12,
+  "nativeLspSmokeSteps": 3,
+  "reliabilityGuards": 78,
+  "blockingCommandsScanned": 163,
+  "nativeUiGate": "Computer Use reports Mac locked; test GUI store was not created.",
+  "providerGenerationGates": [
+    "Claude organization access denied",
+    "DeepSeek saved credential inaccessible"
+  ],
+  "normalAppOrCredentialChanges": false
+}

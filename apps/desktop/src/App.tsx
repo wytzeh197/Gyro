@@ -2720,7 +2720,8 @@ export function App() {
     async (sessionId: string) => {
       const requestId = (sessionEventsRequestRef.current[sessionId] ?? 0) + 1;
       sessionEventsRequestRef.current[sessionId] = requestId;
-      if (!isTauriRuntime()) {
+      // New chats use a local preview ID until their first turn is persisted.
+      if (!isTauriRuntime() || sessionId.startsWith("preview-")) {
         setEventsForSession(sessionId, (current) =>
           mergePersistedAndOptimisticEvents(
             current,

@@ -1,0 +1,128 @@
+{
+  "schema": "gyro.token-counting-screenshot-evidence.v1",
+  "checkedAt": "2026-10-11T18:54:05.590912+00:00",
+  "method": "Read-only reconciliation of existing Codex rollout, Gyro ledger latest receipt, and persisted footer events; no generation or database changes.",
+  "provider": "openai",
+  "model": "gpt-6.1-sol",
+  "providerThreadId": "01a12c46-3bed-7313-995d-4d004f85d7bd",
+  "providerTurnId": "01a12c49-a2d3-79a0-b4f3-c02eb13e8e2f",
+  "gyroSessionId": "69bf588c-b2f2-4450-9b8b-33df4f30abd9",
+  "gyroTurnId": "0e8e570e-ff44-40df-9ea5-cef13740fa9d",
+  "providerCompletedAt": "2026-10-11T18:48:32.402Z",
+  "providerUsageUpdates": 17,
+  "baseline": {
+    "input_tokens": 1754476,
+    "cached_input_tokens": 1681792,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 3430,
+    "reasoning_output_tokens": 676,
+    "total_tokens": 1757906
+  },
+  "cumulative": {
+    "input_tokens": 3588533,
+    "cached_input_tokens": 3468160,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 6550,
+    "reasoning_output_tokens": 1722,
+    "total_tokens": 3595083
+  },
+  "turnDelta": {
+    "inputTokens": 1834057,
+    "cachedInputTokens": 1786368,
+    "outputTokens": 3120,
+    "reasoningOutputTokens": 1046,
+    "totalTokens": 1837177
+  },
+  "ledgerReceipt": {
+    "inputTokens": 1834057,
+    "cachedInputTokens": 1786368,
+    "cacheWriteTokens": 0,
+    "outputTokens": 3120,
+    "reasoningOutputTokens": 1046,
+    "totalTokens": 1837177,
+    "measured": true,
+    "accounting": {
+      "source": "provider",
+      "scope": "turn",
+      "coverage": "complete",
+      "known": {
+        "input": true,
+        "output": true,
+        "cacheRead": true,
+        "cacheWrite": false,
+        "reasoning": true
+      }
+    }
+  },
+  "footerEvents": [
+    {
+      "eventId": "2a74d0e6-76de-4d70-bf7e-775773d50cf7",
+      "kind": "system-event",
+      "tokens": {
+        "accounting": {
+          "coverage": "complete",
+          "known": {
+            "cacheRead": true,
+            "cacheWrite": false,
+            "input": true,
+            "output": true,
+            "reasoning": true
+          },
+          "scope": "task",
+          "source": "provider"
+        },
+        "cacheWriteTokens": 0,
+        "cachedInputTokens": 1786368,
+        "inputTokens": 1834057,
+        "measured": true,
+        "outputTokens": 3120,
+        "reasoningOutputTokens": 1046,
+        "totalTokens": 1837177
+      }
+    },
+    {
+      "eventId": "c8ccbe85-67e3-435b-980d-fcb1df5122e0",
+      "kind": "assistant-message",
+      "tokens": {
+        "accounting": {
+          "coverage": "complete",
+          "known": {
+            "cacheRead": true,
+            "cacheWrite": false,
+            "input": true,
+            "output": true,
+            "reasoning": true
+          },
+          "scope": "task",
+          "source": "provider"
+        },
+        "cacheWriteTokens": 0,
+        "cachedInputTokens": 1786368,
+        "inputTokens": 1834057,
+        "measured": true,
+        "outputTokens": 3120,
+        "reasoningOutputTokens": 1046,
+        "totalTokens": 1837177
+      }
+    }
+  ],
+  "reconciled": true,
+  "oldCompactLabel": "1.8M tokens \u00b7 1.8M cached",
+  "correctedCompactLabel": "1.84M tokens \u00b7 includes 1.79M cached",
+  "limitations": "Reconciles this observed resumed Codex turn and adjacent counters; does not certify every provider or runtime.",
+  "validation": {
+    "desktopAccountingTests": 16,
+    "coreUsageTests": 74,
+    "frontendChecks": [
+      "turn-tokens",
+      "subagents",
+      "usage-ledger"
+    ],
+    "typechecks": [
+      "shared-ui",
+      "desktop"
+    ],
+    "renderedFooterVerified": true,
+    "preview": "token-counting-footer-2026-10-11.jpg"
+  }
+}

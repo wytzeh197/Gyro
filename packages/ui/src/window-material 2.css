@@ -1,0 +1,251 @@
+/* Keep navigation ink fully opaque. Only the backdrop receives a tint.
+   This is enabled by the macOS main window, or explicitly by a labeled fixture. */
+:root[data-native-material="sidebar"] {
+  --gyro-window-tint: 55%;
+  --gyro-window-tint-color: var(--gyro-sidebar);
+  --gyro-window-blur: blur(32px) saturate(0);
+  --gyro-sidebar-material-radius: 14px;
+  /* Remove only the two corner wedges; the large outer boundary preserves
+     menus that legitimately extend outside the content pane. */
+  --gyro-native-pane-clip: polygon(evenodd,
+    -100vw -100vh, calc(100% + 100vw) -100vh,
+    calc(100% + 100vw) calc(100% + 100vh), -100vw calc(100% + 100vh),
+    -100vw -100vh,
+    0 0, 14px 0, 11.27px 0.27px, 8.64px 1.06px, 6.22px 2.36px,
+    4.1px 4.1px, 2.36px 6.22px, 1.06px 8.64px, 0.27px 11.27px,
+    0 14px, 0 0, -100vw -100vh,
+    0 100%, 0 calc(100% - 14px), 0.27px calc(100% - 11.27px),
+    1.06px calc(100% - 8.64px), 2.36px calc(100% - 6.22px),
+    4.1px calc(100% - 4.1px), 6.22px calc(100% - 2.36px),
+    8.64px calc(100% - 1.06px), 11.27px calc(100% - 0.27px),
+    14px 100%, 0 100%, -100vw -100vh
+  );
+  --gyro-sidebar-material: color-mix(
+    in srgb, var(--gyro-window-tint-color, var(--gyro-sidebar)) var(--gyro-window-tint), transparent
+  );
+}
+
+:root[data-native-material="sidebar"][data-theme="light"] {
+  --gyro-window-tint: 65%;
+  --gyro-window-tint-color: #f5faff;
+  --gyro-window-blur: blur(32px) saturate(1.08);
+}
+
+/* Chat navigation, workspace panels, and title chrome share one neutral material. */
+:root[data-native-material="sidebar"][data-theme] .gyro-app-shell {
+  --gyro-chrome-material: var(--gyro-sidebar-material);
+  --gyro-workspace-panel-material: var(--gyro-sidebar-material);
+  --gyro-topbar-material: var(--gyro-sidebar-material);
+}
+
+/* Clear every ancestor between the chrome and the native material.
+   Error and auxiliary surfaces retain their opaque canvas. */
+:root[data-native-material="sidebar"]:has(.gyro-app-shell),
+:root[data-native-material="sidebar"]:has(.gyro-app-shell) body,
+:root[data-native-material="sidebar"]:has(.gyro-app-shell) #root,
+:root[data-native-material="sidebar"][data-theme] .gyro-app-shell {
+  background: transparent;
+}
+
+/* Sessions, Settings, and other universal navigation: one continuous material,
+   including the title bar and footer. A separate paint layer avoids making
+   the sidebar a containing block for fixed menus and tooltips. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active) > .gyro-sidebar {
+  background: transparent;
+  border-radius: 0;
+  isolation: isolate;
+  position: relative;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active) > .gyro-sidebar::before {
+  -webkit-backdrop-filter: var(--gyro-window-blur);
+  backdrop-filter: var(--gyro-window-blur);
+  background: var(--gyro-sidebar-material);
+  content: "";
+  inset: 0;
+  right: calc(-1 * var(--gyro-sidebar-material-radius));
+  -webkit-mask:
+    linear-gradient(#000, #000) left / calc(100% - 14px) 100% no-repeat,
+    radial-gradient(circle at right bottom, transparent 14px, #000 14px) right top / 14px 14px no-repeat,
+    radial-gradient(circle at right top, transparent 14px, #000 14px) right bottom / 14px 14px no-repeat;
+  mask:
+    linear-gradient(#000, #000) left / calc(100% - 14px) 100% no-repeat,
+    radial-gradient(circle at right bottom, transparent 14px, #000 14px) right top / 14px 14px no-repeat,
+    radial-gradient(circle at right top, transparent 14px, #000 14px) right bottom / 14px 14px no-repeat;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+/* The isolated sidebar and the clipped main pane are sibling layers, and the
+   main pane comes later, so it painted over footer cards that open past the
+   sidebar edge. Lift the sidebar only while one of those cards is open. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell
+  > .gyro-sidebar:has(
+    :is(.gyro-installed-update-card, .gyro-workspace-preparation-popover)
+  ) {
+  z-index: 1;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active)
+  .gyro-sidebar :is(.gyro-sidebar-windowbar, .gyro-sidebar-footer) {
+  background: transparent;
+}
+
+/* The content curves into one continuous material instead of adding an
+   opaque patch at the seam. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active):not(.is-sidebar-hidden) > .gyro-main {
+  clip-path: var(--gyro-native-pane-clip);
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active) > .gyro-main > .gyro-seam-corner {
+  display: none;
+}
+
+/* Scrolling section labels share the continuous material. Project titles
+   retain their existing opaque sticky backing when chats scroll beneath them. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active)
+  .gyro-sidebar .gyro-sidebar-small-title {
+  background: transparent;
+}
+
+/* The title band, activity rail, and tool lists share the navigation frost.
+   The editor canvas remains opaque. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active {
+  isolation: isolate;
+  position: relative;
+}
+
+/* Sample the backdrop once across the entire L-shaped chrome. Separate blur
+   layers can pick up different neighboring surfaces at the editor seam. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active::before {
+  -webkit-backdrop-filter: var(--gyro-window-blur);
+  backdrop-filter: var(--gyro-window-blur);
+  background: var(--gyro-chrome-material);
+  content: "";
+  inset: 0;
+  -webkit-mask:
+    linear-gradient(#000, #000) top / 100% 48px no-repeat,
+    linear-gradient(#000, #000) left / var(--gyro-workspace-activity-rail-width) 100% no-repeat,
+    radial-gradient(circle at right bottom, transparent 10px, #000 10px)
+      var(--gyro-workspace-activity-rail-width) 48px / 10px 10px no-repeat;
+  mask:
+    linear-gradient(#000, #000) top / 100% 48px no-repeat,
+    linear-gradient(#000, #000) left / var(--gyro-workspace-activity-rail-width) 100% no-repeat,
+    radial-gradient(circle at right bottom, transparent 10px, #000 10px)
+      var(--gyro-workspace-activity-rail-width) 48px / 10px 10px no-repeat;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-shell.is-workspace-chrome-active > .gyro-sidebar {
+  background: transparent;
+  isolation: isolate;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::before {
+  -webkit-backdrop-filter: var(--gyro-window-blur);
+  backdrop-filter: var(--gyro-window-blur);
+  background: var(--gyro-workspace-panel-material);
+  height: auto;
+  inset: 0;
+  top: 48px;
+  border-top-left-radius: var(--gyro-workspace-panel-radius);
+  z-index: -1;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::after {
+  background: radial-gradient(
+    circle at var(--gyro-workspace-panel-radius) var(--gyro-workspace-panel-radius),
+    transparent calc(var(--gyro-workspace-panel-radius) - 0.5px),
+    var(--gyro-border-soft) calc(var(--gyro-workspace-panel-radius) - 0.5px)
+      calc(var(--gyro-workspace-panel-radius) + 0.5px),
+    transparent calc(var(--gyro-workspace-panel-radius) + 0.5px)
+  );
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active > .gyro-workspace-activity-rail {
+  background: transparent;
+  isolation: isolate;
+  position: relative;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active > .gyro-workspace-activity-rail::before {
+  content: none;
+}
+
+/* Clear only the editor's enclosing layers so its top tabs can share native
+   chrome; code, diffs, terminal output, and status bars keep their own canvas. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active > .gyro-main,
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  :is(.gyro-workspace-route.is-code, .gyro-ide-surface, .gyro-ide-editor-stack,
+      .gyro-editor-groups, .gyro-editor-pane) {
+  background: transparent;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active .gyro-editor-tabs {
+  background: transparent;
+  isolation: isolate;
+  position: relative;
+}
+
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active .gyro-editor-tabs::before {
+  -webkit-backdrop-filter: var(--gyro-window-blur);
+  backdrop-filter: var(--gyro-window-blur);
+  background: var(--gyro-topbar-material);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+/* Top-level tabs reveal the shared window layer. Lower split headers and
+   headers beneath Restricted Mode keep their local material. */
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  .gyro-ide-editor-stack:not(:has(> .gyro-workspace-trust-banner))
+  .gyro-editor-groups:not(.is-split-down) > .gyro-editor-pane .gyro-editor-tabs::before,
+:root[data-native-material="sidebar"][data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  .gyro-ide-editor-stack:not(:has(> .gyro-workspace-trust-banner))
+  .gyro-editor-groups.is-split-down > .gyro-editor-pane:first-child .gyro-editor-tabs::before {
+  content: none;
+}
+
+/* The sidebar band stays 48px so the traffic lights have room. File tabs
+   do not follow it: stretching this row to 48px made the tabs a tall bar.
+   They keep the compact editor-tab height from the code route. */
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-native-material="sidebar"][data-theme] {
+    --gyro-window-tint: 100%;
+    --gyro-window-blur: none;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root[data-native-material="sidebar"][data-theme] {
+    --gyro-window-tint: 100%;
+    --gyro-window-blur: none;
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "providers": [
+    { "id": "xai", "model": "grok-4.6", "effort": "medium" },
+    { "id": "openai", "model": "gpt-5.6-sol", "effort": "medium" },
+    { "id": "anthropic", "model": "claude-sonnet-5", "effort": "medium" }
+  ],
+  "trials": 5,
+  "timeoutSeconds": 150
+}

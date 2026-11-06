@@ -1,0 +1,1931 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+import {
+  isAssistantPreambleBlock,
+  isOrphanAssistantFragment,
+  isTransientStatusGreeting,
+  peelAssistantPreambleBlocks,
+  structuredCommentaryBlocks,
+} from "../packages/ui/src/chat-commentary.ts";
+import {
+  buildRunModel,
+  failureDetail,
+  formatRunDuration,
+  groupRunSteps,
+  isGenericProviderToolLabel,
+  isRunPhaseLive,
+  liveWindow,
+  runCallText,
+  runHeaderLabel,
+  runRetryText,
+  runRowText,
+  segmentLineStats,
+  segmentRunSteps,
+  splitToolName,
+  splitSegmentSummary,
+  summarizeSegment,
+  workItemFromEvent,
+} from "../packages/ui/src/chat-run.ts";
+import { fileMatchesPathUndo } from "../packages/ui/src/workspace-path-undo.ts";
+
+// These run before the rail wording checks. An unrelated copy mismatch must
+// not hide a path-undo regression.
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/private/tmp/repo/notes.md",
+      label: "Undo move of notes.md",
+    },
+    ["/tmp/repo"],
+  ),
+  true,
+  "a /private/tmp path still matches the /tmp workspace root",
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/tmp/repo/notes.md",
+      label: "Undo move of notes.md",
+    },
+    ["/private/tmp/repo"],
+  ),
+  true,
+  "the /tmp and /private/tmp alias matches in either direction",
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/Users/me/app/notes.md",
+      label: "Undo move of notes.md",
+    },
+    ["/app"],
+  ),
+  false,
+  "an absolute suffix is not the same workspace root",
+);
+
+let sequence = 0;
+assert.deepEqual(
+  splitToolName("gyro_capabilities__gyro_terminal_wait"),
+  { tool: "Wait for command" },
+  "command waits should have a readable chat activity label",
+);
+const at = (minutes) =>
+  new Date(
+    Date.parse("2026-08-02T09:00:00.000Z") + minutes * 60_000,
+  ).toISOString();
+
+const event = (kind, message, payload = {}, minutes = 0) => {
+  sequence += 1;
+  return {
+    id: `evt_${sequence}`,
+    sessionId: "ses_1",
+    turnId: "turn_1",
+    createdAt: at(minutes),
+    kind,
+    message,
+    payload,
+  };
+};
+
+const activity = (activityKind, label, extra = {}, minutes = 0) =>
+  event(
+    "system-event",
+    label,
+    {
+      kind: "provider-activity",
+      activityKind,
+      label,
+      status: "done",
+      ...extra,
+    },
+    minutes,
+  );
+
+const say = (message, minutes = 0) =>
+  event("assistant-message", message, {}, minutes);
+
+// --- the defect that motivated the rebuild ------------------------------------
+
+// A real MCP identifier keeps its server and tool. The shape this replaces threw
+// both away and rendered the string "Used a tool".
+assert.deepEqual(
+  splitToolName("mcp__github__create_issue"),
+  { server: "github", tool: "create issue" },
+  "an MCP tool name should survive as server and tool",
+);
+assert.deepEqual(
+  splitToolName("gyro_capabilities__terminal_open"),
+  { tool: "Terminal open" },
+  "a capability id should lose its prefix, not its name",
+);
+assert.deepEqual(
+  splitToolName("Read surfaces.tsx"),
+  { tool: "Read surfaces.tsx" },
+  "a name that is already prose should be left alone",
+);
+
+assert.deepEqual(
+  runRowText({
+    kind: "work",
+    id: "evt_x",
+    at: at(0),
+    item: workItemFromEvent(
+      activity("tool", "Used mcp  github  create issue", {
+        detail: "mcp__github__create_issue",
+      }),
+    ),
+  }),
+  { label: "github · create issue" },
+  "the row should name the tool rather than say a tool was used",
+);
+
+// A machine tool id without a note used to paint three identical "Bash" rows.
+// The note is the muted half that says what it ran on.
+assert.deepEqual(
+  runRowText({
+    kind: "work",
+    id: "evt_skill",
+    at: at(0),
+    item: workItemFromEvent(
+      activity("tool", "Used Skill", {
+        detail: "Skill",
+        tool: "Skill",
+        note: "simplify",
+      }),
+    ),
+  }),
+  { label: "Skill", description: "simplify" },
+  "a tool row should show the specifics beside the machine identity",
+);
+assert.deepEqual(
+  runRowText({
+    kind: "work",
+    id: "evt_bash_intent",
+    at: at(0),
+    item: workItemFromEvent(
+      activity("command", "Ran command", {
+        detail: "pnpm test",
+        command: "pnpm test",
+        note: "Run the suite",
+      }),
+    ),
+  }),
+  { label: "Ran tests", description: "Run the suite" },
+  "a Bash description reclassified as note should win over the raw command",
+);
+
+// Consecutive tools with the same name but different notes stay separate —
+// otherwise three Skill calls collapse into one.
+const distinctNotes = buildRunModel([
+  activity("tool", "Used Skill", { detail: "Skill", note: "simplify" }, 0),
+  activity("tool", "Used Skill", { detail: "Skill", note: "review" }, 0),
+]);
+assert.equal(
+  distinctNotes.steps.length,
+  2,
+  "tools that share a name but not a target should not coalesce",
+);
+
+// Imported calls preserve output and ordering while remaining past activity.
+const importedDetail =
+  '{"path":"src/a.ts"}\nUpdated the heading.\n<script>untrusted transcript text</script>';
+const historicalEdit = activity("file", "Edit", {
+  historical: true,
+  tool: "Edit",
+  sourceCallId: "native-edit-one",
+  path: "src/a.ts",
+  additions: 40,
+  deletions: 12,
+  detail: importedDetail,
+});
+const historicalBrowser = activity("tool", "gyro_browser_click", {
+  historical: true,
+  tool: "mcp__gyro_capabilities__gyro_browser_click",
+  sourceCallId: "native-browser-one",
+  status: "running",
+  detail: '{"target":"Save"}\nClicked Save.',
+});
+const importedTool = workItemFromEvent(historicalEdit);
+assert.equal(
+  importedTool.kind,
+  "tool",
+  "an imported edit must be display-only tool history",
+);
+assert.equal(
+  importedTool.historicalDetail,
+  importedDetail,
+  "imported arguments and results must survive verbatim",
+);
+assert.equal(importedTool.historicalCallId, "native-edit-one");
+assert.equal(
+  workItemFromEvent(historicalBrowser).kind,
+  "tool",
+  "imported browser activity must never become current browser work",
+);
+assert.equal(
+  workItemFromEvent(historicalBrowser).status,
+  "done",
+  "historical activity must not start a live timer",
+);
+const importedRail = buildRunModel([
+  historicalEdit,
+  activity(
+    "file",
+    "Edit",
+    {
+      ...historicalEdit.payload,
+      sourceCallId: "native-edit-two",
+    },
+    1,
+  ),
+  historicalBrowser,
+  activity(
+    "file",
+    "Updated src/current.ts",
+    { path: "src/current.ts", additions: 3, deletions: 1 },
+    2,
+  ),
+]);
+assert.deepEqual(
+  importedRail.steps
+    .filter((step) => step.kind === "work")
+    .map((step) =>
+      step.item.kind === "tool" ? step.item.historicalCallId : step.item.path,
+    ),
+  [
+    "native-edit-one",
+    "native-edit-two",
+    "native-browser-one",
+    "src/current.ts",
+  ],
+  "historical calls with equal names and contents must remain distinct in their source order",
+);
+assert.deepEqual(
+  importedRail.files,
+  [{ path: "src/current.ts", additions: 3, deletions: 1, status: "done" }],
+  "imported edits must not add current file changes or line counts",
+);
+const importedWithoutNativeIds = buildRunModel([
+  activity("tool", "Bash", { historical: true, detail: "pwd\n/repo" }),
+  activity("tool", "Bash", { historical: true, detail: "pwd\n/repo" }),
+]);
+assert.equal(
+  importedWithoutNativeIds.steps.length,
+  2,
+  "distinct historical calls without native IDs must keep their event identities",
+);
+const historicalCallUpdate = buildRunModel([
+  historicalEdit,
+  activity(
+    "tool",
+    "Edit",
+    {
+      historical: true,
+      sourceCallId: "native-edit-one",
+      detail: "Updated result",
+    },
+    1,
+  ),
+]);
+assert.equal(
+  historicalCallUpdate.steps.length,
+  1,
+  "updates for one historical call should share its native identity",
+);
+assert.equal(
+  historicalCallUpdate.steps[0].item.historicalDetail,
+  "Updated result",
+);
+
+// --- exact work is preserved; the view groups it --------------------------------
+
+// Parallel calls arrive milliseconds apart. The run model preserves each exact
+// action, while the view can summarize them into meaningful phases.
+const parallel = buildRunModel([
+  activity("tool", "Read a.ts", {}, 0),
+  activity("tool", "Read b.ts", {}, 0),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 0),
+]);
+assert.equal(parallel.steps.length, 3, "each activity should be its own beat");
+assert.ok(
+  parallel.steps.every((step) => step.kind === "work"),
+  "activities should all be work steps",
+);
+assert.deepEqual(
+  groupRunSteps(parallel.steps).map((step) =>
+    step.kind === "work-group"
+      ? [step.groupKind, step.steps.length]
+      : step.kind,
+  ),
+  [
+    ["review", 2],
+    ["verify", 1],
+  ],
+  "consecutive review work should become one expandable summary before checks",
+);
+
+// --- the rail interleaves prose and work --------------------------------------
+
+const interleaved = buildRunModel([
+  say("Adding subscription options.", 0),
+  activity("command", "Check the plan file", { detail: "cat plan.md" }, 1),
+  say("Updating the business plan document.", 2),
+  activity(
+    "file",
+    "Updated create_gyro_bp.js",
+    { detail: "create_gyro_bp.js", additions: 73 },
+    3,
+  ),
+  say("Summarizing the recent changes.", 4),
+]);
+assert.deepEqual(
+  interleaved.steps.map((step) =>
+    step.kind === "say" ? `say:${step.text}` : `work:${step.item.kind}`,
+  ),
+  [
+    "say:Adding subscription options.",
+    "work:read",
+    "say:Updating the business plan document.",
+    "work:file",
+  ],
+  "narration should keep its place among the work it introduced",
+);
+assert.equal(
+  interleaved.response?.message,
+  "Summarizing the recent changes.",
+  "the closing message should be the answer, not a rail step",
+);
+
+// The model exposes no per-step clock: the rail is timestamp-free by design.
+assert.ok(
+  interleaved.steps.every((step) => !("clock" in step) && !("offset" in step)),
+  "steps should not carry a gutter clock",
+);
+
+// --- files are live ------------------------------------------------------------
+
+// The shape this replaces gated the file summary on the run being finished, so
+// edits were invisible for the whole run.
+const live = buildRunModel(
+  [
+    activity(
+      "file",
+      "Updated src/a.ts",
+      { detail: "src/a.ts", additions: 12, deletions: 3 },
+      0,
+    ),
+  ],
+  { isRunning: true },
+);
+assert.deepEqual(
+  live.files,
+  [{ path: "src/a.ts", status: "done", additions: 12, deletions: 3 }],
+  "a file edit should be tallied while the run is still going",
+);
+
+// A file touched twice is one entry carrying the latest status.
+const touchedTwice = buildRunModel([
+  activity(
+    "file",
+    "Updated src/a.ts",
+    { detail: "src/a.ts", status: "running" },
+    0,
+  ),
+  activity("file", "Updated src/a.ts", { detail: "src/a.ts", additions: 4 }, 1),
+]);
+assert.deepEqual(
+  touchedTwice.files,
+  [{ path: "src/a.ts", status: "done", additions: 4, deletions: undefined }],
+  "repeat edits to one path should merge",
+);
+
+// --- identical work folds into one row -----------------------------------------
+
+// The rail used to repeat "Edited file · <path> +40" once per edit, because the
+// stat is the file's whole diff rather than one edit's share. One path is one
+// row, carrying the latest numbers.
+assert.equal(touchedTwice.steps.length, 1, "repeat edits should be one row");
+assert.equal(touchedTwice.steps[0].repeat, 2, "the row should count the edits");
+assert.equal(
+  touchedTwice.steps[0].item.additions,
+  4,
+  "the surviving row should carry the newest stats",
+);
+
+// A file rejoins its own row even when other work happened in between, and
+// holds the position it was first touched.
+const revisited = buildRunModel([
+  activity("file", "Updated src/a.ts", { detail: "src/a.ts", additions: 4 }, 0),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 1),
+  activity("file", "Updated src/a.ts", { detail: "src/a.ts", additions: 9 }, 2),
+]);
+assert.deepEqual(
+  revisited.steps.map((step) => `${step.item.kind}:${step.repeat ?? 1}`),
+  ["file:2", "command:1"],
+  "a revisited file should fold upward rather than open a second row",
+);
+assert.equal(
+  revisited.steps[0].item.additions,
+  9,
+  "the folded file row should show the latest diff",
+);
+
+// A stat the newer beat did not carry is not blanked by the fold.
+const statOnceOnly = buildRunModel([
+  activity(
+    "file",
+    "Updated src/a.ts",
+    { detail: "src/a.ts", additions: 12, deletions: 5 },
+    0,
+  ),
+  activity("file", "Updated src/a.ts", { detail: "src/a.ts" }, 1),
+]);
+assert.equal(statOnceOnly.steps[0].item.additions, 12);
+assert.equal(statOnceOnly.steps[0].item.deletions, 5);
+
+// Non-file work folds only back to back: a command repeated after other work is
+// a real second beat and must keep the run's order.
+const repeatedCommand = buildRunModel([
+  activity("command", "pnpm test", { detail: "pnpm test" }, 0),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 1),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 2),
+]);
+assert.equal(repeatedCommand.steps.length, 1, "a rerun command should fold");
+assert.equal(repeatedCommand.steps[0].repeat, 3);
+
+const separatedCommand = buildRunModel([
+  activity("command", "pnpm test", { detail: "pnpm test" }, 0),
+  activity(
+    "search",
+    "Searched project",
+    { query: "rail", scope: "project" },
+    1,
+  ),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 2),
+]);
+assert.deepEqual(
+  separatedCommand.steps.map((step) => step.item.kind),
+  ["command", "search", "command"],
+  "a command run again after other work should stay a separate beat",
+);
+
+// Narration between two identical beats breaks the run of them.
+const splitByNarration = buildRunModel([
+  activity("command", "pnpm test", { detail: "pnpm test" }, 0),
+  say("Trying that again.", 1),
+  activity("command", "pnpm test", { detail: "pnpm test" }, 2),
+  say("Done.", 3),
+]);
+assert.deepEqual(
+  splitByNarration.steps.map((step) =>
+    step.kind === "say" ? "say" : step.item.kind,
+  ),
+  ["command", "say", "command"],
+  "narration should keep two identical commands apart",
+);
+
+// Memory and context beats have no target to compare on, so they never fold.
+const repeatedMemory = buildRunModel([
+  activity("memory", "Edited memory", {}, 0),
+  activity("memory", "Edited memory", {}, 1),
+]);
+assert.equal(
+  repeatedMemory.steps.length,
+  2,
+  "beats with no target should stay distinct",
+);
+
+// Diff stats come from source control, not from the provider payload. Dropping
+// that during the rewrite would leave every file row as a bare path.
+const withStats = buildRunModel(
+  [activity("file", "Updated src/b.ts", { detail: "src/b.ts" }, 0)],
+  {
+    fileStats: (path) =>
+      path === "src/b.ts" ? { additions: 9, deletions: 2 } : undefined,
+  },
+);
+assert.deepEqual(
+  withStats.files,
+  [{ path: "src/b.ts", status: "done", additions: 9, deletions: 2 }],
+  "source-control stats should reach the file row",
+);
+// A payload that carries its own counts wins over the workspace lookup.
+assert.deepEqual(
+  buildRunModel(
+    [
+      activity(
+        "file",
+        "Updated src/b.ts",
+        { detail: "src/b.ts", additions: 1 },
+        0,
+      ),
+    ],
+    { fileStats: () => ({ additions: 9, deletions: 2 }) },
+  ).files[0].additions,
+  1,
+  "payload stats should win over the workspace lookup",
+);
+
+// --- phases --------------------------------------------------------------------
+
+assert.deepEqual(
+  buildRunModel([], { isRunning: true }).phase,
+  { name: "thinking" },
+  "a running turn with nothing yet is thinking",
+);
+assert.deepEqual(
+  buildRunModel([activity("command", "pnpm test", {}, 0)], { isRunning: true })
+    .phase,
+  { name: "working" },
+  "a running turn with work is working",
+);
+assert.deepEqual(
+  buildRunModel([activity("command", "pnpm test", {}, 0), say("All set.", 1)], {
+    isRunning: true,
+  }).phase,
+  { name: "finalizing" },
+  "a running turn whose answer has arrived is finalizing",
+);
+assert.deepEqual(
+  buildRunModel([say("All set.", 0)], { durationMs: 231_000 }).phase,
+  { name: "done", durationMs: 231_000 },
+  "a settled turn reports its duration",
+);
+assert.deepEqual(
+  buildRunModel([], { status: { status: "failed", message: "Provider error" } })
+    .phase,
+  {
+    name: "failed",
+    message: "Provider error",
+    recoveryKind: undefined,
+    recoveryMessage: undefined,
+  },
+  "a failed turn carries its message",
+);
+assert.equal(
+  failureDetail(
+    "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.",
+    "Unlock your Mac and allow Gyro to read the saved credential, then send again.",
+  ),
+  "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.",
+  "a Keychain error that already says to unlock should not repeat the recovery line",
+);
+assert.equal(
+  failureDetail(
+    "The provider stopped responding.",
+    "Send again to continue.",
+  ),
+  "The provider stopped responding. Send again to continue.",
+  "recovery advice still follows an error that does not already include it",
+);
+// A turn left in flight by a restart is interrupted, not still working.
+assert.deepEqual(
+  buildRunModel([], { isRunning: false, status: { status: "running" } }).phase,
+  { name: "interrupted" },
+  "a stale in-flight turn is interrupted",
+);
+
+// --- retrying -------------------------------------------------------------------
+
+// The network going away mid-run is a live beat, not a dead turn: the work
+// already on the rail is intact and the failure block stays out of the way.
+const offline = buildRunModel([activity("command", "pnpm test", {}, 0)], {
+  isRunning: true,
+  retry: { reason: "Waiting for the network" },
+});
+assert.deepEqual(
+  offline.phase,
+  { name: "retrying", attempt: undefined, reason: "Waiting for the network" },
+  "a live turn with a retry in flight is retrying",
+);
+assert.ok(isRunPhaseLive(offline.phase), "a retrying turn still ticks");
+assert.equal(
+  offline.steps.length,
+  1,
+  "the work behind a retry stays on the rail",
+);
+
+// The provider's last word is stale while the surface is dialling again —
+// otherwise the rail says "Stopped" over a reconnect that is still going.
+assert.equal(
+  buildRunModel([activity("command", "pnpm test", {}, 0)], {
+    isRunning: true,
+    retry: { reason: "Reconnecting to the provider" },
+    status: { status: "failed", message: "Connection reset" },
+  }).phase.name,
+  "retrying",
+  "a retry in flight should outrank the failure that provoked it",
+);
+// An open invoke owns the rail even without a retry: a stale cancelled/failed
+// status must not paint Stopped while the process is still running.
+assert.equal(
+  buildRunModel([activity("command", "pnpm test", {}, 0)], {
+    isRunning: true,
+    status: { status: "cancelled", message: "chat cancelled by user" },
+  }).phase.name,
+  "working",
+  "a live invoke outranks a stale cancelled status",
+);
+assert.equal(
+  buildRunModel([activity("command", "pnpm test", {}, 0)], {
+    isRunning: true,
+    status: { status: "failed", message: "Provider error" },
+  }).phase.name,
+  "working",
+  "a live invoke outranks a stale failed status",
+);
+assert.equal(
+  buildRunModel([], {
+    isRunning: false,
+    status: { status: "cancelled", message: "chat cancelled by user" },
+  }).phase.recoveryKind,
+  "cancelled",
+  "a settled cancel is tagged recoveryKind cancelled",
+);
+// A settled turn is over, whatever the surface thinks it is dialling.
+assert.equal(
+  buildRunModel([activity("command", "pnpm test", {}, 0)], {
+    isRunning: false,
+    retry: { reason: "Waiting for the network" },
+  }).phase.name,
+  "done",
+  "a retry hint should not resurrect a settled turn",
+);
+
+// The row copy: reason and attempt are separate facts, and the first attempt
+// carries no number because there is no series to count yet.
+assert.deepEqual(
+  runRetryText({ name: "retrying", reason: "Waiting for the network" }),
+  { label: "Retrying", description: "Waiting for the network" },
+  "a retry names what it is waiting for",
+);
+assert.deepEqual(
+  runRetryText({
+    name: "retrying",
+    reason: "Waiting for the network",
+    attempt: 3,
+  }),
+  { label: "Retrying", description: "Waiting for the network · attempt 3" },
+  "a repeated retry counts itself",
+);
+assert.equal(
+  runRetryText({ name: "retrying", attempt: 1 }).description,
+  "Waiting for the connection",
+  "the first attempt needs neither a number nor a guessed reason",
+);
+assert.equal(
+  runHeaderLabel({ name: "retrying" }, "12s"),
+  "Retrying · 12s",
+  "the header keeps the clock a retrying turn never stopped",
+);
+
+// --- the response rule ----------------------------------------------------------
+
+// While running, an opening line with no work behind it is a preamble.
+assert.equal(
+  buildRunModel([say("I'll take a look.", 0)], { isRunning: true }).response,
+  undefined,
+  "an opening line should stay in the rail while the run is young",
+);
+assert.equal(
+  buildRunModel([say("I'll take a look.", 0)]).response?.message,
+  "I'll take a look.",
+  "the same line closes the turn once the run has settled",
+);
+
+// Narration that trails the last tool is a rail beat, not the answer — a live
+// run that says "Let me check …" is still working, not finalizing.
+const narrating = buildRunModel(
+  [
+    activity("command", "ls node_modules/monaco-editor", {}, 0),
+    say(
+      "Both symptoms point at one root cause. Let me check the build config.",
+      1,
+    ),
+  ],
+  { isRunning: true },
+);
+assert.equal(
+  narrating.response,
+  undefined,
+  "mid-run narration should not be promoted to the answer",
+);
+assert.deepEqual(
+  narrating.phase,
+  { name: "working" },
+  "a run narrating its next step is working, not finalizing",
+);
+assert.equal(
+  narrating.steps.at(-1)?.kind,
+  "say",
+  "the narration should land on the rail as its own beat",
+);
+// The same line closes the turn once the run settles — something has to answer.
+assert.equal(
+  buildRunModel([
+    activity("command", "ls node_modules/monaco-editor", {}, 0),
+    say(
+      "Both symptoms point at one root cause. Let me check the build config.",
+      1,
+    ),
+  ]).response?.message.startsWith("Both symptoms"),
+  true,
+  "a settled turn still answers with its last block",
+);
+
+// A file edit reported after the closing text must not strand the answer.
+const trailingFile = buildRunModel([
+  activity("command", "pnpm build", {}, 0),
+  say("Done — the build passes.", 1),
+  activity("file", "Updated src/a.ts", { detail: "src/a.ts" }, 1),
+]);
+assert.equal(
+  trailingFile.response?.message,
+  "Done — the build passes.",
+  "trailing file activity should not unseat the answer",
+);
+assert.equal(
+  trailingFile.files.length,
+  1,
+  "the trailing edit should still be tallied",
+);
+
+// Work after the closing text does unseat it — the turn kept going.
+assert.equal(
+  buildRunModel([say("Done.", 0), activity("command", "pnpm test", {}, 1)])
+    .response,
+  undefined,
+  "a command after the last message means it was not the answer",
+);
+
+// Multi-paragraph answers after tools must not swallow plan lines into the body.
+const planThenAnswer = buildRunModel([
+  say(
+    "I'll look up the Gyro README and return its first sentence.\n\nChat, CLI, and IDE in one place.\n\nThat's the first sentence in README.md.",
+    0,
+  ),
+  activity("tool", "Read README.md", { path: "README.md" }, 0),
+  say(
+    "I'll look up the Gyro README and return its first sentence.\n\nChat, CLI, and IDE in one place.\n\nThat's the first sentence in README.md.",
+    1,
+  ),
+]);
+// When the cumulative message lands after tools, preambles peel to the rail.
+const afterTools = buildRunModel([
+  activity("tool", "Read README.md", { path: "README.md" }, 0),
+  say(
+    "I'll look up the Gyro README and return its first sentence.\n\ne.\n\nChat, CLI, and IDE in one place.\n\nThat's the first sentence in README.md.",
+    1,
+  ),
+]);
+assert.equal(
+  afterTools.response?.message.includes("Chat, CLI, and IDE in one place."),
+  true,
+  "the answer body should keep the real first sentence",
+);
+assert.equal(
+  afterTools.response?.message.includes("I'll look up"),
+  false,
+  "plan preambles should not sit in the final response body",
+);
+assert.equal(
+  (afterTools.response?.message ?? "")
+    .split(/\n\s*\n/)
+    .some((block) => block.trim() === "e."),
+  false,
+  "orphan stream fragments like 'e.' must not reach the answer",
+);
+assert.ok(
+  afterTools.steps.some(
+    (step) =>
+      step.kind === "say" && step.text.includes("I'll look up the Gyro README"),
+  ),
+  "peeled plan lines should remain visible on the run rail",
+);
+assert.equal(isOrphanAssistantFragment("e."), true);
+assert.equal(
+  isOrphanAssistantFragment("Chat, CLI, and IDE in one place."),
+  false,
+);
+assert.equal(isTransientStatusGreeting("Gyro chat mode is up."), true);
+assert.equal(
+  isTransientStatusGreeting("Chat, CLI, and IDE in one place."),
+  false,
+);
+assert.deepEqual(
+  structuredCommentaryBlocks(
+    "Gyro chat mode is up.\n\nI received your Test message.\n\nWhat would you like to do next?",
+  ),
+  ["I received your Test message.", "What would you like to do next?"],
+  "status greetings should be stripped from the final answer body",
+);
+assert.deepEqual(
+  peelAssistantPreambleBlocks([
+    "I'll look up the README.",
+    "Chat, CLI, and IDE in one place.",
+  ]),
+  {
+    preambles: ["I'll look up the README."],
+    answer: ["Chat, CLI, and IDE in one place."],
+  },
+);
+// Observation first, plan last — the closer is what marks narration.
+assert.equal(
+  peelAssistantPreambleBlocks([
+    "Yes — I see it in the sidebar. Let me find where that's controlled.",
+    "The control lives in SidebarUpdateControl.",
+  ]).preambles.length,
+  1,
+  "a block that closes by promising the assistant's next step is a preamble",
+);
+assert.equal(
+  peelAssistantPreambleBlocks([
+    "The control lives in SidebarUpdateControl. Let me know if you want a tweak.",
+    "I can also rename the helper if that reads better.",
+  ]).preambles.length,
+  0,
+  "Let me know… hands the turn back and must stay in the answer",
+);
+// Narration that leads with context used to escape the rail entirely: the
+// opener test only fired on a first-person start, so "<observation>, so let me
+// …" was promoted to the answer and rendered under the rail mid-run.
+for (const narration of [
+  "This is a sizable change, so let me map the state model before editing.",
+  "The strip is back in place. Now let me look at the recording.",
+  "Confirmed the split geometry, so I will check the launcher next.",
+]) {
+  assert.equal(
+    peelAssistantPreambleBlocks([narration, "The rail lives in surfaces.tsx."])
+      .preambles.length,
+    1,
+    `context-first narration is a preamble: ${narration}`,
+  );
+}
+// The same closing-sentence rule must not swallow an answer that merely offers
+// a follow-up or names the assistant in passing.
+for (const answer of [
+  "The fix is in surfaces.tsx. Let me know if you want the tests too.",
+  "I removed the rail copy and restored the strip; both typecheck clean.",
+]) {
+  assert.equal(
+    peelAssistantPreambleBlocks([answer]).preambles.length,
+    0,
+    `answers stay answers: ${answer}`,
+  );
+}
+// Progress narration names more verbs than "checking" — an observation that
+// closes on "Next I'm finding…" is still a note about the work.
+for (const narration of [
+  "The popover is clipped on its left side. Next I'm finding its styles and markup.",
+  "The header sits 2px low. Now I'm measuring the traffic lights.",
+  "Both paths build the answer. I'm comparing how they peel preambles.",
+]) {
+  assert.equal(
+    isAssistantPreambleBlock(narration),
+    true,
+    `progress narration is a preamble: ${narration}`,
+  );
+}
+// Two sentences over 100 characters used to miss the closing-sentence check:
+// the multi-sentence bail returned first, so "Next I'll …" left the rail,
+// the live phase became finalizing, and the line drew under the working process.
+const nextStepNarration =
+  "The prefix split is in place. Next I'll spill large results, add the tool catalog, and taper history after a model switch.";
+assert.equal(
+  isAssistantPreambleBlock(nextStepNarration),
+  true,
+  "an observation that closes with Next I'll stays narration",
+);
+assert.equal(
+  isAssistantPreambleBlock(
+    "The prefix split is in place. The byte budget is unchanged.",
+  ),
+  false,
+  "two sentences that do not promise more work stay the answer",
+);
+assert.equal(
+  isAssistantPreambleBlock(
+    `${"The measured result holds. ".repeat(20)}Next I'll stop here.`,
+  ),
+  false,
+  "a long answer is not pulled onto the rail because its last clause says Next I'll",
+);
+for (const [label, messageEvent] of [
+  ["plain", say(nextStepNarration, 1)],
+  [
+    "durable",
+    event(
+      "assistant-message",
+      nextStepNarration,
+      { kind: "provider-response", status: "done" },
+      1,
+    ),
+  ],
+]) {
+  const liveNarration = buildRunModel(
+    [activity("tool", "Used tool", { tool: "Read" }, 0), messageEvent],
+    { isRunning: true },
+  );
+  assert.equal(
+    liveNarration.response,
+    undefined,
+    `${label}: live narration stays out of the answer body`,
+  );
+  assert.deepEqual(
+    liveNarration.phase,
+    { name: "working" },
+    `${label}: a run still promising its next step is working, not finalizing`,
+  );
+  assert.equal(
+    liveNarration.steps.at(-1)?.kind,
+    "say",
+    `${label}: the narration stays inside the working rail`,
+  );
+  assert.equal(liveNarration.steps.at(-1)?.text, nextStepNarration);
+}
+assert.equal(
+  buildRunModel(
+    [
+      activity("tool", "Used tool", { tool: "Read" }, 0),
+      event(
+        "assistant-message",
+        "Yes. The diff does what we intended, and the tests passed.",
+        { kind: "provider-response", status: "done" },
+        1,
+      ),
+    ],
+    { isRunning: true },
+  ).phase.name,
+  "finalizing",
+  "a durable answer still finalizes a live run",
+);
+assert.equal(
+  buildRunModel([
+    activity("tool", "Used tool", { tool: "Read" }, 0),
+    say(nextStepNarration, 1),
+  ]).response?.message,
+  nextStepNarration,
+  "a settled turn still answers with its last narration block",
+);
+
+// A real preamble event that trails the last tool (so it is peeled from the
+// closing answer) must not be drawn twice — once in the main pass and once
+// when preambles rejoin the rail.
+const doubleDraw = buildRunModel([
+  activity("command", "Ran command", { detail: "rg runRowText" }, 0),
+  {
+    id: "evt_preamble_once",
+    sessionId: "ses_1",
+    turnId: "turn_1",
+    createdAt: at(1),
+    kind: "assistant-message",
+    message:
+      "Yes — I see the bug. Let me find where the rail labels are built.",
+    payload: {},
+  },
+  say("The labels come from runRowText.", 2),
+]);
+assert.equal(
+  doubleDraw.steps.filter(
+    (step) =>
+      step.kind === "say" && step.text.includes("Let me find where the rail"),
+  ).length,
+  1,
+  "a peeled preamble should appear once on the rail, not twice",
+);
+
+// Silence unused-binding noise when the first multi-block scenario is only for coverage.
+assert.ok(planThenAnswer.steps.length >= 1);
+
+// --- kinds and wording ------------------------------------------------------------
+
+const rowText = (activityKind, label, extra) =>
+  runRowText({
+    kind: "work",
+    id: "evt_x",
+    at: at(0),
+    item: workItemFromEvent(activity(activityKind, label, extra)),
+  });
+
+assert.deepEqual(rowText("command", "Ran it", { detail: "pnpm test" }), {
+  label: "Ran tests",
+  description: "pnpm test",
+});
+assert.deepEqual(
+  rowText("command", "Ran it", {
+    detail: "pnpm test",
+    intent: "Check the suite",
+  }),
+  { label: "Ran tests", description: "Check the suite" },
+  "a provider intent should win over the raw command",
+);
+assert.deepEqual(rowText("file", "Updated create_gyro_bp.js"), {
+  label: "Edited file",
+  description: "create_gyro_bp.js",
+});
+const imageRead = buildRunModel([
+  activity("read", "Read image", { detail: "assets/mockup.png" }),
+]);
+assert.equal(imageRead.steps[0].item.kind, "read");
+assert.equal(imageRead.steps[0].item.media, "image");
+assert.deepEqual(
+  imageRead.files,
+  [],
+  "viewing an image must not count as changing a file",
+);
+for (const activityKind of ["create", "edit", "delete", "move"]) {
+  const run = buildRunModel([
+    activity(activityKind, `${activityKind} file`, { detail: "src/a.ts" }),
+  ]);
+  assert.equal(run.steps[0].item.kind, "file", `${activityKind} is file work`);
+  assert.equal(run.files[0]?.path, "src/a.ts");
+}
+assert.deepEqual(
+  rowText("search", "Searched", { scope: "project", query: "palette" }),
+  {
+    label: "Searched project",
+    description: "palette",
+  },
+);
+assert.deepEqual(rowText("memory", "Edited memory"), {
+  label: "Edited memory",
+});
+// A compaction row may only claim what the provider actually did: only a Codex
+// session summarizes, everything else condenses the transcript or keeps it.
+assert.deepEqual(rowText("context", "Compacted context"), {
+  label: "Compacted context",
+  description: undefined,
+});
+assert.deepEqual(
+  rowText("context", "Compacted context", { compactionMode: "summarized" }),
+  {
+    label: "Compacted context",
+    description: "Earlier conversation summarized",
+  },
+);
+assert.deepEqual(
+  rowText("context", "Compacted context", { compactionMode: "condensed" }),
+  {
+    label: "Compacted context",
+    description: "Earlier turns condensed into a digest",
+  },
+);
+assert.deepEqual(
+  rowText("context", "Compacted context", { compactionMode: "kept" }),
+  {
+    label: "Compacted context",
+    description: "History already fit; nothing dropped",
+  },
+);
+// Events recorded before the marker existed: a checkpoint payload identifies
+// the local rewrite, which never summarized anything.
+assert.deepEqual(
+  rowText("context", "Compacted context", { contextSummary: "kept whole" }),
+  {
+    label: "Compacted context",
+    description: "Earlier turns condensed into a digest",
+  },
+);
+assert.deepEqual(
+  rowText("context", "Compacting context", { status: "running" }),
+  {
+    label: "Compacting context",
+    description: "Making room for the next turn",
+  },
+);
+
+const compactionVisible = buildRunModel([
+  activity("tool", "Read a.ts", {}, 0),
+  activity("context", "Compacting context", { status: "running" }, 1),
+  activity("tool", "Read b.ts", {}, 2),
+]);
+assert.deepEqual(
+  groupRunSteps(compactionVisible.steps).map((step) =>
+    step.kind === "work-group"
+      ? [step.groupKind, step.steps.length]
+      : step.kind === "work"
+        ? step.item.kind
+        : step.kind,
+  ),
+  [["review", 1], "context", ["review", 1]],
+  "context compaction stays visible instead of being folded into a review group",
+);
+
+// An unknown kind stays a beat rather than vanishing.
+assert.deepEqual(rowText("something-new", "Rendered a diagram"), {
+  label: "Rendered a diagram",
+});
+
+// ACP provider placeholders must not double as "Used tool · xAI tool".
+assert.equal(isGenericProviderToolLabel("xAI tool"), true);
+assert.equal(isGenericProviderToolLabel("Kimi tool"), true);
+assert.equal(isGenericProviderToolLabel("Read README.md"), false);
+assert.deepEqual(rowText("tool", "xAI tool"), { label: "Used tool" });
+// A read is its own row: bright verb, muted target — never "Edited file".
+assert.deepEqual(
+  rowText("read", "Read README.md", { path: "README.md" }),
+  { label: "Read file", description: "README.md" },
+  "ACP read kinds should split into a read verb and the path",
+);
+assert.deepEqual(
+  rowText("read", "Read shot.png", { path: "/tmp/shot.png" }),
+  { label: "Viewed image", description: "/tmp/shot.png" },
+  "image reads should read as viewing, not editing",
+);
+// Chat attachments are content-hashed blobs; the digest is not worth a row.
+assert.deepEqual(
+  rowText("read", "Read a9bf.png", {
+    path: "/Users/x/Application Support/Gyro/sessions/attachments/d05/a9bf.png",
+  }),
+  { label: "Viewed image", description: "attachment" },
+  "attachment blobs should not leak their hashed path onto the rail",
+);
+assert.deepEqual(
+  splitToolName(
+    '{"tool_input":{},"tool_name":"gyro_capabilities__gyro_workspace_get_context"}',
+  ),
+  { tool: "Workspace context" },
+  "JSON tool payloads should unwrap to a human capability name",
+);
+assert.deepEqual(
+  splitToolName("gyro_capabilities__gyro_workspace_get_context"),
+  { tool: "Workspace context" },
+  "capability tool ids should drop the gyro_capabilities prefix",
+);
+assert.deepEqual(
+  rowText("tool", "gyro_capabilities__gyro_workspace_get_context"),
+  { label: "Workspace context" },
+  "the rail should show a clean capability name, not Used tool + machine id",
+);
+
+// Repeated updates for the same tool collapse to one beat.
+const repeatedTool = buildRunModel([
+  activity("tool", "gyro_capabilities__gyro_workspace_get_context", {}, 0),
+  activity(
+    "tool",
+    '{"tool_name":"gyro_capabilities__gyro_workspace_get_context"}',
+    {},
+    0,
+  ),
+  activity(
+    "tool",
+    '{"tool_input":{},"tool_name":"gyro_capabilities__gyro_workspace_get_context","variant":"UseTool"}',
+    {},
+    0,
+  ),
+]);
+assert.equal(
+  repeatedTool.steps.filter((step) => step.kind === "work").length,
+  1,
+  "adjacent identical tool calls should coalesce on the rail",
+);
+
+// A running file edit says so.
+assert.deepEqual(
+  rowText("file", "Updated src/a.ts", {
+    detail: "src/a.ts",
+    status: "running",
+  }),
+  { label: "Editing file", description: "src/a.ts" },
+);
+
+// The backend names each kind's material explicitly rather than overloading
+// `detail`. The named field wins, and `detail` stays the fallback so events
+// persisted before that change keep rendering.
+assert.deepEqual(
+  rowText("command", "Ran it", { command: "pnpm build", detail: "ignored" }),
+  { label: "Built project", description: "pnpm build" },
+  "the named command field should win over detail",
+);
+assert.deepEqual(
+  rowText("file", "Updated x", { path: "src/c.ts", detail: "ignored" }),
+  { label: "Edited file", description: "src/c.ts" },
+  "the named path field should win over detail",
+);
+assert.deepEqual(
+  rowText("tool", "Used it", { tool: "mcp__linear__create_issue" }),
+  { label: "linear · create issue" },
+  "the named tool field should win over detail",
+);
+assert.deepEqual(
+  rowText("search", "Searched", { query: "backoff", scope: "project" }),
+  { label: "Searched project", description: "backoff" },
+  "the named query field should win over detail",
+);
+
+// --- what never reaches the rail ----------------------------------------------------
+
+// Delegation records the launch in place, without pinning live children above
+// the parent's work or replaying each later lifecycle update.
+const launch = event(
+  "system-event",
+  "Updated 1 sub-agent(s)",
+  {
+    schema: "gyro.capability.v1",
+    kind: "capability-call",
+    capabilityId: "agent-spawn",
+    status: "completed",
+    resource: { id: "child", kind: "chat", label: "Parser implementation" },
+  },
+  1,
+);
+const delegationRun = buildRunModel(
+  [
+    activity("commentary", "I’ll inspect the parser first.", {}, 0),
+    launch,
+    ...["running", "waiting", "completed"].map((status, index) =>
+      event(
+        "system-event",
+        `Parser: ${status}`,
+        {
+          kind: "subagent-state",
+          agent: { agentId: "child", name: "Parser implementation", status },
+        },
+        index + 2,
+      ),
+    ),
+    activity("commentary", "I’m checking the result.", {}, 5),
+  ],
+  { isRunning: true },
+);
+assert.deepEqual(
+  delegationRun.steps.map((step) => step.kind),
+  ["say", "work", "say"],
+);
+assert.deepEqual(runRowText(delegationRun.steps[1]), {
+  label: "Started sub-agent",
+  description: "Parser implementation",
+});
+for (const [status, label] of [
+  ["running", "Starting sub-agent"],
+  ["denied", "Could not start sub-agent"],
+  ["failed", "Could not start sub-agent"],
+]) {
+  const item = workItemFromEvent({
+    ...launch,
+    payload: { ...launch.payload, status },
+  });
+  assert.equal(runRowText({ kind: "work", item }).label, label);
+}
+
+// Commentary is prose, never a work row or a generic system-event card.
+assert.equal(
+  workItemFromEvent(activity("commentary", "Let me check the config.")),
+  undefined,
+  "commentary should not become a work row",
+);
+const commentary = buildRunModel([
+  activity("commentary", "I’ll inspect the existing sidebar first.", {}, 0),
+  activity("command", "rg sidebar", { detail: "rg sidebar" }, 1),
+]);
+assert.deepEqual(
+  commentary.steps.map((step) => step.kind),
+  ["say", "work"],
+  "provider commentary should render as a plain-language update",
+);
+
+const shellSearch = workItemFromEvent(
+  activity("command", 'rg -n "workspace" packages/ui/src', {
+    command: 'cd /tmp/project && rg -n "workspace" packages/ui/src',
+  }),
+);
+assert.equal(
+  shellSearch?.kind,
+  "search",
+  "ripgrep should read as workspace search",
+);
+
+const shellRead = workItemFromEvent(
+  activity("command", "sed -n '1,80p' src/app.ts", {
+    command: "sed -n '1,80p' src/app.ts",
+  }),
+);
+assert.equal(
+  shellRead?.kind,
+  "read",
+  "range reads should read as file inspection",
+);
+
+const shellTest = workItemFromEvent(
+  activity("command", "pnpm test", { command: "pnpm test" }),
+);
+assert.deepEqual(
+  shellTest &&
+    runRowText({ kind: "work", id: "test", at: at(0), item: shellTest }),
+  { label: "Ran tests", description: "pnpm test" },
+  "test commands should use a purpose-first label",
+);
+
+// The hidden title marker is an instruction to the app, not a beat.
+assert.equal(
+  buildRunModel([
+    activity("commentary", "GYRO_SESSION_TITLE: Rebuild the run UI", {}, 0),
+    activity("command", "pnpm test", {}, 1),
+  ]).steps.length,
+  1,
+  "the session title marker should be dropped",
+);
+
+assert.equal(
+  buildRunModel([
+    activity("commentary", 'GYRO_AGENT_UPDATE: {"status":"continue"}', {}, 0),
+    activity("command", "pnpm test", {}, 1),
+  ]).steps.length,
+  1,
+  "sub-agent completion metadata must stay out of the work timeline",
+);
+
+// Live streamed text still carries the marker until the turn settles; a block
+// holding only the marker must not draw as a narration row.
+assert.equal(
+  buildRunModel(
+    [
+      event(
+        "assistant-message",
+        "GYRO_SESSION_TITLE: Fix daily pace warning",
+        {},
+        0,
+      ),
+      activity("command", "pnpm test", {}, 1),
+    ],
+    { isRunning: true },
+  ).steps.length,
+  1,
+  "a streamed session title marker should be dropped",
+);
+
+assert.equal(
+  buildRunModel([
+    activity("commentary", 'GYRO_ARTIFACTS: {"items":[]}', {}, 0),
+    activity("command", "pnpm test", {}, 1),
+  ]).steps.length,
+  1,
+  "the artifact marker should be dropped",
+);
+
+// A reply saved without block marks still keeps its opening narration out of
+// the answer when that opener reports checking in progress.
+{
+  const leaked = buildRunModel([
+    activity("command", "pnpm test", {}, 0),
+    event(
+      "assistant-message",
+      "I'll verify it in the real app as far as I can. First I'm checking whether the dev server is running, whether any existing fixtures can render the browser panel, and what the native browser smoke test covers.\n\nVerified. All four browser changes work in rendered UI.",
+      { kind: "provider-response", status: "done", timelineSequence: 1 },
+      1,
+    ),
+  ]);
+  assert.equal(
+    leaked.response?.message,
+    "Verified. All four browser changes work in rendered UI.",
+    "an in-progress opener should not lead the final answer",
+  );
+  const answerFirst = buildRunModel([
+    activity("command", "pnpm test", {}, 0),
+    event(
+      "assistant-message",
+      "The fix is in and the checks pass. Nothing else changed in the chat surface.\n\nI'm checking nothing further unless you ask.",
+      { kind: "provider-response", status: "done", timelineSequence: 1 },
+      1,
+    ),
+  ]);
+  assert.match(
+    answerFirst.response?.message ?? "",
+    /^The fix is in/,
+    "an answer that opens with its result must stay whole",
+  );
+}
+
+// Browser work names the verb and what it touched, in its own phase.
+const capabilityCall = (capabilityId, extra = {}, minutes = 0) =>
+  event(
+    "system-event",
+    capabilityId,
+    {
+      schema: "gyro.capability.v1",
+      kind: "capability-call",
+      capabilityId,
+      status: "completed",
+      ...extra,
+    },
+    minutes,
+  );
+const page = {
+  id: "browser-1",
+  kind: "browser",
+  label: "http://127.0.0.1:1437/chat-hardening.html?turn=1",
+};
+const clicked = workItemFromEvent(
+  capabilityCall("browser-click", { target: "Save", resource: page }),
+);
+assert.deepEqual(
+  clicked &&
+    runRowText({ kind: "work", id: "click", at: at(0), item: clicked }),
+  { label: "Clicked", description: "Save" },
+  "a browser click should name the element it touched",
+);
+const opened = workItemFromEvent(
+  capabilityCall("browser-open", { resource: page }),
+);
+assert.deepEqual(
+  opened && runRowText({ kind: "work", id: "open", at: at(0), item: opened }),
+  { label: "Opened page", description: "127.0.0.1:1437/chat-hardening.html" },
+  "a page action should show a compact page address",
+);
+const providerClick = workItemFromEvent(
+  activity("tool", "mcp__gyro_capabilities__gyro_browser_click", {
+    tool: "mcp__gyro_capabilities__gyro_browser_click",
+  }),
+);
+assert.equal(providerClick?.kind, "browser");
+assert.equal(providerClick?.action, "click");
+assert.deepEqual(
+  groupRunSteps(
+    buildRunModel([
+      capabilityCall("browser-read-page", { resource: page }, 0),
+      capabilityCall("browser-screenshot", { resource: page }, 1),
+    ]).steps,
+  ).map((step) =>
+    step.kind === "work-group"
+      ? [step.groupKind, step.steps.length]
+      : step.kind,
+  ),
+  [["browser", 2]],
+  "browser reads and captures should group as browser work, not workspace review",
+);
+
+// A non-activity system event becomes an approval beat rather than being lost.
+const approval = buildRunModel([
+  event("approval-requested", "Allow writing to src/a.ts?", {}, 0),
+]);
+assert.equal(approval.steps[0].kind, "ask", "approvals stay on the rail");
+
+// --- the header ---------------------------------------------------------------
+
+assert.equal(formatRunDuration(231), "3m 51s", "the reference header format");
+assert.equal(
+  formatRunDuration(0),
+  "0s",
+  "a run with no elapsed time still reads",
+);
+assert.equal(formatRunDuration(3_600), "1h", "whole hours drop empty places");
+assert.equal(formatRunDuration(3_661), "1h 1m 1s");
+
+assert.equal(runHeaderLabel({ name: "working" }, "12s"), "Working for 12s");
+assert.equal(runHeaderLabel({ name: "thinking" }, "1s"), "Working for 1s");
+assert.equal(
+  runHeaderLabel({ name: "done", durationMs: 231_000 }, "3m 51s"),
+  "Worked for 3m 51s",
+);
+
+// A failed or interrupted turn has no recorded end, so the header must not
+// invent a duration from whenever the component happened to mount.
+assert.equal(
+  runHeaderLabel({ name: "failed", message: "Provider error" }, "9s"),
+  "Failed",
+  "a real failure is labeled Failed, not Stopped",
+);
+assert.equal(
+  runHeaderLabel(
+    { name: "failed", message: "Stopped", recoveryKind: "cancelled" },
+    "9s",
+  ),
+  "Stopped",
+  "a user cancel is labeled Stopped",
+);
+assert.equal(runHeaderLabel({ name: "interrupted" }, "9s"), "Interrupted");
+assert.equal(
+  runHeaderLabel({ name: "done" }, undefined),
+  "Worked",
+  "a settled turn with no duration recorded says so",
+);
+
+assert.ok(isRunPhaseLive({ name: "finalizing" }), "finalizing still ticks");
+assert.ok(
+  !isRunPhaseLive({ name: "interrupted" }),
+  "interrupted does not tick",
+);
+
+// --- token discipline ------------------------------------------------------------
+
+// Light mode is free only while the rail stays on tokens: `--gyro-*` values
+// already flip at `:root[data-theme="light"]`. One hardcoded colour and the rail
+// grows a ghost line in one theme, which is how `styles.css` accumulated its 280
+// light overrides. The rule is only real if it is checked.
+const stylesheet = readFileSync(
+  new URL("../packages/ui/src/styles.css", import.meta.url),
+  "utf8",
+);
+const railStart = stylesheet.indexOf("Run rail (gyro-run-*)");
+assert.ok(railStart > 0, "the run rail block should be findable in styles.css");
+// The marker sits inside the banner comment, and comments explain the rule by
+// quoting the selector. Start past the banner, then drop the remaining comments,
+// so only declarations are measured.
+const bannerEnd = stylesheet.indexOf("*/", railStart);
+const railEnd = stylesheet.indexOf("End run rail (gyro-run-*)", bannerEnd);
+assert.ok(railEnd > bannerEnd, "the run rail end marker should be findable");
+const rail = stylesheet
+  .slice(bannerEnd, railEnd)
+  .replace(/\/\*[\s\S]*?\*\//g, "");
+
+const literalColour = rail.match(
+  /(?<![\w-])(#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\))/gi,
+);
+assert.equal(
+  literalColour,
+  null,
+  `the run rail must use only --gyro-* tokens, found: ${literalColour?.join(", ")}`,
+);
+
+const lightOverrides = rail.match(/:root\[data-theme="light"\]/g) ?? [];
+assert.equal(
+  lightOverrides.length,
+  1,
+  "the run rail allows exactly one light override (icon opacity, which is optical)",
+);
+
+console.log("chat run checks passed");
+
+assert.equal(
+  buildRunModel([], {
+    status: {
+      status: "cancelled",
+      recoveryKind: "unknown",
+      message: "OpenAI was cancelled",
+    },
+  }).phase.recoveryKind,
+  "cancelled",
+  "a stored cancellation must remain a neutral stop even with legacy recovery metadata",
+);
+
+// Narration that names the work and hands off with a colon belongs on the rail,
+// not in the answer body. The opener alone cannot carry this: a gerund also
+// opens an ordinary noun phrase, so the colon is the part that decides.
+assert.equal(
+  isAssistantPreambleBlock("Running the UI smoke checks:"),
+  true,
+  "a gerund handoff ending in a colon is narration",
+);
+assert.equal(
+  isAssistantPreambleBlock("Updating the assertion to match the new one:"),
+  true,
+  "the same holds for an edit the assistant is about to make",
+);
+assert.equal(
+  isAssistantPreambleBlock(
+    "Running totals are stored in the ledger and reconciled nightly, so the figure you saw is expected.",
+  ),
+  false,
+  "a gerund that opens a noun phrase is still an answer",
+);
+assert.equal(
+  isAssistantPreambleBlock("Here are the results:"),
+  false,
+  "a colon alone does not make a block narration",
+);
+
+// --- segments: narration splits work into stretches ---------------------------
+
+const call = (id, item, repeat) => ({
+  kind: "work",
+  id,
+  at: at(0),
+  item: { status: "done", ...item },
+  ...(repeat ? { repeat } : {}),
+});
+
+assert.deepEqual(
+  segmentRunSteps([
+    { kind: "status", id: "r1", at: at(0), text: "Planning" },
+    call("c1", { kind: "command", command: "git status" }),
+    call("c2", { kind: "read", path: "a.ts" }),
+    { kind: "say", id: "s1", at: at(1), text: "Now editing." },
+    call("c3", { kind: "file", path: "a.ts" }),
+  ]).map((segment) =>
+    segment.kind === "work"
+      ? `${segment.id}:${segment.steps.length}`
+      : `${segment.kind}:${segment.id}`,
+  ),
+  ["segment-r1:3", "say:s1", "segment-c3:1"],
+  "narration should close a stretch; work and reasoning beats should share one",
+);
+
+assert.equal(
+  summarizeSegment([
+    call("a", { kind: "command", command: "git remote -v" }),
+    call("b", { kind: "read", path: "a.ts" }),
+    call("c", { kind: "command", command: "pnpm test" }, 2),
+    call("d", { kind: "read", path: "a.ts" }),
+    call("e", { kind: "tool", name: "Skill" }),
+  ]),
+  "Ran 3 commands, Read 1 file, 1 other tool call",
+  "kinds keep first-seen order, reads count distinct paths, repeats count calls",
+);
+assert.equal(
+  summarizeSegment([
+    call("a", { kind: "command", command: "ls" }),
+    call("b", { kind: "read", path: "a.ts" }),
+    call("c", { kind: "file", path: "a.ts" }),
+    call("d", { kind: "search", query: "todo" }),
+    call("e", { kind: "tool", name: "Skill", status: "failed" }),
+  ]),
+  "Ran 1 command, Read 1 file, Edited 1 file, 2 other tool calls, 1 failed",
+  "a fourth kind should fold into other calls and a failure should be named",
+);
+assert.equal(
+  summarizeSegment([call("a", { kind: "tool", name: "Skill" }, 2)]),
+  "Used 2 tools",
+  "a stretch of only unnamed tools should not read as 'other'",
+);
+assert.deepEqual(
+  splitSegmentSummary(
+    "Ran 14 commands, Ran 8 searches, Read 7 files, 55 other tool calls, 3 failed",
+  ),
+  {
+    lead: "Ran 14 commands, Ran 8 searches, Read 7 files, 55 other tool calls",
+    failed: "3 failed",
+  },
+  "only the failure clause of a summary should be separable for emphasis",
+);
+assert.deepEqual(
+  splitSegmentSummary("Ran 3 commands, Read 1 file, 1 other tool call"),
+  {
+    lead: "Ran 3 commands, Read 1 file, 1 other tool call",
+    failed: null,
+  },
+);
+
+assert.deepEqual(
+  liveWindow([1, 2, 3, 4, 5, 6], 4),
+  { visible: [3, 4, 5, 6], hiddenCount: 2 },
+  "the live window should keep the newest calls",
+);
+assert.deepEqual(liveWindow([1, 2], 4), { visible: [1, 2], hiddenCount: 0 });
+
+assert.deepEqual(
+  runCallText(
+    call("a", {
+      kind: "command",
+      command: "/bin/zsh -lc 'cd /repo && git remote -v'",
+      status: "running",
+    }),
+  ),
+  { label: "Running", description: "git remote -v" },
+  "a call row should show the command as typed, without shell wrapper or cd",
+);
+assert.deepEqual(runCallText(call("a", { kind: "search", query: "useNow" })), {
+  label: "Searched for",
+  description: "useNow",
+});
+
+// Reasoning headlines are a live status, never a tool row or a reply.
+const reasoningEvents = [
+  activity("reasoning", "**Checking file sizes**", {}, 0),
+];
+const thinking = buildRunModel(reasoningEvents, { isRunning: true });
+assert.deepEqual(
+  thinking.steps.map((step) => [step.kind, step.text]),
+  [["status", "Checking file sizes"]],
+  "a reasoning summary should become a status beat with its markdown stripped",
+);
+assert.equal(
+  thinking.phase.name,
+  "thinking",
+  "a run with only reasoning should still read as thinking",
+);
+const reasonedEvents = [
+  ...reasoningEvents,
+  activity("command", "pnpm test", { detail: "pnpm test" }, 1),
+  say("All checks pass.", 2),
+];
+const reasoned = buildRunModel(reasonedEvents, { isRunning: false });
+assert.equal(
+  reasoned.response?.message,
+  "All checks pass.",
+  "reasoning should not stop the closing message from being the answer",
+);
+assert.deepEqual(
+  buildRunModel(reasonedEvents, { isRunning: false }).steps.map(
+    (step) => step.id,
+  ),
+  reasoned.steps.map((step) => step.id),
+  "replaying the same events should produce the same steps",
+);
+assert.equal(
+  buildRunModel(
+    [
+      activity("reasoning", "**Checking file sizes**", {}, 0),
+      activity("reasoning", "Checking file sizes", {}, 0),
+    ],
+    { isRunning: true },
+  ).steps.length,
+  1,
+  "a re-sent reasoning headline should stay one beat",
+);
+
+// Gyro's own edit tool names its path only on the completed call. That call is
+// a changed file; a failed proposal changed nothing.
+const proposedEdit = buildRunModel([
+  capabilityCall("workspace-propose-edit", { status: "running" }),
+  capabilityCall("workspace-propose-edit", {
+    resource: { id: "p1", kind: "proposal", label: "src/app.ts" },
+  }),
+  capabilityCall("workspace-propose-edit", {
+    status: "failed",
+    resource: { id: "p2", kind: "proposal", label: "src/rejected.ts" },
+  }),
+]);
+assert.deepEqual(
+  proposedEdit.files.map((file) => file.path),
+  ["src/app.ts"],
+  "a completed propose-edit call should count as a changed file",
+);
+
+// The string-replacement edit tool lands in the same lane, so the same rule
+// holds: only the completed call changed a file.
+const stringEdit = buildRunModel([
+  capabilityCall("workspace-edit", { status: "running" }),
+  capabilityCall("workspace-edit", {
+    resource: { id: "p3", kind: "proposal", label: "src/lib.rs" },
+  }),
+  capabilityCall("workspace-edit", {
+    status: "failed",
+    resource: { id: "p4", kind: "proposal", label: "src/old.rs" },
+  }),
+]);
+assert.deepEqual(
+  stringEdit.files.map((file) => file.path),
+  ["src/lib.rs"],
+  "a completed string-replacement edit should count as a changed file",
+);
+
+// The working-process line reads the receipt, not the bare path. Provider
+// payloads often omit the delta; the applied mutation is the measurement.
+const measuredEdit = buildRunModel([
+  activity(
+    "file",
+    "Updated src/app.ts",
+    { detail: "src/app.ts", additions: 1, deletions: 0 },
+    0,
+  ),
+  capabilityCall(
+    "workspace-edit",
+    { resource: { id: "p5", kind: "proposal", label: "src/lib.rs" } },
+    1,
+  ),
+  event(
+    "system-event",
+    "Applied src/app.ts",
+    {
+      schema: "gyro.mutation.v1",
+      proposalId: "receipt-app",
+      status: "applied",
+      fileChanges: [{ path: "src/app.ts", additions: 20, deletions: 4 }],
+    },
+    2,
+  ),
+  event(
+    "system-event",
+    "Applied src/lib.rs",
+    {
+      schema: "gyro.mutation.v1",
+      proposalId: "receipt-lib",
+      status: "applied",
+      fileChanges: [{ path: "src/lib.rs", additions: 6, deletions: 5 }],
+    },
+    3,
+  ),
+]);
+assert.deepEqual(
+  measuredEdit.steps.flatMap((step) =>
+    step.kind === "work" && step.item.kind === "file"
+      ? [[step.item.path, step.item.additions, step.item.deletions]]
+      : [],
+  ),
+  [
+    ["src/app.ts", 20, 4],
+    ["src/lib.rs", 6, 5],
+  ],
+  "applied receipts should put line counts on each working-process edit",
+);
+assert.deepEqual(
+  segmentLineStats(measuredEdit.steps),
+  { additions: 26, deletions: 9 },
+  "the folded edit line should total those counts, like +26 -9",
+);
+assert.equal(
+  segmentLineStats([
+    call("a", { kind: "file", path: "a.ts", additions: 4, deletions: 1 }),
+    call("b", { kind: "file", path: "b.ts" }),
+  ]),
+  undefined,
+  "one unmeasured edit should hide the stretch total",
+);
+assert.deepEqual(
+  segmentLineStats([
+    call("a", { kind: "read", path: "a.ts" }),
+    call("b", { kind: "file", path: "b.ts", additions: 4, deletions: 0 }),
+  ]),
+  { additions: 4, deletions: 0 },
+  "reads should not block the edit line delta",
+);
+
+assert.equal(
+  buildRunModel([], {
+    status: {
+      status: "failed",
+      message: "DeepSeek send needs attention",
+      error: "DeepSeek exceeded Gyro's tool-call limit for one turn",
+    },
+  }).phase.message,
+  "DeepSeek exceeded Gyro's tool-call limit for one turn",
+  "failure banners expose the actual cause instead of a generic heading",
+);
+
+// A finished move is a path card, not a content edit, and Undo matches only
+// while that destination is still the top of the journal.
+const moved = workItemFromEvent(
+  capabilityCall("workspace-move-path", {
+    status: "completed",
+    summary: "Moved drafts/a.txt to notes.md",
+    resource: { id: "file-1", kind: "file", label: "notes.md" },
+  }),
+);
+assert.equal(moved?.kind, "file");
+assert.equal(moved?.lifecycle, "move");
+assert.deepEqual(
+  moved && runCallText({ kind: "work", id: "move", at: at(0), item: moved }),
+  { label: "Moved", description: "notes.md" },
+);
+const roots = ["/repo"];
+const topMove = {
+  action: "moved",
+  path: "/repo/notes.md",
+  label: "Undo move of notes.md",
+};
+assert.equal(fileMatchesPathUndo(moved, topMove, roots), true);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    { action: "moved", path: "/repo/docs/notes.md", label: "Undo move of notes.md" },
+    roots,
+  ),
+  false,
+  "a root file must not match a nested file of the same name",
+);
+assert.equal(
+  fileMatchesPathUndo(moved, { ...topMove, action: "created" }, roots),
+  false,
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "app/main.ts", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/Users/me/app/main.ts",
+      label: "Undo move of main.ts",
+    },
+    ["/Users/me/app"],
+  ),
+  false,
+  "a card whose path only shares a suffix must not undo a different root file",
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "main.ts", lifecycle: "move" },
+    { action: "moved", path: "p/main.ts", label: "Undo move of main.ts" },
+    ["/Users/me/app"],
+  ),
+  false,
+  "a root that merely ends with the same letters is not that directory",
+);
+assert.equal(
+  fileMatchesPathUndo(
+    { path: "notes.md", lifecycle: "move" },
+    {
+      action: "moved",
+      path: "/private/tmp/repo/notes.md",
+      label: "Undo move of notes.md",
+    },
+    ["/tmp/repo"],
+  ),
+  true,
+  "a canonical directory still matches when the extra prefix sits on a slash",
+);
+assert.equal(
+  buildRunModel([
+    capabilityCall("workspace-create-path", {
+      resource: { id: "file-2", kind: "file", label: "notes.md" },
+    }),
+  ]).files.length,
+  0,
+  "creating a path is not a content edit",
+);

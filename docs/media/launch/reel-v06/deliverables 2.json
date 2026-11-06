@@ -1,0 +1,18 @@
+{
+  "gyro-launch-16x9-15s-en-v06.mp4": {
+    "bytes": 6193757,
+    "sha256": "5826eeb2c0a58219f6f9754a1923e27f67be6c27140b66f9dacaa49d7c1b6844"
+  },
+  "gyro-launch-16x9-15s-en-v06-animatic.mp4": {
+    "bytes": 1488951,
+    "sha256": "08ab404b77471ae5141351eaab8752a5beff035a57c0b4354dc25f90e4726b28"
+  },
+  "gyro-launch-v06-editable-source.zip": {
+    "bytes": 7835691,
+    "sha256": "0f1bb042219646e14ff90b995501df83cb96e63eacb143301bf7566473df9756"
+  },
+  "v06-four-designed-frames.jpg": {
+    "bytes": 76252,
+    "sha256": "31dbebf77839d6a4d91396c9e1c608af4f3f1814a3289712fd7ebccb578e9f26"
+  }
+}

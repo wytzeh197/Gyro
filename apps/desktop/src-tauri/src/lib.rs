@@ -294,8 +294,9 @@ const DESKTOP_IPC_IO_TIMEOUT: Duration = Duration::from_secs(5);
 const WORKSPACE_TREE_MAX_CACHE_AGE: Duration = Duration::from_secs(30);
 const WORKSPACE_CHANGE_DEBOUNCE: Duration = Duration::from_millis(250);
 const WORKSPACE_PREPARATION_CACHE_AGE: Duration = Duration::from_secs(2);
-const WORKSPACE_PREPARATION_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
-const WORKSPACE_PREPARATION_GIT_TIMEOUT: Duration = Duration::from_secs(8);
+const WORKSPACE_PREPARATION_WAIT_TIMEOUT: Duration = Duration::from_secs(90);
+const WORKSPACE_PREPARATION_GIT_SLOW_NOTICE: Duration = Duration::from_secs(8);
+const WORKSPACE_PREPARATION_GIT_TIMEOUT: Duration = Duration::from_secs(60);
 /// `git status` prints nothing until it has walked the whole worktree, so a
 /// large or iCloud-evicted checkout stays silent for minutes while it works.
 /// The read is budgeted by wall clock alone; an inactivity timeout would only
@@ -8073,6 +8074,24 @@ fn emit_workspace_preparation(
     progress
 }
 
+// Keep one bounded read alive after the initial progress budget. Restarting Git
+// at the soft deadline would discard work already spent scanning the checkout.
+fn wait_for_git_preparation<T>(
+    receiver: &mpsc::Receiver<T>,
+    slow_notice: Duration,
+    deadline: Instant,
+    on_slow: impl FnOnce(),
+) -> Result<T, mpsc::RecvTimeoutError> {
+    let remaining = || deadline.saturating_duration_since(Instant::now());
+    match receiver.recv_timeout(slow_notice.min(remaining())) {
+        Err(mpsc::RecvTimeoutError::Timeout) if !remaining().is_zero() => {
+            on_slow();
+            receiver.recv_timeout(remaining())
+        }
+        result => result,
+    }
+}
+
 fn prepare_workspace_impl(
     request: &WorkspacePreparationRequest,
     root: &Path,
@@ -8158,7 +8177,22 @@ fn prepare_workspace_impl(
     });
 
     let remaining_git = || git_deadline.saturating_duration_since(Instant::now());
-    let source_control = match git_rx.recv_timeout(remaining_git()) {
+    let source_control = match wait_for_git_preparation(
+        &git_rx,
+        WORKSPACE_PREPARATION_GIT_SLOW_NOTICE,
+        git_deadline,
+        || {
+            emit_workspace_preparation(
+                app,
+                request,
+                Some("git"),
+                "preparing",
+                2,
+                "Git is taking longer than usual",
+                &errors,
+            );
+        },
+    ) {
         Ok(Ok(status)) => {
             if let Some(error) = &status.error {
                 if !error.contains("not a git repository") {
@@ -8177,16 +8211,16 @@ fn prepare_workspace_impl(
             });
             None
         }
-        Err(_) => {
+        Err(error) => {
+            let message = match error {
+                mpsc::RecvTimeoutError::Timeout => "Inspecting Git timed out",
+                mpsc::RecvTimeoutError::Disconnected => "Git inspection worker stopped",
+            };
             errors.push(WorkspacePreparationError {
                 phase: "git".into(),
-                message: "Inspecting Git timed out".into(),
+                message: message.into(),
             });
-            Some(git_status_read_failure(
-                Some(root),
-                "Inspecting Git timed out".into(),
-                true,
-            ))
+            Some(git_status_read_failure(Some(root), message.into(), true))
         }
     };
     let branches = match branch_rx.recv_timeout(remaining_git()) {

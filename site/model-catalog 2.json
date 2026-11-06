@@ -1,0 +1,257 @@
+{
+  "schema": "gyro.model-catalog.v1",
+  "revision": "2026-10-23.3",
+  "enabled": true,
+  "rolloutPercentage": 100,
+  "models": [
+    {
+      "providerId": "openai",
+      "id": "gpt-6.1-sol",
+      "displayName": "GPT-6.1 Sol",
+      "description": "Codex CLI. Near-Astra performance for coding and professional work.",
+      "minClientRevision": 2,
+      "insertBefore": "gpt-6-astra",
+      "contextWindowTokens": 500000,
+      "supportedReasoningEfforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "defaultReasoningEffort": "low"
+    },
+    {
+      "providerId": "anthropic",
+      "id": "claude-opus-5-5",
+      "displayName": "Claude Opus 5.5",
+      "description": "Claude Code. Long-running agentic coding and knowledge work.",
+      "minClientRevision": 1,
+      "insertBefore": "claude-opus-5",
+      "contextWindowTokens": 1000000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "anthropic",
+      "id": "claude-sonnet-5-5",
+      "displayName": "Claude Sonnet 5.5",
+      "description": "Claude Code. Best speed and intelligence balance.",
+      "minClientRevision": 1,
+      "insertBefore": "claude-sonnet-5",
+      "contextWindowTokens": 1000000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "anthropic",
+      "id": "claude-haiku-5-5",
+      "displayName": "Claude Haiku 5.5",
+      "description": "Claude Code. Fast model for lighter coding and high-volume tasks.",
+      "minClientRevision": 1,
+      "insertBefore": "claude-haiku-4-5",
+      "contextWindowTokens": 1000000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "openai",
+      "id": "gpt-6-sol",
+      "displayName": "GPT-6 Sol",
+      "description": "Codex CLI. Workhorse model for coding and everyday work.",
+      "minClientRevision": 2,
+      "insertBefore": "gpt-5.6-sol",
+      "contextWindowTokens": 272000,
+      "supportedReasoningEfforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "openai",
+      "id": "gpt-6-luna",
+      "displayName": "GPT-6 Luna",
+      "description": "Codex CLI. Fast and affordable model for easier tasks.",
+      "minClientRevision": 2,
+      "insertBefore": "gpt-5.6-sol",
+      "contextWindowTokens": 272000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "openai",
+      "id": "gpt-5.6-sol",
+      "displayName": "GPT-5.6 Sol",
+      "description": "Codex CLI. Frontier model for complex professional work.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 272000,
+      "supportedReasoningEfforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "defaultReasoningEffort": "low"
+    },
+    {
+      "providerId": "openai",
+      "id": "gpt-5.6-luna",
+      "displayName": "GPT-5.6 Luna",
+      "description": "Codex CLI. Fast, cost-sensitive model for lighter workloads.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 272000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "anthropic",
+      "id": "claude-haiku-4-5",
+      "displayName": "Claude Haiku 4.5",
+      "description": "Claude Code. Fastest option for lighter work.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 200000,
+      "supportedReasoningEfforts": []
+    },
+    {
+      "providerId": "openrouter",
+      "id": "x-ai/grok-4.7",
+      "displayName": "Grok 4.7",
+      "description": "OpenRouter API. Serves 500K, separate from the Grok Build CLI's 256K.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 500000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
+      "defaultReasoningEffort": "high"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "deepseek/deepseek-v4.1-flash",
+      "displayName": "DeepSeek V4.1 Flash",
+      "description": "OpenRouter API. Low-cost general model. DeepSeek's own API serves 1M.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 1048576,
+      "supportedReasoningEfforts": ["low", "high", "max"],
+      "defaultReasoningEffort": "high"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "openai/gpt-6-astra",
+      "displayName": "GPT-6 Astra",
+      "description": "OpenRouter API. OpenAI's frontier model. Codex CLI serves 272K on its own connection.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 1050000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "qwen/qwen3.8-max-0902",
+      "displayName": "Qwen3.8 Max",
+      "description": "OpenRouter API. Qwen's frontier model.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 1000000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
+      "defaultReasoningEffort": "xhigh"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "google/gemini-3.8-flash",
+      "displayName": "Gemini 3.8 Flash",
+      "description": "OpenRouter API. Long-context reasoning.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 1048576,
+      "supportedReasoningEfforts": ["low", "medium", "high"],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "z-ai/glm-5.3",
+      "displayName": "GLM 5.3",
+      "description": "OpenRouter API. Open-weights coding model.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 1048576,
+      "supportedReasoningEfforts": ["low", "high", "max"],
+      "defaultReasoningEffort": "max"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "x-ai/grok-4.6",
+      "displayName": "Grok 4.6",
+      "description": "OpenRouter API. Serves 500K, separate from the Grok Build CLI's 256K.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 500000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
+      "defaultReasoningEffort": "high"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "anthropic/claude-opus-5",
+      "displayName": "Claude Opus 5",
+      "description": "OpenRouter API. Anthropic's frontier model. Claude Code also serves 1M on its own connection.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 1000000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultReasoningEffort": "high"
+    },
+    {
+      "providerId": "kimi",
+      "id": "k3.1-pro",
+      "displayName": "Kimi K3.1 Pro",
+      "description": "Kimi Code. Flagship of the K3.1 series. Up to 1M context on Pro and Allegretto; Plus and Moderato stay at 262,144. Thinking is required.",
+      "minClientRevision": 2,
+      "insertBefore": "k3",
+      "contextWindowTokens": 262144,
+      "supportedReasoningEfforts": ["low", "high", "max"],
+      "defaultReasoningEffort": "max"
+    },
+    {
+      "providerId": "kimi",
+      "id": "k3.1-pro-highspeed",
+      "displayName": "Kimi K3.1 Pro Highspeed",
+      "description": "Kimi Code. The same K3.1 Pro model, about 2-3x faster. Pro and Allegretto only, with a 1,048,576 context window.",
+      "minClientRevision": 2,
+      "insertBefore": "k3",
+      "contextWindowTokens": 1048576,
+      "supportedReasoningEfforts": ["low", "high", "max"],
+      "defaultReasoningEffort": "max"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "moonshotai/kimi-k3.1-pro",
+      "displayName": "Kimi K3.1 Pro",
+      "description": "OpenRouter API. Flagship open-weight model with a 1,048,576 context. Kimi Code's offline baseline for this model is 262,144.",
+      "minClientRevision": 2,
+      "insertBefore": "moonshotai/kimi-k3",
+      "contextWindowTokens": 1048576,
+      "supportedReasoningEfforts": ["low", "high", "max"],
+      "defaultReasoningEffort": "max"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "moonshotai/kimi-k3",
+      "displayName": "Kimi K3",
+      "description": "OpenRouter API. Open-weights agentic model. Kimi Code's offline baseline is 262,144.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 1048576,
+      "supportedReasoningEfforts": ["low", "high", "max"],
+      "defaultReasoningEffort": "max"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "anthropic/claude-sonnet-5",
+      "displayName": "Claude Sonnet 5",
+      "description": "OpenRouter API. Strong general coding model. Claude Code also serves 1M on its own connection.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 1000000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultReasoningEffort": "high"
+    }
+  ]
+}

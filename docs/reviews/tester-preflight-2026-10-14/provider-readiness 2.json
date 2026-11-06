@@ -1,0 +1,130 @@
+{
+  "schema": "gyro.provider-verification.v1",
+  "checkedAt": "2026-10-14T06:53:17.087Z",
+  "temporaryRoot": "/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-provider-verification-rx3j5r",
+  "live": false,
+  "scope": "Shipped providers; readiness is distinct from generation. CLI live probes do not validate desktop rendering or every listed model.",
+  "providers": [
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "executionKind": "codex-cli",
+      "model": "gpt-5.6-sol",
+      "readiness": "ready",
+      "summary": "Logged in using ChatGPT",
+      "live": {
+        "status": "not-run"
+      }
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "executionKind": "claude-code",
+      "model": "claude-sonnet-5",
+      "readiness": "ready",
+      "summary": "Claude CLI reports a stored login; generation must verify account access.",
+      "live": {
+        "status": "not-run"
+      }
+    },
+    {
+      "id": "kimi",
+      "name": "Kimi",
+      "executionKind": "kimi-acp",
+      "model": "k3",
+      "readiness": "ready",
+      "summary": "Kimi ACP authenticated; provider-owned credential value was not read by Gyro.",
+      "live": {
+        "status": "not-run"
+      }
+    },
+    {
+      "id": "xai",
+      "name": "xAI",
+      "executionKind": "acp-cli",
+      "model": "grok-4.7",
+      "readiness": "ready",
+      "summary": "xAI ACP authenticated; provider-owned credential value was not read by Gyro.",
+      "live": {
+        "status": "not-run"
+      }
+    },
+    {
+      "id": "antigravity",
+      "name": "Google Antigravity",
+      "executionKind": "acp-cli",
+      "model": "antigravity-default",
+      "readiness": "blocked",
+      "summary": "start agy_acp_server.par through ACP: No such file or directory (os error 2)",
+      "live": {
+        "status": "not-run"
+      }
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "executionKind": "acp-cli",
+      "model": "cursor-default",
+      "readiness": "blocked",
+      "summary": "start cursor-agent through ACP: No such file or directory (os error 2)",
+      "live": {
+        "status": "not-run"
+      }
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "executionKind": "acp-cli",
+      "model": "opencode-default",
+      "readiness": "blocked",
+      "summary": "start opencode through ACP: No such file or directory (os error 2)",
+      "live": {
+        "status": "not-run"
+      }
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "executionKind": "openai-compatible-api",
+      "model": "deepseek-flash",
+      "readiness": "blocked",
+      "summary": "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.",
+      "live": {
+        "status": "not-run"
+      }
+    },
+    {
+      "id": "mistral",
+      "name": "Mistral",
+      "executionKind": "openai-compatible-api",
+      "model": "mistral-medium-latest",
+      "readiness": "blocked",
+      "summary": "No API key is stored for this provider. Add one in Settings > Providers, or set MISTRAL_API_KEY.",
+      "live": {
+        "status": "not-run"
+      }
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "executionKind": "openai-compatible-api",
+      "model": "anthropic/claude-sonnet-5",
+      "readiness": "blocked",
+      "summary": "No API key is stored for this provider. Add one in Settings > Providers, or set OPENROUTER_API_KEY.",
+      "live": {
+        "status": "not-run"
+      }
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "executionKind": "ollama-api",
+      "model": "",
+      "readiness": "ready",
+      "summary": "Ollama is running at http://localhost:11434/api; 1 local model discovered.",
+      "live": {
+        "status": "not-run"
+      }
+    }
+  ]
+}

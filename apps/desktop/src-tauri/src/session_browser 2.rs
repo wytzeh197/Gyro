@@ -1,0 +1,2127 @@
+//! Session-scoped embedded browser (child WKWebView) for the chat rail.
+//!
+//! One child webview per chat session, positioned over the React rail host.
+//! The injected agent captures console/network and exposes DOM read/interaction
+//! tools via native evaluation callbacks. The custom URI scheme carries only
+//! best-effort console/network events; tool results do not depend on page fetch.
+
+use crate::browser_viewport::{self, BrowserViewportRequest, BrowserViewportState};
+use gyro_core::security::redact_secrets;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::mpsc;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Runtime, WebviewUrl};
+use uuid::Uuid;
+
+const MAX_CONSOLE_ENTRIES: usize = 100;
+const MAX_NETWORK_ENTRIES: usize = 100;
+const MAX_ENTRY_CHARS: usize = 2_000;
+const MAX_TREE_CHARS: usize = 48_000;
+const MAX_FIND_RESULTS: usize = 40;
+const AGENT_CALL_TIMEOUT: Duration = Duration::from_secs(8);
+const MAIN_WINDOW_LABEL: &str = "main";
+const BRIDGE_SCHEME: &str = "gyro-bridge";
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionBrowserBounds {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// The viewport a browser gets when nobody is looking at it.
+///
+/// An ordinary desktop size, so a background page lays out the way the site
+/// intends and the model reads the same document a person would. It is never
+/// shown at these bounds: the UI host overwrites them the moment it mounts.
+pub const BACKGROUND_BROWSER_BOUNDS: SessionBrowserBounds = SessionBrowserBounds {
+    x: 0.0,
+    y: 0.0,
+    width: 1280.0,
+    height: 800.0,
+};
+
+// Create agent webviews outside the window before hiding them, so creation
+// cannot briefly cover the frontend. They retain a full desktop viewport.
+const AGENT_BROWSER_BOUNDS: SessionBrowserBounds = SessionBrowserBounds {
+    x: -1281.0,
+    ..BACKGROUND_BROWSER_BOUNDS
+};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionBrowserOpenRequest {
+    pub session_id: String,
+    pub workspace_key: String,
+    pub url: String,
+    #[serde(default)]
+    pub bounds: Option<SessionBrowserBounds>,
+    #[serde(default)]
+    pub visible: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionBrowserSnapshot {
+    pub session_id: String,
+    pub workspace_key: String,
+    pub resource_id: String,
+    pub url: String,
+    pub title: String,
+    pub visible: bool,
+    pub background_only: bool,
+    pub label: String,
+    pub viewport: BrowserViewportState,
+}
+
+#[derive(Clone, Debug)]
+pub struct SessionBrowserCapture {
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct BrowserPointerReference {
+    pub capture_id: String,
+    pub url: String,
+    pub viewport: Value,
+    pub created_at: Instant,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserConsoleEntry {
+    pub kind: String,
+    pub message: String,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub line: Option<i64>,
+    #[serde(default)]
+    pub column: Option<i64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserNetworkEntry {
+    pub method: String,
+    pub url: String,
+    #[serde(default)]
+    pub status: Option<i64>,
+    #[serde(default)]
+    pub ok: Option<bool>,
+    #[serde(default, alias = "resourceType")]
+    pub resource_type: Option<String>,
+}
+
+struct SessionBrowserSlot {
+    session_id: String,
+    workspace_key: String,
+    resource_id: String,
+    webview_label: String,
+    bridge_nonce: String,
+    url: String,
+    title: String,
+    visible: bool,
+    background_only: bool,
+    host_bounds: SessionBrowserBounds,
+    viewport_request: BrowserViewportRequest,
+    viewport: BrowserViewportState,
+    approved_origins: HashSet<String>,
+    pointer_reference: Option<BrowserPointerReference>,
+    console: VecDeque<BrowserConsoleEntry>,
+    network: VecDeque<BrowserNetworkEntry>,
+}
+
+#[derive(Default)]
+pub struct SessionBrowserManager {
+    inner: Mutex<HashMap<String, SessionBrowserSlot>>,
+    layout: Mutex<()>,
+}
+
+impl SessionBrowserManager {
+    fn with_slot_mut<R>(
+        &self,
+        session_id: &str,
+        f: impl FnOnce(&mut SessionBrowserSlot) -> R,
+    ) -> Result<R, String> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| "session browser state is unavailable".to_string())?;
+        let slot = guard
+            .get_mut(session_id)
+            .ok_or_else(|| "this chat has no open browser".to_string())?;
+        Ok(f(slot))
+    }
+
+    fn snapshot_locked(slot: &SessionBrowserSlot) -> SessionBrowserSnapshot {
+        SessionBrowserSnapshot {
+            session_id: slot.session_id.clone(),
+            workspace_key: slot.workspace_key.clone(),
+            resource_id: slot.resource_id.clone(),
+            url: slot.url.clone(),
+            title: slot.title.clone(),
+            visible: slot.visible,
+            background_only: slot.background_only,
+            label: slot.webview_label.clone(),
+            viewport: slot.viewport,
+        }
+    }
+
+    pub fn get_snapshot(&self, session_id: &str) -> Result<Option<SessionBrowserSnapshot>, String> {
+        let guard = self
+            .inner
+            .lock()
+            .map_err(|_| "session browser state is unavailable".to_string())?;
+        Ok(guard.get(session_id).map(Self::snapshot_locked))
+    }
+
+    pub fn require_owned(
+        &self,
+        session_id: &str,
+        workspace_key: &str,
+    ) -> Result<SessionBrowserSnapshot, String> {
+        let guard = self
+            .inner
+            .lock()
+            .map_err(|_| "session browser state is unavailable".to_string())?;
+        let slot = guard
+            .get(session_id)
+            .ok_or_else(|| "this chat has no open browser".to_string())?;
+        if slot.workspace_key != workspace_key || slot.session_id != session_id {
+            return Err("browser resource ownership changed".into());
+        }
+        Ok(Self::snapshot_locked(slot))
+    }
+
+    pub fn is_origin_approved(&self, session_id: &str, origin: &str) -> Result<bool, String> {
+        self.with_slot_mut(session_id, |slot| slot.approved_origins.contains(origin))
+    }
+
+    pub fn approve_origin(&self, session_id: &str, origin: &str) -> Result<(), String> {
+        self.with_slot_mut(session_id, |slot| {
+            slot.approved_origins.insert(origin.to_string());
+        })
+    }
+
+    pub fn remember_pointer_capture(
+        &self,
+        session_id: &str,
+        capture_id: String,
+        url: String,
+        viewport: Value,
+    ) -> Result<(), String> {
+        self.with_slot_mut(session_id, |slot| {
+            slot.pointer_reference = Some(BrowserPointerReference {
+                capture_id,
+                url,
+                viewport,
+                created_at: Instant::now(),
+            });
+        })
+    }
+
+    pub fn pointer_reference(
+        &self,
+        session_id: &str,
+        capture_id: &str,
+    ) -> Result<BrowserPointerReference, String> {
+        self.with_slot_mut(session_id, |slot| slot.pointer_reference.clone())?
+            .filter(|reference| reference.capture_id == capture_id)
+            .filter(|reference| reference.created_at.elapsed() <= Duration::from_secs(60))
+            .ok_or_else(|| "browser screenshot is stale; capture the page again".to_string())
+    }
+
+    pub fn console_entries(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<BrowserConsoleEntry>, String> {
+        self.with_slot_mut(session_id, |slot| {
+            slot.console
+                .iter()
+                .rev()
+                .take(limit.clamp(1, MAX_CONSOLE_ENTRIES))
+                .cloned()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect()
+        })
+    }
+
+    fn push_console(&self, session_id: &str, entry: BrowserConsoleEntry) {
+        let _ = self.with_slot_mut(session_id, |slot| {
+            if slot.console.len() >= MAX_CONSOLE_ENTRIES {
+                slot.console.pop_front();
+            }
+            slot.console.push_back(entry);
+        });
+    }
+
+    fn push_network(&self, session_id: &str, entry: BrowserNetworkEntry) {
+        let _ = self.with_slot_mut(session_id, |slot| {
+            if slot.network.len() >= MAX_NETWORK_ENTRIES {
+                slot.network.pop_front();
+            }
+            slot.network.push_back(entry);
+        });
+    }
+
+    fn webview_label_for(&self, session_id: &str) -> Result<String, String> {
+        self.with_slot_mut(session_id, |slot| slot.webview_label.clone())
+    }
+
+    fn background_only(&self, session_id: &str) -> Result<bool, String> {
+        self.with_slot_mut(session_id, |slot| slot.background_only)
+    }
+
+    fn set_url(&self, session_id: &str, url: &str) -> Result<(), String> {
+        self.with_slot_mut(session_id, |slot| {
+            if slot.url != url {
+                slot.pointer_reference = None;
+            }
+            slot.url = url.to_string();
+        })
+    }
+
+    fn set_title(&self, session_id: &str, title: &str) -> Result<(), String> {
+        self.with_slot_mut(session_id, |slot| {
+            slot.title = title.to_string();
+        })
+    }
+
+    fn set_visible_flag(&self, session_id: &str, visible: bool) -> Result<(), String> {
+        self.with_slot_mut(session_id, |slot| {
+            slot.visible = browser_visibility(slot.background_only, visible);
+        })
+    }
+
+    fn visible_flag(&self, session_id: &str) -> Result<bool, String> {
+        self.with_slot_mut(session_id, |slot| slot.visible)
+    }
+
+    fn remove_slot(&self, session_id: &str) -> Result<Option<SessionBrowserSlot>, String> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| "session browser state is unavailable".to_string())?;
+        Ok(guard.remove(session_id))
+    }
+}
+
+/// A child webview shares the window with the chat UI, so the browser steals
+/// the keyboard while it is being driven: AppKit makes a newly shown webview
+/// first responder and leaves first responder on a view that is hidden. The
+/// user keeps typing in a chat the model is not working in, so those keystrokes
+/// disappear into a native view nobody is looking at. Give the keyboard back to
+/// the app webview whenever a browser visibility change moved it.
+fn restore_main_webview_focus<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(main) = app.get_webview(MAIN_WINDOW_LABEL) {
+        let _ = main.set_focus();
+    }
+}
+
+/// A hidden chat's browser can still end up holding the keyboard: WebKit moves
+/// first responder while the model types into a field, takes a snapshot, or
+/// loads a page with autofocus, and a child created hidden never handed it
+/// back. The person is meanwhile typing in another chat, and every keystroke
+/// lands in a view nobody can see. Unlike `restore_main_webview_focus`, this
+/// only acts when the keyboard is stranded — on a hidden view, on the window
+/// itself, or nowhere — so it never takes focus from a browser on screen.
+fn reclaim_stranded_keyboard<R: Runtime>(app: &AppHandle<R>) {
+    #[cfg(target_os = "macos")]
+    if let Some(main) = app.get_webview(MAIN_WINDOW_LABEL) {
+        let _ = main.with_webview(|platform| unsafe {
+            use objc2_app_kit::NSView;
+            let main_view: &NSView = &*platform.inner().cast();
+            let Some(window) = main_view.window() else {
+                return;
+            };
+            let stranded = match window.firstResponder() {
+                None => true,
+                // The window itself, the one non-view responder here, takes no
+                // typing either.
+                Some(responder) => responder
+                    .downcast_ref::<NSView>()
+                    .is_none_or(|view| view.isHiddenOrHasHiddenAncestor()),
+            };
+            if stranded {
+                window.makeFirstResponder(Some(main_view));
+            }
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+}
+
+/// Only a visibility change can move the window's keyboard focus; repeated
+/// requests for the state the browser is already in must leave the user alone.
+fn visibility_moves_keyboard_focus(was_visible: bool, visible: bool) -> bool {
+    was_visible != visible
+}
+
+fn browser_visibility(background_only: bool, requested_visible: bool) -> bool {
+    !background_only && requested_visible
+}
+
+fn session_browser_is_background_only(
+    store: &gyro_core::SessionStore,
+    session_id: &str,
+) -> Result<bool, String> {
+    let session = store
+        .get_session(super::parse_uuid(session_id)?)
+        .map_err(super::to_string)?
+        .ok_or_else(|| "browser chat no longer exists".to_string())?;
+    Ok(session.parent_session_id.is_some())
+}
+
+pub fn is_background_browser<R: Runtime>(app: &AppHandle<R>, session_id: &str) -> bool {
+    app.state::<SessionBrowserManager>()
+        .get_snapshot(session_id)
+        .ok()
+        .flatten()
+        .is_some_and(|snapshot| snapshot.background_only)
+}
+
+pub fn browser_url_is_navigable(url: &url::Url) -> bool {
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.host().is_none()
+    {
+        return false;
+    }
+    true
+}
+
+pub fn browser_url_is_loopback(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    }
+}
+
+pub fn parse_navigable_url(raw: &str) -> Result<url::Url, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("url is required".into());
+    }
+    let candidate = if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    };
+    let url = url::Url::parse(&candidate).map_err(|_| "invalid browser URL".to_string())?;
+    if !browser_url_is_navigable(&url) {
+        return Err("browser URLs must be credential-free http or https with a host".into());
+    }
+    Ok(url)
+}
+
+fn truncate_chars(value: &str, max: usize) -> String {
+    let mut out = String::new();
+    for (index, ch) in value.chars().enumerate() {
+        if index >= max {
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn sanitize_text(value: &str) -> String {
+    truncate_chars(&redact_secrets(value.trim()), MAX_ENTRY_CHARS)
+}
+
+fn agent_initialization_script(bridge_nonce: &str) -> String {
+    let nonce = serde_json::to_string(bridge_nonce).unwrap_or_else(|_| "\"\"".into());
+    let background_pointer = include_str!("browser_background_pointer.js")
+        .trim()
+        .trim_end_matches(';');
+    let pointer_feedback = include_str!("browser_pointer_feedback.js")
+        .trim()
+        .trim_end_matches(';');
+    format!(
+        r#"(function() {{
+  if (window.__gyroBrowserAgentInstalled) return;
+  window.__gyroBrowserAgentInstalled = true;
+  const BRIDGE_NONCE = {nonce};
+  const MAX_CONSOLE = {MAX_CONSOLE_ENTRIES};
+  const MAX_NETWORK = {MAX_NETWORK_ENTRIES};
+  const MAX_MSG = {MAX_ENTRY_CHARS};
+  const consoleBuf = [];
+  const networkBuf = [];
+  let refCounter = 0;
+  const refMap = new Map();
+
+  const textOf = (value) => {{
+    try {{
+      if (value instanceof Error) return value.message || value.name || "Error";
+      if (typeof value === "string") return value;
+      const encoded = JSON.stringify(value);
+      return encoded === undefined ? String(value) : encoded;
+    }} catch (_) {{
+      return String(value);
+    }}
+  }};
+
+  const originalFetch = window.fetch.bind(window);
+  const postBridge = (payload) => {{
+    try {{
+      const body = JSON.stringify(Object.assign({{ nonce: BRIDGE_NONCE }}, payload));
+      originalFetch("gyro-bridge://call", {{
+        method: "POST",
+        headers: {{ "content-type": "application/json" }},
+        body,
+        mode: "cors",
+        credentials: "omit",
+        keepalive: true,
+      }}).catch(() => {{}});
+    }} catch (_) {{}}
+  }};
+
+  const pushConsole = (kind, values, source, line, column) => {{
+    const message = values.map(textOf).join(" ").slice(0, MAX_MSG);
+    if (!message) return;
+    const entry = {{
+      kind,
+      message,
+      source: typeof source === "string" ? source : null,
+      line: Number.isFinite(line) ? line : null,
+      column: Number.isFinite(column) ? column : null,
+    }};
+    if (consoleBuf.length >= MAX_CONSOLE) consoleBuf.shift();
+    consoleBuf.push(entry);
+    postBridge({{ kind: "console", entry }});
+  }};
+
+  const original = {{
+    log: console.log.bind(console),
+    info: console.info.bind(console),
+    warn: console.warn.bind(console),
+    error: console.error.bind(console),
+    debug: console.debug.bind(console),
+  }};
+  console.log = (...v) => {{ pushConsole("log", v); original.log(...v); }};
+  console.info = (...v) => {{ pushConsole("info", v); original.info(...v); }};
+  console.warn = (...v) => {{ pushConsole("warn", v); original.warn(...v); }};
+  console.error = (...v) => {{ pushConsole("console-error", v); original.error(...v); }};
+  console.debug = (...v) => {{ pushConsole("debug", v); original.debug(...v); }};
+  addEventListener("error", (event) => {{
+    pushConsole("page-error", [event.message || "Page error"], event.filename, event.lineno, event.colno);
+  }}, true);
+  addEventListener("unhandledrejection", (event) => {{
+    pushConsole("unhandled-rejection", [event.reason || "Unhandled promise rejection"]);
+  }}, true);
+
+  const recordNetwork = (entry) => {{
+    if (networkBuf.length >= MAX_NETWORK) networkBuf.shift();
+    networkBuf.push(entry);
+    postBridge({{ kind: "network", entry }});
+  }};
+
+  window.fetch = async function(input, init) {{
+    const method = (init && init.method) || (input && input.method) || "GET";
+    let url = "";
+    try {{
+      url = typeof input === "string" ? input : (input && input.url) || String(input);
+    }} catch (_) {{
+      url = "unknown";
+    }}
+    try {{
+      const response = await originalFetch(input, init);
+      recordNetwork({{
+        method: String(method).toUpperCase(),
+        url: String(url).slice(0, MAX_MSG),
+        status: response.status,
+        ok: response.ok,
+        resourceType: "fetch",
+      }});
+      return response;
+    }} catch (error) {{
+      recordNetwork({{
+        method: String(method).toUpperCase(),
+        url: String(url).slice(0, MAX_MSG),
+        status: null,
+        ok: false,
+        resourceType: "fetch",
+      }});
+      throw error;
+    }}
+  }};
+
+  const XO = window.XMLHttpRequest;
+  if (XO) {{
+    const open = XO.prototype.open;
+    const send = XO.prototype.send;
+    XO.prototype.open = function(method, url) {{
+      this.__gyroMethod = method;
+      this.__gyroUrl = url;
+      return open.apply(this, arguments);
+    }};
+    XO.prototype.send = function() {{
+      this.addEventListener("loadend", () => {{
+        recordNetwork({{
+          method: String(this.__gyroMethod || "GET").toUpperCase(),
+          url: String(this.__gyroUrl || "").slice(0, MAX_MSG),
+          status: this.status || null,
+          ok: this.status >= 200 && this.status < 400,
+          resourceType: "xhr",
+        }});
+      }});
+      return send.apply(this, arguments);
+    }};
+  }}
+
+  const isVisible = (el) => {{
+    if (!el || el.nodeType !== 1) return false;
+    const style = window.getComputedStyle(el);
+    if (!style || style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {{
+      return false;
+    }}
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }};
+
+  const roleOf = (el) => {{
+    const explicit = el.getAttribute("role");
+    if (explicit) return explicit;
+    const tag = el.tagName.toLowerCase();
+    if (tag === "a") return "link";
+    if (tag === "button") return "button";
+    if (tag === "input") {{
+      const type = (el.getAttribute("type") || "text").toLowerCase();
+      if (type === "checkbox") return "checkbox";
+      if (type === "radio") return "radio";
+      if (type === "submit" || type === "button") return "button";
+      return "textbox";
+    }}
+    if (tag === "textarea") return "textbox";
+    if (tag === "select") return "combobox";
+    if (tag === "img") return "img";
+    if (/^h[1-6]$/.test(tag)) return "heading";
+    if (tag === "nav") return "navigation";
+    if (tag === "main") return "main";
+    if (tag === "header") return "banner";
+    if (tag === "footer") return "contentinfo";
+    return tag;
+  }};
+
+  const nameOf = (el) => {{
+    const labelled = el.getAttribute("aria-label")
+      || el.getAttribute("alt")
+      || el.getAttribute("title")
+      || el.getAttribute("placeholder")
+      || "";
+    if (labelled) return labelled.trim().slice(0, 120);
+    const text = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+    return text.slice(0, 120);
+  }};
+
+  // What the person watching would call the element an action touched. Form
+  // controls are usually named by a <label for>, which nameOf does not read.
+  const targetName = (el) => {{
+    const label = el.getAttribute("aria-label")
+      || (el.labels && el.labels.length ? el.labels[0].innerText : "");
+    return (label || nameOf(el) || el.getAttribute("name") || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80);
+  }};
+
+  const isCredentialField = (el) => {{
+    if (!el || el.nodeType !== 1) return false;
+    const tag = el.tagName.toLowerCase();
+    if (tag !== "input") return false;
+    const type = (el.getAttribute("type") || "").toLowerCase();
+    if (type === "password") return true;
+    const name = ((el.getAttribute("name") || "") + " " + (el.getAttribute("autocomplete") || "") + " " + (el.getAttribute("id") || "")).toLowerCase();
+    return /password|passwd|pwd|one-time|otp|totp|2fa|credit.?card|cc-number|cvc|cvv|ssn/.test(name);
+  }};
+
+  const assignRef = (el) => {{
+    if (!el) return null;
+    if (el.__gyroRef) {{
+      refMap.set(el.__gyroRef, el);
+      return el.__gyroRef;
+    }}
+    refCounter += 1;
+    const ref = "ref_" + refCounter;
+    el.__gyroRef = ref;
+    refMap.set(ref, el);
+    return ref;
+  }};
+
+  const resolveRef = (ref) => {{
+    if (!ref || typeof ref !== "string") return null;
+    const el = refMap.get(ref);
+    if (el && el.isConnected) return el;
+    refMap.delete(ref);
+    return null;
+  }};
+
+  const pageState = () => ({{
+    url: location.href,
+    title: (document.title || "").slice(0, 400),
+    titleTruncated: (document.title || "").length > 400,
+    readyState: document.readyState,
+    viewport: {{
+      width: Math.max(0, Math.round(window.innerWidth || 0)),
+      height: Math.max(0, Math.round(window.innerHeight || 0)),
+      deviceScaleFactor: Number(window.devicePixelRatio || 1),
+      scrollX: Math.round(window.scrollX || 0),
+      scrollY: Math.round(window.scrollY || 0),
+    }},
+    history: {{ length: Math.max(0, Number(window.history.length || 0)) }},
+  }});
+
+  const serializeTree = (root, depth, maxDepth, budget) => {{
+    if (!root || depth > maxDepth || budget.left <= 0) return null;
+    if (root.nodeType === 3) {{
+      const text = (root.textContent || "").replace(/\s+/g, " ").trim();
+      if (!text) return null;
+      budget.left -= text.length;
+      return {{ type: "text", text: text.slice(0, 200) }};
+    }}
+    if (root.nodeType !== 1) return null;
+    const el = root;
+    if (!isVisible(el) && depth > 0) return null;
+    const tag = el.tagName.toLowerCase();
+    if (tag === "script" || tag === "style" || tag === "noscript" || tag === "svg") return null;
+    const ref = assignRef(el);
+    const node = {{
+      ref,
+      role: roleOf(el),
+      name: nameOf(el),
+      tag,
+      children: [],
+    }};
+    if (el.getAttribute("href")) node.href = String(el.getAttribute("href")).slice(0, 200);
+    if (el.getAttribute("type")) node.inputType = el.getAttribute("type");
+    if (tag === "input" || tag === "textarea" || tag === "select") {{
+      node.value = isCredentialField(el) ? "[redacted-credential]" : String(el.value || "").slice(0, 120);
+    }}
+    // Retain the existing traversal budget: deduplication must not hide more of the page.
+    budget.left -= 64;
+    if (depth >= maxDepth) return node;
+    const children = el.childNodes;
+    for (let i = 0; i < children.length && budget.left > 0 && node.children.length < 40; i++) {{
+      const child = serializeTree(children[i], depth + 1, maxDepth, budget);
+      if (child) node.children.push(child);
+    }}
+    if (node.children.length === 0) delete node.children;
+    // Expanded layout wrappers repeat all descendant text as their name.
+    // Keep labels and leaf summaries, but send that prose only once.
+    if (node.children && ["body", "div", "section", "main", "article", "nav", "header", "footer", "aside"].includes(tag)
+        && !el.getAttribute("aria-label") && !el.getAttribute("title")) delete node.name;
+    if (node.children && node.children.length === 1 && node.children[0].type === "text"
+        && node.children[0].text === node.name) delete node.children;
+    if (!node.name) delete node.name;
+    return node;
+  }};
+
+  const dispatch = (el, type, init) => {{
+    const EventClass = type.startsWith("key") ? KeyboardEvent : Event;
+    const event = new EventClass(type, Object.assign({{ bubbles: true, cancelable: true }}, init || {{}}));
+    el.dispatchEvent(event);
+  }};
+
+  const clickEl = (el, options) => {{
+    el.scrollIntoView({{ block: "center", inline: "nearest", behavior: "instant" }});
+    flashTarget(el, Object.assign({{}}, options, {{ action: "click" }}));
+    ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach((type) => {{
+      const EventClass = type.startsWith("pointer") ? PointerEvent : MouseEvent;
+      el.dispatchEvent(new EventClass(type, {{ bubbles: true, cancelable: true, view: window }}));
+    }});
+    if (typeof el.click === "function") el.click();
+    else el.dispatchEvent(new MouseEvent("click", {{ bubbles: true, cancelable: true, view: window }}));
+  }};
+
+  const typeInto = (el, text, submit) => {{
+    if (isCredentialField(el)) {{
+      return {{ ok: false, error: "credential fields are not writable by the model" }};
+    }}
+    if (el.disabled || el.readOnly ||
+        !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable)) {{
+      return {{ ok: false, error: "target is not an editable text field" }};
+    }}
+    el.focus();
+    const value = String(text ?? "");
+    if ("value" in el) {{
+      const proto = el.tagName.toLowerCase() === "textarea"
+        ? window.HTMLTextAreaElement.prototype
+        : window.HTMLInputElement.prototype;
+      const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+      if (descriptor && descriptor.set) descriptor.set.call(el, value);
+      else el.value = value;
+    }} else if (el.isContentEditable) {{
+      el.textContent = value;
+    }}
+    dispatch(el, "input");
+    dispatch(el, "change");
+    if (submit) {{
+      dispatch(el, "keydown", {{ key: "Enter", code: "Enter", keyCode: 13 }});
+      const form = el.form || el.closest("form");
+      if (form && typeof form.requestSubmit === "function") form.requestSubmit();
+    }}
+    return {{ ok: true }};
+  }};
+
+  const pointerFeedback = {pointer_feedback}(window, document);
+  const clearHighlight = () => pointerFeedback.clear();
+  const flashTarget = (el, options = {{}}) => pointerFeedback.show(el, options);
+
+  window.__gyroBrowserAgent = {{
+    clearHighlight() {{
+      clearHighlight();
+      return {{ ok: true }};
+    }},
+    hidePointer() {{
+      pointerFeedback.setHidden(true);
+      return {{ ok: true }};
+    }},
+    restorePointer() {{
+      pointerFeedback.setHidden(false);
+      return {{ ok: true }};
+    }},
+    showPointer(options) {{
+      // A click may already have navigated. Never paint old coordinates on a new page.
+      if (options.url !== location.href) return {{ ok: true }};
+      const dragging = options.action === "drag" && options.phase !== "move";
+      const el = document.elementFromPoint(dragging ? options.toX : options.x, dragging ? options.toY : options.y);
+      if (el) flashTarget(el, options);
+      return {{ ok: true }};
+    }},
+    readPage(options) {{
+      const root = options && options.ref ? resolveRef(options.ref) : (document.body || document.documentElement);
+      if (!root) return {{ ok: false, error: "element ref is stale; use find to locate it again" }};
+      refMap.clear();
+      const maxDepth = Math.min(8, Math.max(1, (options && options.maxDepth) || 4));
+      const maxChars = Math.min({MAX_TREE_CHARS}, Math.max(1024, (options && options.maxChars) || 6000));
+      const budget = {{ left: maxChars }};
+      const tree = serializeTree(root, 0, maxDepth, budget);
+      return Object.assign({{
+        ok: true,
+        framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED",
+        tree,
+        truncated: budget.left <= 0,
+      }}, pageState());
+    }},
+    find(options) {{
+      const query = ((options && options.query) || "").trim();
+      const selector = ((options && options.selector) || "").trim();
+      const results = [];
+      const limit = Math.min({MAX_FIND_RESULTS}, Math.max(1, (options && options.limit) || 20));
+      const offset = Math.max(0, (options && options.offset) || 0);
+      let matched = 0;
+      let candidates = [];
+      if (selector) {{
+        try {{ candidates = Array.from(document.querySelectorAll(selector)); }}
+        catch (error) {{ return {{ ok: false, error: "invalid selector" }}; }}
+      }} else {{
+        candidates = Array.from(document.querySelectorAll("a,button,input,textarea,select,[role],[onclick],h1,h2,h3,h4,h5,h6,label,summary"));
+      }}
+      const needle = query.toLowerCase();
+      for (const el of candidates) {{
+        if (!isVisible(el)) continue;
+        const name = nameOf(el);
+        if (needle && !name.toLowerCase().includes(needle) && !(el.innerText || "").toLowerCase().includes(needle)) {{
+          continue;
+        }}
+        if (matched++ < offset) continue;
+        const rect = el.getBoundingClientRect();
+        results.push({{
+          ref: assignRef(el),
+          role: roleOf(el),
+          name,
+          tag: el.tagName.toLowerCase(),
+          rect: {{
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+          }},
+        }});
+        if (results.length > limit) break;
+      }}
+      const hasMore = results.length > limit;
+      if (hasMore) results.pop();
+      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", results, offset, hasMore, nextOffset: hasMore ? offset + results.length : null }};
+    }},
+    pointerTarget(options) {{
+      const x = Number(options && options.x);
+      const y = Number(options && options.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)
+          || x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) {{
+        return {{ ok: false, error: "pointer coordinates are outside the browser viewport" }};
+      }}
+      const hit = document.elementFromPoint(x, y);
+      if (!hit) return {{ ok: false, error: "no page target at pointer coordinates" }};
+      const el = hit.closest("a,button,input,textarea,select,[role],[onclick],form") || hit;
+      const name = targetName(el);
+      const form = el.closest("form");
+      const formName = form ? targetName(form) : "";
+      const sensitive = /\b(buy|checkout|purchase|pay|send|submit|publish|delete|remove|transfer|book|confirm)\b/i.test(name + " " + formName);
+      return {{
+        ok: true,
+        name,
+        role: roleOf(el),
+        tag: el.tagName.toLowerCase(),
+        blocked: isCredentialField(el) || el.tagName.toLowerCase() === "iframe",
+        blockedReason: el.tagName.toLowerCase() === "iframe"
+          ? "embedded frames need user takeover in the Browser"
+          : "credential fields cannot be targeted by the model",
+        sensitive,
+        url: location.href,
+        viewport: pageState().viewport,
+      }};
+    }},
+        click(options) {{
+      const el = resolveRef(options && options.ref);
+      if (!el) return {{ ok: false, error: "unknown or stale ref" }};
+      clickEl(el, options);
+      return {{ ok: true, ref: options.ref, name: targetName(el) }};
+    }},
+    type(options) {{
+      const el = options && options.ref ? resolveRef(options.ref) : document.activeElement;
+      if (!el) return {{ ok: false, error: "no target element" }};
+      const typed = Object.assign({{ ref: el.__gyroRef || null, name: targetName(el) }}, typeInto(el, options && options.text, !!(options && options.submit)));
+      if (typed.ok) flashTarget(el, options);
+      return typed;
+    }},
+    formInput(options) {{
+      const el = resolveRef(options && options.ref);
+      if (!el) return {{ ok: false, error: "unknown or stale ref" }};
+      if (isCredentialField(el)) {{
+        return {{ ok: false, error: "credential fields are not writable by the model" }};
+      }}
+      const name = targetName(el);
+      flashTarget(el, options);
+      const value = String((options && options.value) ?? "");
+      if (el.tagName.toLowerCase() === "select") {{
+        el.value = value;
+        dispatch(el, "input");
+        dispatch(el, "change");
+        return {{ ok: true, ref: options.ref, name }};
+      }}
+      if (el.tagName.toLowerCase() === "input") {{
+        const type = (el.getAttribute("type") || "text").toLowerCase();
+        if (type === "checkbox" || type === "radio") {{
+          el.checked = value === "true" || value === "1" || value === "on" || value === "checked";
+          dispatch(el, "input");
+          dispatch(el, "change");
+          return {{ ok: true, ref: options.ref, name }};
+        }}
+      }}
+      return Object.assign({{ ref: options.ref, name }}, typeInto(el, value, false));
+    }},
+    scroll(options) {{
+      const dx = Number((options && options.dx) || 0);
+      const dy = Number((options && options.dy) || 0);
+      const el = options && options.ref ? resolveRef(options.ref) : null;
+      if (options && options.ref && !el) return {{ ok: false, error: "unknown or stale ref" }};
+      if (el) {{
+        el.scrollBy({{ left: dx, top: dy, behavior: "instant" }});
+      }} else {{
+        window.scrollBy({{ left: dx, top: dy, behavior: "instant" }});
+      }}
+      return {{ ok: true, dx, dy }};
+    }},
+    console(options) {{
+      const limit = Math.min(MAX_CONSOLE, Math.max(1, (options && options.limit) || 20));
+      const offset = Math.max(0, (options && options.offset) || 0);
+      const entries = consoleBuf.slice().reverse().slice(offset, offset + limit);
+      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", entries, offset, total: consoleBuf.length, order: "newest-first" }};
+    }},
+    network(options) {{
+      const limit = Math.min(MAX_NETWORK, Math.max(1, (options && options.limit) || 20));
+      const offset = Math.max(0, (options && options.offset) || 0);
+      const entries = networkBuf.slice().reverse().slice(offset, offset + limit);
+      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", entries, offset, total: networkBuf.length, order: "newest-first" }};
+    }},
+    status() {{
+      return Object.assign({{ ok: true }}, pageState());
+    }},
+  }};
+  window.__gyroBrowserAgent.backgroundPointer = {background_pointer}(window.__gyroBrowserAgent, window, document);
+}})();"#
+    )
+}
+
+fn cors_response(status: u16, body: impl Into<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
+    tauri::http::Response::builder()
+        .status(status)
+        .header("access-control-allow-origin", "*")
+        .header("access-control-allow-methods", "POST, OPTIONS")
+        .header("access-control-allow-headers", "content-type")
+        .header("content-type", "application/json")
+        .body(body.into())
+        .unwrap_or_else(|_| {
+            tauri::http::Response::builder()
+                .status(500)
+                .body(b"{}".to_vec())
+                .expect("fallback response")
+        })
+}
+
+pub fn register_bridge_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder.register_asynchronous_uri_scheme_protocol(BRIDGE_SCHEME, |ctx, request, responder| {
+        if request.method() == tauri::http::Method::OPTIONS {
+            responder.respond(cors_response(204, Vec::new()));
+            return;
+        }
+        if request.method() != tauri::http::Method::POST {
+            responder.respond(cors_response(
+                405,
+                br#"{"ok":false,"error":"method"}"#.to_vec(),
+            ));
+            return;
+        }
+        let app = ctx.app_handle().clone();
+        let body = request.into_body();
+        // Chatty pages post a message per log line and request; the shared
+        // blocking pool reuses threads instead of spawning one per message.
+        tauri::async_runtime::spawn_blocking(move || {
+            let result = handle_bridge_body(&app, &body);
+            match result {
+                Ok(()) => responder.respond(cors_response(200, br#"{"ok":true}"#.to_vec())),
+                Err(error) => {
+                    let payload = serde_json::json!({ "ok": false, "error": error });
+                    responder.respond(cors_response(
+                        400,
+                        serde_json::to_vec(&payload).unwrap_or_else(|_| b"{}".to_vec()),
+                    ));
+                }
+            }
+        });
+    })
+}
+
+fn handle_bridge_body<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<(), String> {
+    let value: Value =
+        serde_json::from_slice(body).map_err(|_| "invalid bridge payload".to_string())?;
+    let nonce = value
+        .get("nonce")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "bridge nonce missing".to_string())?;
+    let manager = app.state::<SessionBrowserManager>();
+    let session_id = {
+        let guard = manager
+            .inner
+            .lock()
+            .map_err(|_| "session browser state is unavailable".to_string())?;
+        guard
+            .values()
+            .find(|slot| slot.bridge_nonce == nonce)
+            .map(|slot| slot.session_id.clone())
+            .ok_or_else(|| "unknown bridge nonce".to_string())?
+    };
+
+    let kind = value.get("kind").and_then(Value::as_str).unwrap_or("");
+    match kind {
+        "console" => {
+            if let Some(entry) = value.get("entry") {
+                let message = entry
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                manager.push_console(
+                    &session_id,
+                    BrowserConsoleEntry {
+                        kind: entry
+                            .get("kind")
+                            .and_then(Value::as_str)
+                            .unwrap_or("log")
+                            .to_string(),
+                        message: sanitize_text(&message),
+                        source: entry
+                            .get("source")
+                            .and_then(Value::as_str)
+                            .map(sanitize_text),
+                        line: entry.get("line").and_then(Value::as_i64),
+                        column: entry.get("column").and_then(Value::as_i64),
+                    },
+                );
+            }
+        }
+        "network" => {
+            if let Some(entry) = value.get("entry") {
+                manager.push_network(
+                    &session_id,
+                    BrowserNetworkEntry {
+                        method: entry
+                            .get("method")
+                            .and_then(Value::as_str)
+                            .unwrap_or("GET")
+                            .to_string(),
+                        url: sanitize_text(entry.get("url").and_then(Value::as_str).unwrap_or("")),
+                        status: entry.get("status").and_then(Value::as_i64),
+                        ok: entry.get("ok").and_then(Value::as_bool),
+                        resource_type: entry
+                            .get("resourceType")
+                            .and_then(Value::as_str)
+                            .map(|value| value.to_string()),
+                    },
+                );
+            }
+        }
+        "title" => {
+            if let Some(title) = value.get("title").and_then(Value::as_str) {
+                let _ = manager.set_title(&session_id, &sanitize_text(title));
+            }
+            if let Some(url) = value.get("url").and_then(Value::as_str) {
+                let _ = manager.set_url(&session_id, url);
+            }
+        }
+        _ => {}
+    }
+    // Console and network entries are read on demand from the buffers above;
+    // broadcasting each one only wakes every window for nothing.
+    if !matches!(kind, "console" | "network") && !is_background_browser(app, &session_id) {
+        let _ = app.emit(
+            "session-browser-event",
+            serde_json::json!({ "sessionId": session_id, "kind": kind }),
+        );
+    }
+    Ok(())
+}
+
+fn get_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<tauri::Window<R>, String> {
+    app.get_window(MAIN_WINDOW_LABEL)
+        .ok_or_else(|| "main window is not available".to_string())
+}
+
+fn apply_session_browser_layout<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    host: Option<SessionBrowserBounds>,
+    request: Option<BrowserViewportRequest>,
+) -> Result<SessionBrowserSnapshot, String> {
+    let manager = app.state::<SessionBrowserManager>();
+    // Serialize load events, model choices, and UI resize reports so an older
+    // layout cannot overwrite a newer request after its native apply completes.
+    let _layout = manager
+        .layout
+        .lock()
+        .map_err(|_| "browser layout is unavailable")?;
+    let (label, host, request, url, previous) = manager.with_slot_mut(session_id, |slot| {
+        (
+            slot.webview_label.clone(),
+            host.unwrap_or_else(|| slot.host_bounds.clone()),
+            request.unwrap_or(slot.viewport_request),
+            slot.url.clone(),
+            slot.viewport,
+        )
+    })?;
+    let geometry = browser_viewport::geometry(request, &url, &host)?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or("browser webview is not available")?;
+    browser_viewport::apply(&webview, &geometry, Some(previous))?;
+    let changed = manager.with_slot_mut(session_id, |slot| {
+        let changed = slot.viewport != geometry.state;
+        if slot.viewport.width != geometry.state.width
+            || slot.viewport.height != geometry.state.height
+        {
+            slot.pointer_reference = None;
+        }
+        slot.host_bounds = host;
+        slot.viewport_request = request;
+        slot.viewport = geometry.state;
+        changed
+    })?;
+    let snapshot = manager
+        .get_snapshot(session_id)?
+        .ok_or("browser disappeared during resize")?;
+    if changed && !snapshot.background_only {
+        let _ = app.emit(
+            "session-browser-event",
+            serde_json::json!({
+                "sessionId":session_id,"kind":"viewport","viewport":snapshot.viewport,
+            }),
+        );
+    }
+    Ok(snapshot)
+}
+
+pub fn set_session_browser_viewport<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    request: BrowserViewportRequest,
+) -> Result<SessionBrowserSnapshot, String> {
+    request.validate()?;
+    apply_session_browser_layout(app, session_id, None, Some(request))
+}
+
+pub fn open_session_browser<R: Runtime>(
+    app: &AppHandle<R>,
+    mut request: SessionBrowserOpenRequest,
+) -> Result<SessionBrowserSnapshot, String> {
+    let url = parse_navigable_url(&request.url)?;
+    let origin = url.origin().ascii_serialization();
+    let manager = app.state::<SessionBrowserManager>();
+    // Ownership comes from the durable chat relationship, never a tool/UI
+    // argument. A restored agent gets the same private browser on follow-up.
+    let store = super::open_store()?;
+    let background_only = session_browser_is_background_only(&store, &request.session_id)?;
+    drop(store);
+    if background_only {
+        request.bounds = None;
+        request.visible = Some(false);
+    }
+
+    if let Ok(Some(existing)) = manager.get_snapshot(&request.session_id) {
+        if existing.workspace_key != request.workspace_key {
+            return Err("browser resource ownership changed".into());
+        }
+        let label = manager.webview_label_for(&request.session_id)?;
+        if let Some(webview) = app.get_webview(&label) {
+            webview
+                .navigate(url.clone())
+                .map_err(|error| format!("could not navigate browser: {error}"))?;
+            manager.set_url(&request.session_id, url.as_str())?;
+            apply_session_browser_layout(app, &request.session_id, request.bounds.clone(), None)?;
+            let visible =
+                browser_visibility(background_only, request.visible.unwrap_or(existing.visible));
+            let was_visible = existing.visible;
+            if visible {
+                let _ = webview.show();
+            } else {
+                let _ = webview.hide();
+            }
+            manager.set_url(&request.session_id, url.as_str())?;
+            manager.set_visible_flag(&request.session_id, visible)?;
+            if visibility_moves_keyboard_focus(was_visible, visible) {
+                restore_main_webview_focus(app);
+            }
+            let _ = manager.approve_origin(&request.session_id, &origin);
+            return manager
+                .get_snapshot(&request.session_id)?
+                .ok_or_else(|| "browser disappeared during open".to_string());
+        }
+    }
+
+    let session_id = request.session_id.clone();
+    let resource_id = Uuid::new_v4().to_string();
+    let bridge_nonce = Uuid::new_v4().to_string();
+    let webview_label = format!("session-browser-{}", session_id.replace('-', ""));
+    let script = agent_initialization_script(&bridge_nonce);
+
+    // Close any stale webview with the same label.
+    if let Some(existing) = app.get_webview(&webview_label) {
+        let _ = existing.close();
+    }
+
+    let window = get_main_window(app)?;
+    let session_for_title = session_id.clone();
+    let app_for_title = app.clone();
+    let session_for_load = session_id.clone();
+    let app_for_load = app.clone();
+    // A model opens the browser with no bounds, because nothing is on screen
+    // for it. It still needs a real viewport: the page runs at the child's
+    // size, so a 1x1 child reported window.innerWidth 1, collapsed every
+    // layout the model then read, put every element outside the viewport, and
+    // captured a 1x1 screenshot. Size it like a desktop window and leave it
+    // hidden — the mounted UI host replaces these bounds if it ever opens.
+    let requested_bounds = request.bounds.clone();
+    let bounds = requested_bounds
+        .clone()
+        .unwrap_or(BACKGROUND_BROWSER_BOUNDS);
+    let bounds = if background_only {
+        AGENT_BROWSER_BOUNDS
+    } else {
+        bounds
+    };
+    let visible = request.visible.unwrap_or(
+        requested_bounds.is_some_and(|bounds| bounds.width >= 2.0 && bounds.height >= 2.0),
+    );
+    let viewport_request = BrowserViewportRequest::default();
+    let geometry = browser_viewport::geometry(viewport_request, url.as_str(), &bounds)?;
+
+    let mut builder = tauri::WebviewBuilder::new(&webview_label, WebviewUrl::External(url.clone()))
+        .initialization_script(script)
+        .incognito(true)
+        .devtools(false)
+        .on_navigation(browser_url_is_navigable)
+        .on_page_load(move |_webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                let app = app_for_load.clone();
+                let session_id = session_for_load.clone();
+                let url = payload.url().as_str().to_string();
+                let _ = app
+                    .state::<SessionBrowserManager>()
+                    .set_url(&session_id, &url);
+                // Native layout work waits for the main thread; never block the
+                // WebKit load callback itself. Redirects re-resolve Auto mode.
+                std::thread::spawn(move || {
+                    let snapshot = apply_session_browser_layout(&app, &session_id, None, None);
+                    if !background_only {
+                        let _ = app.emit(
+                            "session-browser-event",
+                            serde_json::json!({
+                                "sessionId": session_id, "kind": "loaded", "url": url,
+                                "viewport": snapshot.ok().map(|snapshot| snapshot.viewport),
+                            }),
+                        );
+                    }
+                });
+            }
+        })
+        .on_document_title_changed(move |_webview, title| {
+            let manager = app_for_title.state::<SessionBrowserManager>();
+            let _ = manager.set_title(&session_for_title, &sanitize_text(&title));
+            if !background_only {
+                let _ = app_for_title.emit(
+                    "session-browser-event",
+                    serde_json::json!({
+                        "sessionId": session_for_title,
+                        "kind": "title",
+                        "title": sanitize_text(&title),
+                    }),
+                );
+            }
+        });
+    if background_only {
+        // A hidden agent page must keep running during a long task.
+        builder = builder
+            .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
+    }
+
+    let webview = window
+        .add_child(
+            builder,
+            LogicalPosition::new(geometry.frame.x, geometry.frame.y),
+            LogicalSize::new(geometry.frame.width, geometry.frame.height),
+        )
+        .map_err(|error| format!("could not create session browser webview: {error}"))?;
+
+    browser_viewport::apply(&webview, &geometry, None)?;
+
+    // Child webviews are the unstable-path trigger that leaves native window
+    // controls at (0, 0). Re-apply the overlay inset on the parent window.
+    #[cfg(target_os = "macos")]
+    if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        crate::apply_macos_traffic_light_position(&main);
+    }
+
+    if !visible {
+        webview
+            .hide()
+            .map_err(|error| format!("could not hide browser: {error}"))?;
+        reclaim_stranded_keyboard(app);
+    } else if !background_only {
+        // A child webview created visible becomes first responder, so a model
+        // opening a page must not pull the keyboard out of the user's chat.
+        restore_main_webview_focus(app);
+    }
+
+    let mut approved = HashSet::new();
+    approved.insert(origin);
+
+    let mut guard = manager
+        .inner
+        .lock()
+        .map_err(|_| "session browser state is unavailable".to_string())?;
+    guard.insert(
+        session_id.clone(),
+        SessionBrowserSlot {
+            session_id: session_id.clone(),
+            workspace_key: request.workspace_key.clone(),
+            resource_id,
+            webview_label: webview_label.clone(),
+            bridge_nonce,
+            url: url.to_string(),
+            title: String::new(),
+            visible,
+            background_only,
+            host_bounds: bounds,
+            viewport_request,
+            viewport: geometry.state,
+            approved_origins: approved,
+            pointer_reference: None,
+            console: VecDeque::new(),
+            network: VecDeque::new(),
+        },
+    );
+    let snapshot = guard
+        .get(&session_id)
+        .map(SessionBrowserManager::snapshot_locked)
+        .expect("just inserted");
+    Ok(snapshot)
+}
+
+pub fn set_session_browser_bounds<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    bounds: SessionBrowserBounds,
+) -> Result<(), String> {
+    let manager = app.state::<SessionBrowserManager>();
+    if manager.background_only(session_id)? {
+        // No frontend host can resize or move an agent's independent viewport.
+        return Ok(());
+    }
+    apply_session_browser_layout(app, session_id, Some(bounds), None)?;
+    // Positioning is independent of visibility: only the mounted UI host may
+    // reveal the child, after confirming its bounds report is still current.
+    Ok(())
+}
+
+pub fn set_session_browser_visible<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    visible: bool,
+) -> Result<(), String> {
+    let manager = app.state::<SessionBrowserManager>();
+    let visible = browser_visibility(manager.background_only(session_id)?, visible);
+    let label = manager.webview_label_for(session_id)?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser webview is not available".to_string())?;
+    let was_visible = manager.visible_flag(session_id)?;
+    if visible {
+        webview
+            .show()
+            .map_err(|error| format!("could not show browser: {error}"))?;
+    } else {
+        webview
+            .hide()
+            .map_err(|error| format!("could not hide browser: {error}"))?;
+    }
+    manager.set_visible_flag(session_id, visible)?;
+    if visibility_moves_keyboard_focus(was_visible, visible) {
+        restore_main_webview_focus(app);
+    }
+    Ok(())
+}
+
+pub fn navigate_session_browser<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    raw_url: &str,
+) -> Result<SessionBrowserSnapshot, String> {
+    let url = parse_navigable_url(raw_url)?;
+    let manager = app.state::<SessionBrowserManager>();
+    let label = manager.webview_label_for(session_id)?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser webview is not available".to_string())?;
+    webview
+        .navigate(url.clone())
+        .map_err(|error| format!("could not navigate browser: {error}"))?;
+    manager.set_url(session_id, url.as_str())?;
+    apply_session_browser_layout(app, session_id, None, None)?;
+    let _ = manager.approve_origin(session_id, &url.origin().ascii_serialization());
+    manager
+        .get_snapshot(session_id)?
+        .ok_or_else(|| "browser disappeared during navigate".to_string())
+}
+
+pub fn reload_session_browser<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+) -> Result<SessionBrowserSnapshot, String> {
+    let manager = app.state::<SessionBrowserManager>();
+    let label = manager.webview_label_for(session_id)?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser webview is not available".to_string())?;
+    webview
+        .reload()
+        .map_err(|error| format!("could not reload browser: {error}"))?;
+    manager
+        .get_snapshot(session_id)?
+        .ok_or_else(|| "browser disappeared during reload".to_string())
+}
+
+pub fn history_session_browser<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    direction: &str,
+) -> Result<SessionBrowserSnapshot, String> {
+    let delta = match direction {
+        "back" => -1,
+        "forward" => 1,
+        _ => return Err("direction must be back or forward".into()),
+    };
+    let manager = app.state::<SessionBrowserManager>();
+    let label = manager.webview_label_for(session_id)?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser webview is not available".to_string())?;
+    webview
+        .eval(format!("window.history.go({delta});"))
+        .map_err(|error| format!("could not move browser history: {error}"))?;
+    // Best-effort URL refresh after history navigation.
+    let _ = call_agent(app, session_id, "status", serde_json::json!({}));
+    manager
+        .get_snapshot(session_id)?
+        .ok_or_else(|| "browser disappeared during history navigation".to_string())
+}
+
+pub fn close_session_browser<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+) -> Result<(), String> {
+    let manager = app.state::<SessionBrowserManager>();
+    if let Some(slot) = manager.remove_slot(session_id)? {
+        if let Some(webview) = app.get_webview(&slot.webview_label) {
+            let _ = webview.close();
+        }
+    }
+    Ok(())
+}
+
+pub fn call_agent<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    method: &str,
+    args: Value,
+) -> Result<Value, String> {
+    let manager = app.state::<SessionBrowserManager>();
+    let label = manager.webview_label_for(session_id)?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser webview is not available".to_string())?;
+
+    // DOM tools are synchronous. Return their result through the native evaluator,
+    // independent of the page's CSP, CORS, custom-scheme fetch, or patched fetch.
+    let method_json = serde_json::to_string(method).map_err(|error| error.to_string())?;
+    let args_json = serde_json::to_string(&args).map_err(|error| error.to_string())?;
+    let script = format!(
+        r#"(function() {{
+  try {{
+    const agent = window.__gyroBrowserAgent;
+    if (!agent || typeof agent[{method_json}] !== "function") {{
+      return {{ error: "browser agent is not ready" }};
+    }}
+    return {{ result: agent[{method_json}]({args_json}) }};
+  }} catch (error) {{
+    return {{ error: String(error && error.message || error) }};
+  }}
+}})();"#
+    );
+    let (sender, receiver) = mpsc::channel();
+    webview
+        .eval_with_callback(script, move |result| {
+            let _ = sender.send(result);
+        })
+        .map_err(|error| format!("could not run browser agent: {error}"))?;
+    let encoded = receiver
+        .recv_timeout(AGENT_CALL_TIMEOUT)
+        .map_err(|_| "browser agent call timed out".to_string());
+    reclaim_stranded_keyboard(app);
+    let encoded = encoded?;
+    let response: Value = serde_json::from_str(&encoded)
+        .map_err(|error| format!("invalid browser agent result: {error}"))?;
+    if let Some(error) = response.get("error").and_then(Value::as_str) {
+        return Err(sanitize_text(error));
+    }
+    let value = response
+        .get("result")
+        .cloned()
+        .ok_or_else(|| "browser agent returned no result".to_string())?;
+    if value.get("ok") == Some(&Value::Bool(false)) {
+        return Err(sanitize_text(
+            value
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("browser action failed"),
+        ));
+    }
+    if let Some(url) = value.get("url").and_then(Value::as_str) {
+        manager.set_url(session_id, url)?;
+    }
+    if let Some(title) = value.get("title").and_then(Value::as_str) {
+        manager.set_title(session_id, &sanitize_text(title))?;
+    }
+    sanitize_agent_result(value)
+}
+
+pub fn mouse_session_browser<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    action: &str,
+    x: f64,
+    y: f64,
+    to_x: f64,
+    to_y: f64,
+) -> Result<(), String> {
+    if ![x, y, to_x, to_y].iter().all(|value| value.is_finite()) {
+        return Err("browser pointer coordinates must be finite".into());
+    }
+    if !matches!(action, "hover" | "click" | "secondary-click" | "drag") {
+        return Err("unsupported browser pointer action".into());
+    }
+    let manager = app.state::<SessionBrowserManager>();
+    let snapshot = manager
+        .get_snapshot(session_id)?
+        .ok_or_else(|| "this chat has no open browser".to_string())?;
+    if snapshot.background_only {
+        return call_agent(
+            app,
+            session_id,
+            "backgroundPointer",
+            serde_json::json!({
+                "action": action, "x": x, "y": y, "toX": to_x, "toY": to_y,
+            }),
+        )
+        .map(|_| ());
+    }
+    if !snapshot.visible {
+        return Err("show this chat's Browser before using the mouse".into());
+    }
+    let label = manager.webview_label_for(session_id)?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser webview is not available".to_string())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let action = action.to_string();
+        let (sender, receiver) = mpsc::channel();
+        webview
+            .with_webview(move |platform| unsafe {
+                use objc2_app_kit::{NSApplication, NSScreen, NSView};
+                use objc2_core_graphics::{
+                    CGEvent, CGEventTapLocation, CGEventType, CGMouseButton,
+                };
+                use objc2_foundation::NSPoint;
+                use objc2_web_kit::WKWebView;
+
+                let result = (|| -> Result<(), String> {
+                    let webview: &WKWebView = &*platform.inner().cast();
+                    let view: &NSView = webview;
+                    let window = view
+                        .window()
+                        .ok_or_else(|| "browser window is not available".to_string())?;
+                    // System mouse input must never pull focus from another app.
+                    let mtm = objc2::MainThreadMarker::new()
+                        .ok_or_else(|| "browser mouse action left the main thread".to_string())?;
+                    let native_app = NSApplication::sharedApplication(mtm);
+                    if !native_app.isActive() || !window.isKeyWindow() {
+                        return Err("Bring Gyro and this chat's Browser to the foreground before using the mouse".into());
+                    }
+                    window.setAcceptsMouseMovedEvents(true);
+                    let bounds = view.bounds();
+                    let width = bounds.size.width;
+                    let height = bounds.size.height;
+                    let point = |px: f64, py: f64| -> Result<NSPoint, String> {
+                        let px = px * webview.pageZoom();
+                        let py = py * webview.pageZoom();
+                        if px < 0.0 || py < 0.0 || px >= width || py >= height {
+                            return Err(
+                                "pointer coordinates are outside the browser viewport".into()
+                            );
+                        }
+                        let local_y = if view.isFlipped() {
+                            bounds.origin.y + py
+                        } else {
+                            bounds.origin.y + height - py
+                        };
+                        Ok(view
+                            .convertPoint_toView(NSPoint::new(bounds.origin.x + px, local_y), None))
+                    };
+                    let start = point(x, y)?;
+                    let end = point(to_x, to_y)?;
+                    if !objc2_core_graphics::CGPreflightPostEventAccess() {
+                        return Err("Gyro needs macOS Accessibility permission to send browser mouse input".into());
+                    }
+                    let mtm = objc2::MainThreadMarker::new()
+                        .ok_or_else(|| "browser mouse action left the main thread".to_string())?;
+                    let main_screen = NSScreen::mainScreen(mtm)
+                        .ok_or_else(|| "main display is unavailable".to_string())?;
+                    let screen_height =
+                        main_screen.frame().origin.y + main_screen.frame().size.height;
+                    let send = |kind: CGEventType,
+                                location: NSPoint,
+                                button: CGMouseButton|
+                     -> Result<(), String> {
+                        let screen = window.convertPointToScreen(location);
+                        let position = NSPoint::new(screen.x, screen_height - screen.y);
+                        let event = CGEvent::new_mouse_event(None, kind, position, button)
+                            .ok_or_else(|| "could not create browser mouse event".to_string())?;
+                        CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+                        Ok(())
+                    };
+                    if action == "hover" {
+                        let outside = point(1.0, 1.0)?;
+                        if (outside.x - start.x).abs() > 2.0 || (outside.y - start.y).abs() > 2.0 {
+                            send(CGEventType::MouseMoved, outside, CGMouseButton::Left)?;
+                        }
+                    }
+                    send(CGEventType::MouseMoved, start, CGMouseButton::Left)?;
+                    match action.as_str() {
+                        "hover" => {}
+                        "click" => {
+                            send(CGEventType::LeftMouseDown, start, CGMouseButton::Left)?;
+                            send(CGEventType::LeftMouseUp, start, CGMouseButton::Left)?;
+                        }
+                        "secondary-click" => {
+                            send(CGEventType::RightMouseDown, start, CGMouseButton::Right)?;
+                            send(CGEventType::RightMouseUp, start, CGMouseButton::Right)?;
+                        }
+                        "drag" => {
+                            send(CGEventType::LeftMouseDown, start, CGMouseButton::Left)?;
+                            for step in 1..=12 {
+                                let progress = step as f64 / 12.0;
+                                let location = NSPoint::new(
+                                    start.x + (end.x - start.x) * progress,
+                                    start.y + (end.y - start.y) * progress,
+                                );
+                                send(CGEventType::LeftMouseDragged, location, CGMouseButton::Left)?;
+                            }
+                            send(CGEventType::LeftMouseUp, end, CGMouseButton::Left)?;
+                        }
+                        _ => unreachable!(),
+                    }
+                    Ok(())
+                })();
+                let _ = sender.send(result);
+            })
+            .map_err(|error| format!("could not send browser mouse event: {error}"))?;
+        receiver
+            .recv_timeout(AGENT_CALL_TIMEOUT)
+            .map_err(|_| "browser mouse action timed out".to_string())?
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (webview, action, x, y, to_x, to_y);
+        Err("browser mouse actions are currently available on macOS only".into())
+    }
+}
+
+fn sanitize_agent_result(value: Value) -> Result<Value, String> {
+    fn walk(value: Value) -> Value {
+        match value {
+            Value::String(text) => Value::String(sanitize_text(&text)),
+            Value::Array(items) => Value::Array(items.into_iter().map(walk).collect()),
+            Value::Object(map) => {
+                let mut out = serde_json::Map::new();
+                for (key, child) in map {
+                    out.insert(key, walk(child));
+                }
+                Value::Object(out)
+            }
+            other => other,
+        }
+    }
+    let sanitized = walk(value);
+    let encoded = serde_json::to_vec(&sanitized).map_err(|error| error.to_string())?;
+    if encoded.len() > gyro_core::MAX_CAPABILITY_RESULT_BYTES {
+        return Err("browser agent result exceeded the capability size limit".into());
+    }
+    Ok(sanitized)
+}
+
+pub fn capture_session_browser_png<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+) -> Result<SessionBrowserCapture, String> {
+    let manager = app.state::<SessionBrowserManager>();
+    let label = manager.webview_label_for(session_id)?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or_else(|| "browser webview is not available".to_string())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let (sender, receiver) = mpsc::channel();
+        webview
+            .with_webview(move |platform| unsafe {
+                use block2::RcBlock;
+                use objc2::runtime::AnyObject;
+                use objc2_app_kit::{
+                    NSBitmapImageFileType, NSBitmapImageRep, NSBitmapImageRepPropertyKey, NSImage,
+                };
+                use objc2_foundation::{NSDictionary, NSError, NSNumber};
+                use objc2_web_kit::{WKSnapshotConfiguration, WKWebView};
+
+                let view: &WKWebView = &*platform.inner().cast();
+                let completion = RcBlock::new(move |image: *mut NSImage, _error: *mut NSError| {
+                    let snapshot = (|| {
+                        let image = image.as_ref().ok_or_else(|| {
+                            "native browser snapshot returned no image".to_string()
+                        })?;
+                        let tiff = image.TIFFRepresentation().ok_or_else(|| {
+                            "native browser snapshot could not be encoded".to_string()
+                        })?;
+                        let bitmap =
+                            NSBitmapImageRep::imageRepWithData(&tiff).ok_or_else(|| {
+                                "native browser snapshot could not create a bitmap".to_string()
+                            })?;
+                        let properties =
+                            NSDictionary::<NSBitmapImageRepPropertyKey, AnyObject>::new();
+                        let png = bitmap
+                            .representationUsingType_properties(
+                                NSBitmapImageFileType::PNG,
+                                &properties,
+                            )
+                            .ok_or_else(|| {
+                                "native browser snapshot could not create PNG data".to_string()
+                            })?;
+                        Ok::<SessionBrowserCapture, String>(SessionBrowserCapture {
+                            png: png.to_vec(),
+                            width: bitmap.pixelsWide().max(0) as u32,
+                            height: bitmap.pixelsHigh().max(0) as u32,
+                        })
+                    })();
+                    let _ = sender.send(snapshot);
+                });
+                // Request the unscaled CSS width, preserving desktop evidence
+                // even while the person sees a fitted page in a narrow panel.
+                let configuration = WKSnapshotConfiguration::new(
+                    objc2::MainThreadMarker::new().expect("snapshot runs on the main thread"),
+                );
+                let width = view.bounds().size.width / view.pageZoom();
+                configuration.setSnapshotWidth(Some(&NSNumber::new_f64(width)));
+                view.takeSnapshotWithConfiguration_completionHandler(
+                    Some(&configuration),
+                    &completion,
+                );
+            })
+            .map_err(|error| format!("could not request native browser snapshot: {error}"))?;
+
+        let capture = receiver
+            .recv_timeout(Duration::from_secs(8))
+            .map_err(|_| "native browser screenshot timed out".to_string())
+            .and_then(|capture| capture);
+        reclaim_stranded_keyboard(app);
+        capture
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, session_id, webview);
+        Err("browser screenshots are currently available on macOS only".into())
+    }
+}
+
+// --- Tauri commands -------------------------------------------------------
+
+#[tauri::command]
+pub async fn session_browser_open(
+    app: AppHandle,
+    mut request: SessionBrowserOpenRequest,
+) -> Result<SessionBrowserSnapshot, String> {
+    if request.workspace_key.is_empty() {
+        // Resolve the chat's workspace on a blocking worker: this is a SQLite
+        // open plus a read, and it used to hold an async-runtime thread while
+        // every other IPC call queued. Creating the webview stays on this task
+        // so Tauri keeps its own main-thread hop.
+        let session_id = request.session_id.clone();
+        request.workspace_key = tauri::async_runtime::spawn_blocking(move || {
+            let store = super::open_store()?;
+            let session = store
+                .get_session(super::parse_uuid(&session_id)?)
+                .map_err(super::to_string)?
+                .ok_or_else(|| "browser chat no longer exists".to_string())?;
+            Ok::<String, String>(
+                super::session_execution_workspace(&session, store.paths())?
+                    .display()
+                    .to_string(),
+            )
+        })
+        .await
+        .map_err(|error| format!("browser workspace worker failed: {error}"))??;
+    }
+    open_session_browser(&app, request)
+}
+
+#[tauri::command]
+pub async fn session_browser_set_bounds(
+    app: AppHandle,
+    session_id: String,
+    bounds: SessionBrowserBounds,
+) -> Result<(), String> {
+    set_session_browser_bounds(&app, &session_id, bounds)
+}
+
+#[tauri::command]
+pub async fn session_browser_set_viewport(
+    app: AppHandle,
+    session_id: String,
+    request: BrowserViewportRequest,
+) -> Result<SessionBrowserSnapshot, String> {
+    set_session_browser_viewport(&app, &session_id, request)
+}
+
+#[tauri::command]
+pub async fn session_browser_set_visible(
+    app: AppHandle,
+    session_id: String,
+    visible: bool,
+) -> Result<(), String> {
+    set_session_browser_visible(&app, &session_id, visible)
+}
+
+#[tauri::command]
+pub async fn session_browser_navigate(
+    app: AppHandle,
+    session_id: String,
+    url: String,
+) -> Result<SessionBrowserSnapshot, String> {
+    navigate_session_browser(&app, &session_id, &url)
+}
+
+#[tauri::command]
+pub async fn session_browser_reload(
+    app: AppHandle,
+    session_id: String,
+) -> Result<SessionBrowserSnapshot, String> {
+    reload_session_browser(&app, &session_id)
+}
+
+#[tauri::command]
+pub async fn session_browser_history(
+    app: AppHandle,
+    session_id: String,
+    direction: String,
+) -> Result<SessionBrowserSnapshot, String> {
+    history_session_browser(&app, &session_id, &direction)
+}
+
+#[tauri::command]
+pub async fn session_browser_close(app: AppHandle, session_id: String) -> Result<(), String> {
+    close_session_browser(&app, &session_id)
+}
+
+#[tauri::command]
+pub async fn session_browser_snapshot(
+    app: AppHandle,
+    session_id: String,
+) -> Result<Option<SessionBrowserSnapshot>, String> {
+    app.state::<SessionBrowserManager>()
+        .get_snapshot(&session_id)
+}
+
+/// The element a browser interaction touched, as the page names it.
+pub(crate) fn browser_action_target(result: &gyro_core::CapabilityResult) -> Option<String> {
+    if !matches!(
+        result.capability_id,
+        gyro_core::CapabilityId::BrowserClick
+            | gyro_core::CapabilityId::BrowserMouse
+            | gyro_core::CapabilityId::BrowserType
+            | gyro_core::CapabilityId::BrowserFormInput
+    ) {
+        return None;
+    }
+    let name = if result.capability_id == gyro_core::CapabilityId::BrowserMouse {
+        result.data.pointer("/target/name")
+    } else {
+        result.data.pointer("/data/name")
+    }?
+    .as_str()?
+    .trim();
+    (!name.is_empty()).then(|| name.chars().take(80).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_browser_visibility_change_gives_the_keyboard_back_to_the_chat() {
+        // Showing or hiding the child webview moves first responder in the
+        // window, so the app webview has to reclaim it or keystrokes stop
+        // reaching the chat the user is typing in.
+        assert!(visibility_moves_keyboard_focus(false, true));
+        assert!(visibility_moves_keyboard_focus(true, false));
+        // Re-sending the state the browser is already in must leave typing alone.
+        assert!(!visibility_moves_keyboard_focus(true, true));
+        assert!(!visibility_moves_keyboard_focus(false, false));
+    }
+
+    fn browser_slot(session_id: &str, background_only: bool) -> SessionBrowserSlot {
+        SessionBrowserSlot {
+            session_id: session_id.into(),
+            workspace_key: "shared-workspace".into(),
+            resource_id: Uuid::new_v4().to_string(),
+            webview_label: format!("session-browser-{session_id}"),
+            bridge_nonce: Uuid::new_v4().to_string(),
+            url: "https://example.com/".into(),
+            title: String::new(),
+            visible: false,
+            background_only,
+            host_bounds: BACKGROUND_BROWSER_BOUNDS.clone(),
+            viewport_request: BrowserViewportRequest::default(),
+            viewport: browser_viewport::geometry(
+                BrowserViewportRequest::default(),
+                "https://example.com/",
+                &BACKGROUND_BROWSER_BOUNDS,
+            )
+            .unwrap()
+            .state,
+            approved_origins: HashSet::new(),
+            pointer_reference: None,
+            console: VecDeque::new(),
+            network: VecDeque::new(),
+        }
+    }
+
+    #[test]
+    fn restored_subagents_get_private_browsers_from_durable_ownership() {
+        use gyro_core::{CreateSessionContext, GyroPaths, SessionOrigin, SessionStore};
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("store"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let parent = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "Parent")
+            .unwrap();
+        let child = store
+            .create_subagent_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "Research",
+                CreateSessionContext::default(),
+                parent.id,
+            )
+            .unwrap();
+        drop(store);
+        let store = SessionStore::open(paths).unwrap();
+        assert!(!session_browser_is_background_only(&store, &parent.id.to_string()).unwrap());
+        assert!(session_browser_is_background_only(&store, &child.id.to_string()).unwrap());
+        assert!(session_browser_is_background_only(&store, &Uuid::new_v4().to_string()).is_err());
+    }
+
+    #[test]
+    fn agent_browser_cannot_be_revealed_but_parent_browser_can() {
+        let manager = SessionBrowserManager::default();
+        for (id, private) in [("parent", false), ("agent", true)] {
+            manager
+                .inner
+                .lock()
+                .unwrap()
+                .insert(id.into(), browser_slot(id, private));
+            manager.set_visible_flag(id, true).unwrap();
+            let snapshot = manager.get_snapshot(id).unwrap().unwrap();
+            assert_eq!(snapshot.visible, !private);
+            assert_eq!(snapshot.background_only, private);
+            manager.set_visible_flag(id, false).unwrap();
+            manager.set_visible_flag(id, true).unwrap();
+            assert_eq!(manager.get_snapshot(id).unwrap().unwrap().visible, !private);
+        }
+        assert_eq!(AGENT_BROWSER_BOUNDS.width, 1280.0);
+        assert_eq!(AGENT_BROWSER_BOUNDS.height, 800.0);
+        assert!(AGENT_BROWSER_BOUNDS.x + AGENT_BROWSER_BOUNDS.width < 0.0);
+    }
+
+    #[test]
+    fn agent_browsers_keep_resources_page_state_and_grants_independent() {
+        let manager = SessionBrowserManager::default();
+        for (id, private) in [("parent", false), ("agent-a", true), ("agent-b", true)] {
+            manager
+                .inner
+                .lock()
+                .unwrap()
+                .insert(id.into(), browser_slot(id, private));
+        }
+        manager
+            .set_url("agent-a", "https://example.com/research")
+            .unwrap();
+        manager.set_title("agent-a", "Research").unwrap();
+        manager
+            .approve_origin("agent-a", "https://example.com")
+            .unwrap();
+        manager.push_console(
+            "agent-a",
+            BrowserConsoleEntry {
+                kind: "log".into(),
+                message: "ready".into(),
+                source: None,
+                line: None,
+                column: None,
+            },
+        );
+        manager
+            .remember_pointer_capture(
+                "agent-a",
+                "capture-a".into(),
+                "https://example.com/research".into(),
+                serde_json::json!({}),
+            )
+            .unwrap();
+        let a = manager
+            .require_owned("agent-a", "shared-workspace")
+            .unwrap();
+        for id in ["parent", "agent-b"] {
+            let other = manager.require_owned(id, "shared-workspace").unwrap();
+            assert_ne!(a.resource_id, other.resource_id);
+            assert_ne!(a.label, other.label);
+            assert_eq!(other.url, "https://example.com/");
+            assert!(other.title.is_empty());
+            assert!(!manager
+                .is_origin_approved(id, "https://example.com")
+                .unwrap());
+            assert!(manager.console_entries(id, 10).unwrap().is_empty());
+            assert!(manager.pointer_reference(id, "capture-a").is_err());
+        }
+        assert_eq!(manager.console_entries("agent-a", 10).unwrap().len(), 1);
+        assert!(manager.pointer_reference("agent-a", "capture-a").is_ok());
+        assert!(manager.require_owned("agent-a", "other-workspace").is_err());
+        manager.remove_slot("agent-a").unwrap();
+        assert!(manager.get_snapshot("agent-a").unwrap().is_none());
+        assert!(manager.get_snapshot("agent-b").unwrap().is_some());
+        assert!(manager.get_snapshot("parent").unwrap().is_some());
+    }
+
+    #[test]
+    fn navigable_urls_accept_public_https_and_reject_credentials() {
+        assert!(browser_url_is_navigable(
+            &url::Url::parse("https://example.com/path").unwrap()
+        ));
+        assert!(browser_url_is_navigable(
+            &url::Url::parse("http://127.0.0.1:3000").unwrap()
+        ));
+        assert!(!browser_url_is_navigable(
+            &url::Url::parse("https://user:pass@example.com").unwrap()
+        ));
+        assert!(!browser_url_is_navigable(
+            &url::Url::parse("file:///tmp/x").unwrap()
+        ));
+        assert!(!browser_url_is_loopback(
+            &url::Url::parse("https://example.com").unwrap()
+        ));
+        assert!(browser_url_is_loopback(
+            &url::Url::parse("http://localhost:5173").unwrap()
+        ));
+    }
+
+    #[test]
+    fn agent_script_installs_bridge_and_tools() {
+        let script = agent_initialization_script("test-nonce");
+        assert!(script.contains("gyro-bridge://call"));
+        assert!(script.contains("__gyroBrowserAgent"));
+        assert!(script.contains("readPage"));
+        assert!(script.contains("credential fields"));
+        assert!(script.contains("OBSERVED_PAGE_CONTENT_UNTRUSTED"));
+    }
+
+    #[test]
+    fn browser_paging_script_is_valid_javascript() {
+        let script = agent_initialization_script("test-nonce");
+        let mut command = crate::command_with_gui_path("node");
+        command
+            .args(["-e", "new Function(process.env.GYRO_BROWSER_TEST_SCRIPT)"])
+            .env("GYRO_BROWSER_TEST_SCRIPT", script);
+        let output = command
+            .output()
+            .expect("Node is required by the desktop frontend tests");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}

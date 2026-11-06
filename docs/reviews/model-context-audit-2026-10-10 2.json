@@ -1,0 +1,594 @@
+{
+  "checkedDate": "2026-10-10",
+  "scope": "Local bundled catalog plus complete site overlay; documentation audit, no generation calls",
+  "providerCount": 11,
+  "catalogEntryCount": 44,
+  "concreteModelCount": 41,
+  "overlayRevision": "2026-10-10.1",
+  "published": false,
+  "entries": [
+    {
+      "providerId": "openai",
+      "modelId": "gpt-6.1-sol",
+      "baselineContextWindowTokens": 500000,
+      "documentationStatus": "API specification and CLI baseline distinguished",
+      "officialSources": [
+        "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+        "https://learn.chatgpt.com/docs/config-file/config-reference"
+      ]
+    },
+    {
+      "providerId": "openai",
+      "modelId": "gpt-6-astra",
+      "baselineContextWindowTokens": 272000,
+      "documentationStatus": "API specification and CLI baseline distinguished",
+      "officialSources": [
+        "https://developers.openai.com/api/docs/models/gpt-6-astra",
+        "https://learn.chatgpt.com/docs/config-file/config-reference"
+      ]
+    },
+    {
+      "providerId": "openai",
+      "modelId": "gpt-6-sol",
+      "baselineContextWindowTokens": 272000,
+      "documentationStatus": "API specification and CLI baseline distinguished",
+      "officialSources": [
+        "https://developers.openai.com/api/docs/models/gpt-6-sol",
+        "https://learn.chatgpt.com/docs/config-file/config-reference"
+      ]
+    },
+    {
+      "providerId": "openai",
+      "modelId": "gpt-6-luna",
+      "baselineContextWindowTokens": 272000,
+      "documentationStatus": "API specification and CLI baseline distinguished",
+      "officialSources": [
+        "https://developers.openai.com/api/docs/models/gpt-6-luna",
+        "https://learn.chatgpt.com/docs/config-file/config-reference"
+      ]
+    },
+    {
+      "providerId": "openai",
+      "modelId": "gpt-5.6-sol",
+      "baselineContextWindowTokens": 272000,
+      "documentationStatus": "API specification and CLI baseline distinguished",
+      "officialSources": [
+        "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+        "https://learn.chatgpt.com/docs/config-file/config-reference"
+      ]
+    },
+    {
+      "providerId": "openai",
+      "modelId": "gpt-5.6-terra",
+      "baselineContextWindowTokens": 272000,
+      "documentationStatus": "API specification and CLI baseline distinguished",
+      "officialSources": [
+        "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+        "https://learn.chatgpt.com/docs/config-file/config-reference"
+      ]
+    },
+    {
+      "providerId": "openai",
+      "modelId": "gpt-5.6-luna",
+      "baselineContextWindowTokens": 272000,
+      "documentationStatus": "API specification and CLI baseline distinguished",
+      "officialSources": [
+        "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+        "https://learn.chatgpt.com/docs/config-file/config-reference"
+      ]
+    },
+    {
+      "providerId": "openai",
+      "modelId": "gpt-5.5",
+      "baselineContextWindowTokens": 272000,
+      "documentationStatus": "API specification and CLI baseline distinguished",
+      "officialSources": [
+        "https://developers.openai.com/api/docs/models/gpt-5.5",
+        "https://learn.chatgpt.com/docs/config-file/config-reference"
+      ]
+    },
+    {
+      "providerId": "openai",
+      "modelId": "gpt-5.4",
+      "baselineContextWindowTokens": 272000,
+      "documentationStatus": "API specification and CLI baseline distinguished",
+      "officialSources": [
+        "https://developers.openai.com/api/docs/models/gpt-5.4",
+        "https://learn.chatgpt.com/docs/config-file/config-reference"
+      ]
+    },
+    {
+      "providerId": "openai",
+      "modelId": "gpt-5.4-mini",
+      "baselineContextWindowTokens": 400000,
+      "documentationStatus": "API specification and CLI baseline distinguished",
+      "officialSources": [
+        "https://developers.openai.com/api/docs/models/gpt-5.4-mini",
+        "https://learn.chatgpt.com/docs/config-file/config-reference"
+      ]
+    },
+    {
+      "providerId": "anthropic",
+      "modelId": "claude-fable-5-1",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "providerId": "anthropic",
+      "modelId": "claude-fable-5",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "providerId": "anthropic",
+      "modelId": "claude-opus-5-5",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "providerId": "anthropic",
+      "modelId": "claude-opus-5",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "providerId": "anthropic",
+      "modelId": "claude-opus-4-8",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "providerId": "anthropic",
+      "modelId": "claude-sonnet-5-5",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "providerId": "anthropic",
+      "modelId": "claude-sonnet-5",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "providerId": "anthropic",
+      "modelId": "claude-haiku-5-5",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "providerId": "anthropic",
+      "modelId": "claude-haiku-4-5",
+      "baselineContextWindowTokens": 200000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "providerId": "kimi",
+      "modelId": "k3",
+      "baselineContextWindowTokens": 262144,
+      "documentationStatus": "plan-dependent; conservative baseline",
+      "officialSources": [
+        "https://www.kimi.com/code/docs/en/kimi-code/models.html",
+        "https://www.kimi.com/code/docs/en/kimi-code/error-reference.html"
+      ]
+    },
+    {
+      "providerId": "xai",
+      "modelId": "grok-4.7",
+      "baselineContextWindowTokens": 500000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://docs.x.ai/developers/models/grok-4.7"
+      ]
+    },
+    {
+      "providerId": "xai",
+      "modelId": "grok-4.6",
+      "baselineContextWindowTokens": 500000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://docs.x.ai/developers/models/grok-4.6"
+      ]
+    },
+    {
+      "providerId": "xai",
+      "modelId": "grok-4.5",
+      "baselineContextWindowTokens": 500000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://docs.x.ai/developers/models/grok-4.5"
+      ]
+    },
+    {
+      "providerId": "xai",
+      "modelId": "grok-4.3",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://docs.x.ai/developers/models/grok-4.3"
+      ]
+    },
+    {
+      "providerId": "gemini",
+      "modelId": "gemini-default",
+      "baselineContextWindowTokens": 1048576,
+      "documentationStatus": "delegated CLI selection",
+      "officialSources": [
+        "https://geminicli.com/docs/cli/model/",
+        "https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash"
+      ]
+    },
+    {
+      "providerId": "cursor",
+      "modelId": "cursor-default",
+      "baselineContextWindowTokens": null,
+      "documentationStatus": "delegated CLI selection",
+      "officialSources": [
+        "https://cursor.com/docs/models-and-pricing"
+      ]
+    },
+    {
+      "providerId": "opencode",
+      "modelId": "opencode-default",
+      "baselineContextWindowTokens": null,
+      "documentationStatus": "delegated CLI selection",
+      "officialSources": [
+        "https://opencode.ai/docs/models/"
+      ]
+    },
+    {
+      "providerId": "deepseek",
+      "modelId": "deepseek-flash",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented shorthand; existing decimal baseline retained",
+      "officialSources": [
+        "https://api-docs.deepseek.com/quick_start/pricing/"
+      ]
+    },
+    {
+      "providerId": "deepseek",
+      "modelId": "deepseek-v4-pro",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented shorthand; existing decimal baseline retained",
+      "officialSources": [
+        "https://api-docs.deepseek.com/quick_start/pricing/"
+      ]
+    },
+    {
+      "providerId": "mistral",
+      "modelId": "mistral-medium-latest",
+      "baselineContextWindowTokens": 256000,
+      "documentationStatus": "documented shorthand; existing decimal baseline retained",
+      "officialSources": [
+        "https://docs.mistral.ai/resources/known-limitations",
+        "https://docs.mistral.ai/vibe/code/cli/configuration"
+      ]
+    },
+    {
+      "providerId": "mistral",
+      "modelId": "mistral-large-latest",
+      "baselineContextWindowTokens": 256000,
+      "documentationStatus": "documented shorthand; existing decimal baseline retained",
+      "officialSources": [
+        "https://docs.mistral.ai/resources/known-limitations",
+        "https://docs.mistral.ai/vibe/code/cli/configuration"
+      ]
+    },
+    {
+      "providerId": "mistral",
+      "modelId": "mistral-small-latest",
+      "baselineContextWindowTokens": 256000,
+      "documentationStatus": "documented shorthand; existing decimal baseline retained",
+      "officialSources": [
+        "https://docs.mistral.ai/resources/known-limitations",
+        "https://docs.mistral.ai/vibe/code/cli/configuration"
+      ]
+    },
+    {
+      "providerId": "mistral",
+      "modelId": "codestral-latest",
+      "baselineContextWindowTokens": 128000,
+      "documentationStatus": "documented shorthand; existing decimal baseline retained",
+      "officialSources": [
+        "https://docs.mistral.ai/resources/known-limitations",
+        "https://docs.mistral.ai/vibe/code/cli/configuration"
+      ]
+    },
+    {
+      "providerId": "openrouter",
+      "modelId": "anthropic/claude-sonnet-5",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://openrouter.ai/api/v1/models"
+      ]
+    },
+    {
+      "providerId": "openrouter",
+      "modelId": "anthropic/claude-opus-5",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://openrouter.ai/api/v1/models"
+      ]
+    },
+    {
+      "providerId": "openrouter",
+      "modelId": "openai/gpt-6-astra",
+      "baselineContextWindowTokens": 1050000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://openrouter.ai/api/v1/models"
+      ]
+    },
+    {
+      "providerId": "openrouter",
+      "modelId": "google/gemini-3.8-flash",
+      "baselineContextWindowTokens": 1048576,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://openrouter.ai/api/v1/models"
+      ]
+    },
+    {
+      "providerId": "openrouter",
+      "modelId": "x-ai/grok-4.7",
+      "baselineContextWindowTokens": 500000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://openrouter.ai/api/v1/models"
+      ]
+    },
+    {
+      "providerId": "openrouter",
+      "modelId": "x-ai/grok-4.6",
+      "baselineContextWindowTokens": 500000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://openrouter.ai/api/v1/models"
+      ]
+    },
+    {
+      "providerId": "openrouter",
+      "modelId": "deepseek/deepseek-v4.1-flash",
+      "baselineContextWindowTokens": 1048576,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://openrouter.ai/api/v1/models"
+      ]
+    },
+    {
+      "providerId": "openrouter",
+      "modelId": "moonshotai/kimi-k3",
+      "baselineContextWindowTokens": 1048576,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://openrouter.ai/api/v1/models"
+      ]
+    },
+    {
+      "providerId": "openrouter",
+      "modelId": "z-ai/glm-5.3",
+      "baselineContextWindowTokens": 1048576,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://openrouter.ai/api/v1/models"
+      ]
+    },
+    {
+      "providerId": "openrouter",
+      "modelId": "qwen/qwen3.8-max-0902",
+      "baselineContextWindowTokens": 1000000,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://openrouter.ai/api/v1/models"
+      ]
+    },
+    {
+      "providerId": "openrouter",
+      "modelId": "meta-llama/llama-3.3-70b-instruct",
+      "baselineContextWindowTokens": 131072,
+      "documentationStatus": "documented",
+      "officialSources": [
+        "https://openrouter.ai/api/v1/models"
+      ]
+    }
+  ],
+  "openrouterPublicSnapshot": [
+    {
+      "id": "anthropic/claude-sonnet-5",
+      "context": 1000000,
+      "topProvider": {
+        "context_length": 1000000,
+        "max_completion_tokens": 128000,
+        "is_moderated": true
+      }
+    },
+    {
+      "id": "anthropic/claude-opus-5",
+      "context": 1000000,
+      "topProvider": {
+        "context_length": 1000000,
+        "max_completion_tokens": 128000,
+        "is_moderated": true
+      }
+    },
+    {
+      "id": "openai/gpt-6-astra",
+      "context": 1050000,
+      "topProvider": {
+        "context_length": 1050000,
+        "max_completion_tokens": 128000,
+        "is_moderated": true
+      }
+    },
+    {
+      "id": "google/gemini-3.8-flash",
+      "context": 1048576,
+      "topProvider": {
+        "context_length": 1048576,
+        "max_completion_tokens": 65536,
+        "is_moderated": false
+      }
+    },
+    {
+      "id": "x-ai/grok-4.7",
+      "context": 500000,
+      "topProvider": {
+        "context_length": 500000,
+        "max_completion_tokens": 450000,
+        "is_moderated": false
+      }
+    },
+    {
+      "id": "x-ai/grok-4.6",
+      "context": 500000,
+      "topProvider": {
+        "context_length": 500000,
+        "max_completion_tokens": 450000,
+        "is_moderated": false
+      }
+    },
+    {
+      "id": "deepseek/deepseek-v4.1-flash",
+      "context": 1048576,
+      "topProvider": {
+        "context_length": 1048576,
+        "max_completion_tokens": 943718,
+        "is_moderated": false
+      }
+    },
+    {
+      "id": "moonshotai/kimi-k3",
+      "context": 1048576,
+      "topProvider": {
+        "context_length": 1048576,
+        "max_completion_tokens": 943718,
+        "is_moderated": false
+      }
+    },
+    {
+      "id": "z-ai/glm-5.3",
+      "context": 1048576,
+      "topProvider": {
+        "context_length": 1048576,
+        "max_completion_tokens": 943718,
+        "is_moderated": false
+      }
+    },
+    {
+      "id": "qwen/qwen3.8-max-0902",
+      "context": 1000000,
+      "topProvider": {
+        "context_length": 1000000,
+        "max_completion_tokens": 131072,
+        "is_moderated": false
+      }
+    },
+    {
+      "id": "meta-llama/llama-3.3-70b-instruct",
+      "context": 131072,
+      "topProvider": {
+        "context_length": 131072,
+        "max_completion_tokens": 16384,
+        "is_moderated": false
+      }
+    }
+  ],
+  "codexLocalCatalog": {
+    "clientVersion": "0.162.1",
+    "fetchedAt": "2026-10-10T13:48:56.474791Z",
+    "models": [
+      {
+        "id": "gpt-6.1-sol",
+        "defaultContextWindow": 500000,
+        "maxContextWindow": 872000,
+        "effectiveContextWindowPercent": 95
+      },
+      {
+        "id": "gpt-6-astra",
+        "defaultContextWindow": 272000,
+        "maxContextWindow": 872000,
+        "effectiveContextWindowPercent": 95
+      },
+      {
+        "id": "gpt-6-sol",
+        "defaultContextWindow": 272000,
+        "maxContextWindow": 872000,
+        "effectiveContextWindowPercent": 95
+      },
+      {
+        "id": "gpt-6-luna",
+        "defaultContextWindow": 272000,
+        "maxContextWindow": 872000,
+        "effectiveContextWindowPercent": 95
+      },
+      {
+        "id": "gpt-5.6-sol",
+        "defaultContextWindow": 272000,
+        "maxContextWindow": 872000,
+        "effectiveContextWindowPercent": 95
+      },
+      {
+        "id": "gpt-5.6-terra",
+        "defaultContextWindow": 272000,
+        "maxContextWindow": 872000,
+        "effectiveContextWindowPercent": 95
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "defaultContextWindow": 272000,
+        "maxContextWindow": 872000,
+        "effectiveContextWindowPercent": 95
+      },
+      {
+        "id": "gpt-5.5",
+        "defaultContextWindow": 272000,
+        "maxContextWindow": 272000,
+        "effectiveContextWindowPercent": 95
+      }
+    ]
+  },
+  "limitations": [
+    "Kimi account entitlement and provisioned K3 window were not confirmed; ACP does not capture that limit.",
+    "Cursor/OpenCode defaults and custom endpoint model allocations are unknown until reported.",
+    "Gemini CLI routing can select a different configured model; normal Gemini baseline is 1048576.",
+    "Ollama model capacity is discovered; its per-request allocation may be smaller.",
+    "DeepSeek/Mistral docs use shorthand units; exact integer ceilings were not independently measured.",
+    "GPT-5.4 and GPT-5.4 mini are absent from current local Codex cache; existing integration baselines retained."
+  ],
+  "validation": {
+    "composerContextAndLiveStreaming": "passed",
+    "remoteCatalogAndPicker": "passed",
+    "compactionLifecycle": "20 provider/outcome cases passed",
+    "nativeContextSuite": "25 passed; local socket fixture required sandbox escalation",
+    "focusedSolAndGeminiNativeTests": "2 passed",
+    "uiAndDesktopTypecheck": "passed"
+  }
+}

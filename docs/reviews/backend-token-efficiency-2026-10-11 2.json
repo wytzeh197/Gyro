@@ -1,0 +1,254 @@
+{
+  "checkedDate": "2026-10-11",
+  "scope": "Source audit, implementation, local fixture tests, and backend contract checks across every Gyro provider execution path and model-facing workspace tool domain.",
+  "status": "implemented-and-verified",
+  "activation": "Rebuild and restart Gyro to use these source changes.",
+  "paidGenerationCalls": 0,
+  "providerCoverage": {
+    "nativeCli": [
+      "openai (Codex exec and app-server)",
+      "anthropic (Claude Code)",
+      "kimi",
+      "xai",
+      "gemini",
+      "cursor",
+      "opencode"
+    ],
+    "openAiCompatibleApi": [
+      "deepseek",
+      "mistral",
+      "openrouter",
+      "custom endpoint configurations"
+    ],
+    "localApi": [
+      "ollama"
+    ]
+  },
+  "implemented": [
+    {
+      "area": "Prompts and history",
+      "result": "Valid native resumes omit redundant local history. Fresh sessions, stale resumes and model handoffs retain the transcript. Compact reminders preserve dynamic workspace, goal, mode and approval information. Identical wrapper instructions are removed."
+    },
+    {
+      "area": "Browser knowledge and tool catalogs",
+      "result": "Model prompts no longer duplicate complete browser tool schemas. Shared root descriptions are shorter. JSON bridge discovery can retrieve an exact tool schema instead of a whole domain; native catalogs retain every advertised capability and constraint."
+    },
+    {
+      "area": "Workspace reads and search",
+      "result": "Default serialized result data budget is 16 KiB with explicit continuation metadata and configurable larger reads. Search stops at its global result limit and keeps match-centered previews. Edit hashes cover complete editable files. Unicode coordinates and position-preserving secret masking are retained."
+    },
+    {
+      "area": "Context, diagnostics and GitHub",
+      "result": "Default workspace context is an overview of identities, revisions, signal counts and output status. Explicit sections page retained evidence. Diagnostics, PRs, workflow lists and logs have budgets and cursors; late log failures remain available."
+    },
+    {
+      "area": "Terminal and task results",
+      "result": "Default log responses return bounded windows. Known output revisions suppress unchanged logs. Full finite-task outputs are retained separately from compact model responses so UI evidence refreshes cannot discard continuation data. Optional outputId retrieves earlier retained outputs only for the owning chat; retention is bounded to 16 outputs / 16 MiB."
+    },
+    {
+      "area": "Memory, Git and code intelligence",
+      "result": "Memory entries and raw file text are separate paged modes. Git status omits duplicate history; diffs, history, blame, locations, symbols and hover results expose bounded pages or text windows. Explicit memory limits up to 200 and Git-status limits up to 500 now use validated page limits instead of a hidden 50-item clamp."
+    },
+    {
+      "area": "Web, browser and research evidence",
+      "result": "Fetch output separates source truncation from response paging. Browser observations omit duplicated diagnostics, preserve element references, and expose omitted subtrees and paged console/network results. Existing owned research sessions can be read without starting another generation."
+    },
+    {
+      "area": "Agent reports",
+      "result": "Reports use a 16 KiB default result budget. Known agent revisions suppress unchanged summaries. Individual reports or larger budgets retrieve additional retained evidence. Parent synthesis uses the same bounded representation."
+    },
+    {
+      "area": "Compaction and response serialization",
+      "result": "Compaction keeps complete assistant/tool/image exchanges and the latest exchange, excludes encoded image bytes from text estimates, and trims old image evidence by observed occupancy. Model-only tool responses omit the large IPC/UI envelope."
+    },
+    {
+      "area": "Tool execution and retries",
+      "result": "Independent reads run with at most four workers; writes remain ordered barriers. Unsupported native-tool probes are cached for 15 minutes by endpoint/model/credential identity after explicit feature rejection. One malformed-batch correction is allowed, then invalid tool loops stop. Valid execution failures remain recoverable."
+    },
+    {
+      "area": "Spend enforcement and accounting",
+      "result": "Existing user ceilings and provider rolling budgets are enforced through the common live usage path for API, local API and native runners. Failed/retried generations count; cached input is handled by the existing ceiling policy. Other completed chats refresh rolling totals. Continuation receipts and child totals are not counted twice. Final task totals are display-only."
+    },
+    {
+      "area": "Workspace execution reliability",
+      "result": "Owning chat, selected root identity, cancellation and canonical directory are rechecked after approval and before action. Secondary roots and private projectless workspaces remain supported."
+    }
+  ],
+  "measurements": {
+    "method": "Controlled fixture comparisons of serialized UTF-8 payload bytes or prompt characters. Full/repeated representations are compared with compact representations of the same evidence. These are not measured token bills, average production savings, or end-to-end historical catalog size reductions.",
+    "fixtures": [
+      {
+        "name": "Terminal log result data",
+        "fullBytes": 524360,
+        "compactBytes": 16384
+      },
+      {
+        "name": "Task result data",
+        "fullBytes": 72043,
+        "compactBytes": 16384
+      },
+      {
+        "name": "Console result data",
+        "fullBytes": 101525,
+        "compactBytes": 16327
+      },
+      {
+        "name": "Repeated agent report",
+        "fullBytes": 8087,
+        "compactBytes": 152
+      },
+      {
+        "name": "Browser prompt contract",
+        "fullBytes": 7374,
+        "compactBytes": 1366
+      },
+      {
+        "name": "Workspace context overview",
+        "fullBytes": 203495,
+        "compactBytes": 639
+      },
+      {
+        "name": "GitHub workflow log window",
+        "fullBytes": 48081,
+        "compactBytes": 16384
+      },
+      {
+        "name": "Exact bridge read-range schema versus whole domain",
+        "fullBytes": 10679,
+        "compactBytes": 941
+      },
+      {
+        "name": "Model-only tool response envelope sample",
+        "fullBytes": 404,
+        "compactBytes": 254
+      }
+    ],
+    "nativeCatalogDescriptionOnly": {
+      "explanation": "Current complete catalog is held constant; only repeated rootId descriptions are compared. All schemas and tool counts are retained.",
+      "normal": {
+        "tools": 62,
+        "rootFields": 45,
+        "fullBytes": 51816,
+        "compactBytes": 49566,
+        "fullTextSchemaCharacters": 52353,
+        "compactTextSchemaCharacters": 50103
+      },
+      "plan": {
+        "tools": 35,
+        "rootFields": 28,
+        "fullBytes": 30666,
+        "compactBytes": 29266,
+        "fullTextSchemaCharacters": 30989,
+        "compactTextSchemaCharacters": 29589
+      },
+      "council": {
+        "tools": 0,
+        "fullBytes": 2,
+        "compactBytes": 2
+      }
+    }
+  },
+  "limitations": [
+    "Fixture payload reductions do not establish exact tokenizer or billing savings; no paid provider generation was used.",
+    "Provider-owned CLI prompts, hidden context and internal tool loops cannot be fully inspected or capped by Gyro. Several adapters report token counts only at completion or cannot report them.",
+    "API/local API limits stop later generations after observed usage. An in-flight request can exceed a ceiling; simultaneous in-flight chats have no shared token reservation.",
+    "Source command output, session history, search and web content retain their existing bounded-source limits. Paging does not recover data already omitted upstream.",
+    "Web paging currently refetches the URL, so changing content can shift later windows.",
+    "Tool-support rejection caching lasts 15 minutes and is bounded to 128 records.",
+    "Finite-task output retention is bounded to 16 outputs and 16 MiB; older outputs can be evicted.",
+    "Models, reasoning settings, configured budget values and compaction thresholds were preserved.",
+    "The installed application has not been replaced by this source audit."
+  ],
+  "validation": {
+    "ignoredTests": [
+      "Two real-generation Ollama integrations require an explicitly selected local model.",
+      "Live model-catalog fetch, signed-in Anthropic/Codex/Kimi account reads, and installed provider CLI argument checks remain explicitly ignored."
+    ],
+    "resolvedFailures": [
+      "Corrected a malformed ACP replay fixture and refreshed the browser contract golden for the new paging schemas.",
+      "Updated the context schema contract assertion for optional overview/section paging arguments while preserving conservative sensitive-read and reload checks.",
+      "An existing ACP unterminated-frame timing assertion failed under unrestricted aggregate scheduling, then passed six focused runs, the complete 31-test ACP group, and the full core suite with four test threads. The 1 MiB rejection and two-second assertion were preserved.",
+      "CLI fixtures require their own HOME/XDG isolation; the passing CLI suite was run without the desktop GYRO_TEST_DATA_DIR override."
+    ],
+    "core": {
+      "passed": 558,
+      "failed": 0,
+      "ignored": 2,
+      "command": "env GYRO_TEST_DATA_DIR=/private/tmp/gyro-token-audit-01a12a2a cargo test -p gyro-core --offline -- --test-threads=4"
+    },
+    "desktop": {
+      "passed": 613,
+      "failed": 0,
+      "ignored": 5,
+      "command": "env GYRO_TEST_DATA_DIR=/private/tmp/gyro-token-audit-01a12a2a cargo test -p gyro-desktop --offline -- --test-threads=4 --nocapture"
+    },
+    "cli": {
+      "passed": 64,
+      "failed": 0,
+      "ignored": 0,
+      "command": "env -u GYRO_TEST_DATA_DIR cargo test -p gyro-cli --offline"
+    },
+    "total": {
+      "passed": 1235,
+      "failed": 0,
+      "ignored": 7
+    },
+    "backendChecks": {
+      "passed": 26,
+      "scripts": [
+        "scripts/check-turn-tokens.mjs",
+        "scripts/check-usage-ledger.mjs",
+        "scripts/check-provider-identity.mjs",
+        "scripts/check-provider-allowance.mjs",
+        "scripts/check-composer-context-usage.mjs",
+        "scripts/check-goal-plan.mjs",
+        "scripts/check-provider-capability-manifest.mjs",
+        "scripts/check-provider-stream-ordering.mjs",
+        "scripts/check-chat-network.mjs",
+        "scripts/check-chat-persistence.mjs",
+        "scripts/check-subagents.mjs",
+        "scripts/check-subagent-browsers.mjs",
+        "scripts/check-browser-observation-cost.mjs",
+        "scripts/check-context-compaction.mjs",
+        "scripts/check-workspace-search.mjs",
+        "scripts/check-workspace-explorer.mjs",
+        "scripts/check-workspace-capability-sync.mjs",
+        "scripts/check-model-file-visibility.mjs",
+        "scripts/check-browser-capability.mjs",
+        "scripts/check-command-blocking.mjs",
+        "scripts/check-code-intelligence.mjs",
+        "scripts/check-backend-responsiveness.mjs",
+        "scripts/check-github-reliability.mjs",
+        "scripts/check-terminal-output.mjs",
+        "scripts/check-terminal-failure.mjs",
+        "scripts/check-guard-registry.mjs"
+      ],
+      "finalRetentionPatchRechecks": [
+        "terminal-output",
+        "workspace-capability-sync"
+      ]
+    },
+    "regressions": "Includes Unicode continuation and edit hashes, secret masking, source/response paging, late failure retrieval, UI output refresh retention and cache eviction, chat ownership, no generation on research reread, unchanged agent reports, native resume fallback, unsupported-tool compatibility, retry/continuation spend, and child-total deduplication.",
+    "whitespace": "git diff --check passed"
+  },
+  "unrelatedWorkingTreeCheck": {
+    "check": "scripts/check-architecture-boundaries.mjs",
+    "status": "failed",
+    "reason": "Concurrent packages/ui/src/surfaces.tsx changes exceed its 29,926-line ceiling (30,011 lines when checked). Backend lib.rs stays under its 31,217-line ceiling. No ceiling was raised.",
+    "guardRegistry": "Passed with 89 reachable guards after concurrent registry work was completed."
+  },
+  "sourceEntrypoints": [
+    "/Users/wytzehemrica/Documents/Gyro/apps/desktop/src-tauri/src/provider_spend_guard.rs",
+    "/Users/wytzehemrica/Documents/Gyro/apps/desktop/src-tauri/src/provider_accounting.rs",
+    "/Users/wytzehemrica/Documents/Gyro/apps/desktop/src-tauri/src/provider_tool_batch.rs",
+    "/Users/wytzehemrica/Documents/Gyro/apps/desktop/src-tauri/src/provider_context.rs",
+    "/Users/wytzehemrica/Documents/Gyro/apps/desktop/src-tauri/src/capability_output_budget.rs",
+    "/Users/wytzehemrica/Documents/Gyro/apps/desktop/src-tauri/src/workspace_context_capability.rs",
+    "/Users/wytzehemrica/Documents/Gyro/apps/desktop/src-tauri/src/terminal_capability.rs",
+    "/Users/wytzehemrica/Documents/Gyro/apps/desktop/src-tauri/src/agent_reports.rs",
+    "/Users/wytzehemrica/Documents/Gyro/apps/desktop/src-tauri/src/capability_execution_guard.rs",
+    "/Users/wytzehemrica/Documents/Gyro/crates/gyro-core/src/provider_observation.rs",
+    "/Users/wytzehemrica/Documents/Gyro/crates/gyro-core/src/api_compatibility.rs",
+    "/Users/wytzehemrica/Documents/Gyro/crates/gyro-core/src/usage.rs"
+  ]
+}

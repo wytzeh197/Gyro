@@ -1,0 +1,240 @@
+/* The installed release floats above Settings so the chat list keeps its height. */
+.gyro-installed-update-notice {
+  bottom: calc(100% + 8px);
+  left: 8px;
+  position: absolute;
+  right: 8px;
+  z-index: 2;
+}
+
+.gyro-installed-update-trigger {
+  background: var(--gyro-surface-raised);
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-accent) 18%, var(--gyro-border));
+  border-radius: var(--gyro-radius-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+  color: var(--gyro-text);
+  display: grid;
+  gap: 4px;
+  padding: 12px 40px 13px 14px;
+  text-align: left;
+  width: 100%;
+}
+
+.gyro-installed-update-trigger:hover,
+.gyro-installed-update-trigger:focus-visible {
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 5%,
+    var(--gyro-surface-raised)
+  );
+}
+
+:root[data-theme="light"] .gyro-installed-update-trigger {
+  box-shadow: 0 12px 32px rgba(28, 39, 52, 0.15);
+}
+
+.gyro-installed-update-trigger:focus-visible,
+.gyro-installed-update-dismiss:focus-visible,
+.gyro-installed-update-card button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
+.gyro-installed-update-icon,
+.gyro-installed-update-card-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+}
+
+.gyro-installed-update-icon {
+  height: 18px;
+  width: 18px;
+}
+
+.gyro-installed-update-icon img {
+  height: 14px;
+  width: 14px;
+}
+
+.gyro-installed-update-brand {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: var(--gyro-font-caption);
+  font-weight: 600;
+  gap: 6px;
+  margin-bottom: 4px;
+  min-width: 0;
+}
+
+.gyro-installed-update-icon img,
+.gyro-installed-update-card-icon img {
+  display: block;
+}
+
+.gyro-installed-update-compact-version {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-tiny);
+  line-height: 1.2;
+}
+
+.gyro-installed-update-title {
+  font-size: var(--gyro-font-chrome);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.gyro-installed-update-preview {
+  color: var(--gyro-muted);
+  display: -webkit-box;
+  font-size: var(--gyro-font-caption);
+  line-height: 1.35;
+  margin-top: 3px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.gyro-installed-update-action {
+  align-items: center;
+  color: var(--gyro-accent);
+  display: inline-flex;
+  font-size: var(--gyro-font-caption);
+  font-weight: 600;
+  gap: 4px;
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.gyro-installed-update-dismiss {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-xs);
+  color: var(--gyro-muted);
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 26px;
+}
+
+.gyro-installed-update-dismiss:hover,
+.gyro-installed-update-card-close:hover {
+  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-installed-update-card {
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-xl);
+  bottom: 0;
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.42);
+  color: var(--gyro-text);
+  display: grid;
+  gap: 14px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  left: 0;
+  max-height: min(70vh, 460px);
+  overflow: hidden;
+  padding: 18px 18px 16px;
+  position: absolute;
+  width: min(340px, calc(100vw - 32px));
+  z-index: 140;
+}
+
+:root[data-theme="light"] .gyro-installed-update-card {
+  box-shadow: 0 22px 54px rgba(28, 39, 52, 0.2);
+}
+
+.gyro-installed-update-card-heading {
+  align-items: center;
+  column-gap: 12px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.gyro-installed-update-card-icon {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  border: 0.5px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+  height: 44px;
+  width: 44px;
+}
+
+.gyro-installed-update-card-icon img {
+  height: 26px;
+  width: 26px;
+}
+
+:root[data-theme="light"] .gyro-installed-update-icon img,
+:root[data-theme="light"] .gyro-installed-update-card-icon img {
+  filter: brightness(0);
+}
+
+.gyro-installed-update-card-close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  display: inline-flex;
+  height: 28px;
+  align-self: start;
+  justify-content: center;
+  margin: -6px -6px 0 0;
+  width: 28px;
+}
+
+.gyro-installed-update-card-intro {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gyro-installed-update-eyebrow {
+  color: var(--gyro-accent);
+  font-size: var(--gyro-font-tiny);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.gyro-installed-update-card h2 {
+  font-size: var(--gyro-font-lead);
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.gyro-installed-update-version {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  margin: 0;
+}
+
+.gyro-installed-update-notes {
+  border-top: 1px solid var(--gyro-border-soft);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  line-height: 1.55;
+  min-height: 0;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  padding-top: 13px;
+  white-space: pre-wrap;
+}
+
+/* Done is the shared primary button; it only sizes itself to the card. */
+.gyro-installed-update-done {
+  height: 30px;
+  justify-self: end;
+  min-width: 72px;
+}
+

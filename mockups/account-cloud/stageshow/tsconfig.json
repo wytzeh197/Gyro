@@ -1,0 +1,1 @@
+{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"Bundler","jsx":"react-jsx","strict":true,"skipLibCheck":true,"allowSyntheticDefaultImports":true,"noEmit":true,"types":["vite/client"]},"include":["review.tsx","kit","examples"]}

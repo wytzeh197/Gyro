@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'"
+    />
+    <title>Gyro Browser Observation Fixture</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px;
+      }
+
+      main {
+        display: grid;
+        gap: 24px;
+        margin: 0 auto;
+        max-width: 760px;
+      }
+
+      .responsive-state::after {
+        content: "desktop";
+      }
+
+      #pointer-canvas {
+        border: 1px solid currentColor;
+        display: block;
+        height: 64px;
+        width: 220px;
+      }
+
+      #drag-track {
+        align-items: center;
+        border: 1px solid currentColor;
+        display: flex;
+        height: 44px;
+        justify-content: space-between;
+        padding: 4px;
+        width: 260px;
+      }
+
+      #drag-handle,
+      #drop-zone {
+        align-items: center;
+        display: flex;
+        height: 36px;
+        justify-content: center;
+        width: 72px;
+      }
+
+      #drag-handle {
+        background: #2684ff;
+        color: white;
+        cursor: grab;
+        touch-action: none;
+      }
+
+      #drop-zone {
+        border: 1px dashed currentColor;
+      }
+
+      @media (min-width: 1000px) {
+        #change-state { float: right; }
+      }
+
+      @media (max-width: 600px) {
+        body {
+          padding: 16px;
+        }
+
+        .responsive-state::after {
+          content: "compact";
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p>Deterministic loopback page for Gyro Browser acceptance.</p>
+        <h1>Browser observation ready</h1>
+        <p class="responsive-state">Viewport:</p>
+      </header>
+
+      <section aria-labelledby="interaction-heading">
+        <h2 id="interaction-heading">State-changing control</h2>
+        <button id="change-state" type="button">Change visible state</button>
+        <output id="visible-state" aria-live="polite">State: initial</output>
+        <output id="click-count">Clicks: 0</output>
+      </section>
+
+      <section aria-labelledby="pointer-heading">
+        <h2 id="pointer-heading">Mouse interaction</h2>
+        <button id="hover-trigger" type="button">Hover target</button>
+        <output id="hover-state">Hover: initial</output>
+        <canvas id="pointer-canvas" width="220" height="64" aria-label="Canvas target"></canvas>
+        <output id="canvas-state">Canvas: initial</output>
+        <div id="drag-track">
+          <div id="drag-handle" role="button" aria-label="Drag handle">Drag</div>
+          <div id="drop-zone" role="button" aria-label="Drop zone">Drop</div>
+        </div>
+        <output id="drag-state">Drag: initial</output>
+        <output id="context-state">Context: initial</output>
+      </section>
+
+      <section aria-labelledby="form-heading">
+        <h2 id="form-heading">Form controls</h2>
+        <form id="safe-form">
+          <label for="project-name">Project name</label>
+          <input id="project-name" name="projectName" value="Gyro" />
+          <select id="project-kind" aria-label="Project kind">
+            <option value="site">Site</option>
+            <option value="app">App</option>
+          </select>
+          <input id="project-enabled" type="checkbox" aria-label="Enabled" />
+          <output id="options-state">Kind: site; enabled: false</output>
+          <button type="submit">Save project</button>
+          <output id="form-state" aria-live="polite">Form: untouched</output>
+        </form>
+
+        <label for="fixture-password">Blocked credential field</label>
+        <input
+          id="fixture-password"
+          name="password"
+          type="password"
+          value="fixture-secret"
+        />
+      </section>
+      <div style="height: 900px" aria-hidden="true"></div>
+    </main>
+
+    <script>
+      let clicks = 0;
+      document.addEventListener("pointerdown", event => console.log("fixture-pointer", event.clientX, event.clientY, event.target.id));
+      for (const id of ["project-kind", "project-enabled"]) {
+        document.getElementById(id).addEventListener("change", () => {
+          document.getElementById("options-state").textContent =
+            `Kind: ${document.getElementById("project-kind").value}; enabled: ${document.getElementById("project-enabled").checked}`;
+        });
+      }
+      document.querySelector("#change-state").addEventListener("click", () => {
+        document.querySelector("#visible-state").textContent = "State: changed";
+        document.querySelector("#click-count").textContent =
+          `Clicks: ${++clicks}`;
+      });
+
+      document
+        .querySelector("#safe-form")
+        .addEventListener("submit", (event) => {
+          event.preventDefault();
+          const name = document.querySelector("#project-name").value;
+          document.querySelector("#form-state").textContent =
+            `Form: saved ${name}`;
+        });
+
+      document.querySelector("#hover-trigger").addEventListener("mouseenter", () => {
+        document.querySelector("#hover-state").textContent = "Hover: open";
+      });
+      document.querySelector("#hover-trigger").addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        document.querySelector("#context-state").textContent = "Context: opened";
+      });
+      document.querySelector("#pointer-canvas").addEventListener("click", () => {
+        document.querySelector("#canvas-state").textContent = "Canvas: clicked";
+      });
+      let dragging = false;
+      document.querySelector("#drag-handle").addEventListener("pointerdown", (event) => {
+        dragging = true;
+        event.currentTarget.setPointerCapture(event.pointerId);
+      });
+      document.addEventListener("pointerup", (event) => {
+        if (!dragging) return;
+        dragging = false;
+        const drop = document.querySelector("#drop-zone").getBoundingClientRect();
+        if (event.clientX >= drop.left && event.clientX <= drop.right) {
+          document.querySelector("#drag-state").textContent = "Drag: completed";
+        }
+      });
+
+      console.info("gyro-browser-fixture-ready");
+      fetch("/__gyro_missing_network_fixture__").catch(() => {
+        console.warn("gyro-browser-fixture-network-failed");
+      });
+    </script>
+  </body>
+</html>

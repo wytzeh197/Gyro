@@ -1,0 +1,250 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
+
+// Exercise the actual hooks with controlled slow RPCs. This tests scheduling
+// behavior without relying on wall-clock timing or a particular laptop.
+const source = readFileSync(
+  new URL("../apps/desktop/src/App.tsx", import.meta.url),
+  "utf8",
+);
+function hook(name, next, context) {
+  const start = source.indexOf(`  const ${name} = useCallback`);
+  const end = source.indexOf(`  const ${next} = useCallback`, start);
+  assert.ok(start > 0 && end > start);
+  const js = ts.transpileModule(
+    `${source.slice(start, end)}\nglobalThis.result = ${name};`,
+    {
+      compilerOptions: { target: ts.ScriptTarget.ES2022 },
+    },
+  ).outputText;
+  const sandbox = {
+    useCallback: (fn) => fn,
+    isTauriRuntime: () => true,
+    ...context,
+  };
+  runInNewContext(js, sandbox);
+  return sandbox.result;
+}
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+let pending = [];
+const events = [];
+const refresh = hook("refreshIdeSourceControl", "refreshWorkspaceBranches", {
+  ideSourceControlRootRef: { current: undefined },
+  ideSourceControlInFlightRef: { current: new Set() },
+  ideSourceControlQueuedRef: { current: new Set() },
+  dispatchWorkbench: (event) => events.push(event),
+  invoke: (_command, args) =>
+    new Promise((resolve, reject) => pending.push({ resolve, reject, args })),
+});
+for (let i = 0; i < 100; i++) refresh("/workspace/a");
+assert.equal(
+  pending.length,
+  1,
+  "refresh bursts must have only one Git RPC in flight",
+);
+pending.shift().resolve({ branch: "first" });
+await flush();
+assert.equal(
+  pending.length,
+  1,
+  "a burst queues exactly one follow-up to catch mutations",
+);
+pending.shift().resolve({ branch: "fresh" });
+await flush();
+assert.equal(pending.length, 0);
+assert.equal(events.at(-1).sourceControl.branch, "fresh");
+refresh("/workspace/a");
+refresh("/workspace/b");
+pending.shift().resolve({ branch: "stale" });
+await flush();
+assert.equal(
+  events.at(-1).sourceControl.branch,
+  "fresh",
+  "previous workspace results stay hidden",
+);
+pending.shift().reject(new Error("unavailable"));
+await flush();
+refresh("/workspace/b");
+assert.equal(pending.length, 1, "failed RPCs release the in-flight guard");
+pending.shift().resolve({ branch: "recovered" });
+await flush();
+refresh("/workspace/b");
+const eventCountBeforeNoWorkspace = events.length;
+refresh(undefined);
+pending.shift().resolve({ branch: "late previous workspace" });
+await flush();
+assert.equal(
+  events.length,
+  eventCountBeforeNoWorkspace,
+  "switching to no workspace rejects a late Git result and its queued follow-up",
+);
+assert.equal(pending.length, 0);
+
+let config;
+let finishDiscovery;
+const refreshConfig = hook("refreshConfig", "selectDestination", {
+  setConfig: (value) => {
+    config = typeof value === "function" ? value(config) : value;
+  },
+  setActiveProfileId: () => {},
+  providersForConfig: (value) => value.modelProviders,
+  withCouncilConfig: (value) => value,
+  applyProviderCapabilityManifest: () => {},
+  restoreModelCatalog: () => {},
+  invoke: (command) => {
+    if (command === "load_config") {
+      return Promise.resolve({
+        commandProfiles: [{ id: "shell" }],
+        modelProviders: [{ id: "ollama", baseUrl: null, enabled: true }],
+        preference: "original",
+      });
+    }
+    if (command === "list_provider_capability_support") {
+      return Promise.resolve([]);
+    }
+    return new Promise((resolve) => {
+      finishDiscovery = resolve;
+    });
+  },
+});
+await refreshConfig();
+assert.equal(
+  config.preference,
+  "original",
+  "workspace config loads before slow local discovery",
+);
+config = { ...config, preference: "edited while loading" };
+finishDiscovery({
+  baseUrl: "http://localhost:11434/api",
+  models: [{ id: "test:small", displayName: "Test", supportsTools: false }],
+});
+await flush();
+assert.equal(
+  config.preference,
+  "edited while loading",
+  "discovery must preserve newer preferences",
+);
+assert.equal(config.modelProviders[0].selectedModelId, "test:small");
+console.log(
+  "Startup performance checks passed: bounded Git refresh bursts, stale-workspace suppression, failure recovery, nonblocking Ollama discovery, preserved preferences.",
+);
+
+const selectionStart = source.indexOf(
+  '      if (action.startsWith("select-provider-model:"))',
+);
+const selectionEnd = source.indexOf(
+  '      if (action.startsWith("select-provider-effort:"))',
+  selectionStart,
+);
+assert.ok(selectionStart > 0 && selectionEnd > selectionStart);
+for (const modelId of ["qwen3:0.6b", "namespace/model:tag", "gpt-5.6-sol"]) {
+  let selected;
+  runInNewContext(
+    `(() => { ${source.slice(selectionStart, selectionEnd)} })()`,
+    {
+      action: `select-provider-model:ollama:${modelId}`,
+      isProviderId: (id) => id === "ollama",
+      selectProviderModel: (provider, model) => {
+        selected = [provider, model];
+      },
+    },
+  );
+  assert.deepEqual(
+    selected,
+    ["ollama", modelId],
+    "model menu actions preserve tags and namespaces",
+  );
+}
+console.log(
+  "Local-model menu checks passed: tags and namespaces reach provider selection intact.",
+);
+
+const listing = {};
+const compileModule = (path) =>
+  ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.CommonJS,
+    },
+  }).outputText;
+runInNewContext(compileModule("../apps/desktop/src/session-listing.ts"), {
+  exports: listing,
+});
+const scope = {};
+runInNewContext(compileModule("../apps/desktop/src/source-control-scope.ts"), {
+  exports: scope,
+  require: (id) => (id === "react" ? { useMemo: (fn) => fn() } : listing),
+});
+const snapshot = {
+  available: true,
+  workspacePath: "/workspace/a",
+  files: [{ path: "changed.ts" }],
+};
+assert.equal(
+  scope.sourceControlForWorkspace(snapshot, "/workspace/a/"),
+  snapshot,
+);
+for (const root of [
+  undefined,
+  "",
+  "/workspace/b",
+  "/workspace/a/subfolder",
+  "/workspace/ab",
+]) {
+  assert.equal(
+    scope.sourceControlForWorkspace(snapshot, root),
+    undefined,
+    "snapshots cannot supply a different root or no-workspace chat",
+  );
+}
+assert.equal(
+  scope.sourceControlForWorkspace(
+    { ...snapshot, workspacePath: undefined },
+    "/workspace/a",
+  ),
+  undefined,
+);
+assert.equal(
+  scope.sourceControlForWorkspace(
+    { ...snapshot, workspacePath: 42 },
+    "/workspace/a",
+  ),
+  undefined,
+);
+const ide = { sourceControl: snapshot, tabs: ["keep-editor-state"] };
+assert.equal(
+  scope.sourceControlForWorkspace(
+    { ...snapshot, workspacePath: "/workspace/a " },
+    "/workspace/a",
+  ),
+  undefined,
+  "whitespace in a real directory name cannot alias a different workspace",
+);
+assert.equal(
+  scope.useScopedIdeState(ide, "/workspace/a"),
+  ide,
+  "matching snapshots retain render identity",
+);
+const unownedIde = scope.useScopedIdeState(ide, "/workspace/b");
+assert.equal(unownedIde.tabs, ide.tabs);
+assert.equal(unownedIde.sourceControl.available, false);
+assert.equal(unownedIde.sourceControl.files.length, 0);
+assert.ok(
+  !source.includes("ide={workbench.ide}"),
+  "all IDE surfaces consume scoped data",
+);
+assert.ok(
+  !source.includes("workbench.ide.sourceControl.files"),
+  "action and baseline inputs consume scoped data",
+);
+assert.ok(
+  /sourceControlForWorkspace\(\s*workbench\.ide\.sourceControl,\s*pane\.workspacePath,?\s*\)/.test(
+    source,
+  ),
+  "each tiled pane validates its own workspace rather than the focused pane",
+);
+console.log(
+  "Git snapshot ownership passed: no workspace, other roots, subfolders, malformed legacy state, pane wiring and stable matching renders.",
+);

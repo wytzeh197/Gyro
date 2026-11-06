@@ -1,0 +1,255 @@
+{
+ "//": "Documents the picker (parseModelCatalog) and the runner (model_catalog.rs) must both accept or both reject. Tested by scripts/check-model-catalog.mjs and the model_catalog Rust tests.",
+ "cases": [
+  {
+   "name": "a complete entry",
+   "valid": true,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "an empty models list",
+   "valid": true,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[]}"
+  },
+  {
+   "name": "a disabled document",
+   "valid": true,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":false,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "unknown fields are ignored",
+   "valid": true,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\",\"baseUrl\":\"https://bad.invalid\",\"apiKey\":\"x\"}]}"
+  },
+  {
+   "name": "only the required fields",
+   "valid": true,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"p\",\"displayName\":\"P\",\"minClientRevision\":1}]}"
+  },
+  {
+   "name": "an integer written with a decimal point",
+   "valid": true,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1.0,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a display name of exactly 120 characters",
+   "valid": true,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a display name of 120 UTF-16 units",
+   "valid": true,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "an unknown provider is ignored, not rejected",
+   "valid": true,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"future-provider\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "an entry for a later client",
+   "valid": true,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":99,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a zero rollout",
+   "valid": true,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":0,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "not JSON",
+   "valid": false,
+   "raw": "broken"
+  },
+  {
+   "name": "a JSON array",
+   "valid": false,
+   "raw": "[]"
+  },
+  {
+   "name": "another schema",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v2\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[]}"
+  },
+  {
+   "name": "enabled missing",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "enabled as a string",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":\"true\",\"rolloutPercentage\":100,\"models\":[]}"
+  },
+  {
+   "name": "models not a list",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":{}}"
+  },
+  {
+   "name": "a model that is a list",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[[]]}"
+  },
+  {
+   "name": "a blank provider",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"   \",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a provider of only a byte-order mark",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"﻿\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "an ID that reads as a flag",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"--unsafe-flag\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "an ID with a space",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"a b\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "IDs that differ only in case",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"Parity-Model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"},{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "the same entry twice",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"},{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "display name missing",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a display name with a newline",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"bad\\nname\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a display name with DEL",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"badname\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a display name of 121 characters",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a display name of 122 UTF-16 units",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "minClientRevision missing",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "minClientRevision zero",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":0,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a fractional minClientRevision",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1.5,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "minClientRevision as a string",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":\"1\",\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a null description",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\",\"description\":null}]}"
+  },
+  {
+   "name": "an empty insertBefore",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\",\"insertBefore\":\"\"}]}"
+  },
+  {
+   "name": "a zero context window",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":0,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a context window over the limit",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":100000001,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a null context window",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":null,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "an invented effort",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"turbo\"]}]}"
+  },
+  {
+   "name": "a repeated effort",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"low\"],\"defaultReasoningEffort\":\"low\"}]}"
+  },
+  {
+   "name": "efforts as a string",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":\"low\"}]}"
+  },
+  {
+   "name": "a default effort that is not supported",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"medium\"}]}"
+  },
+  {
+   "name": "a default effort without a list",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"p\",\"displayName\":\"P\",\"minClientRevision\":1,\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a numeric default effort",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":5}]}"
+  },
+  {
+   "name": "revision missing",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a revision of 121 characters",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\",\"enabled\":true,\"rolloutPercentage\":100,\"models\":[]}"
+  },
+  {
+   "name": "rolloutPercentage missing",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"models\":[{\"providerId\":\"openai\",\"id\":\"parity-model\",\"displayName\":\"Parity\",\"minClientRevision\":1,\"contextWindowTokens\":200000,\"supportedReasoningEfforts\":[\"low\",\"high\"],\"defaultReasoningEffort\":\"high\"}]}"
+  },
+  {
+   "name": "a rollout over 100",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":101,\"models\":[]}"
+  },
+  {
+   "name": "a fractional rollout",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":50.5,\"models\":[]}"
+  },
+  {
+   "name": "a negative rollout",
+   "valid": false,
+   "raw": "{\"schema\":\"gyro.model-catalog.v1\",\"revision\":\"parity.1\",\"enabled\":true,\"rolloutPercentage\":-1,\"models\":[]}"
+  }
+ ]
+}

@@ -1,0 +1,12 @@
+{
+  "socket": "isolated benchmark gyro.sock",
+  "owners": [
+    {
+      "pid": 63534,
+      "executables": [
+        "/Users/wytze/Gyro/target/debug/gyro-desktop"
+      ]
+    }
+  ],
+  "binaryMatchesLaunch": true
+}

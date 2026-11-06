@@ -1,0 +1,47 @@
+body {
+  margin: 0;
+  background: var(--gyro-app);
+  color: var(--gyro-text);
+}
+.gyro-motion-fixture {
+  margin: auto;
+  max-width: 760px;
+  padding: var(--gyro-space-section);
+}
+.gyro-motion-fixture h1 {
+  font-size: var(--gyro-font-heading);
+}
+.gyro-motion-fixture p {
+  font-size: var(--gyro-font-body);
+  line-height: 1.6;
+}
+.gyro-motion-fixture-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gyro-space-group);
+  margin-block: var(--gyro-space-section);
+}
+.gyro-motion-fixture-controls > button {
+  background: var(--gyro-control);
+  color: var(--gyro-text);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  min-height: 28px;
+}
+.gyro-motion-fixture-effort {
+  position: relative;
+  min-height: 128px;
+}
+:root .gyro-motion-fixture-effort > .gyro-effort-slider-popover {
+  top: 0;
+  left: 0;
+}
+.gyro-motion-fixture output {
+  font-size: var(--gyro-font-support);
+}
+.gyro-motion-fixture-controls > output {
+  flex-basis: 100%;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}

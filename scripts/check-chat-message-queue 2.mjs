@@ -1,0 +1,156 @@
+import assert from "node:assert/strict";
+
+import {
+  promoteQueuedMessage,
+  selectQueuedMessageDelivery,
+} from "../packages/ui/src/chat-message-queue.ts";
+
+const message = (id, options = {}) => ({
+  id,
+  status: "waiting",
+  ...options,
+});
+
+const cooldownOptions = {
+  dispatchingSessionIds: new Set(),
+  sendingSessionIds: new Set(),
+  deliveryNotBefore: new Map([["chat", 3000]]),
+  now: 2999,
+};
+assert.deepEqual(
+  selectQueuedMessageDelivery({ chat: [message("next")] }, cooldownOptions),
+  { kind: "waiting", retryAt: 3000 },
+  "automatic delivery must leave time for the completed reply to appear",
+);
+assert.equal(
+  selectQueuedMessageDelivery(
+    { chat: [message("next")] },
+    { ...cooldownOptions, now: 3000 },
+  )?.kind,
+  "ready",
+);
+assert.equal(
+  selectQueuedMessageDelivery(
+    { chat: [message("next")], other: [message("ready")] },
+    cooldownOptions,
+  )?.sessionId,
+  "other",
+  "a completion pause must not delay other chats",
+);
+assert.deepEqual(
+  selectQueuedMessageDelivery(
+    { chat: [message("retry", { retryAt: 4500 })] },
+    cooldownOptions,
+  ),
+  { kind: "waiting", retryAt: 4500 },
+  "completion pauses must preserve a longer retry delay",
+);
+
+// A session can finish while the user is reading another chat. Its queue must
+// continue without requiring focus to return to the finished session.
+assert.deepEqual(
+  selectQueuedMessageDelivery(
+    {
+      background: [message("background-next")],
+      foreground: [message("foreground-next")],
+    },
+    {
+      dispatchingSessionIds: new Set(),
+      now: 100,
+      sendingSessionIds: new Set(["foreground"]),
+    },
+  ),
+  {
+    kind: "ready",
+    sessionId: "background",
+    message: message("background-next"),
+  },
+  "an idle background chat should deliver its next queued message",
+);
+
+// A retry delay in one chat must not stall a ready message in another chat.
+assert.deepEqual(
+  selectQueuedMessageDelivery(
+    {
+      delayed: [message("retry", { retryAt: 500 })],
+      ready: [message("go")],
+    },
+    {
+      dispatchingSessionIds: new Set(),
+      now: 100,
+      sendingSessionIds: new Set(),
+    },
+  ),
+  { kind: "ready", sessionId: "ready", message: message("go") },
+  "a delayed retry should not block a different session's ready queue",
+);
+
+assert.deepEqual(
+  selectQueuedMessageDelivery(
+    { delayed: [message("retry", { retryAt: 500 })] },
+    {
+      dispatchingSessionIds: new Set(),
+      now: 100,
+      sendingSessionIds: new Set(),
+    },
+  ),
+  { kind: "waiting", retryAt: 500 },
+  "the scheduler should wake at the queue's next retry time",
+);
+
+assert.deepEqual(
+  promoteQueuedMessage(
+    [message("first"), message("second"), message("third")],
+    "second",
+  )?.map((item) => item.id),
+  ["second", "first", "third"],
+  "Steer should move the chosen queued message to the head",
+);
+assert.deepEqual(
+  promoteQueuedMessage([message("only")], "only")?.map((item) => item.id),
+  ["only"],
+  "Retrying the queue head should keep it first",
+);
+assert.equal(
+  promoteQueuedMessage([message("only")], "missing"),
+  undefined,
+  "an unknown queued id must not invent a queue",
+);
+
+console.log("chat message queue checks passed");
+
+// Stop pauses only its own chat, including already-scheduled retry timers.
+const stoppedQueues = {
+  stopped: [message("next"), message("later")],
+  other: [message("other")],
+};
+const pausedSessionIds = new Set(["stopped"]);
+const stoppedOptions = {
+  dispatchingSessionIds: new Set(),
+  sendingSessionIds: new Set(),
+  pausedSessionIds,
+  now: 1000,
+};
+assert.equal(
+  selectQueuedMessageDelivery(stoppedQueues, stoppedOptions).sessionId,
+  "other",
+);
+assert.equal(
+  selectQueuedMessageDelivery(
+    { stopped: stoppedQueues.stopped },
+    stoppedOptions,
+  ),
+  undefined,
+);
+assert.equal(
+  selectQueuedMessageDelivery(
+    { stopped: [message("retry", { retryAt: 1500 })] },
+    stoppedOptions,
+  ),
+  undefined,
+);
+pausedSessionIds.delete("stopped");
+assert.equal(
+  selectQueuedMessageDelivery(stoppedQueues, stoppedOptions).message.id,
+  "next",
+);

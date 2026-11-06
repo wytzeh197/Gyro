@@ -1,0 +1,69 @@
+{
+  "product": {
+    "name": "Gyro",
+    "category": "macOS AI coding workspace",
+    "launch": "Website visual refresh"
+  },
+  "launch_goal": "Show the workspace before explaining it",
+  "audience": {
+    "primary": "Builders using AI coding agents",
+    "awareness": "solution-aware",
+    "job": "Direct work and review changes in one workspace"
+  },
+  "promise": "From a clear request to a reviewable change in one place",
+  "proof_points": [
+    {
+      "id": "conversation",
+      "claim": "A conversation holds the request and result",
+      "evidence": "Current React UI with sample capture fixtures"
+    },
+    {
+      "id": "activity",
+      "claim": "The work log can be expanded",
+      "evidence": "Actual run-header control in current UI"
+    },
+    {
+      "id": "review",
+      "claim": "A companion panel shows a code diff",
+      "evidence": "Actual review surface with a sample patch"
+    }
+  ],
+  "runtime": {
+    "master_seconds": 13,
+    "cutdowns_seconds": []
+  },
+  "distribution": [
+    {
+      "channel": "Website hero",
+      "aspect_ratio": "16:10",
+      "playback": "silent loop"
+    }
+  ],
+  "creative": {
+    "tone": [
+      "quiet",
+      "precise"
+    ],
+    "visual_style": "Real windows over an original blue-hour coast",
+    "on_screen_text_density": "UI only",
+    "audio": "Intentional silence"
+  },
+  "cta": {
+    "label": "Download for macOS",
+    "destination": "https://usegyro.io/#download"
+  },
+  "constraints": {
+    "brand": [
+      "Calm Power palette",
+      "No borrowed Cursor assets"
+    ],
+    "claims": [
+      "Edited sample sequence, not real-time inference or performance evidence"
+    ]
+  },
+  "deliverables": [
+    "Dark and light 13s MP4",
+    "Six responsive posters",
+    "Reproducible captures and renderer"
+  ]
+}

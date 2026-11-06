@@ -1,0 +1,26 @@
+[
+  {
+    "attempts": 2,
+    "duplicateMutation": false,
+    "mutationCount": 1,
+    "observedCursorReused": false,
+    "retries": 1,
+    "scenario": "disconnect-before-edit"
+  },
+  {
+    "attempts": 2,
+    "duplicateMutation": true,
+    "mutationCount": 2,
+    "observedCursorReused": false,
+    "retries": 1,
+    "scenario": "disconnect-after-edit"
+  },
+  {
+    "attempts": 3,
+    "duplicateMutation": true,
+    "mutationCount": 3,
+    "observedCursorReused": false,
+    "retries": 2,
+    "scenario": "repeated-disconnect-after-edit"
+  }
+]

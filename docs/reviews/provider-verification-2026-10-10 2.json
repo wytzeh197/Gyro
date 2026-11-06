@@ -1,0 +1,1215 @@
+{
+  "schema": "gyro.provider-verification.v1",
+  "date": "2026-10-10",
+  "timezone": "Europe/Amsterdam",
+  "checkedAt": "2026-10-10T12:17:18.162Z",
+  "allProvidersVerifiedWorking": false,
+  "normalConfigurationModified": false,
+  "customProvidersConfigured": 0,
+  "scope": "11 shipped providers; representative generation probes, not every model or capability.",
+  "tests": {
+    "core": {
+      "passed": 501,
+      "failed": 0,
+      "threads": 1
+    },
+    "cli": {
+      "passed": 63,
+      "failed": 0,
+      "acpStopReasonProviderCases": 10
+    },
+    "ollamaLiveCancel": {
+      "passed": 1,
+      "failed": 0
+    },
+    "typescriptGuards": [
+      "provider-capability-manifest",
+      "provider-identity",
+      "provider-stream-ordering",
+      "model-catalog"
+    ],
+    "builds": ["gyro-cli debug", "gyro-desktop debug"],
+    "desktopAcp": {
+      "passed": 4,
+      "failed": 0
+    },
+    "concurrencyObservation": "A parallel core run had one process-guard lease failure. That test passed in isolation; the full serial core suite passed."
+  },
+  "providers": [
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "officialAvailability": "documented",
+      "officialSource": "https://learn.chatgpt.com/docs/app-server",
+      "readiness": "ready",
+      "readinessDetail": "Logged in using ChatGPT",
+      "cliAttempts": [
+        {
+          "model": "gpt-5.6-sol",
+          "exitCode": 0,
+          "response": "GYRO_OK",
+          "status": "passed",
+          "error": null,
+          "durationMs": 5995
+        },
+        {
+          "model": "gpt-6-astra",
+          "exitCode": 0,
+          "response": "GYRO_OK",
+          "status": "passed"
+        }
+      ],
+      "desktopBenchmark": {
+        "build": "debug",
+        "elapsedMs": 22144,
+        "fixture": "meridian-v1",
+        "frontendMeasured": false,
+        "records": [
+          {
+            "correct": false,
+            "effort": "low",
+            "failureClass": "provider-failed",
+            "failureDetail": "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.",
+            "model": "gpt-5.6-sol",
+            "outcome": "failed",
+            "provider": "openai",
+            "resumedRequested": false,
+            "sessionId": "e7e7b72c-c12f-4a02-afee-24211997fe0c",
+            "task": "no-tool",
+            "trial": 1,
+            "wallMs": 6501.857625
+          },
+          {
+            "effort": "low",
+            "failureClass": "provider-failed",
+            "failureDetail": "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.",
+            "model": "gpt-5.6-sol",
+            "outcome": "setup-failed",
+            "provider": "openai",
+            "resumedRequested": true,
+            "task": "no-tool",
+            "trial": 1
+          }
+        ],
+        "schema": "gyro.benchmark.v1"
+      }
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "officialAvailability": "documented",
+      "officialSource": "https://code.claude.com/docs/en/headless",
+      "readiness": "ready",
+      "readinessDetail": "Stored Claude login reported ready; generation was rejected by the organization.",
+      "cliAttempts": [
+        {
+          "model": "claude-sonnet-5",
+          "exitCode": 3,
+          "response": null,
+          "status": "failed",
+          "error": "{\n  \"schema\": \"gyro.cli.v1\",\n  \"status\": \"failed\",\n  \"error\": {\n    \"category\": \"provider-unavailable\",\n    \"code\": 3,\n    \"message\": \"Your organization has disabled Claude subscription access for Claude Code. Ask your organization administrator to enable access, or explicitly configure API-key access in Settings > Providers.. The Gyro session was saved; retry with `gyro resume 8b686a51-8428-4eba-8a09-105927866069` after access is restored.\"\n  }\n}\n",
+          "durationMs": 2546
+        }
+      ]
+    },
+    {
+      "id": "kimi",
+      "name": "Kimi",
+      "officialAvailability": "documented",
+      "officialSource": "https://moonshotai.github.io/kimi-code/en/reference/kimi-acp",
+      "readiness": "blocked",
+      "readinessDetail": "{\"code\":-32000,\"message\":\"Authentication required\"}",
+      "cliAttempts": [
+        {
+          "model": "k3",
+          "exitCode": 0,
+          "response": "",
+          "status": "incorrect-response",
+          "error": null,
+          "durationMs": 3302
+        }
+      ]
+    },
+    {
+      "id": "xai",
+      "name": "xAI",
+      "officialAvailability": "documented",
+      "officialSource": "https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/15-agent-mode.md",
+      "readiness": "ready",
+      "readinessDetail": "xAI ACP authenticated; provider-owned credential value was not read by Gyro.",
+      "cliAttempts": [
+        {
+          "model": "grok-4.7",
+          "exitCode": 0,
+          "response": "GYRO_OK",
+          "status": "passed",
+          "error": null,
+          "durationMs": 3309
+        },
+        {
+          "model": "grok-4.6",
+          "exitCode": 0,
+          "response": "GYRO_OK",
+          "status": "passed"
+        }
+      ],
+      "desktopBenchmark": {
+        "build": "debug",
+        "elapsedMs": 126806,
+        "fixture": "meridian-v1",
+        "frontendMeasured": false,
+        "records": [
+          {
+            "correct": true,
+            "effort": "low",
+            "model": "grok-4.7",
+            "outcome": "completed",
+            "provider": "xai",
+            "responsePresent": true,
+            "resumedActual": false,
+            "resumedRequested": false,
+            "retryCount": 0,
+            "sessionId": "3018785f-7528-4ae8-81f8-81e1d88fd084",
+            "task": "no-tool",
+            "toolActivityRecords": 0,
+            "trial": 1,
+            "turnId": "bb22938a-4e4d-45ab-b6f2-55d687132392",
+            "wallMs": 51064.607958
+          },
+          {
+            "correct": true,
+            "effort": "low",
+            "model": "grok-4.7",
+            "outcome": "completed",
+            "provider": "xai",
+            "responsePresent": true,
+            "resumedActual": true,
+            "resumedRequested": true,
+            "retryCount": 0,
+            "sessionId": "a4e11994-5df8-4327-bf84-8b24934957c2",
+            "task": "no-tool",
+            "toolActivityRecords": 0,
+            "trial": 1,
+            "turnId": "049bbdf5-7421-4d9d-8a60-46dfe7f10a66",
+            "wallMs": 24661.239208000003
+          }
+        ],
+        "schema": "gyro.benchmark.v1"
+      }
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini",
+      "officialAvailability": "documented",
+      "officialSource": "https://geminicli.com/docs/cli/acp-mode/",
+      "readiness": "blocked",
+      "readinessDetail": "Gemini ACP run timed out",
+      "cliAttempts": []
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "officialAvailability": "documented",
+      "officialSource": "https://cursor.com/docs/cli/acp",
+      "readiness": "blocked",
+      "readinessDetail": "start cursor-agent through ACP: No such file or directory (os error 2)",
+      "cliAttempts": []
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "officialAvailability": "documented",
+      "officialSource": "https://opencode.ai/docs/acp/",
+      "readiness": "blocked",
+      "readinessDetail": "start opencode through ACP: No such file or directory (os error 2)",
+      "cliAttempts": [],
+      "temporaryCliVerification": {
+        "version": "1.18.35",
+        "installation": "Official npm package opencode-ai installed only in a disposable temporary directory.",
+        "configuredModel": "opencode/space-bunny-free",
+        "officialSource": "https://opencode.ai/docs/zen/",
+        "normalRuntimeInstalled": false,
+        "readiness": "ready",
+        "cliResponse": "GYRO_OK",
+        "cliStatus": "passed",
+        "reportedModel": {
+          "providerId": "opencode",
+          "modelId": "space-bunny-free",
+          "source": "OpenCode test database, assistant message records"
+        }
+      },
+      "desktopBenchmark": {
+        "build": "debug",
+        "elapsedMs": 43053,
+        "fixture": "meridian-v1",
+        "frontendMeasured": false,
+        "records": [
+          {
+            "correct": true,
+            "effort": "",
+            "model": "opencode-default",
+            "outcome": "completed",
+            "provider": "opencode",
+            "responsePresent": true,
+            "resumedActual": false,
+            "resumedRequested": false,
+            "retryCount": 0,
+            "sessionId": "f10c2dfa-fea7-4470-a281-853c334c23a4",
+            "task": "no-tool",
+            "toolActivityRecords": 0,
+            "trial": 1,
+            "turnId": "eed99f76-c091-4ddc-a89a-a9a0968e254e",
+            "wallMs": 14808.061792
+          },
+          {
+            "correct": true,
+            "effort": "",
+            "model": "opencode-default",
+            "outcome": "completed",
+            "provider": "opencode",
+            "responsePresent": true,
+            "resumedActual": true,
+            "resumedRequested": true,
+            "retryCount": 0,
+            "sessionId": "36f35fff-b3ad-4d76-83f1-d6c5b42dbea0",
+            "task": "no-tool",
+            "toolActivityRecords": 0,
+            "trial": 1,
+            "turnId": "e6d2fa08-eb47-4ab4-8f76-eb23c5ff4c0c",
+            "wallMs": 13683.305459
+          }
+        ],
+        "schema": "gyro.benchmark.v1"
+      },
+      "desktopTimingRecords": [
+        {
+          "schema": "gyro.timing.v1",
+          "traceId": "21b2d7ac-50dc-4483-ba46-d53e4e7a617a",
+          "turnId": "e6d2fa08-eb47-4ab4-8f76-eb23c5ff4c0c",
+          "sessionId": "36f35fff-b3ad-4d76-83f1-d6c5b42dbea0",
+          "points": [
+            {
+              "stage": "backend-received",
+              "elapsedMs": 0.023042,
+              "attempt": 0,
+              "toolIndex": null
+            },
+            {
+              "stage": "workspace-start",
+              "elapsedMs": 10.737874999999999,
+              "attempt": 0,
+              "toolIndex": null
+            },
+            {
+              "stage": "workspace-ready",
+              "elapsedMs": 59.8835,
+              "attempt": 0,
+              "toolIndex": null
+            },
+            {
+              "stage": "attempt-start",
+              "elapsedMs": 72.337375,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "process-start",
+              "elapsedMs": 84.233042,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "process-spawned",
+              "elapsedMs": 90.04816699999999,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "protocol-ready",
+              "elapsedMs": 5463.988458,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "prompt-sent",
+              "elapsedMs": 5464.549375,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "first-activity",
+              "elapsedMs": 12887.510708,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "first-token",
+              "elapsedMs": 12887.553667,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "provider-complete",
+              "elapsedMs": 13597.228167000001,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "complete",
+              "elapsedMs": 13650.618625,
+              "attempt": 1,
+              "toolIndex": null
+            }
+          ],
+          "outcome": "completed",
+          "truncated": false,
+          "providerRequests": {
+            "requests": 0,
+            "completed": 0,
+            "rejected": 0,
+            "retries": 0,
+            "tokens": {
+              "inputTokens": 23033,
+              "cachedInputTokens": 142,
+              "outputTokens": 5,
+              "reasoningOutputTokens": 0,
+              "totalTokens": 23180,
+              "measured": true
+            },
+            "unmeasuredContent": false,
+            "providerAttempts": 1
+          }
+        },
+        {
+          "schema": "gyro.timing.v1",
+          "traceId": "69eeceff-e9e7-44d2-9ea3-8e2f42d6eafd",
+          "turnId": "c12c21a7-d2d2-425c-8edf-33b1fab51fc4",
+          "sessionId": "36f35fff-b3ad-4d76-83f1-d6c5b42dbea0",
+          "points": [
+            {
+              "stage": "backend-received",
+              "elapsedMs": 0.023042,
+              "attempt": 0,
+              "toolIndex": null
+            },
+            {
+              "stage": "workspace-start",
+              "elapsedMs": 3.766709,
+              "attempt": 0,
+              "toolIndex": null
+            },
+            {
+              "stage": "workspace-ready",
+              "elapsedMs": 68.54008400000001,
+              "attempt": 0,
+              "toolIndex": null
+            },
+            {
+              "stage": "attempt-start",
+              "elapsedMs": 79.916375,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "process-start",
+              "elapsedMs": 85.256917,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "process-spawned",
+              "elapsedMs": 94.06925,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "protocol-ready",
+              "elapsedMs": 4474.067875000001,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "prompt-sent",
+              "elapsedMs": 4474.247459,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "first-activity",
+              "elapsedMs": 13084.699792,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "first-token",
+              "elapsedMs": 13084.706542,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "provider-complete",
+              "elapsedMs": 13541.802625,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "complete",
+              "elapsedMs": 13596.504792,
+              "attempt": 1,
+              "toolIndex": null
+            }
+          ],
+          "outcome": "completed",
+          "truncated": false,
+          "providerRequests": {
+            "requests": 0,
+            "completed": 0,
+            "rejected": 0,
+            "retries": 0,
+            "tokens": {
+              "inputTokens": 20612,
+              "cachedInputTokens": 1920,
+              "outputTokens": 4,
+              "reasoningOutputTokens": 0,
+              "totalTokens": 22536,
+              "measured": true
+            },
+            "unmeasuredContent": false,
+            "providerAttempts": 1
+          }
+        },
+        {
+          "schema": "gyro.timing.v1",
+          "traceId": "dbfdd226-aca7-427b-8beb-01634a822ca6",
+          "turnId": "eed99f76-c091-4ddc-a89a-a9a0968e254e",
+          "sessionId": "f10c2dfa-fea7-4470-a281-853c334c23a4",
+          "points": [
+            {
+              "stage": "backend-received",
+              "elapsedMs": 0.059375,
+              "attempt": 0,
+              "toolIndex": null
+            },
+            {
+              "stage": "workspace-start",
+              "elapsedMs": 18.965666,
+              "attempt": 0,
+              "toolIndex": null
+            },
+            {
+              "stage": "workspace-ready",
+              "elapsedMs": 115.761458,
+              "attempt": 0,
+              "toolIndex": null
+            },
+            {
+              "stage": "attempt-start",
+              "elapsedMs": 138.925375,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "process-start",
+              "elapsedMs": 149.23608299999998,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "process-spawned",
+              "elapsedMs": 156.767708,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "protocol-ready",
+              "elapsedMs": 9775.481125,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "prompt-sent",
+              "elapsedMs": 9775.51425,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "first-activity",
+              "elapsedMs": 13984.285957999999,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "first-token",
+              "elapsedMs": 13984.313208,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "provider-complete",
+              "elapsedMs": 14710.268041,
+              "attempt": 1,
+              "toolIndex": null
+            },
+            {
+              "stage": "complete",
+              "elapsedMs": 14764.988666000001,
+              "attempt": 1,
+              "toolIndex": null
+            }
+          ],
+          "outcome": "completed",
+          "truncated": false,
+          "providerRequests": {
+            "requests": 0,
+            "completed": 0,
+            "rejected": 0,
+            "retries": 0,
+            "tokens": {
+              "inputTokens": 22377,
+              "cachedInputTokens": 142,
+              "outputTokens": 5,
+              "reasoningOutputTokens": 0,
+              "totalTokens": 22524,
+              "measured": true
+            },
+            "unmeasuredContent": false,
+            "providerAttempts": 1
+          }
+        },
+        {
+          "kind": "startup",
+          "from": null,
+          "surface": "chat",
+          "startedToCommitMs": 4176,
+          "startedToFrameOpportunityMs": 4644
+        }
+      ]
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "officialAvailability": "documented",
+      "officialSource": "https://api-docs.deepseek.com/",
+      "readiness": "blocked",
+      "readinessDetail": "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.",
+      "cliAttempts": []
+    },
+    {
+      "id": "mistral",
+      "name": "Mistral",
+      "officialAvailability": "documented",
+      "officialSource": "https://docs.mistral.ai/api/endpoint/chat",
+      "readiness": "blocked",
+      "readinessDetail": "No API key is stored for this provider. Add one in Settings > Providers, or set MISTRAL_API_KEY.",
+      "cliAttempts": []
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "officialAvailability": "documented",
+      "officialSource": "https://openrouter.ai/docs/api_reference/overview",
+      "readiness": "blocked",
+      "readinessDetail": "No API key is stored for this provider. Add one in Settings > Providers, or set OPENROUTER_API_KEY.",
+      "cliAttempts": []
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "officialAvailability": "documented",
+      "officialSource": "https://docs.ollama.com/api/chat",
+      "readiness": "ready",
+      "readinessDetail": "Ollama is running at http://localhost:11434/api; 2 local models discovered.",
+      "cliAttempts": [
+        {
+          "model": "gemma3:4b",
+          "exitCode": 0,
+          "response": "GYRO_OK",
+          "status": "passed",
+          "error": null,
+          "durationMs": 49670
+        }
+      ]
+    }
+  ],
+  "openrouterPublicCatalog": {
+    "source": "https://openrouter.ai/api/v1/models",
+    "models": [
+      {
+        "id": "anthropic/claude-sonnet-5",
+        "available": true
+      },
+      {
+        "id": "anthropic/claude-opus-5",
+        "available": true
+      },
+      {
+        "id": "openai/gpt-6-astra",
+        "available": true
+      },
+      {
+        "id": "google/gemini-3.8-flash",
+        "available": true
+      },
+      {
+        "id": "x-ai/grok-4.7",
+        "available": true
+      },
+      {
+        "id": "x-ai/grok-4.6",
+        "available": true
+      },
+      {
+        "id": "deepseek/deepseek-v4.1-flash",
+        "available": true
+      },
+      {
+        "id": "moonshotai/kimi-k3",
+        "available": true
+      },
+      {
+        "id": "z-ai/glm-5.3",
+        "available": true
+      },
+      {
+        "id": "qwen/qwen3.8-max-0902",
+        "available": true
+      },
+      {
+        "id": "meta-llama/llama-3.3-70b-instruct",
+        "available": true
+      }
+    ]
+  },
+  "desktopTimingRecords": [
+    {
+      "schema": "gyro.timing.v1",
+      "traceId": "1c209c45-eb49-4adb-987b-724fdd601bc7",
+      "turnId": "0c3be33d-7260-4975-924b-06dc5c78f6ea",
+      "sessionId": "a4e11994-5df8-4327-bf84-8b24934957c2",
+      "points": [
+        {
+          "stage": "backend-received",
+          "elapsedMs": 2.960416,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "workspace-start",
+          "elapsedMs": 36.731041,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "workspace-ready",
+          "elapsedMs": 2167.571791,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "attempt-start",
+          "elapsedMs": 2217.886208,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "process-start",
+          "elapsedMs": 5538.630333,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "process-spawned",
+          "elapsedMs": 8390.896291000001,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "protocol-ready",
+          "elapsedMs": 18539.992875,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "prompt-sent",
+          "elapsedMs": 18544.798583,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "first-activity",
+          "elapsedMs": 32624.489083,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "first-token",
+          "elapsedMs": 32626.594458,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "provider-complete",
+          "elapsedMs": 35302.608415999995,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "complete",
+          "elapsedMs": 35377.878166,
+          "attempt": 1,
+          "toolIndex": null
+        }
+      ],
+      "outcome": "completed",
+      "truncated": false,
+      "providerRequests": {
+        "requests": 0,
+        "completed": 0,
+        "rejected": 0,
+        "retries": 0,
+        "tokens": {
+          "inputTokens": 2253,
+          "cachedInputTokens": 0,
+          "outputTokens": 3,
+          "reasoningOutputTokens": 0,
+          "totalTokens": 2256,
+          "measured": false
+        },
+        "unmeasuredContent": true,
+        "providerAttempts": 1
+      }
+    },
+    {
+      "schema": "gyro.timing.v1",
+      "traceId": "21eae7cd-0cfc-48ba-9283-11bc28b83344",
+      "turnId": "bb22938a-4e4d-45ab-b6f2-55d687132392",
+      "sessionId": "3018785f-7528-4ae8-81f8-81e1d88fd084",
+      "points": [
+        {
+          "stage": "backend-received",
+          "elapsedMs": 0.7404580000000001,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "workspace-start",
+          "elapsedMs": 36.462458000000005,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "workspace-ready",
+          "elapsedMs": 2047.2950409999999,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "attempt-start",
+          "elapsedMs": 2118.1596250000002,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "process-start",
+          "elapsedMs": 5397.980708,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "process-spawned",
+          "elapsedMs": 7032.2335,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "protocol-ready",
+          "elapsedMs": 16619.598374999998,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "prompt-sent",
+          "elapsedMs": 16621.007458,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "first-activity",
+          "elapsedMs": 47188.36775,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "first-token",
+          "elapsedMs": 47191.191416,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "provider-complete",
+          "elapsedMs": 50377.139875,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "complete",
+          "elapsedMs": 50463.602041,
+          "attempt": 1,
+          "toolIndex": null
+        }
+      ],
+      "outcome": "completed",
+      "truncated": false,
+      "providerRequests": {
+        "requests": 0,
+        "completed": 0,
+        "rejected": 0,
+        "retries": 0,
+        "tokens": {
+          "inputTokens": 2222,
+          "cachedInputTokens": 0,
+          "outputTokens": 2,
+          "reasoningOutputTokens": 0,
+          "totalTokens": 2224,
+          "measured": false
+        },
+        "unmeasuredContent": true,
+        "providerAttempts": 1
+      }
+    },
+    {
+      "schema": "gyro.timing.v1",
+      "traceId": "4ecf8c5f-c985-45db-9687-305007763eca",
+      "turnId": "3d98b107-73e2-430e-ba52-76a441c82060",
+      "sessionId": "e7e7b72c-c12f-4a02-afee-24211997fe0c",
+      "points": [
+        {
+          "stage": "backend-received",
+          "elapsedMs": 0.731625,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "workspace-start",
+          "elapsedMs": 36.495958,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "workspace-ready",
+          "elapsedMs": 2047.288708,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "attempt-start",
+          "elapsedMs": 2118.142167,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "provider-complete",
+          "elapsedMs": 5604.6252079999995,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "complete",
+          "elapsedMs": 5858.112792,
+          "attempt": 1,
+          "toolIndex": null
+        }
+      ],
+      "outcome": "failed",
+      "truncated": false,
+      "providerRequests": {
+        "requests": 0,
+        "completed": 0,
+        "rejected": 0,
+        "retries": 0,
+        "tokens": null,
+        "unmeasuredContent": false,
+        "providerAttempts": 1
+      }
+    },
+    {
+      "schema": "gyro.timing.v1",
+      "traceId": "86c1348e-42ba-4863-be54-edd266b377bd",
+      "turnId": "904f79ac-6e26-4c5f-bea3-9c7ad50d0ab6",
+      "sessionId": "c746f75c-eb6e-4299-8908-9bfad6c9ff41",
+      "points": [
+        {
+          "stage": "backend-received",
+          "elapsedMs": 0.704334,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "workspace-start",
+          "elapsedMs": 20.038625,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "workspace-ready",
+          "elapsedMs": 275.626667,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "attempt-start",
+          "elapsedMs": 397.393084,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "provider-complete",
+          "elapsedMs": 4128.712,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "complete",
+          "elapsedMs": 4219.133667,
+          "attempt": 1,
+          "toolIndex": null
+        }
+      ],
+      "outcome": "failed",
+      "truncated": false,
+      "providerRequests": {
+        "requests": 0,
+        "completed": 0,
+        "rejected": 0,
+        "retries": 0,
+        "tokens": null,
+        "unmeasuredContent": false,
+        "providerAttempts": 1
+      }
+    },
+    {
+      "schema": "gyro.timing.v1",
+      "traceId": "f48fdbdc-8d29-45dd-8805-e7c6e90d5b80",
+      "turnId": "049bbdf5-7421-4d9d-8a60-46dfe7f10a66",
+      "sessionId": "a4e11994-5df8-4327-bf84-8b24934957c2",
+      "points": [
+        {
+          "stage": "backend-received",
+          "elapsedMs": 0.195667,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "workspace-start",
+          "elapsedMs": 17.558709,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "workspace-ready",
+          "elapsedMs": 1034.3165000000001,
+          "attempt": 0,
+          "toolIndex": null
+        },
+        {
+          "stage": "attempt-start",
+          "elapsedMs": 1154.6515,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "process-start",
+          "elapsedMs": 1731.570292,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "process-spawned",
+          "elapsedMs": 2758.3672500000002,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "protocol-ready",
+          "elapsedMs": 19938.778209,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "prompt-sent",
+          "elapsedMs": 19940.092624999997,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "first-activity",
+          "elapsedMs": 24120.000209,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "first-token",
+          "elapsedMs": 24120.011042000002,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "provider-complete",
+          "elapsedMs": 24573.001792,
+          "attempt": 1,
+          "toolIndex": null
+        },
+        {
+          "stage": "complete",
+          "elapsedMs": 24627.760292000003,
+          "attempt": 1,
+          "toolIndex": null
+        }
+      ],
+      "outcome": "completed",
+      "truncated": false,
+      "providerRequests": {
+        "requests": 0,
+        "completed": 0,
+        "rejected": 0,
+        "retries": 0,
+        "tokens": {
+          "inputTokens": 795,
+          "cachedInputTokens": 0,
+          "outputTokens": 2,
+          "reasoningOutputTokens": 0,
+          "totalTokens": 797,
+          "measured": false
+        },
+        "unmeasuredContent": true,
+        "providerAttempts": 1
+      }
+    }
+  ],
+  "ollamaCancellation": {
+    "cancelled": true,
+    "model": "gemma3:4b",
+    "probe": "cancel-after-first-text",
+    "schema": "gyro.ollama-live-probe.v1",
+    "stopMs": 3.0419169999999998,
+    "visibleOutputObserved": true
+  },
+  "unverified": [
+    "Authenticated API generation for DeepSeek, Mistral, OpenRouter",
+    "Fresh and resumed desktop Codex turns",
+    "Live Cursor behavior; OpenCode tool approval and cancellation matrix",
+    "Kimi generation after restoring login",
+    "Gemini generation after completing authentication",
+    "Live tool approval and image matrix across every provider"
+  ],
+  "recheckedAt": "2026-10-10T12:31:39.577Z",
+  "readinessRecheck": {
+    "checkedAt": "2026-10-10T12:19:39.486Z",
+    "providers": [
+      {
+        "id": "anthropic",
+        "readiness": "ready",
+        "summary": "Claude CLI reports a stored login; generation must verify account access."
+      },
+      {
+        "id": "kimi",
+        "readiness": "blocked",
+        "summary": "{\"code\":-32000,\"message\":\"Authentication required\"}"
+      },
+      {
+        "id": "gemini",
+        "readiness": "blocked",
+        "summary": "Gemini ACP run timed out"
+      },
+      {
+        "id": "cursor",
+        "readiness": "blocked",
+        "summary": "start cursor-agent through ACP: No such file or directory (os error 2)"
+      },
+      {
+        "id": "opencode",
+        "readiness": "blocked",
+        "summary": "start opencode through ACP: No such file or directory (os error 2)"
+      },
+      {
+        "id": "deepseek",
+        "readiness": "blocked",
+        "summary": "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again."
+      },
+      {
+        "id": "mistral",
+        "readiness": "blocked",
+        "summary": "No API key is stored for this provider. Add one in Settings > Providers, or set MISTRAL_API_KEY."
+      },
+      {
+        "id": "openrouter",
+        "readiness": "blocked",
+        "summary": "No API key is stored for this provider. Add one in Settings > Providers, or set OPENROUTER_API_KEY."
+      }
+    ]
+  },
+  "acpCorrection": {
+    "file": "crates/gyro-core/src/kimi_acp.rs",
+    "officialSource": "https://agentclientprotocol.com/protocol/v1/prompt-turn",
+    "problem": "Provider-reported cancelled/refusal results were incorrectly returned as successful turns, even after partial text.",
+    "result": "Cancellation uses the caller cancellation path; refusal uses the failure path. Real CLI tests cover all five ACP providers and ensure no done status is persisted.",
+    "originalKimiEmptyResponseCauseResolved": false
+  },
+  "cursorInstallerCheck": {
+    "source": "https://cursor.com/install",
+    "release": "2026.10.01-e373342",
+    "providesCursorAgentAlias": true,
+    "executed": false
+  },
+  "blockerAudit": {
+    "checkedAt": "2026-10-10T12:34:24.296Z",
+    "goalTurnsWithRecurringSetupBlockers": 3,
+    "allProvidersVerifiedWorking": false,
+    "officialDocumentationRequirement": {
+      "status": "verified",
+      "providerCount": 11
+    },
+    "liveVerificationRequirement": {
+      "status": "incomplete",
+      "providersWithSuccessfulGeneration": [
+        "openai",
+        "xai",
+        "opencode",
+        "ollama"
+      ],
+      "currentBlockedProbes": [
+        {
+          "id": "kimi",
+          "readiness": "blocked",
+          "summary": "{\"code\":-32000,\"message\":\"Authentication required\"}"
+        },
+        {
+          "id": "gemini",
+          "readiness": "blocked",
+          "summary": "Gemini ACP run timed out"
+        },
+        {
+          "id": "cursor",
+          "readiness": "blocked",
+          "summary": "start cursor-agent through ACP: No such file or directory (os error 2)"
+        },
+        {
+          "id": "deepseek",
+          "readiness": "blocked",
+          "summary": "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again."
+        },
+        {
+          "id": "mistral",
+          "readiness": "blocked",
+          "summary": "No API key is stored for this provider. Add one in Settings > Providers, or set MISTRAL_API_KEY."
+        },
+        {
+          "id": "openrouter",
+          "readiness": "blocked",
+          "summary": "No API key is stored for this provider. Add one in Settings > Providers, or set OPENROUTER_API_KEY."
+        }
+      ]
+    },
+    "nextRequiredChange": "Provide usable provider authentication/keys and install Cursor; authorize the desktop credential reader. Claude subscription access also requires account/organization repair before its generation can be verified."
+  }
+}

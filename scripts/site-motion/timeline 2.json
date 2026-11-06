@@ -1,0 +1,63 @@
+{
+  "title": "Gyro website workflow",
+  "duration_seconds": 13,
+  "fps": 24,
+  "canvas": {
+    "width": 1600,
+    "height": 1000
+  },
+  "scenes": [
+    {
+      "id": "conversation",
+      "start": 0,
+      "end": 3.8,
+      "purpose": "Show conversation",
+      "proof_id": "conversation",
+      "visual": "Actual captured Gyro UI over a quiet coast",
+      "on_screen_text": [],
+      "voiceover": "",
+      "audio": "Intentional silence",
+      "transition_out": "0.6s dissolve",
+      "source": "Current app capture fixtures; original generated background"
+    },
+    {
+      "id": "activity",
+      "start": 3.8,
+      "end": 7.6,
+      "purpose": "Show activity",
+      "proof_id": "activity",
+      "visual": "Actual captured Gyro UI over a quiet coast",
+      "on_screen_text": [],
+      "voiceover": "",
+      "audio": "Intentional silence",
+      "transition_out": "0.6s dissolve",
+      "source": "Current app capture fixtures; original generated background"
+    },
+    {
+      "id": "review",
+      "start": 7.6,
+      "end": 12.4,
+      "purpose": "Show review",
+      "proof_id": "review",
+      "visual": "Actual captured Gyro UI over a quiet coast",
+      "on_screen_text": [],
+      "voiceover": "",
+      "audio": "Intentional silence",
+      "transition_out": "0.6s dissolve",
+      "source": "Current app capture fixtures; original generated background"
+    },
+    {
+      "id": "return",
+      "start": 12.4,
+      "end": 13,
+      "purpose": "Close the loop",
+      "proof_id": null,
+      "visual": "Actual captured Gyro UI over a quiet coast",
+      "on_screen_text": [],
+      "voiceover": "",
+      "audio": "Intentional silence",
+      "transition_out": "0.6s dissolve",
+      "source": "Current app capture fixtures; original generated background"
+    }
+  ]
+}
