@@ -4,12 +4,25 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing merged release tag to rebuild without moving it
+        required: true
+        type: string
+      expected_commit:
+        description: Exact 40-character commit already approved for this tag
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -18,7 +31,43 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       mode: ${{ steps.mode.outputs.mode }}
+      commit: ${{ steps.source.outputs.commit }}
     steps:
+      - name: Validate release request
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Invalid release tag." >&2
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "An exact approved commit is required." >&2
+            exit 1
+          fi
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit || github.sha }}
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+      - name: Verify immutable merged release source
+        id: source
+        run: |
+          set -euo pipefail
+          COMMIT="$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")"
+          test "$COMMIT" = "$EXPECTED_COMMIT"
+          test "$(git rev-parse HEAD)" = "$COMMIT"
+          git merge-base --is-ancestor "$COMMIT" origin/main
+          if [ -f scripts/release-identity.mjs ]; then
+            node --input-type=module -e 'import { requireReleaseTag } from "./scripts/release-identity.mjs"; requireReleaseTag(process.env.RELEASE_TAG)'
+          else
+            # Older immutable tags predate release-identity.json.
+            VERSION="$(node -p "require('./package.json').version")"
+            test "$RELEASE_TAG" = "v$VERSION"
+          fi
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit || github.sha }}
       # Developer ID signing is all-or-nothing: every Apple secret is present,
       # or none is and the build stays ad-hoc. A stable tag such as v0.1.0 must
       # ship Developer ID signed and notarized, never ad-hoc.
@@ -44,8 +93,8 @@ jobs:
             echo "Developer ID signing is partially configured; missing secrets: ${missing[*]}" >&2
             exit 1
           fi
-          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-launch\.[0-9]{8}(\.[1-9][0-9]*)?)?$ ]] && [ "$MODE" != "developer-id" ]; then
-            echo "Stable release $GITHUB_REF_NAME must be Developer ID signed and notarized; missing secrets: ${missing[*]}" >&2
+          if [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-launch\.[0-9]{8}(\.[1-9][0-9]*)?)?$ ]] && [ "$MODE" != "developer-id" ]; then
+            echo "Stable release $RELEASE_TAG must be Developer ID signed and notarized; missing secrets: ${missing[*]}" >&2
             exit 1
           fi
           echo "macOS signing mode: $MODE"
@@ -76,6 +125,8 @@ jobs:
             updater_suffix: x64
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.signing.outputs.commit }}
       - uses: pnpm/action-setup@v4
         with:
           version: 11.7.0
@@ -96,7 +147,7 @@ jobs:
         env:
           TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
       - name: Verify release configuration
-        run: pnpm release:check
+        run: GITHUB_REF_NAME="$RELEASE_TAG" pnpm release:check
         env:
           GYRO_REQUIRE_RELEASE_SECRETS: "1"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -121,6 +172,15 @@ jobs:
             VERIFY_ARGS+=(--run)
           fi
           node scripts/package-cli-release.mjs "${VERIFY_ARGS[@]}"
+      # GitHub-hosted macOS runners can drop Apple's HTTP/3 ticket lookup.
+      # Keep HTTPS over TCP on this disposable runner; TLS verification stays on.
+      # https://github.com/actions/runner-images/issues/14924
+      - name: Use TCP for Apple notarization tickets
+        if: env.GYRO_MACOS_SIGNING == 'developer-id'
+        run: |
+          set -euo pipefail
+          printf '%s\n' 'block return out quick proto udp from any to any port 443' | sudo pfctl -f -
+          sudo pfctl -E
       # The certificate lives only in a throwaway keychain under RUNNER_TEMP,
       # and the App Store Connect key only in a 0600 file beside it. Both are
       # removed by the always-run cleanup step at the end of this job.
@@ -300,6 +360,8 @@ jobs:
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.signing.outputs.commit }}
       - uses: pnpm/action-setup@v4
         with:
           version: 11.7.0
@@ -332,6 +394,8 @@ jobs:
             updater_suffix: x64
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.signing.outputs.commit }}
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -340,6 +404,13 @@ jobs:
         with:
           name: gyro-built-${{ matrix.target }}
           path: release-assets
+      # Apply the same ticket-service workaround on this separate native runner.
+      - name: Use TCP for Apple notarization tickets
+        if: env.GYRO_MACOS_SIGNING == 'developer-id'
+        run: |
+          set -euo pipefail
+          printf '%s\n' 'block return out quick proto udp from any to any port 443' | sudo pfctl -f -
+          sudo pfctl -E
       - name: Staple accepted DMG with bounded ticket-service retries
         if: env.GYRO_MACOS_SIGNING == 'developer-id'
         run: |
@@ -347,7 +418,10 @@ jobs:
           shopt -s nullglob
           DMGS=(release-assets/*.dmg)
           test "${#DMGS[@]}" -eq 1
-          node scripts/staple-macos-artifact.mjs "${DMGS[0]}"
+          if ! node scripts/staple-macos-artifact.mjs "${DMGS[0]}"; then
+            echo "DMG stapling failed; refusing to upload an unstapled image." >&2
+            exit 1
+          fi
       - name: Verify macOS DMG
         run: |
           set -euo pipefail
@@ -397,6 +471,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.signing.outputs.commit }}
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -407,9 +483,9 @@ jobs:
           path: release-assets
           merge-multiple: true
       - name: Build and validate updater manifest
-        run: node scripts/create-updater-manifest.mjs --assets release-assets --tag "${GITHUB_REF_NAME}" --signing "${{ needs.signing.outputs.mode }}"
+        run: node scripts/create-updater-manifest.mjs --assets release-assets --tag "${RELEASE_TAG}" --signing "${{ needs.signing.outputs.mode }}"
       - name: Finalize CLI checksums and Homebrew Formula
-        run: node scripts/finalize-cli-release.mjs --assets release-assets --tag "${GITHUB_REF_NAME}"
+        run: node scripts/finalize-cli-release.mjs --assets release-assets --tag "${RELEASE_TAG}"
       - name: Verify final release checksums
         run: |
           cd release-assets
@@ -417,27 +493,27 @@ jobs:
       - name: Create one complete draft release
         run: |
           set -euo pipefail
-          NOTES_PATH="docs/releases/${GITHUB_REF_NAME}.md"
+          NOTES_PATH="docs/releases/${RELEASE_TAG}.md"
           if [ ! -f "$NOTES_PATH" ]; then
             echo "Missing versioned release notes at $NOTES_PATH." >&2
             exit 1
           fi
           RELEASE_NOTES="$(cat "$NOTES_PATH")"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            IS_DRAFT="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            IS_DRAFT="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')"
             if [ "$IS_DRAFT" != "true" ]; then
-              echo "Refusing to overwrite published release $GITHUB_REF_NAME." >&2
+              echo "Refusing to overwrite published release $RELEASE_TAG." >&2
               exit 1
             fi
-            gh release edit "$GITHUB_REF_NAME" \
+            gh release edit "$RELEASE_TAG" \
               --draft \
-              --title "Gyro $GITHUB_REF_NAME" \
+              --title "Gyro $RELEASE_TAG" \
               --notes "$RELEASE_NOTES"
-            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
           else
-            gh release create "$GITHUB_REF_NAME" release-assets/* \
+            gh release create "$RELEASE_TAG" release-assets/* \
               --draft \
-              --title "Gyro $GITHUB_REF_NAME" \
+              --title "Gyro $RELEASE_TAG" \
               --notes "$RELEASE_NOTES"
           fi
         env:

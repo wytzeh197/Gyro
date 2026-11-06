@@ -1,7 +1,8 @@
+import { readFileSync } from "./read-product-source.mjs";
 import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
 import { buildRunModel } from "../packages/ui/src/chat-run.ts";
-import { readFileSync } from "node:fs";
+
 import { createRequire } from "node:module";
 import ts from "typescript";
 import { totalFileChangeCounts } from "../packages/ui/src/file-change-counts.ts";

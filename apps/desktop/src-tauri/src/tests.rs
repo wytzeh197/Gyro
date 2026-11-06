@@ -3060,7 +3060,7 @@ fn all_catalog_context_windows_and_cli_efforts_match_verified_metadata() {
     ))
     .unwrap();
     let published: serde_json::Value =
-        serde_json::from_str(include_str!("../../../../site/model-catalog.json")).unwrap();
+        serde_json::from_str(include_str!("../../../../catalog/model-catalog.json")).unwrap();
     for row in facts["models"].as_array().unwrap() {
         let provider = row[0].as_str().unwrap();
         let model = row[1].as_str().unwrap();
@@ -6486,7 +6486,7 @@ fn every_provider_is_asked_for_a_title_on_the_first_turn() {
         .create_session(temp.path(), SessionOrigin::Desktop, "Untitled chat")
         .unwrap();
     let catalog: serde_json::Value =
-        serde_json::from_str(include_str!("../../../../site/model-catalog.json")).unwrap();
+        serde_json::from_str(include_str!("../../../../catalog/model-catalog.json")).unwrap();
     let models = catalog["models"].as_array().unwrap();
     let cases = gyro_core::provider_registry()
         .iter()

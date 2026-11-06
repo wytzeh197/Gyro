@@ -40,14 +40,14 @@ catalog support; new providers, authentication flows, or native model handling
 still require a normal app release.
 
 1. Verify the model ID, reasoning options, and capabilities against the supported
-   provider API or CLI version. Edit `site/model-catalog.json`, update its
+   provider API or CLI version. Edit `catalog/model-catalog.json`, update its
    `revision`, and set each entry's `minClientRevision` to the catalog client
    revision it requires.
 2. Run `node --experimental-strip-types scripts/check-model-catalog.mjs`
    and verify an actual chat with the model in a compatible app.
-3. Merge the reviewed catalog change, then publish it from the private
-   gyro-website repository (`npm run catalog:sync`, commit the import, then
-   `npm run site:deploy`). `pnpm site:deploy` in this checkout refuses to run.
+3. Merge the reviewed catalog change. In the private `gyro-website` repository,
+   run `npm run catalog:sync -- /path/to/Gyro`, commit the imported catalog and
+   parser snapshot, then publish with `npm run site:deploy`.
    Confirm `https://usegyro.io/model-catalog.json` serves the expected revision
    and the model appears in a compatible app's picker after refresh.
 4. Run `pnpm catalog:verify`. It fails when the served document is not the one
@@ -236,6 +236,19 @@ Open a pull request for the release branch and require CI to pass. Merge it into
 Never tag or publish directly from an unmerged release branch. Pushing the tag
 starts the draft release workflow described below.
 
+If a hosted runner loses Apple's notarization ticket connection, retry the
+failed job. The release workflow forces ticket requests over TCP on disposable
+Developer ID build runners and retries transient DMG stapling failures; signature,
+staple and Gatekeeper checks remain mandatory. See the
+[GitHub runner issue](https://github.com/actions/runner-images/issues/14924).
+
+For a reviewed workflow repair after tagging, run **Release** manually from
+`main` with the existing `release_tag` and its exact approved `expected_commit`.
+The workflow verifies the tag, commit, version and main ancestry before using
+signing secrets, then builds that immutable commit. Never move or recreate the
+tag. Recovery still creates a draft and requires the same artifact acceptance
+before publication.
+
 Delete the release branch after it is merged. These branches are temporary
 coordination points, not permanent branches for historic versions. Ordinary
 feature and dependency changes continue to use normal short-lived branches and
@@ -266,10 +279,9 @@ do not require a product release by themselves.
    fixed release; never replace the old assets in place.
 
 The download site fetches release metadata from GitHub at runtime, so publishing
-a normal app release does not require a website redeployment. Website content
-and `site/model-catalog.json` are published from the private gyro-website
-repository. `pnpm site:deploy` in this checkout refuses, because it used to
-upload this repo's old site and replace usegyro.io. Model-only releases follow
+a normal app release does not require a website redeployment. Run
+`npm run site:deploy` in the private [gyro-website repository](https://github.com/wytzeh197/gyro-website) when website content or the imported catalog changes,
+and verify the deployed content. Model-only releases follow
 [Adding new models](#adding-new-models) above.
 
 ## Homebrew CLI

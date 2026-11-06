@@ -1,6 +1,6 @@
 import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import vm from "node:vm";
 import ts from "typescript";
 
@@ -44,6 +44,13 @@ let drafts = {
 let attachments = { [draftKey]: [{ id: "attachment" }] };
 let selectedPane;
 const context = {
+  carryFolderlessDraft: () => {},
+  draftWorkspaceModes: { current: {} },
+  config: { modelProviders: [] }, configLoaded: true,
+  workbench: { preferences: { defaultWorkspaceMode: "local" } },
+  setChatDraftModels: () => {},
+  newChatDefaultSelection: () => undefined,
+  selectedSessionModelFromConfig: () => undefined,
   activeSession: { workspacePath: "/project" },
   activeSessionId: "existing",
   workspacePath: "/project",

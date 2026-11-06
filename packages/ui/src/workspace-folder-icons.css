@@ -21,6 +21,6 @@
 }
 
 .gyro-sidebar-explorer-row.is-drop-target {
-  outline: 1px solid var(--gyro-accent, currentColor);
+  outline: 1px solid var(--gyro-accent);
   outline-offset: -1px;
 }

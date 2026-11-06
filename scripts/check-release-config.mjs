@@ -267,11 +267,23 @@ if (
 }
 
 for (const marker of [
+  "workflow_dispatch:",
+  "Validate release request",
+  "Verify immutable merged release source",
+  'test "$COMMIT" = "$EXPECTED_COMMIT"',
+  'git merge-base --is-ancestor "$COMMIT" origin/main',
+  "requireReleaseTag(process.env.RELEASE_TAG)",
+  "ref: ${{ needs.signing.outputs.commit }}",
+  'GITHUB_REF_NAME="$RELEASE_TAG" pnpm release:check',
+  "Use TCP for Apple notarization tickets",
+  "block return out quick proto udp from any to any port 443",
+  "sudo pfctl -E",
+  "refusing to upload an unstapled image",
   "needs: [signing, macos]",
   "needs: signing",
   "GYRO_MACOS_SIGNING: ${{ needs.signing.outputs.mode }}",
   "Resolve Developer ID or ad-hoc signing",
-  "Stable release $GITHUB_REF_NAME must be Developer ID signed and notarized",
+  "Stable release $RELEASE_TAG must be Developer ID signed and notarized",
   "Import Developer ID certificate",
   'KEYCHAIN_PATH="$RUNNER_TEMP/gyro-signing.keychain-db"',
   "security set-key-partition-list",
@@ -294,13 +306,13 @@ for (const marker of [
   "Verify pinned Tauri release toolchain",
   'tauri --version)" = "tauri-cli 2.11.4"',
   'GYRO_REQUIRE_RELEASE_SECRETS: "1"',
-  "group: release-${{ github.ref }}",
+  "group: release-${{ inputs.release_tag || github.ref_name }}",
   "cancel-in-progress: false",
   "actions/upload-artifact@v4",
   "actions/download-artifact@v4",
   "merge-multiple: true",
   "scripts/create-updater-manifest.mjs",
-  'gh release create "$GITHUB_REF_NAME"',
+  'gh release create "$RELEASE_TAG"',
   "cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg",
   "release-assets/Gyro_${{ matrix.updater_suffix }}.app.tar.gz",
   "updater_suffix: aarch64",
@@ -322,9 +334,9 @@ for (const marker of [
   "--json isDraft --jq '.isDraft'",
   'if [ "$IS_DRAFT" != "true" ]',
   "Refusing to overwrite published release",
-  'gh release edit "$GITHUB_REF_NAME"',
+  'gh release edit "$RELEASE_TAG"',
   '--notes "$RELEASE_NOTES"',
-  'NOTES_PATH="docs/releases/${GITHUB_REF_NAME}.md"',
+  'NOTES_PATH="docs/releases/${RELEASE_TAG}.md"',
 ]) {
   if (!releaseWorkflow.includes(marker)) {
     failures.push(`Release workflow is missing ${marker}.`);
@@ -515,122 +527,24 @@ function dmgNotarizationStep(workflow) {
   return workflow.slice(start, end);
 }
 
-// Staple is legal only after an Accepted status. A dropped notarytool --wait
-// must re-query the submission id (including the id Apple leaves in the
-// notary URL) and must exit before stapler runs when that status is not
-// Accepted.
-function dmgNotarizationPolicyFailures(step) {
-  const found = [];
-  const acceptedAt = step.indexOf('if [ "$STATUS" != "Accepted" ]');
-  const requeryAt = step.indexOf("xcrun notarytool info");
-  const exitAt = acceptedAt === -1 ? -1 : step.indexOf("exit 1", acceptedAt);
-  const stapleAt = Math.max(
-    step.lastIndexOf('xcrun stapler staple "$DMG_PATH"'),
-    step.lastIndexOf("node scripts/staple-macos-artifact.mjs"),
-  );
-  if (!step.includes("xcrun notarytool submit")) {
-    found.push("DMG notarization must submit the disk image with notarytool.");
-  }
-  if (acceptedAt === -1) {
-    found.push("DMG notarization must stop unless status is Accepted.");
-  }
-  if (requeryAt === -1 || !step.includes("submissions/")) {
-    found.push(
-      "A missing notarytool --wait status must re-query the existing submission before stapling.",
-    );
-  }
-  if (stapleAt === -1) {
-    found.push("DMG notarization must staple the ticket.");
-  }
-  if (
-    acceptedAt === -1 ||
-    requeryAt === -1 ||
-    exitAt === -1 ||
-    stapleAt === -1 ||
-    !(acceptedAt < requeryAt && requeryAt < exitAt && exitAt < stapleAt)
-  ) {
-    found.push(
-      "DMG stapler must run only after notarization status is Accepted.",
-    );
-  }
-  return found;
+// Notarization gates the separate native verification job, which staples the
+// downloaded DMG only after the macOS build has completed successfully.
+const notaryStep = dmgNotarizationStep(releaseWorkflow);
+const acceptedAt = notaryStep.indexOf('if [ "$STATUS" != "Accepted" ]');
+const requeryAt = notaryStep.indexOf("xcrun notarytool info");
+const exitAt = acceptedAt === -1 ? -1 : notaryStep.indexOf("exit 1", acceptedAt);
+if (!notaryStep.includes("xcrun notarytool submit") ||
+    !notaryStep.includes("submissions/") ||
+    acceptedAt === -1 || requeryAt <= acceptedAt || exitAt <= requeryAt) {
+  failures.push("DMG notarization must re-query dropped submissions and fail when the status is not Accepted.");
 }
-
-function dmgNotarizationPolicyFixtureFailures() {
-  const good = [
-    "xcrun notarytool submit",
-    'if [ "$STATUS" != "Accepted" ]; then',
-    "submissions/",
-    "xcrun notarytool info",
-    "exit 1",
-    "fi",
-    'xcrun stapler staple "$DMG_PATH"',
-  ].join("\n");
-  const stapleBeforeAccepted = [
-    'xcrun stapler staple "$DMG_PATH"',
-    "xcrun notarytool submit",
-    'if [ "$STATUS" != "Accepted" ]; then',
-    "submissions/",
-    "xcrun notarytool info",
-    "exit 1",
-    "fi",
-  ].join("\n");
-  const noRequery = [
-    "xcrun notarytool submit",
-    'if [ "$STATUS" != "Accepted" ]; then',
-    "exit 1",
-    "fi",
-    'xcrun stapler staple "$DMG_PATH"',
-  ].join("\n");
-  const stapleThenExit = [
-    "xcrun notarytool submit",
-    'if [ "$STATUS" != "Accepted" ]; then',
-    "submissions/",
-    "xcrun notarytool info",
-    "fi",
-    'xcrun stapler staple "$DMG_PATH"',
-    "exit 1",
-  ].join("\n");
-  const cases = [
-    ["accepted workflow", good, []],
-    [
-      "staple before Accepted",
-      stapleBeforeAccepted,
-      ["DMG stapler must run only after notarization status is Accepted."],
-    ],
-    [
-      "missing re-query",
-      noRequery,
-      [
-        "A missing notarytool --wait status must re-query the existing submission before stapling.",
-        "DMG stapler must run only after notarization status is Accepted.",
-      ],
-    ],
-    [
-      "staple before the non-Accepted exit",
-      stapleThenExit,
-      ["DMG stapler must run only after notarization status is Accepted."],
-    ],
-  ];
-  const found = [];
-  for (const [name, step, expected] of cases) {
-    const actual = dmgNotarizationPolicyFailures(step);
-    if (actual.join("\n") !== expected.join("\n")) {
-      found.push(
-        `DMG notarization policy fixture ${name} returned ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}.`,
-      );
-    }
-  }
-  return found;
-}
-
-for (const failure of dmgNotarizationPolicyFailures(
-  dmgNotarizationStep(releaseWorkflow),
-)) {
-  failures.push(failure);
-}
-for (const failure of dmgNotarizationPolicyFixtureFailures()) {
-  failures.push(failure);
+const verifyJob = releaseWorkflow.slice(
+  releaseWorkflow.indexOf("\n  verify:"),
+  releaseWorkflow.indexOf("\n  finalize:"),
+);
+if (!verifyJob.includes("needs: [signing, macos]") ||
+    !verifyJob.includes("node scripts/staple-macos-artifact.mjs")) {
+  failures.push("Native verification must wait for successful notarization and staple the downloaded DMG.");
 }
 
 const dmgRetryTest = spawnSync(
@@ -651,6 +565,17 @@ const dmgMountTest = spawnSync(
 );
 if (dmgMountTest.status !== 0) {
   failures.push("DMG mount cleanup regression checks failed.");
+}
+
+const releaseRecoveryTest = spawnSync(
+  process.execPath,
+  [resolve(repoRoot, "scripts/check-release-recovery.mjs")],
+  { stdio: "inherit" },
+);
+if (releaseRecoveryTest.status !== 0) {
+  failures.push(
+    "Release recovery must reject unapproved or unmerged source before signing.",
+  );
 }
 
 if (failures.length > 0) {

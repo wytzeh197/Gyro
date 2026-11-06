@@ -1,11 +1,12 @@
 #!/usr/bin/env node
+import { readFileSync } from "./read-product-source.mjs";
 import { readRepoSource } from "./read-repo-source.mjs";
 // Multi-root workspace policy: validation, health, canonical storage, and
 // relocation. The filesystem half is covered by `gyro_core::workspace_roots`
 // tests; these inputs stand in for what `inspect_workspace_folders` returns.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import {
   assessWorkspaceRoots,
   relocateWorkspaceFolderPreferences,

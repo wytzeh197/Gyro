@@ -1,6 +1,6 @@
 import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import ts from "typescript";
 import { limitOptimisticSessionEvents } from "../apps/desktop/src/provider-stream-events.ts";
 

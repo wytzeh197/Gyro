@@ -33,7 +33,7 @@ conversions: `check-language-server-registry.mjs` executes the editor's merged
 | Runner | Executes |
 | --- | --- |
 | `pnpm test` | `test:reliability` (every Node guard, architecture ceilings, guard registry) then `pnpm -r test` |
-| CI `node` job | `pnpm check`, `pnpm test`, `pnpm smoke:workbench`, `pnpm test:canvas-browser`, `pnpm release:check`, `pnpm site:check` |
+| CI `node` job | `pnpm check`, `pnpm test`, `pnpm smoke:workbench`, `pnpm test:canvas-browser`, `pnpm release:check` |
 | CI `rust` job | `cargo test --workspace`, CLI build, CLI packaging check |
 | CI `tauri` job | frontend build, `cargo test --workspace`, debug `.app` bundle, native smoke |
 
@@ -69,3 +69,5 @@ cargo test --workspace
 pnpm --filter @gyro-dev/desktop tauri build --debug --bundles app --no-sign --ci
 pnpm smoke:native
 ```
+
+Website build, interaction, and release-download checks run in the private [gyro-website repository](https://github.com/wytzeh197/gyro-website), independently of desktop CI.

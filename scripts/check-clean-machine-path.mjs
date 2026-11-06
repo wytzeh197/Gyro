@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "./read-product-source.mjs";
 import { readRepoSource } from "./read-repo-source.mjs";
 /**
  * Clean-machine activation path checks.
@@ -10,7 +11,7 @@ import { readRepoSource } from "./read-repo-source.mjs";
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

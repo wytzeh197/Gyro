@@ -28,7 +28,10 @@ jobs:
       # server; scripts/run-canvas-preview-browser.mjs boots Vite itself.
       - run: pnpm test:canvas-browser
       - run: pnpm release:check
-      - run: pnpm site:check
+        # Source validation checks the intended signed preview notes. The tagged
+        # release job resolves the actual signing mode and verifies the artifacts.
+        env:
+          GYRO_MACOS_SIGNING: developer-id
 
   rust:
     name: Rust

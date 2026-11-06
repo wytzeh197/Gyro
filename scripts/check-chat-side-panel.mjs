@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "./read-product-source.mjs";
 /**
  * Structural checks for the chat side rail — the column that hosts the
  * environment launcher and the Browser, Changes and Terminal tools.
@@ -10,7 +11,7 @@
  * track, the wrong specificity, a control group that cannot wrap.
  */
 
-import { readFileSync } from "node:fs";
+
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

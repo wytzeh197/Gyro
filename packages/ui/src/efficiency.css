@@ -2,7 +2,7 @@
   margin: 8px 0;
   padding: 10px 12px;
   border: 1px solid var(--border-color, #8884);
-  border-radius: 8px;
+  border-radius: var(--gyro-radius-lg);
   color: inherit;
   font-size: var(--gyro-font-micro);
 }

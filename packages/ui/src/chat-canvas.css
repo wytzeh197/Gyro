@@ -48,7 +48,7 @@
 
 .gyro-canvas-editor.is-code,
 .gyro-canvas-document.is-code {
-  font-family: var(--gyro-font-mono, monospace);
+  font-family: var(--gyro-font-mono);
   tab-size: 2;
 }
 

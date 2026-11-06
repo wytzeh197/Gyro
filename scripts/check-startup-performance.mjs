@@ -1,6 +1,7 @@
+import { readFileSync } from "./read-product-source.mjs";
 import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 
@@ -84,13 +85,14 @@ assert.equal(
 assert.equal(pending.length, 0);
 
 let config;
+let configLoaded = false;
 let finishDiscovery;
 const refreshConfig = hook("refreshConfig", "selectDestination", {
   setConfig: (value) => {
     config = typeof value === "function" ? value(config) : value;
   },
+  setConfigLoaded: (value) => { configLoaded = value; },
   setActiveProfileId: () => {},
-  setConfigLoaded: () => {},
   providersForConfig: (value) => value.modelProviders,
   withCouncilConfig: (value) => value,
   applyProviderCapabilityManifest: () => {},
@@ -112,6 +114,7 @@ const refreshConfig = hook("refreshConfig", "selectDestination", {
   },
 });
 await refreshConfig();
+assert.equal(configLoaded, true, "startup marks config ready before optional discovery");
 assert.equal(
   config.preference,
   "original",

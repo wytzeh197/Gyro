@@ -3,7 +3,7 @@
  *
  * Installs a fake Tauri IPC layer so the real Gyro UI renders populated demo
  * content in a plain browser. This is a development tool for producing the
- * marketing screenshots under `site/assets/screenshots/`; it is never part of
+ * marketing screenshots under `docs/screenshots/marketing/`; it is never part of
  * the shipped app because `vite build` only takes `index.html` as an entry.
  *
  * Run `node scripts/capture-site-screenshots.mjs` rather than loading

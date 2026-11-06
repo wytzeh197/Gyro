@@ -280,6 +280,10 @@
   "check-provider-stream-ordering.mjs": {
     "kind": "behavioral"
   },
+  "check-release-recovery.mjs": {
+    "kind": "behavioral",
+    "note": "Executes release source validation against disposable Git history; rejects unmerged, mismatched and malformed release requests."
+  },
   "check-release-config.mjs": {
     "kind": "source-text",
     "reason": "Release configuration is data - signing identity, updater endpoints, version surfaces, workflow stages; the packaged-artifact half of this contract runs in release CI (verify-macos-release.mjs)."
@@ -422,15 +426,6 @@
     "kind": "behavioral"
   },
   "check-workspace-explorer-refresh.mjs": {
-    "kind": "behavioral"
-  },
-  "check-download-site.mjs": {
-    "kind": "behavioral"
-  },
-  "check-download-site-runtime.mjs": {
-    "kind": "behavioral"
-  },
-  "check-download-site-build.mjs": {
     "kind": "behavioral"
   },
   "check-cloud-chat-continuation.mjs": {
