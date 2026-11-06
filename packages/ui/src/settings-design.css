@@ -424,7 +424,7 @@
     var(--preview-content) 35%,
     var(--preview-canvas)
   );
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-md);
   padding: 6px;
 }
 .gyro-theme-preview-composer i:first-child {
@@ -977,7 +977,7 @@
   min-height: calc(24px * var(--gyro-ui-scale, 1));
   padding: 0 calc(7px * var(--gyro-ui-scale, 1));
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-md);
   background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
   color: var(--gyro-text);
   font-family: var(--gyro-font-mono);
@@ -988,7 +988,7 @@
   max-width: 100%;
   padding: 4px 7px;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-md);
   background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
   color: var(--gyro-text);
   font-family: var(--gyro-font-mono);
@@ -1208,7 +1208,7 @@
   max-width: 100%;
   padding: 4px 8px;
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-md);
   background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
   color: var(--gyro-muted);
   font-family: var(--gyro-font-mono);
@@ -1596,7 +1596,7 @@
   min-height: calc(24px * var(--gyro-ui-scale, 1));
   padding: 0 calc(7px * var(--gyro-ui-scale, 1));
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-md);
   background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
   color: var(--gyro-muted);
   font-family: var(--gyro-font-mono);

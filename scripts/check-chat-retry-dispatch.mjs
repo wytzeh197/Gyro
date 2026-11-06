@@ -1,6 +1,6 @@
 import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import vm from "node:vm";
 import ts from "typescript";
 import {

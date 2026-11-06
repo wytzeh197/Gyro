@@ -6,6 +6,7 @@
    retain their monospace fonts. */
 
 :root {
+  --gyro-mask-opaque: #000;
   color-scheme: dark;
   /* Native window-chrome geometry: macOS draws the traffic lights and the title
      bar centres its controls on them. Keep these equal to MAIN_TRAFFIC_LIGHT_X/Y
@@ -103,6 +104,7 @@
   --gyro-warn-soft: color-mix(in srgb, var(--gyro-warn) 12%, transparent);
   --gyro-danger-soft: color-mix(in srgb, var(--gyro-danger) 12%, transparent);
   --gyro-blue: #60b0ff;
+  --gyro-blue-action-text: #06111f;
   --gyro-blue-soft: color-mix(in srgb, var(--gyro-blue) 12%, transparent);
   --gyro-canvas-subtle: var(--gyro-app);
   --gyro-window: var(--gyro-app);
@@ -295,6 +297,9 @@
   font-synthesis: none;
   --gyro-control-height: calc(32px * var(--gyro-ui-scale, 1));
   --gyro-icon-target: calc(28px * var(--gyro-ui-scale, 1));
+  --gyro-chat-font-body: 14px;
+  --gyro-chat-font-meta: 12px;
+  --gyro-chat-font-work: 13px;
 }
 
 /* Durable Chat context: attachments, goals, plans, and run controls. */
@@ -315,8 +320,8 @@
 .gyro-composer-attachment,
 .gyro-transcript-attachment {
   align-items: center;
-  background: var(--gyro-surface-raised, #202328);
-  border: 1px solid var(--gyro-border, #30343a);
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-md);
   display: flex;
   gap: 7px;
@@ -450,7 +455,7 @@
 }
 
 .gyro-composer-chip.is-council {
-  color: color-mix(in srgb, var(--gyro-accent, #6ea8fe) 88%, #c4b5fd);
+  color: color-mix(in srgb, var(--gyro-accent) 88%, #c4b5fd);
 }
 
 .gyro-composer-chip.is-council:hover .gyro-composer-chip-remove {
@@ -459,8 +464,8 @@
 
 .gyro-council-preflight {
   align-items: center;
-  border-bottom: 1px solid var(--gyro-border-soft, #262626);
-  color: var(--gyro-muted, #b3b3b3);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  color: var(--gyro-muted);
   display: flex;
   flex-wrap: wrap;
   font-size: var(--gyro-font-caption);
@@ -469,7 +474,7 @@
 }
 
 .gyro-council-preflight.is-blocked {
-  color: var(--gyro-warn, #e8b45f);
+  color: var(--gyro-warn);
 }
 
 .gyro-council-preflight-seats {
@@ -481,7 +486,7 @@
 
 /* What one Council send costs, disclosed before Enter commits it. */
 .gyro-council-preflight-cost {
-  color: var(--gyro-faint, #8b8b8b);
+  color: var(--gyro-faint);
   flex-basis: 100%;
   font-size: var(--gyro-font-tiny);
 }
@@ -490,7 +495,7 @@
 .gyro-composer-safety-notice {
   align-items: center;
   border-radius: var(--gyro-radius-lg);
-  color: var(--gyro-text, #f0f0f0);
+  color: var(--gyro-text);
   display: flex;
   gap: 9px;
   margin: 8px 8px 0;
@@ -498,15 +503,15 @@
 }
 
 .gyro-composer-safety-notice.is-paused {
-  background: color-mix(in srgb, var(--gyro-danger, #ef7d7d) 12%, transparent);
+  background: color-mix(in srgb, var(--gyro-danger) 12%, transparent);
   border: 1px solid
-    color-mix(in srgb, var(--gyro-danger, #ef7d7d) 36%, transparent);
+    color-mix(in srgb, var(--gyro-danger) 36%, transparent);
 }
 
 .gyro-composer-safety-notice.is-warning {
-  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 10%, transparent);
+  background: color-mix(in srgb, var(--gyro-warn) 10%, transparent);
   border: 1px solid
-    color-mix(in srgb, var(--gyro-warn, #e8b45f) 30%, transparent);
+    color-mix(in srgb, var(--gyro-warn) 30%, transparent);
 }
 
 .gyro-composer-safety-notice > span {
@@ -521,16 +526,16 @@
 }
 
 .gyro-composer-safety-notice small {
-  color: var(--gyro-muted, #b3b3b3);
+  color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
   line-height: 1.35;
 }
 
 .gyro-composer-safety-notice button {
-  background: color-mix(in srgb, var(--gyro-text, #f0f0f0) 10%, transparent);
+  background: color-mix(in srgb, var(--gyro-text) 10%, transparent);
   border: 1px solid var(--gyro-premium-hairline-strong);
   border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text, #f0f0f0);
+  color: var(--gyro-text);
   flex: none;
   font: inherit;
   font-size: var(--gyro-font-micro);
@@ -541,11 +546,11 @@
 /* Second-press confirmation for a send large enough to be worth agreeing to. */
 .gyro-composer-cost-confirm {
   align-items: center;
-  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 10%, transparent);
+  background: color-mix(in srgb, var(--gyro-warn) 10%, transparent);
   border: 1px solid
-    color-mix(in srgb, var(--gyro-warn, #e8b45f) 34%, transparent);
+    color-mix(in srgb, var(--gyro-warn) 34%, transparent);
   border-radius: var(--gyro-radius-lg);
-  color: var(--gyro-text, #f0f0f0);
+  color: var(--gyro-text);
   display: flex;
   gap: 9px;
   margin: 8px 8px 0;
@@ -564,7 +569,7 @@
 }
 
 .gyro-composer-cost-confirm small {
-  color: var(--gyro-muted, #b3b3b3);
+  color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
   line-height: 1.35;
 }
@@ -573,7 +578,7 @@
   background: transparent;
   border: 1px solid var(--gyro-premium-hairline-strong);
   border-radius: var(--gyro-radius-md);
-  color: var(--gyro-muted, #b3b3b3);
+  color: var(--gyro-muted);
   flex: none;
   font: inherit;
   font-size: var(--gyro-font-micro);
@@ -586,14 +591,14 @@
 }
 
 .gyro-composer-cost-confirm-send {
-  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 22%, transparent);
-  color: var(--gyro-text, #f0f0f0);
+  background: color-mix(in srgb, var(--gyro-warn) 22%, transparent);
+  color: var(--gyro-text);
 }
 
 .gyro-council-preflight-chip {
-  background: color-mix(in srgb, var(--gyro-accent, #7aa7ff) 12%, transparent);
+  background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
   border-radius: var(--gyro-radius-pill);
-  color: var(--gyro-text, #f0f0f0);
+  color: var(--gyro-text);
   font-size: var(--gyro-font-tiny);
   padding: 2px 8px;
 }
@@ -625,9 +630,9 @@
 }
 
 .gyro-council-status {
-  border: 1px solid var(--gyro-border, #303030);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-pill);
-  color: var(--gyro-muted, #b3b3b3);
+  color: var(--gyro-muted);
   font-size: var(--gyro-font-caption);
   padding: 2px 8px;
   text-transform: lowercase;
@@ -636,55 +641,55 @@
 .gyro-council-status.is-done {
   border-color: color-mix(
     in srgb,
-    var(--gyro-success, #70d39f) 45%,
+    var(--gyro-success) 45%,
     transparent
   );
-  color: var(--gyro-success, #70d39f);
+  color: var(--gyro-success);
 }
 
 .gyro-council-status.is-partial {
-  border-color: color-mix(in srgb, var(--gyro-warn, #e8b45f) 45%, transparent);
-  color: var(--gyro-warn, #e8b45f);
+  border-color: color-mix(in srgb, var(--gyro-warn) 45%, transparent);
+  color: var(--gyro-warn);
 }
 
 .gyro-council-status.is-failed,
 .gyro-council-status.is-cancelled {
   border-color: color-mix(
     in srgb,
-    var(--gyro-danger, #ef7d7d) 45%,
+    var(--gyro-danger) 45%,
     transparent
   );
-  color: var(--gyro-danger, #ef7d7d);
+  color: var(--gyro-danger);
 }
 
 .gyro-council-badge {
   border-radius: var(--gyro-radius-pill);
-  background: var(--gyro-accent-soft, rgba(122, 167, 255, 0.12));
-  color: var(--gyro-accent, #7aa7ff);
+  background: var(--gyro-accent-soft);
+  color: var(--gyro-accent);
   font-size: var(--gyro-font-tiny);
   padding: 2px 8px;
 }
 
 .gyro-council-meta {
-  color: var(--gyro-muted, #b3b3b3);
+  color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
   margin: 0;
 }
 
 .gyro-council-banner {
-  background: color-mix(in srgb, var(--gyro-accent, #7aa7ff) 10%, transparent);
+  background: color-mix(in srgb, var(--gyro-accent) 10%, transparent);
   border: 1px solid
-    color-mix(in srgb, var(--gyro-accent, #7aa7ff) 28%, transparent);
+    color-mix(in srgb, var(--gyro-accent) 28%, transparent);
   border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text, #f0f0f0);
+  color: var(--gyro-text);
   font-size: var(--gyro-font-micro);
   margin: 0;
   padding: 8px 10px;
 }
 
 .gyro-council-banner.is-warn {
-  background: color-mix(in srgb, var(--gyro-warn, #e8b45f) 12%, transparent);
-  border-color: color-mix(in srgb, var(--gyro-warn, #e8b45f) 32%, transparent);
+  background: color-mix(in srgb, var(--gyro-warn) 12%, transparent);
+  border-color: color-mix(in srgb, var(--gyro-warn) 32%, transparent);
 }
 
 .gyro-council-seats {
@@ -693,7 +698,7 @@
 }
 
 .gyro-council-seat {
-  border: 1px solid var(--gyro-border, #303030);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-lg);
   overflow: hidden;
 }
@@ -702,7 +707,7 @@
 .gyro-council-seat.is-cancelled {
   border-color: color-mix(
     in srgb,
-    var(--gyro-danger, #ef7d7d) 35%,
+    var(--gyro-danger) 35%,
     transparent
   );
 }
@@ -721,7 +726,7 @@
 }
 
 .gyro-council-seat-header:hover {
-  background: color-mix(in srgb, var(--gyro-text, #fff) 4%, transparent);
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
 }
 
 .gyro-council-seat-label {
@@ -732,7 +737,7 @@
 
 .gyro-council-seat-status,
 .gyro-council-seat-latency {
-  color: var(--gyro-muted, #b3b3b3);
+  color: var(--gyro-muted);
   font-size: var(--gyro-font-caption);
 }
 
@@ -741,16 +746,16 @@
 }
 
 .gyro-council-seat-body {
-  border-top: 1px solid var(--gyro-border, #303030);
+  border-top: 1px solid var(--gyro-border);
   display: grid;
   gap: 8px;
   padding: 10px;
 }
 
 .gyro-council-seat-output {
-  background: var(--gyro-code-bg, #0c0c0c);
+  background: var(--gyro-code-bg);
   border-radius: var(--gyro-radius-md);
-  color: var(--gyro-code-text, #e6e6e6);
+  color: var(--gyro-code-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: var(--gyro-font-caption);
   line-height: 1.45;
@@ -771,10 +776,10 @@
 
 .gyro-council-seat-actions button,
 .gyro-council-actions button:not([aria-label]) {
-  background: var(--gyro-control-bg, #1b1b1b);
-  border: 1px solid var(--gyro-border, #303030);
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text, #f0f0f0);
+  color: var(--gyro-text);
   cursor: pointer;
   font-size: var(--gyro-font-micro);
   padding: 6px 10px;
@@ -782,7 +787,7 @@
 
 .gyro-council-seat-actions button:hover,
 .gyro-council-actions button:not([aria-label]):hover {
-  background: var(--gyro-control-hover, #272727);
+  background: var(--gyro-control-hover);
 }
 
 .gyro-council-seat-actions button:disabled,
@@ -929,6 +934,7 @@
   --gyro-warn-soft: color-mix(in srgb, var(--gyro-warn) 12%, transparent);
   --gyro-danger-soft: color-mix(in srgb, var(--gyro-danger) 12%, transparent);
   --gyro-blue: #0d5fc9;
+  --gyro-blue-action-text: #ffffff;
   --gyro-blue-soft: color-mix(in srgb, var(--gyro-blue) 12%, transparent);
   /* The dark tones are too light to read on a light sidebar; these are the
      same hues carried down to a legible lightness. */

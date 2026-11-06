@@ -1,6 +1,7 @@
 import { capabilityLabel } from "../packages/ui/src/capability-ui.ts";
+import { readFile } from "./read-product-source.mjs";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+
 import vm from "node:vm";
 import ts from "typescript";
 
@@ -161,7 +162,7 @@ for (const [id, label] of [
   );
 }
 assert.ok(
-  chatRun.includes("capabilityUi(capabilityId)"),
+  chatRun.includes("capabilityUi(capabilityId)") && chatRun.includes("capabilityLabel(capabilityId)"),
   "code capabilities have no activity beat",
 );
 assert.deepEqual(

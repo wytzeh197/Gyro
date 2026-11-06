@@ -63,7 +63,7 @@
 }
 
 :root[data-theme] .gyro-provider-api-key-choices .gyro-provider-logo {
-  border-radius: 4px !important;
+  border-radius: var(--gyro-radius-sm) !important;
   height: 16px !important;
   width: 16px !important;
 }
@@ -181,7 +181,7 @@
 :root[data-theme] .gyro-provider-custom-list .gyro-danger-button {
   background: transparent !important;
   border: 0 !important;
-  border-radius: 6px !important;
+  border-radius: var(--gyro-radius-md) !important;
   box-shadow: none !important;
   color: var(--gyro-muted) !important;
   font-size: var(--gyro-font-caption) !important;

@@ -17,6 +17,7 @@
  *   --scene <name>   capture a single scene
  *   --readme         capture the three README product-tour scenes
  *   --keep-png       retain full-resolution PNGs in docs/screenshots/site-v4
+ *   --output <dir>  screenshot destination (default docs/screenshots/marketing)
  *   --origin <url>   use an existing local Gyro dev server (default port 1420)
  */
 
@@ -33,7 +34,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const outputRoot = resolve(repoRoot, "site/assets/screenshots");
+const outputRoot = resolve(repoRoot, argument("--output") ?? "docs/screenshots/marketing");
+const assetOutputRoot = resolve(outputRoot, "..");
 const readmeOutputRoot = resolve(repoRoot, "docs/screenshots/readme");
 const stagingRoot = resolve(repoRoot, "docs/screenshots/site-v4");
 const appOrigin = argument("--origin") ?? "http://127.0.0.1:1420";
@@ -626,7 +628,7 @@ async function main() {
             : output.directory === "staging"
               ? stagingRoot
               : output.directory === "assets"
-                ? resolve(repoRoot, "site/assets")
+                ? assetOutputRoot
                 : outputRoot,
           output.file,
         );

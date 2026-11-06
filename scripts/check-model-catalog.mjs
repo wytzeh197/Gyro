@@ -1,6 +1,7 @@
+import { readFileSync } from "./read-product-source.mjs";
 import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import {
   applyModelCatalog,
   createModelCatalogClient,
@@ -57,7 +58,7 @@ assert.ok(
 );
 
 parseModelCatalog(
-  readFileSync(new URL("../site/model-catalog.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../catalog/model-catalog.json", import.meta.url), "utf8"),
 );
 for (const raw of [
   "broken",
@@ -294,7 +295,7 @@ const anthropicIds = () => anthropic.models.map((m) => m.id);
 applyModelCatalog(
   parseModelCatalog(
     readFileSync(
-      new URL("../site/model-catalog.json", import.meta.url),
+      new URL("../catalog/model-catalog.json", import.meta.url),
       "utf8",
     ),
   ),
@@ -414,10 +415,7 @@ assert.throws(() =>
 // anchor is otherwise silent: the document is valid and the model never shows.
 {
   const published = parseModelCatalog(
-    readFileSync(
-      new URL("../site/model-catalog.json", import.meta.url),
-      "utf8",
-    ),
+    readFileSync(new URL("../catalog/model-catalog.json", import.meta.url), "utf8"),
   );
   const bundledIds = new Map(
     providerCatalog.map((p) => [p.id, p.models.map((m) => m.id)]),
@@ -586,7 +584,7 @@ assert.throws(() =>
   );
   const published = parseModelCatalog(
     readFileSync(
-      new URL("../site/model-catalog.json", import.meta.url),
+      new URL("../catalog/model-catalog.json", import.meta.url),
       "utf8",
     ),
   );
@@ -717,7 +715,7 @@ assert.equal(
   }
   const published = parseModelCatalog(
     readFileSync(
-      new URL("../site/model-catalog.json", import.meta.url),
+      new URL("../catalog/model-catalog.json", import.meta.url),
       "utf8",
     ),
   );

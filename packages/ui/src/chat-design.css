@@ -242,7 +242,6 @@
    and no indent — the type does the structuring. */
 :root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-header {
   color: var(--gyro-muted);
-  font-size: var(--gyro-chat-font-work);
   font-weight: 400;
   line-height: calc(18px * var(--gyro-ui-scale, 1));
   min-height: 0;
@@ -1042,7 +1041,7 @@
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   .gyro-dictation-button:is(.is-listening, .is-processing) {
-  background: color-mix(in srgb, var(--gyro-accent, #6ea8fe) 22%, transparent);
+  background: color-mix(in srgb, var(--gyro-accent) 22%, transparent);
   color: var(--gyro-text);
 }
 

@@ -613,6 +613,7 @@ const surfaceSource = [
   readRepoFile("packages/ui/src/diff-file-tree.ts"),
   readRepoFile("packages/ui/src/surfaces.tsx"),
   readRepoFile("packages/ui/src/cli-session-list.tsx"),
+  readRepoFile("packages/ui/src/chat-session-drag.ts"),
   readRepoFile("packages/ui/src/workspace-header.tsx"),
   readRepoFile("packages/ui/src/browser-capture-view.tsx"),
   readRepoFile("packages/ui/src/browser-viewport-controls.tsx"),
@@ -624,6 +625,8 @@ const surfaceSource = [
   readRepoFile("packages/ui/src/desktop-notification-settings.tsx"),
   readRepoFile("packages/ui/src/use-chat-transcript-scroll.ts"),
   readRepoFile("packages/ui/src/chat-run-view.tsx"),
+  readRepoFile("packages/ui/src/settings-disclosure.tsx"),
+  readRepoFile("packages/ui/src/efficiency-settings.tsx"),
 ].join("\n");
 const chatGridDropSource = readRepoFile("packages/ui/src/chat-grid-drop.ts");
 const modelRailSource = readRepoFile("packages/ui/src/composer-model-rail.tsx");
@@ -649,6 +652,8 @@ const styleSource = [
   readRepoFile("packages/ui/src/ui-upgrade.css"),
   readRepoFile("packages/ui/src/browser-capture.css"),
   readRepoFile("packages/ui/src/installed-update.css"),
+  readRepoFile("packages/ui/src/chat-shell-design.css"),
+  readRepoFile("packages/ui/src/companion-design.css"),
 ].join("\n");
 const chatDesignSource = readRepoFile("packages/ui/src/chat-design.css");
 const planModeSource = [
@@ -671,6 +676,7 @@ const desktopRustSource = [
   readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
   readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
+  readRepoFile("crates/gyro-core/src/provider_permissions.rs"),
 ].join("\n");
 expect(
   // Row heights live in tokens on the surface root and menu_bar.rs mirrors
@@ -1037,7 +1043,9 @@ expect(
     if (end < 0) return false;
     const rail = styleSource
       .slice(styleSource.indexOf("*/", start), end)
-      .replace(/\/\*[\s\S]*?\*\//g, "");
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      // Mask color determines alpha, not theme paint.
+      .replace(/(?:-webkit-)?mask-image:[^;]+;/g, "");
     return (
       !/(?<![\w-])(#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\))/i.test(
         rail,
@@ -1205,7 +1213,7 @@ expect(
 );
 const composerSourceStart = surfaceSource.indexOf("function Composer({");
 const composerSourceEnd = surfaceSource.indexOf(
-  "\nfunction ",
+  "\nfunction ComposerMediaPreview(",
   composerSourceStart + 1,
 );
 const composerSource = surfaceSource.slice(
@@ -1288,6 +1296,7 @@ const tauriSource = [
   readRepoFile("apps/desktop/src-tauri/src/terminal_process.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_activity.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
+  readRepoFile("crates/gyro-core/src/provider_permissions.rs"),
   readRepoFile("apps/desktop/src-tauri/src/ollama_runner.rs"),
   readRepoFile("apps/desktop/src-tauri/src/capability_workspace_helpers.rs"),
   readRepoFile("apps/desktop/src-tauri/src/session_browser.rs"),
@@ -6665,7 +6674,7 @@ expect(
     releaseWorkflowSource.includes("needs: [signing, macos]") &&
     releaseWorkflowSource.includes("merge-multiple: true") &&
     releaseWorkflowSource.includes("scripts/create-updater-manifest.mjs") &&
-    releaseWorkflowSource.includes('gh release create "$GITHUB_REF_NAME"') &&
+    releaseWorkflowSource.includes('gh release create "$RELEASE_TAG"') &&
     !releaseWorkflowSource.includes("tauri-apps/tauri-action") &&
     !tauriConfigSource.includes("updates.gyro.dev") &&
     surfaceSource.includes('title="Updates"') &&
@@ -8026,7 +8035,7 @@ expect(
       surfaceSource,
       '!isEmptyStart && activeRailPanel === "environment" && !isCompanionPanel',
     ),
-  "Cold launch and New chat should keep recent sessions unselected, reset to local mode, and render the start screen from transcript events.",
+  "Cold launch and New chat should keep recent sessions unselected, honor per-draft workspace defaults, and render the start screen from transcript events.",
 );
 expect(
   !surfaceSource.includes("pane-shell") &&

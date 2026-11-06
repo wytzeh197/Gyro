@@ -78,6 +78,7 @@ export function AppearanceSettings({
       </div>
       <SettingsGroup
         attention={saveStatus === "error" && lastEditedSection === "theme"} id="theme" label="Theme" summary={themeMode === "system" ? "Follows macOS" : `${themeMode === "dark" ? "Dark" : "Light"} theme`}
+        description="Follow your Mac’s appearance or choose your own."
         actions={
           <AppearanceReset
             label="Reset theme"
@@ -202,6 +203,7 @@ export function AppearanceSettings({
       </SettingsGroup>
       <SettingsGroup
         attention={saveStatus === "error" && lastEditedSection === "colors"} id="colors" label="Accent colors" summary={`${mainColor} · ${secondaryColor}`}
+        description="Choose colors for selection, actions, and supporting highlights."
         actions={
           <AppearanceReset
             label="Reset colors"

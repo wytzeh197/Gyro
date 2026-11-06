@@ -34,11 +34,11 @@
   button,
 .gyro-app-preview-toolbar select {
   font: inherit;
-  font-size: 11px;
+  font-size: var(--gyro-font-caption);
   color: var(--gyro-text);
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-md);
   padding: 5px 8px;
 }
 .gyro-app-preview button:disabled {
@@ -49,7 +49,7 @@
   border-color: currentColor;
 }
 .gyro-app-preview-issues {
-  font-size: 11px;
+  font-size: var(--gyro-font-caption);
   padding: 6px 10px;
   color: var(--gyro-muted);
   border-bottom: 1px solid var(--gyro-border-soft);
@@ -59,7 +59,7 @@
   margin: 6px 0;
 }
 .gyro-app-preview-error {
-  font-size: 12px;
+  font-size: var(--gyro-font-micro);
   padding: 8px 10px;
   margin: 0;
   color: var(--gyro-text);
@@ -77,7 +77,7 @@
   flex-direction: column;
   gap: 5px;
   padding: 10px 12px;
-  font-size: 11px;
+  font-size: var(--gyro-font-caption);
   color: var(--gyro-muted);
 }
 .gyro-app-preview-evidence strong {
@@ -125,7 +125,7 @@
   gap: 12px;
   padding: 24px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--gyro-font-micro);
   color: var(--gyro-muted);
 }
 .gyro-app-preview-busy {
@@ -135,6 +135,6 @@
   padding: 5px 8px;
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: 6px;
-  font-size: 11px;
+  border-radius: var(--gyro-radius-md);
+  font-size: var(--gyro-font-caption);
 }

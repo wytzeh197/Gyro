@@ -172,9 +172,9 @@ async function main() {
     resolve(repoRoot, "docs/screenshots/readme/chat-workflow.webp"),
     resolve(repoRoot, "docs/screenshots/readme/cli-workbench.webp"),
     resolve(repoRoot, "docs/screenshots/readme/workspace-review.webp"),
-    resolve(repoRoot, "site/assets/screenshots/hero-2400.webp"),
-    resolve(repoRoot, "site/assets/fonts/inter-latin.woff2"),
-    resolve(repoRoot, "site/assets/fonts/inter-tight-latin.woff2"),
+    resolve(repoRoot, "docs/media/shared/hero-2400.webp"),
+    resolve(repoRoot, "apps/desktop/public/fonts/inter-latin.woff2"),
+    resolve(repoRoot, "apps/desktop/public/fonts/inter-tight-latin.woff2"),
   ];
   for (const asset of required) {
     if (!existsSync(asset)) fail(`missing ${asset}`);

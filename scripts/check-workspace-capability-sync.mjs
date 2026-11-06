@@ -1,7 +1,7 @@
 import { createIdeEvidenceScheduler } from "../apps/desktop/src/ide-evidence-push.ts";
 import { readRepoSource } from "./read-repo-source.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import ts from "typescript";
 
 // Exercise the production hooks without a Tauri window. Re-rendering with new

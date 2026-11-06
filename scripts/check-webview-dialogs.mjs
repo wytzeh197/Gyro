@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "./read-product-source.mjs";
 /**
  * The WebView dialogs guard.
  *
@@ -14,7 +15,7 @@
  * the model-facing capability must announce through the same helper, and the
  * editor must listen for that event.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const root = new URL("..", import.meta.url).pathname;

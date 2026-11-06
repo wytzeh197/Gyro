@@ -23,7 +23,7 @@ const entryText = entryTexts.join("\n");
 
 // Reachability closure over every script in scripts/: entry points first, then
 // whatever a reached script references (run-canvas-preview-browser starts its
-// guard; check-download-site runs its build/runtime halves).
+// guard; reliability runners start their individual guards).
 const scripts = (await readdir(new URL("scripts/", root))).filter((name) =>
   name.endsWith(".mjs"),
 );

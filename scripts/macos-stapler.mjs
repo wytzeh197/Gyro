@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 export function staplerFailureIsTransient(output) {
-  return /network connection was lost|NSURLErrorDomain Code=-1005|kCFErrorDomainCFNetwork Code=-1005|CloudKit's response is inconsistent/i.test(
+  return /network connection was lost|NSURLErrorDomain Code=-1005|NSURLErrorDomain Code=-1009|kCFErrorDomainCFNetwork Code=-1005|CloudKit's response is inconsistent/i.test(
     output,
   );
 }

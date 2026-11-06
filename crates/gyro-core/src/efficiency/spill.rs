@@ -458,11 +458,11 @@ mod tests {
     }
 
     fn scratch() -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|value| value.as_nanos())
-            .unwrap_or(0);
-        std::env::temp_dir().join(format!("gyro-spill-{}-{nanos}", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "gyro-spill-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ))
     }
 
     #[test]

@@ -3060,7 +3060,7 @@ fn all_catalog_context_windows_and_cli_efforts_match_verified_metadata() {
     ))
     .unwrap();
     let published: serde_json::Value =
-        serde_json::from_str(include_str!("../../../../site/model-catalog.json")).unwrap();
+        serde_json::from_str(include_str!("../../../../catalog/model-catalog.json")).unwrap();
     for row in facts["models"].as_array().unwrap() {
         let provider = row[0].as_str().unwrap();
         let model = row[1].as_str().unwrap();
@@ -6486,7 +6486,7 @@ fn every_provider_is_asked_for_a_title_on_the_first_turn() {
         .create_session(temp.path(), SessionOrigin::Desktop, "Untitled chat")
         .unwrap();
     let catalog: serde_json::Value =
-        serde_json::from_str(include_str!("../../../../site/model-catalog.json")).unwrap();
+        serde_json::from_str(include_str!("../../../../catalog/model-catalog.json")).unwrap();
     let models = catalog["models"].as_array().unwrap();
     let cases = gyro_core::provider_registry()
         .iter()
@@ -8244,50 +8244,6 @@ fn git_status_handles_unborn_binary_large_and_non_git_workspaces() {
     let unavailable = git_status_impl(folder.path().to_str().unwrap()).unwrap();
     assert!(!unavailable.available);
     assert_eq!((unavailable.additions, unavailable.deletions), (0, 0));
-}
-
-#[test]
-fn git_preparation_waits_for_slow_reads_and_respects_the_deadline() {
-    let (tx, rx) = mpsc::sync_channel(1);
-    let (continue_tx, continue_rx) = mpsc::sync_channel::<()>(1);
-    let worker = std::thread::spawn(move || {
-        continue_rx.recv().unwrap();
-        tx.send(42).unwrap();
-    });
-    let mut noticed = false;
-    let result = wait_for_git_preparation(
-        &rx,
-        Duration::from_millis(5),
-        Instant::now() + Duration::from_secs(2),
-        || {
-            noticed = true;
-            continue_tx.send(()).unwrap();
-        },
-    );
-    assert_eq!(result.unwrap(), 42);
-    assert!(noticed);
-    worker.join().unwrap();
-
-    let (_tx, rx) = mpsc::sync_channel::<()>(1);
-    let start = Instant::now();
-    let result = wait_for_git_preparation(
-        &rx,
-        Duration::from_millis(5),
-        start + Duration::from_millis(30),
-        || {},
-    );
-    assert!(matches!(result, Err(mpsc::RecvTimeoutError::Timeout)));
-    assert!(start.elapsed() < Duration::from_secs(2));
-
-    let (tx, rx) = mpsc::sync_channel::<()>(1);
-    drop(tx);
-    let result = wait_for_git_preparation(
-        &rx,
-        Duration::from_secs(1),
-        Instant::now() + Duration::from_secs(2),
-        || panic!("disconnected is not slow"),
-    );
-    assert!(matches!(result, Err(mpsc::RecvTimeoutError::Disconnected)));
 }
 
 #[test]

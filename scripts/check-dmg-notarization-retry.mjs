@@ -10,6 +10,7 @@ import {
   readFileSync,
   existsSync,
   chmodSync,
+  rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -66,16 +67,21 @@ if [ "\${1:-}" = "stapler" ]; then
     echo "unexpected stapler invocation: \$*" >&2
     exit 1
   fi
-  printf '%s\\n' "$3" >> "$GYRO_FAKE_STAPLED"
-  n=$(wc -l < "$GYRO_FAKE_STAPLED" | tr -d ' ')
+  printf '%s\\n' "$3" >> "$GYRO_FAKE_STAPLE_ATTEMPTS"
+  n=$(wc -l < "$GYRO_FAKE_STAPLE_ATTEMPTS" | tr -d ' ')
   if [ "$n" -le "\${GYRO_FAKE_STAPLE_FAILURES:-0}" ]; then
-    if [ "\${GYRO_FAKE_STAPLE_PERMANENT:-0}" = "1" ]; then
-      echo "Artifact does not have a ticket stapled to it. Error 65." >&2
+    if [ "\${GYRO_FAKE_STAPLE_ERROR:-transient}" = "permanent" ] || [ "\${GYRO_FAKE_STAPLE_PERMANENT:-0}" = "1" ]; then
+      echo "The ticket does not match this image." >&2
       exit 65
     fi
-    echo 'Error Domain=NSURLErrorDomain Code=-1005 "The network connection was lost."' >&2
+    if [ "\${GYRO_FAKE_STAPLE_ERROR:-transient}" = "offline" ]; then
+      echo 'NSURLErrorDomain Code=-1009 The Internet connection appears to be offline.' >&2
+    else
+      echo 'NSURLErrorDomain Code=-1005 The network connection was lost.' >&2
+    fi
     exit 68
   fi
+  printf '%s\\n' "$3" >> "$GYRO_FAKE_STAPLED"
   exit 0
 fi
 if [ "\${1:-}" != "notarytool" ]; then
@@ -145,6 +151,7 @@ function runCase(name, configure) {
   const submitStderr = join(root, "submit-stderr.txt");
   const submitStdout = join(root, "submit-stdout.txt");
   const stapled = join(root, "stapled.txt");
+  const stapleAttempts = join(root, "staple-attempts.txt");
   const infoIds = join(root, "info-ids.txt");
   const logIds = join(root, "log-ids.txt");
   const sleeps = join(root, "sleeps.txt");
@@ -162,6 +169,7 @@ function runCase(name, configure) {
     APPLE_API_KEY: "TESTKEY",
     APPLE_API_ISSUER: "test-issuer",
     GYRO_FAKE_STAPLED: stapled,
+    GYRO_FAKE_STAPLE_ATTEMPTS: stapleAttempts,
     GYRO_FAKE_INFO_IDS: infoIds,
     GYRO_FAKE_LOG_IDS: logIds,
     GYRO_FAKE_SLEEPS: sleeps,
@@ -178,7 +186,7 @@ function runCase(name, configure) {
     encoding: "utf8",
     timeout: 15000,
   });
-  if (result.status === 0) {
+  if (result.status === 0 && !existsSync(stapled)) {
     const stapling = spawnSync(
       process.execPath,
       [join(repoRoot, "scripts/staple-macos-artifact.mjs"), dmg],
@@ -195,7 +203,7 @@ function runCase(name, configure) {
       stderr: result.stderr + stapling.stderr,
     };
   }
-  return {
+  const report = {
     name,
     sleeps: existsSync(sleeps) ? readFileSync(sleeps, "utf8").trim() : "",
     status: result.status,
@@ -203,9 +211,12 @@ function runCase(name, configure) {
     stderr: result.stderr ?? "",
     error: result.error,
     stapled: existsSync(stapled) ? readFileSync(stapled, "utf8").trim() : "",
+    stapleAttempts: existsSync(stapleAttempts) ? readFileSync(stapleAttempts, "utf8").trim().split("\n").length : 0,
     infoIds: existsSync(infoIds) ? readFileSync(infoIds, "utf8").trim() : "",
     logIds: existsSync(logIds) ? readFileSync(logIds, "utf8").trim() : "",
   };
+  rmSync(root, { recursive: true, force: true });
+  return report;
 }
 
 const droppedWait = runCase(
@@ -293,8 +304,38 @@ assert.equal(noSubmission.stapled, "");
 assert.equal(noSubmission.infoIds, "");
 assert.match(noSubmission.stderr, /finished with status 'unknown'/);
 
+function acceptedWithStapleFailures(failures, kind = "transient") {
+  return runCase(`staple ${kind} ${failures}`, ({ submitStdout, env }) => {
+    writeFileSync(submitStdout, '{"id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","status":"Accepted"}\n');
+    env.GYRO_FAKE_SUBMIT_EXIT = "0";
+    env.GYRO_FAKE_STAPLE_FAILURES = String(failures);
+    env.GYRO_FAKE_STAPLE_ERROR = kind;
+  });
+}
+const stapleRecovers = acceptedWithStapleFailures(2);
+assert.equal(stapleRecovers.status, 0, stapleRecovers.stderr);
+assert.equal(stapleRecovers.stapleAttempts, 3);
+assert.equal(stapleRecovers.sleeps, "10\n20");
+assert.match(stapleRecovers.stapled, /\.dmg$/);
+const stapleOffline = acceptedWithStapleFailures(1, "offline");
+assert.equal(stapleOffline.status, 0, stapleOffline.stderr);
+assert.equal(stapleOffline.stapleAttempts, 2);
+assert.equal(stapleOffline.sleeps, "10");
+const stapleExhausted = acceptedWithStapleFailures(4);
+assert.equal(stapleExhausted.status, 1, stapleExhausted.stderr);
+assert.equal(stapleExhausted.stapleAttempts, 4);
+assert.equal(stapleExhausted.sleeps, "10\n20\n30");
+assert.equal(stapleExhausted.stapled, "");
+assert.match(stapleExhausted.stderr, /xcrun stapler staple.*exited 68/);
+assert.ok(verifyJob.includes("refusing to upload an unstapled image"));
+const stapleInvalid = acceptedWithStapleFailures(1, "permanent");
+assert.equal(stapleInvalid.status, 1, stapleInvalid.stderr);
+assert.equal(stapleInvalid.stapleAttempts, 1);
+assert.equal(stapleInvalid.sleeps, "");
+assert.equal(stapleInvalid.stapled, "");
+
 console.log(
-  "DMG notarization retry passed: dropped wait re-queries, Accepted staples, Invalid and a missing id do not.",
+  "DMG notarization retry passed: dropped wait re-queries, Accepted staples, Invalid and a missing id do not; transient staple retries are bounded and permanent failures stop immediately.",
 );
 
 const ticketDrop = runCase(
@@ -309,7 +350,7 @@ const ticketDrop = runCase(
   },
 );
 assert.equal(ticketDrop.status, 0, ticketDrop.stderr);
-assert.equal(ticketDrop.stapled.split("\n").length, 2);
+assert.equal(ticketDrop.stapleAttempts, 2);
 assert.equal(ticketDrop.sleeps, "10");
 const exhaustedTicket = runCase(
   "ticket network retries are bounded",
@@ -323,7 +364,7 @@ const exhaustedTicket = runCase(
   },
 );
 assert.notEqual(exhaustedTicket.status, 0);
-assert.equal(exhaustedTicket.stapled.split("\n").length, 4);
+assert.equal(exhaustedTicket.stapleAttempts, 4);
 assert.equal(exhaustedTicket.sleeps, "10\n20\n30");
 const missingTicket = runCase(
   "permanent missing ticket is not retried",
@@ -338,7 +379,7 @@ const missingTicket = runCase(
   },
 );
 assert.notEqual(missingTicket.status, 0);
-assert.equal(missingTicket.stapled.split("\n").length, 1);
+assert.equal(missingTicket.stapleAttempts, 1);
 assert.equal(missingTicket.sleeps, "");
 console.log(
   "Apple ticket tests passed: dropped connection recovers, retries are bounded, permanent failure stops.",

@@ -1,3 +1,4 @@
+import { readFileSync } from "./read-product-source.mjs";
 import { readRepoSource } from "./read-repo-source.mjs";
 /**
  * Assert every browser capability descriptor has a provider tool name, class,
@@ -5,7 +6,7 @@ import { readRepoSource } from "./read-repo-source.mjs";
  * rest of CAPABILITY_DESCRIPTORS.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
