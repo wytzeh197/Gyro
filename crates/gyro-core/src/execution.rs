@@ -679,13 +679,24 @@ fn push_bounded(
         return !text.is_empty();
     }
     let remaining = max_chars - *current_chars;
-    let text_chars = text.chars().count();
+    // Command logs are almost always ASCII. A byte length is then the scalar
+    // length, so an 8 KiB read does not decode every byte. Non-ASCII still
+    // counts and cuts on scalar boundaries.
+    let text_chars = if text.is_ascii() {
+        text.len()
+    } else {
+        text.chars().count()
+    };
     if text_chars <= remaining {
         target.push_str(text);
         *current_chars += text_chars;
         return false;
     }
-    target.extend(text.chars().take(remaining));
+    if text.is_ascii() {
+        target.push_str(&text[..remaining]);
+    } else {
+        target.extend(text.chars().take(remaining));
+    }
     *current_chars = max_chars;
     true
 }
@@ -761,6 +772,38 @@ pub(crate) fn terminate_process_group(child: &mut std::process::Child) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn push_bounded_uses_byte_length_for_ascii_and_scalar_cuts_otherwise() {
+        let mut ascii = String::new();
+        let mut ascii_chars = 0;
+        assert!(!super::push_bounded(&mut ascii, &mut ascii_chars, "ab", 8));
+        assert!(super::push_bounded(
+            &mut ascii,
+            &mut ascii_chars,
+            "cdefghij",
+            8
+        ));
+        assert_eq!(ascii, "abcdefgh");
+        assert_eq!(ascii_chars, 8);
+        assert!(super::push_bounded(&mut ascii, &mut ascii_chars, "more", 8));
+        assert_eq!(ascii, "abcdefgh");
+
+        let mut mixed = String::new();
+        let mut mixed_chars = 0;
+        let chunk = "aébc";
+        assert_ne!(chunk.len(), chunk.chars().count());
+        assert!(super::push_bounded(&mut mixed, &mut mixed_chars, chunk, 3));
+        assert_eq!(mixed, "aéb");
+        assert_eq!(mixed_chars, 3);
+        assert!(mixed.is_char_boundary(mixed.len()));
+
+        let mut fit = String::new();
+        let mut fit_chars = 0;
+        assert!(!super::push_bounded(&mut fit, &mut fit_chars, "éé", 2));
+        assert_eq!(fit, "éé");
+        assert_eq!(fit_chars, 2);
+    }
+
     #[test]
     fn finite_stdin_delivers_large_input_and_eof() {
         let dir = tempfile::tempdir().unwrap();
