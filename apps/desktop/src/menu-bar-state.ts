@@ -9,6 +9,10 @@ import type {
   Session,
   SessionEvent,
 } from "@gyro-dev/ui";
+import {
+  pendingSessionApprovals,
+  pendingSessionQuestions,
+} from "../../../packages/ui/src/session-approvals.ts";
 
 type MenuBarStateInput = {
   automations: Automation[];
@@ -55,7 +59,7 @@ function chatJobStatus(events: SessionEvent[]): MenuBarJob["status"] {
   const payload = recordFromUnknown(lastEvent?.payload);
   const payloadStatus = stringFromRecord(payload, "status");
   if (
-    lastEvent?.kind === "approval-requested" ||
+    pendingSessionApprovals(events).length > 0 ||
     payloadStatus === "waiting" ||
     payloadStatus === "blocked"
   ) {
@@ -64,14 +68,16 @@ function chatJobStatus(events: SessionEvent[]): MenuBarJob["status"] {
   return "running";
 }
 
-const APPROVAL_SUMMARY_LIMIT = 120;
-
 /** The pending provider approval the latest turn is blocked on, if any.
     Capability approvals are left out: they need the turn context the chat
     view resolves them with, so the popover only offers to open those. */
 function pendingApproval(events: SessionEvent[]): MenuBarApproval | undefined {
-  const lastEvent = latestTurnEvents(events).at(-1);
-  if (lastEvent?.kind !== "approval-requested") return undefined;
+  const lastEvent = pendingSessionApprovals(events).find(
+    (event) =>
+      stringFromRecord(recordFromUnknown(event.payload), "kind") ===
+      "provider-tool-approval",
+  );
+  if (!lastEvent) return undefined;
   const payload = recordFromUnknown(lastEvent.payload);
   if (stringFromRecord(payload, "kind") !== "provider-tool-approval") {
     return undefined;
@@ -84,10 +90,7 @@ function pendingApproval(events: SessionEvent[]): MenuBarApproval | undefined {
     stringFromRecord(payload, "command") ??
     stringFromRecord(payload, "reason") ??
     lastEvent.message
-  )
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, APPROVAL_SUMMARY_LIMIT);
+  ).trim();
   return { id, approvalType, summary };
 }
 
@@ -124,11 +127,20 @@ export function deriveMenuBarJobs({
   const activeSessionIds = new Set(sendingSessionIds);
   const jobs: MenuBarJob[] = [];
 
-  for (const sessionId of sendingSessionIds) {
-    const session = sessionById.get(sessionId);
-    if (!session) continue;
+  const waitingForReplies = new Set<string>();
+  for (const session of sessions) {
+    const sessionId = session.id;
+    const isSending = activeSessionIds.has(sessionId);
+    if (session.parentSessionId && !isSending) continue;
     const events = sessionEventsById[sessionId] ?? [];
-    const status = chatJobStatus(events);
+    // Use the same native-turn reconciliation as the chat/sidebar. A finished
+    // reply can still need an answer; imported and superseded questions cannot.
+    const question = !isSending ? pendingSessionQuestions(events) : undefined;
+    const approvals = pendingSessionApprovals(events);
+    if (!isSending && !question && !approvals.length) continue;
+    if (question || approvals.length) waitingForReplies.add(sessionId);
+    const status =
+      question || approvals.length ? "waiting" : chatJobStatus(events);
     const approval = status === "waiting" ? pendingApproval(events) : undefined;
     jobs.push({
       id: `chat:${sessionId}`,
@@ -138,12 +150,22 @@ export function deriveMenuBarJobs({
       detail: chatJobDetail(events, session),
       status,
       startedAt: chatJobStart(events, session),
-      canStop: true,
+      canStop: isSending,
       providerId: session.providerId,
       providerLabel: session.providerLabel,
       modelId: session.modelId,
       modelLabel: session.modelLabel,
       ...(approval ? { approval } : {}),
+      ...(question
+        ? {
+            question: {
+              id: question.id,
+              summary: question.questions
+                .map((item) => item.title)
+                .join("\n\n"),
+            },
+          }
+        : {}),
     });
   }
 
@@ -151,7 +173,8 @@ export function deriveMenuBarJobs({
     if (
       outcome.kind !== "chat" ||
       outcome.status !== "succeeded" ||
-      activeSessionIds.has(outcome.targetId)
+      activeSessionIds.has(outcome.targetId) ||
+      waitingForReplies.has(outcome.targetId)
     ) {
       continue;
     }
@@ -165,10 +188,10 @@ export function deriveMenuBarJobs({
       status: "finished",
       startedAt: outcome.finishedAt,
       canStop: false,
-      providerId: session?.providerId,
-      providerLabel: session?.providerLabel,
-      modelId: session?.modelId,
-      modelLabel: session?.modelLabel,
+      providerId: outcome.providerId ?? session?.providerId,
+      providerLabel: outcome.providerLabel ?? session?.providerLabel,
+      modelId: outcome.modelId ?? session?.modelId,
+      modelLabel: outcome.modelLabel ?? session?.modelLabel,
     });
   }
 
@@ -211,6 +234,10 @@ function providerOutcome(
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
   let latest: MenuBarOutcome | undefined;
   for (const [sessionId, events] of Object.entries(sessionEventsById)) {
+    const session = sessionById.get(sessionId);
+    // Child runs are represented by their parent. A reply asking a question
+    // is waiting for input rather than a completion notification.
+    if (session?.parentSessionId || pendingSessionQuestions(events)) continue;
     for (const event of events) {
       if (event.kind !== "system-event") continue;
       const payload = recordFromUnknown(event.payload);
@@ -219,11 +246,6 @@ function providerOutcome(
       if (!status || !["done", "failed", "cancelled"].includes(status)) {
         continue;
       }
-      const session = sessionById.get(sessionId);
-      // A session another chat's turn started — a research sub-agent run — is
-      // not a chat the user started, so finishing it is not a chat outcome:
-      // the turn waiting on it reports its own.
-      if (session?.parentSessionId) continue;
       const finishedAt =
         stringFromRecord(payload, "completedAt") ?? event.createdAt;
       const outcome: MenuBarOutcome = {
@@ -239,6 +261,10 @@ function providerOutcome(
               ? "stopped"
               : "failed",
         finishedAt,
+        providerId: session?.providerId,
+        providerLabel: session?.providerLabel,
+        modelId: session?.modelId,
+        modelLabel: session?.modelLabel,
       };
       if (
         !latest ||

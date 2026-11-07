@@ -618,6 +618,8 @@ export type MenuBarJob = {
   modelLabel?: string;
   /** A pending provider approval the popover can answer inline. */
   approval?: MenuBarApproval;
+  /** An unanswered chat question. Replying always opens its original chat. */
+  question?: { id: string; summary: string };
 };
 
 export type MenuBarApproval = {
@@ -634,6 +636,10 @@ export type MenuBarOutcome = {
   detail: string;
   status: "succeeded" | "failed" | "stopped";
   finishedAt: string;
+  providerId?: string;
+  providerLabel?: string;
+  modelId?: string;
+  modelLabel?: string;
 };
 
 export type MenuBarSnapshotState =

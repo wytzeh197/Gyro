@@ -488,6 +488,10 @@ mod tests {
             detail: "/private/workspace/secret.txt".into(),
             status: status.into(),
             finished_at: "2026-09-28T10:00:00Z".into(),
+            provider_id: None,
+            provider_label: None,
+            model_id: None,
+            model_label: None,
         }
     }
 

@@ -17,6 +17,7 @@ import {
   restoreCompanionPanes,
   sessionApprovalCounts,
   sessionQuestionCounts,
+  revealChatQuestion,
   setConfirmActionHandler,
   setOpenDroppedWorkspaceHandler,
   terminalLaunchProfiles,
@@ -7915,7 +7916,9 @@ export function App() {
             destination: "workspace",
           });
           selectSession(target.id);
-          void refreshEvents(target.id);
+          const reveal = () =>
+            requestAnimationFrame(() => revealChatQuestion(target.id));
+          void refreshEvents(target.id).then(reveal, reveal);
           return;
         }
         if (target.kind === "automation") {
@@ -7954,6 +7957,10 @@ export function App() {
       "gyro://provider-approval-notification-open",
       (event) => {
         if (!isMounted || !event.payload.sessionId) return;
+        dispatchWorkbench({
+          type: "select-destination",
+          destination: "workspace",
+        });
         selectSession(event.payload.sessionId);
         void refreshEvents(event.payload.sessionId);
       },

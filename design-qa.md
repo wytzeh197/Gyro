@@ -214,3 +214,13 @@ final result: passed
 - Type checks, production build, relevant UI guards and native delegation/policy tests passed. Live provider spawning was not exercised; the installed app bundle remains unchanged.
 
 Sub-agent composer refinement: strip/composer edges match at regular and narrow widths; the strip's bottom divider is removed. Evidence: `docs/design/subagents/composer-aligned.png`. Workbench/token checks passed.
+
+---
+
+# Gyro Native compact menu bar — 2026-11-07
+
+**final result: passed** (scoped visual/component review; native delivery unverified)
+
+Implemented the selected option 1 and Reply in chat using the actual menu component and existing native approval-notification path. Full evidence, normalized side-by-side and focused comparisons, interaction checks, native tests, and limits are in [the menu bar review](docs/design/menu-bar-concepts-2026-11-07/implementation/design-qa.md). The approved per-chat AI logos and finished-result identity are covered by [the provider-logo review](docs/design/menu-bar-concepts-2026-11-07/implementation/provider-logos/design-qa.md). Browser preview: `http://127.0.0.1:1420/menu-bar-fixture.html`.
+
+The isolated production build and current component/type checks pass. Desktop TypeScript, menu/question checks and broad workbench smoke also pass on the clean proposed commit; unrelated dirty layout changes are excluded. Live macOS notification delivery, native tray/window interaction and live-provider resumption were not exercised, and the installed app was not replaced.

@@ -159,7 +159,11 @@ import {
   startChatPointerDrag,
 } from "./chat-pointer-drag";
 import { ChatQuestionPopup } from "./chat-question-popup";
-import { latestChatQuestions, parseChatAnswers } from "./chat-questions";
+import {
+  CHAT_QUESTION_REVEAL_EVENT,
+  latestChatQuestions,
+  parseChatAnswers,
+} from "./chat-questions";
 import {
   beginChatPaneDrag,
   chatDragSource,
@@ -5050,6 +5054,28 @@ export function ChatSurface({
 
   const [dismissedQuestionId, setDismissedQuestionId] = useState<string>();
   const questionRequest = useMemo(() => latestChatQuestions(events), [events]);
+  useLayoutEffect(() => {
+    const reveal = (event: Event) => {
+      const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail
+        ?.sessionId;
+      if (
+        !questionRequest ||
+        !sessionId ||
+        !events.some(
+          (item) => item.id === questionRequest.id && item.sessionId === sessionId,
+        )
+      ) return;
+      setDismissedQuestionId(undefined);
+      requestAnimationFrame(() => {
+        document
+          .getElementById(`${questionRequest.id}-question`)
+          ?.closest<HTMLElement>("form")
+          ?.focus({ preventScroll: true });
+      });
+    };
+    window.addEventListener(CHAT_QUESTION_REVEAL_EVENT, reveal);
+    return () => window.removeEventListener(CHAT_QUESTION_REVEAL_EVENT, reveal);
+  }, [events, questionRequest]);
   const showQuestionPopup =
     questionRequest &&
     questionRequest.id !== dismissedQuestionId &&

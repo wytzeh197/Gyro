@@ -33,12 +33,14 @@ const MENU_BAR_CARD_WIDTH: f64 = 372.0;
 #[cfg(target_os = "macos")]
 const MENU_BAR_POPOVER_WIDTH: f64 = MENU_BAR_CARD_WIDTH + MENU_BAR_GUTTER_X * 2.0;
 #[cfg(target_os = "macos")]
-const MENU_BAR_HEADER_HEIGHT: f64 = 52.0;
+const MENU_BAR_HEADER_HEIGHT: f64 = 44.0;
 #[cfg(target_os = "macos")]
-const MENU_BAR_ROW_HEIGHT: f64 = 44.0;
+const MENU_BAR_ROW_HEIGHT: f64 = 52.0;
 /// The inline approval block under a waiting row.
 #[cfg(target_os = "macos")]
 const MENU_BAR_APPROVAL_HEIGHT: f64 = 92.0;
+#[cfg(target_os = "macos")]
+const MENU_BAR_QUESTION_HEIGHT: f64 = 100.0;
 #[cfg(target_os = "macos")]
 const MENU_BAR_OVERFLOW_HEIGHT: f64 = 32.0;
 #[cfg(target_os = "macos")]
@@ -81,6 +83,15 @@ pub struct MenuBarJob {
     pub model_label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval: Option<MenuBarApproval>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<MenuBarQuestion>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MenuBarQuestion {
+    pub id: String,
+    pub summary: String,
 }
 
 /// A pending provider approval the popover answers inline.
@@ -126,6 +137,14 @@ pub struct MenuBarOutcome {
     pub detail: String,
     pub status: String,
     pub finished_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_label: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -234,7 +253,7 @@ impl MenuBarController {
         if snapshot.jobs.iter().any(|job| job.status == "waiting") {
             return MenuBarSnapshotState::Attention;
         }
-        if !snapshot.jobs.is_empty() {
+        if snapshot.jobs.iter().any(|job| job.status != "finished") {
             return MenuBarSnapshotState::Working;
         }
         if let Some(outcome) = snapshot.recent_outcome.as_ref() {
@@ -333,17 +352,32 @@ fn emit_snapshot(app: &AppHandle) {
 
 #[cfg(target_os = "macos")]
 fn popover_height(snapshot: &MenuBarSnapshot) -> f64 {
-    let visible_jobs = snapshot.jobs.len().min(MENU_BAR_MAX_VISIBLE_JOBS);
-    let approvals = snapshot.jobs[..visible_jobs]
+    // Waiting requests take the full body; ongoing work becomes one summary row.
+    let waiting = snapshot.jobs.iter().any(|job| job.status == "waiting");
+    let candidates: Vec<_> = snapshot
+        .jobs
         .iter()
-        .filter(|job| job.approval.is_some())
+        .filter(|job| !waiting || job.status == "waiting")
+        .collect();
+    let visible: Vec<_> = candidates.iter().take(MENU_BAR_MAX_VISIBLE_JOBS).collect();
+    let approvals = visible.iter().filter(|job| job.approval.is_some()).count();
+    let questions = visible
+        .iter()
+        .filter(|job| job.approval.is_none() && job.question.is_some())
         .count();
     // With no jobs the popover shows a recent-outcome row, or nothing at all
     // when idle.
-    let content = if visible_jobs > 0 {
-        visible_jobs as f64 * MENU_BAR_ROW_HEIGHT
+    let content = if !visible.is_empty() {
+        visible.len() as f64 * MENU_BAR_ROW_HEIGHT
             + approvals as f64 * MENU_BAR_APPROVAL_HEIGHT
-            + if snapshot.jobs.len() > MENU_BAR_MAX_VISIBLE_JOBS {
+            + questions as f64 * MENU_BAR_QUESTION_HEIGHT
+            + if candidates.len() > MENU_BAR_MAX_VISIBLE_JOBS
+                || (waiting
+                    && snapshot
+                        .jobs
+                        .iter()
+                        .any(|job| job.status == "running" || job.status == "queued"))
+            {
                 MENU_BAR_OVERFLOW_HEIGHT
             } else {
                 0.0
@@ -366,6 +400,12 @@ fn resize_popover(app: &AppHandle) {
         return;
     };
     let height = popover_height(&app.state::<MenuBarController>().public_snapshot());
+    let height = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .map(|monitor| height.min(monitor.work_area().size.height as f64 / monitor.scale_factor()))
+        .unwrap_or(height);
     let _ = window.set_size(tauri::LogicalSize::new(MENU_BAR_POPOVER_WIDTH, height));
 }
 
@@ -450,8 +490,8 @@ fn toggle_popover(app: &AppHandle, rect: tauri::Rect, pointer: tauri::PhysicalPo
     if took_recent_outside_dismiss() {
         return;
     }
-    resize_popover(app);
     position_popover(app, rect, pointer);
+    resize_popover(app);
     let _ = window.show();
     let _ = window.set_focus();
     app.state::<MenuBarController>()
@@ -673,6 +713,7 @@ mod tests {
                     model_id: Some("gpt-5.6-sol".into()),
                     model_label: Some("GPT-5.6 Sol".into()),
                     approval: None,
+                    question: None,
                 })
                 .collect(),
             total_active: statuses.len(),
@@ -711,6 +752,31 @@ mod tests {
     }
 
     #[test]
+    fn finished_rows_are_not_running_work() {
+        let controller = MenuBarController::default();
+        let mut snapshot = snapshot_with_jobs(&["finished"]);
+        snapshot.state = MenuBarSnapshotState::Complete;
+        snapshot.total_active = 0;
+        assert_eq!(
+            controller.effective_state(&snapshot),
+            MenuBarSnapshotState::Complete
+        );
+    }
+
+    #[test]
+    fn reply_request_survives_snapshot_serialization() {
+        let mut snapshot = snapshot_with_jobs(&["waiting"]);
+        snapshot.jobs[0].question = Some(MenuBarQuestion {
+            id: "question-1".into(),
+            summary: "Which layout?".into(),
+        });
+        let json = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(json["jobs"][0]["question"]["summary"], "Which layout?");
+        let restored: MenuBarSnapshot = serde_json::from_value(json).unwrap();
+        assert_eq!(restored.jobs[0].question.as_ref().unwrap().id, "question-1");
+    }
+
+    #[test]
     fn acknowledged_failure_returns_to_idle() {
         let controller = MenuBarController::default();
         let snapshot = MenuBarSnapshot {
@@ -723,6 +789,10 @@ mod tests {
                 detail: "Failed".into(),
                 status: "failed".into(),
                 finished_at: "2026-07-19T10:00:00Z".into(),
+                provider_id: None,
+                provider_label: None,
+                model_id: None,
+                model_label: None,
             }),
             ..MenuBarSnapshot::default()
         };
@@ -740,19 +810,19 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn popover_height_caps_visible_jobs() {
-        // gutters 8 + 24, header 52, footer 40 -> 124 plus the rows.
-        assert_eq!(popover_height(&snapshot_with_jobs(&[])), 124.0);
+        // gutters 8 + 24, header 44, footer 40 -> 116 plus the rows.
+        assert_eq!(popover_height(&snapshot_with_jobs(&[])), 116.0);
         assert_eq!(popover_height(&snapshot_with_jobs(&["running"])), 168.0);
         assert_eq!(
             popover_height(&snapshot_with_jobs(&["running", "running"])),
-            212.0
+            220.0
         );
         // Capped at four rows, plus the 32px "+N more" row.
         assert_eq!(
             popover_height(&snapshot_with_jobs(&[
                 "running", "running", "running", "running", "running"
             ])),
-            332.0
+            356.0
         );
         // A waiting row with an inline approval adds its 92px block.
         let mut waiting = snapshot_with_jobs(&["waiting", "running"]);
@@ -761,6 +831,15 @@ mod tests {
             approval_type: "command".into(),
             summary: "pnpm test".into(),
         });
-        assert_eq!(popover_height(&waiting), 304.0);
+        // Only the waiting request is expanded; the running job is a summary.
+        assert_eq!(popover_height(&waiting), 292.0);
+        waiting.jobs[0].approval = None;
+        waiting.jobs[0].question = Some(MenuBarQuestion {
+            id: "question-1".into(),
+            summary: "Which layout?".into(),
+        });
+        assert_eq!(popover_height(&waiting), 300.0);
+        waiting.jobs.pop();
+        assert_eq!(popover_height(&waiting), 268.0);
     }
 }

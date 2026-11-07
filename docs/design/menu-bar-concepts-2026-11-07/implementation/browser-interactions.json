@@ -1,0 +1,9 @@
+[
+  "Approval resolves and returns to running",
+  "File changes open chat for review",
+  "Reply keyboard action opens original chat",
+  "Stop removes only the chosen task",
+  "Failed approval shows error and remains retryable",
+  "Retry succeeds and clears stale error",
+  "Settings and Open Gyro callbacks work"
+]

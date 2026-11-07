@@ -1,0 +1,315 @@
+    Blocking waiting for file lock on build directory
+   Compiling gyro-desktop v0.1.0 (/Users/wytze/Gyro/apps/desktop/src-tauri)
+warning: struct `State` is never constructed
+  --> apps/desktop/src-tauri/src/gyro_cloud.rs:28:8
+   |
+28 | struct State {
+   |        ^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `account` is never read
+  --> apps/desktop/src-tauri/src/gyro_cloud.rs:34:5
+   |
+33 | struct Login {
+   |        ----- field in this struct
+34 |     account: String,
+   |     ^^^^^^^
+
+warning: static `STATE` is never used
+  --> apps/desktop/src-tauri/src/gyro_cloud.rs:38:8
+   |
+38 | static STATE: Mutex<State> = Mutex::new(State {
+   |        ^^^^^
+
+warning: struct `Page` is never constructed
+  --> apps/desktop/src-tauri/src/gyro_cloud.rs:87:8
+   |
+87 | struct Page {
+   |        ^^^^
+
+warning: struct `Receipt` is never constructed
+  --> apps/desktop/src-tauri/src/gyro_cloud.rs:93:8
+   |
+93 | struct Receipt {
+   |        ^^^^^^^
+
+warning: struct `PendingUpload` is never constructed
+  --> apps/desktop/src-tauri/src/gyro_cloud.rs:99:8
+   |
+99 | struct PendingUpload {
+   |        ^^^^^^^^^^^^^
+
+warning: function `read_pending` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:105:4
+    |
+105 | fn read_pending(path: &Path) -> Option<(PendingUpload, Vec<u8>)> {
+    |    ^^^^^^^^^^^^
+
+warning: field `email` is never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:132:9
+    |
+131 |     SendCode {
+    |     -------- field in this variant
+132 |         email: String,
+    |         ^^^^^
+
+warning: fields `email` and `proof` are never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:135:9
+    |
+134 |     SignIn {
+    |     ------ fields in this variant
+135 |         email: String,
+    |         ^^^^^
+136 |         proof: String,
+    |         ^^^^^
+
+warning: fields `email` and `password` are never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:140:9
+    |
+138 |     SignUp {
+    |     ------ fields in this variant
+139 |         name: String,
+140 |         email: String,
+    |         ^^^^^
+141 |         password: String,
+    |         ^^^^^^^^
+
+warning: fields `email` and `password` are never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:144:9
+    |
+143 |     PasswordSignIn {
+    |     -------------- fields in this variant
+144 |         email: String,
+    |         ^^^^^
+145 |         password: String,
+    |         ^^^^^^^^
+
+warning: field `email` is never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:148:9
+    |
+147 |     SendPasswordReset {
+    |     ----------------- field in this variant
+148 |         email: String,
+    |         ^^^^^
+
+warning: fields `email`, `proof`, and `password` are never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:151:9
+    |
+150 |     ResetPassword {
+    |     ------------- fields in this variant
+151 |         email: String,
+    |         ^^^^^
+152 |         proof: String,
+    |         ^^^^^
+153 |         password: String,
+    |         ^^^^^^^^
+
+warning: field `password` is never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:156:9
+    |
+155 |     ChangePassword {
+    |     -------------- field in this variant
+156 |         password: String,
+    |         ^^^^^^^^
+
+warning: field `email` is never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:159:9
+    |
+158 |     ResendConfirmation {
+    |     ------------------ field in this variant
+159 |         email: String,
+    |         ^^^^^
+
+warning: field `code` is never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:168:9
+    |
+167 |     Recover {
+    |     ------- field in this variant
+168 |         code: String,
+    |         ^^^^
+
+warning: field `cursor` is never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:171:9
+    |
+170 |     List {
+    |     ---- field in this variant
+171 |         cursor: Option<String>,
+    |         ^^^^^^
+
+warning: fields `id` and `replace` are never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:174:9
+    |
+173 |     Upload {
+    |     ------ fields in this variant
+174 |         id: Uuid,
+    |         ^^
+175 |         replace: Option<String>,
+    |         ^^^^^^^
+
+warning: field `id` is never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:178:9
+    |
+177 |     Download {
+    |     -------- field in this variant
+178 |         id: Uuid,
+    |         ^^
+
+warning: field `id` is never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:181:9
+    |
+180 |     Delete {
+    |     ------ field in this variant
+181 |         id: Uuid,
+    |         ^^
+
+warning: field `id` is never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:184:9
+    |
+183 |     Open {
+    |     ---- field in this variant
+184 |         id: Uuid,
+    |         ^^
+
+warning: function `sign_in` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:319:4
+    |
+319 | fn sign_in(email: &str, proof: &str) -> Result<Login> {
+    |    ^^^^^^^
+
+warning: function `sign_in_with_password` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:431:4
+    |
+431 | fn sign_in_with_password(email: &str, password: &str) -> Result<Option<Login>> {
+    |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `0` is never read
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:449:13
+    |
+449 |     Session(Box<AuthToken>),
+    |     ------- ^^^^^^^^^^^^^^
+    |     |
+    |     field in this variant
+    |
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+    |
+449 -     Session(Box<AuthToken>),
+449 +     Session(()),
+    |
+
+warning: function `account_profile` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:497:4
+    |
+497 | fn account_profile(login: &Login) -> Result<serde_json::Value> {
+    |    ^^^^^^^^^^^^^^^
+
+warning: function `digest` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:548:4
+    |
+548 | fn digest(value: &[u8]) -> String {
+    |    ^^^^^^
+
+warning: function `key_entry` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:552:4
+    |
+552 | fn key_entry(login: &Login) -> Result<keyring::Entry> {
+    |    ^^^^^^^^^
+
+warning: function `saved_key` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:565:4
+    |
+565 | fn saved_key(login: &Login) -> Result<Option<Key>> {
+    |    ^^^^^^^^^
+
+warning: constant `KEY_CHECK` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:690:7
+    |
+690 | const KEY_CHECK: &[u8] = b"gyro-cloud-ready!";
+    |       ^^^^^^^^^
+
+warning: constant `KEY_CHECK_URL` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:691:7
+    |
+691 | const KEY_CHECK_URL: &str = "/v1/key-check";
+    |       ^^^^^^^^^^^^^
+
+warning: function `key_check` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:693:4
+    |
+693 | fn key_check(login: &Login) -> Result<Option<Vec<u8>>> {
+    |    ^^^^^^^^^
+
+warning: function `key_check_aad` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:705:4
+    |
+705 | fn key_check_aad(login: &Login) -> String {
+    |    ^^^^^^^^^^^^^
+
+warning: function `verify_key_check` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:709:4
+    |
+709 | fn verify_key_check(login: &Login, key: &Key, bytes: &[u8]) -> Result<()> {
+    |    ^^^^^^^^^^^^^^^^
+
+warning: function `reserve_key` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:717:4
+    |
+717 | fn reserve_key(login: &Login, key: &Key) -> Result<()> {
+    |    ^^^^^^^^^^^
+
+warning: function `chat_url` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:731:4
+    |
+731 | fn chat_url(id: Uuid) -> String {
+    |    ^^^^^^^^
+
+warning: function `list` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:735:4
+    |
+735 | fn list(login: &Login, cursor: Option<&str>) -> Result<Page> {
+    |    ^^^^
+
+warning: function `download` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:743:4
+    |
+743 | fn download(login: &Login, key: &Key, id: Uuid) -> Result<Archive> {
+    |    ^^^^^^^^
+
+warning: function `local_dir` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:756:4
+    |
+756 | fn local_dir(login: &Login) -> Result<PathBuf> {
+    |    ^^^^^^^^^
+
+warning: function `upload` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:780:4
+    |
+780 | fn upload(
+    |    ^^^^^^
+
+warning: function `run` is never used
+   --> apps/desktop/src-tauri/src/gyro_cloud.rs:917:4
+    |
+917 | fn run(action: Action) -> Result<serde_json::Value> {
+    |    ^^^
+
+warning: function `gyro_cloud` is never used
+    --> apps/desktop/src-tauri/src/gyro_cloud.rs:1143:21
+     |
+1143 | pub(crate) async fn gyro_cloud(action: Action) -> Result<serde_json::Value, String> {
+     |                     ^^^^^^^^^^
+
+warning: `gyro-desktop` (lib test) generated 41 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 10s
+     Running unittests src/lib.rs (target/debug/deps/gyro_desktop_lib-0e6800495081893c)
+
+running 7 tests
+test menu_bar::tests::running_jobs_are_working ... ok
+test menu_bar::tests::waiting_job_takes_attention_precedence ... ok
+test menu_bar::tests::acknowledged_failure_returns_to_idle ... ok
+test menu_bar::tests::popover_height_caps_visible_jobs ... ok
+test menu_bar::tests::finished_rows_are_not_running_work ... ok
+test menu_bar::tests::menu_bar_job_keeps_model_identity_in_snapshot_json ... ok
+test menu_bar::tests::reply_request_survives_snapshot_serialization ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 956 filtered out; finished in 0.02s

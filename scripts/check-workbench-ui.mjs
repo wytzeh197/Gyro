@@ -683,18 +683,20 @@ expect(
   // them; the point of the check is that the two still agree, so it asserts
   // the tokens and the Rust constants rather than literals in each rule.
   // Everything on the surface is border-box, so these are the whole row.
-  menuBarStyleSource.includes("--menu-header: 52px") &&
-    menuBarStyleSource.includes("--menu-row: 44px") &&
+  menuBarStyleSource.includes("--menu-header: 44px") &&
+    menuBarStyleSource.includes("--menu-row: 52px") &&
     menuBarStyleSource.includes("--menu-approval: 92px") &&
+    menuBarStyleSource.includes("--menu-question: 100px") &&
     menuBarStyleSource.includes("--menu-footer: 40px") &&
     menuBarStyleSource.includes("--menu-gutter-top: 8px") &&
     menuBarStyleSource.includes("--menu-gutter-bottom: 24px") &&
     cssRules(menuBarStyleSource, ".gyro-menu-bar-approval").some((rule) =>
       rule.includes("height: var(--menu-approval)"),
     ) &&
-    menuBarRustSource.includes("const MENU_BAR_HEADER_HEIGHT: f64 = 52.0") &&
-    menuBarRustSource.includes("const MENU_BAR_ROW_HEIGHT: f64 = 44.0") &&
+    menuBarRustSource.includes("const MENU_BAR_HEADER_HEIGHT: f64 = 44.0") &&
+    menuBarRustSource.includes("const MENU_BAR_ROW_HEIGHT: f64 = 52.0") &&
     menuBarRustSource.includes("const MENU_BAR_APPROVAL_HEIGHT: f64 = 92.0") &&
+    menuBarRustSource.includes("const MENU_BAR_QUESTION_HEIGHT: f64 = 100.0") &&
     menuBarRustSource.includes("const MENU_BAR_FOOTER_HEIGHT: f64 = 40.0") &&
     menuBarRustSource.includes("const MENU_BAR_GUTTER_TOP: f64 = 8.0") &&
     menuBarRustSource.includes("const MENU_BAR_GUTTER_BOTTOM: f64 = 24.0") &&

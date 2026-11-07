@@ -1,0 +1,127 @@
+[
+  {
+    "buttons": [
+      "Settings",
+      "Open Fix menu bar layout, Claude",
+      "Stop Fix menu bar layout",
+      "Open Review changes, OpenAI",
+      "Stop Review changes",
+      "Open Write tests, Gemini",
+      "Stop Write tests",
+      "Open Gyro"
+    ],
+    "card": {
+      "height": 240,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "providers": [
+      {
+        "label": "Claude",
+        "svg": true,
+        "width": 19
+      },
+      {
+        "label": "OpenAI",
+        "svg": true,
+        "width": 19
+      },
+      {
+        "label": "Gemini",
+        "svg": true,
+        "width": 19
+      }
+    ],
+    "state": "Working",
+    "viewport": [
+      1162,
+      954
+    ]
+  },
+  {
+    "buttons": [
+      "Settings",
+      "Open Fix menu bar layout, Claude",
+      "Stop Fix menu bar layout",
+      "Approve",
+      "Open chat",
+      "2 other tasks running",
+      "Open Gyro"
+    ],
+    "card": {
+      "height": 260,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "providers": [
+      {
+        "label": "Claude",
+        "svg": true,
+        "width": 19
+      }
+    ],
+    "state": "Approval",
+    "viewport": [
+      1162,
+      954
+    ]
+  },
+  {
+    "buttons": [
+      "Settings",
+      "Open Review changes, OpenAI",
+      "Reply in chat",
+      "2 other tasks running",
+      "Open Gyro"
+    ],
+    "card": {
+      "height": 268,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "providers": [
+      {
+        "label": "OpenAI",
+        "svg": true,
+        "width": 19
+      }
+    ],
+    "state": "Reply",
+    "viewport": [
+      1162,
+      954
+    ]
+  },
+  {
+    "buttons": [
+      "Settings",
+      "Open Write tests, Gemini",
+      "Open Gyro"
+    ],
+    "card": {
+      "height": 136,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "providers": [
+      {
+        "label": "Gemini",
+        "svg": true,
+        "width": 19
+      }
+    ],
+    "state": "Finished",
+    "viewport": [
+      1162,
+      954
+    ]
+  }
+]

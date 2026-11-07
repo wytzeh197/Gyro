@@ -1,0 +1,276 @@
+[
+  {
+    "state": "Idle",
+    "body": {
+      "client": 0,
+      "scroll": 0
+    },
+    "card": {
+      "height": 84,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "header": "Ready",
+    "primary": null,
+    "question": null,
+    "selected": "Idle",
+    "viewport": [
+      1162,
+      954
+    ]
+  },
+  {
+    "state": "Working",
+    "body": {
+      "client": 104,
+      "scroll": 104
+    },
+    "card": {
+      "height": 188,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "header": "2 running",
+    "primary": null,
+    "question": null,
+    "selected": "Working",
+    "viewport": [
+      1162,
+      954
+    ]
+  },
+  {
+    "state": "Approval",
+    "body": {
+      "client": 176,
+      "scroll": 176
+    },
+    "card": {
+      "height": 260,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "header": "1 needs you",
+    "primary": {
+      "background": "rgb(228, 170, 82)",
+      "font": "13px",
+      "height": 32
+    },
+    "question": null,
+    "selected": "Approval",
+    "viewport": [
+      1162,
+      954
+    ]
+  },
+  {
+    "state": "Finished",
+    "body": {
+      "client": 52,
+      "scroll": 52
+    },
+    "card": {
+      "height": 136,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "header": "Finished",
+    "primary": null,
+    "question": null,
+    "selected": "Finished",
+    "viewport": [
+      1162,
+      954
+    ]
+  },
+  {
+    "state": "File review",
+    "body": {
+      "client": 176,
+      "scroll": 176
+    },
+    "card": {
+      "height": 260,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "header": "1 needs you",
+    "primary": {
+      "background": "rgb(228, 170, 82)",
+      "font": "13px",
+      "height": 32
+    },
+    "question": null,
+    "selected": "File review",
+    "viewport": [
+      1162,
+      954
+    ]
+  },
+  {
+    "state": "Failure",
+    "body": {
+      "client": 52,
+      "scroll": 52
+    },
+    "card": {
+      "height": 136,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "header": "Needs attention",
+    "primary": null,
+    "question": null,
+    "selected": "Failure",
+    "viewport": [
+      1162,
+      954
+    ]
+  },
+  {
+    "state": "Long question",
+    "body": {
+      "client": 184,
+      "scroll": 184
+    },
+    "card": {
+      "height": 268,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "header": "1 needs reply",
+    "primary": {
+      "background": "rgb(228, 170, 82)",
+      "font": "13px",
+      "height": 32
+    },
+    "question": {
+      "client": 44,
+      "font": "14px",
+      "scroll": 504
+    },
+    "selected": "Long question",
+    "viewport": [
+      1162,
+      954
+    ]
+  },
+  {
+    "state": "Many requests",
+    "body": {
+      "client": 520,
+      "scroll": 640
+    },
+    "card": {
+      "height": 604,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "header": "6 need replies",
+    "primary": {
+      "background": "rgb(228, 170, 82)",
+      "font": "13px",
+      "height": 32
+    },
+    "question": {
+      "client": 44,
+      "font": "14px",
+      "scroll": 44
+    },
+    "selected": "Many requests",
+    "viewport": [
+      1162,
+      954
+    ]
+  },
+  {
+    "state": "Loading",
+    "body": {
+      "client": 0,
+      "scroll": 0
+    },
+    "card": {
+      "height": 84,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "header": "Loading…",
+    "primary": null,
+    "question": null,
+    "selected": "Loading",
+    "viewport": [
+      1162,
+      954
+    ]
+  },
+  {
+    "state": "Unavailable",
+    "body": {
+      "client": 0,
+      "scroll": 0
+    },
+    "card": {
+      "height": 84,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "header": "Unavailable",
+    "primary": null,
+    "question": null,
+    "selected": "Unavailable",
+    "viewport": [
+      1162,
+      954
+    ]
+  },
+  {
+    "state": "Reply",
+    "body": {
+      "client": 184,
+      "scroll": 184
+    },
+    "card": {
+      "height": 268,
+      "width": 372,
+      "x": 395,
+      "y": 133
+    },
+    "dpr": 1,
+    "header": "1 needs reply",
+    "primary": {
+      "background": "rgb(228, 170, 82)",
+      "font": "13px",
+      "height": 32
+    },
+    "question": {
+      "client": 44,
+      "font": "14px",
+      "scroll": 44
+    },
+    "selected": "Reply",
+    "viewport": [
+      1162,
+      954
+    ]
+  }
+]
