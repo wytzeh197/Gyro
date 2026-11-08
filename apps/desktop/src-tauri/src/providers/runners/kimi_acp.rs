@@ -1,32 +1,20 @@
 use crate::{
     app::{config::load_config_blocking, limits::MAX_CHAT_IMAGE_BYTES},
-    capabilities::bridge::{
-        active_provider_approval_nonce, active_provider_capability_context,
-        capability_acp_mcp_server,
-    },
     provider_context::{provider_billed_usage_from_acp_tokens, ProviderContextUsage},
     providers::{
-        approvals::{
-            sanitize_provider_approval_details, wait_for_provider_approval_with_transaction,
-        },
+        approvals::sanitize_provider_approval_details,
         chat_types::{ChatMode, ProviderChatRequest},
         cli_args::provider_chat_cwd,
-        events::{
-            emit_provider_activity_event, emit_provider_chat_event, emit_provider_context_usage,
-        },
-        process::{
-            acp_conversation_history_text, build_grok_acp_program_args, provider_output_summary,
-        },
+        process::{build_grok_acp_program_args, provider_output_summary},
         prompt::{provider_context_message, provider_context_message_for_turn, PromptTurn},
-        streaming::{
-            provider_stop_message, spawn_provider_chat_heartbeat, PROVIDER_CHAT_MAX_RUNTIME_SECS,
+        runner::{
+            emit_provider_activity_event, emit_provider_chat_event, emit_provider_context_usage,
+            RunnerHost,
         },
+        streaming::PROVIDER_CHAT_MAX_RUNTIME_SECS,
         types::{ProviderActivity, ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput},
     },
-    state::{
-        managers::ProviderCancellationManager,
-        provider_run::{ProviderApprovalContext, ProviderApprovalDecision},
-    },
+    state::provider_run::ProviderApprovalDecision,
 };
 use anyhow::Context;
 use base64::Engine;
@@ -41,7 +29,6 @@ use std::{
     sync::{atomic::AtomicBool, Arc, Mutex},
     time::Duration,
 };
-use tauri::Manager;
 #[derive(Clone, Copy)]
 pub(crate) struct AcpProviderRuntime {
     pub(crate) label: &'static str,
@@ -175,7 +162,7 @@ pub(crate) fn apply_acp_workspace_write(
 }
 
 pub(crate) fn run_kimi_acp_chat(
-    app: &tauri::AppHandle,
+    host: &dyn RunnerHost,
     request: &ProviderChatRequest,
     resume_cursor: Option<&ProviderResumeCursor>,
     attempt: &mut ProviderRunAttempt,
@@ -184,14 +171,7 @@ pub(crate) fn run_kimi_acp_chat(
         .ok_or_else(|| anyhow::anyhow!("{} does not have an ACP runtime", request.provider_id))?;
     let provider_label = request.provider_label.as_deref().unwrap_or(runtime.label);
     let workspace = provider_chat_cwd(request.workspace_path.as_deref())?;
-    let cancellation = app
-        .state::<ProviderCancellationManager>()
-        .flags
-        .lock()
-        .map_err(|_| anyhow::anyhow!("provider cancellation state is unavailable"))?
-        .get(&request.session_id)
-        .map(|control| control.cancellation.clone())
-        .ok_or_else(|| anyhow::anyhow!("provider run control is unavailable"))?;
+    let cancellation = host.cancellation(&request.session_id)?;
     let mut prompt = vec![serde_json::json!({
         "type": "text",
         "text": provider_context_message(request),
@@ -225,15 +205,7 @@ pub(crate) fn run_kimi_acp_chat(
     // Give ACP agents the same Gyro capability tools the Claude and Codex
     // adapters get. A missing capability bind used to drop the MCP server and
     // leave Grok/Kimi/Gemini with no Gyro tools for the whole turn.
-    let mcp_servers = match (
-        active_provider_approval_nonce(app, &request.session_id),
-        active_provider_capability_context(app, &request.session_id),
-    ) {
-        (Ok(nonce), Ok(bound)) => vec![capability_acp_mcp_server(&bound, &nonce)?],
-        (Err(error), _) | (_, Err(error)) => {
-            anyhow::bail!("Gyro tools are unavailable for this turn: {error}")
-        }
-    };
+    let mcp_servers = host.acp_mcp_servers(&request.session_id)?;
 
     let resume_session_id = resume_cursor
         .filter(|cursor| cursor.kind == runtime.cursor_kind)
@@ -253,7 +225,7 @@ pub(crate) fn run_kimi_acp_chat(
     // Always load the local transcript. Grok often cannot resume; model handoffs
     // also start a fresh agent session. Either way the local Gyro session is the
     // source of truth and must travel with the prompt when resume is unavailable.
-    let conversation_history_text = acp_conversation_history_text(app, &request.session_id);
+    let conversation_history_text = host.acp_conversation_history(&request.session_id);
 
     let launched_model = if request.provider_id == "xai" {
         let speed_config = load_config_blocking().map_err(anyhow::Error::msg)?;
@@ -282,19 +254,16 @@ pub(crate) fn run_kimi_acp_chat(
 
     let activities = Arc::new(Mutex::new(Vec::<ProviderActivity>::new()));
     let activity_sink = activities.clone();
-    let approval_context = ProviderApprovalContext::from(request);
     let plan_mode = request.mode == ChatMode::Plan;
     let require_command_approval = request.require_command_approval;
     let require_file_approval = request.require_file_edit_approval;
     // Same quiet-period heartbeats as Claude/Codex so the desktop keeps the
     // turn marked live while ACP tools think without frames.
     let heartbeat_stop = Arc::new(AtomicBool::new(false));
-    let heartbeat = spawn_provider_chat_heartbeat(
-        app.clone(),
+    let heartbeat = host.start_heartbeat(
         request.clone(),
         cancellation.clone(),
         heartbeat_stop.clone(),
-        None,
     );
     let opened_session = Arc::new(Mutex::new(None::<String>));
     let output = run_kimi_acp(
@@ -344,7 +313,7 @@ pub(crate) fn run_kimi_acp_chat(
         },
         |delta| {
             emit_provider_chat_event(
-                app,
+                host,
                 request,
                 "delta",
                 Some(HarnessRunStatus::Running),
@@ -356,7 +325,7 @@ pub(crate) fn run_kimi_acp_chat(
         |activity| {
             if let Some(context) = activity.context_usage {
                 emit_provider_context_usage(
-                    app,
+                    host,
                     request,
                     &ProviderContextUsage {
                         input_tokens: Some(context.used),
@@ -389,7 +358,7 @@ pub(crate) fn run_kimi_acp_chat(
                         .and_then(|item| item.file_counts);
                 }
             }
-            emit_provider_activity_event(app, request, &activity, None);
+            emit_provider_activity_event(host, request, &activity, None);
             // Upsert by id so intermediate tool_call_update frames replace the
             // prior status instead of stacking dozens of "running" rows that
             // then persist after end_turn (every ACP provider, not only Grok).
@@ -432,9 +401,8 @@ pub(crate) fn run_kimi_acp_chat(
             let allowed = if auto_allow {
                 true
             } else {
-                wait_for_provider_approval_with_transaction(
-                    app,
-                    &approval_context,
+                host.request_approval(
+                    request,
                     approval_type,
                     sanitize_provider_approval_details(approval.tool_call.clone()),
                     None,
@@ -455,9 +423,8 @@ pub(crate) fn run_kimi_acp_chat(
                 require_file_approval,
                 &cancellation,
                 |transaction, details| {
-                    wait_for_provider_approval_with_transaction(
-                        app,
-                        &approval_context,
+                    host.request_approval(
+                        request,
                         "file-change",
                         sanitize_provider_approval_details(details),
                         Some(transaction),
@@ -484,7 +451,7 @@ pub(crate) fn run_kimi_acp_chat(
     // offered a retry.
     let output = output.map_err(|error| {
         if cancellation.is_cancelled() {
-            error.context(provider_stop_message(app, &request.session_id))
+            error.context(host.stop_message(&request.session_id))
         } else {
             error
         }

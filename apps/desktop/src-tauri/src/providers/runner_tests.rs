@@ -46,6 +46,24 @@ impl RunnerHost for RecordingHost {
     ) -> anyhow::Result<Vec<gyro_core::CapabilityResponse>> {
         unreachable!("unused fixture service")
     }
+    fn acp_mcp_servers(&self, _: &str) -> anyhow::Result<Vec<serde_json::Value>> {
+        unreachable!("unused fixture service")
+    }
+    fn acp_conversation_history(&self, _: &str) -> Option<String> {
+        unreachable!("unused fixture service")
+    }
+    fn request_approval(
+        &self,
+        _: &ProviderChatRequest,
+        _: &str,
+        _: serde_json::Value,
+        _: Option<gyro_core::PreparedProviderMutationTransaction>,
+    ) -> anyhow::Result<crate::state::provider_run::ProviderApprovalDecision> {
+        unreachable!("unused fixture service")
+    }
+    fn stop_message(&self, _: &str) -> String {
+        unreachable!("unused fixture service")
+    }
     fn run_legacy(
         &self,
         kind: ProviderAdapterKind,

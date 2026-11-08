@@ -87,6 +87,16 @@ pub(crate) trait RunnerHost: Send + Sync {
         session_id: &str,
         calls: &[(CapabilityId, serde_json::Value)],
     ) -> anyhow::Result<Vec<CapabilityResponse>>;
+    fn acp_mcp_servers(&self, session_id: &str) -> anyhow::Result<Vec<serde_json::Value>>;
+    fn acp_conversation_history(&self, session_id: &str) -> Option<String>;
+    fn request_approval(
+        &self,
+        request: &ProviderChatRequest,
+        kind: &str,
+        details: serde_json::Value,
+        transaction: Option<gyro_core::PreparedProviderMutationTransaction>,
+    ) -> anyhow::Result<crate::state::provider_run::ProviderApprovalDecision>;
+    fn stop_message(&self, session_id: &str) -> String;
 
     fn run_legacy(
         &self,

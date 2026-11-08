@@ -122,6 +122,44 @@ impl RunnerHost for TauriRunnerHost {
         provider_tool_batch::execute(&self.app, session_id, calls)
     }
 
+    fn acp_mcp_servers(&self, session_id: &str) -> anyhow::Result<Vec<serde_json::Value>> {
+        match (
+            active_provider_approval_nonce(&self.app, session_id),
+            active_provider_capability_context(&self.app, session_id),
+        ) {
+            (Ok(nonce), Ok(bound)) => Ok(vec![
+                crate::capabilities::bridge::capability_acp_mcp_server(&bound, &nonce)?,
+            ]),
+            (Err(error), _) | (_, Err(error)) => {
+                anyhow::bail!("Gyro tools are unavailable for this turn: {error}")
+            }
+        }
+    }
+
+    fn acp_conversation_history(&self, session_id: &str) -> Option<String> {
+        super::process::acp_conversation_history_text(&self.app, session_id)
+    }
+
+    fn request_approval(
+        &self,
+        request: &ProviderChatRequest,
+        kind: &str,
+        details: serde_json::Value,
+        transaction: Option<gyro_core::PreparedProviderMutationTransaction>,
+    ) -> anyhow::Result<crate::state::provider_run::ProviderApprovalDecision> {
+        super::approvals::wait_for_provider_approval_with_transaction(
+            &self.app,
+            &crate::state::provider_run::ProviderApprovalContext::from(request),
+            kind,
+            details,
+            transaction,
+        )
+    }
+
+    fn stop_message(&self, session_id: &str) -> String {
+        super::streaming::provider_stop_message(&self.app, session_id)
+    }
+
     fn run_legacy(
         &self,
         kind: ProviderAdapterKind,
@@ -136,7 +174,7 @@ impl RunnerHost for TauriRunnerHost {
             ProviderAdapterKind::AnthropicClaude => {
                 run_anthropic_claude_chat(&self.app, request, resume, attempt)
             }
-            ProviderAdapterKind::KimiAcp => run_kimi_acp_chat(&self.app, request, resume, attempt),
+            ProviderAdapterKind::KimiAcp => run_kimi_acp_chat(self, request, resume, attempt),
             ProviderAdapterKind::AntigravityCli => {
                 run_antigravity_chat(&self.app, request, resume, attempt)
             }
