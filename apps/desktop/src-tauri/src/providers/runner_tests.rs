@@ -4,6 +4,9 @@ use super::*;
 struct RecordingHost;
 
 impl RunnerHost for RecordingHost {
+    fn tool_catalog(&self) -> &dyn gyro_core::provider_runtime::catalog::ToolCatalog {
+        unreachable!("unused fixture service")
+    }
     fn provider_command(&self, _: &str, _: &str) -> anyhow::Result<std::process::Command> {
         unreachable!("unused fixture service")
     }

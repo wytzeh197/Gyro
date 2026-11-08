@@ -33,6 +33,9 @@ impl TauriRunnerHost {
 }
 
 impl RunnerHost for TauriRunnerHost {
+    fn tool_catalog(&self) -> &dyn gyro_core::provider_runtime::catalog::ToolCatalog {
+        &super::catalog::DESKTOP_TOOL_CATALOG
+    }
     fn provider_command(
         &self,
         program: &str,

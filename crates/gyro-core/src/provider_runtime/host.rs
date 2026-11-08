@@ -62,6 +62,7 @@ impl Drop for ProviderHeartbeat {
 /// Application services supplied to a provider run.
 
 pub trait RunnerHost: Send + Sync {
+    fn tool_catalog(&self) -> &dyn super::catalog::ToolCatalog;
     fn provider_command(
         &self,
         program: &str,

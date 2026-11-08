@@ -22,3 +22,5 @@ pub(crate) mod stdout;
 pub(crate) mod streaming;
 pub(crate) mod tauri_host;
 pub(crate) mod types;
+
+pub(crate) mod catalog;

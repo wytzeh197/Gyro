@@ -14,3 +14,5 @@ pub mod runners;
 pub mod support;
 pub mod text;
 pub mod types;
+
+pub mod catalog;
