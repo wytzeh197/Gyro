@@ -1,7 +1,7 @@
 use crate::{
     app::limits::{MAX_WORKSPACE_FILE_EDIT_BYTES, MAX_WORKSPACE_FILE_PREVIEW_BYTES},
     ide::task_discovery::content_hash,
-    to_string,
+    stores::to_string,
     workspace::types::{
         FileMutationDecisionRequest, FileMutationDecisionResult, FileMutationProposalRequest,
         WorkspaceFileContent, WorkspaceFileStat, WorkspaceFileWriteRequest,

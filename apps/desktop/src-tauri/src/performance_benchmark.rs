@@ -1,7 +1,40 @@
 //! Debug-only, explicit benchmark entry. Calls the desktop's real chat command
 //! with disposable workspaces and a separate store. Never included in releases.
-use super::*;
+use crate::{
+    ipc::cli::start_cli_ipc_listener,
+    provider_reliability::is_transient_provider_error,
+    provider_session_lifecycle::reconcile_interrupted_provider_turns,
+    providers::{
+        chat_types::{ProviderChatRequest, ProviderChatResponse},
+        commands::run_provider_chat,
+        retry::is_provider_cancellation,
+    },
+    session_browser,
+    state::{
+        managers::ProviderCancellationManager,
+        provider_run::{stop_provider_run, ProviderRunControl, ProviderStopReason},
+    },
+    stores::{open_store, to_string},
+};
+use gyro_core::{
+    timing, CapabilityAccess, CapabilityClass, GyroConfig, GyroPaths, ProjectCapabilityPolicy,
+    SessionOrigin, SessionStore,
+};
+use serde::Deserialize;
 use serde_json::json;
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    },
+    time::{Duration, Instant},
+};
+use tauri::Manager;
+use uuid::Uuid;
 #[path = "benchmark_fixture_review.rs"]
 mod fixture_review;
 use fixture_review::FixtureReviewer;
@@ -785,6 +818,10 @@ fn verify_files(workspace: &Path, task: &str) -> anyhow::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        provider_retry_recovery::run_provider_chat_with_retry_using,
+        providers::types::{ProviderResumeCursor, ProviderRunnerOutput},
+    };
     #[test]
     fn fixture_review_stops_with_its_own_turn_and_never_follows_a_new_turn() {
         let control = ProviderRunControl::default();

@@ -1,6 +1,25 @@
 //! Model-owned terminal observations and lifecycle operations.
-use super::*;
+use crate::{
+    capabilities::access::capability_argument_string,
+    capability_output_budget,
+    capability_workspace_helpers::workspace_result_byte_limit,
+    efficiency,
+    state::{
+        managers::{
+            CapabilityIdeEvidenceManager, ProviderCancellationManager,
+            ProviderCapabilityResourceManager,
+        },
+        provider_run::BoundProviderCapabilityContext,
+    },
+    terminal::types::{TerminalPaneSnapshot, TerminalProcessManager},
+    terminal_wait,
+};
+use gyro_core::{
+    timing, CapabilityId, CapabilityRequest, CapabilityResourceRef, WorkspaceContextSnapshot,
+};
 use serde_json::{json, Value};
+use std::{collections::VecDeque, sync::Mutex, time::Duration};
+use tauri::Manager;
 
 const RETAINED_OUTPUT_COUNT: usize = 16;
 const RETAINED_OUTPUT_BYTES: usize = 16 * 1024 * 1024;

@@ -52,14 +52,16 @@ fn install_blocking(provider_id: String, confirm: bool) -> Result<InstallOutcome
     })?;
 
     let output = run_installer(command)?;
-    let health = crate::check_provider_health_blocking(gyro_core::ProviderHealthRequest {
-        provider_id: provider_id.clone(),
-        api_key_ref: None,
-        base_url: None,
-        kind: None,
-        // The installer just changed the device, so a cached probe is stale.
-        force: true,
-    })
+    let health = crate::providers::health::check_provider_health_blocking(
+        gyro_core::ProviderHealthRequest {
+            provider_id: provider_id.clone(),
+            api_key_ref: None,
+            base_url: None,
+            kind: None,
+            // The installer just changed the device, so a cached probe is stale.
+            force: true,
+        },
+    )
     .ok();
     let installed = health
         .as_ref()

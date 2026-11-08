@@ -41,7 +41,7 @@ pub fn prompt_contract(tools: bool, images: bool, mode: &str) -> Value {
 fn browser_contract(tools: bool, images: bool, mode: &str, definitions: bool) -> Value {
     let tools = tools && mode != "council";
     let commands: Vec<Value> = if tools {
-        super::CAPABILITY_DESCRIPTORS
+        gyro_core::CAPABILITY_DESCRIPTORS
             .iter()
             .filter(|item| item.id.provider_tool_name().starts_with("gyro_browser_"))
             .map(|item| {
@@ -49,7 +49,7 @@ fn browser_contract(tools: bool, images: bool, mode: &str, definitions: bool) ->
                     json!({
                         "name": item.id.provider_tool_name(),
                         "description": item.description,
-                        "inputSchema": super::desktop_capability_tool_schema(item.id),
+                        "inputSchema": crate::capabilities::mcp_server::desktop_capability_tool_schema(item.id),
                     })
                 } else {
                     json!({ "name": item.id.provider_tool_name() })
@@ -64,7 +64,7 @@ fn browser_contract(tools: bool, images: bool, mode: &str, definitions: bool) ->
         "capabilities": {"toolCalls": tools, "imageInput": images},
         "runMode": mode,
         "authorization": "Current broker policy; declarations do not grant permission.",
-        "observationSchema": super::BROWSER_OBSERVATION_SCHEMA_V1,
+        "observationSchema": crate::browser::types::BROWSER_OBSERVATION_SCHEMA_V1,
         "imageEvidence": "Image bytes must be delivered; a file path is insufficient.",
         "commands": commands,
         "workflow": if tools { json!([

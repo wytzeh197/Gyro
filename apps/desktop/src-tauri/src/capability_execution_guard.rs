@@ -1,6 +1,13 @@
 //! Revalidate the owning chat after a potentially long approval wait.
-use super::*;
 
+use crate::{
+    capabilities::approval::capability_event, code_mode,
+    state::provider_run::BoundProviderCapabilityContext,
+};
+use gyro_core::{
+    CancellationToken, CapabilityRequest, CapabilityResponse, CapabilityStatus, SessionStore,
+};
+use uuid::Uuid;
 /// Keep the operation and its underlying cause so the model can repair a
 /// missing path or argument. Sanitize the complete chain before exposing it.
 pub(super) fn error_message(error: &anyhow::Error) -> String {
@@ -90,6 +97,12 @@ pub(super) fn validate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capabilities::access::effective_capability_class;
+    use gyro_core::{
+        CapabilityClass, CapabilityId, CapabilityPolicySnapshot, CapabilityRunMode, GyroPaths,
+        ProjectCapabilityPolicy, SessionOrigin, WorkspaceCheckReport, WorkspaceContextSnapshot,
+    };
+    use std::{fs, path::Path};
 
     #[test]
     fn tool_errors_explain_the_underlying_io_failure() {

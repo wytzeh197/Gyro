@@ -1,5 +1,15 @@
-use super::*;
-
+use crate::{
+    capabilities::mcp_server::{advertised_capability_descriptors, desktop_capability_tool_schema},
+    delegated_agents, efficiency,
+    ollama_runner::invoke_run_capability,
+    provider_reliability,
+};
+use gyro_core::{
+    timing, CapabilityClass, CapabilityId, CapabilityResourceRef, CapabilityResponse,
+    CapabilityRunMode, CapabilityStatus,
+};
+use serde::Serialize;
+use uuid::Uuid;
 // Explicit allowlist: these observe disk state without changing the workspace,
 // opening an editor, running a command, or driving a shared browser session.
 fn independent_read(id: CapabilityId) -> bool {
@@ -732,6 +742,8 @@ fn read_on_worker<T>(invoke: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gyro_core::CapabilityResult;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn cli_catalog_needs_both_switches_and_a_reviewed_cli() {

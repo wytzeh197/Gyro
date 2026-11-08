@@ -1,5 +1,14 @@
-use super::*;
-
+use crate::{
+    capabilities::mcp_server::desktop_capability_tool_schema,
+    capability_workspace_helpers::workspace_result_byte_limit,
+    ollama_runner::validate_compatibility_schema_value,
+    provider_retry_recovery, provider_tool_batch,
+    providers::{process::is_stale_resume_error, retry::is_provider_cancellation},
+    state::provider_run::{
+        PROVIDER_INTERRUPTED_MARKER, PROVIDER_STALL_MARKER, PROVIDER_STOP_MARKER,
+    },
+};
+use gyro_core::{CapabilityId, GyroConfig, GyroPaths};
 pub(super) fn is_transient_provider_error(error: &str) -> bool {
     let normalized = error.to_ascii_lowercase();
     if is_provider_cancellation(error)
@@ -686,6 +695,7 @@ pub(super) fn prepare_tool_call(
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
+    use crate::state::provider_run::ProviderStopReason;
 
     const GROK_402: &str = r#"Internal error: {"http_status":402,"message":"API error (status 402 Payment Required): Grok Build usage balance exhausted","promptUsage":{"inputTokens":18177618,"modelCalls":71}}"#;
 

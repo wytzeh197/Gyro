@@ -874,8 +874,8 @@ fn session_browser_is_background_only(
     session_id: &str,
 ) -> Result<bool, String> {
     let session = store
-        .get_session(super::parse_uuid(session_id)?)
-        .map_err(super::to_string)?
+        .get_session(crate::stores::parse_uuid(session_id)?)
+        .map_err(crate::stores::to_string)?
         .ok_or_else(|| "browser chat no longer exists".to_string())?;
     Ok(session.parent_session_id.is_some())
 }
@@ -1801,7 +1801,7 @@ pub fn open_session_browser<R: Runtime>(
 ) -> Result<SessionBrowserSnapshot, String> {
     // Ownership comes from the durable chat relationship, never a tool/UI
     // argument. A restored agent gets the same private browser on follow-up.
-    let store = super::open_store()?;
+    let store = crate::stores::open_store()?;
     let background_only = session_browser_is_background_only(&store, &request.session_id)?;
     drop(store);
     if background_only {
@@ -2133,7 +2133,7 @@ fn open_browser_resource<R: Runtime>(
     // controls at (0, 0). Re-apply the overlay inset on the parent window.
     #[cfg(target_os = "macos")]
     if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        crate::apply_macos_traffic_light_position(&main);
+        crate::window_controls::apply_macos_traffic_light_position(&main);
     }
 
     if !visible {
@@ -2920,13 +2920,13 @@ pub async fn session_browser_open(
         // so Tauri keeps its own main-thread hop.
         let session_id = request.session_id.clone();
         request.workspace_key = tauri::async_runtime::spawn_blocking(move || {
-            let store = super::open_store()?;
+            let store = crate::stores::open_store()?;
             let session = store
-                .get_session(super::parse_uuid(&session_id)?)
-                .map_err(super::to_string)?
+                .get_session(crate::stores::parse_uuid(&session_id)?)
+                .map_err(crate::stores::to_string)?
                 .ok_or_else(|| "browser chat no longer exists".to_string())?;
             Ok::<String, String>(
-                super::session_execution_workspace(&session, store.paths())?
+                crate::providers::binding::session_execution_workspace(&session, store.paths())?
                     .display()
                     .to_string(),
             )
@@ -3970,7 +3970,7 @@ mod tests {
     #[test]
     fn browser_paging_script_is_valid_javascript() {
         let script = agent_initialization_script("test-nonce");
-        let mut command = crate::command_with_gui_path("node");
+        let mut command = crate::providers::process::command_with_gui_path("node");
         command
             .args(["-e", "new Function(process.env.GYRO_BROWSER_TEST_SCRIPT)"])
             .env("GYRO_BROWSER_TEST_SCRIPT", script);

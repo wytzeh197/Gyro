@@ -1,7 +1,10 @@
 //! Tauri commands for the automation list, its leases and its triage state.
 
 use super::runtime::AutomationSchedulerControl;
-use crate::{open_automation_store, parse_uuid, to_string, ProviderCancellationManager};
+use crate::{
+    state::managers::ProviderCancellationManager,
+    stores::{open_automation_store, parse_uuid, to_string},
+};
 use gyro_core::{
     Automation, AutomationRunStatus, AutomationStatus, AutomationTriageState,
     CreateAutomationRequest,

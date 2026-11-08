@@ -1,6 +1,6 @@
 //! Git types.
 
-use crate::{source_control_review, IdeCommandOutput};
+use crate::{ide::types::IdeCommandOutput, source_control_review};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

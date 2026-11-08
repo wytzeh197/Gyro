@@ -1,4 +1,5 @@
 use super::*;
+use crate::terminal::types::{TerminalPaneSnapshot, TerminalProcessManager};
 
 // Only synthetic paths are supplied as credential roots. These tests exercise
 // desktop wiring; detailed Seatbelt policy cases live in gyro-core.

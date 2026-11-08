@@ -8,9 +8,11 @@ use crate::{
             PROVIDER_STREAM_FLUSH_INTERVAL,
         },
     },
-    codex_capability_mcp_config_args, codex_images, codex_turn_completion, context_compaction,
-    file_patch_counts, project_import_continuation, provider_accounting,
-    provider_context_usage_from_app_server, provider_reliability,
+    capabilities::bridge::codex_capability_mcp_config_args,
+    codex_images, codex_turn_completion, context_compaction, file_patch_counts,
+    project_import_continuation, provider_accounting,
+    provider_context::{provider_context_usage_from_app_server, ProviderContextUsage},
+    provider_reliability,
     providers::{
         approvals::wait_for_provider_approval,
         binding::{local_conversation_history_for_request, provider_approval_instructions},
@@ -43,7 +45,7 @@ use crate::{
         provider_run::ProviderApprovalDecision,
     },
     text::{push_bounded, sanitize_provider_chat_response, truncate_chars},
-    turn_timing, ProviderContextUsage,
+    turn_timing,
 };
 use anyhow::Context;
 use gyro_core::{timing, timing::Stage as TimingStage, GyroPaths};

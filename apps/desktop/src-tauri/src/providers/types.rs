@@ -1,6 +1,9 @@
 //! Providers types.
 
-use crate::{provider_timeline, ProviderContextUsage, ProviderRateLimitWindow, StreamedText};
+use crate::{
+    provider_context::ProviderContextUsage, provider_timeline, reply_segments::StreamedText,
+    usage::types::ProviderRateLimitWindow,
+};
 use gyro_core::UsageTokens;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]

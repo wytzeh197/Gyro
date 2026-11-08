@@ -1,16 +1,23 @@
 #[cfg(target_os = "macos")]
-use crate::run_bounded_command_with_cancellation;
+use crate::command_execution::run_bounded_command_with_cancellation;
 use crate::{
     app::limits::{CODEX_USAGE_TIMEOUT, PROVIDER_USAGE_UPDATED_EVENT},
-    claude_usage_cli, codex_app_server_result, command_for_provider,
+    claude_usage_cli,
     diagnostics::export::user_home_directory,
-    fetch_kimi_provider_usage, open_store, parse_uuid, receive_codex_app_server_response,
-    spawn_codex_app_server_reader, to_string,
+    kimi_usage::fetch_kimi_provider_usage,
+    providers::{
+        codex_app_server::{
+            codex_app_server_result, receive_codex_app_server_response,
+            spawn_codex_app_server_reader, write_codex_app_server_message,
+        },
+        process::command_for_provider,
+    },
+    stores::{open_store, parse_uuid, to_string},
     usage::types::{
         CodexRateLimitSnapshot, CodexRateLimitsResponse, ProviderRateLimitWindow,
         ProviderUsageSnapshot,
     },
-    usage_poll, write_codex_app_server_message,
+    usage_poll,
 };
 #[cfg(target_os = "macos")]
 use gyro_core::{CancellationToken, ExecutionTermination};

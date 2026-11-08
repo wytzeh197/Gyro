@@ -1,14 +1,18 @@
 use crate::{
     app::limits::MAX_CONCURRENT_PROVIDER_RUNS,
-    emit_provider_chat_event, open_store, parse_uuid, provider_chat_cancelled,
-    provider_stop_message,
-    providers::chat_types::{ChatAttachmentRequest, ChatMode, ProviderChatRequest},
-    run_provider_chat_with_retry,
+    providers::{
+        chat_types::{ChatAttachmentRequest, ChatMode, ProviderChatRequest},
+        events::emit_provider_chat_event,
+        retry::run_provider_chat_with_retry,
+        streaming::{provider_chat_cancelled, provider_stop_message},
+    },
     state::{
         managers::ProviderCancellationManager,
         provider_run::{ProviderRunControl, PROVIDER_STOP_MARKER},
     },
-    to_string, validate_chat_message, UsageContext,
+    stores::{open_store, parse_uuid, to_string},
+    text::validate_chat_message,
+    usage::guard::UsageContext,
 };
 use gyro_core::{
     barrier_decision, build_synthesizer_user_prompt, council_run_dir, final_run_status,

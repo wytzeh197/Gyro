@@ -3,12 +3,20 @@
 #[cfg(target_os = "macos")]
 use crate::browser::types::BrowserPreviewSnapshot;
 use crate::{
-    session_browser, to_string, truncate_chars, BrowserPreviewAdmission, BrowserPreviewCapture,
-    BrowserPreviewCaptureRequest, BrowserPreviewCheck, BrowserPreviewCheckRequest,
-    BrowserPreviewDiagnostic, HiddenWebviewGuard, BROWSER_PREVIEW_CAPTURE_TIMEOUT,
-    BROWSER_PREVIEW_DIAGNOSTIC_TIMEOUT, MAX_BROWSER_PREVIEW_CAPTURES,
-    MAX_BROWSER_PREVIEW_CAPTURE_BYTES, MAX_BROWSER_PREVIEW_DIAGNOSTICS,
-    MAX_BROWSER_PREVIEW_DIAGNOSTIC_CHARS, MAX_BROWSER_PREVIEW_DIAGNOSTIC_PAYLOAD_CHARS,
+    app::limits::{
+        BROWSER_PREVIEW_CAPTURE_TIMEOUT, BROWSER_PREVIEW_DIAGNOSTIC_TIMEOUT,
+        MAX_BROWSER_PREVIEW_CAPTURES, MAX_BROWSER_PREVIEW_CAPTURE_BYTES,
+        MAX_BROWSER_PREVIEW_DIAGNOSTICS, MAX_BROWSER_PREVIEW_DIAGNOSTIC_CHARS,
+        MAX_BROWSER_PREVIEW_DIAGNOSTIC_PAYLOAD_CHARS,
+    },
+    browser::types::{
+        BrowserPreviewCapture, BrowserPreviewCaptureRequest, BrowserPreviewCheck,
+        BrowserPreviewCheckRequest, BrowserPreviewDiagnostic,
+    },
+    session_browser,
+    state::managers::{BrowserPreviewAdmission, HiddenWebviewGuard},
+    stores::to_string,
+    text::truncate_chars,
 };
 use gyro_core::GyroPaths;
 use std::{fs, io::Write, path::Path, sync::mpsc, time::Duration};

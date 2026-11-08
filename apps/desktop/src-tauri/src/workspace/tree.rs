@@ -4,7 +4,7 @@ use crate::{
         WORKSPACE_TREE_MAX_CACHE_AGE,
     },
     state::workspace::{WorkspaceDirectoryStamp, WorkspaceTreeSnapshot, WorkspaceWatchManager},
-    to_string,
+    stores::to_string,
     workspace::types::{WorkspaceChangedEvent, WorkspaceFile},
     workspace_tree_order,
 };

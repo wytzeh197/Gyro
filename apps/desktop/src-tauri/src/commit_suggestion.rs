@@ -1,6 +1,6 @@
 //! Let a completed implementation offer a local commit through the existing
 //! question card. The answer returns to the same chat and normal tool policy.
-use super::{ChatMode, ProviderChatRequest};
+use crate::providers::chat_types::{ChatMode, ProviderChatRequest};
 
 const COMMIT_QUESTION_EXAMPLE: &str = r#"
 GYRO_QUESTIONS: {"questions":[{"question":"Should I commit these changes?","options":[{"label":"Commit changes","detail":"Create a local commit of this task's changes."},{"label":"Review first","detail":"Show the diff and proposed commit message before committing."},{"label":"Not now","detail":"Leave the changes uncommitted."}]}]}
@@ -34,9 +34,9 @@ pub(super) fn guidance(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        provider_context_message_with_capabilities_for_turn, strip_hidden_control_markers,
-        PromptTurn,
+    use crate::providers::{
+        markers::strip_hidden_control_markers,
+        prompt::{provider_context_message_with_capabilities_for_turn, PromptTurn},
     };
 
     fn request() -> ProviderChatRequest {

@@ -1,19 +1,21 @@
 use crate::{
-    active_provider_capability_context, context_compaction, conversation_history,
+    capabilities::bridge::active_provider_capability_context,
+    context_compaction, conversation_history,
     conversation_history::local_compaction_summary,
-    efficiency, emit_provider_activity_event, parse_uuid, provider_activity_event_entry,
+    efficiency,
+    provider_context::ProviderContextUsage,
     providers::{
         binding::bind_provider_capability_context,
         chat_types::{
             ChatMode, InternalRequestPurpose, ProviderChatRequest,
             ProviderContextCompactionResponse,
         },
+        events::{emit_provider_activity_event, provider_activity_event_entry},
         retry::run_provider_chat_with_retry,
         types::ProviderActivity,
     },
-    to_string,
+    stores::{parse_uuid, to_string},
     usage::guard::UsageContext,
-    ProviderContextUsage,
 };
 use gyro_core::{SessionStore, UsageOrigin};
 use std::time::Instant;

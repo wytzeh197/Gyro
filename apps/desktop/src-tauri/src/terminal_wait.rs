@@ -1,4 +1,5 @@
-use super::{CancellationToken, TerminalPaneSnapshot};
+use crate::terminal::types::TerminalPaneSnapshot;
+use gyro_core::CancellationToken;
 use std::time::{Duration, Instant};
 
 /// Longest single wait. Every wait call re-sends the model's whole context, so
@@ -71,8 +72,10 @@ pub(super) fn wait(
 mod tests {
     use super::*;
     use crate::{
-        desktop_capability_tool_schema, CapabilityId, TerminalPaneRequest, TerminalProcessManager,
+        capabilities::mcp_server::desktop_capability_tool_schema,
+        terminal::types::{TerminalPaneRequest, TerminalProcessManager},
     };
+    use gyro_core::CapabilityId;
 
     fn command(script: &str) -> TerminalProcessManager {
         let manager = TerminalProcessManager::default();

@@ -8,9 +8,14 @@
 //! so that the editor and the capabilities share one server pool.
 
 use crate::{
-    add_ide_protocol_message_bytes, command_with_gui_path, read_workspace_file_with_limit,
-    to_string, workspace_root, MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE,
-    MAX_IDE_PROTOCOL_RESPONSE_BYTES, MAX_WORKSPACE_FILE_EDIT_BYTES,
+    app::limits::{
+        MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE, MAX_IDE_PROTOCOL_RESPONSE_BYTES,
+        MAX_WORKSPACE_FILE_EDIT_BYTES,
+    },
+    ide::debug::add_ide_protocol_message_bytes,
+    providers::process::command_with_gui_path,
+    stores::to_string,
+    workspace::files::{read_workspace_file_with_limit, workspace_root},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;

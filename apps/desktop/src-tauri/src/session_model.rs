@@ -1,5 +1,5 @@
-use super::*;
-
+use crate::stores::{open_store, parse_uuid, to_string};
+use gyro_core::{Session, SessionEventKind};
 #[tauri::command]
 pub(super) async fn set_session_model(
     session_id: String,

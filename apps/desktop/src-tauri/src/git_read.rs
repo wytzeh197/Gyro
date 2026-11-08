@@ -1,7 +1,13 @@
 //! Shared wall-clock budgets for background Git reads. The supervisor kills
 //! timed-out children; a later step must not start with a fresh timeout.
-use super::*;
 
+use crate::command_execution::run_bounded_command;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    time::Instant,
+};
 pub(super) fn run(
     command: &Command,
     deadline: Instant,
@@ -125,6 +131,13 @@ fn workspace_prefix(repo_root: &Path, workspace: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        git_branch_service::git_branch_catalog_before,
+        git_status_cache,
+        git_status_cache::{git_status_for_preparation, git_status_impl},
+    };
+    use gyro_core::ExecutionTermination;
+    use std::time::Duration;
     #[test]
     fn git_read_deadline_stops_children_and_prevents_later_steps() {
         let mut slow = Command::new("sh");

@@ -4,12 +4,23 @@
 //! the only place that starts the provider. When the Mac is paired, the same
 //! loop pulls relay tasks before it claims local work.
 
-use super::*;
+use crate::{
+    model_catalog,
+    providers::{
+        chat_types::{ChatMode, ProviderChatRequest},
+        process::provider_adapter_for,
+        run::run_provider_chat_blocking,
+        types::ProviderAdapterKind,
+    },
+    state::provider_run::{stop_provider_run, ProviderStopReason},
+    stores::to_string,
+};
 use gyro_core::agent_sessions::{
     agent_session_run_policy, AgentSessionRow, AgentSessionState, AgentSessionStore, ChoiceCatalog,
     ModelChoices, ProviderChoices,
 };
 use gyro_core::{provider_is_executable_for, GyroConfig};
+use gyro_core::{GyroPaths, UsageOrigin};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;

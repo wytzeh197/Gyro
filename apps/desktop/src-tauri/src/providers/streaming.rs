@@ -7,6 +7,7 @@ use crate::{
         PROVIDER_STREAM_FLUSH_INTERVAL, TEXT_TRUNCATION_SUFFIX,
     },
     provider_accounting,
+    provider_context::ProviderContextUsage,
     provider_run_cleanup::ProviderHeartbeat,
     provider_timeline,
     providers::{
@@ -30,7 +31,6 @@ use crate::{
     },
     text::push_bounded,
     usage::{fetch::publish_settled_provider_usage, types::ProviderRateLimitWindow},
-    ProviderContextUsage,
 };
 use gyro_core::{
     timing, CancellationToken, CredentialPolicy, ExecutionRequest, ExecutionStream,

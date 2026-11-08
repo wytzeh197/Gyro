@@ -1,10 +1,14 @@
 //! State managers.
 
 use crate::{
-    handle_desktop_provider_capability_request, ide_evidence, terminal_capability,
-    BoundProviderCapabilityContext, ModelBrowserResource, ModelTerminalResource,
-    PendingCapabilityApproval, PendingProviderApproval, ProviderRunControl,
-    MAX_CONCURRENT_BROWSER_PREVIEWS, MAX_CONCURRENT_IDE_COMMANDS,
+    app::limits::{MAX_CONCURRENT_BROWSER_PREVIEWS, MAX_CONCURRENT_IDE_COMMANDS},
+    capabilities::execute::handle_desktop_provider_capability_request,
+    ide_evidence,
+    state::provider_run::{
+        BoundProviderCapabilityContext, ModelBrowserResource, ModelTerminalResource,
+        PendingCapabilityApproval, PendingProviderApproval, ProviderRunControl,
+    },
+    terminal_capability,
 };
 use gyro_core::{
     CancellationToken, CapabilityRequest, CapabilityResponse, WorkspaceContextSnapshot,

@@ -1,10 +1,11 @@
 use crate::{
-    delegated_agents, goal_runner, open_store, parse_uuid,
+    delegated_agents, goal_runner,
     providers::{
         chat_types::ProviderChatRequest, streaming::StreamingCommandState, types::ProviderActivity,
     },
     sessions::titles::is_generic_session_title,
     state::managers::ProviderCancellationManager,
+    stores::{open_store, parse_uuid},
     task_suggestions,
 };
 use tauri::{Emitter, Manager};

@@ -4,7 +4,7 @@
 //! The store is the source of truth. The composer asks for a change; this
 //! module checks it, words the transcript line, and answers what the goal is
 //! when a turn runs, so a stale window cannot send a goal that was cleared.
-use crate::SessionGoalContext;
+use crate::providers::chat_types::SessionGoalContext;
 use gyro_core::{SessionEvent, SessionEventKind};
 
 /// Long enough for a request typed straight into the goal composer, short

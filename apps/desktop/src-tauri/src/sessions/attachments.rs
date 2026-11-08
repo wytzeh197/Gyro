@@ -4,12 +4,16 @@ use crate::{
         MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES, MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION,
         MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION, MAX_STORED_DRAFT_ATTACHMENTS,
     },
-    browser_observation, chat_images, open_store, parse_uuid,
-    providers::chat_types::{PrepareChatAttachmentRequest, PreparedChatAttachment},
-    session_browser, session_execution_workspace,
+    capabilities::access::browser_observation,
+    chat_images,
+    providers::{
+        binding::session_execution_workspace,
+        chat_types::{PrepareChatAttachmentRequest, PreparedChatAttachment},
+    },
+    session_browser,
     sessions::commands::{attachment_session_lock, remove_attachment_storage_entry},
     state::provider_run::ModelBrowserResource,
-    to_string,
+    stores::{open_store, parse_uuid, to_string},
     workspace::files::read_bounded_regular_file,
 };
 use gyro_core::GyroPaths;

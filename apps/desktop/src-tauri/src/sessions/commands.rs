@@ -1,6 +1,5 @@
 use crate::{
     git_branch_service::git_branch_catalog_impl,
-    open_store, parse_uuid,
     providers::chat_types::ChatAttachmentRequest,
     session_history::{read_session_events_blocking, SessionEventsReadResult},
     state::{
@@ -10,8 +9,9 @@ use crate::{
         },
         provider_run::ProviderRunControl,
     },
+    stores::{open_store, parse_uuid, to_string},
     terminal::{governance::release_pane_governance, types::TerminalProcessManager},
-    to_string, validate_chat_message,
+    text::validate_chat_message,
 };
 use gyro_core::{
     create_worktree, CreateSessionContext, GyroPaths, Session, SessionEvent, SessionEventKind,

@@ -1,9 +1,15 @@
 //! GitHub workflow and pull request commands.
 
 use crate::{
-    git_current_branch, to_string, workspace_root, GithubCreatePullRequestRequest,
-    GithubPullRequestsRequest, GithubWorkflowRunRequest, GithubWorkflowRunsRequest,
-    GithubWorkspaceRequest,
+    git::{
+        commands::git_current_branch,
+        types::{
+            GithubCreatePullRequestRequest, GithubPullRequestsRequest, GithubWorkflowRunRequest,
+            GithubWorkflowRunsRequest, GithubWorkspaceRequest,
+        },
+    },
+    stores::to_string,
+    workspace::files::workspace_root,
 };
 
 #[tauri::command]

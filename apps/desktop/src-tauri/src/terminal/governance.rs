@@ -1,10 +1,17 @@
 //! Model terminal command governance.
 
 use crate::{
-    advertised_mcp_capability_tools, desktop_claude_permission_mcp_config_for,
-    git_branch_catalog_impl, open_store, BoundProviderCapabilityContext,
-    CapabilityIdeEvidenceManager, ClaudePermissionBridgeIdentity, PaneGovernance,
-    ProviderCancellationManager, ProviderRunControl, TerminalPaneRequest,
+    capabilities::bridge::{
+        desktop_claude_permission_mcp_config_for, ClaudePermissionBridgeIdentity,
+    },
+    git_branch_service::git_branch_catalog_impl,
+    providers::binding::advertised_mcp_capability_tools,
+    state::{
+        managers::{CapabilityIdeEvidenceManager, ProviderCancellationManager},
+        provider_run::{BoundProviderCapabilityContext, ProviderRunControl},
+    },
+    stores::open_store,
+    terminal::types::{PaneGovernance, TerminalPaneRequest},
 };
 use anyhow::Context;
 use gyro_core::{

@@ -1,5 +1,279 @@
-use super::*;
-use terminal_process::*;
+use crate::{
+    app::{
+        config::merge_renderer_config,
+        limits::{
+            MAX_BROWSER_PREVIEW_CAPTURES, MAX_CHAT_ATTACHMENTS, MAX_CHAT_IMAGE_BYTES,
+            MAX_CHAT_MESSAGE_CHARS, MAX_CHAT_RESPONSE_CHARS, MAX_CODEX_APP_SERVER_ACTIVITIES,
+            MAX_CODEX_APP_SERVER_MESSAGE_BYTES, MAX_CODEX_APP_SERVER_PATCHES,
+            MAX_CODEX_APP_SERVER_PATCH_BYTES, MAX_DESKTOP_IPC_MESSAGE_BYTES,
+            MAX_LIVE_RESPONSE_CHARS, MAX_PROVIDER_STDOUT_FRAME_BYTES,
+            MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION, MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION,
+            MAX_STORED_DRAFT_ATTACHMENTS, MAX_TERMINAL_OUTPUT_BYTES, MAX_WORKSPACE_FILE_EDIT_BYTES,
+            MAX_WORKSPACE_FILE_PREVIEW_BYTES, MAX_WORKSPACE_WATCH_CACHES,
+            PROVIDER_CHAT_HEARTBEAT_INTERVAL,
+        },
+        shutdown::{remove_provider_host_ipc_socket, run_quit_jobs_until},
+    },
+    automation::{
+        commands::automation_notification_content,
+        execution::{automation_provider_prompt, parse_automation_execution_outcome},
+        runtime::{
+            automation_scheduler_effective_now, run_event_wakes_automation_scheduler,
+            AutomationSchedulerControl,
+        },
+        scheduler::{
+            automation_dispatch_candidates, recover_automation_scheduler_leases_with,
+            run_automation_scheduler_once_at_with, run_automation_scheduler_once_with,
+            run_automation_scheduler_once_with_heartbeat_interval,
+        },
+    },
+    browser::{
+        preview::{
+            browser_preview_capture_dimensions, browser_preview_capture_script,
+            browser_preview_diagnostics_supported, check_browser_preview_blocking,
+            parse_browser_preview_diagnostics, persist_browser_preview_capture,
+        },
+        types::{
+            BrowserObservation, BrowserObservationDiagnostics, BrowserObservationEvidence,
+            BrowserObservationOwner, BrowserPreviewCheckRequest, BROWSER_OBSERVATION_FRAMING,
+            BROWSER_OBSERVATION_SCHEMA_V1,
+        },
+    },
+    browser_knowledge,
+    capabilities::{
+        access::{
+            capability_access_for_call, capability_access_with_full_access, capability_grant_scope,
+            effective_capability_class, unknown_workspace_task_message,
+        },
+        bridge::{
+            codex_capability_tool_approval_args, codex_compact_invoke_approval_args,
+            desktop_claude_permission_mcp_config, desktop_claude_permission_mcp_config_for,
+            provider_run_approval_matches, ClaudePermissionBridgeIdentity,
+        },
+        mcp_server::{
+            advertised_capability_descriptors, browser_result_image, capability_mcp_response,
+            desktop_capability_tool_call, desktop_capability_tool_schema,
+            desktop_permission_tool_call, write_desktop_mcp_message,
+            DesktopProviderCapabilityContext, DesktopProviderPermissionContext,
+        },
+    },
+    capability_workspace_helpers::{
+        normalize_workspace_context_paths, workspace_context_metadata,
+        DEFAULT_WORKSPACE_RESULT_BYTES,
+    },
+    context_compaction, delegated_agents,
+    diagnostics::export::{terminal_command_path, user_home_directory},
+    efficiency,
+    git::{
+        commands::{
+            git_action_error, git_checkout_branch_impl, git_command, git_commit_blocking,
+            git_create_branch_impl, git_current_branch, git_discard_blocking, git_push_blocking,
+            git_remove_worktree_impl, git_rename_branch_impl, git_stage_blocking,
+            sort_branch_catalog_entries,
+        },
+        types::{
+            GitCheckoutBranchRequest, GitCommitRequest, GitCreateBranchRequest,
+            GitRemoveWorktreeRequest, GitStageRequest, GitSyncRequest,
+        },
+    },
+    git_branch_service::git_branch_catalog_impl,
+    git_status_cache::{
+        git_repo_root, git_repository_state, git_status_for_preparation, git_status_impl,
+        git_status_read_failure, parse_git_numstat, parse_git_status_v2, GitRepositoryState,
+    },
+    ide::{
+        debug::{debug_adapter_command_is_allowed, redact_json_strings},
+        task_discovery::{
+            custom_task_create_impl, custom_task_delete_impl, justfile_recipes, makefile_targets,
+            parse_command_line, suggested_task, task_discover_impl, test_tree_from_tasks,
+        },
+        tasks::{configure_noninteractive_task_environment, task_run_blocking},
+        types::{
+            CustomTaskCreateRequest, CustomTaskDeleteRequest, DebugAdapterManager,
+            DebugSendRequest, DebugStartRequest, IdeCommandOutput, TaskDefinitionResult,
+            TaskRunRequest,
+        },
+    },
+    ipc::cli::{bind_cli_ipc_listener, provider_host_ipc_paths, write_bounded_json_line},
+    kimi_usage::{
+        fetch_kimi_provider_usage, kimi_sign_in_at, kimi_sign_in_renewal,
+        provider_usage_windows_from_kimi_usages, store_kimi_sign_in, KimiSignIn, KimiSignInRenewal,
+        KIMI_NO_PLAN_LIMITS,
+    },
+    language_server,
+    ollama_runner::{ollama_compatibility_catalog, validate_ollama_compatibility_call},
+    provider_accounting,
+    provider_activity::{
+        extract_provider_activities, extract_provider_activity,
+        extract_provider_commentary_activity, provider_file_result_counts,
+    },
+    provider_context::{
+        provider_context_usage_from_app_server, provider_context_usage_from_claude_stream,
+        provider_context_usage_from_codex_exec, provider_context_usage_with_window,
+        provider_model_context_window, ClaudeUsageFrame, OllamaTurnUsage, ProviderContextUsage,
+    },
+    provider_reliability::{is_transient_provider_error, provider_failure_recovery},
+    provider_retry_recovery::run_provider_chat_with_retry_using,
+    provider_timeline, provider_tool_batch,
+    providers::{
+        approvals::{
+            claude_multimodal_input, desktop_claude_approval_details,
+            desktop_claude_approval_response, provider_approval_label, provider_approval_risk,
+        },
+        binding::{
+            bind_provider_chat_request, local_conversation_history_for_request,
+            provider_approval_instructions, validate_chat_context,
+        },
+        chat_types::{
+            normal_chat_requests_plan, ChatAttachmentRequest, ChatMode, InternalRequestPurpose,
+            PrepareChatAttachmentRequest, ProviderChatRequest, SessionGoalContext,
+        },
+        cli_args::{
+            claude_allowed_capability_tools, claude_chat_args, claude_model_arg,
+            claude_reasoning_effort_arg, codex_chat_args, codex_model_arg,
+            codex_reasoning_effort_arg, grok_reasoning_effort_arg, provider_chat_cwd,
+        },
+        codex_app_server::{
+            codex_app_server_closed_message, codex_app_server_result, read_bounded_protocol_line,
+            spawn_codex_app_server_reader,
+        },
+        events::{
+            append_provider_status_event, kimi_acp_plan_payload, provider_activity_event_entry,
+        },
+        markers::{
+            completed_chat_artifacts, completed_plan_updates, completed_stream_title,
+            derive_session_summary, extract_chat_artifact_marker, extract_plan_update_marker,
+            extract_session_title_marker, repair_glued_assistant_blocks,
+            streamed_title_replacement, strip_hidden_control_markers, suggested_title_for_turn,
+            valid_chat_artifact, GYRO_AGENT_UPDATE_MARKER, GYRO_GOAL_UPDATE_MARKER,
+            MAX_CHAT_ARTIFACTS,
+        },
+        process::{
+            build_grok_acp_program_args, command_with_gui_path, is_stale_resume_error,
+            provider_adapter_for, provider_stream_failure_detail,
+        },
+        prompt::{
+            claude_chat_prompt, openai_codex_chat_prompt, provider_context_message,
+            provider_context_message_for_turn, provider_context_message_with_capabilities,
+            provider_context_message_with_tool_support, user_requests_gyro_browser, PromptTurn,
+        },
+        retry::{is_provider_cancellation, with_browser_attachment_images},
+        runners::{
+            claude::{claude_login_failure, claude_runner_output, CLAUDE_LOGIN_EXPIRED_DETAIL},
+            codex::{
+                codex_app_server_policy, codex_file_change_activities, codex_item_activity,
+                codex_provider_approval_response, codex_reasoning_activity,
+                insert_codex_app_server_patch, CodexAppServerCommentaryStream,
+            },
+            kimi_acp::{
+                acp_provider_runtime, apply_acp_workspace_write,
+                compatible_provider_session_binding, provider_resume_cursor_from_binding,
+            },
+        },
+        stdout::{
+            extract_provider_session_id, extract_provider_text_delta, merge_provider_rate_limit,
+            provider_activities_for_response, provider_rate_limit_from_claude_stream,
+            recover_streamed_provider_answer,
+        },
+        streaming::{
+            provider_quiet_seconds, provider_run_failure, provider_run_stalled, ProviderQuietClock,
+            StreamingCommandOutput, StreamingCommandState, PROVIDER_CHAT_QUIET_NOTICE,
+        },
+        types::{
+            ProviderActivity, ProviderAdapterKind, ProviderChatStreamEvent, ProviderResumeCursor,
+            ProviderRunnerOutput,
+        },
+    },
+    sessions::{
+        attachments::{
+            ensure_attachment_storage_quota, ensure_private_attachment_directory,
+            make_room_in_draft_attachments, prepare_chat_attachment_blocking,
+            redact_terminal_output, validate_attachment_name, validated_chat_media_type,
+        },
+        commands::{remove_attachment_storage_entry, stage_session_attachments},
+        titles::{
+            is_generic_session_title, session_title_from_message,
+            SESSION_TITLE_FIRST_TURN_INSTRUCTION,
+        },
+    },
+    state::{
+        provider_run::{
+            BoundProviderCapabilityContext, ProviderApprovalDecision, ProviderRunControl,
+            ProviderStopReason, PROVIDER_CUT_OFF_NOTICE, PROVIDER_TOOL_BUDGET_NOTICE,
+        },
+        workspace::{WorkspaceRescanState, WorkspaceWatchManager},
+    },
+    terminal::{
+        governance::governable_pane_provider,
+        panes::terminal_current_directory,
+        types::{
+            PaneGovernance, TerminalPaneRequest, TerminalPaneSnapshot, TerminalProcessManager,
+        },
+    },
+    terminal_process::{
+        append_terminal_output, configure_terminal_environment, resolve_terminal_cwd,
+        snapshot_terminal_output, TerminalOutputBuffer,
+    },
+    text::{
+        push_bounded, sanitize_provider_chat_response, sanitize_provider_text_delta,
+        truncate_chars, validate_chat_message, BoundedPushResult,
+    },
+    usage::{
+        fetch::{
+            claude_oauth_access_token_at, fetch_anthropic_provider_usage,
+            get_provider_usage_blocking, provider_usage_windows_from_anthropic_usage,
+            provider_usage_windows_from_codex, provider_usage_windows_from_xai_billing,
+        },
+        types::{CodexRateLimitSnapshot, CodexRateLimitWindow},
+    },
+    workspace::{
+        files::{
+            read_workspace_file_impl, read_workspace_file_with_limit, workspace_root,
+            write_workspace_file_impl,
+        },
+        tree::{
+            compare_workspace_tree_entries, list_workspace_tree_blocking,
+            workspace_watch_event_is_relevant,
+        },
+        types::{
+            WorkspaceFile, WorkspaceFileWriteRequest, WorkspaceSearchRange, WorkspaceSearchResult,
+        },
+    },
+    workspace_search::{bound_model_search_results, run_workspace_rg_search},
+};
+use base64::Engine;
+use gyro_core::{
+    create_worktree,
+    ipc::{
+        DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
+        DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
+    },
+    provider_account_label, provider_runtime_status_from_output, provider_subscription_label,
+    should_skip_codex_login_for_external_env, user_cli_paths, Automation, AutomationRunStatus,
+    AutomationStatus, AutomationStore, CapabilityAccess, CapabilityClass, CapabilityId,
+    CapabilityPolicySnapshot, CapabilityRequest, CapabilityResponse, CapabilityResult,
+    CapabilityRunMode, CapabilityStatus, CreateAutomationRequest, CreateSessionContext, GyroConfig,
+    GyroPaths, HarnessRunStatus, ProjectCapabilityGrant, ProjectCapabilityPolicy,
+    ProviderSessionBinding, Session, SessionEventKind, SessionOrigin, SessionStore,
+    SessionWorkspaceMode, WorkspaceCheckReport, WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS,
+    WORKSPACE_UNAVAILABLE_MESSAGE,
+};
+use notify::Event as NotifyEvent;
+use portable_pty::CommandBuilder;
+use sha2::{Digest, Sha256};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    io::{BufRead, BufReader, Read, Write},
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc, Mutex,
+    },
+    time::{Duration, Instant},
+};
+use uuid::Uuid;
 
 #[test]
 fn compatibility_tool_requests_follow_the_advertised_schema_and_mode() {
@@ -416,18 +690,6 @@ fn bound_capability_context(request: &ProviderChatRequest) -> BoundProviderCapab
 }
 
 #[test]
-fn gyro_applied_file_changes_are_not_applied_again_by_codex() {
-    assert_eq!(
-        codex_provider_approval_response(ProviderApprovalDecision::AppliedByGyro),
-        "decline"
-    );
-    assert_eq!(
-        codex_provider_approval_response(ProviderApprovalDecision::Approve),
-        "accept"
-    );
-}
-
-#[test]
 fn gyro_applied_file_changes_are_not_applied_again_by_claude() {
     let response = desktop_claude_approval_response(
         ProviderApprovalDecision::AppliedByGyro,
@@ -520,28 +782,6 @@ fn provider_approval_nonce_is_bound_to_the_active_session_run() {
         "another-session",
         &expected_nonce
     ));
-}
-
-#[test]
-fn codex_capability_approvals_are_scoped_to_registered_gyro_tools() {
-    let args = codex_capability_tool_approval_args();
-    let expected: HashSet<_> = CAPABILITY_DESCRIPTORS
-        .iter()
-        .map(|descriptor| descriptor.id.provider_tool_name())
-        .collect();
-    let mut configured = HashSet::new();
-    for pair in args.chunks_exact(2) {
-        assert_eq!(pair[0], "-c");
-        let tool = pair[1]
-            .strip_prefix("mcp_servers.gyro_capabilities.tools.")
-            .and_then(|value| value.strip_suffix(".approval_mode=\"approve\""))
-            .expect("only individual built-in tool approval settings may be overridden");
-        assert!(configured.insert(tool));
-    }
-    assert_eq!(configured, expected);
-    assert!(configured.contains("gyro_workspace_get_context"));
-    assert!(configured.contains("gyro_workspace_check"));
-    assert!(configured.contains("gyro_browser_open"));
 }
 
 #[test]
@@ -1863,111 +2103,6 @@ fn desktop_claude_permission_child_forwards_tool_context_to_the_app() {
 }
 
 #[test]
-fn codex_usage_windows_follow_reported_duration_instead_of_slot() {
-    let windows = provider_usage_windows_from_codex(&CodexRateLimitSnapshot {
-        primary: Some(CodexRateLimitWindow {
-            used_percent: 29,
-            window_duration_mins: Some(10_080),
-            resets_at: Some(1_784_489_840),
-        }),
-        secondary: None,
-    });
-
-    assert_eq!(windows.len(), 1);
-    assert_eq!(windows[0].id, "weekly");
-    assert_eq!(windows[0].label, "Weekly window");
-    assert_eq!(windows[0].used_percent, Some(29));
-    assert_eq!(windows[0].status, "ok");
-    assert!(windows[0]
-        .resets_at
-        .as_deref()
-        .is_some_and(|value| { chrono::DateTime::parse_from_rfc3339(value).is_ok() }));
-}
-
-#[test]
-fn codex_usage_windows_name_a_plan_only_window_by_its_duration() {
-    // The free plan meters one 30-day window and sends it in the primary
-    // slot. Calling that "5-hour" would misstate the allowance by 144x.
-    let windows = provider_usage_windows_from_codex(&CodexRateLimitSnapshot {
-        primary: Some(CodexRateLimitWindow {
-            used_percent: 7,
-            window_duration_mins: Some(43_200),
-            resets_at: None,
-        }),
-        secondary: None,
-    });
-
-    assert_eq!(windows.len(), 1);
-    assert_eq!(windows[0].id, "monthly");
-    assert_eq!(windows[0].label, "Monthly window");
-    assert_eq!(windows[0].used_percent, Some(7));
-}
-
-#[test]
-fn codex_usage_windows_describe_a_duration_gyro_does_not_name() {
-    let windows = provider_usage_windows_from_codex(&CodexRateLimitSnapshot {
-        primary: Some(CodexRateLimitWindow {
-            used_percent: 3,
-            window_duration_mins: Some(180),
-            resets_at: None,
-        }),
-        secondary: Some(CodexRateLimitWindow {
-            used_percent: 4,
-            window_duration_mins: Some(4_320),
-            resets_at: None,
-        }),
-    });
-
-    assert_eq!(
-        windows
-            .iter()
-            .map(|window| (window.id.as_str(), window.label.as_str()))
-            .collect::<Vec<_>>(),
-        vec![("3-hour", "3-hour window"), ("3-day", "3-day window")]
-    );
-}
-
-#[test]
-fn codex_usage_windows_are_clamped_ordered_and_deduplicated() {
-    let windows = provider_usage_windows_from_codex(&CodexRateLimitSnapshot {
-        primary: Some(CodexRateLimitWindow {
-            used_percent: 140,
-            window_duration_mins: Some(300),
-            resets_at: None,
-        }),
-        secondary: Some(CodexRateLimitWindow {
-            used_percent: -5,
-            window_duration_mins: Some(10_080),
-            resets_at: None,
-        }),
-    });
-
-    assert_eq!(
-        windows
-            .iter()
-            .map(|window| window.id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["five-hour", "weekly"]
-    );
-    assert_eq!(windows[0].used_percent, Some(100));
-    assert_eq!(windows[1].used_percent, Some(0));
-    // A clamped level still has to describe itself honestly.
-    assert_eq!(windows[0].status, "exhausted");
-    assert_eq!(windows[1].status, "ok");
-}
-
-#[test]
-fn codex_app_server_errors_are_exposed_without_protocol_details() {
-    let error = codex_app_server_result(&serde_json::json!({
-        "id": 2,
-        "error": { "code": -32603, "message": "Login required" },
-    }))
-    .unwrap_err();
-
-    assert_eq!(error, "Login required");
-}
-
-#[test]
 fn a_lapsed_claude_token_names_the_fix_its_refresh_token_still_allows() {
     let now = 1_000_000_000_000i64;
     let credentials = |expires: i64, refresh_expires: i64| {
@@ -2011,22 +2146,6 @@ fn live_anthropic_provider_usage_reads_the_current_account() {
             window.id, window.label, window.used_percent, window.resets_at
         );
     }
-}
-
-#[test]
-#[ignore = "requires a locally authenticated Codex CLI"]
-fn live_codex_provider_usage_reads_the_current_account() {
-    let snapshot = get_provider_usage_blocking("openai", false).unwrap();
-
-    assert_eq!(snapshot.provider_id, "openai");
-    assert!(!snapshot.windows.is_empty());
-    // A window a provider named but did not measure reports no percentage,
-    // which is a reading in its own right rather than a failure.
-    assert!(snapshot
-        .windows
-        .iter()
-        .filter_map(|window| window.used_percent)
-        .all(|used_percent| (0..=100).contains(&used_percent)));
 }
 
 #[test]
@@ -3240,18 +3359,6 @@ fn validates_supported_chat_video_containers() {
 }
 
 #[test]
-fn provider_health_skips_codex_login_for_external_env_auth() {
-    assert!(should_skip_codex_login_for_external_env(
-        Some("https://gateway.example.test/v1"),
-        Some("provider-env:PORTKEY_API_KEY"),
-    ));
-    assert!(!should_skip_codex_login_for_external_env(
-        Some("https://api.openai.com/v1"),
-        Some("provider-cli:codex"),
-    ));
-}
-
-#[test]
 fn gui_cli_paths_include_latest_nvm_node_bin() {
     let home = tempfile::tempdir().unwrap();
     let node_versions = home.path().join(".nvm/versions/node");
@@ -3275,18 +3382,6 @@ fn gui_cli_paths_include_latest_nvm_node_bin() {
     assert!(paths.iter().any(|path| path.ends_with(".kimi-code/bin")));
     assert!(paths.iter().any(|path| path.ends_with(".npm-global/bin")));
     assert!(paths.iter().any(|path| path.ends_with(".cursor/bin")));
-}
-
-#[test]
-fn codex_chat_preserves_requested_models_for_authentication_specific_validation() {
-    for model in ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "o4-mini"] {
-        assert_eq!(codex_model_arg(Some(model)), Some(model.into()));
-    }
-    assert_eq!(
-        codex_model_arg(Some(" gpt-5.4-mini ")),
-        Some("gpt-5.4-mini".into())
-    );
-    assert_eq!(codex_model_arg(Some("gpt-5")), None);
 }
 
 #[test]
@@ -3346,79 +3441,6 @@ fn all_catalog_context_windows_and_cli_efforts_match_verified_metadata() {
 }
 
 #[test]
-fn astra_model_and_effort_are_forwarded_to_codex() {
-    assert_eq!(
-        codex_model_arg(Some("gpt-6-astra")),
-        Some("gpt-6-astra".into())
-    );
-    for effort in ["low", "medium", "high", "xhigh", "max", "ultra"] {
-        assert_eq!(
-            codex_reasoning_effort_arg(Some("gpt-6-astra"), Some(effort)),
-            Some(effort.into())
-        );
-    }
-    assert_eq!(
-        codex_reasoning_effort_arg(Some("gpt-6-astra"), Some("invalid")),
-        None
-    );
-    assert_eq!(
-        provider_model_context_window("openai", Some("gpt-6-astra")),
-        Some(272_000)
-    );
-    assert_eq!(
-        provider_model_context_window("anthropic", Some("claude-fable-5-1")),
-        Some(1_000_000)
-    );
-}
-
-#[test]
-fn gpt_6_1_sol_model_and_effort_are_forwarded_to_codex() {
-    assert_eq!(
-        codex_model_arg(Some("gpt-6.1-sol")),
-        Some("gpt-6.1-sol".into())
-    );
-    for effort in ["low", "medium", "high", "xhigh", "max", "ultra"] {
-        assert_eq!(
-            codex_reasoning_effort_arg(Some("gpt-6.1-sol"), Some(effort)),
-            Some(effort.into())
-        );
-    }
-    assert_eq!(
-        codex_reasoning_effort_arg(Some("gpt-6.1-sol"), Some("invalid")),
-        None
-    );
-    assert_eq!(
-        provider_model_context_window("openai", Some("gpt-6.1-sol")),
-        Some(500_000)
-    );
-}
-
-#[test]
-fn gpt_6_sol_and_luna_efforts_are_forwarded_to_codex() {
-    for model in ["gpt-6-sol", "gpt-6-luna", "gpt-5.6-luna"] {
-        assert_eq!(codex_model_arg(Some(model)), Some(model.into()));
-        for effort in ["low", "medium", "high", "xhigh", "max"] {
-            assert_eq!(
-                codex_reasoning_effort_arg(Some(model), Some(effort)),
-                Some(effort.into())
-            );
-        }
-    }
-    assert_eq!(
-        codex_reasoning_effort_arg(Some("gpt-6-sol"), Some("ultra")),
-        Some("ultra".into())
-    );
-    assert_eq!(
-        codex_reasoning_effort_arg(Some("gpt-6-luna"), Some("ultra")),
-        None
-    );
-    assert_eq!(
-        codex_reasoning_effort_arg(Some("gpt-5.6-luna"), Some("ultra")),
-        None
-    );
-}
-
-#[test]
 fn catalog_models_unknown_to_this_release_forward_their_effort() {
     for effort in ["low", "medium", "high", "xhigh", "max", "ultra"] {
         assert_eq!(
@@ -3430,38 +3452,6 @@ fn catalog_models_unknown_to_this_release_forward_their_effort() {
         codex_reasoning_effort_arg(Some("gpt-7-nova"), Some("invalid")),
         None
     );
-}
-
-#[test]
-fn codex_chat_prompt_prefers_concise_answers() {
-    let prompt = openai_codex_chat_prompt(
-        "WHAT MODEL are you?",
-        Some("/workspace"),
-        Some("GPT-5.6 Sol"),
-        true,
-        false,
-        false,
-    );
-
-    assert!(prompt.contains("polished, scannable Markdown"));
-    assert!(prompt.contains("bullets or numbered lists"));
-    assert!(prompt.contains("each thing on its own bullet"));
-    assert!(prompt.contains("Do not repeat the same conclusion"));
-    assert!(prompt.contains("selected model label is: GPT-5.6 Sol"));
-    assert!(prompt.contains("exactly that selected model label only"));
-    assert!(prompt.contains("Do not describe the local Codex runner"));
-    assert!(prompt.contains("GYRO_SESSION_TITLE: <2-6 word title>"));
-    assert!(prompt.contains("name the session immediately"));
-    assert!(!prompt.contains(browser_knowledge::SIDE_PANEL_GUIDE));
-    assert!(prompt.contains("Selected workspace: /workspace"));
-    assert!(prompt.contains("Do not edit files"));
-
-    let full_access_prompt =
-        openai_codex_chat_prompt("fix it", Some("/workspace"), None, false, true, false);
-    assert!(full_access_prompt.contains(
-        "You may edit files, run commands, and complete requested workspace changes directly."
-    ));
-    assert!(!full_access_prompt.contains("Do not edit files"));
 }
 
 #[test]
@@ -4146,45 +4136,6 @@ fn provider_arg_vectors_are_accepted_by_the_installed_clis() {
 }
 
 #[test]
-fn codex_app_server_policy_keeps_gated_edits_read_only() {
-    let workspace = Path::new("/tmp/gyro-workspace");
-    let (approval, sandbox, policy) =
-        codex_app_server_policy(&ChatMode::Normal, true, true, false, workspace);
-    assert_eq!(approval, "untrusted");
-    assert_eq!(sandbox, "read-only");
-    assert_eq!(policy["type"], "readOnly");
-    assert_eq!(policy["networkAccess"], false);
-
-    let (approval, sandbox, policy) =
-        codex_app_server_policy(&ChatMode::Normal, false, false, false, workspace);
-    assert_eq!(approval, "on-request");
-    assert_eq!(sandbox, "workspace-write");
-    assert_eq!(policy["type"], "workspaceWrite");
-    assert_eq!(policy["writableRoots"][0], "/tmp/gyro-workspace");
-
-    let (approval, sandbox, policy) =
-        codex_app_server_policy(&ChatMode::Normal, false, false, true, workspace);
-    assert_eq!(approval, "on-request");
-    assert_eq!(sandbox, "danger-full-access");
-    assert_eq!(policy["type"], "dangerFullAccess");
-
-    let (approval, sandbox, policy) =
-        codex_app_server_policy(&ChatMode::Normal, true, false, true, workspace);
-    assert_eq!(approval, "untrusted");
-    assert_eq!(sandbox, "workspace-write");
-    assert_eq!(policy["type"], "workspaceWrite");
-
-    let (approval, sandbox, policy) =
-        codex_app_server_policy(&ChatMode::Plan, false, false, false, workspace);
-    assert_eq!(approval, "untrusted");
-    assert_eq!(sandbox, "read-only");
-    assert_eq!(policy["type"], "readOnly");
-    assert_eq!(policy["networkAccess"], false);
-    assert_eq!(provider_approval_label("command"), "Review command");
-    assert!(provider_approval_risk("file-change").contains("workspace patch"));
-}
-
-#[test]
 fn provider_adapter_registry_executes_all_supported_acp_providers() {
     let openai = provider_adapter_for("openai");
     assert_eq!(openai.kind, ProviderAdapterKind::OpenAiCodex);
@@ -4534,128 +4485,6 @@ fn tool_use_activities_carry_specifics_not_just_the_tool_name() {
     assert_eq!(payload["note"], "simplify");
     assert_eq!(payload["detail"], "Skill");
     assert_eq!(payload["tool"], "Skill");
-}
-
-#[test]
-fn codex_app_server_commentary_streams_cumulative_snapshots_with_missing_ids() {
-    let mut stream = CodexAppServerCommentaryStream::new();
-    let mut activities = Vec::new();
-
-    stream.push_delta(&mut activities, None, "I’ll inspect");
-    let (first, first_sequence) = stream
-        .take_snapshot(&activities, false)
-        .expect("first commentary token is not held for the flush interval");
-    assert_eq!(first.id, "codex-commentary-0");
-    assert_eq!(first.label, "I’ll inspect");
-    assert_eq!(first.status, "running");
-    assert_eq!(first_sequence, 0);
-    stream.dirty = true;
-    stream.last_emit_at = Some(Instant::now());
-    assert!(stream.take_snapshot(&activities, false).is_none());
-
-    stream.push_delta(&mut activities, None, " the project.");
-    let (cumulative, cumulative_sequence) = stream
-        .take_snapshot(&activities, true)
-        .expect("cumulative commentary snapshot");
-    assert_eq!(cumulative.id, first.id);
-    assert_eq!(cumulative.label, "I’ll inspect the project.");
-    assert_eq!(cumulative_sequence, first_sequence);
-
-    stream.complete_message(
-        &mut activities,
-        None,
-        Some("I’ll inspect the project first."),
-    );
-    let (completed, completed_sequence) = stream
-        .take_snapshot(&activities, true)
-        .expect("completed commentary snapshot");
-    assert_eq!(completed.id, first.id);
-    assert_eq!(completed.label, "I’ll inspect the project first.");
-    assert_eq!(completed.status, "done");
-    assert_eq!(completed_sequence, first_sequence);
-    stream.finish_message();
-
-    stream.push_delta(&mut activities, None, "Next update.");
-    assert_eq!(activities[1].id, "codex-commentary-1");
-}
-
-#[test]
-fn codex_app_server_commentary_preserves_activity_order_and_dedupes_final() {
-    let mut stream = CodexAppServerCommentaryStream::new();
-    let mut activities = Vec::new();
-    let mut commentary_sequences = Vec::new();
-    let mut complete_commentary = |stream: &mut CodexAppServerCommentaryStream,
-                                   activities: &mut Vec<ProviderActivity>,
-                                   item_id: Option<&str>,
-                                   text: &str| {
-        stream.push_delta(activities, item_id, text);
-        stream.complete_message(activities, item_id, Some(text));
-        let (_, sequence) = stream
-            .take_snapshot(activities, true)
-            .expect("completed commentary");
-        commentary_sequences.push(sequence);
-        stream.finish_message();
-    };
-
-    complete_commentary(
-        &mut stream,
-        &mut activities,
-        Some("opening-message"),
-        "I’ll inspect first.",
-    );
-    activities.push(ProviderActivity {
-        id: "command-1".into(),
-        kind: "command".into(),
-        label: "Searched project".into(),
-        detail: None,
-        file_counts: None,
-        note: None,
-        status: "done".into(),
-    });
-    complete_commentary(
-        &mut stream,
-        &mut activities,
-        None,
-        "I found the relevant code.",
-    );
-    activities.push(ProviderActivity {
-        id: "command-2".into(),
-        kind: "command".into(),
-        label: "Ran tests".into(),
-        detail: None,
-        file_counts: None,
-        note: None,
-        status: "done".into(),
-    });
-    complete_commentary(
-        &mut stream,
-        &mut activities,
-        Some("final-message"),
-        "The timeline is fixed.",
-    );
-
-    assert_eq!(commentary_sequences, vec![0, 2, 4]);
-    assert_eq!(
-        activities
-            .iter()
-            .map(|activity| (activity.kind.as_str(), activity.label.as_str()))
-            .collect::<Vec<_>>(),
-        vec![
-            ("commentary", "I’ll inspect first."),
-            ("command", "Searched project"),
-            ("commentary", "I found the relevant code."),
-            ("command", "Ran tests"),
-            ("commentary", "The timeline is fixed."),
-        ]
-    );
-
-    let retained = provider_activities_for_response(activities, "The timeline is fixed.");
-    assert_eq!(retained.len(), 4);
-    assert_eq!(retained[0].label, "I’ll inspect first.");
-    assert_eq!(retained[2].label, "I found the relevant code.");
-    assert!(retained
-        .iter()
-        .all(|activity| activity.label != "The timeline is fixed."));
 }
 
 /// Intermediate tool frames from every provider used to pile up as
@@ -5267,43 +5096,6 @@ fn grok_acp_args_use_process_model_and_effort() {
         .windows(2)
         .any(|pair| pair == ["--permission-mode", "bypassPermissions"]));
     assert!(full.windows(2).any(|pair| pair == ["--sandbox", "off"]));
-}
-
-#[test]
-fn parses_codex_app_server_context_usage() {
-    let usage = provider_context_usage_from_app_server(&serde_json::json!({
-        "tokenUsage": {
-            "last": {
-                "inputTokens": 42137,
-                "cachedInputTokens": 40000,
-                "outputTokens": 812,
-                "reasoningOutputTokens": 205,
-                "totalTokens": 42949
-            },
-            "modelContextWindow": 128000
-        }
-    }))
-    .unwrap();
-    assert_eq!(usage.input_tokens, Some(42_137));
-    assert_eq!(usage.model_context_window, Some(128_000));
-}
-
-#[test]
-fn parses_codex_exec_context_usage() {
-    let usage = provider_context_usage_from_codex_exec(&serde_json::json!({
-        "type": "turn.completed",
-        "usage": {
-            "input_tokens": 42137,
-            "cached_input_tokens": 40000,
-            "output_tokens": 812,
-            "reasoning_output_tokens": 205,
-            "total_tokens": 42949,
-            "model_context_window": 128000
-        }
-    }))
-    .unwrap();
-    assert_eq!(usage.input_tokens, Some(42_137));
-    assert_eq!(usage.model_context_window, Some(128_000));
 }
 
 #[test]
@@ -7278,25 +7070,6 @@ fn protocol_line_reader_rejects_oversized_unterminated_frames() {
         .contains("newline terminator"));
 }
 
-#[test]
-fn codex_protocol_reader_accepts_frames_larger_than_four_megabytes() {
-    // Rich tool results and resumed histories can exceed the former
-    // 4 MiB cap. Such a frame must reach the JSON decoder rather than
-    // turning a normal chat send into a generic retry failure.
-    let payload_len = 4 * 1024 * 1024 + 1;
-    let mut frame = vec![b'x'; payload_len];
-    frame.push(b'\n');
-    let mut reader = BufReader::new(std::io::Cursor::new(frame));
-
-    assert_eq!(
-        read_bounded_protocol_line(&mut reader, MAX_CODEX_APP_SERVER_MESSAGE_BYTES)
-            .unwrap()
-            .unwrap()
-            .len(),
-        payload_len
-    );
-}
-
 #[cfg(unix)]
 #[test]
 fn provider_ipc_routes_to_owning_host_when_another_app_owns_public_socket() {
@@ -7471,31 +7244,6 @@ fn quit_jobs_run_in_parallel_and_stop_waiting_at_the_deadline() {
 }
 
 #[test]
-fn codex_patch_accumulator_is_bounded() {
-    let mut patches = HashMap::new();
-    for index in 0..MAX_CODEX_APP_SERVER_PATCHES {
-        insert_codex_app_server_patch(
-            &mut patches,
-            &format!("patch-{index}"),
-            serde_json::json!({ "changes": [] }),
-        )
-        .unwrap();
-    }
-    assert!(insert_codex_app_server_patch(
-        &mut patches,
-        "one-too-many",
-        serde_json::json!({ "changes": [] }),
-    )
-    .is_err());
-    assert!(insert_codex_app_server_patch(
-        &mut HashMap::new(),
-        "oversized",
-        serde_json::json!({ "changes": "x".repeat(MAX_CODEX_APP_SERVER_PATCH_BYTES) }),
-    )
-    .is_err());
-}
-
-#[test]
 fn file_changes_stay_with_the_reporting_chat_in_a_shared_workspace() {
     let temp = tempfile::tempdir().unwrap();
     let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
@@ -7550,47 +7298,6 @@ fn file_changes_stay_with_the_reporting_chat_in_a_shared_workspace() {
     assert_eq!(file.payload["path"], "shared.css");
     assert_eq!(file.payload["additions"], 1);
     assert_eq!(file.payload["deletions"], 1);
-}
-
-#[test]
-fn codex_file_change_activity_keeps_only_reported_paths() {
-    let item = serde_json::json!({
-        "id": "change-1",
-        "type": "fileChange",
-        "status": "completed",
-    });
-    let patch = serde_json::json!({
-        "changes": [
-            { "path": "packages/ui/src/chat-run.ts", "diff": "@@ -1 +1,2 @@\n-old\n+new\n+added\n" },
-            { "path": "packages/ui/src/surfaces.tsx" },
-        ],
-    });
-
-    let activities = codex_file_change_activities(&item, Some(&patch));
-
-    assert_eq!(
-        activities
-            .iter()
-            .filter_map(|activity| activity.detail.as_deref())
-            .collect::<Vec<_>>(),
-        vec![
-            "packages/ui/src/chat-run.ts",
-            "packages/ui/src/surfaces.tsx",
-        ],
-    );
-    assert_eq!(activities[0].file_counts, Some((2, 1)));
-    assert_eq!(activities[1].file_counts, None);
-    let temp = tempfile::tempdir().unwrap();
-    let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
-    let session = store
-        .create_session(temp.path(), SessionOrigin::Desktop, "counts")
-        .unwrap();
-    let request = provider_chat_request_for(&session, temp.path(), "openai");
-    let (_, payload, _) =
-        provider_activity_event_entry(&request, Uuid::new_v4(), 0, &activities[0]);
-    assert_eq!(payload["additions"], 2);
-    assert_eq!(payload["deletions"], 1);
-    assert!(codex_file_change_activities(&item, None).is_empty());
 }
 
 #[test]
@@ -9703,42 +9410,5 @@ fn unknown_workspace_task_lists_the_valid_ids() {
     assert!(unknown_workspace_task_message("x", &[], true).contains("no discovered test tasks"));
 }
 
-#[test]
-fn codex_early_exit_reports_the_tail_of_its_stderr() {
-    assert_eq!(
-        codex_app_server_closed_message(" \n"),
-        "Codex app server closed unexpectedly"
-    );
-    assert_eq!(
-        codex_app_server_closed_message(
-            "Error: model_providers contains reserved built-in provider IDs: `openai`.\nin `model_providers`\n"
-        ),
-        "Codex app server closed unexpectedly: Error: model_providers contains reserved built-in provider IDs: `openai`. in `model_providers`"
-    );
-    let long = format!("{}final cause", "noise ".repeat(400));
-    let message = codex_app_server_closed_message(&long);
-    assert!(message.ends_with("final cause"));
-    assert!(message.contains('…'));
-    assert!(message.chars().count() < 700);
-}
-
-#[test]
-fn codex_early_exit_includes_stderr_from_the_real_process() {
-    let mut child = Command::new("/bin/sh")
-        .args(["-c", "echo 'fatal: bad config' >&2; exit 1"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let messages = spawn_codex_app_server_reader(child.stdout.take().unwrap(), child.stderr.take());
-    let error = messages
-        .recv_timeout(Duration::from_secs(5))
-        .unwrap()
-        .unwrap_err();
-    let _ = child.wait();
-    assert_eq!(
-        error,
-        "Codex app server closed unexpectedly: fatal: bad config"
-    );
-}
+#[path = "providers/runners/codex_tests.rs"]
+mod providers_runners_codex_tests;

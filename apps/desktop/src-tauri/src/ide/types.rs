@@ -1,6 +1,6 @@
 //! Ide types.
 
-use crate::default_custom_task_group;
+use crate::ide::task_discovery::default_custom_task_group;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,

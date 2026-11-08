@@ -84,8 +84,11 @@ pub(crate) fn retry_after(
 mod tests {
     use super::*;
     use crate::{
-        claude_rate_limit_used_percent, provider_usage_windows_from_anthropic_usage,
-        usage_refresh_fallback, ProviderUsageSnapshot,
+        providers::stdout::claude_rate_limit_used_percent,
+        usage::{
+            fetch::{provider_usage_windows_from_anthropic_usage, usage_refresh_fallback},
+            types::ProviderUsageSnapshot,
+        },
     };
 
     #[test]

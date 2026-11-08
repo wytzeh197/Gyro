@@ -10,8 +10,12 @@
 //! The call only validates the folder and reports it. The desktop frontend
 //! performs the switch when it receives the `workspace` resource, and only
 //! while the asking chat is still the one on screen.
-use super::*;
+use crate::{
+    capabilities::access::capability_argument_string, git_branch_service::git_branch_catalog_impl,
+};
+use gyro_core::{CapabilityId, CapabilityRequest, CapabilityResourceRef, GyroPaths};
 use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 
 const MAX_FOLDER_PATH_CHARS: usize = 4_096;
 

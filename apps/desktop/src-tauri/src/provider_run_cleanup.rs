@@ -1,6 +1,21 @@
 //! Run-owned cleanup survives early returns, worker panics, and dropped IPC callers.
-use super::*;
 
+use crate::{
+    app::limits::MAX_CONCURRENT_PROVIDER_RUNS,
+    goal_runner,
+    providers::{chat_types::ProviderChatRequest, events::append_provider_status_event},
+    state::{managers::ProviderCancellationManager, provider_run::ProviderRunControl},
+};
+use gyro_core::{HarnessRunStatus, SessionStore};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+};
+use tauri::Manager;
+use uuid::Uuid;
 pub(super) struct ProviderHeartbeat {
     stop: Arc<AtomicBool>,
     worker: Option<std::thread::JoinHandle<()>>,
@@ -168,6 +183,12 @@ impl Drop for ProviderTurnFinalizer<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        provider_session_lifecycle::ProviderSessionLease,
+        providers::events::provider_turn_has_unfinished_attempt,
+    };
+    use gyro_core::{GyroPaths, SessionEventKind};
+    use std::time::Duration;
 
     fn setup() -> (
         tempfile::TempDir,

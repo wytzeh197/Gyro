@@ -1,7 +1,10 @@
 //! In-process scheduler state: the wake signal, the run clock, provider-slot
 //! admission and the lease heartbeat.
 
-use crate::{ProviderCancellationManager, ProviderRunControl, MAX_CONCURRENT_PROVIDER_RUNS};
+use crate::{
+    app::limits::MAX_CONCURRENT_PROVIDER_RUNS,
+    state::{managers::ProviderCancellationManager, provider_run::ProviderRunControl},
+};
 use gyro_core::{AutomationStore, GyroPaths};
 use std::{
     collections::HashMap,

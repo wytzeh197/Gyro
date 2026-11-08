@@ -1,6 +1,9 @@
 //! Workspace types.
 
-use crate::{GitBranchCatalog, SourceControlStatus, TaskDefinitionResult, TestTreeItemResult};
+use crate::{
+    git::types::{GitBranchCatalog, SourceControlStatus},
+    ide::types::{TaskDefinitionResult, TestTreeItemResult},
+};
 use gyro_core::{MutationProposal, SessionEvent};
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize)]

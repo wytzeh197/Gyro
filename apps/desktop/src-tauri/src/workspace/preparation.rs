@@ -5,12 +5,13 @@ use crate::{
         WORKSPACE_PREPARATION_WAIT_TIMEOUT,
     },
     git_branch_service::git_branch_catalog_before,
-    git_status_cache, git_status_read_failure,
+    git_status_cache,
+    git_status_cache::git_status_read_failure,
     ide::task_discovery::{task_discover_impl, test_tree_from_tasks},
     state::workspace::{
         WorkspacePreparationManager, WorkspacePreparationState, WorkspaceWatchManager,
     },
-    to_string,
+    stores::to_string,
     workspace::types::{
         WorkspacePreparationError, WorkspacePreparationProgress, WorkspacePreparationRequest,
         WorkspacePreparationSnapshot,

@@ -3,7 +3,7 @@ use crate::{
         DiagnosticsConfigSummary, DiagnosticsExportBundle, DiagnosticsExportResult,
         DiagnosticsSessionSummary,
     },
-    open_store, to_string,
+    stores::{open_store, to_string},
 };
 use gyro_core::{
     GyroConfig, GyroPaths, ProviderHealthCheck, ProviderHealthRequest, SessionOrigin,

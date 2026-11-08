@@ -1,7 +1,7 @@
 {
   "apps/desktop/src/App.tsx": 20329,
-  "apps/desktop/src-tauri/src/lib.rs": 662,
-  "apps/desktop/src-tauri/src/tests.rs": 9744,
+  "apps/desktop/src-tauri/src/lib.rs": 236,
+  "apps/desktop/src-tauri/src/tests.rs": 9414,
   "crates/gyro-cli/src/main.rs": 7367,
   "packages/ui/src/styles.css": 42464,
   "packages/ui/src/surfaces.tsx": 29926

@@ -549,7 +549,7 @@ pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
 fn restore_and_focus_main_window(app: &AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        crate::restore_main_window(app).map_err(|error| error.to_string())?;
+        crate::app::shutdown::restore_main_window(app).map_err(|error| error.to_string())?;
     }
     #[cfg(not(target_os = "macos"))]
     if let Some(window) = app.get_webview_window("main") {

@@ -1,6 +1,30 @@
 //! Recover rate limits and overloads inside an acknowledged native conversation.
-use super::*;
 
+use crate::{
+    app::{config::load_config_blocking, limits::PROVIDER_CHAT_EVENT},
+    project_import_continuation, provider_reliability,
+    provider_reliability::is_transient_provider_error,
+    provider_retry_recovery, provider_timeline,
+    providers::{
+        chat_types::ProviderChatRequest,
+        events::next_provider_event_sequence,
+        process::{is_stale_resume_error, provider_adapter_for},
+        retry::{persist_failed_provider_attempt, wait_before_provider_retry},
+        runners::kimi_acp::{
+            compatible_provider_session_binding, provider_resume_cursor_from_binding,
+        },
+        stdout::provider_activities_for_response,
+        streaming::{provider_chat_cancelled, provider_stop_message},
+        types::{
+            ProviderAdapterKind, ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput,
+        },
+    },
+    stores::{open_store, parse_uuid},
+};
+use gyro_core::{ProviderSessionBinding, SessionEventKind, SessionStore};
+use std::time::Duration;
+use tauri::Emitter;
+use uuid::Uuid;
 pub(super) const CAPACITY_RETRY_DELAY: Duration = Duration::from_secs(30);
 pub(super) const CAPACITY_RETRY_EXHAUSTED: &str =
     "The model is still busy after three automatic attempts.";
@@ -609,6 +633,15 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        provider_reliability::provider_failure_recovery,
+        providers::{
+            chat_types::ChatMode, events::append_provider_status_event,
+            retry::is_provider_cancellation, types::ProviderActivity,
+        },
+        state::provider_run::ProviderStopReason,
+    };
+    use gyro_core::{GyroPaths, HarnessRunStatus, SessionOrigin};
 
     #[test]
     fn manual_retry_does_not_inherit_exhausted_metadata_from_an_older_cycle() {

@@ -1,5 +1,4 @@
 use crate::{
-    advertised_capability_descriptors,
     app::{
         config::load_config_blocking,
         limits::{
@@ -8,6 +7,7 @@ use crate::{
             MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES,
         },
     },
+    capabilities::mcp_server::advertised_capability_descriptors,
     context_compaction,
     conversation_history::acp_conversation_history_text_for_session,
     delegated_agents, openai_compatible_runner,
@@ -17,7 +17,7 @@ use crate::{
         managers::{CapabilityIdeEvidenceManager, ProviderCancellationManager},
         provider_run::BoundProviderCapabilityContext,
     },
-    to_string,
+    stores::to_string,
 };
 use gyro_core::{
     CapabilityPolicySnapshot, CapabilityRunMode, GyroConfig, GyroPaths, Session, SessionStore,

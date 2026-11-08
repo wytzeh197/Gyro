@@ -1,8 +1,8 @@
 //! State provider_run.
 
 use crate::{
-    provider_spend_guard, provider_timeline, session_title_stream, ProviderCancellationManager,
-    ProviderChatRequest,
+    provider_spend_guard, provider_timeline, providers::chat_types::ProviderChatRequest,
+    session_title_stream, state::managers::ProviderCancellationManager,
 };
 use gyro_core::{
     timing, CancellationToken, CapabilityApprovalDecision, CapabilityPolicySnapshot,

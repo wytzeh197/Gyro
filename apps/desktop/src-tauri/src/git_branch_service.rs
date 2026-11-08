@@ -1,10 +1,28 @@
 //! Shared, read-only branch discovery for the desktop and agent tools.
 //! Only unfinished reads are shared: a later call always reads fresh refs.
 //! Reads stay worktree-specific; invalidations cover their shared Git directory.
-use super::*;
+use crate::{
+    capability_output_budget,
+    capability_workspace_helpers::{workspace_result_byte_limit, workspace_result_bytes_schema},
+    command_execution::bounded_command_error,
+    git::{
+        commands::{git_command, sort_branch_catalog_entries},
+        types::{GitBranchCatalog, GitBranchTip, GitLinkedWorktree},
+    },
+    git_read, git_status_cache,
+    ide::task_discovery::content_hash,
+    workspace::files::workspace_root,
+};
+use gyro_core::CapabilityId;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Weak};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
+    time::{Duration, Instant},
+};
 
 type BranchResult = Result<GitBranchCatalog, ReadError>;
 
@@ -512,6 +530,12 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        capabilities::mcp_server::desktop_capability_tool_schema,
+        git::{commands::git_rename_branch_impl, types::GitCheckoutBranchRequest},
+    };
+    use gyro_core::CapabilityClass;
+    use std::process::Command;
 
     fn git(root: &Path, args: &[&str]) -> String {
         let output = Command::new("git")

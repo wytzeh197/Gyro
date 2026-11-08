@@ -1,11 +1,37 @@
 //! Confined workspace inspection. Every admitted child action re-enters the broker.
-use super::*;
+use crate::{
+    app::limits::PROVIDER_APPROVAL_EVENT,
+    capabilities::{
+        access::capability_argument_string,
+        approval::capability_event,
+        mcp_server::{advertised_capability_descriptors, desktop_capability_tool_schema},
+    },
+    capability_workspace_helpers::{workspace_result_byte_limit, DEFAULT_WORKSPACE_RESULT_BYTES},
+    ide::debug::redact_json_strings,
+    provider_reliability,
+    state::{
+        managers::{ProviderCancellationManager, ProviderCapabilityBroker},
+        provider_run::BoundProviderCapabilityContext,
+    },
+};
+use gyro_core::{
+    CapabilityApprovalDecision, CapabilityId, CapabilityRequest, CapabilityResourceRef,
+    CapabilityResponse, CapabilityRunMode, CapabilityStatus, SessionEventKind, SessionStore,
+    PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+};
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    path::{Path, PathBuf},
+    sync::{mpsc, Arc, Mutex},
+    time::{Duration, Instant},
+};
+use tauri::{Emitter, Manager};
+use uuid::Uuid;
 
 const MAX_SOURCE: usize = 16 * 1024;
 const MAX_FRAME: usize = 128 * 1024;
@@ -615,6 +641,7 @@ fn run_worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
     fn binary() -> PathBuf {
         worker_path().expect("Build the Code Mode helper before running its tests")
     }

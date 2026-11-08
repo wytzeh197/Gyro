@@ -1,7 +1,34 @@
 //! Observe raw deltas from every provider, including ACP and owned API runners.
 //! Native runners that already extract titles still use the same rename guard.
-use super::*;
 
+use crate::{
+    context_compaction,
+    provider_accounting::record_provider_usage,
+    provider_spend_guard,
+    providers::{
+        binding::bind_provider_capability_context,
+        chat_types::{ChatMode, ProviderChatRequest},
+        markers::{
+            publish_streamed_session_title, sanitize_session_title_candidate,
+            take_visible_stream_text, GYRO_SESSION_TITLE_MARKER,
+        },
+        retry::run_provider_chat_once,
+        streaming::provider_chat_cancelled,
+        types::ProviderRunAttempt,
+    },
+    sessions::titles::{is_generic_session_title, SESSION_TITLE_FIRST_TURN_INSTRUCTION},
+    state::{managers::ProviderCancellationManager, provider_run::ProviderRunControl},
+    stores::parse_uuid,
+    usage::guard::{usage_guard_block, UsageContext},
+};
+use gyro_core::{CancellationToken, Session, SessionStore, UsageOrigin, UsageOutcome};
+use std::{
+    collections::HashMap,
+    sync::{mpsc, Arc},
+    time::{Duration, Instant},
+};
+use tauri::{Emitter, Manager};
+use uuid::Uuid;
 #[derive(Default)]
 pub(super) struct SessionTitleStream {
     hold: String,
@@ -114,7 +141,8 @@ fn repair_request(request: &ProviderChatRequest, task: &str) -> ProviderChatRequ
     repair.workspace_context = None;
     repair.workspace_check = None;
     repair.side_chat_context = None;
-    repair.internal_purpose = Some(crate::InternalRequestPurpose::SessionTitle);
+    repair.internal_purpose =
+        Some(crate::providers::chat_types::InternalRequestPurpose::SessionTitle);
     repair
 }
 
@@ -339,6 +367,8 @@ pub(super) fn repair_missing(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ollama_runner::{ollama_compatibility_system, parse_ollama_compatibility_action};
+    use gyro_core::{GyroPaths, SessionOrigin};
 
     #[test]
     fn session_title_repair_covers_every_registered_provider_and_catalog_model() {

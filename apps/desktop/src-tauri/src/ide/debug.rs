@@ -1,10 +1,18 @@
 //! Debug adapter commands and protocol handling.
 
 use crate::{
-    command_with_gui_path, language_server, to_string, workspace_root, DebugAdapterManager,
-    DebugAdapterProcess, DebugSendRequest, DebugSessionResult, DebugStartRequest,
-    MAX_DAP_OUTPUT_EVENT_BYTES, MAX_DEBUG_ADAPTER_PROCESSES,
-    MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE, MAX_IDE_PROTOCOL_RESPONSE_BYTES,
+    app::limits::{
+        MAX_DAP_OUTPUT_EVENT_BYTES, MAX_DEBUG_ADAPTER_PROCESSES,
+        MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE, MAX_IDE_PROTOCOL_RESPONSE_BYTES,
+    },
+    ide::types::{
+        DebugAdapterManager, DebugAdapterProcess, DebugSendRequest, DebugSessionResult,
+        DebugStartRequest,
+    },
+    language_server,
+    providers::process::command_with_gui_path,
+    stores::to_string,
+    workspace::files::workspace_root,
 };
 use std::{
     process::Stdio,

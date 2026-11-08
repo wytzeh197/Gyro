@@ -1,12 +1,17 @@
 //! Terminal pane commands and process management.
 
 #[cfg(target_os = "macos")]
-use crate::run_bounded_command;
+use crate::command_execution::run_bounded_command;
 use crate::{
-    parse_uuid, project_import_continuation, refresh_model_terminal_boundary,
-    release_pane_governance, resolve_pane_governance, to_string, user_home_directory,
-    ProviderCapabilityResourceManager, TerminalPaneRequest, TerminalPaneSnapshot,
-    TerminalProcessManager,
+    command_execution::refresh_model_terminal_boundary,
+    diagnostics::export::user_home_directory,
+    project_import_continuation,
+    state::managers::ProviderCapabilityResourceManager,
+    stores::{parse_uuid, to_string},
+    terminal::{
+        governance::{release_pane_governance, resolve_pane_governance},
+        types::{TerminalPaneRequest, TerminalPaneSnapshot, TerminalProcessManager},
+    },
 };
 use gyro_core::CapabilityResourceRef;
 use std::path::PathBuf;

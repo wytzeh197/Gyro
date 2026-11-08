@@ -1,12 +1,22 @@
 //! Git workspace commands and operations.
 
 use crate::{
-    assert_workspace_entry, bounded_command_error, command_with_gui_path, git_branch_catalog_impl,
-    git_branch_service, git_repo_root, git_status_impl, open_store, parse_uuid,
-    run_bounded_command, run_command_output, run_command_output_with_limits, to_string,
-    workspace_root, GitBranchCatalog, GitCheckoutBranchRequest, GitCommitRequest,
-    GitCreateBranchRequest, GitLinkedWorktree, GitPathRequest, GitRemoveWorktreeRequest,
-    GitStageRequest, GitSyncRequest, GitSyncResult, IdeCommandOutput, SourceControlStatus,
+    command_execution::{
+        bounded_command_error, run_bounded_command, run_command_output,
+        run_command_output_with_limits,
+    },
+    git::types::{
+        GitBranchCatalog, GitCheckoutBranchRequest, GitCommitRequest, GitCreateBranchRequest,
+        GitLinkedWorktree, GitPathRequest, GitRemoveWorktreeRequest, GitStageRequest,
+        GitSyncRequest, GitSyncResult, SourceControlStatus,
+    },
+    git_branch_service,
+    git_branch_service::git_branch_catalog_impl,
+    git_status_cache::{git_repo_root, git_status_impl},
+    ide::types::IdeCommandOutput,
+    providers::process::command_with_gui_path,
+    stores::{open_store, parse_uuid, to_string},
+    workspace::files::{assert_workspace_entry, workspace_root},
 };
 use gyro_core::{CancellationToken, Session};
 use std::{

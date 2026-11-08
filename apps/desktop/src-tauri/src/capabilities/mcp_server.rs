@@ -1,12 +1,13 @@
 use crate::{
     app::limits::{MAX_BROWSER_PREVIEW_CAPTURE_BYTES, MAX_PERMISSION_MCP_MESSAGE_BYTES},
     browser::types::BROWSER_OBSERVATION_SCHEMA_V1,
-    browser_viewport, capability_output_budget, capability_uses_workspace_root, code_mode,
-    delegated_agents, desktop_provider_ipc_paths, efficiency, git_branch_service,
-    git_history_capability, lsp_capability, memory_capability, provider_mcp, provider_tool_batch,
-    subagent_capability, web_fetch_capability, workspace_edit_capability,
-    workspace_open_capability, workspace_path_capability, workspace_result_bytes_schema,
-    write_bounded_json_line,
+    browser_viewport, capability_output_budget,
+    capability_workspace_helpers::{capability_uses_workspace_root, workspace_result_bytes_schema},
+    code_mode, delegated_agents, efficiency, git_branch_service, git_history_capability,
+    ipc::cli::{desktop_provider_ipc_paths, write_bounded_json_line},
+    lsp_capability, memory_capability, provider_mcp, provider_tool_batch, subagent_capability,
+    web_fetch_capability, workspace_edit_capability, workspace_open_capability,
+    workspace_path_capability,
 };
 use anyhow::Context;
 use base64::Engine;

@@ -1,5 +1,22 @@
-use super::*;
-
+use crate::{
+    app::limits::PROVIDER_CHAT_EVENT,
+    delegated_agents, efficiency, provider_context,
+    provider_context::{provider_context_usage_from_app_server, ProviderContextUsage},
+    provider_spend_guard,
+    providers::{
+        chat_types::ProviderChatRequest,
+        events::{emit_provider_context_usage, next_provider_event_sequence},
+        types::ProviderRunnerOutput,
+    },
+    state::managers::ProviderCancellationManager,
+    stores::parse_uuid,
+    usage::{fetch::remember_provider_rate_limits_in, guard::UsageContext},
+};
+use gyro_core::{
+    timing, CapabilityStatus, SessionEventKind, SessionStore, UsageEntry, UsageOutcome, UsageTokens,
+};
+use tauri::{Emitter, Manager};
+use uuid::Uuid;
 #[path = "codex_rollout_usage.rs"]
 mod codex_rollout_usage;
 #[path = "native_accounting.rs"]
@@ -651,6 +668,11 @@ pub(super) fn tool_timing(call_id: Uuid, status: CapabilityStatus) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        provider_retry_recovery::run_provider_chat_with_retry_using,
+        providers::types::ProviderResumeCursor,
+    };
+    use gyro_core::{GyroPaths, SessionOrigin, UsageOrigin};
 
     #[test]
     fn diagnostics_do_not_turn_native_or_unattempted_runs_into_zeroes() {

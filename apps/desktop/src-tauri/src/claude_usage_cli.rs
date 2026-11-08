@@ -12,8 +12,12 @@
 //! been refused, then asks the endpoint again; if that still fails, the levels
 //! the command printed are the reading.
 
-use super::*;
-
+use crate::{
+    providers::process::command_for_provider,
+    stores::to_string,
+    usage::{fetch::plan_window_status, types::ProviderRateLimitWindow},
+};
+use std::{io::Read, process::Stdio, time::Duration};
 /// The CLI starts in a few seconds; a hung keychain prompt must not hold the
 /// usage poll's mutex for long.
 const CLAUDE_USAGE_CLI_TIMEOUT: Duration = Duration::from_secs(30);

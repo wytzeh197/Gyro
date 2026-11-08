@@ -1,7 +1,7 @@
 use crate::{
-    goal_runner, open_store, parse_uuid, session_goal,
+    goal_runner, session_goal,
     state::provider_run::{stop_provider_run, ProviderStopReason},
-    to_string,
+    stores::{open_store, parse_uuid, to_string},
 };
 use gyro_core::{SessionEvent, SessionEventKind};
 #[tauri::command]

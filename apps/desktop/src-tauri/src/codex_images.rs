@@ -2,9 +2,29 @@
 //! Keep image bytes out of activities/transcripts and use the existing private,
 //! session-scoped attachment storage and preview resolver.
 
-use super::*;
+use crate::{
+    app::limits::{
+        MAX_CHAT_ATTACHMENTS, MAX_CHAT_IMAGE_BYTES, MAX_CHAT_RESPONSE_CHARS, TEXT_TRUNCATION_SUFFIX,
+    },
+    providers::{chat_types::ChatMode, types::ProviderActivity},
+    sessions::{
+        attachments::{
+            ensure_attachment_storage_quota, ensure_private_attachment_directory,
+            validated_chat_media_type, write_private_attachment,
+        },
+        commands::attachment_session_lock,
+    },
+    stores::parse_uuid,
+    text::truncate_chars,
+    workspace::files::read_bounded_regular_file,
+};
 use base64::Engine as _;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 pub(super) const REPLY_INSTRUCTION: &str = "When the user asks to generate or edit an image, use the native image-generation tool if it is available. Gyro saves its output and displays it in chat. Do not substitute a text description for the requested image or claim generation succeeded when the tool failed. If the tool is unavailable, say so.";
 
@@ -221,7 +241,9 @@ fn store_image(sessions_dir: &Path, session_id: &str, bytes: &[u8]) -> Result<Pa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat_images;
     use serde_json::json;
+    use std::fs;
 
     const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
     const SESSION: &str = "12345678-1234-1234-1234-123456789abc";

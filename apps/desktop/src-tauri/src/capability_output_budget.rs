@@ -1,5 +1,10 @@
 //! Model-facing observations retain full backing data and return bounded pages.
-use super::*;
+use crate::{
+    capability_workspace_helpers::{workspace_result_byte_limit, workspace_result_bytes_schema},
+    ide::debug::redact_json_strings,
+    terminal_wait,
+};
+use gyro_core::CapabilityId;
 use serde_json::{json, Value};
 
 #[derive(Clone, Copy)]
@@ -353,6 +358,9 @@ pub(super) fn browser_page_result(mut data: Value, max_bytes: usize) -> anyhow::
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        capability_workspace_helpers::DEFAULT_WORKSPACE_RESULT_BYTES, terminal_capability,
+    };
 
     #[test]
     fn explicit_git_status_limit_and_invalid_page_limits_are_honored() {

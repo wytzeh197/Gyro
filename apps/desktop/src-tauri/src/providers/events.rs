@@ -3,7 +3,8 @@ use crate::{
         config::load_config_blocking,
         limits::{MAX_DESKTOP_SESSION_EVENTS_READ, PROVIDER_CHAT_EVENT},
     },
-    context_compaction, live_model_context, provider_context_usage_with_window,
+    context_compaction, live_model_context,
+    provider_context::{provider_context_usage_with_window, ProviderContextUsage},
     provider_reliability,
     provider_reliability::{provider_failure_recovery, readable_provider_error},
     provider_retry_recovery, provider_session_lifecycle, provider_timeline,
@@ -17,7 +18,6 @@ use crate::{
     state::managers::ProviderCancellationManager,
     text::chat_message_preview,
     usage::fetch::publish_live_provider_usage,
-    ProviderContextUsage,
 };
 use gyro_core::{
     timing, timing::Stage as TimingStage, HarnessRunStatus, ProviderDiagnosticsPayload,

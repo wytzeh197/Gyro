@@ -1,6 +1,9 @@
-use super::{
-    assert_workspace_path, bounded_command_error, git_command, git_main_comparison_base, git_read,
-    workspace_root,
+use super::git_read;
+use crate::{
+    command_execution::bounded_command_error,
+    git::commands::git_command,
+    git_main_comparison::git_main_comparison_base,
+    workspace::files::{assert_workspace_path, workspace_root},
 };
 use serde::{Deserialize, Serialize};
 use std::{

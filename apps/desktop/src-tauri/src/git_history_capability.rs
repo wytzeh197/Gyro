@@ -8,9 +8,23 @@
 //! the read tools use. Output arrives bounded and secret-redacted from
 //! `run_command_output_with_limits`, and is bounded again here per line and per
 //! entry so one call cannot spend a whole turn's context.
-use super::*;
+use crate::{
+    app::limits::MAX_WORKSPACE_FILE_EDIT_BYTES,
+    capabilities::access::{
+        capability_argument_string, capability_argument_u64, capability_argument_usize,
+    },
+    capability_output_budget,
+    capability_workspace_helpers::{workspace_result_byte_limit, workspace_result_bytes_schema},
+    command_execution::run_command_output_with_limits,
+    git::commands::git_command,
+    ide::types::IdeCommandOutput,
+    state::provider_run::BoundProviderCapabilityContext,
+    workspace::files::read_bounded_regular_file,
+};
+use gyro_core::{CancellationToken, CapabilityId, CapabilityRequest, CapabilityResourceRef};
 use serde_json::{json, Value};
 use std::time::Duration;
+use std::{path::Path, process::Command};
 
 const GIT_HISTORY_SCHEMA: &str = "gyro.git-history.v1";
 const GIT_HISTORY_TIMEOUT: Duration = Duration::from_secs(30);

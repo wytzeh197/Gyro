@@ -1,11 +1,12 @@
 use crate::{
     app::config::load_config_blocking,
     capabilities::types::{CapabilityIdeEvidenceUpdate, SaveProjectCapabilityPolicyRequest},
+    capability_workspace_helpers::normalize_workspace_context_paths,
     code_mode,
     ide::debug::redact_json_strings,
-    normalize_workspace_context_paths, open_store, openai_compatible_runner,
+    openai_compatible_runner,
     state::managers::CapabilityIdeEvidenceManager,
-    to_string,
+    stores::{open_store, to_string},
     workspace::files::workspace_root,
 };
 use gyro_core::{

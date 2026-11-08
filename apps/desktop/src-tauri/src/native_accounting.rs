@@ -1,7 +1,8 @@
 //! Native Claude stream accounting. Request snapshots are keyed by message ID;
 //! assistant output is provisional until message_stop or a successful result.
-use super::*;
+use crate::provider_context::ProviderContextUsage;
 use gyro_core::usage::{UsageReason, UsageScope};
+use gyro_core::UsageTokens;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Default)]

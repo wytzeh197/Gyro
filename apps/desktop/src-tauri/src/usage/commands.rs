@@ -1,4 +1,4 @@
-use crate::{open_store, to_string};
+use crate::stores::{open_store, to_string};
 use gyro_core::{GyroConfig, GyroPaths, UsageTotals};
 use serde::Serialize;
 /// What one provider has spent, measured by Gyro rather than reported by it.

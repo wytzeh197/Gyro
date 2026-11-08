@@ -6,7 +6,7 @@ use crate::{
     },
     ide::task_discovery::content_hash,
     state::workspace::WorkspaceWatchManager,
-    to_string,
+    stores::to_string,
     workspace::{
         files::{
             assert_workspace_entry, assert_workspace_path, read_bounded_regular_file,

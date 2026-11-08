@@ -1,6 +1,8 @@
 //! Providers chat_types.
 
-use crate::{efficiency, ProviderResumeCursor, MAX_CHAT_VIDEO_BYTES};
+use crate::{
+    app::limits::MAX_CHAT_VIDEO_BYTES, efficiency, providers::types::ProviderResumeCursor,
+};
 use gyro_core::{Session, SessionEvent, WorkspaceCheckReport, WorkspaceContextSnapshot};
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]

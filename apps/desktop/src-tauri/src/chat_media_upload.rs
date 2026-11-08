@@ -1,6 +1,11 @@
 //! Bounded raw-byte media ingestion; file validation and storage stay native.
-use super::*;
 
+use crate::{
+    app::limits::{MAX_CHAT_IMAGE_BYTES, MAX_CHAT_VIDEO_BYTES},
+    providers::chat_types::{PrepareChatAttachmentRequest, PreparedChatAttachment},
+    sessions::attachments::prepare_chat_attachment_blocking,
+};
+use base64::Engine;
 /// Dropped and pasted media arrive as a raw IPC body. Encoding a video as a
 /// JSON number array inflates it several times over and stalls the webview.
 #[tauri::command]

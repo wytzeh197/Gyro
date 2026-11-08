@@ -1,5 +1,10 @@
 //! Small workspace overviews and retrievable pages of live IDE evidence.
-use super::*;
+use crate::{
+    capability_output_budget,
+    capability_workspace_helpers::{workspace_context_metadata, workspace_result_byte_limit},
+    ide::debug::redact_json_strings,
+};
+use gyro_core::WorkspaceContextSnapshot;
 use serde_json::{json, Value};
 
 const COLLECTIONS: [&str; 4] = ["diagnostics", "testFailures", "visibleTabs", "buffers"];
@@ -122,6 +127,7 @@ pub(super) fn diagnostics(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability_workspace_helpers::DEFAULT_WORKSPACE_RESULT_BYTES;
 
     fn context() -> WorkspaceContextSnapshot {
         let mut context = WorkspaceContextSnapshot::empty("/workspace");

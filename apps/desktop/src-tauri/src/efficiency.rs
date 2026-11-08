@@ -1,10 +1,42 @@
 //! Desktop integration for local, inspectable efficiency policies.
-use super::*;
+use crate::{
+    app::{config::load_config_blocking, limits::MAX_WORKSPACE_FILE_EDIT_BYTES},
+    capabilities::bridge::active_provider_capability_context,
+    capability_output_budget,
+    capability_workspace_helpers::workspace_result_bytes_schema,
+    ide::task_discovery::content_hash,
+    model_catalog,
+    providers::{
+        chat_types::ProviderChatRequest, events::emit_provider_activity_event,
+        types::ProviderActivity,
+    },
+    state::{
+        managers::{with_ide_evidence, CapabilityIdeEvidenceManager, ProviderCancellationManager},
+        provider_run::{
+            stop_provider_run, BoundProviderCapabilityContext, ProviderRunControl,
+            ProviderStopReason,
+        },
+    },
+    stores::{open_store, parse_uuid, to_string},
+    workspace_capability_list,
+};
 use gyro_core::efficiency::{
     checkpoint::{AgentNotes, FileEvidence, TaskCheckpoint},
     progress::Decision,
 };
+use gyro_core::{
+    timing, CapabilityId, CapabilityRequest, CapabilityResourceRef, CapabilityResponse, GyroConfig,
+    GyroPaths, SessionEvent, SessionEventKind, SessionStore,
+};
 use serde_json::{json, Value};
+use std::{
+    collections::HashSet,
+    fs,
+    path::Path,
+    sync::{Arc, Mutex},
+};
+use tauri::Manager;
+use uuid::Uuid;
 static ROUTE_LOCK: Mutex<()> = Mutex::new(());
 
 thread_local! { static PROMPT_SECTIONS: std::cell::RefCell<Option<(String,String)>> = const {std::cell::RefCell::new(None)}; }

@@ -1,11 +1,21 @@
 //! Workspace task and test commands.
 
 use crate::{
-    assert_workspace_path, cancel_task_run, command_with_gui_path, custom_task_create_impl,
-    custom_task_delete_impl, run_workspace_task_output_with_cancellation, task_discover_impl,
-    test_discover_impl, to_string, workspace_root, CustomTaskCreateRequest,
-    CustomTaskDeleteRequest, IdeCommandAdmission, IdeCommandOutput, TaskCancelRequest,
-    TaskDefinitionResult, TaskRunHandle, TaskRunRequest, TestRunRequest, TestTreeItemResult,
+    command_execution::run_workspace_task_output_with_cancellation,
+    ide::{
+        task_discovery::{
+            custom_task_create_impl, custom_task_delete_impl, task_discover_impl,
+            test_discover_impl,
+        },
+        types::{
+            CustomTaskCreateRequest, CustomTaskDeleteRequest, IdeCommandOutput, TaskCancelRequest,
+            TaskDefinitionResult, TaskRunRequest, TestRunRequest, TestTreeItemResult,
+        },
+    },
+    providers::process::command_with_gui_path,
+    state::managers::{cancel_task_run, IdeCommandAdmission, TaskRunHandle},
+    stores::to_string,
+    workspace::files::{assert_workspace_path, workspace_root},
 };
 use std::{
     path::{Path, PathBuf},

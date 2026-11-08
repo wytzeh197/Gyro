@@ -81,7 +81,7 @@ pub(super) fn start(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>>
     if !super::session_browser::browser_url_is_loopback(&url) {
         return Err("native browser fixture page must be loopback".into());
     }
-    let store = super::open_store()?;
+    let store = crate::stores::open_store()?;
     let mut sessions = Vec::new();
     for name in ["first", "second"] {
         let workspace = root.join("workspaces").join(name);

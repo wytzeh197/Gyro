@@ -9,8 +9,27 @@
 //! run one at a time. When a sibling edit moves the hash and the matched text
 //! is still there, the same replacement is applied to the current file instead
 //! of failing the tool call.
-use super::*;
+use crate::{
+    app::{
+        config::load_config_blocking,
+        limits::{MAX_WORKSPACE_FILE_EDIT_BYTES, PROVIDER_CAPABILITY_EVENT},
+    },
+    capabilities::access::{capability_argument_string, capability_full_access_enabled},
+    delegated_agents,
+    ide::task_discovery::content_hash,
+    state::{managers::with_ide_evidence, provider_run::BoundProviderCapabilityContext},
+    stores::open_store,
+    workspace::{files::read_bounded_regular_file, types::FileMutationProposalRequest},
+    workspace_mutations,
+};
+use gyro_core::{
+    CapabilityId, CapabilityRequest, CapabilityResourceRef, CapabilityRunMode, MutationProposal,
+    SessionStore, WorkspaceContextSnapshot,
+};
 use serde_json::{json, Value};
+use std::path::Path;
+use tauri::Emitter;
+use uuid::Uuid;
 
 const IMMEDIATE_EDIT_ATTEMPTS: usize = 4;
 
@@ -459,6 +478,12 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        ide::debug::redact_json_strings,
+        workspace_mutations::create_file_mutation_proposal_in_store,
+    };
+    use gyro_core::{GyroPaths, SessionOrigin};
+    use std::{fs, path::PathBuf};
 
     #[test]
     fn large_proposals_return_the_durable_outcome_within_the_tool_budget() {

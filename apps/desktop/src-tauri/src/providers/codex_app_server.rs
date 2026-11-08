@@ -5,7 +5,7 @@ use crate::{
         chat_types::ProviderChatRequest,
         streaming::{provider_chat_cancelled, provider_stop_message},
     },
-    to_string,
+    stores::to_string,
 };
 use std::{
     collections::VecDeque,

@@ -1,7 +1,10 @@
 use crate::{
-    active_provider_approval_nonce, active_provider_capability_context,
     app::{config::load_config_blocking, limits::MAX_CHAT_IMAGE_BYTES},
-    capability_acp_mcp_server, provider_billed_usage_from_acp_tokens,
+    capabilities::bridge::{
+        active_provider_approval_nonce, active_provider_capability_context,
+        capability_acp_mcp_server,
+    },
+    provider_context::{provider_billed_usage_from_acp_tokens, ProviderContextUsage},
     providers::{
         approvals::{
             sanitize_provider_approval_details, wait_for_provider_approval_with_transaction,
@@ -24,7 +27,6 @@ use crate::{
         managers::ProviderCancellationManager,
         provider_run::{ProviderApprovalContext, ProviderApprovalDecision},
     },
-    ProviderContextUsage,
 };
 use anyhow::Context;
 use base64::Engine;

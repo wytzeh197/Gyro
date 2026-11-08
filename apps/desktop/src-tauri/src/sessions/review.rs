@@ -1,4 +1,4 @@
-use crate::{open_store, parse_uuid, to_string};
+use crate::stores::{open_store, parse_uuid, to_string};
 use gyro_core::{FileReviewDecision, SessionEvent, SessionEventKind, FILE_REVIEW_SCHEMA};
 use serde::Deserialize;
 /// What the user did with one file on the review card.

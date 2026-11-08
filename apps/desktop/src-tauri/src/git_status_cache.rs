@@ -1,7 +1,28 @@
 //! The Git status read layer: porcelain v2 parsing, the per-repository
 //! snapshot cache, and the diff line stats that decorate Source Control.
-use super::*;
 
+use crate::{
+    app::limits::{GIT_STATUS_PREPARATION_TIMEOUT, GIT_STATUS_TIMEOUT, MAX_GIT_STATUS_CACHES},
+    command_execution::bounded_command_error,
+    git::{
+        commands::git_command,
+        types::{SourceControlFile, SourceControlStatus},
+    },
+    git_line_counts, git_main_comparison,
+    git_main_comparison::git_main_comparison_base,
+    git_read,
+    ide::task_discovery::content_hash,
+    source_control_review,
+    workspace::files::workspace_root,
+};
+use gyro_core::ExecutionTermination;
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
+    time::{Instant, SystemTime},
+};
 pub(super) fn git_status_cache() -> &'static Mutex<HashMap<PathBuf, (String, SourceControlStatus)>>
 {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, (String, SourceControlStatus)>>> =
@@ -713,6 +734,8 @@ pub(super) fn git_state_from_code(code: char) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::{commands::git_stage_blocking, types::GitStageRequest};
+    use std::{process::Command, time::Duration};
 
     fn git(repo: &Path, args: &[&str]) -> std::process::Output {
         Command::new("git")

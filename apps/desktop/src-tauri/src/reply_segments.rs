@@ -1,6 +1,6 @@
 //! Where a saved reply's streamed text blocks belong on the turn timeline.
-use super::*;
 
+use crate::providers::{markers::strip_hidden_control_markers, types::ProviderActivity};
 /// Where one streamed text block began and the tool it followed, if any.
 #[derive(Clone, Debug)]
 pub(super) struct StreamedTextBlock {

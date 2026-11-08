@@ -467,20 +467,35 @@ mod tests {
                {"providerId":"anthropic","id":"catalog-test-no-effort","displayName":"T","minClientRevision":2,
                 "supportedReasoningEfforts":[]}"#,
         ));
-        let codex =
-            |effort| crate::codex_reasoning_effort_arg(Some("catalog-test-gpt"), Some(effort));
+        let codex = |effort| {
+            crate::providers::cli_args::codex_reasoning_effort_arg(
+                Some("catalog-test-gpt"),
+                Some(effort),
+            )
+        };
         assert_eq!(codex("ultra").as_deref(), Some("ultra"));
         assert_eq!(codex("medium"), None);
-        let grok =
-            |effort| crate::grok_reasoning_effort_arg(Some("catalog-test-grok"), Some(effort));
+        let grok = |effort| {
+            crate::providers::cli_args::grok_reasoning_effort_arg(
+                Some("catalog-test-grok"),
+                Some(effort),
+            )
+        };
         assert_eq!(grok("xhigh").as_deref(), Some("xhigh"));
         assert_eq!(grok("high"), None);
-        let claude =
-            |effort| crate::claude_reasoning_effort_arg(Some("catalog-test-claude"), Some(effort));
+        let claude = |effort| {
+            crate::providers::cli_args::claude_reasoning_effort_arg(
+                Some("catalog-test-claude"),
+                Some(effort),
+            )
+        };
         assert_eq!(claude("max").as_deref(), Some("max"));
         assert_eq!(claude("high"), None);
         assert_eq!(
-            crate::claude_reasoning_effort_arg(Some("catalog-test-no-effort"), Some("high")),
+            crate::providers::cli_args::claude_reasoning_effort_arg(
+                Some("catalog-test-no-effort"),
+                Some("high")
+            ),
             None
         );
         assert_eq!(

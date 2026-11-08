@@ -1,4 +1,4 @@
-use crate::sanitize_session_title_candidate;
+use crate::providers::markers::sanitize_session_title_candidate;
 /// Placeholder titles a new chat still has when its first message arrives.
 /// A title the user already chose is left alone.
 pub(crate) fn is_generic_session_title(title: &str) -> bool {

@@ -1,5 +1,6 @@
 //! Bounded inspection identity, kept apart from the outcome/error sentence.
-use super::*;
+use gyro_core::{CapabilityId, CapabilityRequest};
+use uuid::Uuid;
 thread_local! {
     static ACTIVE: std::cell::RefCell<Vec<(Uuid, serde_json::Value)>> = const { std::cell::RefCell::new(Vec::new()) };
 }

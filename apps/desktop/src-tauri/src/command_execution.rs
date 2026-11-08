@@ -1,6 +1,21 @@
 //! Bounded command execution and credential handling for model-owned tools.
-use super::*;
+use crate::{
+    app::config::load_config_blocking, capabilities::access::capability_full_access_enabled,
+    delegated_agents, diagnostics::export::user_home_directory, ide::types::IdeCommandOutput,
+    state::provider_run::BoundProviderCapabilityContext, terminal::types::TerminalPaneRequest,
+    text::truncate_error_detail,
+};
 use gyro_core::workspace_sandbox::PreparedWorkspaceSandbox;
+use gyro_core::{
+    CancellationToken, CapabilityRunMode, CredentialPolicy, ExecutionRequest, ExecutionTermination,
+    GyroConfig, GyroPaths,
+};
+use portable_pty::CommandBuilder;
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+};
 
 /// Selected only by the capability broker. A renderer cannot opt a command
 /// out of confinement or choose its writable root. Retained across PTY restart.

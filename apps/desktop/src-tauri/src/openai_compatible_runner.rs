@@ -12,9 +12,46 @@
 //! path, cancellation flag, and streamed events as a local model's, so the
 //! transport is the only thing that differs.
 
-use super::*;
+use crate::{
+    app::config::load_config_blocking,
+    capabilities::mcp_server::{browser_result_image, mark_browser_image_attached},
+    context_compaction, delegated_agents, efficiency,
+    ollama_runner::{
+        invoke_run_capability, ollama_compatibility_catalog, ollama_compatibility_system,
+        parse_ollama_compatibility_action, validate_ollama_compatibility_call,
+        OllamaCompatibilityAction,
+    },
+    provider_accounting,
+    provider_context::OllamaTurnUsage,
+    provider_identity::provider_model_identity,
+    provider_reliability, provider_tool_batch,
+    providers::{
+        binding::{capability_run_mode_for_chat, local_conversation_history_for_request},
+        chat_types::{ChatAttachmentRequest, ChatMode, ProviderChatRequest},
+        events::{
+            emit_provider_activity_event, emit_provider_chat_event, emit_provider_context_usage,
+        },
+        markers::{publish_streamed_session_title, GYRO_SESSION_TITLE_MARKER},
+        process::provider_output_summary,
+        prompt::provider_context_message_with_capabilities,
+        stdout::provider_activities_for_response,
+        streaming::{spawn_provider_chat_heartbeat, PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS},
+        types::{ProviderAdapterDescriptor, ProviderAdapterKind, ProviderRunnerOutput},
+    },
+    state::{managers::ProviderCancellationManager, provider_run::PROVIDER_STOP_MARKER},
+    stores::open_store,
+};
+use base64::Engine;
+use gyro_core::{
+    openai_compat_endpoint, openai_compat_host_is_loopback, provider_accepts_images,
+    provider_api_key_env_name, provider_descriptor, CapabilityId, GyroConfig, GyroPaths,
+    HarnessRunStatus, OpenAiCompatChatRequest, ProviderCapabilitySupport, UsageTokens,
+    OPENAI_COMPAT_CANCELLED_MESSAGE,
+};
+use std::fs;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use tauri::Manager;
 use uuid::Uuid;
 
 fn openai_compat_tool_unsupported(error: &anyhow::Error) -> bool {
@@ -886,6 +923,7 @@ fn continue_owned_output_limit(
 #[cfg(test)]
 mod image_tests {
     use super::*;
+    use base64::Engine;
 
     #[test]
     fn a_text_only_length_finish_joins_three_times_then_stays_cut_off() {

@@ -1,6 +1,15 @@
 //! Workspace reads honor their advertised ranges and the serialized tool budget.
-use super::*;
+use crate::{
+    app::limits::{MAX_WORKSPACE_FILE_EDIT_BYTES, MAX_WORKSPACE_SEARCH_FALLBACK_BYTES},
+    capabilities::access::{capability_argument_string, capability_positive_position},
+    capability_workspace_helpers::workspace_result_byte_limit,
+    ide::debug::redact_json_strings,
+    state::{managers::with_ide_evidence, provider_run::BoundProviderCapabilityContext},
+    workspace::{files::read_workspace_file_with_limit, types::WorkspaceFileContent},
+};
+use gyro_core::{CapabilityId, CapabilityRequest, CapabilityResourceRef};
 use serde_json::{json, Value};
+use std::path::Path;
 
 pub(super) fn execute(
     app: &tauri::AppHandle,
@@ -522,6 +531,14 @@ fn bound_read_result(mut data: Value, max_bytes: usize) -> anyhow::Result<Value>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        app::limits::MAX_WORKSPACE_FILE_PREVIEW_BYTES,
+        capability_workspace_helpers::{
+            redact_workspace_capability_result, DEFAULT_WORKSPACE_RESULT_BYTES,
+        },
+        ide::task_discovery::content_hash,
+    };
+    use std::fs;
 
     #[test]
     fn held_editor_text_accepts_only_complete_live_buffers() {

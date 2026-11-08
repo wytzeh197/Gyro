@@ -284,19 +284,24 @@ pub(super) fn schema(
 
 pub(super) fn execute_capability(
     app: &tauri::AppHandle,
-    bound: &super::BoundProviderCapabilityContext,
+    bound: &crate::state::provider_run::BoundProviderCapabilityContext,
     request: &gyro_core::CapabilityRequest,
 ) -> anyhow::Result<(
     String,
     serde_json::Value,
     Option<gyro_core::CapabilityResourceRef>,
 )> {
-    let owned = super::require_model_browser_resource(app, bound)?;
+    let owned = crate::capabilities::access::require_model_browser_resource(app, bound)?;
     let viewport: BrowserViewportRequest = serde_json::from_value(request.arguments.clone())?;
     let snapshot =
         crate::session_browser::set_session_browser_viewport(app, &bound.session_id, viewport)
             .map_err(anyhow::Error::msg)?;
-    super::remember_model_browser_resource(app, bound, owned.call_id, &snapshot)?;
+    crate::capabilities::access::remember_model_browser_resource(
+        app,
+        bound,
+        owned.call_id,
+        &snapshot,
+    )?;
     let observed_viewport =
         crate::session_browser::call_agent(app, &bound.session_id, "status", serde_json::json!({}))
             .ok()

@@ -1,4 +1,4 @@
-use super::to_string;
+use crate::stores::to_string;
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]

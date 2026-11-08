@@ -1,5 +1,13 @@
-use super::*;
+use crate::{
+    command_execution::bounded_command_error,
+    ide::debug::redact_json_strings,
+    providers::process::command_with_gui_path,
+    workspace::types::{WorkspaceSearchRange, WorkspaceSearchResult},
+};
+use anyhow::Context;
+use gyro_core::{CancellationToken, ExecutionRequest, ExecutionStream};
 use serde::Deserialize;
+use std::{path::Path, time::Duration};
 
 pub(super) struct WorkspaceSearchScan {
     pub results: Vec<WorkspaceSearchResult>,
@@ -489,6 +497,14 @@ pub(super) fn parse_rg_output(output: &str, max_results: usize) -> Vec<Workspace
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        capabilities::mcp_server::desktop_capability_tool_schema,
+        capability_workspace_helpers::DEFAULT_WORKSPACE_RESULT_BYTES,
+        ide::task_discovery::content_hash, provider_tool_batch,
+        workspace_search::run_workspace_rg_search,
+    };
+    use gyro_core::CapabilityId;
+    use std::{fs, time::Instant};
 
     /// Pre-change decoding path, retained only for equivalence and opt-in timing.
     fn parse_rg_record_via_value(record: &str) -> Option<WorkspaceSearchResult> {
@@ -639,9 +655,14 @@ mod tests {
     fn workspace_search_rg_returns_full_regex_matches() {
         let workspace = tempfile::tempdir().unwrap();
         std::fs::write(workspace.path().join("a:b.txt"), "é 🦀 needle needles\n").unwrap();
-        let results =
-            super::super::run_workspace_rg_search(workspace.path(), "need\\w+", None, 10, true)
-                .unwrap();
+        let results = crate::workspace_search::run_workspace_rg_search(
+            workspace.path(),
+            "need\\w+",
+            None,
+            10,
+            true,
+        )
+        .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].path, "a:b.txt");
         assert_eq!(results[0].ranges[0].start_column, 6);

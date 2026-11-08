@@ -9,7 +9,12 @@
 //! prefix-filters the descriptor table into the golden file that
 //! `check-browser-capability.mjs` set-matches, and this tool is not part of the
 //! in-app browser's contract.
-use super::*;
+use crate::{
+    capabilities::access::capability_argument_string, capability_output_budget,
+    capability_workspace_helpers::workspace_result_bytes_schema, session_browser,
+    state::provider_run::BoundProviderCapabilityContext,
+};
+use gyro_core::{CapabilityId, CapabilityRequest, CapabilityResourceRef};
 use serde_json::{json, Value};
 
 const WEB_FETCH_SCHEMA: &str = "gyro.web-fetch.v1";

@@ -1,7 +1,7 @@
 //! What one automation run needs: its workspace, its provider, its prompt, and
 //! the stop-condition verdict parsed from the provider's reply.
 
-use crate::truncate_chars;
+use crate::text::truncate_chars;
 use gyro_core::{create_worktree, Automation, GyroPaths, SessionWorkspaceMode};
 use serde::Deserialize;
 use std::path::PathBuf;

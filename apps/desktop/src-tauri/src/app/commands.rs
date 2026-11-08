@@ -1,6 +1,6 @@
 use crate::{
     desktop_notifications::{native_permission, send_test_notification},
-    to_string,
+    stores::to_string,
 };
 #[tauri::command]
 pub(crate) async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {

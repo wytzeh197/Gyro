@@ -1,6 +1,6 @@
 //! State workspace.
 
-use crate::{WorkspaceFile, WorkspacePreparationSnapshot};
+use crate::workspace::types::{WorkspaceFile, WorkspacePreparationSnapshot};
 use notify::RecommendedWatcher;
 use std::{
     collections::{HashMap, HashSet},

@@ -5,10 +5,20 @@
 //! opened. It starts (or reuses) the workspace's language server through
 //! `language_server.rs`, opens the document on the Rust side, and reports
 //! `indexing` instead of a bogus "not found" while a cold server warms up.
-use super::*;
 use crate::language_server::{LanguageServerManager, LspFileOutcome, LspFileRequest};
+use crate::{
+    app::limits::MAX_WORKSPACE_FILE_EDIT_BYTES,
+    capabilities::access::{capability_argument_string, capability_positive_position},
+    capability_output_budget,
+    capability_workspace_helpers::{workspace_result_byte_limit, workspace_result_bytes_schema},
+    state::provider_run::BoundProviderCapabilityContext,
+    workspace::files::read_workspace_file_with_limit,
+};
+use gyro_core::{CapabilityId, CapabilityRequest, CapabilityResourceRef};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use tauri::Manager;
 
 const CODE_OBSERVATION_SCHEMA: &str = "gyro.code-observation.v1";
 const MAX_CODE_LOCATIONS: usize = 50;

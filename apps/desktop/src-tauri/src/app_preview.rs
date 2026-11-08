@@ -1,5 +1,5 @@
 //! Selected runtime ownership and framed observations. No native image is a live web page.
-use crate::{session_browser, BrowserPreviewCapture};
+use crate::{browser::types::BrowserPreviewCapture, session_browser};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -280,13 +280,14 @@ pub fn capture<R: Runtime>(
         image_height: height,
     };
     let paths = gyro_core::GyroPaths::for_current_user().map_err(|e| e.to_string())?;
-    let mut saved: BrowserPreviewCapture = crate::persist_browser_preview_capture(
-        &paths,
-        &png,
-        frame.image_width,
-        frame.image_height,
-        chrono::Utc::now(),
-    )?;
+    let mut saved: BrowserPreviewCapture =
+        crate::browser::preview::persist_browser_preview_capture(
+            &paths,
+            &png,
+            frame.image_width,
+            frame.image_height,
+            chrono::Utc::now(),
+        )?;
     saved.title = Some(target.title.clone());
     saved.resource_id = Some(format!("preview:{session}:{}", target.id));
     let reference = Reference {
@@ -299,13 +300,13 @@ pub fn capture<R: Runtime>(
         digest,
     };
     let observation = json!({
-        "schema":crate::BROWSER_OBSERVATION_SCHEMA_V1,
+        "schema":crate::browser::types::BROWSER_OBSERVATION_SCHEMA_V1,
         "owner":{"sessionId":session,"workspace":workspace},
         "target":target,"screenshot":saved,"contentRect":frame,
         "coordinateSpace":"framed-image-pixels","capturedAt":saved.created_at,
         "status":"captured","expiresAfterMs":15000,
         "interaction":if target.kind=="simulator" {"capture-only; use Simulator for native input"} else {"click"},
-        "framing":crate::BROWSER_OBSERVATION_FRAMING,
+        "framing":crate::browser::types::BROWSER_OBSERVATION_FRAMING,
         "evidence":{"runtime":target.kind,"liveStream":false,"screenshotModelVisible":false}
     });
     app.state::<ManagerState>()

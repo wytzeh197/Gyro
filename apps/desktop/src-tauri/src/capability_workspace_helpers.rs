@@ -1,5 +1,6 @@
-use super::*;
-
+use crate::ide::debug::redact_json_strings;
+use gyro_core::{CapabilityId, WorkspaceContextSnapshot};
+use std::path::Path;
 // Keep routine model inspection small; callers can opt into the hard tool
 // ceiling when the additional context is actually needed.
 pub(super) const DEFAULT_WORKSPACE_RESULT_BYTES: usize = 16 * 1024;

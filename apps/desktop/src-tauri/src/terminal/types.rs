@@ -1,6 +1,9 @@
 //! Terminal types.
 
-use crate::{terminal_process, ModelCommandBoundary, ModelCommandContext};
+use crate::{
+    command_execution::{ModelCommandBoundary, ModelCommandContext},
+    terminal_process,
+};
 use gyro_core::CredentialPolicy;
 use serde::{Deserialize, Serialize};
 use std::{

@@ -1,16 +1,19 @@
 use crate::{
     app::limits::{PROVIDER_APPROVAL_EVENT, PROVIDER_APPROVAL_TIMEOUT},
-    capabilities::types::ProviderApprovalDecisionRequest,
+    capabilities::{bridge::provider_run_approval_matches, types::ProviderApprovalDecisionRequest},
     desktop_notifications::notify_provider_approval_question,
-    open_store, provider_chat_cancelled, provider_run_approval_matches, provider_stop_message,
-    providers::chat_types::{ChatAttachmentRequest, ProviderChatRequest},
+    providers::{
+        chat_types::{ChatAttachmentRequest, ProviderChatRequest},
+        streaming::{provider_chat_cancelled, provider_stop_message},
+    },
     state::{
         managers::{ProviderApprovalManager, ProviderCancellationManager},
         provider_run::{
             PendingProviderApproval, ProviderApprovalContext, ProviderApprovalDecision,
         },
     },
-    to_string, truncate_chars,
+    stores::{open_store, to_string},
+    text::truncate_chars,
 };
 use anyhow::Context;
 use base64::Engine;

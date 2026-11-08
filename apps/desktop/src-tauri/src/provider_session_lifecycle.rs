@@ -1,9 +1,10 @@
-use super::{
-    provider_chat_status_message, provider_failure_recovery, GyroPaths, HarnessRunStatus,
-    SessionEvent, SessionEventKind, SessionStore, MAX_DESKTOP_SESSION_EVENTS_READ,
-    PROVIDER_INTERRUPTED_MARKER,
+use crate::{
+    app::limits::MAX_DESKTOP_SESSION_EVENTS_READ, provider_reliability::provider_failure_recovery,
+    providers::events::provider_chat_status_message,
+    state::provider_run::PROVIDER_INTERRUPTED_MARKER,
 };
 use anyhow::Context;
+use gyro_core::{GyroPaths, HarnessRunStatus, SessionEvent, SessionEventKind, SessionStore};
 use std::{collections::HashMap, fs, path::Path};
 use uuid::Uuid;
 
@@ -327,7 +328,7 @@ fn interrupted_provider_status_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider_turn_has_unfinished_attempt;
+    use crate::providers::events::provider_turn_has_unfinished_attempt;
     use gyro_core::SessionOrigin;
 
     fn running_turn(store: &SessionStore, session: Uuid, turn: Uuid) {

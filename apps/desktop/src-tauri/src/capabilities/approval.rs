@@ -10,10 +10,11 @@ use crate::{
         capability_access_for_call, capability_argument_string, capability_full_access_enabled,
         narrower_capability_access,
     },
-    capability_inspection, code_mode, delegated_agents,
+    capability_inspection, code_mode,
+    command_execution::{model_command_boundary, model_terminal_request, ModelCommandContext},
+    delegated_agents,
     ide::task_discovery::content_hash,
-    model_command_boundary, model_terminal_request, open_store, provider_accounting,
-    provider_timeline,
+    provider_accounting, provider_timeline,
     providers::approvals::record_provider_approval_terminal_event,
     state::{
         managers::{
@@ -24,8 +25,9 @@ use crate::{
             BoundProviderCapabilityContext, ModelTerminalResource, PendingCapabilityApproval,
         },
     },
+    stores::open_store,
     terminal::types::{TerminalPaneSnapshot, TerminalProcessManager},
-    workspace_capability_read, ModelCommandContext,
+    workspace_capability_read,
 };
 use gyro_core::{
     timing, CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent, CapabilityClass,

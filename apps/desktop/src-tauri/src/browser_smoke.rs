@@ -84,14 +84,14 @@ pub fn start(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
 }
 
 fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<String>, String> {
-    let store = super::open_store()?;
+    let store = crate::stores::open_store()?;
     let parent = store
         .create_session(
             output,
             gyro_core::SessionOrigin::Desktop,
             "Native browser smoke",
         )
-        .map_err(super::to_string)?;
+        .map_err(crate::stores::to_string)?;
     let session_id = parent.id.to_string();
     let session = session_id.as_str();
     let mut steps = Vec::new();
@@ -242,7 +242,7 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
         .state::<SessionBrowserManager>()
         .get_snapshot(session)?
         .ok_or("browser disappeared before replacement")?;
-    let previous_owner = super::ModelBrowserResource {
+    let previous_owner = crate::state::provider_run::ModelBrowserResource {
         resource_id: previous_resource.resource_id.clone(),
         session_id: session.into(),
         turn_id: None,
@@ -251,7 +251,7 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
         url: previous_resource.url.clone(),
     };
     close_session_browser(app, session)?;
-    if super::browser_observation(
+    if crate::capabilities::access::browser_observation(
         app,
         &previous_owner,
         &json!({}),
@@ -280,7 +280,7 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
         },
     )?;
     wait_page("Browser observation ready")?;
-    if super::browser_observation(
+    if crate::capabilities::access::browser_observation(
         app,
         &previous_owner,
         &json!({}),
@@ -571,7 +571,7 @@ fn run_background(
     output: &std::path::Path,
     parent_id: uuid::Uuid,
 ) -> Result<String, String> {
-    let store = super::open_store()?;
+    let store = crate::stores::open_store()?;
     let child = store
         .create_subagent_session(
             output,
@@ -580,7 +580,7 @@ fn run_background(
             gyro_core::CreateSessionContext::default(),
             parent_id,
         )
-        .map_err(super::to_string)?;
+        .map_err(crate::stores::to_string)?;
     let session_id = child.id.to_string();
     let session = session_id.as_str();
     let snapshot = open_session_browser(

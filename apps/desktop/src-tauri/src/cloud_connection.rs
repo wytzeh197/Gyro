@@ -67,7 +67,7 @@ pub(crate) async fn cloud_connection_service(
         let result=(||->Result<Value,gyro_core::cloud_connection::v2::Error>{
             use gyro_core::cloud_connection::v2::Error;
             match request {
-                ServiceRequest::LocalChats=>{let store=super::open_store().map_err(|_|Error::Storage)?;let rows=store.list_sessions().map_err(|_|Error::Storage)?;Ok(serde_json::json!({"items":rows.into_iter().map(|s|serde_json::json!({"localId":s.id,"title":s.title})).collect::<Vec<_>>()}))},
+                ServiceRequest::LocalChats=>{let store=crate::stores::open_store().map_err(|_|Error::Storage)?;let rows=store.list_sessions().map_err(|_|Error::Storage)?;Ok(serde_json::json!({"items":rows.into_iter().map(|s|serde_json::json!({"localId":s.id,"title":s.title})).collect::<Vec<_>>()}))},
                 ServiceRequest::PreviewChat{local_id}=>connection.preview_chat(local_id),
                 ServiceRequest::PreviewReport{local_id,report_id}=>connection.preview_report(local_id,report_id),
                 ServiceRequest::PreviewSettings{preferences}=>connection.preview_settings(preferences),
@@ -77,7 +77,7 @@ pub(crate) async fn cloud_connection_service(
                     #[cfg(unix)]{use std::os::unix::fs::OpenOptionsExt;options.mode(0o600);}
                     let mut out=options.open(path).map_err(|_|Error::Storage)?;out.write_all(&bytes).map_err(|_|Error::Storage)?;out.sync_all().map_err(|_|Error::Storage)?;Ok(serde_json::json!({"saved":true,"name":name}))},
                 ServiceRequest::UploadPreview{ticket,reviewed}=>connection.upload_preview(ticket,reviewed),
-                ServiceRequest::ProjectMemoryId{local_id}=>{let view=connection.view();let account=view.snapshot.as_ref().map(|s|s.account.id).ok_or(Error::Authentication)?;let key=if let Some(id)=local_id{let store=super::open_store().map_err(|_|Error::Storage)?;let s=store.get_session(id).map_err(|_|Error::Storage)?.ok_or(Error::Input)?;format!("memory:{account}:{}",s.workspace_path.display())}else{format!("memory:{account}:selected-project")};Ok(serde_json::json!({"projectId":connection.local_state()?.object_for_local(&key)?}))},
+                ServiceRequest::ProjectMemoryId{local_id}=>{let view=connection.view();let account=view.snapshot.as_ref().map(|s|s.account.id).ok_or(Error::Authentication)?;let key=if let Some(id)=local_id{let store=crate::stores::open_store().map_err(|_|Error::Storage)?;let s=store.get_session(id).map_err(|_|Error::Storage)?.ok_or(Error::Input)?;format!("memory:{account}:{}",s.workspace_path.display())}else{format!("memory:{account}:selected-project")};Ok(serde_json::json!({"projectId":connection.local_state()?.object_for_local(&key)?}))},
                 ServiceRequest::Service{command}=>connection.service(command),
                 ServiceRequest::SaveReadOnlyArchive{content}=>{let id=connection.save_read_only_archive(&content)?;Ok(serde_json::json!({"archiveId":id,"readOnly":true,"content":content,"notice":"Restored a separate read-only local copy. No project, approvals, tools or provider session were restored. The original chat is unchanged."}))},
             }

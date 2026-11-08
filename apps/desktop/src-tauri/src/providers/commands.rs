@@ -1,6 +1,6 @@
 use crate::{
     app::limits::MAX_CONCURRENT_PROVIDER_RUNS,
-    goal_runner, parse_uuid,
+    goal_runner,
     provider_run_cleanup::ProviderRunReservation,
     providers::{
         chat_types::{
@@ -12,7 +12,8 @@ use crate::{
         managers::ProviderCancellationManager,
         provider_run::{stop_provider_run, ProviderRunControl, ProviderStopReason},
     },
-    validate_chat_message,
+    stores::parse_uuid,
+    text::validate_chat_message,
 };
 use std::sync::Arc;
 use tauri::Manager;

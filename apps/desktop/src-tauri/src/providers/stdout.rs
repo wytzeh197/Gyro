@@ -1,6 +1,11 @@
 use crate::{
-    extract_provider_activities, extract_provider_commentary_activity, provider_accounting,
-    provider_context, provider_context_usage_from_codex_exec, provider_file_result_counts,
+    provider_accounting,
+    provider_activity::{
+        extract_provider_activities, extract_provider_commentary_activity,
+        provider_file_result_counts,
+    },
+    provider_context,
+    provider_context::{provider_context_usage_from_codex_exec, ProviderContextUsage},
     provider_timeline,
     providers::{
         chat_types::ProviderChatRequest,
@@ -14,7 +19,6 @@ use crate::{
     },
     text::{sanitize_provider_chat_response, sanitize_provider_text_delta, truncate_chars},
     usage::{fetch::publish_live_provider_usage, types::ProviderRateLimitWindow},
-    ProviderContextUsage,
 };
 use gyro_core::{timing, timing::Stage as TimingStage, HarnessRunStatus};
 use std::{collections::HashMap, path::Path, time::Instant};

@@ -1,7 +1,17 @@
 //! One chronology for provider frames and broker calls, independent of the
 //! contiguous provider-stream delivery counter.
-use super::*;
 
+use crate::{
+    app::limits::MAX_CHAT_RESPONSE_CHARS,
+    providers::{markers::strip_hidden_control_markers, types::ProviderActivity},
+    state::managers::ProviderCancellationManager,
+};
+use serde::Serialize;
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU64, Ordering},
+};
+use tauri::Manager;
 #[cfg(test)]
 mod benchmarks;
 
@@ -296,6 +306,9 @@ pub(super) fn response_segments(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        providers::streaming::StreamingCommandState, state::provider_run::ProviderRunControl,
+    };
 
     #[test]
     fn heartbeats_are_not_counted_as_shown_output() {

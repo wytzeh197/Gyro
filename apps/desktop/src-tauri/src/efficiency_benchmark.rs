@@ -1,8 +1,26 @@
 //! Explicit v2 pilot. Serial runs preserve budgets and avoid cross-variant cache/config races.
-use super::*;
+use crate::{
+    command_execution::run_bounded_command, ipc::cli::start_cli_ipc_listener,
+    providers::process::command_with_gui_path,
+};
 use gyro_core::efficiency::pricing::PriceSnapshot;
+use gyro_core::{
+    decide_mutation_proposal, CapabilityAccess, CapabilityClass, ExecutionTermination, GyroConfig,
+    GyroPaths, MutationDecision, ProjectCapabilityPolicy, Session, SessionEvent, SessionOrigin,
+    SessionStore, UsageTokens,
+};
+use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    time::{Duration, Instant},
+};
+use uuid::Uuid;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Spec {
@@ -847,6 +865,8 @@ fn persist(root: &Path, records: &[Value]) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ide::task_discovery::content_hash;
+    use gyro_core::SessionEventKind;
     #[test]
     fn frozen_native_pair_is_valid_and_requires_its_baseline() {
         let file = Path::new(env!("CARGO_MANIFEST_DIR"))

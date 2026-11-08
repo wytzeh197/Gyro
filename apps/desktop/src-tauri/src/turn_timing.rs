@@ -1,5 +1,13 @@
-use super::*;
-
+use crate::{
+    provider_session_lifecycle::ProviderSessionLease,
+    providers::{
+        chat_types::{ProviderChatRequest, ProviderChatResponse},
+        retry::is_provider_cancellation,
+        run::run_provider_chat_blocking_in_lease,
+    },
+    stores::parse_uuid,
+};
+use gyro_core::{timing, UsageOrigin};
 // Keep the scope on the blocking worker: it must not leak across async tasks.
 pub(super) fn run_timed_provider_chat(
     app: tauri::AppHandle,

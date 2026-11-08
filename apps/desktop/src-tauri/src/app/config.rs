@@ -1,6 +1,7 @@
 use crate::{
-    app::limits::DESKTOP_SHELL_SESSION_PAGE, launch_integrity, to_string, warm_store_pools,
-    SessionStoreLease,
+    app::limits::DESKTOP_SHELL_SESSION_PAGE,
+    launch_integrity,
+    stores::{to_string, warm_store_pools, SessionStoreLease},
 };
 use gyro_core::{
     logout_account as account_logout, refresh_account_session as account_refresh_session,

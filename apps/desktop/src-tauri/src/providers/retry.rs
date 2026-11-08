@@ -1,22 +1,32 @@
 use crate::{
     app::config::load_config_blocking,
-    delegated_agents, efficiency, openai_compatible_runner, parse_uuid, provider_accounting,
-    provider_adapter_for, provider_chat_cancelled, provider_context, provider_reliability,
+    delegated_agents, efficiency,
+    ollama_runner::run_ollama_chat,
+    openai_compatible_runner, provider_accounting,
+    provider_accounting::{provider_turn_tokens, record_provider_usage},
+    provider_context, provider_reliability,
     provider_reliability::is_transient_provider_error,
-    provider_resume_cursor_from_binding, provider_retry_recovery,
+    provider_retry_recovery,
     provider_retry_recovery::run_provider_chat_with_retry_using_with_wait,
-    provider_spend_guard, provider_stop_message, provider_timeline, provider_turn_tokens,
+    provider_spend_guard, provider_timeline,
     providers::{
         binding::validate_chat_context,
         chat_types::{isolated_internal_purpose, ChatAttachmentRequest, ProviderChatRequest},
+        process::provider_adapter_for,
         run::compact_provider_chat_blocking,
+        runners::{
+            antigravity::run_antigravity_chat,
+            claude::run_anthropic_claude_chat,
+            codex::run_openai_codex_chat,
+            kimi_acp::{provider_resume_cursor_from_binding, run_kimi_acp_chat},
+        },
+        streaming::{provider_chat_cancelled, provider_stop_message},
         types::{
             ProviderAdapterKind, ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput,
         },
     },
-    record_provider_usage, run_anthropic_claude_chat, run_antigravity_chat, run_kimi_acp_chat,
-    run_ollama_chat, run_openai_codex_chat,
     state::{managers::ProviderCancellationManager, provider_run::PROVIDER_STOP_MARKER},
+    stores::parse_uuid,
     usage::guard::{session_context_signal, usage_guard_block, UsageContext},
 };
 use gyro_core::{

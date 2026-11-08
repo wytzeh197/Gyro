@@ -7,7 +7,8 @@
 //! a person touches: the stored share the Settings surface shows, and the rows
 //! that say a compaction happened without anyone pressing anything.
 
-use super::*;
+use crate::{providers::types::ProviderActivity, stores::to_string};
+use gyro_core::{GyroConfig, GyroPaths};
 use std::collections::HashSet;
 use std::sync::Mutex;
 

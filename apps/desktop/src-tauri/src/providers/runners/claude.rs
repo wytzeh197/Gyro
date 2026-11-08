@@ -1,7 +1,10 @@
 use crate::{
-    active_provider_approval_nonce, active_provider_capability_context,
     app::config::load_config_blocking,
-    desktop_claude_permission_mcp_config, project_import_continuation, provider_reliability,
+    capabilities::bridge::{
+        active_provider_approval_nonce, active_provider_capability_context,
+        desktop_claude_permission_mcp_config,
+    },
+    project_import_continuation, provider_reliability,
     providers::{
         approvals::claude_multimodal_input,
         binding::local_conversation_history_for_request,

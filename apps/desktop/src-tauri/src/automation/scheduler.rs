@@ -14,9 +14,16 @@ use super::{
     },
 };
 use crate::{
-    desktop_notifications::notify_automation_outcome, open_automation_store, open_store,
-    provider_adapter_for, run_provider_chat_blocking, to_string, ChatMode, ProviderAdapterKind,
-    ProviderCancellationManager, ProviderChatRequest, MAX_CONCURRENT_SCHEDULED_RUNS,
+    app::limits::MAX_CONCURRENT_SCHEDULED_RUNS,
+    desktop_notifications::notify_automation_outcome,
+    providers::{
+        chat_types::{ChatMode, ProviderChatRequest},
+        process::provider_adapter_for,
+        run::run_provider_chat_blocking,
+        types::ProviderAdapterKind,
+    },
+    state::managers::ProviderCancellationManager,
+    stores::{open_automation_store, open_store, to_string},
 };
 use gyro_core::{
     Automation, AutomationRunStatus, AutomationStatus, AutomationStore, CreateSessionContext,

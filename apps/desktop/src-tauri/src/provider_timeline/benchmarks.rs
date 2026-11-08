@@ -1,6 +1,10 @@
 //! Explicit fixture timings for the actual timeline implementation.
-use super::*;
 
+use crate::{
+    ide::task_discovery::content_hash, provider_timeline::ProviderTimeline,
+    providers::types::ProviderActivity,
+};
+use std::time::Instant;
 fn sample(mut run: impl FnMut() -> serde_json::Value) -> serde_json::Value {
     let expected = run();
     let mut samples = Vec::new();

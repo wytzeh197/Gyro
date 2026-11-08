@@ -1,9 +1,14 @@
 //! Workspace task discovery and custom task storage.
 
 use crate::{
-    assert_workspace_path, atomic_write_workspace_file, read_bounded_regular_file, workspace_root,
-    CustomTaskCreateRequest, CustomTaskDeleteRequest, CustomTaskFile, CustomTaskRecord,
-    TaskDefinitionResult, TestTreeItemResult,
+    ide::types::{
+        CustomTaskCreateRequest, CustomTaskDeleteRequest, CustomTaskFile, CustomTaskRecord,
+        TaskDefinitionResult, TestTreeItemResult,
+    },
+    workspace::files::{
+        assert_workspace_path, atomic_write_workspace_file, read_bounded_regular_file,
+        workspace_root,
+    },
 };
 use anyhow::Context;
 use sha2::{Digest, Sha256};

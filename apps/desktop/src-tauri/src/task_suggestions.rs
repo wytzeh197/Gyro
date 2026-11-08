@@ -188,7 +188,7 @@ pub(crate) fn list_start_task_suggestions_blocking(
     if workspace_path.is_empty() {
         return Ok(Vec::new());
     }
-    let store = super::open_store()?;
+    let store = crate::stores::open_store()?;
     collect_start_tasks(&store, workspace_path, exclude_ids)
 }
 
@@ -202,7 +202,7 @@ fn collect_start_tasks(
     let oldest = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(
         now_ms.saturating_sub(START_MAX_AGE_MS),
     );
-    let mut sessions = store.list_sessions().map_err(super::to_string)?;
+    let mut sessions = store.list_sessions().map_err(crate::stores::to_string)?;
     sessions.retain(|session| {
         session.parent_session_id.is_none()
             && session.workspace_path == requested
@@ -290,14 +290,15 @@ mod tests {
     #[test]
     fn marker_leaves_the_reply_and_lands_in_tasks() {
         let raw = "Fixed the fade.\nGYRO_TASKS: {\"tasks\":[{\"title\":\"Sample the hang\",\"prompt\":\"Find why.\"}]}";
-        let stripped = crate::strip_hidden_control_markers(raw);
+        let stripped = crate::providers::markers::strip_hidden_control_markers(raw);
         assert_eq!(stripped.message, "Fixed the fade.");
         assert_eq!(
             stripped.tasks.expect("tasks")[0]["title"],
             "Sample the hang"
         );
 
-        let broken = crate::strip_hidden_control_markers("Done.\nGYRO_TASKS: {not json");
+        let broken =
+            crate::providers::markers::strip_hidden_control_markers("Done.\nGYRO_TASKS: {not json");
         assert_eq!(broken.message, "Done.");
         assert!(broken.tasks.is_none());
     }

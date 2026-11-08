@@ -134,12 +134,14 @@ pub(crate) fn known_window(provider: &str, model: &str) -> Option<u64> {
         .entries
         .get(&(provider.to_string(), model.trim().to_string()))?
         .clone();
-    let configured = super::load_config_blocking().ok().and_then(|config| {
-        config
-            .model_providers
-            .into_iter()
-            .find(|item| item.id == provider)
-    });
+    let configured = crate::app::config::load_config_blocking()
+        .ok()
+        .and_then(|config| {
+            config
+                .model_providers
+                .into_iter()
+                .find(|item| item.id == provider)
+        });
     fresh(
         &entry,
         &scope(
@@ -239,7 +241,7 @@ fn refresh(
     model_ids: &[String],
     force: bool,
 ) -> Result<Vec<ModelContextWindow>, String> {
-    let config = super::load_config_blocking()?;
+    let config = crate::app::config::load_config_blocking()?;
     let provider = config
         .model_providers
         .iter()

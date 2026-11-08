@@ -1,4 +1,8 @@
-use crate::{acp_auth_methods, acp_provider_runtime, project_import_continuation, to_string};
+use crate::{
+    project_import_continuation,
+    providers::runners::kimi_acp::{acp_auth_methods, acp_provider_runtime},
+    stores::to_string,
+};
 use gyro_core::{
     apply_cli_updates, check_cli_updates, discover_ollama_models, provider_cli_install_plan,
     CliInstallPlanReport, CliUpdateApplyResult, CliUpdateCheckReport, ProviderHealthCheck,
