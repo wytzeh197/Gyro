@@ -11,30 +11,6 @@ pub(crate) use gyro_core::provider_runtime::host::{
     publish_streamed_session_title, ProviderHeartbeat, ProviderRunner, RunEvent, RunnerHost,
 };
 
-pub(crate) fn observe_codex_turn_usage(
-    host: &dyn RunnerHost,
-    request: &ProviderChatRequest,
-    billed: &mut crate::provider_accounting::CodexTurnUsage,
-    params: &serde_json::Value,
-    thread: &str,
-    turn: Option<&str>,
-) -> Option<ProviderContextUsage> {
-    if !crate::provider_accounting::codex_usage_matches(params, thread, turn) {
-        return None;
-    }
-    if let Some(tokens) = billed.observe(params) {
-        gyro_core::provider_observation::native_usage(tokens);
-        emit_turn_tokens(
-            host,
-            request,
-            crate::provider_accounting::provider_turn_tokens(request, None),
-        );
-    }
-    let usage = crate::provider_context::provider_context_usage_from_app_server(params)?;
-    emit_provider_context_usage(host, request, &usage);
-    Some(usage)
-}
-
 macro_rules! runner {
     ($name:ident, $kind:ident, $run:expr $(, $extra:item)*) => {
         struct $name;
@@ -158,3 +134,5 @@ pub(crate) fn runner_for(kind: ProviderAdapterKind) -> &'static dyn ProviderRunn
 #[cfg(test)]
 #[path = "runner_tests.rs"]
 mod tests;
+
+pub(crate) use gyro_core::provider_runtime::host::observe_codex_turn_usage;

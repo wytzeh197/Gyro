@@ -242,3 +242,27 @@ pub trait ProviderRunner: Send + Sync {
         None
     }
 }
+
+pub fn observe_codex_turn_usage(
+    host: &dyn RunnerHost,
+    request: &ProviderChatRequest,
+    billed: &mut super::accounting::CodexTurnUsage,
+    params: &serde_json::Value,
+    thread: &str,
+    turn: Option<&str>,
+) -> Option<ProviderContextUsage> {
+    if !super::accounting::codex_usage_matches(params, thread, turn) {
+        return None;
+    }
+    if let Some(tokens) = billed.observe(params) {
+        crate::provider_observation::native_usage(tokens);
+        emit_turn_tokens(
+            host,
+            request,
+            super::accounting::provider_turn_tokens(request, None),
+        );
+    }
+    let usage = super::accounting::provider_context_usage_from_app_server(params)?;
+    emit_provider_context_usage(host, request, &usage);
+    Some(usage)
+}

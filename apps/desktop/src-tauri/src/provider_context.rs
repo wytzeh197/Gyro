@@ -525,24 +525,6 @@ pub(super) fn occupancy_from_request(
     })
 }
 
-pub(super) fn provider_context_usage_from_app_server(
-    params: &Value,
-) -> Option<ProviderContextUsage> {
-    let token_usage = params.get("tokenUsage")?;
-    let last = token_usage.get("last")?;
-    Some(ProviderContextUsage {
-        input_tokens: Some(last.get("inputTokens")?.as_u64()?),
-        cached_input_tokens: last.get("cachedInputTokens").and_then(Value::as_u64),
-        output_tokens: last.get("outputTokens").and_then(Value::as_u64),
-        reasoning_output_tokens: last.get("reasoningOutputTokens").and_then(Value::as_u64),
-        total_tokens: last.get("totalTokens").and_then(Value::as_u64),
-        model_context_window: token_usage
-            .get("modelContextWindow")
-            .and_then(Value::as_u64),
-        ..ProviderContextUsage::default()
-    })
-}
-
 /// Compatibility parser for the Grok PromptUsage contract only. Live ACP
 /// adapters use the provider-specific normalizer, retaining cache writes and
 /// coverage in UsageTokens rather than collapsing them into cached reads.
@@ -1479,3 +1461,5 @@ pub(crate) use gyro_core::provider_runtime::types::ProviderContextUsage;
 
 #[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::support::provider_billed_usage_from_acp_tokens;
+
+pub(crate) use gyro_core::provider_runtime::accounting::provider_context_usage_from_app_server;
