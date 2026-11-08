@@ -3,7 +3,7 @@ use crate::{
     capabilities::{bridge::provider_run_approval_matches, types::ProviderApprovalDecisionRequest},
     desktop_notifications::notify_provider_approval_question,
     providers::{
-        chat_types::{ChatAttachmentRequest, ProviderChatRequest},
+        chat_types::ProviderChatRequest,
         streaming::{provider_chat_cancelled, provider_stop_message},
     },
     state::{
@@ -16,7 +16,6 @@ use crate::{
     text::truncate_chars,
 };
 use anyhow::Context;
-use base64::Engine;
 use gyro_core::{
     apply_provider_mutation_transaction_with_cancellation, begin_provider_mutation_transaction,
     ipc::{
@@ -706,21 +705,5 @@ pub(crate) fn desktop_claude_approval_response(
     }
 }
 
-pub(crate) fn claude_multimodal_input(
-    prompt: &str,
-    attachments: &[ChatAttachmentRequest],
-) -> anyhow::Result<serde_json::Value> {
-    let mut content = vec![serde_json::json!({"type": "text", "text": prompt})];
-    for attachment in attachments.iter().filter(|item| item.kind == "image") {
-        let bytes = std::fs::read(&attachment.path)?;
-        content.push(serde_json::json!({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": attachment.mime_type.as_deref().unwrap_or("image/png"),
-                "data": base64::engine::general_purpose::STANDARD.encode(bytes),
-            }
-        }));
-    }
-    Ok(serde_json::json!({"type": "user", "message": {"role": "user", "content": content}}))
-}
+#[cfg(test)]
+pub(crate) use gyro_core::provider_runtime::support::claude_multimodal_input;

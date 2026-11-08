@@ -20,6 +20,12 @@ impl RunnerHost for RecordingHost {
     ) -> String {
         unreachable!("unused fixture service")
     }
+    fn reasoning_efforts(&self, _: &str, _: Option<&str>) -> Option<Vec<String>> {
+        unreachable!("unused fixture service")
+    }
+    fn claude_capability_tools(&self, _: super::super::chat_types::ChatMode) -> String {
+        unreachable!("unused fixture service")
+    }
     fn cancellation(&self, _: &str) -> anyhow::Result<gyro_core::CancellationToken> {
         unreachable!("unused fixture service")
     }

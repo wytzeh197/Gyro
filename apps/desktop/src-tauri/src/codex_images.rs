@@ -26,8 +26,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(super) const REPLY_INSTRUCTION: &str = "When the user asks to generate or edit an image, use the native image-generation tool if it is available. Gyro saves its output and displays it in chat. Do not substitute a text description for the requested image or claim generation succeeded when the tool failed. If the tool is unavailable, say so.";
-
 pub(super) fn config_arg(mode: &ChatMode) -> &'static str {
     if *mode == ChatMode::Normal {
         "features.image_generation=true"

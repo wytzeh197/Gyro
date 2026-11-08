@@ -160,15 +160,6 @@ impl Default for ProviderRunControl {
     }
 }
 
-/// The phrase every stop message opens with.
-///
-/// A stop travels the rest of the way as an error string, and several places
-/// have to tell one from a genuine failure. They match this rather than the
-/// whole sentence so the sentence stays free to say what actually happened.
-pub(crate) const PROVIDER_STOP_MARKER: &str = "chat cancelled by";
-/// The stable phrase of a turn Gyro ended because the provider went silent.
-pub(crate) const PROVIDER_STALL_MARKER: &str = "the provider sent nothing for";
-
 /// The sentence a turn is closed with when Gyro exited while it was running.
 ///
 /// Written by startup reconciliation rather than by the run itself, which by
@@ -266,3 +257,5 @@ pub(crate) fn stop_provider_run(
 }
 
 pub(crate) use gyro_core::provider_runtime::types::ProviderApprovalDecision;
+
+pub(crate) use gyro_core::provider_runtime::limits::{PROVIDER_STALL_MARKER, PROVIDER_STOP_MARKER};

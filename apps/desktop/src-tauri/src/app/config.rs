@@ -16,11 +16,6 @@ pub(crate) async fn load_config() -> Result<GyroConfig, String> {
         .map_err(|error| format!("config load worker failed: {error}"))?
 }
 
-pub(crate) fn load_config_blocking() -> Result<GyroConfig, String> {
-    let paths = GyroPaths::for_current_user().map_err(to_string)?;
-    GyroConfig::load(&paths).map_err(to_string)
-}
-
 /// Warm local storage so the shell can open the chat UI while this finishes.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -162,3 +157,5 @@ pub(crate) fn merge_renderer_config(
     incoming.efficiency = persisted.efficiency.clone();
     incoming
 }
+
+pub(crate) use gyro_core::provider_runtime::support::load_config_blocking;

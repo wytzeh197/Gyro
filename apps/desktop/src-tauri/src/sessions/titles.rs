@@ -23,23 +23,6 @@ pub(crate) fn is_generic_session_title(title: &str) -> bool {
     )
 }
 
-/// Ask every provider until the opening title has actually been accepted.
-/// A retry can recover a missed title without renaming an already named chat.
-pub(crate) const SESSION_TITLE_FIRST_TURN_INSTRUCTION: &str = "This chat still needs its title; name the session immediately. Start your first assistant message, before commentary or tools, with this exact hidden line: GYRO_SESSION_TITLE: <2-6 word title>. Choose a concise title describing the original user task, then end the line and continue your response. This title is required; do not wait until the task is finished. The app hides this marker. This may be the opening turn or recovery of a previously missed title. After Gyro accepts a title, do not repeat this line unless asked.\n";
-pub(crate) const SESSION_TITLE_LATER_TURN_INSTRUCTION: &str = "This is not the first turn of this chat. Do not write a GYRO_SESSION_TITLE line; Gyro only reads it on a chat's first turn.\n";
-
-pub(crate) fn session_title_instruction(suggest_title: bool) -> &'static str {
-    if suggest_title {
-        SESSION_TITLE_FIRST_TURN_INSTRUCTION
-    } else {
-        SESSION_TITLE_LATER_TURN_INSTRUCTION
-    }
-}
-
-/// Models can put an image they already hold into a final message by citing
-/// its local path on its own line. Only these roots resolve to a preview.
-pub(crate) const CHAT_IMAGE_REPLY_INSTRUCTION: &str = "To show the user an image you already have (a screenshot you captured, a workspace image, or an attachment), put it in your reply as a standalone line: ![short description](/absolute/path.png). Only PNG, JPEG, or WebP files inside the selected workspace, the session's attachments, or Gyro's browser-captures directory are rendered; any other path stays as plain text. Never invent a path, and do not claim an image is shown unless you wrote that line.\n";
-
 /// Title each chat from the user's message, with no model call.
 ///
 /// The desktop composer uses the same rules in `sessionTitleFromMessage` so
@@ -220,3 +203,7 @@ pub(crate) fn title_case_word(word: &str) -> String {
     titled.extend(characters);
     titled
 }
+
+pub(crate) use gyro_core::provider_runtime::prompts::{
+    CHAT_IMAGE_REPLY_INSTRUCTION, SESSION_TITLE_FIRST_TURN_INSTRUCTION,
+};

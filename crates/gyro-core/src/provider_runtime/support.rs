@@ -1,9 +1,14 @@
 //! Pure request validation and provider output normalization.
 use super::{
+    limits::{PROVIDER_STALL_MARKER, PROVIDER_STOP_MARKER},
+    types::ChatAttachmentRequest,
+};
+use super::{
     text::{sanitize_provider_chat_response, truncate_error_detail},
     types::{ProviderActivity, StreamingCommandOutput},
 };
-use crate::WORKSPACE_UNAVAILABLE_MESSAGE;
+use crate::{GyroConfig, GyroPaths, WORKSPACE_UNAVAILABLE_MESSAGE};
+use base64::Engine;
 use std::{collections::HashMap, path::PathBuf};
 pub fn provider_output_summary(
     runner: &str,
@@ -165,4 +170,63 @@ pub fn recover_streamed_provider_answer(
         let response = sanitize_provider_chat_response(candidate.trim());
         (!response.is_empty()).then_some(response)
     })
+}
+
+/// Wrap a run failure with the provider's sign-in hint, unless it was a stop.
+///
+/// The hint earns its place on a run that died on its own, where a lapsed CLI
+/// login is the usual cause. On a stop it is noise: being told to sign in again
+/// because the turn was stopped buries the one line that says what happened.
+pub fn provider_run_failure(error: anyhow::Error, hint: &str) -> anyhow::Error {
+    let message = error.to_string();
+    if message.contains(PROVIDER_STOP_MARKER) || message.contains(PROVIDER_STALL_MARKER) {
+        return error;
+    }
+    anyhow::anyhow!("{hint} {error}")
+}
+pub fn is_model_capacity_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    (normalized.contains("model is at capacity")
+        || normalized.contains("model at capacity")
+        || normalized.contains("model is temporarily at capacity")
+        || normalized.contains("overloaded_error")
+        || normalized.contains("model is overloaded"))
+        && ![
+            "size limit",
+            "tool-call limit",
+            "output exceeded",
+            "http 401",
+            "http 403",
+            "unauthorized",
+            "authentication",
+            "insufficient_quota",
+            "http 402",
+            "status 402",
+            "payment required",
+            "balance exhausted",
+        ]
+        .iter()
+        .any(|cause| normalized.contains(cause))
+}
+pub fn claude_multimodal_input(
+    prompt: &str,
+    attachments: &[ChatAttachmentRequest],
+) -> anyhow::Result<serde_json::Value> {
+    let mut content = vec![serde_json::json!({"type": "text", "text": prompt})];
+    for attachment in attachments.iter().filter(|item| item.kind == "image") {
+        let bytes = std::fs::read(&attachment.path)?;
+        content.push(serde_json::json!({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": attachment.mime_type.as_deref().unwrap_or("image/png"),
+                "data": base64::engine::general_purpose::STANDARD.encode(bytes),
+            }
+        }));
+    }
+    Ok(serde_json::json!({"type": "user", "message": {"role": "user", "content": content}}))
+}
+pub fn load_config_blocking() -> Result<GyroConfig, String> {
+    let paths = GyroPaths::for_current_user().map_err(|error| error.to_string())?;
+    GyroConfig::load(&paths).map_err(|error| error.to_string())
 }

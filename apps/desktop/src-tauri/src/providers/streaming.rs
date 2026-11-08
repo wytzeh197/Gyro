@@ -25,9 +25,7 @@ use crate::{
         managers::{
             ProviderApprovalManager, ProviderCancellationManager, ProviderCapabilityApprovalManager,
         },
-        provider_run::{
-            stop_provider_run, ProviderStopReason, PROVIDER_STALL_MARKER, PROVIDER_STOP_MARKER,
-        },
+        provider_run::{stop_provider_run, ProviderStopReason},
     },
     text::push_bounded,
     usage::{fetch::publish_settled_provider_usage, types::ProviderRateLimitWindow},
@@ -970,19 +968,6 @@ pub(crate) fn spawn_provider_chat_heartbeat(
     ProviderHeartbeat::new(stop, worker)
 }
 
-/// Wrap a run failure with the provider's sign-in hint, unless it was a stop.
-///
-/// The hint earns its place on a run that died on its own, where a lapsed CLI
-/// login is the usual cause. On a stop it is noise: being told to sign in again
-/// because the turn was stopped buries the one line that says what happened.
-pub(crate) fn provider_run_failure(error: anyhow::Error, hint: &str) -> anyhow::Error {
-    let message = error.to_string();
-    if message.contains(PROVIDER_STOP_MARKER) || message.contains(PROVIDER_STALL_MARKER) {
-        return error;
-    }
-    anyhow::anyhow!("{hint} {error}")
-}
-
 /// The sentence describing why this session's run was stopped.
 ///
 /// For the callers that notice a cancelled token themselves rather than through
@@ -1014,3 +999,5 @@ pub(crate) use gyro_core::provider_runtime::types::StreamingCommandOutput;
 pub(crate) use gyro_core::provider_runtime::limits::{
     PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS, PROVIDER_CHAT_MAX_RUNTIME_SECS,
 };
+
+pub(crate) use gyro_core::provider_runtime::support::provider_run_failure;

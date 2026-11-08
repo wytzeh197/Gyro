@@ -87,31 +87,6 @@ pub(super) fn is_rate_limit_error(error: &str) -> bool {
         .any(|cause| normalized.contains(cause))
 }
 
-pub(super) fn is_model_capacity_error(error: &str) -> bool {
-    let normalized = error.to_ascii_lowercase();
-    (normalized.contains("model is at capacity")
-        || normalized.contains("model at capacity")
-        || normalized.contains("model is temporarily at capacity")
-        || normalized.contains("overloaded_error")
-        || normalized.contains("model is overloaded"))
-        && ![
-            "size limit",
-            "tool-call limit",
-            "output exceeded",
-            "http 401",
-            "http 403",
-            "unauthorized",
-            "authentication",
-            "insufficient_quota",
-            "http 402",
-            "status 402",
-            "payment required",
-            "balance exhausted",
-        ]
-        .iter()
-        .any(|cause| normalized.contains(cause))
-}
-
 fn is_hopeless_provider_timeout(error: &str) -> bool {
     let normalized = error.to_ascii_lowercase();
     normalized.contains("acp run timed out")
@@ -798,3 +773,5 @@ mod recovery_tests {
         assert!(!detail.contains("You stopped"));
     }
 }
+
+pub(crate) use gyro_core::provider_runtime::support::is_model_capacity_error;

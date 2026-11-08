@@ -3,29 +3,12 @@ use serde_json::{json, Value};
 
 pub const GUIDE: &str = include_str!("../../../../docs/product-knowledge/browser.md");
 pub const VERSION: &str = "gyro.product-knowledge.browser.v1";
-pub const SIDE_PANEL_GUIDE: &str = include_str!("../../../../docs/product-knowledge/side-panel.md");
 // Older provider threads may retain instructions to reveal component previews.
 // Refresh just this rule on resumed turns without resending the full guide.
 pub const RESUMED_REVEAL_GUIDANCE: &str = "Browser checks, interactions, and screenshots work while hidden. Keep them in the background, including component previews and dev servers. Set reveal: true only when the user explicitly asks to see the page or a required manual handoff needs it. This replaces earlier instructions to reveal visual previews.";
 
 /// Two sentences for an ordinary turn. The side-panel guide stays off this path.
 pub const ORDINARY_SURFACE_HINT: &str = "For reading or summarizing a link, prefer gyro_web_fetch; GYRO_ARTIFACTS exists for Canvas. Browser checks, interactions, and screenshots stay hidden; set reveal: true only when the user explicitly asks to see the page or a required manual handoff needs it.";
-
-/// Browse, Canvas, a URL, or a UI preview. A bare "preview" does not qualify.
-pub fn needs_surface_guide(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("canvas")
-        || lower.contains("gyro_artifacts")
-        || lower.contains("http://")
-        || lower.contains("https://")
-        || lower.contains("ui preview")
-        || lower.contains("component preview")
-        || lower.contains("dev server")
-        || lower.contains("research")
-        || lower.contains("web search")
-        || lower.contains("browse the web")
-        || lower.contains("model release")
-}
 
 pub fn contract(tools: bool, images: bool, mode: &str) -> Value {
     browser_contract(tools, images, mode, true)
@@ -237,3 +220,5 @@ mod tests {
         }
     }
 }
+
+pub(crate) use gyro_core::provider_runtime::prompts::{needs_surface_guide, SIDE_PANEL_GUIDE};

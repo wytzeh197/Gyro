@@ -47,6 +47,20 @@ impl RunnerHost for TauriRunnerHost {
     ) -> String {
         super::prompt::provider_context_message_for_turn(request, history, turn)
     }
+    fn reasoning_efforts(&self, provider_id: &str, model_id: Option<&str>) -> Option<Vec<String>> {
+        crate::model_catalog::catalog_reasoning_efforts(provider_id, model_id)
+    }
+    fn claude_capability_tools(&self, mode: super::chat_types::ChatMode) -> String {
+        super::cli_args::claude_allowed_capability_tools(
+            super::binding::advertised_mcp_capability_tools(
+                super::binding::capability_run_mode_for_chat(mode),
+            ),
+            crate::provider_tool_batch::compact_cli_catalog_active(
+                "anthropic",
+                &crate::efficiency::config(),
+            ),
+        )
+    }
     fn cancellation(&self, session_id: &str) -> anyhow::Result<CancellationToken> {
         self.app
             .state::<ProviderCancellationManager>()
