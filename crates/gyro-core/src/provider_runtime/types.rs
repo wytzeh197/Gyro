@@ -305,3 +305,15 @@ pub enum ProviderApprovalDecision {
     Reject,
     AppliedByGyro,
 }
+
+/// What the provider thread already holds, so a resumed turn does not pay
+/// again for guidance that sits earlier in the same thread.
+#[derive(Clone, Copy, Default)]
+pub struct PromptTurn {
+    /// The provider resumes its own session, which already carries the
+    /// standing guidance from the turn that opened it.
+    pub resumed: bool,
+    /// The runner delivers approval policy out of band (Codex developer
+    /// instructions), so repeating it in the prompt is pure cost.
+    pub approvals_sent_separately: bool,
+}

@@ -9,8 +9,6 @@ pub(crate) const MAX_DEBUG_ADAPTER_PROCESSES: usize = 8;
 pub(crate) const MAX_CONCURRENT_IDE_COMMANDS: usize = 4;
 pub(crate) const MAX_CONCURRENT_PROVIDER_RUNS: usize = 4;
 pub(crate) const MAX_CONCURRENT_SCHEDULED_RUNS: usize = 2;
-pub(crate) const MAX_CHAT_MESSAGE_CHARS: usize = 24_000;
-pub(crate) const MAX_CHAT_RESPONSE_CHARS: usize = 64_000;
 // The live transcript is not the stored message: it grows while the model
 // writes, and only the finished message is persisted. Bounding it separately
 // keeps a long answer from being cut mid-word while it streams, without
@@ -111,4 +109,10 @@ pub(crate) const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_milli
 pub(crate) const PROVIDER_CHAT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 pub(crate) const PROVIDER_APPROVAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 pub(crate) const MAX_MODEL_TERMINAL_PROCESSES: usize = 4;
-pub(crate) const TEXT_TRUNCATION_SUFFIX: &str = "...";
+
+pub(crate) use gyro_core::provider_runtime::limits::{
+    MAX_CHAT_RESPONSE_CHARS, TEXT_TRUNCATION_SUFFIX,
+};
+
+#[cfg(test)]
+pub(crate) use gyro_core::provider_runtime::limits::MAX_CHAT_MESSAGE_CHARS;

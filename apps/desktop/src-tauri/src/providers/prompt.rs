@@ -109,18 +109,6 @@ pub(crate) fn provider_context_message_with_history(
     provider_context_message_for_turn(request, conversation_history, PromptTurn::default())
 }
 
-/// What the provider thread already holds, so a resumed turn does not pay
-/// again for guidance that sits earlier in the same thread.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct PromptTurn {
-    /// The provider resumes its own session, which already carries the
-    /// standing guidance from the turn that opened it.
-    pub(crate) resumed: bool,
-    /// The runner delivers approval policy out of band (Codex developer
-    /// instructions), so repeating it in the prompt is pure cost.
-    pub(crate) approvals_sent_separately: bool,
-}
-
 pub(crate) fn provider_context_message_for_turn(
     request: &ProviderChatRequest,
     conversation_history: Option<&str>,
@@ -663,3 +651,5 @@ pub(crate) fn claude_chat_prompt(
          User message:\n{message}"
     )
 }
+
+pub(crate) use gyro_core::provider_runtime::types::PromptTurn;

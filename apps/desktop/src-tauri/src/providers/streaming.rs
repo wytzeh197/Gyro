@@ -637,8 +637,6 @@ impl StreamingCommandState {
     }
 }
 
-pub(crate) const PROVIDER_CHAT_MAX_RUNTIME_SECS: u64 = 24 * 60 * 60;
-pub(crate) const PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS: u64 = 30 * 60;
 /// How long a run may show nothing before its heartbeat says so.
 pub(crate) const PROVIDER_CHAT_QUIET_NOTICE: Duration = Duration::from_secs(5 * 60);
 
@@ -1012,3 +1010,7 @@ pub(crate) fn provider_chat_cancelled(app: &tauri::AppHandle, session_id: &str) 
 }
 
 pub(crate) use gyro_core::provider_runtime::types::StreamingCommandOutput;
+
+pub(crate) use gyro_core::provider_runtime::limits::{
+    PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS, PROVIDER_CHAT_MAX_RUNTIME_SECS,
+};

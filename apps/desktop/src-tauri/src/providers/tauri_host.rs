@@ -29,6 +29,24 @@ impl TauriRunnerHost {
 }
 
 impl RunnerHost for TauriRunnerHost {
+    fn prepare_command(
+        &self,
+        program: &str,
+        provider_id: &str,
+        request: &ProviderChatRequest,
+    ) -> anyhow::Result<std::process::Command> {
+        let mut command = super::process::command_for_provider(program, provider_id)?;
+        crate::project_import_continuation::apply_data_home(&mut command, request)?;
+        Ok(command)
+    }
+    fn context_message(
+        &self,
+        request: &ProviderChatRequest,
+        history: Option<&str>,
+        turn: gyro_core::provider_runtime::types::PromptTurn,
+    ) -> String {
+        super::prompt::provider_context_message_for_turn(request, history, turn)
+    }
     fn cancellation(&self, session_id: &str) -> anyhow::Result<CancellationToken> {
         self.app
             .state::<ProviderCancellationManager>()

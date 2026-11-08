@@ -14,14 +14,13 @@ use crate::{
             emit_provider_context_usage,
         },
         markers::publish_stream_session_title,
-        streaming::{StreamingCommandOutput, StreamingCommandState},
-        types::ProviderActivity,
+        streaming::StreamingCommandState,
     },
-    text::{sanitize_provider_chat_response, sanitize_provider_text_delta, truncate_chars},
+    text::{sanitize_provider_text_delta, truncate_chars},
     usage::{fetch::publish_live_provider_usage, types::ProviderRateLimitWindow},
 };
 use gyro_core::{timing, timing::Stage as TimingStage, HarnessRunStatus};
-use std::{collections::HashMap, path::Path, time::Instant};
+use std::{path::Path, time::Instant};
 pub(crate) fn handle_provider_stdout_line(
     line: &str,
     app: &tauri::AppHandle,
@@ -540,70 +539,6 @@ pub(crate) fn humanize_activity_name(value: &str) -> String {
         .join(" ")
 }
 
-pub(crate) fn provider_activities_for_response(
-    activities: Vec<ProviderActivity>,
-    response: &str,
-) -> Vec<ProviderActivity> {
-    let response = response.trim();
-    // Providers stream many intermediate statuses for the same activity id
-    // (ACP tool_call → tool_call_update, Claude stream progress, …). Keeping
-    // every frame left the durable rail full of "running" ghosts after a turn
-    // settled — across Grok, Claude, and Codex. Collapse to the latest state
-    // per id in arrival order, then force any still-open work closed: once the
-    // provider has answered, nothing is still running.
-    let mut order = Vec::<String>::new();
-    let mut by_id = HashMap::<String, ProviderActivity>::new();
-    for activity in activities {
-        if activity.kind == "commentary" && activity.label.trim() == response {
-            continue;
-        }
-        if !by_id.contains_key(&activity.id) {
-            order.push(activity.id.clone());
-        }
-        by_id.insert(activity.id.clone(), activity);
-    }
-    order
-        .into_iter()
-        .filter_map(|id| by_id.remove(&id))
-        .map(|mut activity| {
-            if activity.status == "running" || activity.status == "queued" {
-                activity.status = "done".into();
-            }
-            activity
-        })
-        .collect()
-}
-
-/// A non-zero CLI exit that still produced a real streamed answer.
-///
-/// Several provider CLIs exit non-zero after tool errors the model already
-/// recovered from, or after writing a full answer. Treating those as total
-/// failure tore down a finished chat and left the desktop in "failed" while the
-/// user already had the reply. Cancel, timeout, and empty streams still fail.
-pub(crate) fn recover_streamed_provider_answer(
-    output: &StreamingCommandOutput,
-    last_message: &str,
-) -> Option<String> {
-    if output.status_success {
-        return None;
-    }
-    let candidates = [
-        output.assistant_text.as_deref().unwrap_or(""),
-        last_message,
-        // Raw stdout only when the CLI did not speak stream-json; a JSON dump is
-        // not an answer the user should see as a completed chat.
-        if output.parsed_stream_json {
-            ""
-        } else {
-            output.stdout.as_str()
-        },
-    ];
-    candidates.into_iter().find_map(|candidate| {
-        let response = sanitize_provider_chat_response(candidate.trim());
-        (!response.is_empty()).then_some(response)
-    })
-}
-
 pub(crate) fn extract_provider_session_id(value: &serde_json::Value) -> Option<String> {
     gyro_core::extract_provider_session_id(value)
 }
@@ -626,3 +561,7 @@ pub(crate) fn extract_provider_text_chunk(value: &serde_json::Value) -> Option<P
 pub(crate) fn extract_codex_agent_message_text(value: &serde_json::Value) -> Option<String> {
     gyro_core::extract_codex_agent_message_text(value)
 }
+
+pub(crate) use gyro_core::provider_runtime::support::{
+    provider_activities_for_response, recover_streamed_provider_answer,
+};

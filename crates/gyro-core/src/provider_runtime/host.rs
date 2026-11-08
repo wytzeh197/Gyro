@@ -1,8 +1,8 @@
 //! Synchronous provider effects supplied by the application's host.
 use super::types::{
-    ProviderActivity, ProviderAdapterKind, ProviderApprovalDecision, ProviderChatRequest,
-    ProviderContextUsage, ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput,
-    StreamingCommandOutput,
+    PromptTurn, ProviderActivity, ProviderAdapterKind, ProviderApprovalDecision,
+    ProviderChatRequest, ProviderContextUsage, ProviderResumeCursor, ProviderRunAttempt,
+    ProviderRunnerOutput, StreamingCommandOutput,
 };
 use crate::{CancellationToken, CapabilityId, CapabilityResponse, HarnessRunStatus, UsageTokens};
 use std::sync::{
@@ -62,6 +62,18 @@ impl Drop for ProviderHeartbeat {
 /// Application services supplied to a provider run.
 
 pub trait RunnerHost: Send + Sync {
+    fn prepare_command(
+        &self,
+        program: &str,
+        provider_id: &str,
+        request: &ProviderChatRequest,
+    ) -> anyhow::Result<std::process::Command>;
+    fn context_message(
+        &self,
+        request: &ProviderChatRequest,
+        history: Option<&str>,
+        turn: PromptTurn,
+    ) -> String;
     fn cancellation(&self, session_id: &str) -> anyhow::Result<CancellationToken>;
     fn emit(&self, request: &ProviderChatRequest, event: RunEvent<'_>);
     fn conversation_history(&self, request: &ProviderChatRequest) -> Option<String>;

@@ -5,8 +5,7 @@ use crate::{
         chat_types::{ChatAttachmentRequest, ChatMode},
     },
 };
-use gyro_core::WORKSPACE_UNAVAILABLE_MESSAGE;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn codex_chat_args(
     resume_session_id: Option<&str>,
@@ -71,20 +70,6 @@ pub(crate) fn codex_chat_args(
     args.push("--".into());
     args.push(prompt.into());
     args
-}
-
-/// Check a provider argument vector against its CLI contract before spawning.
-///
-/// A violation is a Gyro bug rather than a provider outage, so the run stops
-/// here with a message that says so. Letting the vector through instead makes
-/// the CLI report a downstream symptom — most memorably a missing prompt — that
-/// reads like a transient failure and invites an endless retry.
-pub(crate) fn audit_provider_chat_args(provider_id: &str, args: &[String]) -> anyhow::Result<()> {
-    let Some(contract) = gyro_core::provider_cli_contract(provider_id) else {
-        return Ok(());
-    };
-    gyro_core::audit_provider_args(contract, args)
-        .map_err(|violation| anyhow::anyhow!("{}", violation.message(provider_id)))
 }
 
 /// Claude Code tools that bypass a Gyro surface or cannot work in a `--print`
@@ -206,23 +191,6 @@ pub(crate) fn claude_allowed_capability_tools(tools: String, compact: bool) -> S
     }
 }
 
-pub(crate) fn provider_chat_cwd(workspace_path: Option<&str>) -> anyhow::Result<PathBuf> {
-    if let Some(path) = workspace_path
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-    {
-        let path = PathBuf::from(path);
-        if path.is_dir() {
-            return Ok(path.canonicalize()?);
-        }
-        anyhow::bail!("{WORKSPACE_UNAVAILABLE_MESSAGE}");
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        return Ok(PathBuf::from(home));
-    }
-    std::env::current_dir().map_err(Into::into)
-}
-
 pub(crate) fn codex_model_arg(model_id: Option<&str>) -> Option<String> {
     let model = model_id?.trim();
     if model.is_empty() {
@@ -318,3 +286,7 @@ pub(crate) fn grok_reasoning_effort_arg(
     }
     gyro_core::grok::reasoning_effort_arg(model_id, Some(effort.as_str()))
 }
+
+pub(crate) use gyro_core::provider_runtime::support::{
+    audit_provider_chat_args, provider_chat_cwd,
+};

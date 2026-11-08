@@ -7,7 +7,6 @@ use crate::{
         streaming::PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS,
         types::{ProviderAdapterDescriptor, ProviderAdapterKind},
     },
-    text::truncate_error_detail,
 };
 use gyro_core::{
     augmented_gui_path, is_openai_compatible_provider, provider_descriptor, ProviderExecutionKind,
@@ -54,22 +53,6 @@ pub(crate) fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescript
     }
 }
 
-pub(crate) fn provider_output_summary(
-    runner: &str,
-    status_label: &str,
-    provider_session_id: Option<&str>,
-    response_chars: usize,
-) -> String {
-    let session_state = if provider_session_id.is_some() {
-        "cursor recorded"
-    } else {
-        "no cursor"
-    };
-    gyro_core::sanitize_harness_text(&format!(
-        "{runner} exited with {status_label}; {response_chars} response chars; {session_state}"
-    ))
-}
-
 /// Whether an error means the stored provider cursor is dead.
 ///
 /// A true stale-resume error is one short sentence from the CLI. A failed
@@ -86,59 +69,6 @@ pub(crate) fn is_stale_resume_error(error: &str) -> bool {
         .lines()
         .filter_map(provider_error_sentence)
         .any(|sentence| is_stale_resume_sentence(&sentence))
-}
-
-/// The part of one output line that could be the CLI reporting an error.
-///
-/// Plain text is taken as written. A JSON frame contributes only its error
-/// message, and only when it carries one — a transcript frame has no business
-/// being tested for a dead cursor just because it names the session it belongs
-/// to.
-pub(crate) fn provider_error_sentence(line: &str) -> Option<String> {
-    let line = line.trim();
-    if line.is_empty() {
-        return None;
-    }
-    if !line.starts_with('{') {
-        return Some(line.to_string());
-    }
-    let frame = serde_json::from_str::<serde_json::Value>(line).ok()?;
-    let error = frame.get("error")?;
-    if let Some(message) = error.as_str() {
-        return Some(message.to_string());
-    }
-    error
-        .get("message")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-}
-
-/// The reportable failure from a stream-json run's output.
-///
-/// Both supported CLIs print a JSON transcript on stdout and their own
-/// diagnostics on stderr, so concatenating the two and truncating stored the
-/// first few thousand characters of the conversation as the reason the
-/// conversation failed. That is unreadable in the timeline, and it is worse
-/// than unreadable to the classifiers: [`provider_failure_recovery`] and
-/// [`is_stale_resume_error`] both match keywords, and a long enough transcript
-/// contains every keyword either of them looks for.
-///
-/// The CLI's own diagnostics come first, then error frames from the stream, and
-/// only then the transcript — by which point it is the only thing left to say.
-pub(crate) fn provider_stream_failure_detail(stdout: &str, stderr: &str) -> String {
-    let stderr = stderr.trim();
-    if !stderr.is_empty() {
-        return truncate_error_detail(stderr);
-    }
-    let frame_errors = stdout
-        .lines()
-        .filter_map(provider_error_sentence)
-        .filter(|sentence| !sentence.trim().is_empty())
-        .collect::<Vec<_>>();
-    if !frame_errors.is_empty() {
-        return truncate_error_detail(&frame_errors.join("\n"));
-    }
-    truncate_error_detail(stdout.trim())
 }
 
 pub(crate) fn is_stale_resume_sentence(sentence: &str) -> bool {
@@ -294,3 +224,7 @@ pub(crate) fn terminate_provider_process_group(child: &mut Child) {
     let _ = child.kill();
     let _ = child.wait();
 }
+
+pub(crate) use gyro_core::provider_runtime::support::{
+    provider_error_sentence, provider_output_summary, provider_stream_failure_detail,
+};

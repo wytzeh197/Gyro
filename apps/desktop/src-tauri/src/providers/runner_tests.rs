@@ -4,6 +4,22 @@ use super::*;
 struct RecordingHost;
 
 impl RunnerHost for RecordingHost {
+    fn prepare_command(
+        &self,
+        _: &str,
+        _: &str,
+        _: &ProviderChatRequest,
+    ) -> anyhow::Result<std::process::Command> {
+        unreachable!("unused fixture service")
+    }
+    fn context_message(
+        &self,
+        _: &ProviderChatRequest,
+        _: Option<&str>,
+        _: gyro_core::provider_runtime::types::PromptTurn,
+    ) -> String {
+        unreachable!("unused fixture service")
+    }
     fn cancellation(&self, _: &str) -> anyhow::Result<gyro_core::CancellationToken> {
         unreachable!("unused fixture service")
     }
