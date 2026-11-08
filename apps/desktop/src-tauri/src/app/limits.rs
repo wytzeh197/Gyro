@@ -104,9 +104,11 @@ pub(crate) use gyro_core::provider_runtime::limits::MAX_CHAT_MESSAGE_CHARS;
 pub(crate) use gyro_core::provider_runtime::limits::MAX_CHAT_IMAGE_BYTES;
 
 pub(crate) use gyro_core::provider_runtime::limits::{
-    MAX_CHAT_RESPONSE_BYTES, MAX_CODEX_APP_SERVER_ACTIVITIES, MAX_CODEX_APP_SERVER_PATCHES,
-    MAX_CODEX_APP_SERVER_PATCH_BYTES, MAX_CODEX_APP_SERVER_PROTOCOL_BYTES,
-    MAX_CODEX_APP_SERVER_PROTOCOL_MESSAGES, PROVIDER_STREAM_FLUSH_INTERVAL,
+    MAX_CODEX_APP_SERVER_ACTIVITIES, PROVIDER_STREAM_FLUSH_INTERVAL,
+};
+#[cfg(test)]
+pub(crate) use gyro_core::provider_runtime::limits::{
+    MAX_CODEX_APP_SERVER_PATCHES, MAX_CODEX_APP_SERVER_PATCH_BYTES,
 };
 
 #[cfg(test)]

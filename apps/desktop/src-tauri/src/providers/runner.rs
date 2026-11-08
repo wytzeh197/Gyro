@@ -134,5 +134,3 @@ pub(crate) fn runner_for(kind: ProviderAdapterKind) -> &'static dyn ProviderRunn
 #[cfg(test)]
 #[path = "runner_tests.rs"]
 mod tests;
-
-pub(crate) use gyro_core::provider_runtime::host::observe_codex_turn_usage;

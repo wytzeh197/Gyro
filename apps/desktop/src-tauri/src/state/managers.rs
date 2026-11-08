@@ -196,5 +196,3 @@ impl Drop for HiddenWebviewGuard {
         let _ = self.0.close();
     }
 }
-
-pub(crate) use gyro_core::provider_runtime::support::TempFileGuard;

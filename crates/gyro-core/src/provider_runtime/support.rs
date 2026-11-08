@@ -9,6 +9,7 @@ use super::{
 };
 use crate::{GyroConfig, GyroPaths, WORKSPACE_UNAVAILABLE_MESSAGE};
 use base64::Engine;
+use serde_json::Value;
 #[cfg(unix)]
 use std::time::Duration;
 use std::{
@@ -367,5 +368,84 @@ pub struct TempFileGuard(pub PathBuf);
 impl Drop for TempFileGuard {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
+    }
+}
+
+pub fn image_generation_activity(
+    item: &Value,
+    label: &str,
+    status: &str,
+    note: Option<String>,
+) -> ProviderActivity {
+    ProviderActivity {
+        id: item
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("image-generation")
+            .into(),
+        kind: "tool".into(),
+        label: label.into(),
+        detail: Some("image_generation".into()),
+        note,
+        file_counts: None,
+        status: status.into(),
+    }
+}
+
+pub fn generated_image_event_matches(
+    params: &serde_json::Value,
+    thread: &str,
+    turn: Option<&str>,
+) -> bool {
+    params.get("threadId").and_then(serde_json::Value::as_str) == Some(thread)
+        && turn.is_some_and(|turn| {
+            params.get("turnId").and_then(serde_json::Value::as_str) == Some(turn)
+        })
+}
+
+pub fn protocol_item(item: &serde_json::Value, status: &str) {
+    let status = if status == "done"
+        && (item.get("error").is_some_and(|value| !value.is_null())
+            || item.get("status").and_then(serde_json::Value::as_str) == Some("failed")
+            || item
+                .get("exitCode")
+                .and_then(serde_json::Value::as_i64)
+                .is_some_and(|code| code != 0))
+    {
+        "failed"
+    } else {
+        status
+    };
+    if let (Some(id), Some(kind)) = (
+        item.get("id").and_then(serde_json::Value::as_str),
+        item.get("type").and_then(serde_json::Value::as_str),
+    ) {
+        crate::timing::protocol_item(id, kind, status);
+    }
+}
+pub fn codex_context_compaction_activity(
+    params: &serde_json::Value,
+    status: &str,
+) -> ProviderActivity {
+    let identity = params
+        .get("turnId")
+        .or_else(|| params.pointer("/item/id"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("turn");
+    ProviderActivity {
+        id: format!("context-compaction-{identity}"),
+        kind: "context".into(),
+        label: if status == "running" {
+            "Compacting context".into()
+        } else {
+            "Compacted context".into()
+        },
+        detail: Some(
+            "Summarized earlier conversation to keep the thread within the model context window."
+                .into(),
+        ),
+        file_counts: None,
+        note: None,
+        status: status.into(),
     }
 }

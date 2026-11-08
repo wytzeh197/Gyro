@@ -81,33 +81,6 @@ pub(super) fn activity(
     }
 }
 
-pub(super) fn codex_context_compaction_activity(
-    params: &serde_json::Value,
-    status: &str,
-) -> ProviderActivity {
-    let identity = params
-        .get("turnId")
-        .or_else(|| params.pointer("/item/id"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("turn");
-    ProviderActivity {
-        id: format!("context-compaction-{identity}"),
-        kind: "context".into(),
-        label: if status == "running" {
-            "Compacting context".into()
-        } else {
-            "Compacted context".into()
-        },
-        detail: Some(
-            "Summarized earlier conversation to keep the thread within the model context window."
-                .into(),
-        ),
-        file_counts: None,
-        note: None,
-        status: status.into(),
-    }
-}
-
 /// What a manual `/compact` on a provider without a resumable compacted
 /// session actually did to the transcript.
 ///
@@ -233,3 +206,5 @@ mod tests {
         );
     }
 }
+
+pub(crate) use gyro_core::provider_runtime::support::codex_context_compaction_activity;

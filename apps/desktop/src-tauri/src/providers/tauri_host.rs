@@ -20,24 +20,49 @@ use uuid::Uuid;
 
 pub(crate) struct TauriRunnerHost {
     app: tauri::AppHandle,
+    generated_images: std::sync::Mutex<crate::codex_images::GeneratedImages>,
 }
 
 impl TauriRunnerHost {
     pub(crate) fn new(app: &tauri::AppHandle) -> Self {
-        Self { app: app.clone() }
+        Self {
+            app: app.clone(),
+            generated_images: std::sync::Mutex::new(Default::default()),
+        }
     }
 }
 
 impl RunnerHost for TauriRunnerHost {
-    fn prepare_command(
+    fn provider_command(
         &self,
         program: &str,
         provider_id: &str,
-        request: &ProviderChatRequest,
     ) -> anyhow::Result<std::process::Command> {
-        let mut command = super::process::command_for_provider(program, provider_id)?;
-        crate::project_import_continuation::apply_data_home(&mut command, request)?;
-        Ok(command)
+        super::process::command_for_provider(program, provider_id)
+    }
+    fn apply_session_environment(
+        &self,
+        command: &mut std::process::Command,
+        request: &ProviderChatRequest,
+    ) -> anyhow::Result<()> {
+        crate::project_import_continuation::apply_data_home(command, request)
+    }
+    fn complete_generated_image(
+        &self,
+        request: &ProviderChatRequest,
+        item: &serde_json::Value,
+        sessions_dir: &std::path::Path,
+    ) -> Option<super::types::ProviderActivity> {
+        self.generated_images
+            .lock()
+            .expect("provider image state poisoned")
+            .complete(item, sessions_dir, &request.session_id)
+    }
+    fn generated_image_reply(&self, text: &str) -> String {
+        self.generated_images
+            .lock()
+            .expect("provider image state poisoned")
+            .reply(text)
     }
     fn context_message(
         &self,

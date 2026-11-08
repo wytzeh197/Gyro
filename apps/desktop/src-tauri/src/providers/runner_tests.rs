@@ -4,12 +4,25 @@ use super::*;
 struct RecordingHost;
 
 impl RunnerHost for RecordingHost {
-    fn prepare_command(
+    fn provider_command(&self, _: &str, _: &str) -> anyhow::Result<std::process::Command> {
+        unreachable!("unused fixture service")
+    }
+    fn apply_session_environment(
         &self,
-        _: &str,
-        _: &str,
+        _: &mut std::process::Command,
         _: &ProviderChatRequest,
-    ) -> anyhow::Result<std::process::Command> {
+    ) -> anyhow::Result<()> {
+        unreachable!("unused fixture service")
+    }
+    fn complete_generated_image(
+        &self,
+        _: &ProviderChatRequest,
+        _: &serde_json::Value,
+        _: &std::path::Path,
+    ) -> Option<super::super::types::ProviderActivity> {
+        unreachable!("unused fixture service")
+    }
+    fn generated_image_reply(&self, _: &str) -> String {
         unreachable!("unused fixture service")
     }
     fn context_message(

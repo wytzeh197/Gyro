@@ -1002,8 +1002,7 @@ mod tests {
 }
 
 pub(crate) use gyro_core::provider_runtime::accounting::{
-    codex_usage_baseline, counts_regressed, provider_turn_tokens, subtract, usage_tokens,
-    CodexTurnUsage,
+    counts_regressed, provider_turn_tokens, subtract, usage_tokens,
 };
 
 #[cfg(test)]
@@ -1011,3 +1010,6 @@ use gyro_core::provider_runtime::accounting::parse_counts;
 
 #[cfg(test)]
 use gyro_core::provider_runtime::accounting::codex_usage_matches;
+
+#[cfg(test)]
+use gyro_core::provider_runtime::accounting::{codex_usage_baseline, CodexTurnUsage};

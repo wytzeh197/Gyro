@@ -10,7 +10,7 @@ use crate::{
     capabilities::mcp_server::advertised_capability_descriptors,
     context_compaction,
     conversation_history::acp_conversation_history_text_for_session,
-    delegated_agents, openai_compatible_runner,
+    delegated_agents,
     providers::chat_types::{isolated_internal_purpose, ChatMode, ProviderChatRequest},
     sessions::attachments::{hash_file_streaming, validate_attachment_name},
     state::{
@@ -396,28 +396,6 @@ pub(crate) fn validate_chat_context(request: &ProviderChatRequest) -> Result<(),
     Ok(())
 }
 
-pub(crate) fn provider_approval_instructions(request: &ProviderChatRequest) -> Vec<&'static str> {
-    if request.mode == ChatMode::Plan {
-        return Vec::new();
-    }
-    // Always send the current policy on resume. A null instruction override
-    // can preserve an earlier turn's Ask first instructions in provider state.
-    let mut instructions = vec!["Use the current turn's configured approval policy. Approval requirements from an earlier turn do not override the current policy."];
-    if openai_compatible_runner::configured_capability_support(&request.provider_id)
-        .unwrap_or_else(|_| gyro_core::provider_capability_support(&request.provider_id))
-        .available
-    {
-        instructions.push("Invoke gyro_* capabilities directly: Gyro's capability broker presents any required approval before execution. Do not ask for duplicate approval in chat before invoking these broker-enforced tools.");
-    }
-    if request.require_command_approval {
-        instructions.push("Gyro requires a fresh, explicit user approval before every command or executable tool action, including commands that appear read-only or trusted. Use the provider's approval request mechanism before execution; never infer approval from the user's message or an earlier action.");
-    }
-    if request.require_file_edit_approval {
-        instructions.push("Gyro requires a fresh, explicit user approval before every file change. Use the provider's approval request mechanism before applying it; never infer approval from the user's message or an earlier change.");
-    }
-    instructions
-}
-
 /// Local transcript for a provider turn that cannot resume a foreign agent
 /// session (model handoff, missing cursor, or first turn after a switch).
 pub(crate) fn local_conversation_history_for_request(
@@ -431,3 +409,5 @@ pub(crate) fn local_conversation_history_for_request(
     }
     acp_conversation_history_text_for_session(&request.session_id)
 }
+
+pub(crate) use gyro_core::provider_runtime::prompts::provider_approval_instructions;

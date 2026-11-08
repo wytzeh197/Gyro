@@ -1462,4 +1462,5 @@ pub(crate) use gyro_core::provider_runtime::types::ProviderContextUsage;
 #[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::support::provider_billed_usage_from_acp_tokens;
 
+#[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::accounting::provider_context_usage_from_app_server;

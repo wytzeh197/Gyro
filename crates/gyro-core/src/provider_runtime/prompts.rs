@@ -1,4 +1,5 @@
 //! Pure provider prompt framing and shared product instructions.
+use super::types::{ChatMode, ProviderChatRequest};
 pub fn provider_workspace_prompt_line(message: &str, workspace: &str) -> String {
     let line = format!("Selected workspace: {workspace}");
     if message.lines().any(|existing| existing == line.as_str()) {
@@ -191,3 +192,25 @@ pub fn needs_surface_guide(message: &str) -> bool {
         || lower.contains("model release")
 }
 pub const CODEX_IMAGE_REPLY_INSTRUCTION: &str = "When the user asks to generate or edit an image, use the native image-generation tool if it is available. Gyro saves its output and displays it in chat. Do not substitute a text description for the requested image or claim generation succeeded when the tool failed. If the tool is unavailable, say so.";
+
+pub fn provider_approval_instructions(request: &ProviderChatRequest) -> Vec<&'static str> {
+    if request.mode == ChatMode::Plan {
+        return Vec::new();
+    }
+    // Always send the current policy on resume. A null instruction override
+    // can preserve an earlier turn's Ask first instructions in provider state.
+    let mut instructions = vec!["Use the current turn's configured approval policy. Approval requirements from an earlier turn do not override the current policy."];
+    if super::api_config::configured_capability_support(&request.provider_id)
+        .unwrap_or_else(|_| crate::provider_capability_support(&request.provider_id))
+        .available
+    {
+        instructions.push("Invoke gyro_* capabilities directly: Gyro's capability broker presents any required approval before execution. Do not ask for duplicate approval in chat before invoking these broker-enforced tools.");
+    }
+    if request.require_command_approval {
+        instructions.push("Gyro requires a fresh, explicit user approval before every command or executable tool action, including commands that appear read-only or trusted. Use the provider's approval request mechanism before execution; never infer approval from the user's message or an earlier action.");
+    }
+    if request.require_file_edit_approval {
+        instructions.push("Gyro requires a fresh, explicit user approval before every file change. Use the provider's approval request mechanism before applying it; never infer approval from the user's message or an earlier change.");
+    }
+    instructions
+}

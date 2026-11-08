@@ -39,7 +39,6 @@ mod code_mode;
 #[cfg(debug_assertions)]
 mod code_mode_smoke;
 mod codex_images;
-mod codex_turn_completion;
 mod command_execution;
 mod context_compaction;
 mod conversation_history;

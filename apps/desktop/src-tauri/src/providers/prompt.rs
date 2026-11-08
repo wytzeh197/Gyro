@@ -500,4 +500,5 @@ pub(crate) use gyro_core::provider_runtime::types::PromptTurn;
 
 #[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::prompts::claude_chat_prompt;
+#[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::prompts::openai_codex_chat_prompt;

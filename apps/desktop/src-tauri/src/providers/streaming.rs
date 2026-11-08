@@ -996,8 +996,7 @@ pub(crate) fn provider_chat_cancelled(app: &tauri::AppHandle, session_id: &str) 
 
 pub(crate) use gyro_core::provider_runtime::types::StreamingCommandOutput;
 
-pub(crate) use gyro_core::provider_runtime::limits::{
-    PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS, PROVIDER_CHAT_MAX_RUNTIME_SECS,
-};
+pub(crate) use gyro_core::provider_runtime::limits::PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS;
 
+#[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::support::provider_run_failure;

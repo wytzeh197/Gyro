@@ -6,7 +6,7 @@ use crate::{
     app::limits::{
         MAX_CHAT_ATTACHMENTS, MAX_CHAT_IMAGE_BYTES, MAX_CHAT_RESPONSE_CHARS, TEXT_TRUNCATION_SUFFIX,
     },
-    providers::{chat_types::ChatMode, types::ProviderActivity},
+    providers::types::ProviderActivity,
     sessions::{
         attachments::{
             ensure_attachment_storage_quota, ensure_private_attachment_directory,
@@ -26,14 +26,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(super) fn config_arg(mode: &ChatMode) -> &'static str {
-    if *mode == ChatMode::Normal {
-        "features.image_generation=true"
-    } else {
-        "features.image_generation=false"
-    }
-}
-
 #[derive(Default)]
 pub(super) struct GeneratedImages {
     completed: HashSet<String>,
@@ -44,13 +36,19 @@ pub(super) struct GeneratedImages {
 impl GeneratedImages {
     /// Only accept image events for the active thread/turn. A resumed thread's
     /// historical images must not be imported into the new reply.
+    #[cfg(test)]
     pub(super) fn accepts(params: &Value, thread: &str, turn: Option<&str>) -> bool {
-        params.get("threadId").and_then(Value::as_str) == Some(thread)
-            && turn.is_some_and(|turn| params.get("turnId").and_then(Value::as_str) == Some(turn))
+        gyro_core::provider_runtime::support::generated_image_event_matches(params, thread, turn)
     }
 
+    #[cfg(test)]
     pub(super) fn started(item: &Value) -> ProviderActivity {
-        activity(item, "Generating image", "running", None)
+        gyro_core::provider_runtime::support::image_generation_activity(
+            item,
+            "Generating image",
+            "running",
+            None,
+        )
     }
 
     pub(super) fn complete(
@@ -168,22 +166,6 @@ impl GeneratedImages {
         } else {
             format!("{text}\n\n{appendix}")
         }
-    }
-}
-
-fn activity(item: &Value, label: &str, status: &str, note: Option<String>) -> ProviderActivity {
-    ProviderActivity {
-        id: item
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or("image-generation")
-            .into(),
-        kind: "tool".into(),
-        label: label.into(),
-        detail: Some("image_generation".into()),
-        note,
-        file_counts: None,
-        status: status.into(),
     }
 }
 
@@ -557,3 +539,11 @@ mod tests {
         assert!(reply.ends_with(')'));
     }
 }
+
+#[cfg(test)]
+use gyro_core::provider_runtime::native_args::codex_image_config_arg as config_arg;
+
+use gyro_core::provider_runtime::support::image_generation_activity as activity;
+
+#[cfg(test)]
+use crate::providers::chat_types::ChatMode;

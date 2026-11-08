@@ -62,12 +62,33 @@ impl Drop for ProviderHeartbeat {
 /// Application services supplied to a provider run.
 
 pub trait RunnerHost: Send + Sync {
+    fn provider_command(
+        &self,
+        program: &str,
+        provider_id: &str,
+    ) -> anyhow::Result<std::process::Command>;
+    fn apply_session_environment(
+        &self,
+        command: &mut std::process::Command,
+        request: &ProviderChatRequest,
+    ) -> anyhow::Result<()>;
     fn prepare_command(
         &self,
         program: &str,
         provider_id: &str,
         request: &ProviderChatRequest,
-    ) -> anyhow::Result<std::process::Command>;
+    ) -> anyhow::Result<std::process::Command> {
+        let mut command = self.provider_command(program, provider_id)?;
+        self.apply_session_environment(&mut command, request)?;
+        Ok(command)
+    }
+    fn complete_generated_image(
+        &self,
+        request: &ProviderChatRequest,
+        item: &serde_json::Value,
+        sessions_dir: &std::path::Path,
+    ) -> Option<ProviderActivity>;
+    fn generated_image_reply(&self, text: &str) -> String;
     fn context_message(
         &self,
         request: &ProviderChatRequest,
