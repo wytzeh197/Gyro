@@ -23820,18 +23820,48 @@ button.gyro-account-menu-row:hover,
 
 .gyro-composer-slash-menu.is-commands > header {
   border-bottom: 1px solid var(--gyro-premium-hairline-soft);
+  padding: 9px 12px 8px 14px;
+}
+
+.gyro-composer-slash-keys {
+  align-items: center;
+  color: var(--gyro-faint);
+  display: inline-flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.gyro-composer-slash-keys > span {
+  margin-right: 6px;
+}
+
+.gyro-composer-slash-keys > span:last-child {
+  margin-right: 0;
 }
 
 .gyro-composer-slash-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 6px;
+  padding: 4px 6px 6px;
   scrollbar-color: var(--gyro-border-strong) transparent;
   scrollbar-width: thin;
+}
+
+.gyro-composer-slash-group {
+  color: var(--gyro-faint);
+  flex: none;
+  font-size: var(--gyro-font-tiny);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 8px 8px 3px;
+}
+
+.gyro-composer-slash-group:first-child {
+  padding-top: 4px;
 }
 
 .gyro-composer-slash-menu button {
@@ -23844,12 +23874,10 @@ button.gyro-account-menu-row:hover,
   flex: none;
   font: inherit;
   gap: 10px;
-  grid-template-columns:
-    16px calc(96px * var(--gyro-ui-scale, 1)) minmax(0, 1fr)
-    16px;
+  grid-template-columns: 16px calc(92px * var(--gyro-ui-scale, 1)) minmax(0, 1fr);
   font-size: var(--gyro-font-micro);
-  min-height: calc(34px * var(--gyro-ui-scale, 1));
-  padding: 7px 8px;
+  min-height: calc(32px * var(--gyro-ui-scale, 1));
+  padding: 6px 8px;
   text-align: left;
   transition:
     background var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
@@ -23857,11 +23885,13 @@ button.gyro-account-menu-row:hover,
   width: 100%;
 }
 
-.gyro-composer-slash-menu button:hover,
+/* Command rows follow the pointer through selection, so hover alone never
+   paints a second highlighted row beside the keyboard choice. */
+.gyro-composer-slash-menu:not(.is-commands) button:hover,
 .gyro-composer-slash-menu button.is-selected {
   background: color-mix(
     in srgb,
-    var(--gyro-accent) 7%,
+    var(--gyro-accent) 9%,
     var(--gyro-control-hover)
   );
   color: var(--gyro-text);
@@ -23894,7 +23924,7 @@ button.gyro-account-menu-row:hover,
 
 .gyro-composer-slash-command-copy {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -23918,75 +23948,75 @@ button.gyro-account-menu-row:hover,
   line-height: 1.4;
 }
 
-.gyro-composer-slash-hint-mark {
-  align-items: center;
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: 50%;
-  color: var(--gyro-faint);
-  display: flex;
-  font-size: var(--gyro-font-tiny);
-  font-weight: 500;
-  height: 14px;
-  justify-content: center;
-  line-height: 1;
-  width: 14px;
-}
-
-.gyro-composer-slash-menu button:hover .gyro-composer-slash-hint-mark,
-.gyro-composer-slash-menu button.is-selected .gyro-composer-slash-hint-mark {
-  border-color: var(--gyro-muted);
-  color: var(--gyro-text);
-}
-
-.gyro-composer-slash-hint-bubble {
-  background: var(--gyro-surface-raised);
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  box-shadow: 0 10px 26px var(--gyro-premium-shadow-soft);
-  color: var(--gyro-muted);
-  font-size: var(--gyro-font-micro);
-  line-height: 1.45;
-  padding: 8px 10px;
-  pointer-events: none;
-  position: fixed;
-  transform: translateY(-50%);
-  width: 216px;
-  z-index: 200;
-}
-
 .gyro-composer-slash-menu button code {
   color: var(--gyro-text);
   font-family: var(--gyro-font-mono);
   font-size: var(--gyro-font-micro);
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+.gyro-composer-slash-menu button code mark {
+  background: none;
+  color: var(--gyro-accent);
+  font-weight: 600;
+}
+
+/* Detail strip: the selected command's explainer, reserved at two lines so
+   moving through the list never makes the menu jump. */
 .gyro-composer-slash-footer {
-  align-items: center;
   border-top: 1px solid var(--gyro-premium-hairline-soft);
-  color: var(--gyro-faint);
-  display: flex;
+  color: var(--gyro-muted);
   flex: none;
-  flex-wrap: wrap;
   font-size: var(--gyro-font-micro);
-  gap: 12px;
-  padding: 8px 14px;
+  line-height: 1.45;
+  padding: 9px 14px 10px;
 }
 
 .gyro-composer-slash-footer > span {
-  align-items: center;
-  display: inline-flex;
-  gap: 5px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  display: -webkit-box;
+  min-height: calc(1.45em * 2);
+  overflow: hidden;
 }
 
-.gyro-composer-slash-footer kbd {
+.gyro-composer-slash-menu kbd {
   background: var(--gyro-surface-soft);
   border: 1px solid var(--gyro-premium-hairline);
   border-radius: var(--gyro-radius-xs);
   color: var(--gyro-muted);
   font: inherit;
+  font-size: var(--gyro-font-tiny);
   line-height: 1.2;
+  min-width: 1.4em;
   padding: 1px 4px;
+  text-align: center;
+}
+
+.gyro-composer-slash-empty {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 12px 14px 13px;
+}
+
+.gyro-composer-slash-empty > span {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+}
+
+.gyro-composer-slash-empty code {
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-micro);
+}
+
+.gyro-composer-slash-empty small {
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-micro);
+  line-height: 1.5;
 }
 
 @media (max-width: 620px) {

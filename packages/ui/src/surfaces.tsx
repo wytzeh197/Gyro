@@ -19846,9 +19846,78 @@ type ComposerSlashCommand = {
   available?: boolean;
   action?: string;
   popover?: Extract<ComposerPopoverId, "approval" | "branch" | "provider">;
-  /** Plain-language explainer shown when hovering the row's "?" marker. */
+  /** Plain-language explainer shown in the menu's detail strip. */
   hint?: string;
+  /** Section in the unfiltered menu; chat commands when omitted. */
+  group?: ComposerSlashGroup;
 };
+
+type ComposerSlashGroup = "chat" | "attach" | "workspace";
+
+const COMPOSER_SLASH_GROUPS: Array<{ id: ComposerSlashGroup; label: string }> =
+  [
+    { id: "chat", label: "Chat" },
+    { id: "attach", label: "Attach" },
+    { id: "workspace", label: "Workspace" },
+  ];
+
+/**
+ * How well a typed `/query` names a command: 0 for the exact command, 1 for a
+ * command prefix, 2 for a word in its label, and -1 for no match. An empty
+ * query is a prefix of every command.
+ */
+function composerSlashMatchRank(
+  command: ComposerSlashCommand,
+  query: string,
+): number {
+  const name = command.command.slice(1).toLocaleLowerCase();
+  if (query && name === query) return 0;
+  if (name.startsWith(query)) return 1;
+  return command.label
+    .toLocaleLowerCase()
+    .split(/\s+/)
+    .some((word) => word.startsWith(query))
+    ? 2
+    : -1;
+}
+
+/**
+ * Orders commands for display. Unfiltered, they follow their section order;
+ * filtered, the best match comes first so Enter runs what was typed, with the
+ * shorter command winning a shared prefix (`/n` picks `/new` over `/normal`).
+ */
+function rankComposerSlashCommands(
+  commands: ComposerSlashCommand[],
+  query: string,
+): ComposerSlashCommand[] {
+  const groupOrder = (command: ComposerSlashCommand) =>
+    COMPOSER_SLASH_GROUPS.findIndex(
+      (group) => group.id === (command.group ?? "chat"),
+    );
+  return commands
+    .map((command, index) => ({
+      command,
+      index,
+      rank: composerSlashMatchRank(command, query),
+    }))
+    .filter((entry) => entry.rank >= 0)
+    .sort((left, right) => {
+      if (!query) {
+        return (
+          groupOrder(left.command) - groupOrder(right.command) ||
+          left.index - right.index
+        );
+      }
+      return (
+        left.rank - right.rank ||
+        (left.rank === 1
+          ? left.command.command.length - right.command.command.length
+          : 0) ||
+        left.index - right.index
+      );
+    })
+    .map((entry) => entry.command);
+}
 
 function branchPopoverItems({
   branchCatalog,
@@ -21007,13 +21076,6 @@ function Composer({
   const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
   /** `/help` keeps the catalog open after removing its inline trigger. */
   const [isSlashHelpOpen, setIsSlashHelpOpen] = useState(false);
-  // Hover explainer for a slash command. Positioned fixed against the "?"
-  // marker so it can escape the menu's own scroll clipping.
-  const [slashHint, setSlashHint] = useState<{
-    text: string;
-    top: number;
-    left: number;
-  }>();
   const slashCommandRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const dismissActiveComposerPopover = useCallback(() => {
     setActivePopover(null);
@@ -21501,7 +21563,10 @@ function Composer({
         ]),
     {
       action: "attach-editor-snapshot",
+      // Without an open editor the action can only report a failure.
+      available: canAttachEditorSnapshot,
       command: "/editor",
+      group: "attach",
       description: "Attach the open editor file",
       hint: "Sends a copy of the file you have open, exactly as it looks right now.",
       icon: FileCode2,
@@ -21510,6 +21575,7 @@ function Composer({
     {
       action: "select-image",
       command: "/image",
+      group: "attach",
       description: "Attach an image",
       icon: ImagePlus,
       label: "Attach image",
@@ -21517,6 +21583,7 @@ function Composer({
     {
       action: "select-video",
       command: "/video",
+      group: "attach",
       description: "Attach a video",
       icon: Video,
       label: "Attach video",
@@ -21524,6 +21591,7 @@ function Composer({
     {
       action: "select-file",
       command: "/file",
+      group: "attach",
       description: "Attach a workspace file",
       icon: Paperclip,
       label: "Attach file",
@@ -21531,6 +21599,7 @@ function Composer({
     {
       action: "select-folder",
       command: "/folder",
+      group: "workspace",
       description: "Choose the workspace folder",
       hint: "Pick the project folder this chat is allowed to work in.",
       icon: Folder,
@@ -21539,6 +21608,7 @@ function Composer({
     {
       action: "search-workspace",
       command: "/search",
+      group: "workspace",
       description: "Search workspace files",
       icon: Search,
       label: "Search workspace",
@@ -21568,6 +21638,7 @@ function Composer({
     {
       available: hasUserWorkspace,
       command: "/branch",
+      group: "workspace",
       description: "Create or switch a Git branch",
       icon: GitBranch,
       label: "Choose branch",
@@ -21577,6 +21648,7 @@ function Composer({
       action: "open-source-control",
       available: hasUserWorkspace,
       command: "/review",
+      group: "workspace",
       description: "Review current workspace changes",
       icon: GitPullRequest,
       label: "Review changes",
@@ -21585,6 +21657,7 @@ function Composer({
       action: "run-workspace-test",
       available: hasUserWorkspace,
       command: "/test",
+      group: "workspace",
       description: "Run the detected test task",
       icon: Play,
       label: "Run workspace tests",
@@ -21593,6 +21666,7 @@ function Composer({
       action: "open-diff",
       available: hasUserWorkspace,
       command: "/diff",
+      group: "workspace",
       description: "Open the current workspace diff",
       icon: ScrollText,
       label: "Show diff",
@@ -21674,23 +21748,25 @@ function Composer({
   const filteredSlashCommands =
     slashQuery === undefined
       ? []
-      : availableSlashCommands.filter((command) => {
-          const commandName = command.command.slice(1).toLocaleLowerCase();
-          const labelWords = command.label.toLocaleLowerCase().split(/\s+/);
-          return (
-            commandName.startsWith(slashQuery) ||
-            labelWords.some((word) => word.startsWith(slashQuery))
-          );
-        });
+      : rankComposerSlashCommands(availableSlashCommands, slashQuery);
+  const isSlashMenuGrouped = isSlashHelpOpen || !slashQuery;
   const visibleSlashCommands = isSlashHelpOpen
-    ? availableSlashCommands
+    ? rankComposerSlashCommands(availableSlashCommands, "")
     : filteredSlashCommands;
   const isSlashMenuOpen =
     !isSlashMenuDismissed && visibleSlashCommands.length > 0;
+  // A draft that is only `/word` with no matching command most likely meant
+  // one, so say so instead of silently sending it. Mid-sentence slashes and
+  // anything after the first line stay quiet. Enter still sends the draft.
+  const isSlashEmptyStateOpen =
+    !isSlashMenuDismissed &&
+    !isSlashMenuOpen &&
+    Boolean(slashQuery) &&
+    draft.trim() === `/${slashMatch?.[1] ?? ""}`;
   // The slash menu is driven by the draft, so it stays open while the textarea
   // is in use and closes on a press anywhere outside the composer.
   const slashMenuScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
-    isSlashMenuOpen,
+    isSlashMenuOpen || isSlashEmptyStateOpen,
     () => {
       setIsSlashHelpOpen(false);
       setIsSlashMenuDismissed(true);
@@ -21700,6 +21776,7 @@ function Composer({
     activeSlashCommandIndex,
     Math.max(0, visibleSlashCommands.length - 1),
   );
+  const selectedSlashCommand = visibleSlashCommands[selectedSlashCommandIndex];
 
   const togglePopover = (popover: ComposerPopoverId) => {
     setActivePopover((current) => (current === popover ? null : popover));
@@ -21765,23 +21842,7 @@ function Composer({
       onComposerAction?.(action);
     }
   };
-  const showSlashHint = (text: string, marker: HTMLElement) => {
-    const rect = marker.getBoundingClientRect();
-    const width = 216;
-    const gap = 8;
-    const fitsRight = rect.right + gap + width <= window.innerWidth - 8;
-    setSlashHint({
-      left: fitsRight ? rect.right + gap : Math.max(8, rect.left - gap - width),
-      text,
-      // Centred on the marker, but kept clear of the viewport edges.
-      top: Math.min(
-        Math.max(rect.top + rect.height / 2, 44),
-        window.innerHeight - 44,
-      ),
-    });
-  };
   const runSlashCommand = (command: ComposerSlashCommand) => {
-    setSlashHint(undefined);
     setIsSlashMenuDismissed(true);
     setHistoryIndex(undefined);
     // Remove just the active `/command`, keeping the thought the person was
@@ -21865,7 +21926,6 @@ function Composer({
 
   useEffect(() => {
     setActiveSlashCommandIndex(0);
-    setSlashHint(undefined);
   }, [isSlashHelpOpen, slashQuery]);
 
   useEffect(() => {
@@ -22123,85 +22183,127 @@ function Composer({
           ))}
         </ComposerCompletionMenu>
       ) : null}
-      {isSlashMenuOpen ? (
+      {isSlashMenuOpen || isSlashEmptyStateOpen ? (
         <ComposerCompletionMenu
           aria-label="Chat commands"
           className="gyro-composer-slash-menu is-commands"
           id={`${popoverBaseId}-slash-menu`}
-          role="menu"
+          role="listbox"
         >
           <header role="presentation">
-            <strong>Chat commands</strong>
-            <span>{visibleSlashCommands.length} available</span>
+            <strong>
+              {isSlashHelpOpen ? "All chat commands" : "Chat commands"}
+            </strong>
+            {isSlashMenuOpen ? (
+              <span aria-hidden="true" className="gyro-composer-slash-keys">
+                <kbd>↑</kbd>
+                <kbd>↓</kbd>
+                <span>move</span>
+                <kbd>↵</kbd>
+                <span>run</span>
+                <kbd>esc</kbd>
+                <span>close</span>
+              </span>
+            ) : null}
           </header>
-          <div
-            className="gyro-composer-slash-list"
-            onScroll={() => setSlashHint(undefined)}
-            role="presentation"
-          >
-            {visibleSlashCommands.map((command, index) => {
-              const Icon = command.icon;
-              return (
-                <button
-                  aria-current={
-                    index === selectedSlashCommandIndex ? "true" : undefined
-                  }
-                  className={
-                    index === selectedSlashCommandIndex ? "is-selected" : ""
-                  }
-                  id={`${popoverBaseId}-slash-command-${index}`}
-                  key={command.command}
-                  onClick={() => runSlashCommand(command)}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onPointerEnter={() => {
-                    setActiveSlashCommandIndex(index);
-                    setSlashHint(undefined);
-                  }}
-                  ref={(element) => {
-                    slashCommandRefs.current[index] = element;
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <Icon aria-hidden="true" size={16} />
-                  <code>{command.command}</code>
-                  <span className="gyro-composer-slash-command-copy">
-                    <strong>{command.label}</strong>
-                    {isSlashHelpOpen ? (
-                      <small>{command.description}</small>
-                    ) : null}
-                  </span>
-                  {command.hint ? (
-                    <>
-                      <span
+          {isSlashMenuOpen ? (
+            <div className="gyro-composer-slash-list" role="presentation">
+              {visibleSlashCommands.map((command, index) => {
+                const Icon = command.icon;
+                const group = command.group ?? "chat";
+                const startsGroup =
+                  isSlashMenuGrouped &&
+                  (index === 0 ||
+                    (visibleSlashCommands[index - 1]?.group ?? "chat") !==
+                      group);
+                const isSelected = index === selectedSlashCommandIndex;
+                // Bold the typed part of the command so it is clear why each
+                // row matched; label-word matches keep the plain command.
+                const typedLength =
+                  slashQuery &&
+                  !isSlashHelpOpen &&
+                  composerSlashMatchRank(command, slashQuery) <= 1
+                    ? slashQuery.length + 1
+                    : 0;
+                return (
+                  <Fragment key={command.command}>
+                    {startsGroup ? (
+                      <div
                         aria-hidden="true"
-                        className="gyro-composer-slash-hint-mark"
-                        onPointerEnter={(event) =>
-                          showSlashHint(command.hint ?? "", event.currentTarget)
-                        }
-                        onPointerLeave={() => setSlashHint(undefined)}
+                        className="gyro-composer-slash-group"
                       >
-                        ?
+                        {
+                          COMPOSER_SLASH_GROUPS.find(
+                            (entry) => entry.id === group,
+                          )?.label
+                        }
+                      </div>
+                    ) : null}
+                    <button
+                      aria-describedby={
+                        isSelected
+                          ? `${popoverBaseId}-slash-detail`
+                          : undefined
+                      }
+                      aria-selected={isSelected}
+                      className={isSelected ? "is-selected" : ""}
+                      id={`${popoverBaseId}-slash-command-${index}`}
+                      onClick={() => runSlashCommand(command)}
+                      onPointerDown={(event) => event.preventDefault()}
+                      // Pointer movement, not entry, picks a row: rows that
+                      // scroll under a resting pointer must not steal the
+                      // keyboard selection.
+                      onPointerMove={() => {
+                        if (!isSelected) setActiveSlashCommandIndex(index);
+                      }}
+                      ref={(element) => {
+                        slashCommandRefs.current[index] = element;
+                      }}
+                      role="option"
+                      tabIndex={-1}
+                      type="button"
+                    >
+                      <Icon aria-hidden="true" size={16} />
+                      <code>
+                        {typedLength ? (
+                          <mark>{command.command.slice(0, typedLength)}</mark>
+                        ) : null}
+                        {command.command.slice(typedLength)}
+                      </code>
+                      <span className="gyro-composer-slash-command-copy">
+                        <strong>{command.label}</strong>
+                        {isSlashHelpOpen ? (
+                          <small>{command.description}</small>
+                        ) : null}
                       </span>
-                      <span className="gyro-sr-only">{command.hint}</span>
-                    </>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-          <footer className="gyro-composer-slash-footer" role="presentation">
-            <span>
-              <kbd>↑</kbd>
-              <kbd>↓</kbd> Navigate
-            </span>
-            <span>
-              <kbd>↵</kbd> Select
-            </span>
-            <span>
-              <kbd>esc</kbd> Close
-            </span>
-          </footer>
+                    </button>
+                  </Fragment>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="gyro-composer-slash-empty" role="status">
+              <span>
+                No command matches <code>/{slashMatch?.[1]}</code>
+              </span>
+              <small>
+                Press <kbd>↵</kbd> to send it as a message, or{" "}
+                <kbd>esc</kbd> to hide this.
+              </small>
+            </p>
+          )}
+          {isSlashMenuOpen ? (
+            <footer
+              className="gyro-composer-slash-footer"
+              id={`${popoverBaseId}-slash-detail`}
+              role="presentation"
+            >
+              <span>
+                {selectedSlashCommand?.hint ??
+                  selectedSlashCommand?.description}
+              </span>
+            </footer>
+          ) : null}
         </ComposerCompletionMenu>
       ) : null}
       {activePopover === "branch" ? (
@@ -22247,21 +22349,6 @@ function Composer({
           windows={providerUsage?.windows ?? []}
         />
       ) : null}
-      {/* Portalled to the body: the hero composer carries a drop-shadow
-          filter, which would otherwise become the containing block for this
-          fixed bubble and offset it by the composer's own position. */}
-      {isSlashMenuOpen && slashHint
-        ? createPortal(
-            <div
-              className="gyro-composer-slash-hint-bubble"
-              role="tooltip"
-              style={{ left: slashHint.left, top: slashHint.top }}
-            >
-              {slashHint.text}
-            </div>,
-            document.body,
-          )
-        : null}
       <textarea
         data-tour="composer.input"
         ref={composerTextareaRef}
@@ -22275,7 +22362,7 @@ function Composer({
         aria-controls={
           mentionOpen
             ? `${popoverBaseId}-context-menu`
-            : isSlashMenuOpen
+            : isSlashMenuOpen || isSlashEmptyStateOpen
               ? `${popoverBaseId}-slash-menu`
               : undefined
         }
@@ -22286,8 +22373,8 @@ function Composer({
               ? `${popoverBaseId}-slash-command-${selectedSlashCommandIndex}`
               : undefined
         }
-        aria-expanded={mentionOpen || isSlashMenuOpen}
-        aria-haspopup={mentionOpen ? "listbox" : "menu"}
+        aria-expanded={mentionOpen || isSlashMenuOpen || isSlashEmptyStateOpen}
+        aria-haspopup="listbox"
         onPaste={(event) => {
           const files = chatMediaFiles(event.clipboardData);
           if (files.length) {
@@ -22362,6 +22449,11 @@ function Composer({
           if (isGoalComposerActive && event.key === "Escape") {
             event.preventDefault();
             onCancelGoalComposer?.();
+            return;
+          }
+          if (isSlashEmptyStateOpen && event.key === "Escape") {
+            event.preventDefault();
+            setIsSlashMenuDismissed(true);
             return;
           }
           if (isSlashMenuOpen) {

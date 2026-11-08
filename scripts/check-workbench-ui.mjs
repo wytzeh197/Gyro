@@ -7676,7 +7676,7 @@ expect(
     compactAction.indexOf('"append_user_message"') <
       compactAction.indexOf('"compact_provider_chat"') &&
     compactAction.includes(
-      "sessionId: activeSessionId, turnId: compactionTurnId",
+      "sessionId: compactSessionId, turnId: compactionTurnId",
     ) &&
     desktopRustSource.includes(
       "compact_provider_chat_blocking(worker_app, worker_session_id, run_id)",
@@ -7684,12 +7684,12 @@ expect(
   "Standalone compaction should persist a user message before running and associate compaction activity with that same turn.",
 );
 expect(
-  compactAction.includes("sendingSessionIdsRef.current.has(activeSessionId)") &&
-    compactAction.indexOf("setSessionSending(activeSessionId, true)") <
+  compactAction.includes("sendingSessionIdsRef.current.has(compactSessionId)") &&
+    compactAction.indexOf("setSessionSending(compactSessionId, true)") <
       compactAction.indexOf('invoke<SessionEvent>("append_user_message"') &&
     compactAction.includes('settleCompaction("done")') &&
     compactAction.includes('"cancelled" : "failed"') &&
-    compactAction.includes("setSessionSending(activeSessionId, false)"),
+    compactAction.includes("setSessionSending(compactSessionId, false)"),
   "Compaction must claim the send slot synchronously, show its outcome, and release the slot on every outcome so later messages queue instead of colliding.",
 );
 expect(

@@ -10697,7 +10697,16 @@ export function App() {
           openToolPanel("diff");
           break;
         case "compact-context": {
-          if (!activeSessionId || !activeSession?.providerId) {
+          // A split pane sends its own chat as the target; the pane focus it
+          // requested has not reached this closure's activeSessionId yet.
+          // A pane with no saved chat has nothing to compact.
+          const compactSessionId = attachmentTarget
+            ? attachmentTarget.sessionId
+            : activeSessionId;
+          const compactSession = compactSessionId
+            ? sessions.find((session) => session.id === compactSessionId)
+            : undefined;
+          if (!compactSessionId || !compactSession?.providerId) {
             notify(
               "command-failed",
               "Context compaction unavailable",
@@ -10705,7 +10714,7 @@ export function App() {
             );
             break;
           }
-          if (sendingSessionIdsRef.current.has(activeSessionId)) {
+          if (sendingSessionIdsRef.current.has(compactSessionId)) {
             notify(
               "command-failed",
               "Wait for the current response",
@@ -10719,25 +10728,25 @@ export function App() {
           const compactionTurnId = crypto.randomUUID();
           // Compaction owns the same session slot as a normal send. Claim it
           // synchronously so subsequent messages use the existing send queue.
-          setSessionSending(activeSessionId, true);
+          setSessionSending(compactSessionId, true);
           const compactEvents = createOptimisticTurnEvents(
-            activeSessionId,
+            compactSessionId,
             "/compact",
             compactionTurnId,
             providersForConfig(config).find(
-              (provider) => provider.id === activeSession.providerId,
+              (provider) => provider.id === compactSession.providerId,
             ),
           );
           optimisticEventsRef.current.set(
-            activeSessionId,
+            compactSessionId,
             limitOptimisticSessionEvents(
               mergePersistedAndOptimisticEvents(
-                optimisticEventsRef.current.get(activeSessionId) ?? [],
+                optimisticEventsRef.current.get(compactSessionId) ?? [],
                 compactEvents,
               ),
             ),
           );
-          setEventsForSession(activeSessionId, (current) =>
+          setEventsForSession(compactSessionId, (current) =>
             mergePersistedAndOptimisticEvents(current, compactEvents),
           );
           const settleCompaction = (
@@ -10746,22 +10755,22 @@ export function App() {
           ) =>
             updateOptimisticProviderStatus(
               optimisticEventsRef,
-              (value) => setEventsForSession(activeSessionId, value),
-              activeSessionId,
+              (value) => setEventsForSession(compactSessionId, value),
+              compactSessionId,
               compactionTurnId,
               status,
               error,
             );
           void invoke<SessionEvent>("append_user_message", {
-            sessionId: activeSessionId,
+            sessionId: compactSessionId,
             message: "/compact",
             turnId: compactionTurnId,
           })
             .then(async () => {
-              await refreshEvents(activeSessionId);
+              await refreshEvents(compactSessionId);
               await invoke<ProviderContextCompactionResponse>(
                 "compact_provider_chat",
-                { sessionId: activeSessionId, turnId: compactionTurnId },
+                { sessionId: compactSessionId, turnId: compactionTurnId },
               );
             })
             .then(() => settleCompaction("done"))
@@ -10778,9 +10787,9 @@ export function App() {
             })
             .finally(async () => {
               try {
-                await refreshEvents(activeSessionId);
+                await refreshEvents(compactSessionId);
               } finally {
-                setSessionSending(activeSessionId, false);
+                setSessionSending(compactSessionId, false);
               }
             });
           break;
