@@ -1,5 +1,5 @@
 use crate::{
-    git_branch_service::git_branch_catalog_impl,
+    git::branches::git_branch_catalog_impl,
     providers::chat_types::ChatAttachmentRequest,
     session_history::{read_session_events_blocking, SessionEventsReadResult},
     state::{

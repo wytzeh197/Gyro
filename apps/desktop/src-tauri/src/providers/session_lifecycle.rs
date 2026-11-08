@@ -422,7 +422,7 @@ mod tests {
             std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",
-                    "provider_session_lifecycle::tests::lease_child_process",
+                    "providers::session_lifecycle::tests::lease_child_process",
                     "--nocapture",
                 ])
                 .env("GYRO_LEASE_TEST_ROOT", &root)
@@ -497,7 +497,7 @@ mod tests {
             std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",
-                    "provider_session_lifecycle::tests::legacy_listener_child_process",
+                    "providers::session_lifecycle::tests::legacy_listener_child_process",
                     "--nocapture",
                 ])
                 .env(

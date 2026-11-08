@@ -65,24 +65,25 @@ use crate::{
     diagnostics::export::{terminal_command_path, user_home_directory},
     efficiency,
     git::{
+        branches::git_branch_catalog_impl,
         commands::{
             git_action_error, git_checkout_branch_impl, git_command, git_commit_blocking,
             git_create_branch_impl, git_current_branch, git_discard_blocking, git_push_blocking,
             git_remove_worktree_impl, git_rename_branch_impl, git_stage_blocking,
             sort_branch_catalog_entries,
         },
+        status_cache::{
+            git_repo_root, git_repository_state, git_status_for_preparation, git_status_impl,
+            git_status_read_failure, parse_git_numstat, parse_git_status_v2, GitRepositoryState,
+        },
         types::{
             GitCheckoutBranchRequest, GitCommitRequest, GitCreateBranchRequest,
             GitRemoveWorktreeRequest, GitStageRequest, GitSyncRequest,
         },
     },
-    git_branch_service::git_branch_catalog_impl,
-    git_status_cache::{
-        git_repo_root, git_repository_state, git_status_for_preparation, git_status_impl,
-        git_status_read_failure, parse_git_numstat, parse_git_status_v2, GitRepositoryState,
-    },
     ide::{
         debug::{debug_adapter_command_is_allowed, redact_json_strings},
+        language_server,
         task_discovery::{
             custom_task_create_impl, custom_task_delete_impl, justfile_recipes, makefile_targets,
             parse_command_line, suggested_task, task_discover_impl, test_tree_from_tasks,
@@ -100,7 +101,6 @@ use crate::{
         provider_usage_windows_from_kimi_usages, store_kimi_sign_in, KimiSignIn, KimiSignInRenewal,
         KIMI_NO_PLAN_LIMITS,
     },
-    language_server,
     ollama_runner::{ollama_compatibility_catalog, validate_ollama_compatibility_call},
     provider_accounting,
     provider_activity::{
@@ -113,7 +113,6 @@ use crate::{
         provider_model_context_window, ClaudeUsageFrame, OllamaTurnUsage, ProviderContextUsage,
     },
     provider_reliability::{is_transient_provider_error, provider_failure_recovery},
-    provider_retry_recovery::run_provider_chat_with_retry_using,
     provider_timeline, provider_tool_batch,
     providers::{
         approvals::{
@@ -158,6 +157,7 @@ use crate::{
             provider_context_message_with_tool_support, user_requests_gyro_browser, PromptTurn,
         },
         retry::{is_provider_cancellation, with_browser_attachment_images},
+        retry_recovery::run_provider_chat_with_retry_using,
         runners::{
             claude::{claude_login_failure, claude_runner_output, CLAUDE_LOGIN_EXPIRED_DETAIL},
             codex::{

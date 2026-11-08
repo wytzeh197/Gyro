@@ -3,11 +3,11 @@
 use crate::{
     ipc::cli::start_cli_ipc_listener,
     provider_reliability::is_transient_provider_error,
-    provider_session_lifecycle::reconcile_interrupted_provider_turns,
     providers::{
         chat_types::{ProviderChatRequest, ProviderChatResponse},
         commands::run_provider_chat,
         retry::is_provider_cancellation,
+        session_lifecycle::reconcile_interrupted_provider_turns,
     },
     session_browser,
     state::{
@@ -818,9 +818,9 @@ fn verify_files(workspace: &Path, task: &str) -> anyhow::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        provider_retry_recovery::run_provider_chat_with_retry_using,
-        providers::types::{ProviderResumeCursor, ProviderRunnerOutput},
+    use crate::providers::{
+        retry_recovery::run_provider_chat_with_retry_using,
+        types::{ProviderResumeCursor, ProviderRunnerOutput},
     };
     #[test]
     fn fixture_review_stops_with_its_own_turn_and_never_follows_a_new_turn() {

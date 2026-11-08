@@ -183,9 +183,8 @@ impl Drop for ProviderTurnFinalizer<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        provider_session_lifecycle::ProviderSessionLease,
-        providers::events::provider_turn_has_unfinished_attempt,
+    use crate::providers::{
+        events::provider_turn_has_unfinished_attempt, session_lifecycle::ProviderSessionLease,
     };
     use gyro_core::{GyroPaths, SessionEventKind};
     use std::time::Duration;

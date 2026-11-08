@@ -1,8 +1,7 @@
-use super::git_read;
+use crate::git::read as git_read;
 use crate::{
     command_execution::bounded_command_error,
-    git::commands::git_command,
-    git_main_comparison::git_main_comparison_base,
+    git::{commands::git_command, main_comparison::git_main_comparison_base},
     workspace::files::{assert_workspace_path, workspace_root},
 };
 use serde::{Deserialize, Serialize};

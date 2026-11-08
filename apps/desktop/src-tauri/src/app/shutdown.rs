@@ -4,8 +4,7 @@ use crate::ipc::cli::provider_host_ipc_paths;
 use crate::window_controls::apply_macos_traffic_light_position;
 use crate::{
     automation::runtime::AutomationSchedulerControl,
-    ide::types::DebugAdapterManager,
-    language_server,
+    ide::{language_server, types::DebugAdapterManager},
     state::managers::{active_task_runs, ProviderCancellationManager},
     terminal::types::TerminalProcessManager,
     terminal_process,

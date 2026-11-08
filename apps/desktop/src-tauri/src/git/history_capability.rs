@@ -45,7 +45,7 @@ const MAX_BLAME_LINE_CHARS: usize = 300;
 const UNIT: char = '\u{1f}';
 const RECORD: char = '\u{1e}';
 
-pub(super) fn execute(
+pub(crate) fn execute(
     _app: &tauri::AppHandle,
     bound: &BoundProviderCapabilityContext,
     request: &CapabilityRequest,
@@ -439,7 +439,7 @@ fn bound_git_result(data: Value, max_bytes: usize) -> anyhow::Result<Value> {
 
 /// Tool schemas live here so `lib.rs` keeps a single delegation guard instead
 /// of one arm per capability.
-pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
+pub(crate) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
     let (properties, required) = match id {
         CapabilityId::WorkspaceGitLog => (
             json!({

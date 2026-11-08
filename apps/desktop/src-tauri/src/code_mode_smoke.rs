@@ -1,8 +1,7 @@
 //! Opt-in native broker acceptance using isolated fixtures, no provider calls.
 use crate::{
-    code_mode,
-    provider_session_lifecycle::ProviderSessionLease,
-    provider_tool_batch,
+    code_mode, provider_tool_batch,
+    providers::session_lifecycle::ProviderSessionLease,
     state::{
         managers::{
             ProviderCancellationManager, ProviderCapabilityApprovalManager,

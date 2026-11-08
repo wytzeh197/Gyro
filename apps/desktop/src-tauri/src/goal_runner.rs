@@ -1,13 +1,13 @@
 //! Durable, bounded goal continuation. The goal event log is the queue.
 //! Only a queued turn with no dispatched attempt is recoverable automatically.
 use crate::{
-    provider_session_lifecycle::ProviderSessionLease,
     providers::{
         chat_types::{
             normal_chat_requests_plan, ChatMode, ProviderChatRequest, ProviderChatResponse,
         },
         commands::run_goal_chat,
         events::provider_turn_has_unfinished_attempt,
+        session_lifecycle::ProviderSessionLease,
         streaming::provider_stop_message,
     },
     session_goal,

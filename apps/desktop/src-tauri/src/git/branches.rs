@@ -7,9 +7,9 @@ use crate::{
     command_execution::bounded_command_error,
     git::{
         commands::{git_command, sort_branch_catalog_entries},
+        read as git_read, status_cache as git_status_cache,
         types::{GitBranchCatalog, GitBranchTip, GitLinkedWorktree},
     },
-    git_read, git_status_cache,
     ide::task_discovery::content_hash,
     workspace::files::workspace_root,
 };
@@ -137,7 +137,7 @@ fn common_dir(root: &Path) -> PathBuf {
 }
 
 /// A mutation's follow-up read cannot join a read started before that mutation.
-pub(super) fn invalidate(workspace: &str) {
+pub(crate) fn invalidate(workspace: &str) {
     if let Some((root, _)) = git_read::discover_repository(Path::new(workspace)) {
         let common_dir = common_dir(&root);
         if let Ok(mut active) = flights().lock() {
@@ -157,11 +157,11 @@ pub(super) fn invalidate(workspace: &str) {
     }
 }
 
-pub(super) fn git_branch_catalog_impl(workspace: &str) -> anyhow::Result<GitBranchCatalog> {
+pub(crate) fn git_branch_catalog_impl(workspace: &str) -> anyhow::Result<GitBranchCatalog> {
     git_branch_catalog_before(workspace, Instant::now() + Duration::from_secs(30))
 }
 
-pub(super) fn git_branch_catalog_before(
+pub(crate) fn git_branch_catalog_before(
     workspace: &str,
     deadline: Instant,
 ) -> anyhow::Result<GitBranchCatalog> {
@@ -405,7 +405,7 @@ fn read_worktrees(root: &Path, deadline: Instant) -> anyhow::Result<WorktreeCata
     })
 }
 
-pub(super) fn linked_worktrees(
+pub(crate) fn linked_worktrees(
     root: &Path,
     deadline: Instant,
 ) -> anyhow::Result<Vec<GitLinkedWorktree>> {
@@ -413,7 +413,7 @@ pub(super) fn linked_worktrees(
     Ok(read_worktrees(&root, deadline)?.others)
 }
 
-pub(super) fn model_branches(workspace: &str, arguments: &Value) -> anyhow::Result<Value> {
+pub(crate) fn model_branches(workspace: &str, arguments: &Value) -> anyhow::Result<Value> {
     let max_bytes = workspace_result_byte_limit(arguments)?;
     let offset = capability_output_budget::offset(arguments, "offset")?.unwrap_or(0);
     let limit = arguments
@@ -516,7 +516,7 @@ pub(super) fn model_branches(workspace: &str, arguments: &Value) -> anyhow::Resu
     )
 }
 
-pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
+pub(crate) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
     (id == CapabilityId::WorkspaceGitBranches).then(|| (json!({
         "query": {"type":"string", "maxLength":256, "description":"Case-insensitive branch-name substring. Latest markers and latestCommitAt apply to matching branches within scope."},
         "scope": {"type":"string", "enum":["all", "local", "remote"], "default":"all"},

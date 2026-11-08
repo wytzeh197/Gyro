@@ -4,9 +4,10 @@ use crate::{
         WORKSPACE_PREPARATION_EVENT, WORKSPACE_PREPARATION_GIT_TIMEOUT,
         WORKSPACE_PREPARATION_WAIT_TIMEOUT,
     },
-    git_branch_service::git_branch_catalog_before,
-    git_status_cache,
-    git_status_cache::git_status_read_failure,
+    git::{
+        branches::git_branch_catalog_before, status_cache as git_status_cache,
+        status_cache::git_status_read_failure,
+    },
     ide::task_discovery::{task_discover_impl, test_tree_from_tasks},
     state::workspace::{
         WorkspacePreparationManager, WorkspacePreparationState, WorkspaceWatchManager,

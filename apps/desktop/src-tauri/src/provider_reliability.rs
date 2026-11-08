@@ -2,8 +2,11 @@ use crate::{
     capabilities::mcp_server::desktop_capability_tool_schema,
     capability_workspace_helpers::workspace_result_byte_limit,
     ollama_runner::validate_compatibility_schema_value,
-    provider_retry_recovery, provider_tool_batch,
-    providers::{process::is_stale_resume_error, retry::is_provider_cancellation},
+    provider_tool_batch,
+    providers::{
+        process::is_stale_resume_error, retry::is_provider_cancellation,
+        retry_recovery as provider_retry_recovery,
+    },
     state::provider_run::{
         PROVIDER_INTERRUPTED_MARKER, PROVIDER_STALL_MARKER, PROVIDER_STOP_MARKER,
     },

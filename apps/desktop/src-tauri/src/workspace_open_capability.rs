@@ -11,7 +11,7 @@
 //! performs the switch when it receives the `workspace` resource, and only
 //! while the asking chat is still the one on screen.
 use crate::{
-    capabilities::access::capability_argument_string, git_branch_service::git_branch_catalog_impl,
+    capabilities::access::capability_argument_string, git::branches::git_branch_catalog_impl,
 };
 use gyro_core::{CapabilityId, CapabilityRequest, CapabilityResourceRef, GyroPaths};
 use serde_json::{json, Value};

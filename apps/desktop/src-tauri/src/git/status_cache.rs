@@ -6,13 +6,12 @@ use crate::{
     command_execution::bounded_command_error,
     git::{
         commands::git_command,
+        line_counts as git_line_counts, main_comparison as git_main_comparison,
+        main_comparison::git_main_comparison_base,
+        read as git_read, review as source_control_review,
         types::{SourceControlFile, SourceControlStatus},
     },
-    git_line_counts, git_main_comparison,
-    git_main_comparison::git_main_comparison_base,
-    git_read,
     ide::task_discovery::content_hash,
-    source_control_review,
     workspace::files::workspace_root,
 };
 use gyro_core::ExecutionTermination;
@@ -23,7 +22,7 @@ use std::{
     sync::{Mutex, OnceLock},
     time::{Instant, SystemTime},
 };
-pub(super) fn git_status_cache() -> &'static Mutex<HashMap<PathBuf, (String, SourceControlStatus)>>
+pub(crate) fn git_status_cache() -> &'static Mutex<HashMap<PathBuf, (String, SourceControlStatus)>>
 {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, (String, SourceControlStatus)>>> =
         OnceLock::new();
@@ -32,7 +31,7 @@ pub(super) fn git_status_cache() -> &'static Mutex<HashMap<PathBuf, (String, Sou
 
 /// `files` are relative to `workspace`, which is the cache key; `repo_root`
 /// locates the refs the main comparison is measured against.
-pub(super) fn git_status_stamp(
+pub(crate) fn git_status_stamp(
     repo_root: &Path,
     workspace: &Path,
     porcelain: &str,
@@ -94,7 +93,7 @@ pub(super) fn git_status_stamp(
     content_hash(material.as_bytes())
 }
 
-pub(super) fn cached_git_status(repo_root: &Path, stamp: &str) -> Option<SourceControlStatus> {
+pub(crate) fn cached_git_status(repo_root: &Path, stamp: &str) -> Option<SourceControlStatus> {
     let cache = git_status_cache().lock().ok()?;
     let (cached_stamp, status) = cache.get(repo_root)?;
     if cached_stamp != stamp {
@@ -105,7 +104,7 @@ pub(super) fn cached_git_status(repo_root: &Path, stamp: &str) -> Option<SourceC
     Some(status)
 }
 
-pub(super) fn store_git_status(repo_root: PathBuf, stamp: String, status: SourceControlStatus) {
+pub(crate) fn store_git_status(repo_root: PathBuf, stamp: String, status: SourceControlStatus) {
     let Ok(mut cache) = git_status_cache().lock() else {
         return;
     };
@@ -128,7 +127,7 @@ pub(super) fn store_git_status(repo_root: PathBuf, stamp: String, status: Source
 }
 
 /// The last snapshot any read stored for this repository.
-pub(super) fn last_git_status(repo_root: &Path) -> Option<SourceControlStatus> {
+pub(crate) fn last_git_status(repo_root: &Path) -> Option<SourceControlStatus> {
     let cache = git_status_cache().lock().ok()?;
     cache.get(repo_root).map(|(_, status)| status.clone())
 }
@@ -138,7 +137,7 @@ pub(super) fn last_git_status(repo_root: &Path) -> Option<SourceControlStatus> {
 /// file decoration until a later read happened to land. When the read ran out of
 /// budget — what a large or iCloud-evicted checkout does — the last snapshot for
 /// the repository is returned with the reason attached instead.
-pub(super) fn git_status_read_failure(
+pub(crate) fn git_status_read_failure(
     repo_root: Option<&Path>,
     error: String,
     transient: bool,
@@ -178,26 +177,26 @@ pub(super) fn git_status_read_failure(
     unavailable(error)
 }
 
-pub(super) fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> {
+pub(crate) fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> {
     inspect_git_status(workspace_path, true)
 }
 
 /// Models need fresh paths and branch state, not history or line statistics
 /// for every changed file. Enumerate all untracked files without those passes.
-pub(super) fn git_status_for_model(workspace_path: &str) -> anyhow::Result<SourceControlStatus> {
+pub(crate) fn git_status_for_model(workspace_path: &str) -> anyhow::Result<SourceControlStatus> {
     let deadline = Instant::now() + GIT_STATUS_PREPARATION_TIMEOUT;
     let mut status = inspect_git_status_before_inner(workspace_path, false, true, deadline)?;
     status.workspace_path = Some(workspace_path.to_string());
     Ok(status)
 }
 
-pub(super) fn git_status_for_preparation(
+pub(crate) fn git_status_for_preparation(
     workspace_path: &str,
 ) -> anyhow::Result<SourceControlStatus> {
     inspect_git_status(workspace_path, false)
 }
 
-pub(super) fn inspect_git_status(
+pub(crate) fn inspect_git_status(
     workspace_path: &str,
     detailed: bool,
 ) -> anyhow::Result<SourceControlStatus> {
@@ -210,7 +209,7 @@ pub(super) fn inspect_git_status(
     inspect_git_status_before(workspace_path, detailed, deadline)
 }
 
-pub(super) fn inspect_git_status_before(
+pub(crate) fn inspect_git_status_before(
     workspace_path: &str,
     detailed: bool,
     deadline: Instant,
@@ -344,7 +343,7 @@ fn relativize_git_status_paths(files: &mut Vec<SourceControlFile>, prefix: &str)
     });
 }
 
-pub(super) fn parse_git_status_v2(output: &str) -> SourceControlStatus {
+pub(crate) fn parse_git_status_v2(output: &str) -> SourceControlStatus {
     let mut status = SourceControlStatus {
         provider: "git".into(),
         workspace_path: None,
@@ -457,9 +456,9 @@ pub(super) fn parse_git_status_v2(output: &str) -> SourceControlStatus {
 /// Repository state that `git status --porcelain` does not report: an
 /// operation left in progress and the stash depth.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(super) struct GitRepositoryState {
-    pub(super) operation: Option<&'static str>,
-    pub(super) stash_count: usize,
+pub(crate) struct GitRepositoryState {
+    pub(crate) operation: Option<&'static str>,
+    pub(crate) stash_count: usize,
 }
 
 impl GitRepositoryState {
@@ -472,7 +471,7 @@ impl GitRepositoryState {
 /// The per-worktree git directory and the shared common directory. A linked
 /// worktree's `.git` is a file pointing at `.git/worktrees/<name>`, whose
 /// `commondir` points back at the main repository's `.git`.
-pub(super) fn git_dirs(repo_root: &Path) -> Option<(PathBuf, PathBuf)> {
+pub(crate) fn git_dirs(repo_root: &Path) -> Option<(PathBuf, PathBuf)> {
     let dot_git = repo_root.join(".git");
     let git_dir = if dot_git.is_dir() {
         dot_git
@@ -499,7 +498,7 @@ pub(super) fn git_dirs(repo_root: &Path) -> Option<(PathBuf, PathBuf)> {
     Some((git_dir, common_dir))
 }
 
-pub(super) fn git_repository_state(repo_root: &Path) -> GitRepositoryState {
+pub(crate) fn git_repository_state(repo_root: &Path) -> GitRepositoryState {
     let Some((git_dir, common_dir)) = git_dirs(repo_root) else {
         return GitRepositoryState::default();
     };
@@ -526,7 +525,7 @@ pub(super) fn git_repository_state(repo_root: &Path) -> GitRepositoryState {
     }
 }
 
-pub(super) fn git_repo_root(workspace: &Path) -> Option<PathBuf> {
+pub(crate) fn git_repo_root(workspace: &Path) -> Option<PathBuf> {
     // Same filesystem walk as status reads. `rev-parse --show-toplevel` waits
     // on fsmonitor and used to spend its own 10s budget before any Git action.
     git_read::discover_repository(workspace).map(|(root, _)| root)
@@ -535,7 +534,7 @@ pub(super) fn git_repo_root(workspace: &Path) -> Option<PathBuf> {
 /// Decorates workspace-relative `status.files` with line counts. Every Git
 /// read here shares the caller's `deadline` instead of starting a fresh
 /// timeout per step.
-pub(super) fn apply_git_diff_stats(
+pub(crate) fn apply_git_diff_stats(
     workspace: &Path,
     status: &mut SourceControlStatus,
     deadline: Instant,
@@ -593,7 +592,7 @@ pub(super) fn apply_git_diff_stats(
 
 /// Background `diff --numstat` flags: verbatim NUL-terminated paths relative
 /// to the workspace (`-C`), and no user diff drivers on a background read.
-pub(super) const GIT_NUMSTAT_ARGS: [&str; 7] = [
+pub(crate) const GIT_NUMSTAT_ARGS: [&str; 7] = [
     "diff",
     "--numstat",
     "-z",
@@ -603,7 +602,7 @@ pub(super) const GIT_NUMSTAT_ARGS: [&str; 7] = [
     "--relative",
 ];
 
-pub(super) fn git_numstat(
+pub(crate) fn git_numstat(
     workspace: &Path,
     deadline: Instant,
 ) -> (HashMap<String, (usize, usize)>, bool) {
@@ -621,7 +620,7 @@ pub(super) fn git_numstat(
     (stats, partial || output.stdout_truncated)
 }
 
-pub(super) fn git_numstat_without_head(
+pub(crate) fn git_numstat_without_head(
     workspace: &Path,
     deadline: Instant,
 ) -> (HashMap<String, (usize, usize)>, bool) {
@@ -655,7 +654,7 @@ pub(super) fn git_numstat_without_head(
 
 /// Reads `--numstat -z` records (`added<TAB>deleted<TAB>path<NUL>`), or
 /// newline records when the text carries no NUL.
-pub(super) fn parse_git_numstat(output: &str) -> (HashMap<String, (usize, usize)>, bool) {
+pub(crate) fn parse_git_numstat(output: &str) -> (HashMap<String, (usize, usize)>, bool) {
     let mut totals = HashMap::new();
     let mut partial = false;
     let records: Vec<&str> = if output.contains('\0') {
@@ -689,7 +688,7 @@ pub(super) fn parse_git_numstat(output: &str) -> (HashMap<String, (usize, usize)
 /// working tree. A file can carry both — staged edits plus newer unstaged ones
 /// — so each side becomes its own row, which is how VS Code lists the file
 /// under both "Staged Changes" and "Changes".
-pub(super) fn push_git_status_sides(
+pub(crate) fn push_git_status_sides(
     files: &mut Vec<SourceControlFile>,
     xy: &str,
     path: String,
@@ -720,7 +719,7 @@ pub(super) fn push_git_status_sides(
     }
 }
 
-pub(super) fn git_state_from_code(code: char) -> String {
+pub(crate) fn git_state_from_code(code: char) -> String {
     match code {
         'D' => "deleted",
         'A' => "added",

@@ -1,6 +1,6 @@
 {
   "apps/desktop/src/App.tsx": 20329,
-  "apps/desktop/src-tauri/src/lib.rs": 135,
+  "apps/desktop/src-tauri/src/lib.rs": 125,
   "apps/desktop/src-tauri/src/tests.rs": 593,
   "crates/gyro-cli/src/main.rs": 7367,
   "packages/ui/src/styles.css": 42464,

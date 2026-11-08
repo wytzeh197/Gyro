@@ -5,9 +5,7 @@ use crate::{
     project_import_continuation,
     provider_accounting::provider_turn_tokens,
     provider_context::provider_context_usage_with_window,
-    provider_retry_recovery,
     provider_run_cleanup::ProviderTurnFinalizer,
-    provider_session_lifecycle::ProviderSessionLease,
     provider_timeline,
     providers::{
         binding::{
@@ -31,10 +29,12 @@ use crate::{
         },
         process::provider_adapter_for,
         retry::run_provider_chat_with_retry,
+        retry_recovery as provider_retry_recovery,
         runners::{
             codex::run_openai_codex_context_compaction,
             kimi_acp::provider_resume_cursor_from_binding,
         },
+        session_lifecycle::ProviderSessionLease,
         streaming::provider_chat_cancelled,
         types::{ProviderActivity, ProviderAdapterKind},
     },

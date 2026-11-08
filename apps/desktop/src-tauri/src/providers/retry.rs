@@ -6,13 +6,13 @@ use crate::{
     provider_accounting::{provider_turn_tokens, record_provider_usage},
     provider_context, provider_reliability,
     provider_reliability::is_transient_provider_error,
-    provider_retry_recovery,
-    provider_retry_recovery::run_provider_chat_with_retry_using_with_wait,
     provider_spend_guard, provider_timeline,
     providers::{
         binding::validate_chat_context,
         chat_types::{isolated_internal_purpose, ChatAttachmentRequest, ProviderChatRequest},
         process::provider_adapter_for,
+        retry_recovery as provider_retry_recovery,
+        retry_recovery::run_provider_chat_with_retry_using_with_wait,
         run::compact_provider_chat_blocking,
         runners::{
             antigravity::run_antigravity_chat,

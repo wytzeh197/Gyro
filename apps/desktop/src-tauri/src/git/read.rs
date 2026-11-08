@@ -8,7 +8,7 @@ use std::{
     process::Command,
     time::Instant,
 };
-pub(super) fn run(
+pub(crate) fn run(
     command: &Command,
     deadline: Instant,
     max_stdout: usize,
@@ -42,7 +42,7 @@ pub(super) fn run(
     run_bounded_command(&read, remaining, None, max_stdout, 64 * 1024)
 }
 
-pub(super) fn repo_root(workspace: &Path, deadline: Instant) -> anyhow::Result<Option<PathBuf>> {
+pub(crate) fn repo_root(workspace: &Path, deadline: Instant) -> anyhow::Result<Option<PathBuf>> {
     Ok(repo_root_and_prefix(workspace, deadline)?.map(|(root, _)| root))
 }
 
@@ -54,7 +54,7 @@ pub(super) fn repo_root(workspace: &Path, deadline: Instant) -> anyhow::Result<O
 /// panel reported "could not locate Git repository timed out". The root is the
 /// directory that holds `.git`; the prefix is the same string `--show-prefix`
 /// prints. `deadline` still bounds every Git child the caller starts next.
-pub(super) fn repo_root_and_prefix(
+pub(crate) fn repo_root_and_prefix(
     workspace: &Path,
     _deadline: Instant,
 ) -> anyhow::Result<Option<(PathBuf, String)>> {
@@ -65,7 +65,7 @@ const GIT_DISCOVERY_DEPTH: usize = 64;
 
 /// Walk parents for a checkout. A `.git` directory or a `gitdir:` file marks
 /// the work tree. No Git process is started.
-pub(super) fn discover_repository(workspace: &Path) -> Option<(PathBuf, String)> {
+pub(crate) fn discover_repository(workspace: &Path) -> Option<(PathBuf, String)> {
     let start = workspace
         .canonicalize()
         .unwrap_or_else(|_| workspace.to_path_buf());
@@ -131,10 +131,10 @@ fn workspace_prefix(repo_root: &Path, workspace: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        git_branch_service::git_branch_catalog_before,
-        git_status_cache,
-        git_status_cache::{git_status_for_preparation, git_status_impl},
+    use crate::git::{
+        branches::git_branch_catalog_before,
+        status_cache as git_status_cache,
+        status_cache::{git_status_for_preparation, git_status_impl},
     };
     use gyro_core::ExecutionTermination;
     use std::time::Duration;

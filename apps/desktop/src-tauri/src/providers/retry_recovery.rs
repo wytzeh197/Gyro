@@ -4,12 +4,13 @@ use crate::{
     app::{config::load_config_blocking, limits::PROVIDER_CHAT_EVENT},
     project_import_continuation, provider_reliability,
     provider_reliability::is_transient_provider_error,
-    provider_retry_recovery, provider_timeline,
+    provider_timeline,
     providers::{
         chat_types::ProviderChatRequest,
         events::next_provider_event_sequence,
         process::{is_stale_resume_error, provider_adapter_for},
         retry::{persist_failed_provider_attempt, wait_before_provider_retry},
+        retry_recovery as provider_retry_recovery,
         runners::kimi_acp::{
             compatible_provider_session_binding, provider_resume_cursor_from_binding,
         },
@@ -25,23 +26,23 @@ use gyro_core::{ProviderSessionBinding, SessionEventKind, SessionStore};
 use std::time::Duration;
 use tauri::Emitter;
 use uuid::Uuid;
-pub(super) const CAPACITY_RETRY_DELAY: Duration = Duration::from_secs(30);
-pub(super) const CAPACITY_RETRY_EXHAUSTED: &str =
+pub(crate) const CAPACITY_RETRY_DELAY: Duration = Duration::from_secs(30);
+pub(crate) const CAPACITY_RETRY_EXHAUSTED: &str =
     "The model is still busy after three automatic attempts.";
-pub(super) const RETRY_EXHAUSTED: &str = "Automatic retries exhausted.";
-pub(super) const CONTINUATION_UNAVAILABLE: &str = "Saved provider continuation is unavailable.";
+pub(crate) const RETRY_EXHAUSTED: &str = "Automatic retries exhausted.";
+pub(crate) const CONTINUATION_UNAVAILABLE: &str = "Saved provider continuation is unavailable.";
 thread_local! {
     static RECOVERY_KIND: std::cell::RefCell<String> = std::cell::RefCell::new("network".into());
     static CYCLE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
 }
 
-pub(super) fn set_kind(kind: &str) {
+pub(crate) fn set_kind(kind: &str) {
     RECOVERY_KIND.with(|value| *value.borrow_mut() = kind.into());
 }
 
-pub(super) struct Cycle(String);
+pub(crate) struct Cycle(String);
 impl Cycle {
-    pub(super) fn start() -> Self {
+    pub(crate) fn start() -> Self {
         Self(CYCLE.with(|cycle| {
             if cycle.borrow().is_empty() {
                 cycle.replace(Uuid::new_v4().to_string())
@@ -59,7 +60,7 @@ impl Drop for Cycle {
     }
 }
 
-pub(super) fn wait_for_shared_cooldown(
+pub(crate) fn wait_for_shared_cooldown(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
 ) -> anyhow::Result<()> {
@@ -88,7 +89,7 @@ pub(super) fn wait_for_shared_cooldown(
     Ok(())
 }
 
-pub(super) fn cooldown_scope(store: &SessionStore, request: &ProviderChatRequest) -> String {
+pub(crate) fn cooldown_scope(store: &SessionStore, request: &ProviderChatRequest) -> String {
     // Configured endpoints and imported native login homes identify separate
     // profiles without reading or persisting the credential itself.
     use sha2::{Digest, Sha256};
@@ -116,11 +117,11 @@ pub(super) fn cooldown_scope(store: &SessionStore, request: &ProviderChatRequest
 const CONTINUATION_PREFIX: &str =
     "The previous attempt was interrupted by a temporary provider failure.";
 
-pub(super) fn is_continuation(request: &ProviderChatRequest) -> bool {
+pub(crate) fn is_continuation(request: &ProviderChatRequest) -> bool {
     request.message.starts_with(CONTINUATION_PREFIX)
 }
 
-pub(super) fn durable_native_cursor(
+pub(crate) fn durable_native_cursor(
     request: &ProviderChatRequest,
     cursor: Option<&ProviderResumeCursor>,
 ) -> bool {
@@ -134,7 +135,7 @@ pub(super) fn durable_native_cursor(
 }
 
 /// The original request stays unchanged in status events and saved responses.
-pub(super) fn continuation_request(request: &ProviderChatRequest) -> ProviderChatRequest {
+pub(crate) fn continuation_request(request: &ProviderChatRequest) -> ProviderChatRequest {
     if is_continuation(request) {
         return request.clone();
     }
@@ -146,7 +147,7 @@ pub(super) fn continuation_request(request: &ProviderChatRequest) -> ProviderCha
     continuation
 }
 
-pub(super) fn manual_retry_request(
+pub(crate) fn manual_retry_request(
     request: &ProviderChatRequest,
     previous_status: Option<&str>,
     binding: Option<&ProviderSessionBinding>,
@@ -164,7 +165,7 @@ pub(super) fn manual_retry_request(
     }
 }
 
-pub(super) fn can_resume_transient_after_work(
+pub(crate) fn can_resume_transient_after_work(
     request: &ProviderChatRequest,
     attempt: &ProviderRunAttempt,
     error: &str,
@@ -174,7 +175,7 @@ pub(super) fn can_resume_transient_after_work(
         && durable_native_cursor(request, attempt.resume_cursor.as_ref())
 }
 
-pub(super) fn emit_wait(
+pub(crate) fn emit_wait(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     delay: Duration,
@@ -193,7 +194,7 @@ pub(super) fn emit_wait(
     );
 }
 
-pub(super) fn emit_started(
+pub(crate) fn emit_started(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     retry_attempt: u32,
@@ -219,7 +220,7 @@ fn emit_retry_event(
     max_attempts: u32,
     retry_at: Option<chrono::DateTime<chrono::Utc>>,
 ) {
-    if super::context_compaction::summary_stream_muted(&request.session_id) {
+    if crate::context_compaction::summary_stream_muted(&request.session_id) {
         return;
     }
     let mut payload = serde_json::json!({
@@ -278,7 +279,7 @@ fn emit_retry_event(
     let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
 }
 
-pub(super) fn run_provider_chat_with_retry_using<F>(
+pub(crate) fn run_provider_chat_with_retry_using<F>(
     store: &SessionStore,
     request: &ProviderChatRequest,
     binding: Option<ProviderSessionBinding>,
@@ -301,7 +302,7 @@ where
     )
 }
 
-pub(super) fn run_provider_chat_with_retry_using_with_wait<F>(
+pub(crate) fn run_provider_chat_with_retry_using_with_wait<F>(
     store: &SessionStore,
     request: &ProviderChatRequest,
     binding: Option<ProviderSessionBinding>,

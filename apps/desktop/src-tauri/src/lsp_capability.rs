@@ -5,7 +5,7 @@
 //! opened. It starts (or reuses) the workspace's language server through
 //! `language_server.rs`, opens the document on the Rust side, and reports
 //! `indexing` instead of a bogus "not found" while a cold server warms up.
-use crate::language_server::{LanguageServerManager, LspFileOutcome, LspFileRequest};
+use crate::ide::language_server::{LanguageServerManager, LspFileOutcome, LspFileRequest};
 use crate::{
     app::limits::MAX_WORKSPACE_FILE_EDIT_BYTES,
     capabilities::access::{capability_argument_string, capability_positive_position},

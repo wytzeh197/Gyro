@@ -4,7 +4,7 @@ use crate::{
     capabilities::bridge::{
         desktop_claude_permission_mcp_config_for, ClaudePermissionBridgeIdentity,
     },
-    git_branch_service::git_branch_catalog_impl,
+    git::branches::git_branch_catalog_impl,
     providers::binding::advertised_mcp_capability_tools,
     state::{
         managers::{CapabilityIdeEvidenceManager, ProviderCancellationManager},

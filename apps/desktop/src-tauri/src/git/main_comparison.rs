@@ -1,10 +1,8 @@
-use super::git_read;
-use crate::{
-    git::{
-        commands::git_command,
-        types::{MainComparisonStats, SourceControlFile},
-    },
-    git_status_cache::{parse_git_numstat, GIT_NUMSTAT_ARGS},
+use crate::git::read as git_read;
+use crate::git::{
+    commands::git_command,
+    status_cache::{parse_git_numstat, GIT_NUMSTAT_ARGS},
+    types::{MainComparisonStats, SourceControlFile},
 };
 use std::path::Path;
 use std::time::Instant;
@@ -96,7 +94,7 @@ pub(crate) fn git_main_comparison(
 
 #[cfg(test)]
 mod tests {
-    use crate::git_status_cache::git_status_impl;
+    use crate::git::status_cache::git_status_impl;
     use std::path::Path;
     use std::process::Command;
 

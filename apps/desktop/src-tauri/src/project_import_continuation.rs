@@ -250,7 +250,7 @@ pub(super) fn unavailable(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider_retry_recovery::run_provider_chat_with_retry_using;
+    use crate::providers::retry_recovery::run_provider_chat_with_retry_using;
     use gyro_core::{GyroPaths, SessionEvent, SessionOrigin};
     use uuid::Uuid;
 

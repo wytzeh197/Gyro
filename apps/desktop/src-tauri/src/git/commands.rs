@@ -5,14 +5,16 @@ use crate::{
         bounded_command_error, run_bounded_command, run_command_output,
         run_command_output_with_limits,
     },
-    git::types::{
-        GitBranchCatalog, GitCheckoutBranchRequest, GitCommitRequest, GitCreateBranchRequest,
-        GitLinkedWorktree, GitPathRequest, GitRemoveWorktreeRequest, GitStageRequest,
-        GitSyncRequest, GitSyncResult, SourceControlStatus,
+    git::{
+        branches as git_branch_service,
+        branches::git_branch_catalog_impl,
+        status_cache::{git_repo_root, git_status_impl},
+        types::{
+            GitBranchCatalog, GitCheckoutBranchRequest, GitCommitRequest, GitCreateBranchRequest,
+            GitLinkedWorktree, GitPathRequest, GitRemoveWorktreeRequest, GitStageRequest,
+            GitSyncRequest, GitSyncResult, SourceControlStatus,
+        },
     },
-    git_branch_service,
-    git_branch_service::git_branch_catalog_impl,
-    git_status_cache::{git_repo_root, git_status_impl},
     ide::types::IdeCommandOutput,
     providers::process::command_with_gui_path,
     stores::{open_store, parse_uuid, to_string},

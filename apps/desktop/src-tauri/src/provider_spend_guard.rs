@@ -178,9 +178,9 @@ mod tests {
     use super::*;
     use crate::{
         provider_reliability::{is_transient_provider_error, provider_failure_recovery},
-        provider_retry_recovery::run_provider_chat_with_retry_using,
         providers::{
             retry::is_provider_cancellation,
+            retry_recovery::run_provider_chat_with_retry_using,
             types::{ProviderResumeCursor, ProviderRunnerOutput},
         },
     };
