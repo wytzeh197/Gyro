@@ -20,7 +20,7 @@ use crate::{
         chat_types::{ChatMode, ProviderChatRequest},
         process::provider_adapter_for,
         run::run_provider_chat_blocking,
-        types::ProviderAdapterKind,
+        runner::runner_for,
     },
     state::managers::ProviderCancellationManager,
     stores::{open_automation_store, open_store, to_string},
@@ -390,7 +390,7 @@ fn execute_claimed_automation(
         .provider_id
         .clone()
         .unwrap_or_else(|| provider_id_for_automation_label(&automation.provider).into());
-    if provider_adapter_for(&provider_id).kind == ProviderAdapterKind::ReadinessOnly {
+    if !runner_for(provider_adapter_for(&provider_id).kind).is_executable() {
         return Err(format!(
             "configuration: {} cannot execute automation runs",
             automation.provider

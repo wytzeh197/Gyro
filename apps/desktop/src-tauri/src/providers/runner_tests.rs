@@ -1,14 +1,7 @@
 use super::*;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Mutex,
-};
 
 #[derive(Default)]
-struct RecordingHost {
-    calls: AtomicUsize,
-    observed: Mutex<Vec<(ProviderAdapterKind, String, Option<String>)>>,
-}
+struct RecordingHost;
 
 impl RunnerHost for RecordingHost {
     fn cancellation(&self, _: &str) -> anyhow::Result<gyro_core::CancellationToken> {
@@ -92,22 +85,6 @@ impl RunnerHost for RecordingHost {
     ) -> anyhow::Result<crate::state::provider_run::ProviderApprovalDecision> {
         unreachable!("unused fixture service")
     }
-    fn run_legacy(
-        &self,
-        kind: ProviderAdapterKind,
-        request: &ProviderChatRequest,
-        resume: Option<&ProviderResumeCursor>,
-        attempt: &mut ProviderRunAttempt,
-    ) -> anyhow::Result<ProviderRunnerOutput> {
-        self.calls.fetch_add(1, Ordering::Relaxed);
-        self.observed.lock().unwrap().push((
-            kind,
-            request.message.clone(),
-            resume.map(|cursor| cursor.session_id.clone()),
-        ));
-        attempt.tools_dispatched = true;
-        anyhow::bail!("recorded runner invocation")
-    }
 }
 
 fn request() -> ProviderChatRequest {
@@ -120,13 +97,7 @@ fn request() -> ProviderChatRequest {
 }
 
 #[test]
-fn executable_runners_forward_request_resume_and_mutable_attempt() {
-    let host = RecordingHost::default();
-    let request = request();
-    let resume = ProviderResumeCursor {
-        kind: "fixture".into(),
-        session_id: "owned-conversation".into(),
-    };
+fn registry_exposes_each_executable_adapter_without_an_application_handle() {
     let kinds = [
         ProviderAdapterKind::OpenAiCodex,
         ProviderAdapterKind::AnthropicClaude,
@@ -136,22 +107,29 @@ fn executable_runners_forward_request_resume_and_mutable_attempt() {
         ProviderAdapterKind::OpenAiCompatible,
     ];
     for kind in kinds {
-        let mut attempt = ProviderRunAttempt::default();
-        let error = runner_for(kind)
-            .run(&host, &request, Some(&resume), &mut attempt)
-            .unwrap_err();
-        assert!(error.to_string().contains("recorded runner invocation"));
-        assert!(attempt.tools_dispatched);
+        let runner = runner_for(kind);
+        assert_eq!(runner.kind(), kind);
+        assert!(runner.is_executable());
         assert_eq!(
-            host.observed.lock().unwrap().last(),
-            Some(&(
+            runner.handles_transient_retries(),
+            matches!(
                 kind,
-                request.message.clone(),
-                Some(resume.session_id.clone())
-            ))
+                ProviderAdapterKind::Ollama | ProviderAdapterKind::OpenAiCompatible
+            )
         );
+        if kind != ProviderAdapterKind::OpenAiCodex {
+            assert!(runner
+                .compact(
+                    &RecordingHost,
+                    &request(),
+                    &ProviderResumeCursor {
+                        kind: "fixture".into(),
+                        session_id: "fixture".into()
+                    }
+                )
+                .is_none());
+        }
     }
-    assert_eq!(host.calls.load(Ordering::Relaxed), kinds.len());
 }
 
 #[test]
@@ -165,7 +143,6 @@ fn readiness_runner_rejects_without_invoking_the_host() {
     assert!(error
         .to_string()
         .starts_with("Unavailable provider is readiness-only"));
-    assert_eq!(host.calls.load(Ordering::Relaxed), 0);
 }
 
 #[test]

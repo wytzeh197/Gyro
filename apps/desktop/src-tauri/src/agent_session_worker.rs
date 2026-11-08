@@ -10,7 +10,7 @@ use crate::{
         chat_types::{ChatMode, ProviderChatRequest},
         process::provider_adapter_for,
         run::run_provider_chat_blocking,
-        types::ProviderAdapterKind,
+        runner::runner_for,
     },
     state::provider_run::{stop_provider_run, ProviderStopReason},
     stores::to_string,
@@ -183,9 +183,7 @@ fn execute(app: &tauri::AppHandle, paths: &GyroPaths, row: &AgentSessionRow) {
         .iter()
         .find(|provider| provider.id == row.provider_id)
         .is_some_and(provider_is_executable_for);
-    if !executable
-        || provider_adapter_for(&row.provider_id).kind == ProviderAdapterKind::ReadinessOnly
-    {
+    if !executable || !runner_for(provider_adapter_for(&row.provider_id).kind).is_executable() {
         finish(Err(format!(
             "provider {} cannot run a session",
             row.provider_id

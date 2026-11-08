@@ -11,14 +11,13 @@ use crate::{
         process::{is_stale_resume_error, provider_adapter_for},
         retry::{persist_failed_provider_attempt, wait_before_provider_retry},
         retry_recovery as provider_retry_recovery,
+        runner::runner_for,
         runners::kimi_acp::{
             compatible_provider_session_binding, provider_resume_cursor_from_binding,
         },
         stdout::provider_activities_for_response,
         streaming::{provider_chat_cancelled, provider_stop_message},
-        types::{
-            ProviderAdapterKind, ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput,
-        },
+        types::{ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput},
     },
     stores::{open_store, parse_uuid},
 };
@@ -431,10 +430,8 @@ where
                         &attempt,
                         &format!("{error:#}"),
                     ))
-                && !matches!(
-                    provider_adapter_for(&request.provider_id).kind,
-                    ProviderAdapterKind::OpenAiCompatible | ProviderAdapterKind::Ollama
-                ) =>
+                && !runner_for(provider_adapter_for(&request.provider_id).kind)
+                    .handles_transient_retries() =>
         {
             let mut last_error = error;
             let mut last_attempt = attempt;

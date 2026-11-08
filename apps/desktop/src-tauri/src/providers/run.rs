@@ -30,10 +30,8 @@ use crate::{
         process::provider_adapter_for,
         retry::run_provider_chat_with_retry,
         retry_recovery as provider_retry_recovery,
-        runners::{
-            codex::run_openai_codex_context_compaction,
-            kimi_acp::provider_resume_cursor_from_binding,
-        },
+        runner::runner_for,
+        runners::kimi_acp::provider_resume_cursor_from_binding,
         session_lifecycle::ProviderSessionLease,
         streaming::provider_chat_cancelled,
         types::{ProviderActivity, ProviderAdapterKind},
@@ -327,7 +325,7 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
             let error = gyro_core::security::redact_secrets(&error.to_string());
             let status = if error.contains(PROVIDER_STOP_MARKER) {
                 HarnessRunStatus::Cancelled
-            } else if adapter.kind == ProviderAdapterKind::ReadinessOnly {
+            } else if !runner_for(adapter.kind).is_executable() {
                 HarnessRunStatus::Blocked
             } else {
                 HarnessRunStatus::Failed
@@ -888,11 +886,14 @@ pub(crate) fn compact_provider_chat_blocking(
         context_compaction::codex_context_compaction_activity(&activity_params, "running");
     emit_provider_activity_event(&app, &request, &running, Some(0));
 
-    let (completed, context_usage) = match run_openai_codex_context_compaction(
+    let Some(compacted) = runner_for(ProviderAdapterKind::OpenAiCodex).compact(
         &super::tauri_host::TauriRunnerHost::new(&app),
         &request,
         &resume_cursor,
-    ) {
+    ) else {
+        return compact_local_provider_chat(&app, &store, &request, session_uuid, run_id);
+    };
+    let (completed, context_usage) = match compacted {
         Ok(usage) => (
             context_compaction::codex_context_compaction_activity(&activity_params, "done"),
             provider_context_usage_with_window(
