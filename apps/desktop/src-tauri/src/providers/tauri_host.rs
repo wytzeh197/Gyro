@@ -180,6 +180,12 @@ impl RunnerHost for TauriRunnerHost {
         )
     }
 
+    fn claude_mcp_config(&self, request: &ProviderChatRequest) -> anyhow::Result<String> {
+        let nonce = active_provider_approval_nonce(&self.app, &request.session_id)?;
+        let context = active_provider_capability_context(&self.app, &request.session_id)?;
+        crate::capabilities::bridge::desktop_claude_permission_mcp_config(request, &nonce, &context)
+    }
+
     fn run_legacy(
         &self,
         kind: ProviderAdapterKind,
@@ -192,7 +198,7 @@ impl RunnerHost for TauriRunnerHost {
                 run_openai_codex_chat(&self.app, request, resume, attempt)
             }
             ProviderAdapterKind::AnthropicClaude => {
-                run_anthropic_claude_chat(&self.app, request, resume, attempt)
+                run_anthropic_claude_chat(self, request, resume, attempt)
             }
             ProviderAdapterKind::KimiAcp => run_kimi_acp_chat(self, request, resume, attempt),
             ProviderAdapterKind::AntigravityCli => {

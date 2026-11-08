@@ -1,21 +1,17 @@
 use crate::{
     app::config::load_config_blocking,
-    capabilities::bridge::{
-        active_provider_approval_nonce, active_provider_capability_context,
-        desktop_claude_permission_mcp_config,
-    },
     project_import_continuation, provider_reliability,
     providers::{
         approvals::claude_multimodal_input,
-        binding::local_conversation_history_for_request,
         chat_types::{ChatMode, ProviderChatRequest},
         cli_args::{audit_provider_chat_args, claude_chat_args, provider_chat_cwd},
         process::{command_for_provider, provider_output_summary, provider_stream_failure_detail},
         prompt::{claude_chat_prompt, provider_context_message_for_turn, PromptTurn},
+        runner::RunnerHost,
         stdout::{provider_activities_for_response, recover_streamed_provider_answer},
         streaming::{
-            provider_run_failure, run_streaming_command, StreamingCommandOutput,
-            PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS, PROVIDER_CHAT_MAX_RUNTIME_SECS,
+            provider_run_failure, StreamingCommandOutput, PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS,
+            PROVIDER_CHAT_MAX_RUNTIME_SECS,
         },
         types::{ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput},
     },
@@ -25,7 +21,7 @@ use crate::{
 use std::{io::Write, time::Duration};
 use uuid::Uuid;
 pub(crate) fn run_anthropic_claude_chat(
-    app: &tauri::AppHandle,
+    host: &dyn RunnerHost,
     request: &ProviderChatRequest,
     resume_cursor: Option<&ProviderResumeCursor>,
     attempt: &mut ProviderRunAttempt,
@@ -35,7 +31,7 @@ pub(crate) fn run_anthropic_claude_chat(
     let history = if can_resume {
         None
     } else {
-        local_conversation_history_for_request(request)
+        host.conversation_history(request)
     };
     let contextual_message = provider_context_message_for_turn(
         request,
@@ -53,13 +49,7 @@ pub(crate) fn run_anthropic_claude_chat(
         can_resume,
     );
     gyro_core::provider_observation::native_prompt(&serde_json::json!(prompt));
-    let approval_nonce = active_provider_approval_nonce(app, &request.session_id)?;
-    let capability_context = active_provider_capability_context(app, &request.session_id)?;
-    let permission_mcp_config = Some(desktop_claude_permission_mcp_config(
-        request,
-        &approval_nonce,
-        &capability_context,
-    )?);
+    let permission_mcp_config = Some(host.claude_mcp_config(request)?);
     let session_id = resume_cursor
         .and_then(|cursor| (cursor.kind == "claude-session").then_some(cursor.session_id.clone()))
         .unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -120,12 +110,11 @@ pub(crate) fn run_anthropic_claude_chat(
     process.args(args);
 
     let mut observed_session_id = None;
-    let output = run_streaming_command(
+    let output = host.stream_command(
         process,
         input_file.as_ref().map(|input| input.path()),
         Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
         Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
-        app,
         request,
         &mut observed_session_id,
     );

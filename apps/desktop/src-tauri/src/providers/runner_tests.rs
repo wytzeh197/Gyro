@@ -75,6 +75,9 @@ impl RunnerHost for RecordingHost {
     ) -> anyhow::Result<super::super::streaming::StreamingCommandOutput> {
         unreachable!("unused fixture service")
     }
+    fn claude_mcp_config(&self, _: &ProviderChatRequest) -> anyhow::Result<String> {
+        unreachable!("unused fixture service")
+    }
     fn run_legacy(
         &self,
         kind: ProviderAdapterKind,

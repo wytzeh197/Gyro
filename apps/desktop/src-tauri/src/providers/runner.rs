@@ -106,6 +106,7 @@ pub(crate) trait RunnerHost: Send + Sync {
         request: &ProviderChatRequest,
         observed_session_id: &mut Option<String>,
     ) -> anyhow::Result<super::streaming::StreamingCommandOutput>;
+    fn claude_mcp_config(&self, request: &ProviderChatRequest) -> anyhow::Result<String>;
 
     fn run_legacy(
         &self,
