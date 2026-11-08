@@ -1,5 +1,5 @@
 mod agent_session_worker;
-mod automation_scheduler;
+mod automation;
 #[cfg(test)]
 mod backend_performance_tests;
 mod canvas_preview;
@@ -96,17 +96,25 @@ use workspace_search::{
 };
 
 use anyhow::Context;
-use automation_scheduler::start_automation_scheduler;
+use automation::commands::{
+    automation_notification_content, cancel_scheduled_automation, emit_automation_update,
+    run_automation_blocking, set_automation_status_blocking,
+};
 #[cfg(test)]
-use automation_scheduler::{
+use automation::execution::{automation_provider_prompt, parse_automation_execution_outcome};
+#[cfg(test)]
+use automation::runtime::automation_scheduler_effective_now;
+use automation::runtime::{run_event_wakes_automation_scheduler, AutomationSchedulerControl};
+use automation::scheduler::start_automation_scheduler;
+#[cfg(test)]
+use automation::scheduler::{
     automation_dispatch_candidates, recover_automation_scheduler_leases_with,
     run_automation_scheduler_once_at_with, run_automation_scheduler_once_with,
     run_automation_scheduler_once_with_heartbeat_interval,
 };
 use base64::Engine as _;
 use desktop_notifications::{
-    native_permission, notify_automation_outcome, notify_provider_approval_question,
-    send_test_notification,
+    native_permission, notify_provider_approval_question, send_test_notification,
 };
 use gyro_core::augmented_gui_path;
 #[cfg(test)]
@@ -132,29 +140,30 @@ use gyro_core::{
     start_account_login as account_start_login, stored_account_session as account_stored_session,
     successful_seat_answers, write_council_run_manifest, write_council_snapshot,
     write_seat_artifact, write_synthesis_artifact, AccountSessionState, AppNotificationKind,
-    Automation, AutomationRunStatus, AutomationStatus, AutomationStore, AutomationTriageState,
-    CancellationToken, CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent,
-    CapabilityClass, CapabilityId, CapabilityInvocationContext, CapabilityPolicySnapshot,
-    CapabilityRequest, CapabilityResourceRef, CapabilityResponse, CapabilityResult,
-    CapabilityRunMode, CapabilityStatus, CliInstallPlanReport, CliUpdateApplyResult,
-    CliUpdateCheckReport, CouncilAttachmentRef, CouncilBarrierDecision, CouncilContextSnapshot,
-    CouncilRun, CouncilRunStatus, CouncilSeat, CouncilSeatStatus, CouncilToolPolicy,
-    CreateAutomationRequest, CreateSessionContext, CredentialPolicy, ExecutionRequest,
-    ExecutionStream, ExecutionTermination, FileChangeInput, FileChangeSummary, FileReviewDecision,
-    GyroConfig, GyroPaths, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind,
-    KimiAcpMode, KimiAcpRequest, MutationDecision, MutationProposal, OllamaToolChatRequest,
-    OpenAiCompatChatRequest, PendingProviderMutationCommit, PreparedProviderMutationTransaction,
-    ProjectCapabilityGrant, ProjectCapabilityPolicy, ProviderCapabilitySupport,
-    ProviderDiagnosticsPayload, ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck,
-    ProviderHealthRequest, ProviderMutationJournalContext, ProviderRunPayload,
-    ProviderSessionBinding, Session, SessionEvent, SessionEventKind, SessionOrigin, SessionStore,
-    SessionWorkspaceMode, SummarySource, UsageEntry, UsageOrigin, UsageOutcome, UsageTokens,
-    UsageTotals, WorkspaceCheckReport, WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS,
-    CAPABILITY_SCHEMA_V1, CHANGE_SUMMARY_SYSTEM_PROMPT, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS,
-    FILE_REVIEW_SCHEMA, MAX_SUMMARY_FILES, OLLAMA_CANCELLED_MESSAGE,
-    OPENAI_COMPAT_CANCELLED_MESSAGE, PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT,
-    WORKSPACE_UNAVAILABLE_MESSAGE,
+    Automation, AutomationStatus, AutomationStore, CancellationToken, CapabilityAccess,
+    CapabilityApprovalDecision, CapabilityCallEvent, CapabilityClass, CapabilityId,
+    CapabilityInvocationContext, CapabilityPolicySnapshot, CapabilityRequest,
+    CapabilityResourceRef, CapabilityResponse, CapabilityResult, CapabilityRunMode,
+    CapabilityStatus, CliInstallPlanReport, CliUpdateApplyResult, CliUpdateCheckReport,
+    CouncilAttachmentRef, CouncilBarrierDecision, CouncilContextSnapshot, CouncilRun,
+    CouncilRunStatus, CouncilSeat, CouncilSeatStatus, CouncilToolPolicy, CreateSessionContext,
+    CredentialPolicy, ExecutionRequest, ExecutionStream, ExecutionTermination, FileChangeInput,
+    FileChangeSummary, FileReviewDecision, GyroConfig, GyroPaths, HarnessRunStatus,
+    KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode, KimiAcpRequest, MutationDecision,
+    MutationProposal, OllamaToolChatRequest, OpenAiCompatChatRequest,
+    PendingProviderMutationCommit, PreparedProviderMutationTransaction, ProjectCapabilityGrant,
+    ProjectCapabilityPolicy, ProviderCapabilitySupport, ProviderDiagnosticsPayload,
+    ProviderExecutionKind, ProviderFileChange, ProviderHealthCheck, ProviderHealthRequest,
+    ProviderMutationJournalContext, ProviderRunPayload, ProviderSessionBinding, Session,
+    SessionEvent, SessionEventKind, SessionOrigin, SessionStore, SessionWorkspaceMode,
+    SummarySource, UsageEntry, UsageOrigin, UsageOutcome, UsageTokens, UsageTotals,
+    WorkspaceCheckReport, WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1,
+    CHANGE_SUMMARY_SYSTEM_PROMPT, COUNCIL_MAX_SEATS, COUNCIL_MIN_SEATS, FILE_REVIEW_SCHEMA,
+    MAX_SUMMARY_FILES, OLLAMA_CANCELLED_MESSAGE, OPENAI_COMPAT_CANCELLED_MESSAGE,
+    PROVIDER_CAPABILITY_IPC_SCHEMA_V1, SYNTHESIZER_SYSTEM_PROMPT, WORKSPACE_UNAVAILABLE_MESSAGE,
 };
+#[cfg(test)]
+use gyro_core::{AutomationRunStatus, CreateAutomationRequest};
 use notify::{
     Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
 };
@@ -330,7 +339,6 @@ const PROVIDER_CAPABILITY_EVENT: &str = "gyro://provider-capability-event";
 const PROVIDER_CAPABILITY_RESOURCE_EVENT: &str = "gyro://provider-capability-resource";
 const PROVIDER_APPROVAL_NOTIFICATION_OPEN_EVENT: &str =
     "gyro://provider-approval-notification-open";
-const AUTOMATION_UPDATED_EVENT: &str = "gyro://automation-updated";
 /// A plan-usage reading every open window should adopt, whoever asked for it.
 const PROVIDER_USAGE_UPDATED_EVENT: &str = "gyro://provider-usage-updated";
 const WORKSPACE_PREPARATION_EVENT: &str = "gyro://workspace-preparation";
@@ -346,11 +354,6 @@ const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
 const PROVIDER_CHAT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
 const PROVIDER_APPROVAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const MAX_MODEL_TERMINAL_PROCESSES: usize = 4;
-const AUTOMATION_SCHEDULER_POLL_INTERVAL: Duration = Duration::from_secs(5);
-const AUTOMATION_LEASE_SECONDS: i64 = 45 * 60;
-const AUTOMATION_LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
-const AUTOMATION_RESULT_MARKER_PREFIX: &str = "<!-- gyro-automation-result:";
-const AUTOMATION_RESULT_MARKER_SUFFIX: &str = "-->";
 const TEXT_TRUNCATION_SUFFIX: &str = "...";
 
 #[derive(Default)]
@@ -848,218 +851,6 @@ fn stop_provider_run(app: &tauri::AppHandle, session_id: &str, reason: ProviderS
     }
     control.cancellation.cancel();
     true
-}
-
-#[derive(Default)]
-struct AutomationSchedulerControl {
-    state: Mutex<AutomationSchedulerState>,
-    wake: Condvar,
-}
-
-#[derive(Default)]
-struct AutomationSchedulerState {
-    generation: u64,
-    running_sessions: HashMap<Uuid, String>,
-}
-
-struct AutomationLeaseHeartbeat {
-    stopped: Arc<AtomicBool>,
-    worker: Option<std::thread::JoinHandle<()>>,
-}
-
-struct AutomationSchedulerClock {
-    last_effective: chrono::DateTime<chrono::Utc>,
-    last_sample: Instant,
-}
-
-/// A scheduled run owns a provider slot before its lease is claimed. A busy
-/// interactive app leaves the automation due instead of recording a false failure.
-struct AutomationRunAdmission {
-    app: tauri::AppHandle,
-    reservation_key: String,
-}
-
-impl AutomationRunAdmission {
-    fn reserve(app: &tauri::AppHandle, automation_id: Uuid) -> Result<Option<Self>, String> {
-        let reservation_key = format!("automation-reserved-{automation_id}");
-        let manager = app.state::<ProviderCancellationManager>();
-        let mut flags = manager
-            .flags
-            .lock()
-            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
-        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
-            return Ok(None);
-        }
-        flags.insert(
-            reservation_key.clone(),
-            Arc::new(ProviderRunControl::default()),
-        );
-        Ok(Some(Self {
-            app: app.clone(),
-            reservation_key,
-        }))
-    }
-
-    fn transfer_to_session(&self, session_id: &str) -> Result<(), String> {
-        let manager = self.app.state::<ProviderCancellationManager>();
-        let mut flags = manager
-            .flags
-            .lock()
-            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
-        let control = flags
-            .remove(&self.reservation_key)
-            .ok_or_else(|| "automation provider reservation was lost".to_string())?;
-        flags.insert(session_id.to_string(), control);
-        Ok(())
-    }
-}
-
-impl Drop for AutomationRunAdmission {
-    fn drop(&mut self) {
-        if let Ok(mut flags) = self.app.state::<ProviderCancellationManager>().flags.lock() {
-            flags.remove(&self.reservation_key);
-        }
-    }
-}
-
-fn automation_scheduler_effective_now(
-    previous: chrono::DateTime<chrono::Utc>,
-    monotonic_elapsed: Duration,
-    observed_wall: chrono::DateTime<chrono::Utc>,
-) -> chrono::DateTime<chrono::Utc> {
-    let elapsed = chrono::Duration::from_std(monotonic_elapsed).unwrap_or_default();
-    observed_wall.max(previous + elapsed)
-}
-
-impl AutomationSchedulerClock {
-    fn new(observed_wall: chrono::DateTime<chrono::Utc>) -> Self {
-        Self {
-            last_effective: observed_wall,
-            last_sample: Instant::now(),
-        }
-    }
-
-    fn now(&mut self) -> chrono::DateTime<chrono::Utc> {
-        let sample = Instant::now();
-        let effective = automation_scheduler_effective_now(
-            self.last_effective,
-            sample.duration_since(self.last_sample),
-            chrono::Utc::now(),
-        );
-        self.last_effective = effective;
-        self.last_sample = sample;
-        effective
-    }
-}
-
-impl AutomationLeaseHeartbeat {
-    fn start(
-        paths: GyroPaths,
-        automation_id: Uuid,
-        lease_owner: String,
-        lease_seconds: i64,
-        interval: Duration,
-    ) -> Self {
-        let stopped = Arc::new(AtomicBool::new(false));
-        let worker_stopped = stopped.clone();
-        let worker = std::thread::spawn(move || {
-            let store = match AutomationStore::open(paths) {
-                Ok(store) => store,
-                Err(error) => {
-                    eprintln!("could not start automation lease heartbeat: {error}");
-                    return;
-                }
-            };
-            while !worker_stopped.load(Ordering::SeqCst) {
-                std::thread::park_timeout(interval);
-                if worker_stopped.load(Ordering::SeqCst) {
-                    break;
-                }
-                match store.renew_automation_lease(
-                    automation_id,
-                    lease_owner.clone(),
-                    lease_seconds,
-                ) {
-                    Ok(Some(_)) => {}
-                    Ok(None) => break,
-                    Err(error) => eprintln!(
-                        "could not renew automation lease {}: {}",
-                        automation_id,
-                        gyro_core::security::redact_secrets(&error.to_string())
-                    ),
-                }
-            }
-        });
-        Self {
-            stopped,
-            worker: Some(worker),
-        }
-    }
-
-    fn stop(&mut self) {
-        self.stopped.store(true, Ordering::SeqCst);
-        if let Some(worker) = self.worker.take() {
-            worker.thread().unpark();
-            let _ = worker.join();
-        }
-    }
-}
-
-impl Drop for AutomationLeaseHeartbeat {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
-
-impl AutomationSchedulerControl {
-    fn wake(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            state.generation = state.generation.wrapping_add(1);
-            self.wake.notify_all();
-        }
-    }
-
-    fn generation(&self) -> u64 {
-        self.state
-            .lock()
-            .map(|state| state.generation)
-            .unwrap_or_default()
-    }
-
-    fn wait_for_change(&self, observed_generation: u64, timeout: Duration) -> u64 {
-        let Ok(state) = self.state.lock() else {
-            std::thread::sleep(timeout);
-            return observed_generation;
-        };
-        if state.generation != observed_generation {
-            return state.generation;
-        }
-        self.wake
-            .wait_timeout_while(state, timeout, |state| {
-                state.generation == observed_generation
-            })
-            .map(|(state, _)| state.generation)
-            .unwrap_or(observed_generation)
-    }
-
-    fn register(&self, automation_id: Uuid, session_id: String) {
-        if let Ok(mut state) = self.state.lock() {
-            state.running_sessions.insert(automation_id, session_id);
-        }
-    }
-
-    fn unregister(&self, automation_id: Uuid) {
-        if let Ok(mut state) = self.state.lock() {
-            state.running_sessions.remove(&automation_id);
-        }
-    }
-
-    fn session_for(&self, automation_id: Uuid) -> Option<String> {
-        self.state
-            .lock()
-            .ok()
-            .and_then(|state| state.running_sessions.get(&automation_id).cloned())
-    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -2796,234 +2587,6 @@ fn cleanup_staged_session_attachments(attachments_root: &Path) {
 }
 
 #[tauri::command]
-async fn list_automations() -> Result<Vec<Automation>, String> {
-    tauri::async_runtime::spawn_blocking(list_automations_blocking)
-        .await
-        .map_err(|error| format!("automation list worker failed: {error}"))?
-}
-
-fn list_automations_blocking() -> Result<Vec<Automation>, String> {
-    let store = open_automation_store()?;
-    store.list_automations().map_err(to_string)
-}
-
-#[tauri::command]
-async fn list_due_automations() -> Result<Vec<Automation>, String> {
-    tauri::async_runtime::spawn_blocking(list_due_automations_blocking)
-        .await
-        .map_err(|error| format!("due automation list worker failed: {error}"))?
-}
-
-fn list_due_automations_blocking() -> Result<Vec<Automation>, String> {
-    let store = open_automation_store()?;
-    store.list_due_automations_now().map_err(to_string)
-}
-
-#[tauri::command]
-async fn create_automation(
-    app: tauri::AppHandle,
-    draft: CreateAutomationRequest,
-) -> Result<Automation, String> {
-    let automation =
-        tauri::async_runtime::spawn_blocking(move || create_automation_blocking(draft))
-            .await
-            .map_err(|error| format!("automation create worker failed: {error}"))??;
-    emit_automation_update(&app, &automation);
-    app.state::<AutomationSchedulerControl>().wake();
-    Ok(automation)
-}
-
-fn create_automation_blocking(draft: CreateAutomationRequest) -> Result<Automation, String> {
-    let store = open_automation_store()?;
-    store.create_automation(draft).map_err(to_string)
-}
-
-#[tauri::command]
-async fn edit_automation(
-    app: tauri::AppHandle,
-    automation_id: String,
-    draft: CreateAutomationRequest,
-) -> Result<Automation, String> {
-    let id = parse_uuid(&automation_id)?;
-    let automation = tauri::async_runtime::spawn_blocking(move || {
-        open_automation_store()?
-            .edit_automation(id, draft)
-            .map_err(to_string)
-    })
-    .await
-    .map_err(to_string)??;
-    emit_automation_update(&app, &automation);
-    app.state::<AutomationSchedulerControl>().wake();
-    Ok(automation)
-}
-
-#[tauri::command]
-async fn set_automation_status(
-    app: tauri::AppHandle,
-    automation_id: String,
-    status: AutomationStatus,
-) -> Result<Automation, String> {
-    let parsed_id = parse_uuid(&automation_id)?;
-    let should_cancel = status != AutomationStatus::Current;
-    let automation = tauri::async_runtime::spawn_blocking(move || {
-        set_automation_status_blocking(automation_id, status)
-    })
-    .await
-    .map_err(|error| format!("automation status worker failed: {error}"))??;
-    if should_cancel {
-        cancel_scheduled_automation(&app, parsed_id);
-    }
-    emit_automation_update(&app, &automation);
-    app.state::<AutomationSchedulerControl>().wake();
-    Ok(automation)
-}
-
-fn set_automation_status_blocking(
-    automation_id: String,
-    status: AutomationStatus,
-) -> Result<Automation, String> {
-    let store = open_automation_store()?;
-    let automation_id = parse_uuid(&automation_id)?;
-    store
-        .set_automation_status(automation_id, status)
-        .map_err(to_string)?
-        .ok_or_else(|| "automation not found".into())
-}
-
-#[tauri::command]
-async fn run_automation(
-    app: tauri::AppHandle,
-    automation_id: String,
-) -> Result<Automation, String> {
-    let automation =
-        tauri::async_runtime::spawn_blocking(move || run_automation_blocking(automation_id))
-            .await
-            .map_err(|error| format!("automation queue worker failed: {error}"))??;
-    emit_automation_update(&app, &automation);
-    app.state::<AutomationSchedulerControl>().wake();
-    Ok(automation)
-}
-
-fn run_automation_blocking(automation_id: String) -> Result<Automation, String> {
-    let store = open_automation_store()?;
-    let automation_id = parse_uuid(&automation_id)?;
-    store
-        .queue_automation_now(automation_id)
-        .map_err(to_string)?
-        .ok_or_else(|| "automation not found".into())
-}
-
-#[tauri::command]
-async fn claim_due_automation(
-    lease_owner: String,
-    lease_seconds: Option<i64>,
-) -> Result<Option<Automation>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        claim_due_automation_blocking(lease_owner, lease_seconds)
-    })
-    .await
-    .map_err(|error| format!("automation claim worker failed: {error}"))?
-}
-
-fn claim_due_automation_blocking(
-    lease_owner: String,
-    lease_seconds: Option<i64>,
-) -> Result<Option<Automation>, String> {
-    let store = open_automation_store()?;
-    store
-        .claim_due_automation(lease_owner, lease_seconds.unwrap_or(300))
-        .map_err(to_string)
-}
-
-#[tauri::command]
-async fn complete_automation_lease(
-    automation_id: String,
-    lease_owner: String,
-    summary: String,
-) -> Result<Automation, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        complete_automation_lease_blocking(automation_id, lease_owner, summary)
-    })
-    .await
-    .map_err(|error| format!("automation lease complete worker failed: {error}"))?
-}
-
-fn complete_automation_lease_blocking(
-    automation_id: String,
-    lease_owner: String,
-    summary: String,
-) -> Result<Automation, String> {
-    let store = open_automation_store()?;
-    let automation_id = parse_uuid(&automation_id)?;
-    store
-        .complete_automation_lease(automation_id, lease_owner, summary)
-        .map_err(to_string)?
-        .ok_or_else(|| "automation not found".into())
-}
-
-#[tauri::command]
-async fn recover_automation_leases() -> Result<usize, String> {
-    tauri::async_runtime::spawn_blocking(recover_automation_leases_blocking)
-        .await
-        .map_err(|error| format!("automation lease recovery worker failed: {error}"))?
-}
-
-fn recover_automation_leases_blocking() -> Result<usize, String> {
-    let store = open_automation_store()?;
-    store
-        .recover_expired_automation_leases_now()
-        .map_err(to_string)
-}
-
-#[tauri::command]
-async fn triage_automation(
-    automation_id: String,
-    triage_state: AutomationTriageState,
-) -> Result<Automation, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        triage_automation_blocking(automation_id, triage_state)
-    })
-    .await
-    .map_err(|error| format!("automation triage worker failed: {error}"))?
-}
-
-fn triage_automation_blocking(
-    automation_id: String,
-    triage_state: AutomationTriageState,
-) -> Result<Automation, String> {
-    let store = open_automation_store()?;
-    let automation_id = parse_uuid(&automation_id)?;
-    store
-        .triage_automation(automation_id, triage_state)
-        .map_err(to_string)?
-        .ok_or_else(|| "automation not found".into())
-}
-
-fn emit_automation_update(app: &tauri::AppHandle, automation: &Automation) {
-    if let Err(error) = app.emit(AUTOMATION_UPDATED_EVENT, automation) {
-        eprintln!("could not emit automation update: {error}");
-    }
-}
-
-fn automation_notification_content(
-    automation: &Automation,
-) -> Option<(&'static str, &'static str)> {
-    match automation.run_history.first()?.status {
-        AutomationRunStatus::Passed => Some((
-            "Gyro automation finished",
-            "A scheduled automation completed. Open Gyro to review the result.",
-        )),
-        AutomationRunStatus::Failed => Some((
-            "Gyro automation needs attention",
-            "A scheduled automation failed. Open Gyro to review the result.",
-        )),
-        AutomationRunStatus::Queued
-        | AutomationRunStatus::Running
-        | AutomationRunStatus::Stopped => None,
-    }
-}
-
-#[tauri::command]
 async fn get_notification_permission(app: tauri::AppHandle) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || native_permission(&app).to_string())
         .await
@@ -3035,154 +2598,6 @@ async fn test_notification(app: tauri::AppHandle) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || send_test_notification(&app).to_string())
         .await
         .map_err(to_string)
-}
-
-fn cancel_scheduled_automation(app: &tauri::AppHandle, automation_id: Uuid) {
-    let Some(session_id) = app
-        .state::<AutomationSchedulerControl>()
-        .session_for(automation_id)
-    else {
-        return;
-    };
-    if let Ok(flags) = app.state::<ProviderCancellationManager>().flags.lock() {
-        if let Some(control) = flags.get(&session_id) {
-            control.cancellation.cancel();
-        }
-    }
-}
-
-fn resolve_automation_workspace(
-    paths: &GyroPaths,
-    automation: &Automation,
-) -> Result<PathBuf, String> {
-    let source = automation
-        .execution
-        .workspace_path
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| "configuration: choose a workspace for this automation".to_string())?;
-    let source = PathBuf::from(source).canonicalize().map_err(|_| {
-        "configuration: the automation workspace is no longer available".to_string()
-    })?;
-    if !source.is_dir() {
-        return Err("configuration: the automation workspace is not a folder".into());
-    }
-    if automation.workspace_mode == SessionWorkspaceMode::Local {
-        return Ok(source);
-    }
-
-    let worktree_name = automation
-        .worktree_name
-        .as_deref()
-        .ok_or_else(|| "configuration: the automation has no worktree name".to_string())?;
-    let expected = paths.worktrees_dir.join(worktree_name);
-    if expected.exists() {
-        let expected = expected
-            .canonicalize()
-            .map_err(|_| "configuration: the automation worktree is unavailable".to_string())?;
-        let root = paths
-            .worktrees_dir
-            .canonicalize()
-            .map_err(|_| "configuration: the Gyro worktree root is unavailable".to_string())?;
-        if !expected.starts_with(root) || !expected.is_dir() {
-            return Err("configuration: the automation worktree is unsafe".into());
-        }
-        return Ok(expected);
-    }
-    create_worktree(
-        paths,
-        source,
-        automation.branch.clone(),
-        Some(worktree_name.to_string()),
-    )
-    .map(|plan| plan.worktree_path)
-    .map_err(|error| format!("configuration: could not create automation worktree: {error}"))
-}
-
-fn provider_id_for_automation_label(label: &str) -> &'static str {
-    let normalized = label.to_ascii_lowercase();
-    if normalized.contains("claude") || normalized.contains("anthropic") {
-        "anthropic"
-    } else {
-        "openai"
-    }
-}
-
-fn automation_provider_prompt(automation: &Automation) -> String {
-    match automation.stop_condition.as_deref() {
-        Some(condition) => format!(
-            "{}\n\nAutomation stop condition: {}\n\nEvaluate the stop condition after completing the work. End your final response with exactly one hidden machine-readable line using one of these forms:\n<!-- gyro-automation-result: {{\"stopConditionMet\":true}} -->\n<!-- gyro-automation-result: {{\"stopConditionMet\":false}} -->\nUse true only when you verified the condition is satisfied. Do not omit this line.",
-            automation.prompt, condition,
-        ),
-        None => automation.prompt.clone(),
-    }
-}
-
-#[derive(Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "camelCase")]
-struct AutomationStopConditionVerdict {
-    stop_condition_met: bool,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct AutomationExecutionOutcome {
-    summary: String,
-    stop_condition_met: Option<bool>,
-}
-
-fn parse_automation_execution_outcome(
-    automation: &Automation,
-    response: &str,
-) -> Result<AutomationExecutionOutcome, String> {
-    if automation.stop_condition.is_none() {
-        return Ok(AutomationExecutionOutcome {
-            summary: response.trim().to_string(),
-            stop_condition_met: None,
-        });
-    }
-
-    let marker_start = response
-        .rfind(AUTOMATION_RESULT_MARKER_PREFIX)
-        .ok_or_else(|| {
-            "Automation failed closed because the provider did not report a stop-condition verdict"
-                .to_string()
-        })?;
-    let marker_payload_start = marker_start + AUTOMATION_RESULT_MARKER_PREFIX.len();
-    let marker_tail = &response[marker_payload_start..];
-    let marker_end = marker_tail
-        .find(AUTOMATION_RESULT_MARKER_SUFFIX)
-        .ok_or_else(|| {
-            "Automation failed closed because the provider returned an incomplete stop-condition verdict"
-                .to_string()
-        })?;
-    let trailing = &marker_tail[marker_end + AUTOMATION_RESULT_MARKER_SUFFIX.len()..];
-    if !trailing.trim().is_empty() {
-        return Err(
-            "Automation failed closed because its stop-condition verdict was not the final output"
-                .into(),
-        );
-    }
-
-    let verdict = serde_json::from_str::<AutomationStopConditionVerdict>(
-        marker_tail[..marker_end].trim(),
-    )
-    .map_err(|_| {
-        "Automation failed closed because the provider returned an invalid stop-condition verdict"
-            .to_string()
-    })?;
-    let summary = response[..marker_start].trim();
-    Ok(AutomationExecutionOutcome {
-        summary: if summary.is_empty() {
-            "Automation completed and evaluated its stop condition".into()
-        } else {
-            summary.to_string()
-        },
-        stop_condition_met: Some(verdict.stop_condition_met),
-    })
-}
-
-fn bounded_automation_summary(value: &str) -> String {
-    truncate_chars(value.trim(), 600)
 }
 
 #[tauri::command]
@@ -25790,7 +25205,7 @@ pub fn run() {
             append_plan_event,
             append_user_message,
             set_session_workspace_identity,
-            claim_due_automation,
+            automation::commands::claim_due_automation,
             check_provider_auth,
             check_browser_preview,
             check_provider_health,
@@ -25819,10 +25234,10 @@ pub fn run() {
             session_browser::session_browser_history,
             session_browser::session_browser_close,
             session_browser::session_browser_snapshot,
-            complete_automation_lease,
+            automation::commands::complete_automation_lease,
             close_terminal_pane,
-            create_automation,
-            edit_automation,
+            automation::commands::create_automation,
+            automation::commands::edit_automation,
             create_desktop_session,
             create_file_mutation_proposal,
             create_terminal_pane,
@@ -25878,9 +25293,9 @@ pub fn run() {
             github_workflow_logs,
             github_workflow_run_detail,
             github_workflow_runs,
-            list_automations,
+            automation::commands::list_automations,
             list_active_capability_resources,
-            list_due_automations,
+            automation::commands::list_due_automations,
             list_sessions,
             task_suggestions::list_start_task_suggestions,
             list_workspace_files,
@@ -25905,7 +25320,7 @@ pub fn run() {
             restart_app,
             updater_platform_key,
             menu_bar::hide_menu_bar_popover,
-            recover_automation_leases,
+            automation::commands::recover_automation_leases,
             rename_session,
             rename_workspace_path,
             refresh_account_session,
@@ -25917,7 +25332,7 @@ pub fn run() {
             record_file_review_decision,
             restart_terminal_pane,
             restore_terminal_panes,
-            run_automation,
+            automation::commands::run_automation,
             read_council_artifact,
             retry_council_synthesis,
             run_council_chat,
@@ -25930,7 +25345,7 @@ pub fn run() {
             menu_bar::set_menu_bar_snapshot,
             menu_bar::set_menu_bar_visible,
             set_session_branch,
-            set_automation_status,
+            automation::commands::set_automation_status,
             stat_workspace_file,
             classify_dropped_path,
             summarize_file_changes,
@@ -25949,7 +25364,7 @@ pub fn run() {
             test_discover,
             test_notification,
             test_run,
-            triage_automation,
+            automation::commands::triage_automation,
             update_capability_ide_evidence,
             watch_workspace,
             write_workspace_file,
@@ -26099,10 +25514,6 @@ fn remove_provider_host_ipc_socket(paths: GyroPaths, host_pid: u32) {
             let _ = fs::remove_file(&paths.socket_path);
         }
     }
-}
-
-fn run_event_wakes_automation_scheduler(event: &tauri::RunEvent) -> bool {
-    matches!(event, tauri::RunEvent::Resumed)
 }
 
 #[cfg(target_os = "macos")]

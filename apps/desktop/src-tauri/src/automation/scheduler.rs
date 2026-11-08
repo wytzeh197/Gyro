@@ -1,6 +1,37 @@
-use super::*;
+//! The background scheduler loop: claim due automations, run them, settle
+//! their leases.
 
-pub(super) fn start_automation_scheduler(app: tauri::AppHandle) {
+use super::{
+    commands::emit_automation_update,
+    execution::{
+        automation_provider_prompt, bounded_automation_summary, parse_automation_execution_outcome,
+        provider_id_for_automation_label, resolve_automation_workspace,
+    },
+    runtime::{
+        AutomationLeaseHeartbeat, AutomationRunAdmission, AutomationSchedulerClock,
+        AutomationSchedulerControl, AUTOMATION_LEASE_HEARTBEAT_INTERVAL, AUTOMATION_LEASE_SECONDS,
+        AUTOMATION_SCHEDULER_POLL_INTERVAL,
+    },
+};
+use crate::{
+    desktop_notifications::notify_automation_outcome, open_automation_store, open_store,
+    provider_adapter_for, run_provider_chat_blocking, to_string, ChatMode, ProviderAdapterKind,
+    ProviderCancellationManager, ProviderChatRequest, MAX_CONCURRENT_SCHEDULED_RUNS,
+};
+use gyro_core::{
+    Automation, AutomationRunStatus, AutomationStatus, AutomationStore, CreateSessionContext,
+    GyroPaths, SessionOrigin, SessionWorkspaceMode, UsageOrigin,
+};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::mpsc,
+    time::Duration,
+};
+use tauri::Manager;
+use uuid::Uuid;
+
+pub(crate) fn start_automation_scheduler(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         let paths = match GyroPaths::for_current_user() {
             Ok(paths) => paths,
@@ -129,7 +160,7 @@ fn automation_scheduler_workspace_key(paths: &GyroPaths, automation: &Automation
         .unwrap_or_else(|| PathBuf::from(format!("missing-automation-{}", automation.id)))
 }
 
-pub(super) fn automation_dispatch_candidates(
+pub(crate) fn automation_dispatch_candidates(
     paths: &GyroPaths,
     due: Vec<Automation>,
     running_workspaces: &HashMap<Uuid, PathBuf>,
@@ -150,7 +181,7 @@ pub(super) fn automation_dispatch_candidates(
         .collect()
 }
 
-pub(super) fn recover_automation_scheduler_leases_with<F>(
+pub(crate) fn recover_automation_scheduler_leases_with<F>(
     paths: &GyroPaths,
     now: chrono::DateTime<chrono::Utc>,
     mut on_recovered: F,
@@ -190,7 +221,7 @@ where
     Ok(recovered)
 }
 #[cfg(test)]
-pub(super) fn run_automation_scheduler_once_with<F>(
+pub(crate) fn run_automation_scheduler_once_with<F>(
     paths: &GyroPaths,
     lease_owner: &str,
     execute: F,
@@ -202,7 +233,7 @@ where
 }
 
 #[cfg(test)]
-pub(super) fn run_automation_scheduler_once_at_with<F>(
+pub(crate) fn run_automation_scheduler_once_at_with<F>(
     paths: &GyroPaths,
     lease_owner: &str,
     now: chrono::DateTime<chrono::Utc>,
@@ -222,7 +253,7 @@ where
 }
 
 #[cfg(test)]
-pub(super) fn run_automation_scheduler_once_with_heartbeat_interval<F>(
+pub(crate) fn run_automation_scheduler_once_with_heartbeat_interval<F>(
     paths: &GyroPaths,
     lease_owner: &str,
     heartbeat_interval: Duration,

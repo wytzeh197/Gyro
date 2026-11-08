@@ -1,7 +1,6 @@
 [
   "apps/desktop/src-tauri/src/agent_reports.rs",
   "apps/desktop/src-tauri/src/agent_session_worker.rs",
-  "apps/desktop/src-tauri/src/automation_scheduler.rs",
   "apps/desktop/src-tauri/src/capability_execution_guard.rs",
   "apps/desktop/src-tauri/src/capability_inspection.rs",
   "apps/desktop/src-tauri/src/capability_output_budget.rs",
