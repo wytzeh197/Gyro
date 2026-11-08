@@ -4,3 +4,5 @@
 pub(crate) mod commands;
 pub(crate) mod config;
 pub(crate) mod limits;
+pub(crate) mod setup;
+pub(crate) mod shutdown;
