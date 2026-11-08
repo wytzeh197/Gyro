@@ -1,5 +1,6 @@
 //! Run-owned cleanup survives early returns, worker panics, and dropped IPC callers.
 
+pub(crate) use crate::providers::runner::ProviderHeartbeat;
 use crate::{
     app::limits::MAX_CONCURRENT_PROVIDER_RUNS,
     goal_runner,
@@ -7,38 +8,14 @@ use crate::{
     state::{managers::ProviderCancellationManager, provider_run::ProviderRunControl},
 };
 use gyro_core::{HarnessRunStatus, SessionStore};
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::HashMap,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
 };
 use tauri::Manager;
 use uuid::Uuid;
-pub(super) struct ProviderHeartbeat {
-    stop: Arc<AtomicBool>,
-    worker: Option<std::thread::JoinHandle<()>>,
-}
-
-impl ProviderHeartbeat {
-    pub(super) fn new(stop: Arc<AtomicBool>, worker: std::thread::JoinHandle<()>) -> Self {
-        Self {
-            stop,
-            worker: Some(worker),
-        }
-    }
-}
-
-impl Drop for ProviderHeartbeat {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(worker) = self.worker.take() {
-            worker.thread().unpark();
-            let _ = worker.join();
-        }
-    }
-}
 
 /// The blocking worker owns admission, not the future awaiting its result.
 /// Dropping an IPC caller must neither leak its slot nor release it while the

@@ -1,8 +1,7 @@
 use crate::{
     capabilities::mcp_server::{advertised_capability_descriptors, desktop_capability_tool_schema},
-    delegated_agents, efficiency,
-    ollama_runner::invoke_run_capability,
-    provider_reliability,
+    delegated_agents, efficiency, provider_reliability,
+    providers::tauri_host::invoke_run_capability,
 };
 use gyro_core::{
     timing, CapabilityClass, CapabilityId, CapabilityResourceRef, CapabilityResponse,

@@ -17,29 +17,29 @@ use crate::{
     capabilities::mcp_server::{browser_result_image, mark_browser_image_attached},
     context_compaction, delegated_agents, efficiency,
     ollama_runner::{
-        invoke_run_capability, ollama_compatibility_catalog, ollama_compatibility_system,
+        ollama_compatibility_catalog, ollama_compatibility_system,
         parse_ollama_compatibility_action, validate_ollama_compatibility_call,
         OllamaCompatibilityAction,
     },
-    provider_accounting,
     provider_context::OllamaTurnUsage,
     provider_identity::provider_model_identity,
     provider_reliability, provider_tool_batch,
     providers::{
-        binding::{capability_run_mode_for_chat, local_conversation_history_for_request},
+        binding::capability_run_mode_for_chat,
         chat_types::{ChatAttachmentRequest, ChatMode, ProviderChatRequest},
-        events::{
-            emit_provider_activity_event, emit_provider_chat_event, emit_provider_context_usage,
-        },
-        markers::{publish_streamed_session_title, GYRO_SESSION_TITLE_MARKER},
+        markers::GYRO_SESSION_TITLE_MARKER,
         process::provider_output_summary,
         prompt::provider_context_message_with_capabilities,
+        runner::{
+            self, emit_provider_activity_event, emit_provider_chat_event,
+            emit_provider_context_usage, invoke_run_capability, publish_streamed_session_title,
+            RunnerHost,
+        },
         stdout::provider_activities_for_response,
-        streaming::{spawn_provider_chat_heartbeat, PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS},
+        streaming::PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS,
         types::{ProviderAdapterDescriptor, ProviderAdapterKind, ProviderRunnerOutput},
     },
-    state::{managers::ProviderCancellationManager, provider_run::PROVIDER_STOP_MARKER},
-    stores::open_store,
+    state::provider_run::PROVIDER_STOP_MARKER,
 };
 use base64::Engine;
 use gyro_core::{
@@ -51,7 +51,6 @@ use gyro_core::{
 use std::fs;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use tauri::Manager;
 use uuid::Uuid;
 
 fn openai_compat_tool_unsupported(error: &anyhow::Error) -> bool {
@@ -213,7 +212,7 @@ fn assistant_tool_message(
 
 /// One chat turn against an OpenAI-compatible endpoint.
 pub(super) fn run_openai_compatible_chat(
-    app: &tauri::AppHandle,
+    host: &dyn RunnerHost,
     request: &ProviderChatRequest,
 ) -> anyhow::Result<ProviderRunnerOutput> {
     let label = request.provider_label.as_deref().unwrap_or("This provider");
@@ -239,14 +238,7 @@ pub(super) fn run_openai_compatible_chat(
             "{label} currently accepts Browser and Editor snapshots and terminal output; remove other attachments and retry."
         );
     }
-    let cancellation = app
-        .state::<ProviderCancellationManager>()
-        .flags
-        .lock()
-        .map_err(|_| anyhow::anyhow!("provider cancellation state is unavailable"))?
-        .get(&request.session_id)
-        .map(|control| control.cancellation.clone())
-        .ok_or_else(|| anyhow::anyhow!("provider run control is unavailable"))?;
+    let cancellation = host.cancellation(&request.session_id)?;
     if cancellation.is_cancelled() {
         anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled before {label} started");
     }
@@ -309,7 +301,7 @@ pub(super) fn run_openai_compatible_chat(
     let build = || {
         provider_context_message_with_capabilities(
             request,
-            local_conversation_history_for_request(request).as_deref(),
+            host.conversation_history(request).as_deref(),
             true,
             supports_images,
         )
@@ -346,12 +338,10 @@ pub(super) fn run_openai_compatible_chat(
         provider_tool_batch::model_tools_for(run_mode, allow_delegation, &config.efficiency)
     };
     let heartbeat_stop = Arc::new(AtomicBool::new(false));
-    let heartbeat = spawn_provider_chat_heartbeat(
-        app.clone(),
+    let heartbeat = host.start_heartbeat(
         request.clone(),
         cancellation.clone(),
         heartbeat_stop.clone(),
-        None,
     );
     let mut response = None;
     let mut paused_at_tool_budget = false;
@@ -414,13 +404,11 @@ pub(super) fn run_openai_compatible_chat(
                     context_window,
                     auto_compact_percent,
                 ) {
-                    if let Ok(store) = open_store() {
-                        let _ = efficiency::save_checkpoint(app, &store, request);
-                    }
+                    host.save_checkpoint(request);
                     let activity =
                         context_compaction::activity(auto_compactions.len(), &compaction);
                     emit_provider_activity_event(
-                        app,
+                        host,
                         request,
                         &activity,
                         Some(auto_compactions.len() as u64),
@@ -492,7 +480,7 @@ pub(super) fn run_openai_compatible_chat(
                 |delta| {
                     if !compatibility {
                         emit_provider_chat_event(
-                            app,
+                            host,
                             request,
                             "delta",
                             Some(HarnessRunStatus::Running),
@@ -502,15 +490,7 @@ pub(super) fn run_openai_compatible_chat(
                         );
                     }
                 },
-                |tokens| {
-                    provider_accounting::emit_request_usage(
-                        app,
-                        request,
-                        accounted_usage,
-                        tokens,
-                        None,
-                    )
-                },
+                |tokens| runner::emit_request_usage(host, request, accounted_usage, tokens, None),
             );
             let mut turn = match turn {
                 Err(error)
@@ -563,10 +543,10 @@ pub(super) fn run_openai_compatible_chat(
                 &turn.accounted_usage,
                 None,
             ) {
-                emit_provider_context_usage(app, request, &usage);
+                emit_provider_context_usage(host, request, &usage);
             }
-            provider_accounting::emit_turn_tokens(
-                app,
+            runner::emit_turn_tokens(
+                host,
                 request,
                 accounted_usage.expect("a provider request was accounted"),
             );
@@ -634,7 +614,7 @@ pub(super) fn run_openai_compatible_chat(
                 };
                 if let Some(title) = title {
                     publish_streamed_session_title(
-                        app,
+                        host,
                         request,
                         &format!("{GYRO_SESSION_TITLE_MARKER} {title}\n"),
                         true,
@@ -647,7 +627,7 @@ pub(super) fn run_openai_compatible_chat(
                             "{label} returned an empty Gyro final answer"
                         );
                         emit_provider_chat_event(
-                            app,
+                            host,
                             request,
                             "delta",
                             Some(HarnessRunStatus::Running),
@@ -709,7 +689,7 @@ pub(super) fn run_openai_compatible_chat(
                             .as_str()
                             .is_some_and(gyro_core::efficiency::spill::is_address);
                         let result =
-                            invoke_run_capability(app, &request.session_id, id, arguments)?;
+                            invoke_run_capability(host, &request.session_id, id, arguments)?;
                         provider_tool_batch::observe_response(&result, spill_requested);
                         catalog_memory.observe(&result);
                         malformed_responses = 0;
@@ -798,7 +778,7 @@ pub(super) fn run_openai_compatible_chat(
                 .iter()
                 .map(|(_, _, id, args)| (*id, args.clone()))
                 .collect::<Vec<_>>();
-            let results = provider_tool_batch::execute(app, &request.session_id, &batch)?;
+            let results = runner::execute_capabilities(host, &request.session_id, &batch)?;
             for result in &results {
                 catalog_memory.observe(result);
             }

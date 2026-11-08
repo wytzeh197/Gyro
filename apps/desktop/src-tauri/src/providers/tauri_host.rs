@@ -2,13 +2,28 @@
 
 use super::{
     chat_types::ProviderChatRequest,
-    runner::RunnerHost,
+    runner::{ProviderHeartbeat, RunEvent, RunnerHost},
+};
+use super::{
     runners::{
         antigravity::run_antigravity_chat, claude::run_anthropic_claude_chat,
         codex::run_openai_codex_chat, kimi_acp::run_kimi_acp_chat,
     },
     types::{ProviderAdapterKind, ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput},
 };
+use crate::{
+    capabilities::bridge::{active_provider_approval_nonce, active_provider_capability_context},
+    efficiency, provider_accounting, provider_tool_batch,
+    state::managers::{ProviderCancellationManager, ProviderCapabilityBroker},
+    stores::open_store,
+};
+use gyro_core::{
+    CancellationToken, CapabilityId, CapabilityInvocationContext, CapabilityRequest,
+    CapabilityResponse, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+};
+use std::sync::{atomic::AtomicBool, Arc};
+use tauri::Manager;
+use uuid::Uuid;
 
 pub(crate) struct TauriRunnerHost {
     app: tauri::AppHandle,
@@ -21,6 +36,92 @@ impl TauriRunnerHost {
 }
 
 impl RunnerHost for TauriRunnerHost {
+    fn cancellation(&self, session_id: &str) -> anyhow::Result<CancellationToken> {
+        self.app
+            .state::<ProviderCancellationManager>()
+            .flags
+            .lock()
+            .map_err(|_| anyhow::anyhow!("provider cancellation state is unavailable"))?
+            .get(session_id)
+            .map(|control| control.cancellation.clone())
+            .ok_or_else(|| anyhow::anyhow!("provider run control is unavailable"))
+    }
+
+    fn emit(&self, request: &ProviderChatRequest, event: RunEvent<'_>) {
+        match event {
+            RunEvent::Chat {
+                phase,
+                status,
+                delta,
+                message,
+                error,
+            } => super::events::emit_provider_chat_event(
+                &self.app, request, phase, status, delta, message, error,
+            ),
+            RunEvent::Activity { activity, sequence } => {
+                super::events::emit_provider_activity_event(&self.app, request, activity, sequence)
+            }
+            RunEvent::ContextUsage(usage) => {
+                super::events::emit_provider_context_usage(&self.app, request, usage)
+            }
+            RunEvent::Tokens(tokens) => {
+                provider_accounting::emit_turn_tokens(&self.app, request, tokens)
+            }
+            RunEvent::RequestUsage {
+                previous,
+                tokens,
+                window,
+            } => provider_accounting::emit_request_usage(
+                &self.app, request, previous, tokens, window,
+            ),
+            RunEvent::Title { response, force } => {
+                super::markers::publish_streamed_session_title(&self.app, request, response, force)
+            }
+        }
+    }
+
+    fn conversation_history(&self, request: &ProviderChatRequest) -> Option<String> {
+        super::binding::local_conversation_history_for_request(request)
+    }
+
+    fn save_checkpoint(&self, request: &ProviderChatRequest) {
+        if let Ok(store) = open_store() {
+            let _ = efficiency::save_checkpoint(&self.app, &store, request);
+        }
+    }
+
+    fn start_heartbeat(
+        &self,
+        request: ProviderChatRequest,
+        cancellation: CancellationToken,
+        stop: Arc<AtomicBool>,
+    ) -> ProviderHeartbeat {
+        super::streaming::spawn_provider_chat_heartbeat(
+            self.app.clone(),
+            request,
+            cancellation,
+            stop,
+            None,
+        )
+    }
+
+    fn invoke_capability(
+        &self,
+        session_id: &str,
+        capability: CapabilityId,
+        arguments: serde_json::Value,
+    ) -> anyhow::Result<CapabilityResponse> {
+        invoke_run_capability(&self.app, session_id, capability, arguments)
+    }
+
+    fn execute_capabilities(
+        &self,
+        session_id: &str,
+        calls: &[(CapabilityId, serde_json::Value)],
+    ) -> anyhow::Result<Vec<CapabilityResponse>> {
+        provider_tool_batch::execute(&self.app, session_id, calls)
+    }
+
     fn run_legacy(
         &self,
         kind: ProviderAdapterKind,
@@ -39,9 +140,9 @@ impl RunnerHost for TauriRunnerHost {
             ProviderAdapterKind::AntigravityCli => {
                 run_antigravity_chat(&self.app, request, resume, attempt)
             }
-            ProviderAdapterKind::Ollama => crate::ollama_runner::run_ollama_chat(&self.app, request),
+            ProviderAdapterKind::Ollama => crate::ollama_runner::run_ollama_chat(self, request),
             ProviderAdapterKind::OpenAiCompatible => {
-                crate::openai_compatible_runner::run_openai_compatible_chat(&self.app, request)
+                crate::openai_compatible_runner::run_openai_compatible_chat(self, request)
             }
             ProviderAdapterKind::ReadinessOnly => anyhow::bail!(
                 "{} is readiness-only in Gyro V1. Chat execution for this provider has not been implemented yet.",
@@ -49,4 +150,33 @@ impl RunnerHost for TauriRunnerHost {
             ),
         }
     }
+}
+
+pub(crate) fn invoke_run_capability(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    capability_id: CapabilityId,
+    arguments: serde_json::Value,
+) -> anyhow::Result<CapabilityResponse> {
+    let bound = active_provider_capability_context(app, session_id)?;
+    Ok(app.state::<ProviderCapabilityBroker>().invoke(
+        app,
+        CapabilityRequest {
+            schema: PROVIDER_CAPABILITY_IPC_SCHEMA_V1.into(),
+            sender_version: env!("CARGO_PKG_VERSION").into(),
+            context: CapabilityInvocationContext {
+                session_id: bound.session_id.clone(),
+                turn_id: bound.turn_id.clone(),
+                provider_id: bound.provider_id.clone(),
+                run_nonce: active_provider_approval_nonce(app, session_id)?,
+                call_id: Uuid::new_v4(),
+                workspace_key: bound.workspace_key.clone(),
+                mode: bound.policy.mode,
+                policy_revision: bound.policy.revision,
+                workspace_context_revision: bound.workspace_context.revision,
+            },
+            capability_id,
+            arguments,
+        },
+    ))
 }

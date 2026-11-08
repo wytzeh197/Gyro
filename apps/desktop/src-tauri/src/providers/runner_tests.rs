@@ -11,6 +11,41 @@ struct RecordingHost {
 }
 
 impl RunnerHost for RecordingHost {
+    fn cancellation(&self, _: &str) -> anyhow::Result<gyro_core::CancellationToken> {
+        unreachable!("unused fixture service")
+    }
+    fn emit(&self, _: &ProviderChatRequest, _: RunEvent<'_>) {
+        unreachable!("unused fixture service")
+    }
+    fn conversation_history(&self, _: &ProviderChatRequest) -> Option<String> {
+        unreachable!("unused fixture service")
+    }
+    fn save_checkpoint(&self, _: &ProviderChatRequest) {
+        unreachable!("unused fixture service")
+    }
+    fn start_heartbeat(
+        &self,
+        _: ProviderChatRequest,
+        _: gyro_core::CancellationToken,
+        _: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> ProviderHeartbeat {
+        unreachable!("unused fixture service")
+    }
+    fn invoke_capability(
+        &self,
+        _: &str,
+        _: gyro_core::CapabilityId,
+        _: serde_json::Value,
+    ) -> anyhow::Result<gyro_core::CapabilityResponse> {
+        unreachable!("unused fixture service")
+    }
+    fn execute_capabilities(
+        &self,
+        _: &str,
+        _: &[(gyro_core::CapabilityId, serde_json::Value)],
+    ) -> anyhow::Result<Vec<gyro_core::CapabilityResponse>> {
+        unreachable!("unused fixture service")
+    }
     fn run_legacy(
         &self,
         kind: ProviderAdapterKind,
