@@ -1454,10 +1454,12 @@ function updateEditorTabInLayout(
 function removeEditorTabFromLayout(
   layout: WorkbenchState["ide"]["layout"],
   path: string,
+  groupId?: string,
 ): WorkbenchState["ide"]["layout"] {
   return {
     ...layout,
     groups: layout.groups.map((group) => {
+      if (groupId && group.id !== groupId) return group;
       const tabs = group.tabs.filter((tab) => tab.path !== path);
       const activePath =
         group.activePath === path
@@ -2685,30 +2687,57 @@ export function workbenchReducer(
       // the user is looking at.
       const previewPath =
         tab.preview && !tab.pinned
-          ? activeGroup?.tabs.find(
-              (item) =>
+          ? activeGroup?.tabs.find((item) => {
+              const buffer = state.ide.buffers[item.path];
+              return (
                 item.path !== tab.path &&
                 item.preview &&
                 !item.pinned &&
                 !item.dirty &&
+                (!buffer ||
+                  (buffer.content === buffer.savedContent &&
+                    buffer.status !== "saving" &&
+                    buffer.status !== "error")) &&
                 !(
                   background &&
                   (item.path === state.ide.activePath ||
                     item.path === activeGroup.activePath)
-                ),
-            )?.path
+                )
+              );
+            })?.path
           : undefined;
-      const baseTabs = previewPath
-        ? state.ide.tabs.filter((item) => item.path !== previewPath)
-        : state.ide.tabs;
+      const baseLayout = previewPath
+        ? removeEditorTabFromLayout(
+            state.ide.layout, previewPath, activeGroup?.id,
+          )
+        : state.ide.layout;
+      const remainingPreviewGroup = previewPath
+        ? baseLayout.groups.find((group) =>
+            group.tabs.some((item) => item.path === previewPath),
+          )
+        : undefined;
+      const previewStillOpen = Boolean(remainingPreviewGroup);
+      const baseTabs = !previewPath
+        ? state.ide.tabs
+        : !previewStillOpen
+          ? state.ide.tabs.filter((item) => item.path !== previewPath)
+          : state.ide.tabs.map((item) =>
+              item.path === previewPath
+                ? { ...item, groupId: remainingPreviewGroup?.id }
+                : item,
+            );
       const tabs = baseTabs.some((item) => item.path === tab.path)
         ? baseTabs.map((item) =>
             item.path === tab.path ? { ...item, ...tab } : item,
           )
         : [...baseTabs, tab];
-      const baseLayout = previewPath
-        ? removeEditorTabFromLayout(state.ide.layout, previewPath)
-        : state.ide.layout;
+      // Replaced previews are closed files. Their clean text must not remain
+      // in the editor/LSP buffer map after hundreds of Explorer selections.
+      let buffers = state.ide.buffers;
+      if (previewPath && !previewStillOpen && buffers[previewPath]) {
+        const { [previewPath]: _retired, ...remaining } = buffers;
+        buffers = remaining;
+      }
       return {
         ...state,
         ...(background
@@ -2720,6 +2749,11 @@ export function workbenchReducer(
         ide: {
           ...state.ide,
           tabs,
+          buffers,
+          selection:
+            previewPath && !previewStillOpen && state.ide.selection?.path === previewPath
+              ? undefined
+              : state.ide.selection,
           activePath: background
             ? (state.ide.activePath ?? tab.path)
             : tab.path,

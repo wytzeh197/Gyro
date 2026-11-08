@@ -1152,3 +1152,22 @@ for (const providerId of ["openai", "anthropic", "xai", "kimi", "gemini", "custo
   assert.equal(providerUsageFromSnapshot({ ...older, fetchedAt: latest.fetchedAt }, stale).stale, undefined);
 }
 console.log("Provider usage snapshot ordering checks passed.");
+
+const identicalReading = {
+  providerId: "anthropic",
+  fetchedAt: "2026-11-08T12:00:00Z",
+  windows: [{ id: "weekly", label: "Weekly", usedPercent: 42, status: "ok", resetsAt: "2026-11-09T12:00:00Z" }],
+};
+const identityState = providerUsageFromSnapshot(identicalReading);
+assert.equal(providerUsageFromSnapshot(structuredClone(identicalReading), identityState), identityState);
+for (const changed of [
+  { id: "five-hour" }, { label: "Plan" }, { usedPercent: 43 },
+  { status: "warning" }, { resetsAt: "2026-11-10T12:00:00Z" },
+]) {
+  const result = providerUsageFromSnapshot({ ...identicalReading, windows: [{ ...identicalReading.windows[0], ...changed }] }, identityState);
+  assert.notEqual(result, identityState, "A changed usage window must reach the UI");
+}
+for (const changed of [{ stale: true }, { error: "Offline" }, { fetchedAt: "2026-11-08T12:01:00Z" }, { windows: [] }]) {
+  assert.notEqual(providerUsageFromSnapshot({ ...identicalReading, ...changed }, identityState), identityState);
+}
+console.log("Provider usage identity passed: duplicate poll/broadcast suppression without hiding fresh age, errors, resets or levels.");

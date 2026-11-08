@@ -228,6 +228,7 @@ import { loadGitComparisonDiff } from "./load-comparison-diff";
 import { LocalCheckHost } from "./local-check";
 import { ManagedDiffEditor } from "./managed-diff-editor";
 import { useModelBrowserReveal } from "./model-browser-reveal";
+import { useEditorModelLifecycle } from "./editor/use-editor-model-lifecycle";
 import {
   dismissModelDefaultSuggestion,
   isSuccessfulModelUseResponse,
@@ -720,6 +721,7 @@ export function App() {
   selectedFileRef.current = selectedFile;
   const editorBuffersRef = useRef(workbench.ide.buffers);
   editorBuffersRef.current = workbench.ide.buffers;
+  useEditorModelLifecycle(workbench.ide);
   const navigationRequestRef = useRef(0);
   const [navigationHistory, setNavigationHistory] = useState<{
     entries: WorkspaceNavigationSource[];
@@ -13352,9 +13354,7 @@ export function App() {
         return;
       }
       dispatchWorkbench({ type: "ide-close-tab", path, groupId });
-      if (closesLastReference) {
-        disposeEditorModels([path]);
-      }
+      // Committed tab/buffer ownership releases the model after editors detach.
       if (
         selectedFile === path &&
         (!groupId || groupId === workbench.ide.layout.activeGroupId)
@@ -13418,11 +13418,6 @@ export function App() {
           (item) => item.id === workbench.ide.layout.activeGroupId,
         ) ?? remaining[0];
       dispatchWorkbench({ type: "ide-close-group", groupId });
-      disposeEditorModels(
-        group.tabs
-          .map((tab) => tab.path)
-          .filter((path) => !pathsStillOpen.has(path)),
-      );
       if (groupId === workbench.ide.layout.activeGroupId) {
         setSelectedFile(nextGroup?.activePath);
       }

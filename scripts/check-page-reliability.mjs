@@ -152,9 +152,11 @@ let usageCalls = 0;
 let ledgerCalls = 0;
 const document = {
   visibilityState: "visible",
+  hasFocus: () => focused,
   addEventListener: (name, fn) => listeners.set(name, fn),
   removeEventListener: (name) => listeners.delete(name),
 };
+let focused = true;
 const navigator = { onLine: true };
 const window = {
   __TAURI_INTERNALS__: {},
@@ -218,6 +220,22 @@ cleanup = effect();
 await flush();
 assert.equal(usageCalls, 1);
 assert.equal(ledgerCalls, 1);
+focused = false;
+for (let i = 0; i < 80; i++) timer();
+listeners.get("online")();
+await flush();
+assert.equal(usageCalls, 1, "unfocused windows must not wake provider CLIs");
+assert.equal(ledgerCalls, 1);
+await refreshProviderUsage("openai");
+assert.equal(usageCalls, 2, "explicit and post-turn reads work while unfocused");
+focused = true;
+listeners.get("focus")();
+await flush();
+assert.equal(usageCalls, 3, "focus catches up without waiting for the poll interval");
+assert.equal(ledgerCalls, 2);
+// Reset counters to keep the visibility/offline scenarios independent.
+usageCalls = 1;
+ledgerCalls = 1;
 document.visibilityState = "hidden";
 for (let i = 0; i < 80; i++) timer();
 listeners.get("online")();

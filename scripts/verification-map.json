@@ -1,4 +1,8 @@
 {
+  "check-resource-scheduling.mjs": {
+    "kind": "behavioral",
+    "note": "Executes the production usage, editor and explorer hooks with controlled visibility and cached IPC readings. Protects stable polling, foreground catch-up, idle timers and manager cleanup; does not measure native CPU or RAM."
+  },
   "check-cloud-staging-launcher.mjs": {
     "kind": "behavioral",
     "note": "Compiles the project-scoped macOS launcher and executes disposable-home isolation checks without launching Gyro or accessing the user's app data."
@@ -354,6 +358,14 @@
   },
   "check-workspace-edits.mjs": {
     "kind": "behavioral"
+  },
+  "check-editor-resource-lifecycle.mjs": {
+    "kind": "behavioral",
+    "note": "Executes the production reducer, committed-ownership hook and event-driven model retirement, including dirty/shared files and rapid reopen."
+  },
+  "check-editor-resource-browser.mjs": {
+    "kind": "behavioral",
+    "note": "Drives production Monaco panes with synthetic files; asserts bounded buffers/models, split ownership, unsaved text, undo and cold rapid previews in an isolated browser profile."
   },
   "check-editor-language-sessions.mjs": {
     "kind": "behavioral"

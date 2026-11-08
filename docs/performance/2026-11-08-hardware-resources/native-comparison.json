@@ -1,0 +1,51 @@
+{
+  "schema": "gyro.native-resource-comparison.v1",
+  "scenario": "Same frontend and isolated empty store, 1280x820 painted composer, no connected provider or model turn; native debug builds on the same 8 GiB Mac",
+  "before": {
+    "file": "isolated-before-listener.json",
+    "durationSeconds": 60.00559920805972,
+    "loadAverageAtStart": [
+      19.42041015625,
+      30.1904296875,
+      34.74267578125
+    ],
+    "groupCpuPercentOneCore": 1.7347108248861332,
+    "groupFootprintMiB": {
+      "median": 222.4691162109375,
+      "min": 222.34405517578125,
+      "max": 225.7191162109375
+    },
+    "groupInterruptWakeupsPerSecond": 64.82728364251565,
+    "mainCpuPercentOneCore": 1.2784070183297676,
+    "mainInterruptWakeupsPerSecond": 46.91228880557367,
+    "mainMedianFootprintMiB": 36.1279296875,
+    "readErrors": 0
+  },
+  "after": {
+    "file": "isolated-after-listener.json",
+    "durationSeconds": 60.00598341599107,
+    "loadAverageAtStart": [
+      11.47998046875,
+      16.61767578125,
+      23.39599609375
+    ],
+    "groupCpuPercentOneCore": 0.9740655710081012,
+    "groupFootprintMiB": {
+      "median": 261.62750244140625,
+      "min": 260.39306640625,
+      "max": 279.17431640625
+    },
+    "groupInterruptWakeupsPerSecond": 6.566011880325295,
+    "mainCpuPercentOneCore": 0.7555350025519539,
+    "mainInterruptWakeupsPerSecond": 4.5495463028649885,
+    "mainMedianFootprintMiB": 34.34649658203125,
+    "readErrors": 0
+  },
+  "mainInterruptWakeupReductionPercent": 90.30201591373974,
+  "limitations": [
+    "One exploratory pair in a shared dirty checkout; changing host load and OS helper residency prevent a production CPU/RAM saving guarantee.",
+    "Only the agent listener changed in this task between native builds. Other concurrent work was present. Frontend bundle hashes are pinned in the manifests.",
+    "Group RAM was higher after the change, so no total-memory reduction is claimed.",
+    "Initial incomplete paint sample and stale-process relaunch were excluded from this comparison."
+  ]
+}

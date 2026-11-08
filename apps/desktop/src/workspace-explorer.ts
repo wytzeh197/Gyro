@@ -128,7 +128,9 @@ export function useWorkspaceExplorerFiles(
   const refreshRef = useRef<(() => void) | undefined>(undefined);
 
   useEffect(() => {
-    if (!loadDirectoryRef.current) return;
+    // With no expanded directories there is nothing to poll. In particular the
+    // idle composer must not retain a two-second explorer timer.
+    if (!loadDirectoryRef.current || !directoryKey) return;
     let cancelled = false;
     let pending = false;
     let refreshQueued = false;
@@ -136,7 +138,9 @@ export function useWorkspaceExplorerFiles(
     const directories = directoryKey ? directoryKey.split("\n") : [];
     const refresh = async () => {
       const load = loadDirectoryRef.current;
-      if (cancelled || !directories.length || !load) return;
+      // Native changes may arrive while hidden, too. Keep the cached listing
+      // until visibility returns, when the listener below catches up at once.
+      if (cancelled || document.visibilityState !== "visible" || !load) return;
       if (pending) {
         refreshQueued = true;
         return;
