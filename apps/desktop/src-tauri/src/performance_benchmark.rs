@@ -50,6 +50,8 @@ struct Spec {
     #[serde(default)]
     review_fixture_edits: bool,
     #[serde(default)]
+    require_file_edit_approval: bool,
+    #[serde(default)]
     local_fixture_endpoint: Option<String>,
 }
 #[derive(Deserialize)]
@@ -107,6 +109,9 @@ pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>>
         {
             return Err("local provider fixture requires its explicit loopback-only runner".into());
         }
+    }
+    if spec.require_file_edit_approval && !spec.review_fixture_edits {
+        return Err("edit approval acceptance requires the scoped fixture reviewer".into());
     }
     if spec.review_fixture_edits && data_root != root.join("data") {
         return Err("fixture review requires the isolated data/workspaces layout".into());
@@ -172,7 +177,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>>
     // Keep a finite ceiling in this disposable store; never alter the user's store.
     config.usage_guard.max_calls_per_window = 200;
     config.require_command_approval = false;
-    config.require_file_edit_approval = false;
+    config.require_file_edit_approval = spec.require_file_edit_approval;
     for provider in &mut config.model_providers {
         provider.enabled = spec.providers.iter().any(|p| p.id == provider.id);
     }
@@ -213,6 +218,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>>
                                 timeout_seconds: spec.timeout_seconds,
                                 tasks,
                                 review_fixture_edits: spec.review_fixture_edits,
+                                require_file_edit_approval: spec.require_file_edit_approval,
                                 local_fixture_endpoint,
                             },
                         )
@@ -323,6 +329,13 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
             .all(|record| record["fixtureReviewMode"].as_str().unwrap_or("none") == review_mode),
         "cannot resume a checkpoint with a different fixture review mode"
     );
+    anyhow::ensure!(
+        records.iter().all(|record| {
+            record["requireFileEditApproval"].as_bool().unwrap_or(false)
+                == spec.require_file_edit_approval
+        }),
+        "cannot resume a checkpoint with a different edit approval posture"
+    );
     for provider in spec.providers {
         let mut unavailable: Option<String> = None;
         for task in &tasks {
@@ -352,7 +365,7 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                     } else {
                         workspace
                     };
-                    let mut record = json!({"provider":provider.id,"model":provider.model,"effort":provider.effort,"task":task,"resumedRequested":resumed,"trial":trial,"fixtureReviewMode":if spec.review_fixture_edits {"task-paths"} else {"none"}});
+                    let mut record = json!({"provider":provider.id,"model":provider.model,"effort":provider.effort,"task":task,"resumedRequested":resumed,"trial":trial,"fixtureReviewMode":if spec.review_fixture_edits {"task-paths"} else {"none"}, "requireFileEditApproval":spec.require_file_edit_approval});
                     if let Some(reason) = &unavailable {
                         record["outcome"] = "unavailable".into();
                         record["failureClass"] = reason.clone().into();
@@ -431,14 +444,17 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                                 "no-tool" => "Reply exactly GYRO_OK. Do not use any tools or change any files.",
                                 "readme" => "Shorten README.md from 267 lines to at most 85 lines. Preserve the project name, install requirements, usage, development command, and docs/guide.md link. Edit only README.md.",
                                 "code" => "Fix clamp in src/clamp.mjs so it enforces both inclusive bounds. Add exactly one upper-bound regression test in clamp.test.mjs. Run node --test. Edit only these two files.",
-                                _ if resumed => "Append exactly one line to README.md with the mascot I asked you to remember, in the form Mascot: name. Edit only README.md.",
-                                _ => "Context: the project mascot is heron. Append exactly one line to README.md: Mascot: heron. Edit only README.md.",
+                                _ if resumed => "Append exactly one line to README.md using the mascot I asked you to remember. Use the form `Mascot: name` with no trailing punctuation. Edit only README.md.",
+                                _ => "Context: the project mascot is heron. Append exactly the line `Mascot: heron` to README.md, with no trailing punctuation. Edit only README.md.",
                             };
                             let turn_id = Uuid::new_v4();
                             let reviewer = if spec.review_fixture_edits {
-                                Some(FixtureReviewer::new(
+                                let mut reviewer = FixtureReviewer::new(
                                     &store, root, &workspace, session.id, turn_id, task,
-                                )?)
+                                )?;
+                                reviewer.require_file_edit_approval =
+                                    spec.require_file_edit_approval;
+                                Some(reviewer)
                             } else {
                                 None
                             };
@@ -630,7 +646,7 @@ fn turn_with_reviewer(
         serde_json::from_value(json!({
         "sessionId":session,"turnId":turn_id,"workspacePath":workspace,"providerId":provider.id,
         "modelId":provider.model,"reasoningEffort":selected_effort(provider),"message":prompt,
-        "requireCommandApproval":false,"requireFileEditApproval":false,"fullAccess":false,"mode":"normal"
+        "requireCommandApproval":false,"requireFileEditApproval":reviewer.as_ref().is_some_and(|reviewer| reviewer.require_file_edit_approval),"fullAccess":false,"mode":"normal"
     })).map_err(to_string)
     })();
     let request = match request {

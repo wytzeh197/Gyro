@@ -44,6 +44,8 @@ if (
   spec.timeoutSeconds < 10 ||
   spec.timeoutSeconds > 300 ||
   (spec.reviewFixtureEdits !== undefined && typeof spec.reviewFixtureEdits !== "boolean") ||
+  (spec.requireFileEditApproval !== undefined && typeof spec.requireFileEditApproval !== "boolean") ||
+  (spec.requireFileEditApproval === true && spec.reviewFixtureEdits !== true) ||
   (spec.tasks !== undefined &&
     (!Array.isArray(spec.tasks) ||
       spec.tasks.length < 1 ||
@@ -82,6 +84,7 @@ if (values.resume) {
       ...value,
       tasks: value.tasks ?? ["readme", "code", "follow-up"],
       reviewFixtureEdits: value.reviewFixtureEdits ?? false,
+      requireFileEditApproval: value.requireFileEditApproval ?? false,
     });
   if (JSON.stringify(normalize(previous)) !== JSON.stringify(normalize(spec))) {
     throw new Error(

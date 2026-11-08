@@ -17,6 +17,7 @@ pub(super) struct FixtureReviewer {
     allowed: &'static [&'static str],
     seen: HashSet<Uuid>,
     pub(super) audit: Vec<Value>,
+    pub(super) require_file_edit_approval: bool,
 }
 
 impl FixtureReviewer {
@@ -69,6 +70,7 @@ impl FixtureReviewer {
             allowed,
             seen: HashSet::new(),
             audit: Vec::new(),
+            require_file_edit_approval: false,
         })
     }
 
