@@ -25,7 +25,7 @@ import {
   groupRunSteps,
   isCancelledRunPhase,
   isRunPhaseLive,
-  liveWindow,
+  partitionSegmentCalls,
   runCallText,
   runHeaderLabel,
   runRetryText,
@@ -152,9 +152,6 @@ export type ChatRunProps = {
 type WorkStep = Extract<RunStep, { kind: "work" }>;
 type FileStats = { additions: number; deletions: number };
 
-/** Newest calls kept on screen while a stretch of work is still running. */
-const LIVE_CALL_WINDOW = 4;
-
 export function ChatRun({
   model,
   agentApprovals = [],
@@ -218,7 +215,6 @@ export function ChatRun({
     model.steps.filter((step) => step.kind !== "status"),
   );
   const segments = segmentRunSteps(model.steps);
-  const tailSegment = segments.at(-1);
   const lastStep = model.steps.at(-1);
   const tailStatus = lastStep?.kind === "status" ? lastStep.text : undefined;
   // The phase view names the currently live phase in the header. The segment
@@ -338,26 +334,26 @@ export function ChatRun({
                 if (calls.length === 0) {
                   return null;
                 }
-                const isTail = isLive && segment === tailSegment;
+                const { completed, visible } = partitionSegmentCalls(calls);
                 return (
                   <li
                     className="gyro-run-row-item gyro-run-segment-item"
                     key={segment.id}
                   >
-                    {isTail || calls.length === 1 ? (
-                      <RunCalls
-                        aggregateFileStats={aggregateFileStats}
-                        calls={calls}
-                        onOpenChanges={onOpenChanges}
-                        windowed={isTail}
-                      />
-                    ) : (
+                    {completed.length > 0 ? (
                       <RunSegmentSummary
                         aggregateFileStats={aggregateFileStats}
-                        calls={calls}
+                        calls={completed}
                         onOpenChanges={onOpenChanges}
                       />
-                    )}
+                    ) : null}
+                    {visible.length > 0 ? (
+                      <RunCalls
+                        aggregateFileStats={aggregateFileStats}
+                        calls={visible}
+                        onOpenChanges={onOpenChanges}
+                      />
+                    ) : null}
                   </li>
                 );
               })
@@ -612,58 +608,26 @@ function RunSegmentSummary({
           aggregateFileStats={aggregateFileStats}
           calls={calls}
           onOpenChanges={onOpenChanges}
-          windowed={false}
         />
       </MotionDisclosure>
     </div>
   );
 }
 
-/**
- * The exact calls of a stretch. While the stretch is live only the newest few
- * stay on screen, so a long run of reads scrolls under a "+N more" line rather
- * than pushing the narration out of view.
- */
+/** Exact details, or every in-flight/failed call; completed history folds above. */
 function RunCalls({
   aggregateFileStats,
   calls,
   onOpenChanges,
-  windowed,
 }: {
   aggregateFileStats?: FileStats;
   calls: WorkStep[];
   onOpenChanges?: () => void;
-  windowed: boolean;
 }) {
-  const [showAll, setShowAll] = useState(false);
   const now = useNow(calls.some((step) => step.item.status === "running"));
-  const { visible, hiddenCount } =
-    windowed && !showAll
-      ? liveWindow(calls, LIVE_CALL_WINDOW)
-      : { visible: calls, hiddenCount: 0 };
-  const hiddenFailures = calls
-    .slice(0, hiddenCount)
-    .filter((step) => step.item.status === "failed").length;
   return (
     <ol aria-label="Tool calls" className="gyro-run-calls">
-      {hiddenCount > 0 ? (
-        <li>
-          <button
-            className="gyro-run-calls-more"
-            onClick={() => setShowAll(true)}
-            type="button"
-          >
-            +{hiddenCount} more tool {hiddenCount === 1 ? "call" : "calls"}
-            {hiddenFailures > 0 ? (
-              <span className="gyro-run-hidden-failures">
-                {" · "}
-                {hiddenFailures} failed
-              </span>
-            ) : null}
-          </button>
-        </li>
-      ) : null}
-      {visible.map((step) => (
+      {calls.map((step) => (
         <li key={step.id}>
           <RunCallRow
             aggregateFileStats={aggregateFileStats}
@@ -739,6 +703,16 @@ function RunCallRow({
       ) : null}
     </>
   );
+
+  if ((item?.kind === "read" || item?.kind === "search") && item.error) {
+    return <details className="gyro-import-tool-details">
+      <summary className={`${className} gyro-import-tool-summary`}>{body}<ChevronRight aria-hidden="true" className="gyro-import-tool-chevron" size={12} /></summary>
+      <div className="gyro-import-tool-content">
+        {item.kind === "search" && item.path ? <span>{item.path}</span> : null}
+        <pre aria-label="Tool failure details" tabIndex={0}>{item.error}</pre>
+      </div>
+    </details>;
+  }
 
   if (item.kind === "tool" && item.historicalDetail !== undefined) {
     return (
@@ -906,6 +880,16 @@ function RunRow({
       </span>
     </>
   );
+
+  if ((item?.kind === "read" || item?.kind === "search") && item.error) {
+    return <details className="gyro-import-tool-details">
+      <summary className={`${className} gyro-import-tool-summary`}>{body}<ChevronRight aria-hidden="true" className="gyro-import-tool-chevron" size={12} /></summary>
+      <div className="gyro-import-tool-content">
+        {item.kind === "search" && item.path ? <span>{item.path}</span> : null}
+        <pre aria-label="Tool failure details" tabIndex={0}>{item.error}</pre>
+      </div>
+    </details>;
+  }
 
   if (item?.kind === "tool" && item.historicalDetail !== undefined) {
     return (

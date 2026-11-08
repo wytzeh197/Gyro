@@ -6250,7 +6250,7 @@ fn provider_context_message_with_capabilities_for_turn(
         }
         // The path stays in the tail. These rules are the same on every turn,
         // including resume, so they stay in the stable prefix.
-        stable.push("Use the selected workspace to carry out workspace requests. Inspect actual files with the available Gyro tools before making claims about them; do not ask the user to paste files you can read. Prefer Gyro Workspace tools so reads, changes, command output, and review state remain connected to this chat. For unrelated questions, answer directly without unnecessary workspace calls.".into());
+        stable.push("Use the selected workspace to carry out workspace requests. Inspect actual files with the available Gyro tools before making claims about them; do not ask the user to paste files you can read. Prefer Gyro Workspace tools so reads, changes, command output, and review state remain connected to this chat. For unrelated questions, answer directly without unnecessary workspace calls. Use file paths supplied by the user or observed in workspace results; discover unfamiliar filenames before narrowing a read or search to them. If a search scope does not exist, inspect an existing parent or search from the workspace root before trying another path.".into());
         stable.push("Paths are workspace-relative. When multiple roots are configured, get their root IDs from gyro_workspace_get_context and pass rootId to root-specific tools.".into());
         if request.mode == ChatMode::Normal {
             // Tool descriptions already name list, search, read, and edit.

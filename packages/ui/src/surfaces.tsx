@@ -20005,6 +20005,7 @@ function ComposerPopover({
   align = "start",
   className,
   keepInBounds = false,
+  nativeTooltips = true,
   id,
   items,
   onAction,
@@ -20014,6 +20015,7 @@ function ComposerPopover({
   align?: "start" | "end";
   className?: string;
   keepInBounds?: boolean;
+  nativeTooltips?: boolean;
   id: string;
   items: ComposerPopoverItem[];
   onAction: (action?: string, item?: ComposerPopoverItem) => void;
@@ -20069,8 +20071,14 @@ function ComposerPopover({
         panel.style.minWidth = "0";
         panel.style.maxWidth = `${Math.max(0, bounds.right - bounds.left - pad * 2) / scaleX}px`;
       }
-      const anchorTop = anchor.top;
-      const anchorBottom = anchor.bottom;
+      // Keep Add aligned with its trigger horizontally, but clear the whole
+      // composer vertically so the menu cannot cover the draft or toolbar.
+      const composer = panel.classList.contains("gyro-context-picker")
+        ? panel.closest<HTMLElement>(".gyro-composer-shell")
+        : null;
+      const placementAnchor = composer?.getBoundingClientRect() ?? anchor;
+      const anchorTop = placementAnchor.top;
+      const anchorBottom = placementAnchor.bottom;
       const above = Math.max(0, anchorTop - bounds.top - pad - gap);
       const below = Math.max(0, bounds.bottom - anchorBottom - pad - gap);
       const preferred = placement === "up" ? above : below;
@@ -20078,8 +20086,12 @@ function ComposerPopover({
       const flip =
         panel.offsetHeight * scaleY > preferred && opposite > preferred;
       const direction = flip ? (placement === "up" ? "down" : "up") : placement;
-      panel.style.top = direction === "down" ? "calc(100% + 8px)" : "auto";
-      panel.style.bottom = direction === "up" ? "calc(100% + 8px)" : "auto";
+      panel.style.top = direction === "down"
+        ? composer ? `${(anchorBottom - anchor.top + gap) / scaleY}px` : "calc(100% + 8px)"
+        : "auto";
+      panel.style.bottom = direction === "up"
+        ? composer ? `${(anchor.bottom - anchorTop + gap) / scaleY}px` : "calc(100% + 8px)"
+        : "auto";
       panel.style.maxHeight = `${Math.min(420, (direction === "up" ? above : below) / scaleY)}px`;
       const positioned = panel.getBoundingClientRect();
       const shift = Math.max(
@@ -20265,9 +20277,10 @@ function ComposerPopover({
               disabled={item.disabled}
               onClick={() => onAction(item.action, item)}
               role="menuitem"
-              title={
-                item.tooltip ? `${item.label} — ${item.tooltip}` : item.label
-              }
+              aria-description={nativeTooltips ? undefined : item.tooltip}
+              title={nativeTooltips
+                ? item.tooltip ? `${item.label} — ${item.tooltip}` : item.label
+                : undefined}
               type="button"
             >
               {itemContent}
@@ -20299,7 +20312,10 @@ function ComposerPopover({
           disabled={item.disabled}
           onClick={() => onAction(item.action, item)}
           role="menuitem"
-          title={item.tooltip ? `${item.label} — ${item.tooltip}` : item.label}
+          aria-description={nativeTooltips ? undefined : item.tooltip}
+          title={nativeTooltips
+            ? item.tooltip ? `${item.label} — ${item.tooltip}` : item.label
+            : undefined}
           type="button"
         >
           {itemContent}
@@ -21390,8 +21406,7 @@ function Composer({
       action: "attach-files",
       icon: Paperclip,
       label: "Attach files",
-      detail: "Add context to your message",
-      tooltip: "Images, videos, or project files",
+      detail: "Images, videos, or project files",
     },
     ...(canAttachEditorSnapshot
       ? [
@@ -22472,12 +22487,7 @@ function Composer({
           ) : null}
         </div>
       ) : null}
-      <div
-        className="gyro-composer-bar"
-        // The full-width Add menu must anchor to the shell, including in
-        // hero/tiled layouts whose toolbar rules establish a positioning box.
-        style={activePopover === "context" ? { position: "static" } : undefined}
-      >
+      <div className="gyro-composer-bar">
         {hasSelectedProvider || isHero ? (
           <>
             <div
@@ -22488,7 +22498,7 @@ function Composer({
                 aria-label="Add context"
                 className="gyro-composer-tool"
                 onClick={() => togglePopover("context")}
-                title="Add context"
+                title={activePopover === "context" ? undefined : "Add context"}
                 type="button"
                 {...menuProps("context")}
               >
@@ -22498,6 +22508,7 @@ function Composer({
                 <ComposerPopover
                   className="gyro-context-picker"
                   title="Add"
+                  nativeTooltips={false}
                   keepInBounds
                   id={`${popoverBaseId}-context`}
                   items={contextItems}

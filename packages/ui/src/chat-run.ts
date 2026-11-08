@@ -13,6 +13,7 @@ import {
   orderedChatTimelineEvents,
 } from "./chat-timeline.ts";
 import { FILE_REVIEW_SCHEMA } from "./types.ts";
+import { reconcileCapabilityCalls } from "./capability-call-lifecycle.ts";
 import {
   appliedFileChangeCounts,
   isAppliedFileMutationEvent,
@@ -63,6 +64,9 @@ export type WorkItem =
       status: WorkStatus;
       scope: "web" | "project";
       query?: string;
+      path?: string;
+      error?: string;
+      errorCode?: string;
     }
   | {
       kind: "file";
@@ -94,6 +98,7 @@ export type WorkItem =
       status: WorkStatus;
       path?: string;
       media: "image" | "file";
+      error?: string;
     }
   | { kind: "memory"; id: string; status: WorkStatus }
   | {
@@ -295,6 +300,18 @@ export function segmentWorkSteps(
   );
 }
 
+/** Completed history may fold; running work and failures must remain visible. */
+export function partitionSegmentCalls(
+  calls: Array<Extract<RunStep, { kind: "work" }>>,
+) {
+  const completed: typeof calls = [];
+  const visible: typeof calls = [];
+  for (const call of calls) {
+    (call.item.status === "done" ? completed : visible).push(call);
+  }
+  return { completed, visible };
+}
+
 type SegmentCountKey =
   "command" | "read" | "file" | "search" | "browser" | "other";
 
@@ -451,6 +468,15 @@ export function runCallText(
 ): RunRowText {
   const item = step.item;
   const running = item.status === "running";
+  if (item.status === "failed" && (item.kind === "read" || item.kind === "search")) {
+    if (item.kind === "search" && item.errorCode === "invalid-search-scope") {
+      return { label: "Search path not found", description: item.path };
+    }
+    return {
+      label: item.kind === "read" ? "Read failed" : "Search failed",
+      description: item.kind === "read" ? item.path : item.query ?? item.path,
+    };
+  }
   switch (item.kind) {
     case "command":
       return {
@@ -654,7 +680,7 @@ export function buildRunModel(
   options: BuildRunModelOptions = {},
 ): RunModel {
   const ordered = orderedChatTimelineEvents(
-    expandAssistantMessageSegments(events),
+    expandAssistantMessageSegments(reconcileCapabilityCalls(events)),
   );
   const visible = ordered.filter((event) => !isHiddenRunEvent(event));
   const closing = partitionClosingResponse(visible, options.isRunning ?? false);
@@ -1636,9 +1662,10 @@ function workItemFromCapabilityCall(
   const summary = text(payload, "summary");
   const resource = record(payload?.resource);
   const resourceLabel = text(resource, "label");
+  const inspection = record(payload?.inspection);
   const ui = capabilityUi(capabilityId);
   const label = ui?.label ?? capabilityLabel(capabilityId);
-  const path = resourceLabel ?? summary;
+  const path = text(inspection, "path") ?? resourceLabel ?? (status === "failed" ? undefined : summary);
   const lifecycle = pathLifecycleForCapability(capabilityId);
   // A finished create, rename, move, trash, or duplicate is a path card.
   // A failed call changed nothing, so it stays a plain beat.
@@ -1693,7 +1720,10 @@ function workItemFromCapabilityCall(
         id,
         status,
         scope: ui?.scope ?? "project",
-        query: summary ?? resourceLabel,
+        query: text(inspection, "query") ?? (status === "failed" ? undefined : summary ?? resourceLabel),
+        path: text(inspection, "path"),
+        error: status === "failed" ? summary : undefined,
+        errorCode: text(inspection, "errorCode"),
       };
 
     // Reading a workspace file is the same beat as a provider read, so it gets
@@ -1705,6 +1735,7 @@ function workItemFromCapabilityCall(
         status,
         path,
         media: isImagePath(path) ? "image" : "file",
+        error: status === "failed" ? summary : undefined,
       };
 
     // Gyro's own edit and lifecycle tools change a file just like a provider
@@ -1920,7 +1951,7 @@ export function runRowText(step: RunStep): RunRowText {
     case "search":
       return {
         label:
-          item.status === "running"
+          item.status === "failed" ? "Search failed" : item.status === "running"
             ? item.scope === "web"
               ? "Searching the web"
               : "Searching project"
