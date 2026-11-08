@@ -12,6 +12,7 @@ use crate::{
     task_suggestions,
 };
 use std::fs;
+#[cfg(test)]
 pub(crate) fn provider_context_message(request: &ProviderChatRequest) -> String {
     provider_context_message_with_history(request, None)
 }
@@ -102,6 +103,7 @@ pub(crate) fn user_requests_gyro_browser(message: &str) -> bool {
 
 /// Build the provider prompt, optionally carrying local chat history so a
 /// model that did not resume a provider session still sees the full thread.
+#[cfg(test)]
 pub(crate) fn provider_context_message_with_history(
     request: &ProviderChatRequest,
     conversation_history: Option<&str>,

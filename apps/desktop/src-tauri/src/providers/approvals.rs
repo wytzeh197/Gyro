@@ -390,27 +390,6 @@ pub(crate) fn desktop_claude_approval_type(tool_name: &str) -> &'static str {
     }
 }
 
-pub(crate) fn sanitize_provider_approval_details(value: serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::String(value) => {
-            serde_json::Value::String(gyro_core::security::redact_secrets(&value))
-        }
-        serde_json::Value::Array(values) => serde_json::Value::Array(
-            values
-                .into_iter()
-                .map(sanitize_provider_approval_details)
-                .collect(),
-        ),
-        serde_json::Value::Object(values) => serde_json::Value::Object(
-            values
-                .into_iter()
-                .map(|(key, value)| (key, sanitize_provider_approval_details(value)))
-                .collect(),
-        ),
-        value => value,
-    }
-}
-
 pub(crate) fn desktop_claude_approval_details(
     request: &DesktopProviderApprovalRequest,
     workspace_path: &Path,
@@ -707,3 +686,5 @@ pub(crate) fn desktop_claude_approval_response(
 
 #[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::support::claude_multimodal_input;
+
+pub(crate) use gyro_core::provider_runtime::support::sanitize_provider_approval_details;

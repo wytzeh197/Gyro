@@ -556,30 +556,6 @@ pub(super) fn provider_billed_usage_from_acp(usage: &Value) -> Option<ProviderCo
     provider_billed_usage_from_acp_tokens(observation.tokens)
 }
 
-pub(super) fn provider_billed_usage_from_acp_tokens(
-    tokens: gyro_core::usage::UsageTokens,
-) -> Option<ProviderContextUsage> {
-    let accounting = tokens.effective_accounting();
-    if !accounting.known.input {
-        return None;
-    }
-    Some(ProviderContextUsage {
-        input_tokens: Some(tokens.input_tokens),
-        cached_input_tokens: accounting
-            .known
-            .cache_read
-            .then_some(tokens.cached_input_tokens),
-        output_tokens: accounting.known.output.then_some(tokens.output_tokens),
-        reasoning_output_tokens: accounting
-            .known
-            .reasoning
-            .then_some(tokens.reasoning_output_tokens),
-        total_tokens: Some(tokens.total_tokens),
-        model_context_window: None,
-        ..ProviderContextUsage::default()
-    })
-}
-
 pub(super) fn provider_context_usage_from_codex_exec(
     value: &Value,
 ) -> Option<ProviderContextUsage> {
@@ -1500,3 +1476,6 @@ mod tests {
 }
 
 pub(crate) use gyro_core::provider_runtime::types::ProviderContextUsage;
+
+#[cfg(test)]
+pub(crate) use gyro_core::provider_runtime::support::provider_billed_usage_from_acp_tokens;

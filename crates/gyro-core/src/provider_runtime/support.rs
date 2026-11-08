@@ -1,7 +1,7 @@
 //! Pure request validation and provider output normalization.
 use super::{
     limits::{PROVIDER_STALL_MARKER, PROVIDER_STOP_MARKER},
-    types::ChatAttachmentRequest,
+    types::{ChatAttachmentRequest, ProviderContextUsage},
 };
 use super::{
     text::{sanitize_provider_chat_response, truncate_error_detail},
@@ -229,4 +229,48 @@ pub fn claude_multimodal_input(
 pub fn load_config_blocking() -> Result<GyroConfig, String> {
     let paths = GyroPaths::for_current_user().map_err(|error| error.to_string())?;
     GyroConfig::load(&paths).map_err(|error| error.to_string())
+}
+
+pub fn provider_billed_usage_from_acp_tokens(
+    tokens: crate::usage::UsageTokens,
+) -> Option<ProviderContextUsage> {
+    let accounting = tokens.effective_accounting();
+    if !accounting.known.input {
+        return None;
+    }
+    Some(ProviderContextUsage {
+        input_tokens: Some(tokens.input_tokens),
+        cached_input_tokens: accounting
+            .known
+            .cache_read
+            .then_some(tokens.cached_input_tokens),
+        output_tokens: accounting.known.output.then_some(tokens.output_tokens),
+        reasoning_output_tokens: accounting
+            .known
+            .reasoning
+            .then_some(tokens.reasoning_output_tokens),
+        total_tokens: Some(tokens.total_tokens),
+        model_context_window: None,
+        ..ProviderContextUsage::default()
+    })
+}
+pub fn sanitize_provider_approval_details(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(value) => {
+            serde_json::Value::String(crate::security::redact_secrets(&value))
+        }
+        serde_json::Value::Array(values) => serde_json::Value::Array(
+            values
+                .into_iter()
+                .map(sanitize_provider_approval_details)
+                .collect(),
+        ),
+        serde_json::Value::Object(values) => serde_json::Value::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| (key, sanitize_provider_approval_details(value)))
+                .collect(),
+        ),
+        value => value,
+    }
 }

@@ -131,23 +131,6 @@ pub(crate) fn codex_reasoning_effort_arg(
     supported.then_some(effort)
 }
 
-/// The `grok --reasoning-effort <level>` value for a requested reasoning effort.
-///
-/// Grok 4.5 publishes `low`, `medium`, and `high`. Grok 4.3, 4.6, 4.7, and
-/// 4.7 Fast also publish `xhigh`. The flag parser accepts still more words,
-/// but the model rejects them once the turn starts, so unsupported levels are
-/// dropped here and Grok keeps its own default.
-pub(crate) fn grok_reasoning_effort_arg(
-    model_id: Option<&str>,
-    reasoning_effort: Option<&str>,
-) -> Option<String> {
-    let effort = reasoning_effort?.trim().to_ascii_lowercase();
-    if let Some(efforts) = model_catalog::catalog_reasoning_efforts("xai", model_id) {
-        return efforts.contains(&effort).then_some(effort);
-    }
-    gyro_core::grok::reasoning_effort_arg(model_id, Some(effort.as_str()))
-}
-
 pub(crate) use gyro_core::provider_runtime::support::{
     audit_provider_chat_args, provider_chat_cwd,
 };
@@ -203,3 +186,15 @@ use crate::{
     efficiency,
     providers::binding::{advertised_mcp_capability_tools, capability_run_mode_for_chat},
 };
+
+#[cfg(test)]
+pub(crate) fn grok_reasoning_effort_arg(
+    model_id: Option<&str>,
+    reasoning_effort: Option<&str>,
+) -> Option<String> {
+    gyro_core::provider_runtime::native_args::grok_reasoning_effort_arg(
+        model_id,
+        reasoning_effort,
+        model_catalog::catalog_reasoning_efforts("xai", model_id).as_deref(),
+    )
+}

@@ -16,7 +16,6 @@ pub(crate) const MAX_CONCURRENT_SCHEDULED_RUNS: usize = 2;
 pub(crate) const MAX_LIVE_RESPONSE_CHARS: usize = 256_000;
 pub(crate) const MAX_PROVIDER_STDOUT_FRAME_BYTES: usize = 48 * 1024 * 1024;
 pub(crate) const MAX_CHAT_RESPONSE_BYTES: usize = MAX_CHAT_RESPONSE_CHARS * 4 + 4;
-pub(crate) const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 pub(crate) const MAX_CHAT_IMAGES: usize = 10;
 // Screen recordings routinely exceed 50 MB; videos reach providers as file
 // references, so the cap only bounds local copies.
@@ -116,3 +115,5 @@ pub(crate) use gyro_core::provider_runtime::limits::{
 
 #[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::limits::MAX_CHAT_MESSAGE_CHARS;
+
+pub(crate) use gyro_core::provider_runtime::limits::MAX_CHAT_IMAGE_BYTES;

@@ -3,7 +3,6 @@ use crate::{
     conversation_history::acp_conversation_history_text_for_session,
     openai_compatible_runner,
     providers::{
-        cli_args::grok_reasoning_effort_arg,
         streaming::PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS,
         types::{ProviderAdapterDescriptor, ProviderAdapterKind},
     },
@@ -102,16 +101,6 @@ pub(crate) fn is_stale_resume_sentence(sentence: &str) -> bool {
         // never cleared and every retry failed the same way.
         || normalized.contains("no conversation");
     resume_identity && missing_identity
-}
-
-/// Build Grok ACP spawn args with model/effort at process start.
-pub(crate) fn build_grok_acp_program_args(
-    model_id: Option<&str>,
-    reasoning_effort: Option<&str>,
-    posture: gyro_core::ApprovalPosture,
-) -> Vec<std::ffi::OsString> {
-    let effort = grok_reasoning_effort_arg(model_id, reasoning_effort);
-    gyro_core::grok::format_acp_program_args(model_id, effort.as_deref(), posture)
 }
 
 /// Recent user/assistant turns for agents that cannot reopen a provider session.
@@ -228,3 +217,17 @@ pub(crate) fn terminate_provider_process_group(child: &mut Child) {
 pub(crate) use gyro_core::provider_runtime::support::{
     provider_error_sentence, provider_output_summary, provider_stream_failure_detail,
 };
+
+#[cfg(test)]
+pub(crate) fn build_grok_acp_program_args(
+    model_id: Option<&str>,
+    reasoning_effort: Option<&str>,
+    posture: gyro_core::ApprovalPosture,
+) -> Vec<std::ffi::OsString> {
+    gyro_core::provider_runtime::native_args::build_grok_acp_program_args(
+        model_id,
+        reasoning_effort,
+        posture,
+        crate::model_catalog::catalog_reasoning_efforts("xai", model_id).as_deref(),
+    )
+}

@@ -17,3 +17,5 @@ pub const PROVIDER_STOP_MARKER: &str = "chat cancelled by";
 
 /// The stable phrase of a turn Gyro ended because the provider went silent.
 pub const PROVIDER_STALL_MARKER: &str = "the provider sent nothing for";
+
+pub const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;

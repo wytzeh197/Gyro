@@ -134,3 +134,31 @@ pub fn claude_reasoning_effort_arg(
     }
     matches!(effort.as_str(), "low" | "medium" | "high" | "xhigh" | "max").then_some(effort)
 }
+
+/// The `grok --reasoning-effort <level>` value for a requested reasoning effort.
+///
+/// Grok 4.5 publishes `low`, `medium`, and `high`. Grok 4.3, 4.6, 4.7, and
+/// 4.7 Fast also publish `xhigh`. The flag parser accepts still more words,
+/// but the model rejects them once the turn starts, so unsupported levels are
+/// dropped here and Grok keeps its own default.
+pub fn grok_reasoning_effort_arg(
+    model_id: Option<&str>,
+    reasoning_effort: Option<&str>,
+    model_efforts: Option<&[String]>,
+) -> Option<String> {
+    let effort = reasoning_effort?.trim().to_ascii_lowercase();
+    if let Some(efforts) = model_efforts {
+        return efforts.contains(&effort).then_some(effort);
+    }
+    crate::grok::reasoning_effort_arg(model_id, Some(effort.as_str()))
+}
+/// Build Grok ACP spawn args with model/effort at process start.
+pub fn build_grok_acp_program_args(
+    model_id: Option<&str>,
+    reasoning_effort: Option<&str>,
+    posture: crate::ApprovalPosture,
+    model_efforts: Option<&[String]>,
+) -> Vec<std::ffi::OsString> {
+    let effort = grok_reasoning_effort_arg(model_id, reasoning_effort, model_efforts);
+    crate::grok::format_acp_program_args(model_id, effort.as_deref(), posture)
+}
