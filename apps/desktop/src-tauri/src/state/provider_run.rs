@@ -106,13 +106,6 @@ impl From<&ProviderChatRequest> for ProviderApprovalContext {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ProviderApprovalDecision {
-    Approve,
-    Reject,
-    AppliedByGyro,
-}
-
 pub(crate) struct ProviderRunControl {
     pub(crate) cancellation: CancellationToken,
     /// Why this run was stopped, recorded beside the token that stopped it.
@@ -271,3 +264,5 @@ pub(crate) fn stop_provider_run(
     control.cancellation.cancel();
     true
 }
+
+pub(crate) use gyro_core::provider_runtime::types::ProviderApprovalDecision;

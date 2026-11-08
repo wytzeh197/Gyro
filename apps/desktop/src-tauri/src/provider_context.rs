@@ -1,33 +1,6 @@
 //! Provider-reported context accounting and catalog-window normalization.
 
-use serde::Serialize;
 use serde_json::Value;
-
-/// What a turn consumed of the model's context window.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct ProviderContextUsage {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) input_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) cached_input_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) output_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) reasoning_output_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) total_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) model_context_window: Option<u64>,
-    /// True when the count was inferred from text, not reported by the provider.
-    /// That count is dropped before it is published as occupancy.
-    #[serde(default, skip_serializing_if = "skip_false")]
-    pub(super) estimated: bool,
-}
-
-fn skip_false(value: &bool) -> bool {
-    !*value
-}
 
 #[derive(Default)]
 pub(super) struct OllamaTurnUsage {
@@ -1525,3 +1498,5 @@ mod tests {
         );
     }
 }
+
+pub(crate) use gyro_core::provider_runtime::types::ProviderContextUsage;

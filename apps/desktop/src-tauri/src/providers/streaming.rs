@@ -48,29 +48,6 @@ use std::{
 };
 use tauri::Manager;
 use uuid::Uuid;
-pub(crate) struct StreamingCommandOutput {
-    pub(crate) activities: Vec<ProviderActivity>,
-    pub(crate) context_usage: Option<ProviderContextUsage>,
-    /// What the run billed, as opposed to what the context now holds.
-    ///
-    /// The usage ledger wants the turn-wide total: a turn that called tools
-    /// made several requests and paid for each. `context_usage` deliberately
-    /// prefers the per-request reading because it answers a different question
-    /// — how full the window is — so the billing figure is kept apart.
-    pub(crate) billed_usage: Option<ProviderContextUsage>,
-    /// The billing parser's total, with cache reads and writes still apart.
-    /// `billed_usage` merges them for the legacy context display.
-    pub(crate) accounted_usage: Option<UsageTokens>,
-    pub(crate) rate_limits: Vec<ProviderRateLimitWindow>,
-    pub(crate) status_success: bool,
-    pub(crate) status_label: String,
-    pub(crate) stdout: String,
-    pub(crate) stderr: String,
-    pub(crate) assistant_text: Option<String>,
-    pub(crate) text_blocks: Vec<StreamedTextBlock>,
-    pub(crate) parsed_stream_json: bool,
-    pub(crate) provider_session_id: Option<String>,
-}
 
 pub(crate) struct StreamingCommandState {
     pub(crate) activities: Vec<ProviderActivity>,
@@ -1033,3 +1010,5 @@ pub(crate) fn provider_chat_cancelled(app: &tauri::AppHandle, session_id: &str) 
         .and_then(|flags| flags.get(session_id).cloned())
         .is_some_and(|control| control.cancellation.is_cancelled())
 }
+
+pub(crate) use gyro_core::provider_runtime::types::StreamingCommandOutput;

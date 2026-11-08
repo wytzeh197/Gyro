@@ -3,66 +3,8 @@
 use crate::{
     app::limits::MAX_CHAT_VIDEO_BYTES, efficiency, providers::types::ProviderResumeCursor,
 };
-use gyro_core::{Session, SessionEvent, WorkspaceCheckReport, WorkspaceContextSnapshot};
+use gyro_core::{Session, SessionEvent};
 use serde::{Deserialize, Serialize};
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ProviderChatRequest {
-    pub(crate) session_id: String,
-    pub(crate) message: String,
-    pub(crate) turn_id: Option<String>,
-    pub(crate) provider_id: String,
-    pub(crate) provider_label: Option<String>,
-    pub(crate) model_id: Option<String>,
-    pub(crate) model_label: Option<String>,
-    pub(crate) reasoning_effort: Option<String>,
-    #[serde(default = "default_true")]
-    pub(crate) require_command_approval: bool,
-    #[serde(default = "default_true")]
-    pub(crate) require_file_edit_approval: bool,
-    #[serde(default)]
-    pub(crate) full_access: bool,
-    #[serde(default)]
-    pub(crate) suggest_title: bool,
-    pub(crate) workspace_path: Option<String>,
-    #[serde(default)]
-    pub(crate) mode: ChatMode,
-    pub(crate) goal: Option<SessionGoalContext>,
-    pub(crate) plan: Option<serde_json::Value>,
-    #[serde(default)]
-    pub(crate) attachments: Vec<ChatAttachmentRequest>,
-    #[serde(default)]
-    pub(crate) workspace_context: Option<WorkspaceContextSnapshot>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) workspace_check: Option<WorkspaceCheckReport>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) side_chat_context: Option<SideChatContextRequest>,
-    /// Set only by Gyro for its own text-only calls. Never read from the UI.
-    #[serde(skip)]
-    pub(crate) internal_purpose: Option<InternalRequestPurpose>,
-}
-
-/// Why Gyro itself, rather than the person in the chat, sent a request.
-///
-/// These calls carry their complete input in the message. They get a minimal
-/// prompt with no chat history, chat-only protocols, or browser guidance, and
-/// never trigger compaction of the conversation they describe.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum InternalRequestPurpose {
-    ChangeSummary,
-    ContextSummary,
-    SessionTitle,
-}
-
-impl InternalRequestPurpose {
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::ChangeSummary => "file-change summary",
-            Self::ContextSummary => "conversation checkpoint summary",
-            Self::SessionTitle => "chat title",
-        }
-    }
-}
 
 /// The purpose that shapes this request's prompt, unless rolled back.
 pub(crate) fn isolated_internal_purpose(
@@ -71,29 +13,6 @@ pub(crate) fn isolated_internal_purpose(
     request
         .internal_purpose
         .filter(|_| !efficiency::config().full_context_internal_requests)
-}
-
-/// The chat a side chat sits beside.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SideChatContextRequest {
-    pub(crate) session_id: String,
-    /// When the side chat's last completed turn read this same chat.
-    #[serde(default)]
-    pub(crate) since: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) enum ChatMode {
-    #[default]
-    Normal,
-    Plan,
-    Council,
-}
-
-pub(crate) fn default_true() -> bool {
-    true
 }
 
 /// Promote an explicit planning request made in Normal chat to the real Plan
@@ -231,28 +150,6 @@ pub(crate) fn normal_chat_requests_plan(message: &str) -> bool {
     false
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SessionGoalContext {
-    pub(crate) text: String,
-    pub(crate) status: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ChatAttachmentRequest {
-    pub(crate) id: String,
-    pub(crate) kind: String,
-    pub(crate) name: String,
-    pub(crate) path: String,
-    pub(crate) relative_path: Option<String>,
-    pub(crate) mime_type: Option<String>,
-    pub(crate) size: u64,
-    pub(crate) content_hash: Option<String>,
-    pub(crate) modified_at: Option<String>,
-    pub(crate) preview_url: Option<String>,
-}
-
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PrepareChatAttachmentRequest {
@@ -367,3 +264,8 @@ pub(crate) struct ProviderChatResponse {
 pub(crate) struct ProviderContextCompactionResponse {
     pub(crate) activity_events: Vec<SessionEvent>,
 }
+
+pub(crate) use gyro_core::provider_runtime::types::{
+    ChatAttachmentRequest, ChatMode, InternalRequestPurpose, ProviderChatRequest,
+    SessionGoalContext,
+};
