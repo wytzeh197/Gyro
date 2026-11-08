@@ -1,8 +1,6 @@
 use crate::{
     app::config::load_config_blocking,
-    delegated_agents, efficiency,
-    ollama_runner::run_ollama_chat,
-    openai_compatible_runner, provider_accounting,
+    delegated_agents, efficiency, provider_accounting,
     provider_accounting::{provider_turn_tokens, record_provider_usage},
     provider_context, provider_reliability,
     provider_reliability::is_transient_provider_error,
@@ -14,16 +12,11 @@ use crate::{
         retry_recovery as provider_retry_recovery,
         retry_recovery::run_provider_chat_with_retry_using_with_wait,
         run::compact_provider_chat_blocking,
-        runners::{
-            antigravity::run_antigravity_chat,
-            claude::run_anthropic_claude_chat,
-            codex::run_openai_codex_chat,
-            kimi_acp::{provider_resume_cursor_from_binding, run_kimi_acp_chat},
-        },
+        runner::runner_for,
+        runners::kimi_acp::provider_resume_cursor_from_binding,
         streaming::{provider_chat_cancelled, provider_stop_message},
-        types::{
-            ProviderAdapterKind, ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput,
-        },
+        tauri_host::TauriRunnerHost,
+        types::{ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput},
     },
     state::{managers::ProviderCancellationManager, provider_run::PROVIDER_STOP_MARKER},
     stores::parse_uuid,
@@ -489,29 +482,12 @@ pub(crate) fn run_provider_chat_once(
         request.model_id.as_deref(),
     )?;
     timing::attempt();
-    let expanded = with_browser_attachment_images(
-        request,
-        openai_compatible_runner::supports_images(request),
-    )?;
-    let request = &expanded;
-    match provider_adapter_for(&request.provider_id).kind {
-        ProviderAdapterKind::OpenAiCodex => {
-            run_openai_codex_chat(app, request, resume_cursor, attempt)
-        }
-        ProviderAdapterKind::AnthropicClaude => {
-            run_anthropic_claude_chat(app, request, resume_cursor, attempt)
-        }
-        ProviderAdapterKind::KimiAcp => run_kimi_acp_chat(app, request, resume_cursor, attempt),
-        ProviderAdapterKind::AntigravityCli => {
-            run_antigravity_chat(app, request, resume_cursor, attempt)
-        }
-        ProviderAdapterKind::Ollama => run_ollama_chat(app, request),
-        ProviderAdapterKind::OpenAiCompatible => {
-            openai_compatible_runner::run_openai_compatible_chat(app, request)
-        }
-        ProviderAdapterKind::ReadinessOnly => anyhow::bail!(
-            "{} is readiness-only in Gyro V1. Chat execution for this provider has not been implemented yet.",
-            request.provider_label.as_deref().unwrap_or("Provider")
-        ),
-    }
+    let runner = runner_for(provider_adapter_for(&request.provider_id).kind);
+    let expanded = with_browser_attachment_images(request, runner.supports_images(request))?;
+    runner.run(
+        &TauriRunnerHost::new(app),
+        &expanded,
+        resume_cursor,
+        attempt,
+    )
 }
