@@ -11,11 +11,9 @@ pub struct Evidence {
     pub failures: Vec<Value>,
 }
 pub fn parse(stdout: &str, stderr: &str, exit_code: Option<i64>) -> Option<Evidence> {
-    let text = if stderr.is_empty() {
-        stdout.to_owned()
-    } else {
-        format!("{stdout}\n{stderr}")
-    };
+    // ESLint and Cargo JSON are decided from stdout alone. Joining stderr first
+    // copied the whole command log even when those parsers returned immediately,
+    // and even when stderr was empty.
     if let Ok(Value::Array(files)) = serde_json::from_str::<Value>(stdout.trim()) {
         if !files.is_empty()
             && files
@@ -62,6 +60,15 @@ pub fn parse(stdout: &str, stderr: &str, exit_code: Option<i64>) -> Option<Evide
             failures: diagnostics,
         });
     }
+    let combined;
+    let text: &str = if stderr.is_empty() {
+        stdout
+    } else if stdout.is_empty() {
+        stderr
+    } else {
+        combined = format!("{stdout}\n{stderr}");
+        &combined
+    };
     let lines = text.lines().collect::<Vec<_>>();
     let mut totals = serde_json::Map::new();
     let mut failures = Vec::new();
@@ -99,12 +106,17 @@ pub fn parse(stdout: &str, stderr: &str, exit_code: Option<i64>) -> Option<Evide
         if line.starts_with("TAP version ") || line.starts_with("# tests ") {
             format = Some("node-tap");
         }
-        for key in ["tests", "pass", "fail", "cancelled", "skipped", "todo"] {
-            if let Some(n) = line
-                .strip_prefix(&format!("# {key} "))
-                .and_then(|s| s.trim().parse::<u64>().ok())
-            {
-                totals.insert(key.into(), json!(n));
+        // One prefix check, then the counter name. Building "# {key} " per
+        // line allocated six strings for every line of a test log.
+        if let Some(rest) = line.strip_prefix("# ") {
+            for key in ["tests", "pass", "fail", "cancelled", "skipped", "todo"] {
+                if let Some(n) = rest
+                    .strip_prefix(key)
+                    .and_then(|s| s.strip_prefix(' '))
+                    .and_then(|s| s.trim().parse::<u64>().ok())
+                {
+                    totals.insert(key.into(), json!(n));
+                }
             }
         }
         if line.trim_start().starts_with("not ok ") {
@@ -172,5 +184,70 @@ mod tests {
     fn eslint_paths() {
         let e=parse(r#"[{"filePath":"src/a.ts","errorCount":1,"warningCount":0,"messages":[{"message":"exact","line":2,"severity":2}]}]"#,"",Some(1)).unwrap();
         assert_eq!(e.failures[0]["path"], "src/a.ts");
+    }
+    #[test]
+    fn eslint_reads_stdout_when_stderr_is_unrelated() {
+        let e = parse(
+            r#"[{"filePath":"src/a.ts","errorCount":1,"warningCount":2,"messages":[{"message":"exact","line":2,"severity":2}]}]"#,
+            "not json\n---- noise ----\n",
+            Some(1),
+        )
+        .unwrap();
+        assert_eq!(e.format, "eslint-json");
+        assert_eq!(e.coverage, "complete");
+        assert_eq!(e.totals["errors"], 1);
+        assert_eq!(e.totals["warnings"], 2);
+        assert_eq!(e.failures.len(), 1);
+        assert!(e.failures.iter().all(|f| f["message"] != "not json"));
+    }
+    #[test]
+    fn stderr_only_cargo_failure_is_still_parsed() {
+        let e = parse(
+            "",
+            "---- only_stderr ----\nthread panicked: from stderr\nfailures:\ntest result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;\n",
+            Some(101),
+        )
+        .unwrap();
+        assert_eq!(e.format, "cargo-test");
+        assert_eq!(e.totals["passed"], 1);
+        assert_eq!(e.totals["failed"], 1);
+        assert_eq!(e.totals["filtered out"], 0);
+        assert!(e.failures[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("from stderr"));
+    }
+    #[test]
+    fn stdout_and_stderr_cargo_text_are_joined() {
+        let e = parse(
+            "test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;\n",
+            "---- joined ----\nthread panicked: from stderr\nfailures:\n",
+            Some(1),
+        )
+        .unwrap();
+        assert_eq!(e.format, "cargo-test");
+        assert_eq!(e.totals["passed"], 2);
+        assert_eq!(e.totals["failed"], 1);
+        assert!(e.failures[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("from stderr"));
+    }
+    #[test]
+    fn tap_counts_keep_every_counter() {
+        let e = parse(
+            "TAP version 13\n# tests 3\n# pass 2\n# fail 1\n# cancelled 0\n# skipped 4\n# todo 5\nnot ok 1 - name\n",
+            "",
+            Some(1),
+        )
+        .unwrap();
+        assert_eq!(e.format, "node-tap");
+        assert_eq!(e.totals["tests"], 3);
+        assert_eq!(e.totals["pass"], 2);
+        assert_eq!(e.totals["fail"], 1);
+        assert_eq!(e.totals["cancelled"], 0);
+        assert_eq!(e.totals["skipped"], 4);
+        assert_eq!(e.totals["todo"], 5);
+        assert_eq!(e.failures.len(), 1);
     }
 }
