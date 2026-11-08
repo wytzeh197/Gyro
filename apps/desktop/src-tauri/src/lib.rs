@@ -38,17 +38,14 @@ use app::limits::{
     MAX_PERMISSION_MCP_MESSAGE_BYTES, MAX_PROVIDER_STDOUT_FRAME_BYTES,
     MAX_STORED_CHAT_ATTACHMENTS_PER_SESSION, MAX_STORED_CHAT_ATTACHMENT_BYTES_PER_SESSION,
     MAX_STORED_DRAFT_ATTACHMENTS, MAX_TERMINAL_OUTPUT_BYTES, MAX_TERMINAL_PROCESSES,
-    MAX_WORKSPACE_FILE_EDIT_BYTES, MAX_WORKSPACE_FILE_PREVIEW_BYTES,
-    MAX_WORKSPACE_PREPARATION_CACHES, MAX_WORKSPACE_SEARCH_FALLBACK_BYTES,
-    MAX_WORKSPACE_SEARCH_FALLBACK_FILES, MAX_WORKSPACE_WATCH_CACHES, PROVIDER_APPROVAL_EVENT,
+    MAX_WORKSPACE_FILE_EDIT_BYTES, MAX_WORKSPACE_SEARCH_FALLBACK_BYTES, PROVIDER_APPROVAL_EVENT,
     PROVIDER_APPROVAL_NOTIFICATION_OPEN_EVENT, PROVIDER_APPROVAL_TIMEOUT,
     PROVIDER_CAPABILITY_EVENT, PROVIDER_CAPABILITY_RESOURCE_EVENT, PROVIDER_CHAT_EVENT,
     PROVIDER_CHAT_HEARTBEAT_INTERVAL, PROVIDER_STREAM_FLUSH_INTERVAL, PROVIDER_USAGE_UPDATED_EVENT,
-    TEXT_TRUNCATION_SUFFIX, WORKSPACE_CHANGED_EVENT, WORKSPACE_CHANGE_DEBOUNCE,
-    WORKSPACE_PATHS_CHANGED_EVENT, WORKSPACE_PREPARATION_CACHE_AGE, WORKSPACE_PREPARATION_EVENT,
-    WORKSPACE_PREPARATION_GIT_TIMEOUT, WORKSPACE_PREPARATION_WAIT_TIMEOUT,
-    WORKSPACE_SEARCH_FALLBACK_TIMEOUT, WORKSPACE_TREE_MAX_CACHE_AGE,
+    TEXT_TRUNCATION_SUFFIX,
 };
+#[cfg(test)]
+use app::limits::{MAX_WORKSPACE_FILE_PREVIEW_BYTES, MAX_WORKSPACE_WATCH_CACHES};
 #[cfg(test)]
 use browser::preview::{
     browser_preview_capture_dimensions, browser_preview_capture_script,
@@ -91,18 +88,23 @@ use git::{
     },
 };
 #[cfg(test)]
+use git_branch_service::git_branch_catalog_before;
+#[cfg(test)]
 use gyro_core::WorkspaceCheckReport;
 #[cfg(test)]
 use ide::{
     debug::debug_adapter_command_is_allowed,
-    task_discovery::{justfile_recipes, makefile_targets, parse_command_line, suggested_task},
+    task_discovery::{
+        justfile_recipes, makefile_targets, parse_command_line, suggested_task,
+        test_tree_from_tasks,
+    },
     tasks::{configure_noninteractive_task_environment, task_run_blocking},
 };
 use ide::{
     debug::{add_ide_protocol_message_bytes, redact_json_strings},
     task_discovery::{
         content_hash, custom_task_create_impl, custom_task_delete_impl, default_custom_task_group,
-        task_discover_impl, test_discover_impl, test_tree_from_tasks,
+        task_discover_impl, test_discover_impl,
     },
     types::{
         CustomTaskCreateRequest, CustomTaskDeleteRequest, CustomTaskFile, CustomTaskRecord,
@@ -143,10 +145,7 @@ use state::{
         PROVIDER_CUT_OFF_NOTICE, PROVIDER_INTERRUPTED_MARKER, PROVIDER_STALL_MARKER,
         PROVIDER_STOP_MARKER, PROVIDER_TOOL_BUDGET_NOTICE,
     },
-    workspace::{
-        WorkspaceDirectoryStamp, WorkspacePreparationManager, WorkspacePreparationState,
-        WorkspaceTreeSnapshot, WorkspaceWatchManager,
-    },
+    workspace::{WorkspacePreparationManager, WorkspaceWatchManager},
 };
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
@@ -161,14 +160,37 @@ use usage::types::CodexRateLimitWindow;
 use usage::types::{
     CodexRateLimitSnapshot, CodexRateLimitsResponse, ProviderRateLimitWindow, ProviderUsageSnapshot,
 };
-use workspace::types::{
-    FileMutationDecisionRequest, FileMutationDecisionResult, FileMutationProposalRequest,
-    WorkspaceChangedEvent, WorkspaceFile, WorkspaceFileContent, WorkspaceFileStat,
-    WorkspaceFileWriteRequest, WorkspacePathCreateRequest, WorkspacePathDeleteRequest,
-    WorkspacePathDuplicateRequest, WorkspacePathRenameRequest, WorkspacePreparationError,
-    WorkspacePreparationProgress, WorkspacePreparationRequest, WorkspacePreparationSnapshot,
-    WorkspaceSearchRange, WorkspaceSearchRequest, WorkspaceSearchResult,
+use workspace::{
+    files::{
+        assert_workspace_entry, assert_workspace_path, atomic_write_workspace_file,
+        read_bounded_regular_file, read_workspace_file_with_limit, validated_workspace_file_target,
+        workspace_root,
+    },
+    paths::{
+        absolute_workspace_path, apply_path_history_action, create_workspace_path_impl,
+        delete_workspace_path_impl, duplicate_workspace_path_impl, emit_workspace_path_change,
+        path_history_change, rename_workspace_path_impl, same_workspace_folder,
+        WorkspacePathChange,
+    },
+    tree::list_workspace_tree_blocking,
+    types::{
+        FileMutationDecisionRequest, FileMutationDecisionResult, FileMutationProposalRequest,
+        WorkspaceFile, WorkspaceFileContent, WorkspacePathCreateRequest,
+        WorkspacePathDeleteRequest, WorkspacePathDuplicateRequest, WorkspacePathRenameRequest,
+        WorkspacePreparationSnapshot, WorkspaceSearchRange, WorkspaceSearchResult,
+    },
 };
+#[cfg(test)]
+use workspace::{
+    files::{read_workspace_file_impl, write_workspace_file_impl},
+    paths::{copy_entry, move_entry_into_trash, remove_entry, unique_trash_destination},
+    tree::{
+        compare_workspace_tree_entries, scan_workspace_tree, workspace_watch_event_is_relevant,
+    },
+    types::WorkspaceFileWriteRequest,
+};
+#[cfg(test)]
+use workspace_search::run_workspace_rg_search;
 // @moved-reexports-end
 use chat_media_upload::prepare_chat_media_upload;
 mod conversation_history;
@@ -178,7 +200,7 @@ mod cloud_connection;
 mod efficiency;
 mod git_branch_service;
 mod git_read;
-use git_branch_service::{git_branch_catalog_before, git_branch_catalog_impl};
+use git_branch_service::git_branch_catalog_impl;
 mod ide_evidence;
 mod live_model_context;
 mod local_check;
@@ -254,8 +276,7 @@ mod workspace_roots;
 mod workspace_search;
 mod workspace_tree_order;
 use workspace_search::{
-    bound_model_search_results, confine_search_path, literal_search_ranges,
-    run_scoped_workspace_rg_search, run_workspace_rg_search,
+    bound_model_search_results, confine_search_path, run_scoped_workspace_rg_search,
 };
 
 use anyhow::Context;
@@ -327,9 +348,8 @@ use gyro_core::{
 };
 #[cfg(test)]
 use gyro_core::{AutomationRunStatus, CreateAutomationRequest};
-use notify::{
-    Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
-};
+#[cfg(test)]
+use notify::Event as NotifyEvent;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -345,7 +365,6 @@ use std::sync::{
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{Emitter, Manager};
 use uuid::Uuid;
-use walkdir::WalkDir;
 
 #[cfg(all(debug_assertions, feature = "native-browser-events-smoke"))]
 mod browser_frontend_smoke;
@@ -397,9 +416,6 @@ mod workspace_path_capability;
 mod workspace_path_history;
 #[cfg(test)]
 use workspace_mutations::create_file_mutation_proposal_in_store;
-use workspace_mutations::{
-    create_file_mutation_proposal_impl, resolve_file_mutation_proposal_impl,
-};
 
 #[cfg(test)]
 use gyro_core::{
@@ -5377,815 +5393,6 @@ async fn update_capability_ide_evidence(
 }
 
 #[tauri::command]
-async fn list_workspace_files(workspace_path: String) -> Result<Vec<WorkspaceFile>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        list_workspace_tree_blocking(workspace_path, Some(3))
-    })
-    .await
-    .map_err(|error| format!("workspace file list worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn list_workspace_tree(
-    workspace_path: String,
-    depth: Option<usize>,
-) -> Result<Vec<WorkspaceFile>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        list_workspace_tree_blocking(workspace_path, depth)
-    })
-    .await
-    .map_err(|error| format!("workspace tree worker failed: {error}"))?
-}
-
-fn list_workspace_tree_blocking(
-    workspace_path: String,
-    depth: Option<usize>,
-) -> Result<Vec<WorkspaceFile>, String> {
-    let root = PathBuf::from(workspace_path)
-        .canonicalize()
-        .map_err(to_string)?;
-    let max_depth = depth.unwrap_or(4).clamp(1, 8);
-    scan_workspace_tree(&root, max_depth).map(|snapshot| snapshot.files)
-}
-
-fn scan_workspace_tree(root: &Path, max_depth: usize) -> Result<WorkspaceTreeSnapshot, String> {
-    let mut entries = Vec::new();
-    let root_metadata = fs::symlink_metadata(root).map_err(to_string)?;
-    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
-        return Err("workspace root is not a regular directory".into());
-    }
-    let mut directories = vec![WorkspaceDirectoryStamp {
-        path: root.to_path_buf(),
-        modified: root_metadata.modified().ok(),
-        len: root_metadata.len(),
-    }];
-
-    for entry in WalkDir::new(root)
-        .min_depth(1)
-        .max_depth(max_depth)
-        .into_iter()
-        .filter_entry(|entry| {
-            let name = entry.file_name().to_string_lossy();
-            name != ".git"
-                && (max_depth == 1
-                    || !(is_generated_workspace_dir(&name)
-                        || matches!(name.as_ref(), "target" | "dist" | "build")))
-        })
-    {
-        // One unreadable folder, or one removed mid-build, leaves a gap in
-        // the tree instead of failing the whole listing.
-        let Ok(entry) = entry else {
-            continue;
-        };
-        let Ok(path) = entry.path().strip_prefix(root) else {
-            continue;
-        };
-        let kind = if entry.file_type().is_dir() {
-            if let Ok(metadata) = entry.metadata() {
-                directories.push(WorkspaceDirectoryStamp {
-                    path: entry.path().to_path_buf(),
-                    modified: metadata.modified().ok(),
-                    len: metadata.len(),
-                });
-            }
-            "directory".into()
-        } else {
-            "file".into()
-        };
-        entries.push(WorkspaceFile {
-            path: path.to_string_lossy().to_string(),
-            kind,
-            depth: path.components().count(),
-        });
-    }
-
-    workspace_tree_order::sort(&mut entries);
-    Ok(WorkspaceTreeSnapshot {
-        files: entries,
-        directories,
-        scanned_at: Instant::now(),
-        generation: 0,
-    })
-}
-
-#[cfg(test)]
-fn compare_workspace_tree_entries(a: &WorkspaceFile, b: &WorkspaceFile) -> std::cmp::Ordering {
-    let mut a_components = Path::new(&a.path).components().peekable();
-    let mut b_components = Path::new(&b.path).components().peekable();
-
-    loop {
-        match (a_components.next(), b_components.next()) {
-            (Some(a_component), Some(b_component)) if a_component == b_component => continue,
-            (Some(a_component), Some(b_component)) => {
-                let a_is_directory = a_components.peek().is_some() || a.kind == "directory";
-                let b_is_directory = b_components.peek().is_some() || b.kind == "directory";
-                return b_is_directory
-                    .cmp(&a_is_directory)
-                    .then_with(|| a_component.as_os_str().cmp(b_component.as_os_str()));
-            }
-            (None, Some(_)) => return std::cmp::Ordering::Less,
-            (Some(_), None) => return std::cmp::Ordering::Greater,
-            (None, None) => return std::cmp::Ordering::Equal,
-        }
-    }
-}
-
-impl WorkspaceDirectoryStamp {
-    fn is_current(&self) -> bool {
-        let Ok(metadata) = fs::symlink_metadata(&self.path) else {
-            return false;
-        };
-        !metadata.file_type().is_symlink()
-            && metadata.is_dir()
-            && metadata.len() == self.len
-            && metadata.modified().ok() == self.modified
-    }
-}
-
-impl WorkspaceWatchManager {
-    fn cache_snapshot(
-        &self,
-        root: PathBuf,
-        mut snapshot: WorkspaceTreeSnapshot,
-    ) -> Result<WorkspaceTreeSnapshot, String> {
-        snapshot.generation = self.next_generation.fetch_add(1, Ordering::AcqRel) + 1;
-        // A quiet, watched workspace keeps its old scan time; evicting it
-        // would silently drop its watcher while the UI waits for events.
-        let watched = self
-            .watchers
-            .lock()
-            .map(|watchers| watchers.keys().cloned().collect::<HashSet<_>>())
-            .unwrap_or_default();
-        let mut snapshots = self
-            .snapshots
-            .lock()
-            .map_err(|_| "workspace watch cache is unavailable".to_string())?;
-        let evicted =
-            if !snapshots.contains_key(&root) && snapshots.len() >= MAX_WORKSPACE_WATCH_CACHES {
-                snapshots
-                    .iter()
-                    .min_by_key(|(path, cached)| (watched.contains(*path), cached.scanned_at))
-                    .map(|(path, _)| path.clone())
-            } else {
-                None
-            };
-        if let Some(path) = evicted.as_ref() {
-            snapshots.remove(path);
-        }
-        snapshots.insert(root, snapshot.clone());
-        drop(snapshots);
-        if let Some(path) = evicted {
-            if let Ok(mut watchers) = self.watchers.lock() {
-                watchers.remove(&path);
-            }
-            if let Ok(mut rescan_state) = self.rescan_state.lock() {
-                rescan_state.remove(&path);
-            }
-        }
-        Ok(snapshot)
-    }
-
-    fn prime(&self, workspace_path: &str) -> Result<WorkspaceTreeSnapshot, String> {
-        let root = PathBuf::from(workspace_path)
-            .canonicalize()
-            .map_err(to_string)?;
-        let snapshot = scan_workspace_tree(&root, 1)?;
-        self.cache_snapshot(root, snapshot)
-    }
-
-    fn snapshot(&self, workspace_path: &str) -> Result<Vec<WorkspaceFile>, String> {
-        let root = PathBuf::from(workspace_path)
-            .canonicalize()
-            .map_err(to_string)?;
-        let cached = self
-            .snapshots
-            .lock()
-            .map_err(|_| "workspace watch cache is unavailable".to_string())?
-            .get(&root)
-            .cloned();
-        if let Some(cached) = cached {
-            let watcher_active = self
-                .watchers
-                .lock()
-                .map_err(|_| "workspace watcher registry is unavailable".to_string())?
-                .contains_key(&root);
-            if watcher_active
-                || (cached.scanned_at.elapsed() < WORKSPACE_TREE_MAX_CACHE_AGE
-                    && cached
-                        .directories
-                        .iter()
-                        .all(WorkspaceDirectoryStamp::is_current))
-            {
-                return Ok(cached.files);
-            }
-        }
-
-        let snapshot = scan_workspace_tree(&root, 1)?;
-        self.cache_snapshot(root, snapshot)
-            .map(|snapshot| snapshot.files)
-    }
-
-    fn ensure_watcher(&self, root: &Path, app: tauri::AppHandle) -> Result<(), String> {
-        if self
-            .watchers
-            .lock()
-            .map_err(|_| "workspace watcher registry is unavailable".to_string())?
-            .contains_key(root)
-        {
-            return Ok(());
-        }
-        let watched_root = root.to_path_buf();
-        let event_root = watched_root.clone();
-        let manager = self.clone();
-        let mut watcher = RecommendedWatcher::new(
-            move |result: notify::Result<NotifyEvent>| {
-                if let Ok(event) = result {
-                    manager.schedule_rescan(event_root.clone(), event, app.clone());
-                }
-            },
-            NotifyConfig::default(),
-        )
-        .map_err(to_string)?;
-        watcher
-            .watch(&watched_root, RecursiveMode::Recursive)
-            .map_err(to_string)?;
-        self.watchers
-            .lock()
-            .map_err(|_| "workspace watcher registry is unavailable".to_string())?
-            .insert(watched_root, watcher);
-        Ok(())
-    }
-
-    fn schedule_rescan(&self, root: PathBuf, event: NotifyEvent, app: tauri::AppHandle) {
-        if !workspace_watch_event_is_relevant(&root, &event) {
-            return;
-        }
-        let should_start_worker = {
-            let Ok(mut rescan_state) = self.rescan_state.lock() else {
-                return;
-            };
-            rescan_state.request(root.clone())
-        };
-        if !should_start_worker {
-            return;
-        }
-        let manager = self.clone();
-        let mut superseded_rounds = 0;
-        std::thread::spawn(move || loop {
-            std::thread::sleep(WORKSPACE_CHANGE_DEBOUNCE);
-            let serial = manager
-                .rescan_state
-                .lock()
-                .ok()
-                .and_then(|rescan_state| rescan_state.serial(&root));
-            let Some(serial) = serial else {
-                return;
-            };
-
-            let scanned = scan_workspace_tree(&root, 1);
-            let superseded = manager
-                .rescan_state
-                .lock()
-                .map(|rescan_state| rescan_state.serial(&root) != Some(serial))
-                .unwrap_or(true);
-            // Constant churn (a home-folder workspace) must still publish
-            // now and then rather than rescanning forever without emitting.
-            if superseded && superseded_rounds < MAX_SUPERSEDED_WORKSPACE_RESCANS {
-                superseded_rounds += 1;
-                continue;
-            }
-            superseded_rounds = 0;
-            if let Ok(snapshot) =
-                scanned.and_then(|snapshot| manager.cache_snapshot(root.clone(), snapshot))
-            {
-                let _ = app.emit(
-                    WORKSPACE_CHANGED_EVENT,
-                    WorkspaceChangedEvent {
-                        workspace_path: root.display().to_string(),
-                        generation: snapshot.generation,
-                        files: snapshot.files,
-                    },
-                );
-            }
-
-            let should_rescan = manager
-                .rescan_state
-                .lock()
-                .map(|mut rescan_state| rescan_state.finish_round(&root, serial))
-                .unwrap_or(false);
-            if !should_rescan {
-                return;
-            }
-        });
-    }
-}
-
-const MAX_SUPERSEDED_WORKSPACE_RESCANS: u32 = 8;
-
-/// Folder names that only ever hold installed dependencies or tool caches.
-fn is_generated_workspace_dir(name: &str) -> bool {
-    matches!(
-        name,
-        ".next"
-            | "node_modules"
-            | "__pycache__"
-            | ".venv"
-            | ".turbo"
-            | ".nuxt"
-            | ".svelte-kit"
-            | ".parcel-cache"
-            | ".pytest_cache"
-            | ".mypy_cache"
-            | ".ruff_cache"
-            | ".gradle"
-            | "DerivedData"
-    )
-}
-
-fn workspace_watch_event_is_relevant(root: &Path, event: &NotifyEvent) -> bool {
-    event.paths.is_empty()
-        || event.paths.iter().any(|path| {
-            let Ok(relative) = path.strip_prefix(root) else {
-                return false;
-            };
-            let mut components = relative.components();
-            let Some(first) = components.next() else {
-                return true;
-            };
-            let first = first.as_os_str().to_string_lossy();
-            if first == ".git" {
-                return false;
-            }
-            // Dependency and tool caches churn at any depth (`pnpm install`,
-            // a test run); only their appearance at the top level counts.
-            let mut parents = relative.parent().into_iter().flat_map(Path::components);
-            if parents.any(|part| is_generated_workspace_dir(&part.as_os_str().to_string_lossy())) {
-                return false;
-            }
-            // Build output churns on every compile; rescanning and re-running
-            // git status for it competes with clicks for the whole build. The
-            // folder appearing or vanishing still counts; its contents don't.
-            let is_build_output = matches!(first.as_ref(), ".next" | "target" | "dist" | "build");
-            !(is_build_output && components.next().is_some())
-        })
-}
-
-impl WorkspacePreparationManager {
-    fn prepare(
-        &self,
-        request: WorkspacePreparationRequest,
-        watcher: WorkspaceWatchManager,
-        app: tauri::AppHandle,
-    ) -> Result<WorkspacePreparationSnapshot, String> {
-        let root = PathBuf::from(&request.workspace_path)
-            .canonicalize()
-            .map_err(to_string)?;
-        let (state_lock, state_changed) = &*self.state;
-        let mut state = state_lock
-            .lock()
-            .map_err(|_| "workspace preparation state is unavailable".to_string())?;
-        loop {
-            prune_workspace_preparation_completed(&mut state);
-            if let Some((completed_at, cached)) = state.completed.get(&root) {
-                if completed_at.elapsed() <= WORKSPACE_PREPARATION_CACHE_AGE
-                    && cached.progress.status == "ready"
-                    && cached.progress.errors.is_empty()
-                {
-                    let mut cached = cached.clone();
-                    cached.progress.run_id = request.run_id.clone();
-                    let _ = app.emit(WORKSPACE_PREPARATION_EVENT, cached.progress.clone());
-                    return Ok(cached);
-                }
-            }
-            if state.in_flight.insert(root.clone()) {
-                break;
-            }
-            let (next, wait) = state_changed
-                .wait_timeout(state, WORKSPACE_PREPARATION_WAIT_TIMEOUT)
-                .map_err(|_| "workspace preparation state is unavailable".to_string())?;
-            state = next;
-            if wait.timed_out() && state.in_flight.contains(&root) {
-                return Err("workspace preparation timed out".to_string());
-            }
-        }
-        drop(state);
-
-        let result = prepare_workspace_impl(&request, &root, &watcher, &app);
-        let mut state = state_lock
-            .lock()
-            .map_err(|_| "workspace preparation state is unavailable".to_string())?;
-        state.in_flight.remove(&root);
-        if let Ok(snapshot) = result.as_ref() {
-            if snapshot.progress.status == "ready" && snapshot.progress.errors.is_empty() {
-                state
-                    .completed
-                    .insert(root, (Instant::now(), snapshot.clone()));
-                prune_workspace_preparation_completed(&mut state);
-            } else {
-                state.completed.remove(&root);
-            }
-        }
-        state_changed.notify_all();
-        result
-    }
-}
-
-fn prune_workspace_preparation_completed(state: &mut WorkspacePreparationState) {
-    state
-        .completed
-        .retain(|_, (completed_at, _)| completed_at.elapsed() <= WORKSPACE_PREPARATION_CACHE_AGE);
-    while state.completed.len() > MAX_WORKSPACE_PREPARATION_CACHES {
-        let oldest = state
-            .completed
-            .iter()
-            .min_by_key(|(_, (completed_at, _))| *completed_at)
-            .map(|(path, _)| path.clone());
-        let Some(path) = oldest else {
-            break;
-        };
-        state.completed.remove(&path);
-    }
-}
-
-fn emit_workspace_preparation(
-    app: &tauri::AppHandle,
-    request: &WorkspacePreparationRequest,
-    phase: Option<&str>,
-    status: &str,
-    completed_steps: usize,
-    message: impl Into<String>,
-    errors: &[WorkspacePreparationError],
-) -> WorkspacePreparationProgress {
-    let progress = WorkspacePreparationProgress {
-        run_id: request.run_id.clone(),
-        workspace_path: request.workspace_path.clone(),
-        phase: phase.map(str::to_string),
-        status: status.to_string(),
-        completed_steps,
-        total_steps: 5,
-        message: message.into(),
-        errors: errors.to_vec(),
-    };
-    let _ = app.emit(WORKSPACE_PREPARATION_EVENT, progress.clone());
-    progress
-}
-
-fn prepare_workspace_impl(
-    request: &WorkspacePreparationRequest,
-    root: &Path,
-    watcher: &WorkspaceWatchManager,
-    app: &tauri::AppHandle,
-) -> Result<WorkspacePreparationSnapshot, String> {
-    let root_text = root.display().to_string();
-    let mut errors = Vec::new();
-    emit_workspace_preparation(
-        app,
-        request,
-        Some("catalog"),
-        "preparing",
-        0,
-        "Cataloging workspace",
-        &errors,
-    );
-    let tree = match watcher.prime(&root_text) {
-        Ok(tree) => tree,
-        Err(error) => {
-            errors.push(WorkspacePreparationError {
-                phase: "catalog".into(),
-                message: error.clone(),
-            });
-            emit_workspace_preparation(
-                app,
-                request,
-                Some("catalog"),
-                "failed",
-                1,
-                "Workspace catalog failed",
-                &errors,
-            );
-            return Err(error);
-        }
-    };
-    emit_workspace_preparation(
-        app,
-        request,
-        Some("watcher"),
-        "preparing",
-        1,
-        "Starting workspace watcher",
-        &errors,
-    );
-
-    let watcher_mode = match watcher.ensure_watcher(root, app.clone()) {
-        Ok(()) => "event",
-        Err(error) => {
-            errors.push(WorkspacePreparationError {
-                phase: "watcher".into(),
-                message: error,
-            });
-            "polling"
-        }
-    };
-    emit_workspace_preparation(
-        app,
-        request,
-        Some("git"),
-        "preparing",
-        2,
-        "Inspecting Git",
-        &errors,
-    );
-
-    let git_deadline = Instant::now() + WORKSPACE_PREPARATION_GIT_TIMEOUT;
-    let git_root = root_text.clone();
-    let branch_root = root_text.clone();
-    let task_root = root_text.clone();
-    let (git_tx, git_rx) = mpsc::sync_channel(1);
-    let (branch_tx, branch_rx) = mpsc::sync_channel(1);
-    let task_handle = std::thread::spawn(move || task_discover_impl(&task_root));
-    std::thread::spawn(move || {
-        let _ = git_tx.send(git_status_cache::inspect_git_status_before(
-            &git_root,
-            false,
-            git_deadline,
-        ));
-    });
-    std::thread::spawn(move || {
-        let _ = branch_tx.send(git_branch_catalog_before(&branch_root, git_deadline));
-    });
-
-    let remaining_git = || git_deadline.saturating_duration_since(Instant::now());
-    let source_control = match git_rx.recv_timeout(remaining_git()) {
-        Ok(Ok(status)) => {
-            if let Some(error) = &status.error {
-                if !error.contains("not a git repository") {
-                    errors.push(WorkspacePreparationError {
-                        phase: "git".into(),
-                        message: error.clone(),
-                    });
-                }
-            }
-            Some(status)
-        }
-        Ok(Err(error)) => {
-            errors.push(WorkspacePreparationError {
-                phase: "git".into(),
-                message: error.to_string(),
-            });
-            None
-        }
-        Err(_) => {
-            errors.push(WorkspacePreparationError {
-                phase: "git".into(),
-                message: "Inspecting Git timed out".into(),
-            });
-            Some(git_status_read_failure(
-                Some(root),
-                "Inspecting Git timed out".into(),
-                true,
-            ))
-        }
-    };
-    let branches = match branch_rx.recv_timeout(remaining_git()) {
-        Ok(Ok(catalog)) => Some(catalog),
-        Ok(Err(error)) => {
-            errors.push(WorkspacePreparationError {
-                phase: "git".into(),
-                message: format!("Branch inspection: {error}"),
-            });
-            None
-        }
-        Err(_) => {
-            errors.push(WorkspacePreparationError {
-                phase: "git".into(),
-                message: "Branch inspection timed out".into(),
-            });
-            None
-        }
-    };
-    emit_workspace_preparation(
-        app,
-        request,
-        Some("tasks"),
-        "preparing",
-        3,
-        "Discovering tasks",
-        &errors,
-    );
-
-    let tasks = match task_handle
-        .join()
-        .unwrap_or_else(|_| Err(anyhow::anyhow!("task discovery worker failed")))
-    {
-        Ok(tasks) => tasks,
-        Err(error) => {
-            errors.push(WorkspacePreparationError {
-                phase: "tasks".into(),
-                message: error.to_string(),
-            });
-            Vec::new()
-        }
-    };
-    // Share the pane's fresh Git view with the next workspace check, so the
-    // first chat turn in this workspace reuses it instead of probing again.
-    if let Some(status) = source_control
-        .as_ref()
-        .filter(|status| status.available && status.error.is_none())
-    {
-        let _ = gyro_core::record_prepared_workspace(
-            root,
-            gyro_core::WorkspaceGitBrief {
-                available: true,
-                branch: status.branch.clone(),
-                ahead: u32::try_from(status.ahead).unwrap_or(u32::MAX),
-                behind: u32::try_from(status.behind).unwrap_or(u32::MAX),
-                dirty_count: u32::try_from(status.files.len()).unwrap_or(u32::MAX),
-                conflicted: status.files.iter().any(|file| file.state == "conflicted"),
-            },
-        );
-    }
-    emit_workspace_preparation(
-        app,
-        request,
-        Some("tests"),
-        "preparing",
-        4,
-        "Discovering tests",
-        &errors,
-    );
-    let tests = test_tree_from_tasks(&tasks);
-    let status = if errors.is_empty() {
-        "ready"
-    } else {
-        "degraded"
-    };
-    let progress = emit_workspace_preparation(
-        app,
-        request,
-        Some("tests"),
-        status,
-        5,
-        if status == "ready" {
-            "Workspace ready"
-        } else {
-            "Workspace ready with warnings"
-        },
-        &errors,
-    );
-    Ok(WorkspacePreparationSnapshot {
-        progress,
-        files: tree.files,
-        source_control,
-        branches,
-        tasks,
-        tests,
-        watcher_mode: watcher_mode.into(),
-        generation: tree.generation,
-    })
-}
-
-#[tauri::command]
-async fn prepare_workspace(
-    request: WorkspacePreparationRequest,
-    app: tauri::AppHandle,
-    watcher: tauri::State<'_, WorkspaceWatchManager>,
-    preparation: tauri::State<'_, WorkspacePreparationManager>,
-) -> Result<WorkspacePreparationSnapshot, String> {
-    let watcher = watcher.inner().clone();
-    let preparation = preparation.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || preparation.prepare(request, watcher, app))
-        .await
-        .map_err(|error| format!("workspace preparation worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn read_workspace_file(
-    workspace_path: String,
-    path: String,
-) -> Result<WorkspaceFileContent, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        read_workspace_file_impl(&workspace_path, &path).map_err(to_string)
-    })
-    .await
-    .map_err(|error| format!("workspace file read worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn read_workspace_file_full(
-    workspace_path: String,
-    path: String,
-) -> Result<WorkspaceFileContent, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        read_workspace_file_with_limit(&workspace_path, &path, MAX_WORKSPACE_FILE_EDIT_BYTES)
-            .map_err(to_string)
-    })
-    .await
-    .map_err(|error| format!("full workspace file read worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn stat_workspace_file(
-    workspace_path: String,
-    path: String,
-) -> Result<WorkspaceFileStat, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        stat_workspace_file_impl(&workspace_path, &path).map_err(to_string)
-    })
-    .await
-    .map_err(|error| format!("workspace file stat worker failed: {error}"))?
-}
-
-/// Kind of a path dropped on the window. Symlinks stay `other` so a drop
-/// cannot follow a link out of the folder the person actually dragged.
-/// This does not grant workspace trust and does not read the directory.
-fn dropped_path_kind(path: String) -> Result<String, String> {
-    let path = PathBuf::from(path.trim());
-    if !path.is_absolute() {
-        return Err("drop path must be absolute".into());
-    }
-    let metadata =
-        std::fs::symlink_metadata(&path).map_err(|_| "drop path is missing".to_string())?;
-    if metadata.file_type().is_symlink() {
-        return Ok("other".into());
-    }
-    if metadata.is_dir() {
-        return Ok("directory".into());
-    }
-    if metadata.is_file() {
-        return Ok("file".into());
-    }
-    Ok("other".into())
-}
-
-#[tauri::command]
-async fn classify_dropped_path(path: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || dropped_path_kind(path))
-        .await
-        .map_err(|error| format!("dropped path worker failed: {error}"))?
-}
-
-#[cfg(test)]
-mod dropped_path_kind_tests {
-    #[test]
-    fn directory_file_and_symlink_stay_distinct() {
-        let root = std::env::temp_dir().join(format!("gyro-drop-kind-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("folder")).unwrap();
-        std::fs::write(root.join("notes.md"), b"hi").unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(root.join("folder"), root.join("link")).unwrap();
-        assert_eq!(
-            super::dropped_path_kind(root.join("folder").display().to_string()).unwrap(),
-            "directory"
-        );
-        assert_eq!(
-            super::dropped_path_kind(root.join("notes.md").display().to_string()).unwrap(),
-            "file"
-        );
-        #[cfg(unix)]
-        assert_eq!(
-            super::dropped_path_kind(root.join("link").display().to_string()).unwrap(),
-            "other"
-        );
-        assert!(super::dropped_path_kind("notes.md".into()).is_err());
-        let _ = std::fs::remove_dir_all(&root);
-    }
-}
-
-#[tauri::command]
-async fn write_workspace_file(
-    request: WorkspaceFileWriteRequest,
-) -> Result<WorkspaceFileContent, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        write_workspace_file_impl(&request).map_err(to_string)
-    })
-    .await
-    .map_err(|error| format!("workspace file write worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn create_file_mutation_proposal(
-    request: FileMutationProposalRequest,
-) -> Result<MutationProposal, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        create_file_mutation_proposal_impl(request).map_err(to_string)
-    })
-    .await
-    .map_err(|error| format!("file mutation proposal worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn resolve_file_mutation_proposal(
-    request: FileMutationDecisionRequest,
-) -> Result<FileMutationDecisionResult, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        resolve_file_mutation_proposal_impl(request).map_err(to_string)
-    })
-    .await
-    .map_err(|error| format!("file mutation decision worker failed: {error}"))?
-}
-
-#[tauri::command]
 async fn resolve_provider_approval(
     app: tauri::AppHandle,
     request: ProviderApprovalDecisionRequest,
@@ -6307,943 +5514,6 @@ fn resolve_provider_approval_blocking(
         .map_err(|_| "the provider turn ended before the decision was delivered".to_string())?;
     let _ = app.emit(PROVIDER_APPROVAL_EVENT, event.clone());
     Ok(event)
-}
-
-#[tauri::command]
-async fn watch_workspace(
-    workspace_path: String,
-    manager: tauri::State<'_, WorkspaceWatchManager>,
-) -> Result<Vec<WorkspaceFile>, String> {
-    // Polling now stats only known directories in the common case. A full walk
-    // runs when directory metadata changes or at a bounded reconciliation age.
-    let manager = manager.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || manager.snapshot(&workspace_path))
-        .await
-        .map_err(|error| format!("workspace watch worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn create_workspace_file(
-    app: tauri::AppHandle,
-    request: WorkspacePathCreateRequest,
-) -> Result<WorkspaceFileStat, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        run_workspace_lifecycle(
-            Some(&app),
-            "ui",
-            || WorkspacePathChange {
-                action: "created",
-                path: absolute_workspace_path(&request.workspace_path, &request.path),
-                destination: None,
-                kind: Some(request.kind.clone()),
-                origin: "ui",
-            },
-            || create_workspace_path_impl(&request),
-        )
-        .map_err(to_string)
-    })
-    .await
-    .map_err(|error| format!("workspace file create worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn rename_workspace_path(
-    app: tauri::AppHandle,
-    request: WorkspacePathRenameRequest,
-) -> Result<WorkspaceFileStat, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        run_workspace_lifecycle(
-            Some(&app),
-            "ui",
-            || WorkspacePathChange {
-                action: if same_workspace_folder(&request.from_path, &request.to_path) {
-                    "renamed"
-                } else {
-                    "moved"
-                },
-                path: absolute_workspace_path(&request.workspace_path, &request.from_path),
-                destination: Some(absolute_workspace_path(
-                    &request.workspace_path,
-                    &request.to_path,
-                )),
-                kind: None,
-                origin: "ui",
-            },
-            || rename_workspace_path_impl(&request),
-        )
-        .map_err(to_string)
-    })
-    .await
-    .map_err(|error| format!("workspace path rename worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn delete_workspace_path(
-    app: tauri::AppHandle,
-    request: WorkspacePathDeleteRequest,
-) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        run_workspace_lifecycle(
-            Some(&app),
-            "ui",
-            || WorkspacePathChange {
-                action: "deleted",
-                path: absolute_workspace_path(&request.workspace_path, &request.path),
-                destination: None,
-                kind: None,
-                origin: "ui",
-            },
-            || delete_workspace_path_impl(&request),
-        )
-        .map_err(to_string)
-        .map(|_trashed| true)
-    })
-    .await
-    .map_err(|error| format!("workspace path delete worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn duplicate_workspace_path(
-    app: tauri::AppHandle,
-    request: WorkspacePathDuplicateRequest,
-) -> Result<WorkspaceFileStat, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let stat = duplicate_workspace_path_impl(&request).map_err(to_string)?;
-        emit_workspace_path_change(
-            &app,
-            WorkspacePathChange {
-                action: "created",
-                path: absolute_workspace_path(&request.workspace_path, &stat.path),
-                destination: None,
-                kind: Some(stat.kind.clone()),
-                origin: "ui",
-            },
-        );
-        Ok(stat)
-    })
-    .await
-    .map_err(|error| format!("workspace path duplicate worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn peek_workspace_path_undo(
-) -> Result<Option<workspace_path_history::WorkspacePathUndoPeek>, String> {
-    Ok(workspace_path_history::peek_workspace_path_undo())
-}
-
-#[tauri::command]
-async fn undo_workspace_path(app: tauri::AppHandle) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let action = undo_workspace_path_impl().map_err(to_string)?;
-        if let Some(action) = action {
-            emit_workspace_path_change(&app, path_history_change(&action));
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    })
-    .await
-    .map_err(|error| format!("workspace undo worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn redo_workspace_path(app: tauri::AppHandle) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let action = redo_workspace_path_impl().map_err(to_string)?;
-        if let Some(action) = action {
-            emit_workspace_path_change(&app, path_history_change(&action));
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    })
-    .await
-    .map_err(|error| format!("workspace redo worker failed: {error}"))?
-}
-
-#[tauri::command]
-async fn search_workspace(
-    request: WorkspaceSearchRequest,
-) -> Result<Vec<WorkspaceSearchResult>, String> {
-    tauri::async_runtime::spawn_blocking(move || search_workspace_impl(&request).map_err(to_string))
-        .await
-        .map_err(|error| format!("workspace search worker failed: {error}"))?
-}
-
-fn read_workspace_file_impl(
-    workspace_path: &str,
-    path: &str,
-) -> anyhow::Result<WorkspaceFileContent> {
-    read_workspace_file_with_limit(workspace_path, path, MAX_WORKSPACE_FILE_PREVIEW_BYTES)
-}
-
-fn read_workspace_file_with_limit(
-    workspace_path: &str,
-    path: &str,
-    max_bytes: usize,
-) -> anyhow::Result<WorkspaceFileContent> {
-    let root = PathBuf::from(workspace_path).canonicalize()?;
-    let candidate = gyro_core::security::assert_path_inside_workspace(&root, Path::new(path))?;
-    let (mut bytes, size_bytes) =
-        read_bounded_regular_file(&candidate, max_bytes, "workspace file")?;
-    let truncated = bytes.len() > max_bytes;
-    if truncated {
-        bytes.truncate(max_bytes);
-    }
-    if bytes.contains(&0) {
-        anyhow::bail!("binary workspace files cannot be previewed");
-    }
-    let content_hash = content_hash(&bytes);
-    let content = decode_workspace_utf8(&bytes, truncated)?;
-
-    Ok(WorkspaceFileContent {
-        path: path.to_string(),
-        content,
-        truncated,
-        size_bytes,
-        content_hash,
-    })
-}
-
-// A preview may end in the middle of one codepoint; malformed input anywhere
-// else must never be silently replaced and subsequently saved over the file.
-fn decode_workspace_utf8(bytes: &[u8], truncated: bool) -> anyhow::Result<String> {
-    match std::str::from_utf8(bytes) {
-        Ok(content) => Ok(content.to_owned()),
-        Err(error) if truncated && error.error_len().is_none() => {
-            Ok(std::str::from_utf8(&bytes[..error.valid_up_to()])?.to_owned())
-        }
-        Err(_) => anyhow::bail!("This file is not valid UTF-8 and cannot be edited as text."),
-    }
-}
-
-#[cfg(test)]
-mod workspace_utf8_tests {
-    use super::decode_workspace_utf8;
-
-    #[cfg(unix)]
-    #[test]
-    fn rejects_fifo_without_waiting_for_a_writer() {
-        use std::os::unix::{ffi::OsStrExt, fs::OpenOptionsExt};
-        use std::time::Duration;
-
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("pipe");
-        let fifo = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
-        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let reader_path = path.clone();
-        let reader = std::thread::spawn(move || {
-            let _ = sender.send(super::read_bounded_regular_file(
-                &reader_path,
-                1024,
-                "workspace file",
-            ));
-        });
-        let result = receiver.recv_timeout(Duration::from_secs(2));
-        if result.is_err() {
-            // Unblock a regressed reader without hanging the test itself.
-            let _writer = std::fs::OpenOptions::new()
-                .write(true)
-                .custom_flags(libc::O_NONBLOCK)
-                .open(&path);
-            let _ = receiver.recv_timeout(Duration::from_secs(2));
-        }
-        if reader.is_finished() {
-            reader.join().unwrap();
-        }
-        let error = result
-            .expect("FIFO read blocked waiting for a writer")
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("not a regular file"), "{error}");
-    }
-    #[test]
-    fn rejects_invalid_utf8_even_in_previews() {
-        assert!(decode_workspace_utf8(&[0xff, 0x61], false).is_err());
-        assert!(decode_workspace_utf8(&[0xff, 0x61], true).is_err());
-        assert!(decode_workspace_utf8(&[0x61, 0xe2], false).is_err());
-    }
-    #[test]
-    fn trims_only_a_truncated_codepoint() {
-        assert_eq!(
-            decode_workspace_utf8(&[0x61, 0xe2, 0x82], true).unwrap(),
-            "a"
-        );
-        assert_eq!(decode_workspace_utf8("a€".as_bytes(), false).unwrap(), "a€");
-    }
-}
-
-fn read_bounded_regular_file(
-    path: &Path,
-    max_bytes: usize,
-    label: &str,
-) -> anyhow::Result<(Vec<u8>, u64)> {
-    let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        // A FIFO must not block in open() before the regular-file check.
-        // O_NONBLOCK has no effect on ordinary file reads.
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    let mut file = options
-        .open(path)
-        .with_context(|| format!("open {label} {}", path.display()))?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() {
-        anyhow::bail!("{label} is not a regular file");
-    }
-    let mut bytes = Vec::with_capacity(max_bytes.min(metadata.len() as usize));
-    Read::by_ref(&mut file)
-        .take(max_bytes.saturating_add(1) as u64)
-        .read_to_end(&mut bytes)
-        .with_context(|| format!("read {label} {}", path.display()))?;
-    Ok((bytes, metadata.len()))
-}
-
-fn stat_workspace_file_impl(workspace_path: &str, path: &str) -> anyhow::Result<WorkspaceFileStat> {
-    let root = PathBuf::from(workspace_path).canonicalize()?;
-    let candidate = gyro_core::security::assert_path_inside_workspace(&root, Path::new(path))?;
-    let metadata = std::fs::metadata(&candidate)?;
-    let kind = if metadata.is_dir() {
-        "directory"
-    } else {
-        "file"
-    }
-    .to_string();
-    let content_hash = if metadata.is_file()
-        && metadata.len() <= MAX_WORKSPACE_FILE_EDIT_BYTES as u64
-    {
-        let (bytes, _) =
-            read_bounded_regular_file(&candidate, MAX_WORKSPACE_FILE_EDIT_BYTES, "workspace file")?;
-        if bytes.len() > MAX_WORKSPACE_FILE_EDIT_BYTES || bytes.contains(&0) {
-            None
-        } else {
-            Some(content_hash(&bytes))
-        }
-    } else {
-        None
-    };
-
-    Ok(WorkspaceFileStat {
-        path: path.to_string(),
-        kind,
-        size_bytes: metadata.len(),
-        content_hash,
-    })
-}
-
-fn write_workspace_file_impl(
-    request: &WorkspaceFileWriteRequest,
-) -> anyhow::Result<WorkspaceFileContent> {
-    let root = PathBuf::from(&request.workspace_path).canonicalize()?;
-    let candidate = validated_workspace_file_target(&root, &request.path)?;
-    if candidate.is_dir() {
-        anyhow::bail!("workspace write path is a directory");
-    }
-    let content_bytes = request.content.as_bytes();
-    if content_bytes.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
-        anyhow::bail!("workspace file is too large to edit in Gyro");
-    }
-    if content_bytes.contains(&0) {
-        anyhow::bail!("binary workspace files cannot be edited");
-    }
-    if let Some(expected_hash) = request.expected_hash.as_deref() {
-        let (current, _) =
-            read_bounded_regular_file(&candidate, MAX_WORKSPACE_FILE_EDIT_BYTES, "workspace file")?;
-        if current.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
-            anyhow::bail!("workspace file is too large to edit in Gyro");
-        }
-        if current.contains(&0) {
-            anyhow::bail!("binary workspace files cannot be edited");
-        }
-        let current_hash = content_hash(&current);
-        if current_hash != expected_hash {
-            anyhow::bail!("file changed on disk; reload before saving");
-        }
-    }
-
-    atomic_write_workspace_file(&candidate, content_bytes)?;
-    read_workspace_file_with_limit(
-        &request.workspace_path,
-        &request.path,
-        MAX_WORKSPACE_FILE_EDIT_BYTES,
-    )
-}
-
-fn validated_workspace_file_target(root: &Path, path: &str) -> anyhow::Result<PathBuf> {
-    let candidate = gyro_core::security::assert_path_inside_workspace(root, Path::new(path))?;
-    let parent = candidate
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("workspace file path has no parent"))?;
-    let resolved_parent = parent
-        .canonicalize()
-        .map_err(|_| anyhow::anyhow!("workspace file parent does not exist"))?;
-    if !resolved_parent.starts_with(root) {
-        anyhow::bail!("workspace file parent resolves outside the workspace");
-    }
-    Ok(resolved_parent.join(
-        candidate
-            .file_name()
-            .ok_or_else(|| anyhow::anyhow!("workspace file path has no file name"))?,
-    ))
-}
-
-fn atomic_write_workspace_file(path: &Path, content: &[u8]) -> anyhow::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("workspace file path has no parent"))?;
-    let temporary = parent.join(format!(
-        ".gyro-{}-{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("mutation"),
-        Uuid::new_v4()
-    ));
-    let result = (|| -> anyhow::Result<()> {
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)?;
-        if let Ok(metadata) = fs::metadata(path) {
-            file.set_permissions(metadata.permissions())?;
-        }
-        file.write_all(content)?;
-        file.flush()?;
-        file.sync_all()?;
-        fs::rename(&temporary, path)?;
-        fs::File::open(parent)?.sync_all()?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
-}
-
-fn workspace_root(workspace_path: &str) -> anyhow::Result<PathBuf> {
-    PathBuf::from(workspace_path)
-        .canonicalize()
-        .map_err(anyhow::Error::from)
-}
-
-fn assert_workspace_path(root: &Path, path: &str) -> anyhow::Result<PathBuf> {
-    gyro_core::security::assert_path_inside_workspace(root, Path::new(path))
-}
-
-/// Lifecycle and Git actions act on the entry itself, never a symlink's target.
-fn assert_workspace_entry(root: &Path, path: &str) -> anyhow::Result<PathBuf> {
-    gyro_core::security::assert_entry_inside_workspace(root, Path::new(path))
-}
-
-/// What one lifecycle call did, in the shape an open editor needs to follow it.
-#[derive(Clone, Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkspacePathChange {
-    /// `created`, `renamed`, `moved` or `deleted`.
-    action: &'static str,
-    /// Absolute path the entry had before the change.
-    path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    destination: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    kind: Option<String>,
-    /// `ui` or `model`: who asked, so a surface can skip work it already did.
-    origin: &'static str,
-}
-
-/// Runs one lifecycle call and announces it.
-///
-/// This is the only place a workspace mutation becomes an event, and both the
-/// workspace explorer commands and the model-facing capabilities come through
-/// it. A rename or delete performed by a model therefore reaches the explorer
-/// and every open editor exactly like the one the user performed by hand.
-fn emit_workspace_path_change(app: &tauri::AppHandle, change: WorkspacePathChange) {
-    let _ = app.emit(WORKSPACE_PATHS_CHANGED_EVENT, change);
-}
-
-fn run_workspace_lifecycle<T>(
-    app: Option<&tauri::AppHandle>,
-    origin: &'static str,
-    change: impl FnOnce() -> WorkspacePathChange,
-    operation: impl FnOnce() -> anyhow::Result<T>,
-) -> anyhow::Result<T> {
-    let outcome = operation()?;
-    if let Some(app) = app {
-        let mut recorded = change();
-        recorded.origin = origin;
-        emit_workspace_path_change(app, recorded);
-    }
-    Ok(outcome)
-}
-
-/// The absolute form of a workspace path, whichever form the caller passed.
-fn absolute_workspace_path(workspace_path: &str, path: &str) -> String {
-    let candidate = Path::new(path);
-    if candidate.is_absolute() {
-        return candidate.to_string_lossy().into_owned();
-    }
-    Path::new(workspace_path)
-        .join(candidate)
-        .to_string_lossy()
-        .into_owned()
-}
-
-/// A rename keeps its folder, a move changes it.
-fn same_workspace_folder(from: &str, to: &str) -> bool {
-    Path::new(from).parent() == Path::new(to).parent()
-}
-
-/// Where this platform keeps files the user deleted.
-fn trash_directory() -> Option<PathBuf> {
-    let home = PathBuf::from(std::env::var_os("HOME")?);
-    if cfg!(target_os = "macos") {
-        Some(home.join(".Trash"))
-    } else if cfg!(target_os = "linux") {
-        Some(home.join(".local/share/Trash/files"))
-    } else {
-        None
-    }
-}
-
-/// The name a second delete of the same entry gets: `notes 2.md`, `notes 3.md`.
-fn unique_trash_destination(directory: &Path, name: &std::ffi::OsStr) -> PathBuf {
-    let name = name.to_string_lossy();
-    let (stem, extension) = match name.rfind('.') {
-        Some(index) if index > 0 => (name[..index].to_string(), name[index..].to_string()),
-        _ => (name.to_string(), String::new()),
-    };
-    let mut candidate = directory.join(name.as_ref());
-    let mut attempt = 2;
-    while candidate.symlink_metadata().is_ok() {
-        candidate = directory.join(format!("{stem} {attempt}{extension}"));
-        attempt += 1;
-    }
-    candidate
-}
-
-/// `files.enableTrash`: a delete moves the entry into the trash so it can be
-/// recovered, which is what Finder's ⌘⌫ does. Nothing is unlinked for good, and
-/// a trash that cannot be reached is an error rather than a silent destroy.
-fn move_entry_to_trash(path: &Path) -> anyhow::Result<PathBuf> {
-    let directory = trash_directory()
-        .ok_or_else(|| anyhow::anyhow!("this platform has no trash for workspace deletes"))?;
-    move_entry_into_trash(path, &directory)
-}
-
-/// The move itself, against a caller-chosen directory so a test can use a
-/// temporary one instead of the user's real trash.
-fn move_entry_into_trash(path: &Path, directory: &Path) -> anyhow::Result<PathBuf> {
-    std::fs::create_dir_all(directory)?;
-    let name = path
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("workspace path has no file name"))?;
-    let destination = unique_trash_destination(directory, name);
-    if std::fs::rename(path, &destination).is_ok() {
-        return Ok(destination);
-    }
-    // The trash lives on the boot volume: copy across, then drop the original.
-    copy_entry(path, &destination)?;
-    remove_entry(path)?;
-    Ok(destination)
-}
-
-fn copy_entry(from: &Path, to: &Path) -> anyhow::Result<()> {
-    let metadata = std::fs::symlink_metadata(from)?;
-    if metadata.is_dir() {
-        std::fs::create_dir_all(to)?;
-        for entry in std::fs::read_dir(from)? {
-            let entry = entry?;
-            copy_entry(&entry.path(), &to.join(entry.file_name()))?;
-        }
-        return Ok(());
-    }
-    if metadata.file_type().is_symlink() {
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(std::fs::read_link(from)?, to)?;
-        #[cfg(not(unix))]
-        std::fs::copy(from, to)?;
-        return Ok(());
-    }
-    std::fs::copy(from, to)?;
-    Ok(())
-}
-
-fn remove_entry(path: &Path) -> anyhow::Result<()> {
-    if std::fs::symlink_metadata(path)?.is_dir() {
-        std::fs::remove_dir_all(path)?;
-    } else {
-        std::fs::remove_file(path)?;
-    }
-    Ok(())
-}
-
-fn create_workspace_path_impl(
-    request: &WorkspacePathCreateRequest,
-) -> anyhow::Result<WorkspaceFileStat> {
-    let root = workspace_root(&request.workspace_path)?;
-    let candidate = assert_workspace_path(&root, &request.path)?;
-    if candidate.exists() {
-        anyhow::bail!("workspace path already exists");
-    }
-    match request.kind.as_str() {
-        "directory" => std::fs::create_dir_all(&candidate)?,
-        "file" => {
-            if let Some(parent) = candidate.parent() {
-                if !parent.starts_with(&root) {
-                    anyhow::bail!("workspace file parent is outside workspace");
-                }
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&candidate)?;
-        }
-        _ => anyhow::bail!("workspace path kind must be file or directory"),
-    }
-    workspace_path_history::record(workspace_path_history::PathHistoryAction::Created {
-        path: candidate.clone(),
-    });
-    stat_workspace_file_impl(&request.workspace_path, &request.path)
-}
-
-fn rename_workspace_path_impl(
-    request: &WorkspacePathRenameRequest,
-) -> anyhow::Result<WorkspaceFileStat> {
-    let root = workspace_root(&request.workspace_path)?;
-    let from = assert_workspace_entry(&root, &request.from_path)?;
-    let to = assert_workspace_entry(&root, &request.to_path)?;
-    if std::fs::symlink_metadata(&from).is_err() {
-        anyhow::bail!("workspace path does not exist");
-    }
-    if std::fs::symlink_metadata(&to).is_ok() {
-        anyhow::bail!("target workspace path already exists");
-    }
-    if let Some(parent) = to.parent() {
-        if !parent.starts_with(&root) {
-            anyhow::bail!("target parent is outside workspace");
-        }
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::rename(&from, &to)?;
-    workspace_path_history::record(workspace_path_history::PathHistoryAction::Moved {
-        from: from.clone(),
-        to: to.clone(),
-    });
-    stat_workspace_file_impl(&request.workspace_path, &request.to_path)
-}
-
-fn delete_workspace_path_impl(request: &WorkspacePathDeleteRequest) -> anyhow::Result<PathBuf> {
-    let root = workspace_root(&request.workspace_path)?;
-    let candidate = assert_workspace_entry(&root, &request.path)?;
-    let Ok(metadata) = std::fs::symlink_metadata(&candidate) else {
-        anyhow::bail!("workspace path does not exist");
-    };
-    if metadata.is_symlink() {
-        // Moving the link into the trash never loses the content it points at.
-        let trashed = move_entry_to_trash(&candidate)?;
-        workspace_path_history::record(workspace_path_history::PathHistoryAction::Trashed {
-            original: candidate.clone(),
-            trashed: trashed.clone(),
-        });
-        return Ok(trashed);
-    }
-    if metadata.is_file() {
-        if let Some(expected_hash) = request.expected_hash.as_deref() {
-            let (bytes, _) = read_bounded_regular_file(
-                &candidate,
-                MAX_WORKSPACE_FILE_EDIT_BYTES,
-                "workspace file",
-            )?;
-            if bytes.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
-                anyhow::bail!("workspace file is too large for hash-approved deletion");
-            }
-            if bytes.contains(&0) {
-                anyhow::bail!("binary workspace files cannot be deleted through hash approval");
-            }
-            let current_hash = content_hash(&bytes);
-            if current_hash != expected_hash {
-                anyhow::bail!("file changed on disk; reload before deleting");
-            }
-        }
-    }
-    // A folder travels as one entry, which is also why a non-empty folder can
-    // be deleted at all: nothing is unlinked, the whole tree is moved aside.
-    let trashed = move_entry_to_trash(&candidate)?;
-    workspace_path_history::record(workspace_path_history::PathHistoryAction::Trashed {
-        original: candidate.clone(),
-        trashed: trashed.clone(),
-    });
-    Ok(trashed)
-}
-
-/// Splits a name into stem and extension, leaving directories alone.
-fn split_duplicate_name(file_name: &str, is_directory: bool) -> (String, String) {
-    if is_directory {
-        return (file_name.to_string(), String::new());
-    }
-    match file_name.rsplit_once('.') {
-        Some((stem, extension)) if !stem.is_empty() => (stem.to_string(), format!(".{extension}")),
-        _ => (file_name.to_string(), String::new()),
-    }
-}
-
-/// Copies one workspace entry beside itself, choosing a free "copy" name.
-fn duplicate_workspace_path_impl(
-    request: &WorkspacePathDuplicateRequest,
-) -> anyhow::Result<WorkspaceFileStat> {
-    let root = workspace_root(&request.workspace_path)?;
-    let source = assert_workspace_entry(&root, &request.path)?;
-    let metadata = std::fs::symlink_metadata(&source)
-        .map_err(|_| anyhow::anyhow!("workspace path does not exist"))?;
-    let parent = source
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("workspace path has no parent folder"))?;
-    let file_name = source
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| anyhow::anyhow!("workspace path has no name"))?;
-    let (stem, extension) = split_duplicate_name(file_name, metadata.is_dir());
-    let mut destination = parent.join(format!("{stem} copy{extension}"));
-    let mut suffix = 2;
-    while std::fs::symlink_metadata(&destination).is_ok() {
-        destination = parent.join(format!("{stem} copy {suffix}{extension}"));
-        suffix += 1;
-        if suffix > 1000 {
-            anyhow::bail!("could not find a free name for the duplicate");
-        }
-    }
-    copy_entry(&source, &destination)?;
-    workspace_path_history::record(workspace_path_history::PathHistoryAction::Created {
-        path: destination.clone(),
-    });
-    let relative = destination
-        .strip_prefix(&root)
-        .map_err(|_| anyhow::anyhow!("duplicate landed outside the workspace"))?
-        .to_string_lossy()
-        .replace('\\', "/");
-    stat_workspace_file_impl(&request.workspace_path, &relative)
-}
-
-/// Moves a trashed entry back home, recreating a parent folder if it is gone.
-fn restore_entry_from_trash(trashed: &Path, original: &Path) -> anyhow::Result<()> {
-    if std::fs::symlink_metadata(original).is_ok() {
-        anyhow::bail!(
-            "cannot restore {}: that path exists again",
-            original.display()
-        );
-    }
-    if let Some(parent) = original.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    if std::fs::rename(trashed, original).is_err() {
-        copy_entry(trashed, original)?;
-        remove_entry(trashed)?;
-    }
-    Ok(())
-}
-
-/// Applies the inverse of one journal entry and returns the action that redoes it.
-fn apply_path_history_action(
-    action: &workspace_path_history::PathHistoryAction,
-) -> anyhow::Result<workspace_path_history::PathHistoryAction> {
-    use workspace_path_history::PathHistoryAction;
-    match action {
-        PathHistoryAction::Created { path } => {
-            let trashed = move_entry_to_trash(path)?;
-            Ok(PathHistoryAction::Trashed {
-                original: path.clone(),
-                trashed,
-            })
-        }
-        PathHistoryAction::Moved { from, to } => {
-            if std::fs::symlink_metadata(to).is_err() {
-                anyhow::bail!("cannot undo the move: {} no longer exists", to.display());
-            }
-            if let Some(parent) = from.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::rename(to, from)?;
-            Ok(PathHistoryAction::Moved {
-                from: to.clone(),
-                to: from.clone(),
-            })
-        }
-        PathHistoryAction::Trashed { original, trashed } => {
-            restore_entry_from_trash(trashed, original)?;
-            Ok(PathHistoryAction::Trashed {
-                original: original.clone(),
-                trashed: trashed.clone(),
-            })
-        }
-    }
-}
-
-fn undo_workspace_path_impl() -> anyhow::Result<Option<workspace_path_history::PathHistoryAction>> {
-    let Some(action) = workspace_path_history::pop_undo() else {
-        return Ok(None);
-    };
-    match apply_path_history_action(&action) {
-        Ok(reversed) => {
-            workspace_path_history::push_redo(reversed);
-            Ok(Some(action))
-        }
-        Err(error) => {
-            workspace_path_history::push_undo(action);
-            Err(error)
-        }
-    }
-}
-
-fn redo_workspace_path_impl() -> anyhow::Result<Option<workspace_path_history::PathHistoryAction>> {
-    let Some(action) = workspace_path_history::pop_redo() else {
-        return Ok(None);
-    };
-    match apply_path_history_action(&action) {
-        Ok(reversed) => {
-            workspace_path_history::push_undo(reversed);
-            Ok(Some(action))
-        }
-        Err(error) => {
-            workspace_path_history::push_redo(action);
-            Err(error)
-        }
-    }
-}
-
-/// The explorer-facing shape of an undone or redone journal entry.
-fn path_history_change(action: &workspace_path_history::PathHistoryAction) -> WorkspacePathChange {
-    use workspace_path_history::PathHistoryAction;
-    match action {
-        PathHistoryAction::Created { path } => WorkspacePathChange {
-            action: "deleted",
-            path: path.to_string_lossy().into_owned(),
-            destination: None,
-            kind: None,
-            origin: "ui",
-        },
-        PathHistoryAction::Moved { from, to } => WorkspacePathChange {
-            action: "moved",
-            path: to.to_string_lossy().into_owned(),
-            destination: Some(from.to_string_lossy().into_owned()),
-            kind: None,
-            origin: "ui",
-        },
-        PathHistoryAction::Trashed { original, .. } => WorkspacePathChange {
-            action: "created",
-            path: original.to_string_lossy().into_owned(),
-            destination: None,
-            kind: None,
-            origin: "ui",
-        },
-    }
-}
-
-fn search_workspace_impl(
-    request: &WorkspaceSearchRequest,
-) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
-    let root = workspace_root(&request.workspace_path)?;
-    let query = request.query.trim();
-    if query.is_empty() {
-        return Ok(Vec::new());
-    }
-    let max_results = request.max_results.unwrap_or(200).clamp(1, 1000);
-    // UI search keeps fixed strings so ordinary typing is not treated as regex.
-    // Model capability search calls ripgrep directly and reports regex errors.
-    let use_regex = request.regex.unwrap_or(false);
-    match run_workspace_rg_search(&root, query, request.globs.as_ref(), max_results, use_regex) {
-        Ok(results) => Ok(results),
-        // Agents sometimes send patterns that are invalid regex. Fall back to a
-        // literal search so the capability returns matches instead of an error
-        // that short-circuits the whole turn.
-        Err(_) if use_regex => {
-            run_workspace_rg_search(&root, query, request.globs.as_ref(), max_results, false)
-                .or_else(|_| fallback_search_workspace(&root, query, max_results))
-        }
-        Err(_) => fallback_search_workspace(&root, query, max_results),
-    }
-}
-
-fn fallback_search_workspace(
-    root: &Path,
-    query: &str,
-    max_results: usize,
-) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
-    let mut results = Vec::new();
-    let started_at = Instant::now();
-    let mut scanned_files = 0usize;
-    let mut scanned_bytes = 0u64;
-    for entry in WalkDir::new(root)
-        .min_depth(1)
-        .max_depth(8)
-        .into_iter()
-        .filter_entry(|entry| {
-            let name = entry.file_name().to_string_lossy();
-            !(is_generated_workspace_dir(&name)
-                || matches!(name.as_ref(), ".git" | "target" | "dist" | "build"))
-        })
-    {
-        if started_at.elapsed() >= WORKSPACE_SEARCH_FALLBACK_TIMEOUT
-            || scanned_files >= MAX_WORKSPACE_SEARCH_FALLBACK_FILES
-            || scanned_bytes >= MAX_WORKSPACE_SEARCH_FALLBACK_BYTES
-        {
-            break;
-        }
-        // Unreadable entries are skipped; the fallback is best-effort.
-        let Ok(entry) = entry else {
-            continue;
-        };
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let Ok(metadata) = entry.metadata() else {
-            continue;
-        };
-        if metadata.len() > MAX_WORKSPACE_FILE_PREVIEW_BYTES as u64 {
-            continue;
-        }
-        if scanned_bytes.saturating_add(metadata.len()) > MAX_WORKSPACE_SEARCH_FALLBACK_BYTES {
-            break;
-        }
-        scanned_files += 1;
-        scanned_bytes = scanned_bytes.saturating_add(metadata.len());
-        let Ok((bytes, _)) = read_bounded_regular_file(
-            entry.path(),
-            MAX_WORKSPACE_FILE_PREVIEW_BYTES,
-            "workspace search file",
-        ) else {
-            continue;
-        };
-        if bytes.len() > MAX_WORKSPACE_FILE_PREVIEW_BYTES {
-            continue;
-        }
-        if bytes.contains(&0) {
-            continue;
-        }
-        let content = String::from_utf8_lossy(&bytes);
-        for (index, line) in content.lines().enumerate() {
-            if line.contains(query) {
-                let path = entry
-                    .path()
-                    .strip_prefix(root)?
-                    .to_string_lossy()
-                    .to_string();
-                results.push(WorkspaceSearchResult {
-                    path,
-                    line_number: index + 1,
-                    line: line.to_string(),
-                    ranges: literal_search_ranges(line, query),
-                });
-                if results.len() >= max_results {
-                    return Ok(results);
-                }
-            }
-        }
-    }
-    Ok(results)
 }
 
 #[tauri::command]
@@ -20052,9 +18322,9 @@ pub fn run() {
             automation::commands::create_automation,
             automation::commands::edit_automation,
             create_desktop_session,
-            create_file_mutation_proposal,
+            workspace::files::create_file_mutation_proposal,
             terminal::panes::create_terminal_pane,
-            create_workspace_file,
+            workspace::paths::create_workspace_file,
             create_worktree_session,
             ide::debug::debug_send,
             ide::debug::debug_start,
@@ -20062,11 +18332,11 @@ pub fn run() {
             discover_ollama_models_command,
             discover_google_models_command,
             delete_session,
-            delete_workspace_path,
-            duplicate_workspace_path,
-            peek_workspace_path_undo,
-            undo_workspace_path,
-            redo_workspace_path,
+            workspace::paths::delete_workspace_path,
+            workspace::paths::duplicate_workspace_path,
+            workspace::paths::peek_workspace_path_undo,
+            workspace::paths::undo_workspace_path,
+            workspace::paths::redo_workspace_path,
             export_diagnostics,
             get_account_session,
             get_notification_permission,
@@ -20111,8 +18381,8 @@ pub fn run() {
             automation::commands::list_due_automations,
             list_sessions,
             task_suggestions::list_start_task_suggestions,
-            list_workspace_files,
-            list_workspace_tree,
+            workspace::tree::list_workspace_files,
+            workspace::tree::list_workspace_tree,
             workspace_roots::inspect_workspace_folders,
             load_config,
             warm_desktop_shell,
@@ -20120,8 +18390,8 @@ pub fn run() {
             language_server::lsp_request,
             language_server::lsp_start,
             language_server::lsp_stop,
-            read_workspace_file,
-            read_workspace_file_full,
+            workspace::files::read_workspace_file,
+            workspace::files::read_workspace_file_full,
             terminal::panes::read_terminal_output,
             read_session_events,
             prepare_chat_attachment,
@@ -20129,17 +18399,17 @@ pub fn run() {
             resolve_cited_chat_image,
             prepare_chat_media_upload,
             prepare_browser_attachment,
-            prepare_workspace,
+            workspace::preparation::prepare_workspace,
             restart_app,
             updater_platform_key,
             menu_bar::hide_menu_bar_popover,
             automation::commands::recover_automation_leases,
             rename_session,
-            rename_workspace_path,
+            workspace::paths::rename_workspace_path,
             refresh_account_session,
             terminal::panes::resize_terminal_pane,
             terminal::panes::terminal_pane_working_directory,
-            resolve_file_mutation_proposal,
+            workspace::files::resolve_file_mutation_proposal,
             resolve_provider_approval,
             resolve_capability_approval,
             record_file_review_decision,
@@ -20153,14 +18423,14 @@ pub fn run() {
             compact_provider_chat,
             save_config,
             save_project_capability_policy,
-            search_workspace,
+            workspace::paths::search_workspace,
             set_session_model,
             menu_bar::set_menu_bar_snapshot,
             menu_bar::set_menu_bar_visible,
             git::commands::set_session_branch,
             automation::commands::set_automation_status,
-            stat_workspace_file,
-            classify_dropped_path,
+            workspace::files::stat_workspace_file,
+            workspace::files::classify_dropped_path,
             summarize_file_changes,
             start_account_login,
             terminal::panes::stop_terminal_pane,
@@ -20179,8 +18449,8 @@ pub fn run() {
             ide::tasks::test_run,
             automation::commands::triage_automation,
             update_capability_ide_evidence,
-            watch_workspace,
-            write_workspace_file,
+            workspace::paths::watch_workspace,
+            workspace::files::write_workspace_file,
             terminal::panes::write_terminal_input
         ])
         .build(context)
