@@ -315,9 +315,9 @@ const accessState = readFileSync(
   new URL("../apps/desktop/src/system-access-state.ts", import.meta.url),
   "utf8",
 );
-assert.match(desktopHook, /request_dictation_access/);
-assert.match(desktopHook, /start_dictation/);
-assert.match(desktopHook, /stop_dictation/);
+assert.match(accessCommand, /request_dictation_access/);
+const { createDesktopDictation } =
+  await import("../apps/desktop/src/desktop-dictation.ts");
 assert.match(desktopHook, /dictation-update/);
 assert.match(desktopHook, /setSharedDictation/);
 assert.doesNotMatch(accessState, /import "\.\/dictation-access/);
@@ -372,4 +372,126 @@ assert.deepEqual(restoredListener.events, [
   ["error", "Dictation is not available in this window."],
 ]);
 
+// Finish releases capture without aborting the result listener.
+const finishing = listen();
+const finishController = createBrowserDictation(FakeRecognition);
+let ready = 0;
+finishing.onStart = () => ready++;
+finishController.start(finishing);
+const finishRecognition = FakeRecognition.latest;
+finishRecognition.onstart();
+assert.equal(ready, 1);
+finishRecognition.stop = () => {
+  finishRecognition.stopped = true;
+};
+finishRecognition.emit("last partial", false);
+finishController.finish();
+assert.equal(finishRecognition.stopped, true);
+assert.equal(finishRecognition.aborted, false);
+finishRecognition.emit("last complete sentence", true);
+assert.deepEqual(finishing.events, [
+  ["partial", "last partial"],
+  ["final", "last complete sentence"],
+]);
+finishController.stop();
+finishRecognition.onstart?.();
+assert.equal(ready, 1);
+
+// The native bridge runs with fake IPC only; no permission prompts or audio.
+let update;
+let subscribed = 0;
+const commands = [];
+let resolveStart;
+const bridge = createDesktopDictation({
+  listen: async (callback) => {
+    update = callback;
+    subscribed++;
+    return () => {
+      subscribed--;
+    };
+  },
+  invoke: async (command, args) => {
+    commands.push([command, args]);
+    if (command === "start_dictation")
+      await new Promise((resolve) => {
+        resolveStart = resolve;
+      });
+  },
+});
+const nativeFirst = listen();
+let nativeReady = 0;
+nativeFirst.onStart = () => nativeReady++;
+bridge.start(nativeFirst);
+await tick();
+assert.equal(nativeReady, 0);
+assert.deepEqual(
+  commands.map((x) => x[0]),
+  ["start_dictation"],
+);
+resolveStart();
+await tick();
+assert.equal(nativeReady, 1);
+update({ kind: "partial", text: "keep these" });
+bridge.finish();
+bridge.finish();
+await tick();
+assert.equal(commands.filter((x) => x[1]?.finish).length, 1);
+assert.equal(subscribed, 1);
+update({ kind: "final", text: "keep these final words" });
+await tick();
+assert.equal(subscribed, 0);
+assert.deepEqual(nativeFirst.events, [
+  ["partial", "keep these"],
+  ["final", "keep these final words"],
+]);
+
+// An unresolved older start is stopped before a new start can own the engine.
+commands.length = 0;
+const old = listen();
+bridge.start(old);
+await tick();
+const oldUpdate = update;
+const releaseOldStart = resolveStart;
+bridge.stop();
+const newer = listen();
+bridge.start(newer);
+await tick();
+assert.equal(commands.filter((x) => x[0] === "start_dictation").length, 1);
+releaseOldStart();
+await tick();
+assert.deepEqual(
+  commands.map((x) => x[0]),
+  ["start_dictation", "stop_dictation", "start_dictation"],
+);
+oldUpdate({ kind: "final", text: "stale" });
+assert.deepEqual(old.events, []);
+assert.deepEqual(newer.events, []);
+resolveStart();
+await tick();
+bridge.stop();
+await tick();
+assert.equal(subscribed, 0);
+
+// Abort while subscription is being established cannot leak that subscription.
+let releaseSubscription;
+let releasedSubscription = false;
+const subscriptionBridge = createDesktopDictation({
+  listen: () =>
+    new Promise((resolve) => {
+      releaseSubscription = () =>
+        resolve(() => {
+          releasedSubscription = true;
+        });
+    }),
+  invoke: async () => {
+    throw Error("must not start");
+  },
+});
+const abort = new AbortController();
+subscriptionBridge.start({ ...listen(), signal: abort.signal });
+await tick();
+abort.abort();
+releaseSubscription();
+await tick();
+assert.equal(releasedSubscription, true);
 console.log("dictation microphone passed");

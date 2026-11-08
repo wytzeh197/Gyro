@@ -1,4 +1,4 @@
-import { type ReactNode, useContext, useEffect, useState } from "react";
+import { type ReactNode, useContext, useEffect, useId, useState } from "react";
 import {
   Book,
   ChevronRight,
@@ -9,6 +9,7 @@ import {
   ListChecks,
   type LucideIcon,
   Lightbulb,
+  LoaderCircle,
   Minimize2,
   Pause,
   Pencil,
@@ -52,6 +53,7 @@ import {
   WorkspacePathUndoContext,
 } from "./workspace-path-undo";
 import "./chat-recovery.css";
+import "./chat-run-minimal.css";
 import { MotionDisclosure } from "./motion-disclosure";
 
 /**
@@ -110,7 +112,7 @@ export type ChatRunProps = {
   /** Failed status identity used to read the host's automatic retry deadline. */
   recoveryEventId?: string;
   /** Native continuation waits keep this turn's invoke and child tasks alive. */
-  nativeRetry?: { retryAt: number; attempt?: number; maxAttempts?: number };
+  nativeRetry?: { retryAt: number; attempt?: number; maxAttempts?: number; recoveryKind?: string };
   onCancelNativeRetry?: () => void;
   onReconnect?: () => void;
   reconnectLabel?: string;
@@ -261,7 +263,7 @@ export function ChatRun({
 
   const shellClass = [
     "gyro-run",
-    isSegments ? "is-segments" : "is-groups",
+    isSegments ? "is-segments is-minimal" : "is-groups",
     isLive
       ? model.phase.name === "retrying"
         ? "is-retrying"
@@ -434,8 +436,8 @@ export function ChatRun({
           continuation={nativeWait}
           phase={{
             name: "failed",
-            message: "Model is temporarily busy",
-            recoveryKind: "model-capacity",
+            message: nativeWait.recoveryKind === "rate-limit" ? "Provider rate limit reached" : "Waiting for the provider",
+            recoveryKind: nativeWait.recoveryKind ?? "model-capacity",
           }}
         />
       ) : model.phase.name === "failed" ||
@@ -557,6 +559,7 @@ function RunSegmentSummary({
   onOpenChanges?: () => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const detailsId = useId();
   const summary = splitSegmentSummary(summarizeSegment(calls));
   const lineStats = segmentLineStats(calls);
   const lifecycleFiles = calls.flatMap((step) =>
@@ -572,13 +575,19 @@ function RunSegmentSummary({
   return (
     <div className={className}>
       <button
+        aria-controls={isExpanded ? detailsId : undefined}
         aria-expanded={isExpanded}
         className="gyro-run-segment-toggle"
         onClick={() => setIsExpanded((current) => !current)}
         type="button"
       >
+        <ChevronRight
+          aria-hidden="true"
+          className="gyro-run-segment-chevron"
+          size={13}
+        />
         <span className="gyro-run-segment-label">
-          {summary.lead}
+          {summary.lead.replace(/, /g, " · ")}
           {summary.failed ? (
             <>
               {", "}
@@ -596,19 +605,16 @@ function RunSegmentSummary({
             ) : null}
           </span>
         ) : null}
-        <ChevronRight
-          aria-hidden="true"
-          className="gyro-run-segment-chevron"
-          size={12}
-        />
       </button>
       {!isExpanded ? <PathUndoButton files={lifecycleFiles} /> : null}
       <MotionDisclosure open={isExpanded}>
-        <RunCalls
-          aggregateFileStats={aggregateFileStats}
-          calls={calls}
-          onOpenChanges={onOpenChanges}
-        />
+        <div id={detailsId}>
+          <RunCalls
+            aggregateFileStats={aggregateFileStats}
+            calls={calls}
+            onOpenChanges={onOpenChanges}
+          />
+        </div>
       </MotionDisclosure>
     </div>
   );
@@ -654,8 +660,12 @@ function RunCallRow({
   step: WorkStep;
 }) {
   const item = step.item;
-  const text = runCallText(step);
-  const Icon = workIcon(item);
+  const callText = runCallText(step);
+  const text =
+    item.kind === "command" && item.status === "running"
+      ? { ...callText, label: runRowText(step).label }
+      : callText;
+  const Icon = item.status === "running" ? LoaderCircle : workIcon(item);
   const repeat = step.repeat ?? 1;
   const file = item.kind === "file" ? item : undefined;
   const lineStats = fileLineStats(file, aggregateFileStats);
@@ -1143,19 +1153,33 @@ function RunProblem({
   retryAt?: number;
   continuation?: { attempt?: number; maxAttempts?: number };
 }) {
-  const now = useNow(retryAt !== undefined, retryAt);
+  const retryNotBefore =
+    phase.name === "failed" ? phase.retryNotBefore : undefined;
+  const now = useNow(
+    retryAt !== undefined || retryNotBefore !== undefined,
+    retryAt ?? retryNotBefore,
+  );
   const isInterrupted = phase.name === "interrupted";
   const isCancelled =
     phase.name === "failed" && phase.recoveryKind === "cancelled";
   if (isCancelled) return null; // The neutral Stopped header is sufficient.
   const isScheduled = retryAt !== undefined;
+  const cooldownSeconds =
+    retryNotBefore === undefined
+      ? 0
+      : Math.max(0, Math.ceil((retryNotBefore - now) / 1_000));
+  const continuationUnavailable =
+    phase.name === "failed" &&
+    phase.recoveryKind === "continuation-unavailable";
+  const exhausted =
+    phase.name === "failed" && phase.recoveryKind === "retry-exhausted";
   const isCapacityExhausted =
     !isInterrupted && phase.recoveryKind === "model-capacity-exhausted";
   // Capacity is also the backend's output/tool-budget category. It is not the
   // temporary model-capacity failure shown in the user's recovery notice.
   const isPermanent =
     !isInterrupted &&
-    /^(?:authentication|login-expired|plan-exhausted|provider-config|cli-contract|capacity|spend-ceiling|no-progress|tool-budget|partial-answer|cancelled|model-unavailable|permission|unsupported|invalid-request|model-capacity-exhausted)$/.test(
+    /^(?:authentication|login-expired|plan-exhausted|quota-exceeded|provider-config|cli-contract|capacity|spend-ceiling|no-progress|tool-budget|partial-answer|cancelled|model-unavailable|permission|unsupported|invalid-request|model-capacity-exhausted|retry-exhausted|continuation-unavailable)$/.test(
       phase.recoveryKind ?? "",
     );
   const isInactivityLimit =
@@ -1180,29 +1204,45 @@ function RunProblem({
       ));
   const isTransient = isScheduled || isBusy || isRateLimit || isConnection;
   const attemptLabel =
-    continuation?.attempt === undefined
+    continuation?.attempt === undefined || continuation.attempt < 1
       ? ""
       : continuation.maxAttempts === undefined
         ? ` Retry ${continuation.attempt}.`
         : ` Retry ${continuation.attempt} of ${continuation.maxAttempts}.`;
+  const technicalDetail =
+    phase.name === "failed"
+      ? failureDetail(phase.message, phase.recoveryMessage)
+      : undefined;
   const detail = continuation
-    ? `Recorded work and active tasks are preserved.${attemptLabel}`
+    ? `Waiting for the provider before continuing.${attemptLabel}`
     : isInterrupted
       ? "Gyro restarted or lost the provider before this turn finished. Retry continues the same message."
       : isBusy
         ? "The conversation context is preserved."
-        : failureDetail(phase.message, phase.recoveryMessage);
-  const title = isCapacityExhausted
-    ? "Model is still busy"
-    : isInterrupted
-      ? "Previous send was interrupted"
-      : isBusy
-        ? "Model is temporarily busy"
         : isRateLimit
-          ? "Provider is temporarily limiting requests"
-          : isConnection
-            ? "Could not reach the provider"
-            : "Could not complete this turn";
+          ? cooldownSeconds > 0
+            ? `Retry is available in ${cooldownSeconds}s.`
+            : "The provider cooldown must end before this turn can continue."
+          : (phase.recoveryMessage ??
+            "Open technical details for the provider error.");
+  const title =
+    phase.name === "failed" && phase.recoveryKind === "quota-exceeded"
+      ? "Provider quota reached"
+      : continuationUnavailable
+        ? "Saved conversation unavailable"
+        : exhausted
+          ? "Automatic retries exhausted"
+          : isCapacityExhausted
+            ? "Model is still busy"
+            : isInterrupted
+              ? "Previous send was interrupted"
+              : isBusy
+                ? "Model is temporarily busy"
+                : isRateLimit
+                  ? "Provider rate limit reached"
+                  : isConnection
+                    ? "Could not reach the provider"
+                    : "Could not complete this turn";
   const secondsLeft =
     retryAt === undefined ? 0 : Math.max(0, Math.ceil((retryAt - now) / 1_000));
   return (
@@ -1220,6 +1260,12 @@ function RunProblem({
       <span className="gyro-run-problem-text">
         <strong>{title}</strong>
         {detail ? <span>{detail}</span> : null}
+        {!continuation && technicalDetail ? (
+          <details className="gyro-run-error-details">
+            <summary>Technical details</summary>
+            <pre tabIndex={0}>{technicalDetail}</pre>
+          </details>
+        ) : null}
       </span>
       <span className="gyro-run-problem-actions">
         {isScheduled ? (
@@ -1236,8 +1282,14 @@ function RunProblem({
             </span>
           </>
         ) : null}
-        {onRetry ? (
-          <button onClick={onRetry} type="button">
+        {onRetry &&
+        !continuationUnavailable &&
+        (!isScheduled || !continuation) ? (
+          <button
+            disabled={cooldownSeconds > 0}
+            onClick={onRetry}
+            type="button"
+          >
             {isScheduled ? "Retry now" : "Retry"}
           </button>
         ) : null}

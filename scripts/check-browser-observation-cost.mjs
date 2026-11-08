@@ -27,8 +27,10 @@ const run = (code, root, depth = 8) =>
     isVisible: () => true,
     assignRef: () => "ref_1",
     roleOf: (el) => el.tagName.toLowerCase(),
-    nameOf: (el) =>
-      (el.getAttribute("aria-label") || el.textContent).slice(0, 120),
+    nameOf: (el, includeContents = true) =>
+      (
+        el.getAttribute("aria-label") || (includeContents ? el.textContent : "")
+      ).slice(0, 120),
     isCredentialField: () => false,
   });
 const root = element("body", [
@@ -52,22 +54,30 @@ assert.equal(
   ).name,
   "Results",
 );
-const old = serializer.replace(
-  /    \/\/ Expanded layout wrappers[\s\S]*?delete node.children;\n/,
-  "",
-);
+const old = serializer
+  .replace("name: nameOf(el, !expandedWrapper)", "name: nameOf(el)")
+  .replace(
+    /    \/\/ Expanded layout wrappers[\s\S]*?delete node.children;\n/,
+    "",
+  );
 const before = JSON.stringify(run(old, root)).length;
 const after = JSON.stringify(compact).length;
 assert.ok(after < before);
-const controls = element("body", Array.from({ length: 35 }, (_, i) =>
-  element("div", [element("button", [text(`Action ${i}`)])]),
-));
+const controls = element(
+  "body",
+  Array.from({ length: 35 }, (_, i) =>
+    element("div", [element("button", [text(`Action ${i}`)])]),
+  ),
+);
 const names = (node) => [
   ...(node.tag === "button" ? [node.name] : []),
   ...(node.children ?? []).flatMap(names),
 ];
-assert.deepEqual(names(run(serializer, controls)), names(run(old, controls)),
-  "compaction must preserve the same actionable controls within the traversal budget");
+assert.deepEqual(
+  names(run(serializer, controls)),
+  names(run(old, controls)),
+  "compaction must preserve the same actionable controls within the traversal budget",
+);
 console.log(
   `Browser observation checks passed; fixture JSON ${before} -> ${after} bytes (${Math.round((1 - after / before) * 100)}% smaller).`,
 );

@@ -11,7 +11,9 @@ use conversation_history::{acp_conversation_history_text_for_session, local_comp
 mod agent_reports;
 mod cloud_connection;
 mod efficiency;
+mod git_branch_service;
 mod git_read;
+use git_branch_service::{git_branch_catalog_before, git_branch_catalog_impl};
 mod ide_evidence;
 mod live_model_context;
 mod local_check;
@@ -21,6 +23,7 @@ mod provider_activity;
 mod provider_spend_guard;
 use provider_accounting::*;
 use provider_activity::*;
+mod codex_images;
 mod codex_startup;
 mod codex_turn_completion;
 mod context_compaction;
@@ -51,11 +54,14 @@ use capability_workspace_helpers::*;
 mod capability_execution_guard;
 mod command_execution;
 use command_execution::*;
+#[cfg(target_os = "macos")]
+mod desktop_shortcuts;
 mod provider_api_keys;
 mod provider_install;
 mod window_controls;
 #[cfg(target_os = "macos")]
 pub(crate) use window_controls::apply_macos_traffic_light_position;
+mod claude_usage_cli;
 #[cfg(debug_assertions)]
 mod efficiency_benchmark;
 mod goal_runner;
@@ -77,12 +83,15 @@ use kimi_usage::*;
 mod app_preview;
 mod browser_knowledge;
 mod browser_pointer;
+#[cfg(all(debug_assertions, feature = "native-browser-shell-review"))]
+mod browser_shell_review;
+mod capability_inspection;
 mod file_patch_counts;
 mod workspace_roots;
 mod workspace_search;
 mod workspace_tree_order;
 use workspace_search::{
-    bound_model_search_results, confine_search_directory, literal_search_ranges,
+    bound_model_search_results, confine_search_path, literal_search_ranges,
     run_scoped_workspace_rg_search, run_workspace_rg_search,
 };
 
@@ -156,7 +165,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     mpsc, Arc, Condvar, Mutex, OnceLock, Weak,
@@ -166,6 +175,8 @@ use tauri::{Emitter, Manager};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
+#[cfg(all(debug_assertions, feature = "native-browser-events-smoke"))]
+mod browser_frontend_smoke;
 #[cfg(debug_assertions)]
 mod browser_smoke;
 mod git_history_capability;
@@ -612,6 +623,7 @@ struct BoundProviderCapabilityContext {
     session_id: String,
     turn_id: Option<String>,
     provider_id: String,
+    provider_kind: Option<String>,
     workspace: PathBuf,
     workspace_key: String,
     workspace_identity_revision: u64,
@@ -701,6 +713,7 @@ struct ProviderRunControl {
     approval_nonce: String,
     capability_context: Mutex<Option<BoundProviderCapabilityContext>>,
     capability_calls: Mutex<HashSet<Uuid>>,
+    completed_mutations: AtomicBool,
     timing: Mutex<timing::Handle>,
     process_owner: Mutex<Option<gyro_core::process_guard::ProcessOwner>>,
     request: Mutex<Option<ProviderChatRequest>>,
@@ -723,6 +736,7 @@ impl Default for ProviderRunControl {
             approval_nonce: Uuid::new_v4().to_string(),
             capability_context: Mutex::new(None),
             capability_calls: Mutex::new(HashSet::new()),
+            completed_mutations: AtomicBool::new(false),
             timing: Mutex::new(timing::Handle::default()),
             process_owner: Mutex::new(None),
             request: Mutex::new(None),
@@ -1258,10 +1272,29 @@ struct SourceControlStatus {
 #[serde(rename_all = "camelCase")]
 struct GitBranchCatalog {
     available: bool,
+    repo_root: Option<String>,
     current: Option<String>,
     branches: Vec<String>,
+    last_commit_at: HashMap<String, i64>,
+    tips: Vec<GitBranchTip>,
+    latest_commit_at: Option<i64>,
+    checked_at: String,
     worktrees: Vec<GitLinkedWorktree>,
     error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitBranchTip {
+    name: String,
+    reference: String,
+    commit: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    symbolic_target: Option<String>,
+    committed_at: Option<i64>,
+    remote: bool,
+    current: bool,
+    worktree_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1398,6 +1431,14 @@ struct TaskDefinitionResult {
     output_channel_id: Option<String>,
     /// "suggested" for tasks detected from manifests, "custom" for saved commands.
     source: String,
+    /// Which manifest family produced the command: node, cargo, make, just,
+    /// python, go, deno, or custom.
+    toolchain: String,
+    /// Repo-relative directory when the command belongs to a workspace member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    package_path: Option<String>,
+    /// "primary" is a front door. "variant" is a sibling such as `test:unit`.
+    role: String,
 }
 
 /// A command the person saved for this workspace, persisted in `.gyro/tasks.json`.
@@ -1692,6 +1733,38 @@ struct ProviderChatRequest {
     workspace_check: Option<WorkspaceCheckReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     side_chat_context: Option<SideChatContextRequest>,
+    /// Set only by Gyro for its own text-only calls. Never read from the UI.
+    #[serde(skip)]
+    internal_purpose: Option<InternalRequestPurpose>,
+}
+
+/// Why Gyro itself, rather than the person in the chat, sent a request.
+///
+/// These calls carry their complete input in the message. They get a minimal
+/// prompt with no chat history, chat-only protocols, or browser guidance, and
+/// never trigger compaction of the conversation they describe.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InternalRequestPurpose {
+    ChangeSummary,
+    ContextSummary,
+    SessionTitle,
+}
+
+impl InternalRequestPurpose {
+    fn label(self) -> &'static str {
+        match self {
+            Self::ChangeSummary => "file-change summary",
+            Self::ContextSummary => "conversation checkpoint summary",
+            Self::SessionTitle => "chat title",
+        }
+    }
+}
+
+/// The purpose that shapes this request's prompt, unless rolled back.
+fn isolated_internal_purpose(request: &ProviderChatRequest) -> Option<InternalRequestPurpose> {
+    request
+        .internal_purpose
+        .filter(|_| !efficiency::config().full_context_internal_requests)
 }
 
 /// The chat a side chat sits beside.
@@ -2125,6 +2198,8 @@ struct ProviderResumeCursor {
 #[derive(Debug, Default)]
 struct ProviderRunAttempt {
     resume_cursor: Option<ProviderResumeCursor>,
+    tools_dispatched: bool,
+    mutations_completed: bool,
     /// Set once the attempt showed text or activity in the chat. From then on
     /// generic failures cannot replay the task. An overload can continue only
     /// inside an acknowledged durable native session.
@@ -3477,6 +3552,7 @@ fn run_council_chat_blocking(
                 workspace_context: None,
                 workspace_check: None,
                 side_chat_context: None,
+                internal_purpose: None,
             };
             (seat.clone(), seat_request)
         })
@@ -3689,6 +3765,7 @@ fn run_council_chat_blocking(
                 workspace_context: None,
                 workspace_check: None,
                 side_chat_context: None,
+                internal_purpose: None,
             };
             emit_provider_chat_event(
                 &app,
@@ -3892,6 +3969,7 @@ fn run_council_chat_blocking(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
     };
     emit_provider_chat_event(
         &app,
@@ -4125,6 +4203,7 @@ fn retry_council_synthesis_blocking(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
     };
 
     let _ = store.append_event_with_turn_id(
@@ -4485,6 +4564,7 @@ fn run_change_summary_call(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: Some(InternalRequestPurpose::ChangeSummary),
     };
 
     // The runners read their cancellation control out of this map, and the chat
@@ -4568,6 +4648,7 @@ fn run_compaction_summary_call(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: Some(InternalRequestPurpose::ContextSummary),
     };
     // An auto-compaction runs inside a turn that already bound its context. A
     // manual `/compact` runs between turns, where nothing is bound, and every
@@ -4694,23 +4775,30 @@ fn run_provider_chat_blocking_in_lease(
     let events = store.read_context_events(session_id).map_err(to_string)?;
     request.goal = session_goal::stored_or_unsaved_goal(&events, request.goal.take());
     request.message = validate_chat_message(&request.message)?;
-    // The title from the user's message is instant, so the sidebar is readable
-    // while the first reply streams. It is only provisional: on the turn that
-    // opens the chat the model names it, and its GYRO_SESSION_TITLE line
-    // replaces this title on every provider. The expected title below is
-    // whatever Gyro itself just stored, so a rename the user made by hand is
-    // still detected and never overwritten.
-    let mut title_before_turn = session.title.clone();
-    if request.suggest_title && is_generic_session_title(&session.title) {
-        if let Some(title) = session_title_from_message(&request.message) {
-            if title != session.title {
-                if let Ok(Some(renamed)) = store.rename_session(session_id, title) {
-                    title_before_turn = renamed.title.clone();
-                    let _ = app.emit("gyro://session-title-updated", renamed);
-                }
-            }
+    // Automatic title ownership survives omitted markers, failed first turns,
+    // retries, model switches and app restarts. Generic names start naming;
+    // durable ownership decides whether it is finished. A retry may have lost
+    // the window's first-send flag before initialization ever ran.
+    if is_generic_session_title(&session.title) {
+        let fallback =
+            session_title_from_message(&request.message).unwrap_or_else(|| session.title.clone());
+        if let Some(renamed) = store
+            .begin_session_title(session_id, &session.title, &fallback, &request.message)
+            .map_err(to_string)?
+        {
+            let _ = app.emit("gyro://session-title-updated", renamed);
         }
     }
+    let pending_title = store.pending_session_title(session_id).map_err(to_string)?;
+    request.suggest_title = pending_title.is_some();
+    let _title_task = session_title_stream::TaskScope::start(
+        &request.session_id,
+        pending_title.as_ref().map(|(_, task)| task.as_str()),
+    );
+    let title_before_turn = pending_title
+        .as_ref()
+        .map(|(title, _)| title.as_str())
+        .unwrap_or(&session.title);
     if request.suggest_title {
         if let Some(control) = app
             .state::<ProviderCancellationManager>()
@@ -4723,7 +4811,7 @@ fn run_provider_chat_blocking_in_lease(
                 // Open, not closed: the model may replace the provisional
                 // title for this run. `publish_streamed_session_title` renames
                 // once and closes the control again.
-                *state = suggested_title_for_turn(&title_before_turn);
+                *state = suggested_title_for_turn(title_before_turn);
             }
         }
     }
@@ -4948,6 +5036,12 @@ fn run_provider_chat_blocking_in_lease(
             return Err(error);
         }
     };
+    publish_streamed_session_title(&app, &request, &runner_output.response, true);
+    // Some models omit the naming instruction entirely. Repair the title with
+    // the selected model under deny-all authority, without replaying the task.
+    // Failure leaves durable pending state for a later send instead of failing
+    // a successful user response.
+    session_title_stream::repair_missing(&store, &app, &request);
     // One pass removes every GYRO_* control marker (including ones glued
     // mid-line after multi-block streams) and returns title, plan, and
     // artifacts together. Chaining the per-marker helpers would drop later
@@ -5437,6 +5531,7 @@ fn compact_provider_chat_blocking(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
     };
     bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
     if request.provider_id != "openai" {
@@ -5799,6 +5894,11 @@ fn bind_provider_capability_context(
         session_id: request.session_id.clone(),
         turn_id: Some(run_id.to_string()),
         provider_id: request.provider_id.clone(),
+        provider_kind: load_config_blocking()?
+            .model_providers
+            .iter()
+            .find(|provider| provider.id == request.provider_id)
+            .and_then(|provider| provider.kind.clone()),
         workspace,
         workspace_key,
         workspace_identity_revision: session.workspace_identity.revision,
@@ -6002,7 +6102,10 @@ fn provider_approval_instructions(request: &ProviderChatRequest) -> Vec<&'static
     // Always send the current policy on resume. A null instruction override
     // can preserve an earlier turn's Ask first instructions in provider state.
     let mut instructions = vec!["Use the current turn's configured approval policy. Approval requirements from an earlier turn do not override the current policy."];
-    if gyro_core::provider_capability_support(&request.provider_id).available {
+    if openai_compatible_runner::configured_capability_support(&request.provider_id)
+        .unwrap_or_else(|_| gyro_core::provider_capability_support(&request.provider_id))
+        .available
+    {
         instructions.push("Invoke gyro_* capabilities directly: Gyro's capability broker presents any required approval before execution. Do not ask for duplicate approval in chat before invoking these broker-enforced tools.");
     }
     if request.require_command_approval {
@@ -6017,6 +6120,12 @@ fn provider_approval_instructions(request: &ProviderChatRequest) -> Vec<&'static
 /// Local transcript for a provider turn that cannot resume a foreign agent
 /// session (model handoff, missing cursor, or first turn after a switch).
 fn local_conversation_history_for_request(request: &ProviderChatRequest) -> Option<String> {
+    // Internal text-only calls already carry their complete input.
+    if isolated_internal_purpose(request).is_some()
+        || context_compaction::summary_stream_muted(&request.session_id)
+    {
+        return None;
+    }
     acp_conversation_history_text_for_session(&request.session_id)
 }
 
@@ -6137,7 +6246,9 @@ fn provider_context_message_for_turn(
     provider_context_message_with_capabilities_for_turn(
         request,
         conversation_history,
-        gyro_core::provider_capability_support(&request.provider_id).available,
+        openai_compatible_runner::configured_capability_support(&request.provider_id)
+            .unwrap_or_else(|_| gyro_core::provider_capability_support(&request.provider_id))
+            .available,
         openai_compatible_runner::supports_images(request),
         turn,
     )
@@ -6179,6 +6290,9 @@ fn provider_context_message_with_capabilities_for_turn(
     supports_images: bool,
     turn: PromptTurn,
 ) -> String {
+    if let Some(purpose) = isolated_internal_purpose(request) {
+        return internal_request_message(request, purpose);
+    }
     // `stable` is the byte-identical prefix owned runners cache. `context` is
     // the per-turn tail (mode, history, path, check, goal, plan, attachments).
     let mut stable = Vec::new();
@@ -6192,7 +6306,7 @@ fn provider_context_message_with_capabilities_for_turn(
     // naming does not depend on which provider the user picked. Later turns
     // skip it: the marker is read once and the opening turn already asked.
     if request.suggest_title {
-        context.push(SESSION_TITLE_FIRST_TURN_INSTRUCTION.trim_end().to_string());
+        context.push(session_title_stream::instruction(request));
     }
     // Owned runners always pass resumed: false, so this line stays in the prefix.
     if !turn.resumed {
@@ -6437,6 +6551,29 @@ fn provider_context_message_with_capabilities_for_turn(
         ordered.join("\n"),
         request.message
     )
+}
+
+/// The whole prompt for one of Gyro's own text-only calls.
+///
+/// The message already holds the task instructions and every byte of input
+/// (diffs, transcript, or task text). Chat history, chat-only markers, browser
+/// and workspace guidance would only be paid for and could pull the reply off
+/// task, so none of it is attached. The stable line stays byte-identical so a
+/// provider can still cache it across calls of the same kind.
+fn internal_request_message(
+    request: &ProviderChatRequest,
+    purpose: InternalRequestPurpose,
+) -> String {
+    let stable = vec![format!(
+        "Gyro internal request: {}. Answer only from the input in the message. Do not use tools, read or change files, run commands, request approvals, or add hidden control lines.",
+        purpose.label()
+    )];
+    let context: Vec<String> = Vec::new();
+    let mut attribution = gyro_core::efficiency::context::Attribution::default();
+    attribution.instructions = stable[0].chars().count() as u64;
+    gyro_core::provider_observation::prepared_context(attribution);
+    efficiency::record_prompt_sections(&stable, &context, &request.message);
+    format!("{}\n\nUser message:\n{}", stable[0], request.message)
 }
 
 /// Render the plan for the model as a checklist rather than as raw JSON.
@@ -7566,7 +7703,7 @@ async fn save_project_capability_policy(
 async fn get_provider_capability_support(
     provider_id: String,
 ) -> Result<ProviderCapabilitySupport, String> {
-    Ok(gyro_core::provider_capability_support(provider_id.trim()))
+    openai_compatible_runner::configured_capability_support(provider_id.trim())
 }
 
 #[tauri::command]
@@ -7574,10 +7711,20 @@ async fn list_provider_capability_support() -> Result<Vec<ProviderCapabilitySupp
     let mut support = gyro_core::provider_capability_manifest();
     let config = load_config_blocking()?;
     for provider in &config.model_providers {
-        if gyro_core::provider_registry::is_custom_provider_id(&provider.id)
-            && !support.iter().any(|item| item.provider_id == provider.id)
+        let configured = gyro_core::provider_capability_support_with_kind(
+            &provider.id,
+            provider.kind.as_deref(),
+        );
+        if let Some(existing) = support
+            .iter_mut()
+            .find(|item| item.provider_id == provider.id)
         {
-            support.push(gyro_core::provider_capability_support(&provider.id));
+            *existing = configured;
+        } else if gyro_core::provider_registry::is_openai_compatible_provider(
+            &provider.id,
+            provider.kind.as_deref(),
+        ) {
+            support.push(configured);
         }
     }
     for item in &mut support {
@@ -8768,7 +8915,9 @@ fn git_rename_branch_impl(request: &GitCheckoutBranchRequest) -> anyhow::Result<
         None,
         64 * 1024,
         64 * 1024,
-    )?;
+    );
+    git_branch_service::invalidate(&request.workspace_path);
+    let output = output?;
     if !output.succeeded() {
         return Err(bounded_command_error("could not rename branch", &output));
     }
@@ -8789,131 +8938,15 @@ async fn git_remove_worktree(
 fn sort_branch_catalog_entries(branches: &mut [(i64, String)]) {
     branches.sort_by(|(date_a, branch_a), (date_b, branch_b)| {
         let main_order = (branch_b == "main").cmp(&(branch_a == "main"));
-        main_order
-            .then_with(|| date_b.cmp(date_a))
+        date_b
+            .cmp(date_a)
+            .then(main_order)
             .then_with(|| branch_a.cmp(branch_b))
     });
 }
 
-fn git_branch_catalog_impl(workspace_path: &str) -> anyhow::Result<GitBranchCatalog> {
-    git_branch_catalog_before(workspace_path, Instant::now() + Duration::from_secs(30))
-}
-
-fn git_branch_catalog_before(
-    workspace_path: &str,
-    deadline: Instant,
-) -> anyhow::Result<GitBranchCatalog> {
-    let root = workspace_root(workspace_path)?;
-    let Some(repo_root) = git_read::repo_root(&root, deadline)? else {
-        return Ok(GitBranchCatalog {
-            available: false,
-            current: None,
-            branches: Vec::new(),
-            worktrees: Vec::new(),
-            error: Some("The selected folder is not a Git repository.".into()),
-        });
-    };
-    let mut command = git_command();
-    command.arg("-C").arg(&repo_root).args([
-        "for-each-ref",
-        "--format=%(committerdate:unix)%09%(refname:short)",
-        "refs/heads/",
-    ]);
-    let output = git_read::run(&command, deadline, 2 * 1024 * 1024)?;
-    if !output.succeeded() || output.stdout_truncated {
-        return Err(bounded_command_error(
-            "could not list local branches",
-            &output,
-        ));
-    }
-    let mut branches = output
-        .stdout
-        .lines()
-        .filter_map(|line| {
-            let (committer_date, branch) = line.split_once('\t')?;
-            let branch = branch.trim();
-            (!branch.is_empty()).then(|| {
-                (
-                    committer_date.parse::<i64>().unwrap_or(i64::MIN),
-                    branch.to_owned(),
-                )
-            })
-        })
-        .collect::<Vec<_>>();
-    sort_branch_catalog_entries(&mut branches);
-    let branches = branches
-        .into_iter()
-        .map(|(_, branch)| branch)
-        .collect::<Vec<_>>();
-    let mut current_command = git_command();
-    current_command
-        .arg("-C")
-        .arg(&repo_root)
-        .args(["branch", "--show-current"]);
-    let current_output = git_read::run(&current_command, deadline, 64 * 1024)?;
-    if !current_output.succeeded() || current_output.stdout_truncated {
-        return Err(bounded_command_error(
-            "could not read current branch",
-            &current_output,
-        ));
-    }
-    let current = current_output
-        .succeeded()
-        .then(|| current_output.stdout.trim().to_string());
-    let current = current.filter(|branch| !branch.is_empty());
-    let worktrees = git_linked_worktrees_before(&repo_root, deadline)?;
-    Ok(GitBranchCatalog {
-        available: true,
-        current,
-        branches,
-        worktrees,
-        error: None,
-    })
-}
-
 fn git_linked_worktrees(repo_root: &Path) -> anyhow::Result<Vec<GitLinkedWorktree>> {
-    git_linked_worktrees_before(repo_root, Instant::now() + Duration::from_secs(10))
-}
-
-fn git_linked_worktrees_before(
-    repo_root: &Path,
-    deadline: Instant,
-) -> anyhow::Result<Vec<GitLinkedWorktree>> {
-    let mut command = git_command();
-    command
-        .arg("-C")
-        .arg(repo_root)
-        .args(["worktree", "list", "--porcelain"]);
-    let output = git_read::run(&command, deadline, 2 * 1024 * 1024)?;
-    if !output.succeeded() || output.stdout_truncated {
-        return Err(bounded_command_error(
-            "could not list linked worktrees",
-            &output,
-        ));
-    }
-
-    let mut records = Vec::<(String, Option<String>)>::new();
-    let mut path: Option<String> = None;
-    let mut branch: Option<String> = None;
-    for line in output.stdout.lines().chain(std::iter::once("")) {
-        if line.is_empty() {
-            if let Some(path) = path.take() {
-                records.push((path, branch.take()));
-            }
-            continue;
-        }
-        if let Some(value) = line.strip_prefix("worktree ") {
-            path = Some(value.to_owned());
-        } else if let Some(value) = line.strip_prefix("branch refs/heads/") {
-            branch = Some(value.to_owned());
-        }
-    }
-
-    Ok(records
-        .into_iter()
-        .skip(1)
-        .filter_map(|(path, branch)| branch.map(|branch| GitLinkedWorktree { branch, path }))
-        .collect())
+    git_branch_service::linked_worktrees(repo_root, Instant::now() + Duration::from_secs(10))
 }
 
 fn git_remove_worktree_impl(
@@ -8943,7 +8976,9 @@ fn git_remove_worktree_impl(
         Some(Duration::from_secs(30)),
         2 * 1024 * 1024,
         64 * 1024,
-    )?;
+    );
+    git_branch_service::invalidate(&request.workspace_path);
+    let output = output?;
     if !output.succeeded() {
         return Err(bounded_command_error("could not remove worktree", &output));
     }
@@ -8983,7 +9018,9 @@ fn git_checkout_branch_impl(
         Some(Duration::from_secs(30)),
         64 * 1024,
         64 * 1024,
-    )?;
+    );
+    git_branch_service::invalidate(&request.workspace_path);
+    let switched = switched?;
     if !switched.succeeded() {
         return Err(bounded_command_error("could not switch branch", &switched));
     }
@@ -9155,7 +9192,9 @@ fn git_commit_blocking(request: GitCommitRequest) -> Result<IdeCommandOutput, St
         .arg("commit")
         .arg("-m")
         .arg(request.message);
-    run_command_output(command).map_err(to_string)
+    let output = run_command_output(command).map_err(to_string);
+    git_branch_service::invalidate(&request.workspace_path);
+    output
 }
 
 #[tauri::command]
@@ -9201,7 +9240,9 @@ fn git_create_branch_impl(request: &GitCreateBranchRequest) -> anyhow::Result<Gi
         None,
         2 * 1024 * 1024,
         64 * 1024,
-    )?;
+    );
+    git_branch_service::invalidate(&request.workspace_path);
+    let output = output?;
     if !output.succeeded() {
         return Err(anyhow::anyhow!(
             "{}",
@@ -9235,7 +9276,9 @@ fn git_push_blocking(request: GitSyncRequest) -> Result<GitSyncResult, String> {
             .arg(request.remote.as_deref().unwrap_or("origin"))
             .arg(branch);
     }
-    let output = run_command_output(command).map_err(to_string)?;
+    let output = run_command_output(command);
+    git_branch_service::invalidate(&request.workspace_path);
+    let output = output.map_err(to_string)?;
     Ok(GitSyncResult {
         output,
         status: git_status_impl(&request.workspace_path).map_err(to_string)?,
@@ -9255,7 +9298,9 @@ fn git_pull_blocking(request: GitSyncRequest) -> Result<GitSyncResult, String> {
     // `--ff-only` keeps a button press from silently producing a merge commit or
     // a rebase; a diverged branch surfaces as an error the user can act on.
     command.arg("-C").arg(&root).args(["pull", "--ff-only"]);
-    let output = run_command_output(command).map_err(to_string)?;
+    let output = run_command_output(command);
+    git_branch_service::invalidate(&request.workspace_path);
+    let output = output.map_err(to_string)?;
     Ok(GitSyncResult {
         output,
         status: git_status_impl(&request.workspace_path).map_err(to_string)?,
@@ -9277,7 +9322,9 @@ fn git_fetch_blocking(request: GitSyncRequest) -> Result<GitSyncResult, String> 
         .arg(&root)
         .args(["fetch", "--prune"])
         .arg(request.remote.as_deref().unwrap_or("origin"));
-    let output = run_command_output(command).map_err(to_string)?;
+    let output = run_command_output(command);
+    git_branch_service::invalidate(&request.workspace_path);
+    let output = output.map_err(to_string)?;
     // The point of fetching from the UI is refreshed ahead/behind counts.
     Ok(GitSyncResult {
         output,
@@ -10824,17 +10871,61 @@ fn default_custom_task_group() -> String {
     "custom".into()
 }
 
-fn task_group_for_name(name: &str) -> &'static str {
+const MAX_WORKSPACE_MEMBERS: usize = 32;
+
+/// Classifies a manifest name into a sidebar group and a primary/variant role.
+///
+/// Test wins over check, so `test:local-check-browser` stays a test while
+/// `release:check` is a check. Only the exact front-door names are primary.
+fn classify_task_name(name: &str) -> (&'static str, &'static str) {
     let name = name.to_ascii_lowercase();
-    if name.contains("test") || name.contains("spec") || name.contains("check") {
+    let group = if name == "test"
+        || name.starts_with("test:")
+        || name.starts_with("spec:")
+        || name.contains("spec")
+    {
         "test"
+    } else if is_check_name(&name) {
+        "check"
     } else if name.contains("build") || name.contains("compile") || name.contains("bundle") {
         "build"
     } else if name.contains("dev") || name.contains("start") || name.contains("serve") {
         "dev"
     } else {
         "custom"
-    }
+    };
+    let role = if is_primary_task_name(&name) {
+        "primary"
+    } else {
+        "variant"
+    };
+    (group, role)
+}
+
+fn is_check_name(name: &str) -> bool {
+    matches!(
+        name,
+        "check" | "lint" | "typecheck" | "format" | "fmt" | "vet" | "clippy"
+    ) || name.ends_with(":check")
+        || name.starts_with("lint:")
+}
+
+fn is_primary_task_name(name: &str) -> bool {
+    matches!(
+        name,
+        "test"
+            | "build"
+            | "dev"
+            | "start"
+            | "serve"
+            | "check"
+            | "lint"
+            | "typecheck"
+            | "format"
+            | "fmt"
+            | "vet"
+            | "clippy"
+    )
 }
 
 fn task_id_slug(value: &str) -> String {
@@ -10855,6 +10946,9 @@ fn suggested_task(
     command: &str,
     args: Vec<String>,
     group: &str,
+    toolchain: &str,
+    package_path: Option<String>,
+    role: &str,
 ) -> TaskDefinitionResult {
     let channel = format!("task-{}", task_id_slug(&id).replace([':', '/'], "-"));
     TaskDefinitionResult {
@@ -10867,7 +10961,33 @@ fn suggested_task(
         status: "idle".into(),
         output_channel_id: Some(channel),
         source: "suggested".into(),
+        toolchain: toolchain.into(),
+        package_path,
+        role: role.into(),
     }
+}
+
+fn push_named_task(
+    tasks: &mut Vec<TaskDefinitionResult>,
+    id: String,
+    command: &str,
+    args: Vec<String>,
+    name: &str,
+    toolchain: &str,
+    package_path: Option<String>,
+) {
+    let (group, role) = classify_task_name(name);
+    let label = format!("{command} {}", args.join(" "));
+    tasks.push(suggested_task(
+        id,
+        label,
+        command,
+        args,
+        group,
+        toolchain,
+        package_path,
+        role,
+    ));
 }
 
 fn read_manifest_text(path: &Path, label: &str) -> Option<String> {
@@ -10906,40 +11026,439 @@ fn discover_package_script_tasks(
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&package) else {
         return Ok(());
     };
-    let Some(scripts) = value.get("scripts").and_then(|value| value.as_object()) else {
-        return Ok(());
-    };
     let runner = node_script_runner(root);
-    for name in scripts.keys().take(MAX_TARGETS_PER_MANIFEST) {
-        tasks.push(suggested_task(
-            format!("package:{name}"),
-            format!("{runner} {name}"),
-            runner,
-            vec!["run".into(), name.to_string()],
-            task_group_for_name(name),
-        ));
+    if let Some(scripts) = value.get("scripts").and_then(|value| value.as_object()) {
+        for name in scripts.keys() {
+            push_named_task(
+                tasks,
+                format!("package:{name}"),
+                runner,
+                vec!["run".into(), name.to_string()],
+                name,
+                "node",
+                None,
+            );
+        }
     }
     Ok(())
 }
 
+fn discover_node_members(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
+    let Some(source) = read_manifest_text(&root.join("package.json"), "package manifest") else {
+        return;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&source) else {
+        return;
+    };
+    discover_node_member_tasks(root, &value, node_script_runner(root), tasks);
+}
+
+/// One directory level of a workspace glob. `packages/*` matches child
+/// directories. A pattern with `**` or more than one `*` is left unresolved.
+fn expand_member_glob(root: &Path, pattern: &str, manifest_name: &str) -> Vec<PathBuf> {
+    let pattern = pattern.trim().trim_matches(['"', '\'']);
+    if pattern.is_empty() || pattern.contains("**") || pattern.matches('*').count() > 1 {
+        return Vec::new();
+    }
+    if let Some(dir) = pattern.strip_suffix("/*") {
+        if dir.contains('*') {
+            return Vec::new();
+        }
+        let Ok(entries) = fs::read_dir(root.join(dir)) else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if name.starts_with('.') || matches!(name, "node_modules" | "target" | "dist") {
+                continue;
+            }
+            if path.join(manifest_name).is_file() {
+                found.push(path);
+            }
+        }
+        found.sort();
+        return found;
+    }
+    if pattern.contains('*') {
+        return Vec::new();
+    }
+    let path = root.join(pattern);
+    if path.join(manifest_name).is_file() {
+        vec![path]
+    } else {
+        Vec::new()
+    }
+}
+
+fn capped_members(root: &Path, globs: &[String], manifest_name: &str) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut seen = HashSet::new();
+    for pattern in globs {
+        for path in expand_member_glob(root, pattern, manifest_name) {
+            if seen.insert(path.clone()) {
+                found.push(path);
+            }
+            if found.len() >= MAX_WORKSPACE_MEMBERS {
+                return found;
+            }
+        }
+    }
+    found
+}
+
+fn relative_member_path(root: &Path, member: &Path) -> Option<String> {
+    let relative = member.strip_prefix(root).ok()?;
+    let text = relative.to_string_lossy().replace('\\', "/");
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn list_item_value(trimmed: &str) -> Option<String> {
+    let rest = trimmed.trim().strip_prefix('-')?.trim();
+    let value = if let Some(rest) = rest.strip_prefix('"') {
+        rest.split('"').next()?.to_string()
+    } else if let Some(rest) = rest.strip_prefix('\'') {
+        rest.split('\'').next()?.to_string()
+    } else {
+        rest.split_whitespace().next()?.to_string()
+    };
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn pnpm_workspace_globs(source: &str) -> Vec<String> {
+    let mut globs = Vec::new();
+    let mut in_packages = false;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if !in_packages {
+            if trimmed == "packages:" {
+                in_packages = true;
+            }
+            continue;
+        }
+        if !trimmed.starts_with('-') {
+            break;
+        }
+        if let Some(value) = list_item_value(trimmed) {
+            globs.push(value);
+        }
+    }
+    globs
+}
+
+fn package_json_workspace_globs(value: &serde_json::Value) -> Vec<String> {
+    let Some(workspaces) = value.get("workspaces") else {
+        return Vec::new();
+    };
+    let packages = if let Some(list) = workspaces.as_array() {
+        list
+    } else if let Some(list) = workspaces
+        .get("packages")
+        .and_then(|value| value.as_array())
+    {
+        list
+    } else {
+        return Vec::new();
+    };
+    packages
+        .iter()
+        .filter_map(|item| item.as_str().map(str::to_string))
+        .collect()
+}
+
+fn node_member_globs(root: &Path, package: &serde_json::Value) -> Vec<String> {
+    for name in ["pnpm-workspace.yaml", "pnpm-workspace.yml"] {
+        if let Some(source) = read_manifest_text(&root.join(name), "pnpm workspace") {
+            let globs = pnpm_workspace_globs(&source);
+            if !globs.is_empty() {
+                return globs;
+            }
+        }
+    }
+    package_json_workspace_globs(package)
+}
+
+fn node_member_command(runner: &str, filter: &str, script: &str) -> (String, Vec<String>) {
+    match runner {
+        "pnpm" => (
+            "pnpm".into(),
+            vec!["--filter".into(), filter.into(), script.into()],
+        ),
+        "yarn" => (
+            "yarn".into(),
+            vec!["workspace".into(), filter.into(), script.into()],
+        ),
+        "bun" => (
+            "bun".into(),
+            vec![
+                "run".into(),
+                "--filter".into(),
+                filter.into(),
+                script.into(),
+            ],
+        ),
+        _ => (
+            "npm".into(),
+            vec!["run".into(), script.into(), format!("--workspace={filter}")],
+        ),
+    }
+}
+
+fn discover_node_member_tasks(
+    root: &Path,
+    package: &serde_json::Value,
+    runner: &str,
+    tasks: &mut Vec<TaskDefinitionResult>,
+) {
+    for member in capped_members(root, &node_member_globs(root, package), "package.json") {
+        let Some(relative) = relative_member_path(root, &member) else {
+            continue;
+        };
+        let Some(source) = read_manifest_text(&member.join("package.json"), "package manifest")
+        else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&source) else {
+            continue;
+        };
+        let Some(scripts) = value.get("scripts").and_then(|value| value.as_object()) else {
+            continue;
+        };
+        let filter = value
+            .get("name")
+            .and_then(|value| value.as_str())
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("./{relative}"));
+        for name in scripts.keys() {
+            let (_, role) = classify_task_name(name);
+            if role != "primary" {
+                continue;
+            }
+            let (command, args) = node_member_command(runner, &filter, name);
+            push_named_task(
+                tasks,
+                format!("package:{relative}:{name}"),
+                &command,
+                args,
+                name,
+                "node",
+                Some(relative.clone()),
+            );
+        }
+    }
+}
+
+fn cargo_table(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    let inner = trimmed.strip_prefix('[')?.strip_suffix(']')?.trim();
+    if inner.is_empty() || inner.contains('"') {
+        None
+    } else {
+        Some(inner)
+    }
+}
+
+fn toml_string_literal(value: &str) -> Option<String> {
+    let value = value.trim().trim_end_matches(',');
+    let value = value.strip_prefix('"')?.strip_suffix('"')?;
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn cargo_is_workspace(source: &str) -> bool {
+    source.lines().any(|line| {
+        cargo_table(line)
+            .is_some_and(|table| table == "workspace" || table.starts_with("workspace."))
+    })
+}
+
+fn cargo_workspace_member_globs(source: &str) -> Vec<String> {
+    let mut globs = Vec::new();
+    let mut in_workspace = false;
+    let mut in_members = false;
+    for line in source.lines() {
+        if let Some(table) = cargo_table(line) {
+            in_workspace = table == "workspace";
+            in_members = false;
+            continue;
+        }
+        let trimmed = line.trim();
+        if !in_workspace || trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if in_members {
+            if trimmed.starts_with(']') {
+                in_members = false;
+                continue;
+            }
+            if let Some(value) = toml_string_literal(trimmed) {
+                globs.push(value);
+            }
+            continue;
+        }
+        let Some(rest) = trimmed.strip_prefix("members") else {
+            continue;
+        };
+        let Some(rest) = rest.trim().strip_prefix('=') else {
+            continue;
+        };
+        let rest = rest.trim();
+        let Some(rest) = rest.strip_prefix('[') else {
+            continue;
+        };
+        let rest = rest.trim();
+        if let Some(inline) = rest.strip_suffix(']') {
+            for part in inline.split(',') {
+                if let Some(value) = toml_string_literal(part) {
+                    globs.push(value);
+                }
+            }
+        } else {
+            in_members = true;
+            if let Some(value) = toml_string_literal(rest) {
+                globs.push(value);
+            }
+        }
+    }
+    globs
+}
+
+fn cargo_package_name(source: &str) -> Option<String> {
+    let mut in_package = false;
+    for line in source.lines() {
+        if let Some(table) = cargo_table(line) {
+            in_package = table == "package";
+            continue;
+        }
+        if !in_package {
+            continue;
+        }
+        let Some(rest) = line.trim().strip_prefix("name") else {
+            continue;
+        };
+        let rest = rest.trim().strip_prefix('=')?.trim();
+        return toml_string_literal(rest);
+    }
+    None
+}
+
+fn cargo_has_clippy(root: &Path, source: &str) -> bool {
+    root.join("clippy.toml").is_file()
+        || root.join(".clippy.toml").is_file()
+        || source.contains("[lints.clippy]")
+        || source.contains("[workspace.lints.clippy]")
+}
+
+fn cargo_has_rustfmt(root: &Path) -> bool {
+    root.join("rustfmt.toml").is_file() || root.join(".rustfmt.toml").is_file()
+}
+
+fn push_cargo_task(
+    tasks: &mut Vec<TaskDefinitionResult>,
+    id: &str,
+    args: Vec<String>,
+    group: &str,
+    package_path: Option<String>,
+) {
+    tasks.push(suggested_task(
+        id.into(),
+        format!("cargo {}", args.join(" ")),
+        "cargo",
+        args,
+        group,
+        "cargo",
+        package_path,
+        "primary",
+    ));
+}
+
 fn discover_cargo_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
-    if !root.join("Cargo.toml").exists() {
+    let manifest = root.join("Cargo.toml");
+    if !manifest.is_file() {
         return;
     }
-    for (name, args, group) in [
-        ("build", vec!["build"], "build"),
-        ("test", vec!["test"], "test"),
-        ("check", vec!["check"], "build"),
-        ("clippy", vec!["clippy", "--all-targets"], "test"),
-        ("fmt", vec!["fmt", "--check"], "custom"),
-    ] {
-        tasks.push(suggested_task(
-            format!("cargo:{name}"),
-            format!("cargo {}", args.join(" ")),
-            "cargo",
-            args.into_iter().map(str::to_string).collect(),
-            group,
-        ));
+    let source = read_manifest_text(&manifest, "cargo manifest").unwrap_or_default();
+    let workspace = cargo_is_workspace(&source);
+    push_cargo_task(tasks, "cargo:build", vec!["build".into()], "build", None);
+    let mut test_args = vec!["test".into()];
+    let mut check_args = vec!["check".into()];
+    if workspace {
+        test_args.push("--workspace".into());
+        check_args.push("--workspace".into());
+    }
+    push_cargo_task(tasks, "cargo:test", test_args, "test", None);
+    push_cargo_task(tasks, "cargo:check", check_args, "check", None);
+    if cargo_has_clippy(root, &source) {
+        let mut args = vec!["clippy".into(), "--all-targets".into()];
+        if workspace {
+            args.push("--workspace".into());
+        }
+        push_cargo_task(tasks, "cargo:clippy", args, "check", None);
+    }
+    if cargo_has_rustfmt(root) {
+        push_cargo_task(
+            tasks,
+            "cargo:fmt",
+            vec!["fmt".into(), "--check".into()],
+            "check",
+            None,
+        );
+    }
+}
+
+fn discover_cargo_members(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
+    let Some(source) = read_manifest_text(&root.join("Cargo.toml"), "cargo manifest") else {
+        return;
+    };
+    if !cargo_is_workspace(&source) {
+        return;
+    }
+    for member in capped_members(root, &cargo_workspace_member_globs(&source), "Cargo.toml") {
+        let Some(relative) = relative_member_path(root, &member) else {
+            continue;
+        };
+        let Some(manifest) = read_manifest_text(&member.join("Cargo.toml"), "cargo manifest")
+        else {
+            continue;
+        };
+        let Some(name) = cargo_package_name(&manifest) else {
+            continue;
+        };
+        push_cargo_task(
+            tasks,
+            &format!("cargo:{relative}:test"),
+            vec!["test".into(), "-p".into(), name.clone()],
+            "test",
+            Some(relative.clone()),
+        );
+        push_cargo_task(
+            tasks,
+            &format!("cargo:{relative}:check"),
+            vec!["check".into(), "-p".into(), name],
+            "check",
+            Some(relative),
+        );
     }
 }
 
@@ -10994,13 +11513,15 @@ fn discover_makefile_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
         return;
     };
     for target in makefile_targets(&source) {
-        tasks.push(suggested_task(
+        push_named_task(
+            tasks,
             format!("make:{target}"),
-            format!("make {target}"),
             "make",
             vec![target.clone()],
-            task_group_for_name(&target),
-        ));
+            &target,
+            "make",
+            None,
+        );
     }
 }
 
@@ -11054,13 +11575,15 @@ fn discover_justfile_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
         return;
     };
     for recipe in justfile_recipes(&source) {
-        tasks.push(suggested_task(
+        push_named_task(
+            tasks,
             format!("just:{recipe}"),
-            format!("just {recipe}"),
             "just",
             vec![recipe.clone()],
-            task_group_for_name(&recipe),
-        ));
+            &recipe,
+            "just",
+            None,
+        );
     }
 }
 
@@ -11073,8 +11596,10 @@ fn discover_python_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
     if !has_project {
         return;
     }
-    let uses_uv = root.join("uv.lock").exists();
-    let uses_poetry = read_manifest_text(&pyproject, "python manifest")
+    let uses_uv = root.join("uv.lock").is_file();
+    let manifest = read_manifest_text(&pyproject, "python manifest");
+    let uses_poetry = manifest
+        .as_deref()
         .is_some_and(|source| source.contains("[tool.poetry"));
     let (command, prefix) = if uses_uv {
         ("uv", vec!["run".to_string()])
@@ -11083,17 +11608,28 @@ fn discover_python_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
     } else {
         ("python3", vec!["-m".to_string()])
     };
-    let mut pytest_args = prefix.clone();
-    pytest_args.push("pytest".into());
-    tasks.push(suggested_task(
-        "python:pytest".into(),
-        format!("{command} {}", pytest_args.join(" ")),
-        command,
-        pytest_args,
-        "test",
-    ));
-    if root.join("ruff.toml").exists()
-        || read_manifest_text(&pyproject, "python manifest")
+    let uses_pytest = root.join("pytest.ini").is_file()
+        || root.join("tox.ini").is_file()
+        || manifest
+            .as_deref()
+            .is_some_and(|source| source.contains("[tool.pytest") || source.contains("pytest"));
+    if uses_pytest {
+        let mut pytest_args = prefix.clone();
+        pytest_args.push("pytest".into());
+        tasks.push(suggested_task(
+            "python:pytest".into(),
+            format!("{command} {}", pytest_args.join(" ")),
+            command,
+            pytest_args,
+            "test",
+            "python",
+            None,
+            "primary",
+        ));
+    }
+    if root.join("ruff.toml").is_file()
+        || manifest
+            .as_deref()
             .is_some_and(|source| source.contains("[tool.ruff"))
     {
         let mut ruff_args = prefix;
@@ -11104,7 +11640,10 @@ fn discover_python_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
             format!("{command} {}", ruff_args.join(" ")),
             command,
             ruff_args,
-            "custom",
+            "check",
+            "python",
+            None,
+            "primary",
         ));
     }
 }
@@ -11116,7 +11655,7 @@ fn discover_go_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
     for (name, args, group) in [
         ("build", vec!["build", "./..."], "build"),
         ("test", vec!["test", "./..."], "test"),
-        ("vet", vec!["vet", "./..."], "custom"),
+        ("vet", vec!["vet", "./..."], "check"),
     ] {
         tasks.push(suggested_task(
             format!("go:{name}"),
@@ -11124,6 +11663,9 @@ fn discover_go_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
             "go",
             args.into_iter().map(str::to_string).collect(),
             group,
+            "go",
+            None,
+            "primary",
         ));
     }
 }
@@ -11142,14 +11684,16 @@ fn discover_deno_tasks(root: &Path, tasks: &mut Vec<TaskDefinitionResult>) {
     let Some(entries) = value.get("tasks").and_then(|value| value.as_object()) else {
         return;
     };
-    for name in entries.keys().take(MAX_TARGETS_PER_MANIFEST) {
-        tasks.push(suggested_task(
+    for name in entries.keys() {
+        push_named_task(
+            tasks,
             format!("deno:{name}"),
-            format!("deno task {name}"),
             "deno",
             vec!["task".into(), name.to_string()],
-            task_group_for_name(name),
-        ));
+            name,
+            "deno",
+            None,
+        );
     }
 }
 
@@ -11209,6 +11753,9 @@ fn custom_task_definition(record: &CustomTaskRecord) -> TaskDefinitionResult {
             task_id_slug(&record.id).replace([':', '/'], "-")
         )),
         source: "custom".into(),
+        toolchain: "custom".into(),
+        package_path: None,
+        role: "primary".into(),
     }
 }
 
@@ -11291,6 +11838,7 @@ fn normalize_custom_task_group(group: Option<&str>) -> String {
         Some("build") => "build".into(),
         Some("test") => "test".into(),
         Some("dev") => "dev".into(),
+        Some("check") => "check".into(),
         _ => default_custom_task_group(),
     }
 }
@@ -11389,6 +11937,10 @@ fn task_discover_impl(workspace_path: &str) -> anyhow::Result<Vec<TaskDefinition
     discover_python_tasks(&root, &mut tasks);
     discover_go_tasks(&root, &mut tasks);
     discover_deno_tasks(&root, &mut tasks);
+    // Members come after every root toolchain so the 240-task cap keeps the
+    // repo's own front door when a workspace is large.
+    discover_node_members(&root, &mut tasks);
+    discover_cargo_members(&root, &mut tasks);
     let mut seen = HashSet::new();
     tasks.retain(|task| seen.insert(task.id.clone()));
     tasks.truncate(MAX_DISCOVERED_TASKS);
@@ -12108,7 +12660,9 @@ async fn capture_session_browser_preview(
             .get_snapshot(&session_id)?
             .ok_or_else(|| "browser closed during capture".to_string())?;
         if current.resource_id != owned.resource_id
+            || current.navigation_id != owned.navigation_id
             || before.get("url") != after.get("url")
+            || before.pointer("/navigation/id") != after.pointer("/navigation/id")
             || before.get("viewport") != after.get("viewport")
         {
             return Err("browser changed during capture; take a new screenshot".into());
@@ -12130,8 +12684,9 @@ async fn capture_session_browser_preview(
             .get("viewport")
             .cloned()
             .ok_or_else(|| "browser capture has no viewport".to_string())?;
-        manager.remember_pointer_capture(
+        manager.remember_pointer_capture_at_navigation(
             &session_id,
+            owned.navigation_id,
             capture.filename.clone(),
             url.clone(),
             viewport.clone(),
@@ -12507,8 +13062,9 @@ fn provider_usage_refresh_slots() -> &'static Mutex<HashMap<String, Instant>> {
 /// 3. **Anthropic / Claude** — live `/api/oauth/usage` (5h + weekly used %),
 ///    falling back to the windows streamed mid-answer, which carry a reset but
 ///    no percentage.
-/// 4. **Kimi** — live ACP `/usage` scrape: the context window today, plus the
-///    weekly and 5-hour quota lines when the CLI starts printing them.
+/// 4. **Kimi** — live `GET /coding/v1/usages` with the CLI's OAuth sign-in.
+///    An account outside the Kimi For Coding membership gets nothing back;
+///    that is a reading with no windows, not a failure.
 ///
 /// Gemini has no usage source here; use the ledger for spend.
 ///
@@ -12581,7 +13137,7 @@ fn fetch_xai_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, 
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     let mut child = gyro_core::process_guard::spawn_service(&mut process)
         .map_err(|error| format!("could not start the Grok usage service: {error}"))?;
     let result = (|| {
@@ -12593,7 +13149,7 @@ fn fetch_xai_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot, 
             .stdout
             .take()
             .ok_or_else(|| "Grok usage service output is unavailable".to_string())?;
-        let messages = spawn_codex_app_server_reader(stdout);
+        let messages = spawn_codex_app_server_reader(stdout, child.stderr.take());
         // Auth + billing is usually quick; allow a bit more than Codex for spawn.
         let deadline = Instant::now() + Duration::from_secs(20);
 
@@ -12822,8 +13378,50 @@ fn fetch_anthropic_provider_usage(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let max_age = fresh.then_some(ANTHROPIC_FRESH_USAGE_MAX_AGE);
-    poll.read_within(Instant::now(), max_age, |cooldown| {
-        fetch_anthropic_provider_usage_once(provider_id, cooldown)
+    poll.read_within(
+        Instant::now(),
+        max_age,
+        |cooldown| match fetch_anthropic_provider_usage_once(provider_id, cooldown) {
+            Err(error) if anthropic_usage_needs_cli_refresh(&error) => {
+                refresh_anthropic_usage_through_cli(provider_id, cooldown, error)
+            }
+            other => other,
+        },
+    )
+}
+
+/// A lapsed or refused token is one only the CLI can renew. A rate limit or an
+/// outage is not, and asking the CLI then would only repeat the same request.
+fn anthropic_usage_needs_cli_refresh(error: &str) -> bool {
+    error.starts_with("Claude Code's token has lapsed")
+        || error.starts_with("Claude Code sign-in was rejected")
+}
+
+/// Let `claude -p /usage` renew the token, then read the account again.
+///
+/// The command makes no model request, so it costs nothing against the plan.
+/// When the endpoint still refuses, the levels the command printed are a live
+/// reading in their own right.
+fn refresh_anthropic_usage_through_cli(
+    provider_id: &str,
+    cooldown: &mut Duration,
+    original: String,
+) -> Result<ProviderUsageSnapshot, String> {
+    let cli_windows = match claude_usage_cli::read_claude_usage_via_cli() {
+        Ok(windows) => windows,
+        Err(cli_error) => {
+            eprintln!("Claude usage through the CLI failed: {cli_error}");
+            return Err(original);
+        }
+    };
+    fetch_anthropic_provider_usage_once(provider_id, cooldown).or_else(|_| {
+        Ok(ProviderUsageSnapshot {
+            stale: false,
+            error: None,
+            provider_id: provider_id.into(),
+            windows: cli_windows,
+            fetched_at: chrono::Utc::now().to_rfc3339(),
+        })
     })
 }
 
@@ -13109,7 +13707,7 @@ fn fetch_codex_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot
         .args(["app-server", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     let mut child = gyro_core::process_guard::spawn_service(&mut process)
         .map_err(|error| format!("could not start the Codex usage service: {error}"))?;
     let result = (|| {
@@ -13121,7 +13719,7 @@ fn fetch_codex_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot
             .stdout
             .take()
             .ok_or_else(|| "Codex usage service output is unavailable".to_string())?;
-        let messages = spawn_codex_app_server_reader(stdout);
+        let messages = spawn_codex_app_server_reader(stdout, child.stderr.take());
         let deadline = Instant::now() + CODEX_USAGE_TIMEOUT;
 
         write_codex_app_server_message(
@@ -13170,16 +13768,77 @@ fn fetch_codex_provider_usage(provider_id: &str) -> Result<ProviderUsageSnapshot
     result
 }
 
+/// Bytes of Codex stderr kept so an early exit can say why it happened.
+const CODEX_APP_SERVER_STDERR_TAIL_BYTES: usize = 4 * 1024;
+/// Characters of that tail surfaced in the error shown to the user.
+const CODEX_APP_SERVER_STDERR_DETAIL_CHARS: usize = 600;
+
+/// Drains Codex stderr (so it can never block on a full pipe) and resolves to
+/// its bounded tail once the stream closes.
+fn spawn_codex_app_server_stderr_tail(stderr: ChildStderr) -> mpsc::Receiver<String> {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut tail = VecDeque::with_capacity(CODEX_APP_SERVER_STDERR_TAIL_BYTES);
+        let mut chunk = [0_u8; 1024];
+        loop {
+            match reader.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => {
+                    tail.extend(&chunk[..read]);
+                    let excess = tail
+                        .len()
+                        .saturating_sub(CODEX_APP_SERVER_STDERR_TAIL_BYTES);
+                    tail.drain(..excess);
+                }
+            }
+        }
+        let bytes = tail.into_iter().collect::<Vec<_>>();
+        let _ = sender.send(String::from_utf8_lossy(&bytes).into_owned());
+    });
+    receiver
+}
+
+fn codex_app_server_closed_message(stderr_tail: &str) -> String {
+    let detail = stderr_tail
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if detail.is_empty() {
+        return "Codex app server closed unexpectedly".into();
+    }
+    let total = detail.chars().count();
+    let detail = if total > CODEX_APP_SERVER_STDERR_DETAIL_CHARS {
+        let kept = detail
+            .chars()
+            .skip(total - CODEX_APP_SERVER_STDERR_DETAIL_CHARS)
+            .collect::<String>();
+        format!("…{kept}")
+    } else {
+        detail
+    };
+    format!("Codex app server closed unexpectedly: {detail}")
+}
+
 fn spawn_codex_app_server_reader(
     stdout: ChildStdout,
+    stderr: Option<ChildStderr>,
 ) -> mpsc::Receiver<Result<serde_json::Value, String>> {
     let (sender, receiver) = mpsc::sync_channel(CODEX_APP_SERVER_CHANNEL_CAPACITY);
+    let stderr_tail = stderr.map(spawn_codex_app_server_stderr_tail);
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
         loop {
             match read_bounded_protocol_line(&mut reader, MAX_CODEX_APP_SERVER_MESSAGE_BYTES) {
                 Ok(None) => {
-                    let _ = sender.send(Err("Codex app server closed unexpectedly".into()));
+                    // A helper that inherited stderr can keep it open after
+                    // Codex exits, so never wait long for the tail.
+                    let tail = stderr_tail
+                        .and_then(|tail| tail.recv_timeout(Duration::from_millis(500)).ok())
+                        .unwrap_or_default();
+                    let _ = sender.send(Err(codex_app_server_closed_message(&tail)));
                     break;
                 }
                 Ok(Some(line)) => match serde_json::from_slice(&line) {
@@ -13793,21 +14452,23 @@ fn auto_compact_owned_session(
     request: &ProviderChatRequest,
     binding: Option<ProviderSessionBinding>,
     usage_context: UsageContext,
-) -> Option<ProviderSessionBinding> {
+) -> anyhow::Result<Option<ProviderSessionBinding>> {
+    // A summary of the conversation must not compact the conversation first.
     if usage_context.origin == UsageOrigin::ContextCompaction
+        || isolated_internal_purpose(request).is_some()
         || request.message.trim() == "/compact"
     {
-        return binding;
+        return Ok(binding);
     }
     let percent = match load_config_blocking() {
         Ok(config) => config.usage_guard.auto_compact_percent,
-        Err(_) => return binding,
+        Err(_) => return Ok(binding),
     };
     let Ok(session_id) = parse_uuid(&request.session_id) else {
-        return binding;
+        return Ok(binding);
     };
     let Ok(events) = store.read_events(session_id) else {
-        return binding;
+        return Ok(binding);
     };
     let signals = events
         .iter()
@@ -13824,7 +14485,7 @@ fn auto_compact_owned_session(
         catalog_window,
         &signals,
     ) {
-        return binding;
+        return Ok(binding);
     }
     let run_id = request
         .turn_id
@@ -13838,20 +14499,32 @@ fn auto_compact_owned_session(
         provider_resume_cursor_from_binding(binding)
             .is_some_and(|cursor| cursor.kind == "codex-session")
     });
-    match compact_provider_chat_blocking(app.clone(), request.session_id.clone(), run_id) {
-        Ok(_) => {
-            if keeps_resume {
-                binding
-            } else {
-                None
+    loop {
+        provider_retry_recovery::wait_for_shared_cooldown(app, request)?;
+        match compact_provider_chat_blocking(app.clone(), request.session_id.clone(), run_id) {
+            Ok(_) => return Ok(if keeps_resume { binding } else { None }),
+            Err(error) if provider_reliability::is_rate_limit_error(&error) => {
+                let hint = gyro_core::provider_retry::provider_cooldown_hint(&error)
+                    .unwrap_or(Duration::from_secs(30));
+                gyro_core::provider_cooldown::observe_error(&error, hint);
+                if hint > Duration::from_secs(30) {
+                    return Err(anyhow::anyhow!(
+                        "Required context compaction failed: {error}"
+                    ));
+                }
+                if !gyro_core::provider_retry::take_retry() {
+                    return Err(anyhow::anyhow!(
+                        "{} Required context compaction failed: {error}",
+                        provider_retry_recovery::RETRY_EXHAUSTED
+                    ));
+                }
+                // Retry the compaction itself, never the uncompacted generation.
             }
-        }
-        Err(error) => {
-            eprintln!(
-                "auto-compaction skipped: {}",
-                gyro_core::security::redact_secrets(&error)
-            );
-            binding
+            Err(error) => {
+                return Err(anyhow::anyhow!(
+                    "Required context compaction failed: {error}"
+                ))
+            }
         }
     }
 }
@@ -13863,9 +14536,38 @@ fn run_provider_chat_with_retry(
     binding: Option<ProviderSessionBinding>,
     usage_context: UsageContext,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    let _budget = gyro_core::provider_retry::RetryScope::start();
+    let _cycle = provider_retry_recovery::Cycle::start();
+    let _cooldown = gyro_core::provider_cooldown::Scope::enter(
+        provider_retry_recovery::cooldown_scope(store, request),
+    );
+    let observer_app = app.clone();
+    let observer_request = request.clone();
+    let _observer =
+        gyro_core::provider_retry::ObserveWait::start(move |delay, attempt, waiting| {
+            provider_retry_recovery::set_kind(
+                if gyro_core::provider_cooldown::remaining().is_zero() {
+                    "network"
+                } else {
+                    "rate-limit"
+                },
+            );
+            if waiting {
+                provider_retry_recovery::emit_wait(
+                    &observer_app,
+                    &observer_request,
+                    delay,
+                    attempt,
+                    3,
+                );
+            } else {
+                provider_retry_recovery::emit_started(&observer_app, &observer_request, attempt, 3);
+            }
+        });
+    provider_retry_recovery::wait_for_shared_cooldown(app, request)?;
     let profiled = efficiency::profile(request);
     let request = &profiled;
-    let binding = auto_compact_owned_session(store, app, request, binding, usage_context);
+    let binding = auto_compact_owned_session(store, app, request, binding, usage_context)?;
     let mut output =
         run_provider_chat_with_retry_inner(store, app, request, binding, usage_context)?;
     let mut continuation = request.clone();
@@ -13952,6 +14654,7 @@ fn run_provider_chat_with_retry_inner(
         request,
         binding,
         |resume_cursor, attempt| {
+            provider_retry_recovery::wait_for_shared_cooldown(app, request)?;
             gyro_core::provider_observation::attempt();
             let shown = provider_timeline::item_count(app, &request.session_id);
             let continuation = attempt
@@ -13963,9 +14666,19 @@ fn run_provider_chat_with_retry_inner(
                 resume_cursor,
                 attempt,
             );
+            attempt.tools_dispatched |=
+                provider_accounting::has_dispatched_tools(app, &request.session_id);
+            attempt.mutations_completed |= app
+                .state::<ProviderCancellationManager>()
+                .flags
+                .lock()
+                .ok()
+                .and_then(|flags| flags.get(&request.session_id).cloned())
+                .is_some_and(|control| control.completed_mutations.load(Ordering::Relaxed));
             attempt.published_output |= provider_timeline::item_count(app, &request.session_id)
                 != shown
-                || provider_accounting::has_dispatched_tools(app, &request.session_id);
+                || attempt.tools_dispatched
+                || attempt.mutations_completed;
             if let Ok(output) = &result {
                 if let Some(tokens) = output.accounted_usage.or_else(|| {
                     output
@@ -13982,8 +14695,8 @@ fn run_provider_chat_with_retry_inner(
             provider_chat_cancelled(app, &request.session_id)
                 .then(|| provider_stop_message(app, &request.session_id))
         },
-        |delay, retry_attempt, max_attempts, capacity| {
-            if capacity {
+        |delay, retry_attempt, max_attempts, _capacity| {
+            {
                 provider_retry_recovery::emit_wait(
                     app,
                     request,
@@ -13996,13 +14709,19 @@ fn run_provider_chat_with_retry_inner(
                 provider_chat_cancelled(app, &request.session_id)
                     .then(|| provider_stop_message(app, &request.session_id))
             })?;
-            if capacity {
-                provider_retry_recovery::emit_started(app, request, retry_attempt, max_attempts);
-            }
+            provider_retry_recovery::emit_started(app, request, retry_attempt, max_attempts);
             Ok(())
         },
     )
-    .map_err(|error| anyhow::anyhow!("{error:#}"));
+    .map_err(|error| {
+        if gyro_core::provider_retry::retries_used() >= 3
+            && is_transient_provider_error(&format!("{error:#}"))
+        {
+            error.context(provider_retry_recovery::RETRY_EXHAUSTED)
+        } else {
+            anyhow::anyhow!("{error:#}")
+        }
+    });
     timing::mark(TimingStage::ProviderComplete);
     if let Some(summary) = gyro_core::provider_observation::snapshot() {
         if let Ok(output) = &mut result {
@@ -14988,10 +15707,11 @@ fn run_openai_codex_app_server_chat(
         .current_dir(&cwd)
         .args(capability_args)
         .args(["-c", "features.multi_agent=false"])
+        .args(["-c", codex_images::config_arg(&request.mode)])
         .args(["app-server", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     configure_provider_process_group(&mut process);
     timing::mark(TimingStage::ProcessStart);
     let child = gyro_core::process_guard::spawn_guarded(&mut process)
@@ -15025,7 +15745,7 @@ fn run_openai_codex_app_server_chat(
             .stdout
             .take()
             .ok_or_else(|| anyhow::anyhow!("Codex app server output is unavailable"))?;
-        let messages = spawn_codex_app_server_reader(stdout);
+        let messages = spawn_codex_app_server_reader(stdout, child.stderr.take());
         let deadline = Instant::now() + Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS);
 
         write_codex_app_server_message(
@@ -15159,6 +15879,7 @@ fn run_openai_codex_app_server_chat(
         timing::mark(TimingStage::PromptSent);
         let mut commentary_stream = CodexAppServerCommentaryStream::new();
         let mut completed_message = String::new();
+        let mut generated_images = codex_images::GeneratedImages::default();
         let mut activities = Vec::new();
         let mut completed_activity_ids = HashSet::new();
         let mut patches = HashMap::<String, serde_json::Value>::new();
@@ -15306,6 +16027,20 @@ fn run_openai_codex_app_server_chat(
                     if let Some(item) = params.get("item") {
                         turn_timing::protocol_item(item, "running");
                         match item.get("type").and_then(serde_json::Value::as_str) {
+                            Some("imageGeneration")
+                                if codex_images::GeneratedImages::accepts(
+                                    &params,
+                                    &thread_id,
+                                    provider_turn_id.as_deref(),
+                                ) =>
+                            {
+                                emit_provider_activity_event(
+                                    app,
+                                    request,
+                                    &codex_images::GeneratedImages::started(item),
+                                    None,
+                                );
+                            }
                             Some("fileChange") => {
                                 if let Some(item_id) =
                                     item.get("id").and_then(serde_json::Value::as_str)
@@ -15336,6 +16071,28 @@ fn run_openai_codex_app_server_chat(
                     if let Some(item) = params.get("item") {
                         turn_timing::protocol_item(item, "done");
                         match item.get("type").and_then(serde_json::Value::as_str) {
+                            Some("imageGeneration")
+                                if codex_images::GeneratedImages::accepts(
+                                    &params,
+                                    &thread_id,
+                                    provider_turn_id.as_deref(),
+                                ) =>
+                            {
+                                let paths = GyroPaths::for_current_user()?;
+                                if let Some(activity) = generated_images.complete(
+                                    item,
+                                    &paths.sessions_dir,
+                                    &request.session_id,
+                                ) {
+                                    record_codex_app_server_activity(
+                                        app,
+                                        request,
+                                        &mut activities,
+                                        &mut completed_activity_ids,
+                                        activity,
+                                    );
+                                }
+                            }
                             Some("agentMessage") => {
                                 let text = item.get("text").and_then(serde_json::Value::as_str);
                                 if let Some(text) = text {
@@ -15433,10 +16190,7 @@ fn run_openai_codex_app_server_chat(
                     commentary_stream.finish_message();
                     if status != "completed" {
                         attempt.activities = activities.clone();
-                        let detail = params
-                            .pointer("/turn/error/message")
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("Codex turn did not complete");
+                        let detail = codex_turn_completion::failure_message(&params);
                         anyhow::bail!("{detail}");
                     }
                     provider_completed = true;
@@ -15453,6 +16207,7 @@ fn run_openai_codex_app_server_chat(
         } else {
             completed_message.trim()
         });
+        let response = generated_images.reply(&response);
         if response.is_empty() {
             anyhow::bail!("OpenAI finished, but Codex did not return a chat response.");
         }
@@ -15516,7 +16271,7 @@ fn run_openai_codex_context_compaction(
         .args(["app-server", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     configure_provider_process_group(&mut process);
     let child = gyro_core::process_guard::spawn_guarded(&mut process)
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
@@ -15530,7 +16285,7 @@ fn run_openai_codex_context_compaction(
             .stdout
             .take()
             .ok_or_else(|| anyhow::anyhow!("Codex app server output is unavailable"))?;
-        let messages = spawn_codex_app_server_reader(stdout);
+        let messages = spawn_codex_app_server_reader(stdout, child.stderr.take());
         let deadline = Instant::now() + Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS);
 
         write_codex_app_server_message(
@@ -17684,6 +18439,11 @@ fn resolve_pane_governance(
         session_id: session_id.clone(),
         turn_id: None,
         provider_id: provider_id.to_string(),
+        provider_kind: config
+            .model_providers
+            .iter()
+            .find(|provider| provider.id == provider_id)
+            .and_then(|provider| provider.kind.clone()),
         workspace: workspace.clone(),
         workspace_key: workspace_key.clone(),
         workspace_identity_revision: session.workspace_identity.revision,
@@ -17814,10 +18574,9 @@ fn is_generic_session_title(title: &str) -> bool {
     )
 }
 
-/// The first-turn title line. Gyro reads this marker once, on the turn that
-/// opens a chat, so every provider names the session from the same
-/// instruction instead of depending on the local heuristic alone.
-const SESSION_TITLE_FIRST_TURN_INSTRUCTION: &str = "For this first turn, name the session immediately. Start your first assistant message, before commentary or tools, with this exact hidden line: GYRO_SESSION_TITLE: <2-6 word title>. Choose a concise title describing the user task, then end the line and continue your response. This title is required; do not wait until the task is finished. The app hides this marker. Write it only in this first reply; later replies in this chat must not include it.\n";
+/// Ask every provider until the opening title has actually been accepted.
+/// A retry can recover a missed title without renaming an already named chat.
+const SESSION_TITLE_FIRST_TURN_INSTRUCTION: &str = "This chat still needs its title; name the session immediately. Start your first assistant message, before commentary or tools, with this exact hidden line: GYRO_SESSION_TITLE: <2-6 word title>. Choose a concise title describing the original user task, then end the line and continue your response. This title is required; do not wait until the task is finished. The app hides this marker. This may be the opening turn or recovery of a previously missed title. After Gyro accepts a title, do not repeat this line unless asked.\n";
 const SESSION_TITLE_LATER_TURN_INSTRUCTION: &str = "This is not the first turn of this chat. Do not write a GYRO_SESSION_TITLE line; Gyro only reads it on a chat's first turn.\n";
 
 fn session_title_instruction(suggest_title: bool) -> &'static str {
@@ -18074,6 +18833,11 @@ fn openai_codex_chat_prompt(
         } else {
             CHAT_IMAGE_REPLY_INSTRUCTION
         };
+    let generation_instruction = if allow_mutations {
+        codex_images::REPLY_INSTRUCTION
+    } else {
+        ""
+    };
     if resumed {
         // The resumed thread already holds the style and marker guide from its
         // opening turn; resend only what can change between turns.
@@ -18081,6 +18845,7 @@ fn openai_codex_chat_prompt(
             "Your selected model label is: {model_label}.\n\
              {title_instruction}\n\
              {image_instruction}\n\
+             {generation_instruction}\n\
              {mutation_instruction}\n\
              {workspace_instruction}\n\n\
              User message:\n{message}"
@@ -18102,6 +18867,7 @@ fn openai_codex_chat_prompt(
          {artifact_instruction}\n\
          {title_instruction}\n\
          {image_instruction}\n\
+         {generation_instruction}\n\
          {mutation_instruction}\n\
          {workspace_instruction}\n\n\
          User message:\n{message}"
@@ -18484,7 +19250,9 @@ fn publish_streamed_session_title(
     else {
         return;
     };
-    if let Ok(Some(session)) = store.rename_session(session_id, title) {
+    if let Ok(Some(session)) =
+        store.apply_session_title(session_id, state.0.as_deref().unwrap_or_default(), &title)
+    {
         state.1 = true;
         let _ = app.emit("gyro://session-title-updated", session);
     }
@@ -19008,6 +19776,22 @@ fn append_provider_status_event(
             "kind".into(),
             serde_json::Value::String("provider-status".into()),
         );
+        object.insert("recoveryOwner".into(), serde_json::json!("backend"));
+        let cooldown = gyro_core::provider_cooldown::remaining().max(
+            error
+                .filter(|error| provider_reliability::is_rate_limit_error(error))
+                .and_then(gyro_core::provider_retry::provider_cooldown_hint)
+                .unwrap_or_default(),
+        );
+        if !cooldown.is_zero() {
+            object.insert(
+                "retryNotBefore".into(),
+                serde_json::json!((chrono::Utc::now()
+                    + chrono::Duration::from_std(cooldown).unwrap_or_default())
+                .to_rfc3339()),
+            );
+        }
+
         object.insert(
             "error".into(),
             error
@@ -19016,6 +19800,52 @@ fn append_provider_status_event(
                 .unwrap_or(serde_json::Value::Null),
         );
         if let Some(error) = error {
+            let current_attempt = attempt_id.to_string();
+            let previous = store
+                .read_recent_events(session_id, MAX_DESKTOP_SESSION_EVENTS_READ)
+                .ok()
+                .and_then(|events| {
+                    events
+                        .into_iter()
+                        .rev()
+                        .filter(|event| event.turn_id == turn_id)
+                        .take_while(|event| {
+                            event
+                                .payload
+                                .get("attemptId")
+                                .and_then(serde_json::Value::as_str)
+                                .map_or(true, |id| id == current_attempt)
+                        })
+                        .find(|event| event.payload.get("recovery").is_some())
+                })
+                .and_then(|event| event.payload.get("recovery").cloned());
+            let continuation = store
+                .get_provider_session_binding(session_id, &request.provider_id)
+                .ok()
+                .flatten()
+                .and_then(|binding| provider_resume_cursor_from_binding(&binding))
+                .is_some_and(|cursor| {
+                    provider_retry_recovery::durable_native_cursor(request, Some(&cursor))
+                });
+            let mut recovery = previous.unwrap_or_else(|| {
+                serde_json::json!({
+                    "cycleId": current_attempt, "attemptsUsed": 0, "maxRetries": 3,
+                })
+            });
+            let recovery_state =
+                if error.contains(provider_retry_recovery::CONTINUATION_UNAVAILABLE) {
+                    "continuation-unavailable"
+                } else if error.contains(provider_retry_recovery::RETRY_EXHAUSTED)
+                    || error.contains(provider_retry_recovery::CAPACITY_RETRY_EXHAUSTED)
+                {
+                    recovery["attemptsUsed"] = serde_json::json!(3);
+                    "exhausted"
+                } else {
+                    "failed"
+                };
+            recovery["state"] = serde_json::json!(recovery_state);
+            recovery["continuationAvailable"] = serde_json::json!(continuation);
+            object.insert("recovery".into(), recovery);
             let (recovery_kind, recovery_message) = provider_failure_recovery(error);
             object.insert(
                 "recoveryKind".into(),
@@ -19079,7 +19909,7 @@ fn provider_turn_has_unfinished_attempt(
     // Prefer the durable turn-status index so a long session cannot hide a
     // still-running attempt behind the recent-event read window.
     if let Some(status) = store.latest_provider_status_for_turn(session_id, turn_id)? {
-        return Ok(status == "running");
+        return Ok(matches!(status.as_str(), "running" | "waiting" | "queued"));
     }
     let last_status = store
         .read_recent_events(session_id, MAX_DESKTOP_SESSION_EVENTS_READ)?
@@ -19100,7 +19930,10 @@ fn provider_turn_has_unfinished_attempt(
                 .map(str::to_string)
         })
         .next_back();
-    Ok(last_status.as_deref() == Some("running"))
+    Ok(matches!(
+        last_status.as_deref(),
+        Some("running" | "waiting" | "queued")
+    ))
 }
 
 fn provider_activity_event_entry(
@@ -20429,6 +21262,11 @@ fn handle_provider_stdout_value(
             stream_state.context_usage = Some(usage);
             stream_state.context_usage_is_per_request = true;
         }
+    } else if request.provider_id == "antigravity" {
+        if let Some(usage) = provider_context::antigravity_step_occupancy(value) {
+            stream_state.context_usage = Some(usage);
+            stream_state.context_usage_is_per_request = true;
+        }
     }
     if let Some(rate_limit) = provider_rate_limit_from_claude_stream(value) {
         // Once per window per turn: later announcements repeat the same news.
@@ -21322,6 +22160,9 @@ fn build_grok_acp_program_args(
 
 /// Recent user/assistant turns for agents that cannot reopen a provider session.
 fn acp_conversation_history_text(_app: &tauri::AppHandle, session_id: &str) -> Option<String> {
+    if context_compaction::summary_stream_muted(session_id) {
+        return None;
+    }
     acp_conversation_history_text_for_session(session_id)
 }
 
@@ -21618,6 +22459,7 @@ fn require_model_browser_resource(
         .state::<session_browser::SessionBrowserManager>()
         .require_owned(&bound.session_id, &bound.workspace_key)
     {
+        session_browser::bind_model_resource(&snapshot.resource_id).map_err(anyhow::Error::msg)?;
         let resources = app.state::<ProviderCapabilityResourceManager>();
         let mut browsers = resources
             .browsers
@@ -21664,7 +22506,23 @@ fn browser_observation(
     let snapshot = app
         .state::<session_browser::SessionBrowserManager>()
         .get_snapshot(&owned.session_id)
-        .map_err(anyhow::Error::msg)?;
+        .map_err(anyhow::Error::msg)?
+        .ok_or_else(|| anyhow::anyhow!("browser closed while observing the page"))?;
+    if snapshot.resource_id != owned.resource_id {
+        anyhow::bail!(
+            "browser resource changed while observing the page; observe the current browser again"
+        );
+    }
+    if !snapshot.document_committed
+        || status
+            .pointer("/navigation/id")
+            .and_then(serde_json::Value::as_u64)
+            != Some(snapshot.navigation_id)
+    {
+        anyhow::bail!(
+            "browser document changed while observing the page; observe the current document again"
+        );
+    }
     let url = status
         .get("url")
         .and_then(serde_json::Value::as_str)
@@ -21693,7 +22551,7 @@ fn browser_observation(
             .get("readyState")
             .and_then(serde_json::Value::as_str)
             .map(str::to_string),
-        visible: snapshot.map(|snapshot| snapshot.visible).unwrap_or(false),
+        visible: snapshot.visible,
         viewport: status.get("viewport").cloned(),
         history: status.get("history").cloned(),
         page,
@@ -21720,6 +22578,7 @@ fn remember_model_browser_resource(
     call_id: Uuid,
     snapshot: &session_browser::SessionBrowserSnapshot,
 ) -> anyhow::Result<()> {
+    session_browser::bind_model_resource(&snapshot.resource_id).map_err(anyhow::Error::msg)?;
     let resources = app.state::<ProviderCapabilityResourceManager>();
     let mut browsers = resources
         .browsers
@@ -21952,6 +22811,7 @@ fn capability_event_with_target(
     let session_id = Uuid::parse_str(&bound.session_id)?;
     let mut payload = serde_json::to_value(event)?;
     code_mode::annotate(call_id, &mut payload);
+    capability_inspection::annotate(call_id, &mut payload);
     provider_timeline::observe(
         app,
         &bound.session_id,
@@ -22452,7 +23312,7 @@ fn execute_provider_capability(
                     if path.trim().is_empty() {
                         ".".to_string()
                     } else {
-                        confine_search_directory(&bound.workspace, path)?
+                        confine_search_path(&bound.workspace, path)?
                     }
                 }
             };
@@ -22514,6 +23374,14 @@ fn execute_provider_capability(
                 arguments,
             )?;
             ("Inspected workspace Git status".into(), data, None)
+        }
+        CapabilityId::WorkspaceGitBranches => {
+            let data = git_branch_service::model_branches(&workspace, arguments)?;
+            (
+                "Inspected current and recent Git branches".into(),
+                data,
+                None,
+            )
         }
         CapabilityId::WorkspaceDiff => {
             let path = capability_git_diff_path(arguments)?;
@@ -22761,6 +23629,7 @@ fn execute_provider_capability(
         }
         CapabilityId::TerminalOpen => {
             workspace_result_byte_limit(arguments)?;
+            let initial_wait = terminal_wait::initial_timeout(arguments)?;
             let program = capability_argument_string(arguments, "program")?.to_string();
             if program.contains('\0') || program.chars().count() > 512 {
                 anyhow::bail!("terminal program is invalid");
@@ -22791,7 +23660,7 @@ fn execute_provider_capability(
                     "terminal program must be one executable, not a command line; pass arguments in args (program \"npm\", args [\"run\", \"dev\"]), or use program \"sh\" with args [\"-c\", \"<command>\"] for pipes, redirects, or &&"
                 );
             }
-            let (resource_id, snapshot) = claim_model_terminal(
+            let (resource_id, mut snapshot) = claim_model_terminal(
                 app,
                 bound,
                 request.context.call_id,
@@ -22800,19 +23669,34 @@ fn execute_provider_capability(
                 args,
                 &cwd,
             )?;
+            if !initial_wait.is_zero() {
+                snapshot =
+                    terminal_capability::wait_for_command(app, bound, &resource_id, initial_wait)?;
+            }
             let resource = CapabilityResourceRef {
                 id: resource_id,
                 kind: "terminal".into(),
                 label: snapshot.title.clone(),
             };
             (
-                format!(
-                    "Opened {} ({})",
-                    snapshot.title,
-                    model_command_policy_summary(snapshot.execution_policy)
-                ),
+                if snapshot.status == "running" {
+                    format!(
+                        "Opened {} ({}); command is still running",
+                        snapshot.title,
+                        model_command_policy_summary(snapshot.execution_policy)
+                    )
+                } else {
+                    format!(
+                        "Command finished (exit code {}); inspect the output and continue",
+                        snapshot
+                            .exit_code
+                            .map_or("unknown".into(), |code| code.to_string())
+                    )
+                },
                 terminal_capability::bound_terminal_result(
                     serde_json::json!({
+                        "completed": snapshot.status != "running",
+                        "exitCode": snapshot.exit_code,
                         "pane": snapshot,
                         "owner": {
                             "kind": "model",
@@ -22873,6 +23757,9 @@ fn execute_provider_capability(
                 serde_json::json!({
                     "url": snapshot.url,
                     "title": snapshot.title,
+                    "loading": snapshot.loading,
+                    "navigationId": snapshot.navigation_id,
+                    "nextStep": "Observe the current page before interacting; navigation acceptance does not prove load completion.",
                     "framing": "OBSERVED_PAGE_CONTENT_UNTRUSTED",
                 }),
                 Some(resource),
@@ -22899,6 +23786,8 @@ fn execute_provider_capability(
                 serde_json::json!({
                     "url": snapshot.url,
                     "title": snapshot.title,
+                    "loading": snapshot.loading,
+                    "navigationId": snapshot.navigation_id,
                     "framing": "OBSERVED_PAGE_CONTENT_UNTRUSTED",
                 }),
                 Some(resource),
@@ -22919,6 +23808,8 @@ fn execute_provider_capability(
                 serde_json::json!({
                     "url": snapshot.url,
                     "title": snapshot.title,
+                    "loading": snapshot.loading,
+                    "navigationId": snapshot.navigation_id,
                     "framing": "OBSERVED_PAGE_CONTENT_UNTRUSTED",
                 }),
                 Some(resource),
@@ -22967,13 +23858,7 @@ fn execute_provider_capability(
                 "status",
                 serde_json::json!({}),
             )
-            .unwrap_or_else(|_| {
-                serde_json::json!({
-                    "ok": true,
-                    "url": owned.url,
-                    "title": "",
-                })
-            });
+            .map_err(anyhow::Error::msg)?;
             let console = Vec::new();
             let network = Vec::new();
             let observation =
@@ -22991,6 +23876,8 @@ fn execute_provider_capability(
         }
         CapabilityId::BrowserScreenshot => {
             let owned = require_model_browser_resource(app, bound)?;
+            session_browser::wait_for_screenshot_document(app, &bound.session_id)
+                .map_err(anyhow::Error::msg)?;
             if let Some(device) = request
                 .arguments
                 .get("device")
@@ -23014,13 +23901,7 @@ fn execute_provider_capability(
                 "status",
                 serde_json::json!({}),
             )
-            .unwrap_or_else(|_| {
-                serde_json::json!({
-                    "ok": true,
-                    "url": owned.url,
-                    "title": "",
-                })
-            });
+            .map_err(anyhow::Error::msg)?;
             // Keep agent feedback out of the observation, then restore it for
             // the person watching (also when capture fails).
             let _ = session_browser::call_agent(
@@ -23030,12 +23911,7 @@ fn execute_provider_capability(
                 serde_json::json!({}),
             );
             let snapshot = session_browser::capture_session_browser_png(app, &bound.session_id);
-            let _ = session_browser::call_agent(
-                app,
-                &bound.session_id,
-                "restorePointer",
-                serde_json::json!({}),
-            );
+            let _ = session_browser::restore_pointer_feedback(app, &bound.session_id);
             let snapshot = snapshot.map_err(anyhow::Error::msg)?;
             let paths = GyroPaths::for_current_user().map_err(anyhow::Error::msg)?;
             let created_at = chrono::Utc::now();
@@ -23055,6 +23931,7 @@ fn execute_provider_capability(
             )
             .map_err(anyhow::Error::msg)?;
             if status.get("url") != captured_status.get("url")
+                || status.pointer("/navigation/id") != captured_status.pointer("/navigation/id")
                 || status.get("viewport") != captured_status.get("viewport")
             {
                 anyhow::bail!("browser changed during capture; take a new screenshot");
@@ -23066,8 +23943,14 @@ fn execute_provider_capability(
                 captured_status.get("viewport"),
             ) {
                 app.state::<session_browser::SessionBrowserManager>()
-                    .remember_pointer_capture(
+                    .remember_pointer_capture_at_navigation(
                         &bound.session_id,
+                        captured_status
+                            .pointer("/navigation/id")
+                            .and_then(serde_json::Value::as_u64)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("browser capture has no navigation identity")
+                            })?,
                         capture.filename.clone(),
                         url.to_string(),
                         viewport.clone(),
@@ -23541,6 +24424,7 @@ fn handle_desktop_provider_capability_request(
     app: &tauri::AppHandle,
     request: CapabilityRequest,
 ) -> CapabilityResponse {
+    let _inspection = capability_inspection::Scope::start(&request);
     let _workflow = code_mode::begin(&request);
     let mut response = handle_desktop_provider_capability_request_inner(app, request.clone());
     efficiency::observe(app, &request, &mut response);
@@ -23568,15 +24452,6 @@ fn handle_desktop_provider_capability_request_inner(
         );
         response.compatible = false;
         return response;
-    }
-    let support = gyro_core::provider_capability_support(&request.context.provider_id);
-    if !support.available || !support.capabilities.contains(&request.capability_id) {
-        return fail(
-            "unsupported-provider",
-            support
-                .reason
-                .unwrap_or_else(|| "Gyro tools are unavailable for this provider.".into()),
-        );
     }
     let control = match app
         .state::<ProviderCancellationManager>()
@@ -23642,6 +24517,18 @@ fn handle_desktop_provider_capability_request_inner(
         return fail(
             "forged-context",
             "Gyro rejected capability context that did not match the active run.".into(),
+        );
+    }
+    let support = gyro_core::provider_capability_support_with_kind(
+        &bound.provider_id,
+        bound.provider_kind.as_deref(),
+    );
+    if !support.available || !support.capabilities.contains(&request.capability_id) {
+        return fail(
+            "unsupported-provider",
+            support
+                .reason
+                .unwrap_or_else(|| "Gyro tools are unavailable for this provider.".into()),
         );
     }
     let fresh_call = control
@@ -23998,8 +24885,23 @@ fn handle_desktop_provider_capability_request_inner(
         },
         None,
     );
+    let _browser_operation =
+        session_browser::begin_model_operation(request.capability_id, control.cancellation.clone());
     match execute_provider_capability(app, &bound, &request) {
         Ok(result) => {
+            if gyro_core::capability_descriptor(request.capability_id).class
+                == CapabilityClass::WorkspaceWrite
+                || (matches!(
+                    request.capability_id,
+                    CapabilityId::WorkspaceEdit | CapabilityId::WorkspaceProposeEdit
+                ) && result
+                    .data
+                    .get("status")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("applied"))
+            {
+                control.completed_mutations.store(true, Ordering::Relaxed);
+            }
             let _ = capability_event_with_target(
                 app,
                 &bound,
@@ -24043,9 +24945,14 @@ fn handle_desktop_provider_capability_request_inner(
             CapabilityResponse::completed(env!("CARGO_PKG_VERSION"), result)
         }
         Err(error) => {
-            let message = gyro_core::sanitize_capability_summary(&error.to_string());
-            let cancelled = request.capability_id == CapabilityId::TerminalWait
-                && message.contains("command wait cancelled");
+            let message = capability_execution_guard::error_message(&error);
+            let cancelled = control.cancellation.is_cancelled()
+                || code_mode::cancelled()
+                || matches!(
+                    request.capability_id,
+                    CapabilityId::TerminalOpen | CapabilityId::TerminalWait
+                ) && message.contains("command wait cancelled")
+                || session_browser::operation_was_cancelled(&message);
             let _ = capability_event(
                 app,
                 &bound,
@@ -24285,6 +25192,7 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
         .or_else(|| workspace_path_capability::schema(id))
         .or_else(|| workspace_open_capability::schema(id))
         .or_else(|| git_history_capability::schema(id))
+        .or_else(|| git_branch_service::schema(id))
         .or_else(|| web_fetch_capability::schema(id))
         .or_else(|| browser_viewport::schema(id))
         .or_else(|| memory_capability::schema(id))
@@ -24314,7 +25222,7 @@ fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
             },
             "path": {
                 "type": "string",
-                "description": "Optional workspace-relative directory. Search stays inside this directory."
+                "description": "Optional existing workspace-relative file or directory; omit for the root and put filename patterns in globs. A dot also selects the root. For a file path, omit globs. Never broadens a missing path."
             },
             "globs": { "type": "array", "items": { "type": "string" }, "description": "Optional ripgrep globs that filter files, such as [\"*.ts\", \"!*.test.ts\"]." },
             "maxResults": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 50, "description": "Maximum matching lines to return." },
@@ -24716,10 +25624,33 @@ pub fn run() {
     if std::env::var_os("GYRO_CODE_MODE_SMOKE").is_some() {
         context.config_mut().app.windows.clear();
     }
-    let app = session_browser::register_bridge_protocol(tauri::Builder::default())
+    #[cfg(debug_assertions)]
+    if std::env::var("GYRO_LOCAL_PROVIDER_FIXTURE").as_deref() == Ok("1") {
+        // Isolated native browser integration uses a hidden, empty parent webview.
+        context.config_mut().app.windows.clear();
+        let mut window = tauri::utils::config::WindowConfig::default();
+        window.label = "main".into();
+        window.url = tauri::WebviewUrl::External("about:blank".parse().expect("static blank URL"));
+        window.visible = false;
+        window.incognito = true;
+        context.config_mut().app.windows.push(window);
+    }
+    #[cfg(all(debug_assertions, feature = "native-browser-events-smoke"))]
+    if std::env::var("GYRO_BROWSER_FRONTEND_SMOKE").as_deref() == Ok("1") {
+        context.config_mut().app.windows.clear();
+        context.config_mut().identifier = "dev.gyro.browser-events-smoke".into();
+        context.config_mut().product_name = Some("Gyro native browser event check".into());
+    }
+    let builder = session_browser::register_bridge_protocol(tauri::Builder::default())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+    // macOS notices use desktop_notifications' native permission/delivery
+    // path. The plugin's unused Web Notification shim probes an IPC permission
+    // that these webviews intentionally do not have, causing an unhandled
+    // rejection at startup (and in embedded browser pages).
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_notification::init());
+    let app = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(TerminalProcessManager::default())
         .manage(language_server::LanguageServerManager::default())
@@ -24742,6 +25673,10 @@ pub fn run() {
         .manage(menu_bar::MenuBarController::default())
         .manage(quit_confirmation::QuitConfirmation::default())
         .setup(|app| {
+            #[cfg(all(debug_assertions, feature = "native-browser-events-smoke"))]
+            if browser_frontend_smoke::start(app.handle())? {
+                return Ok(());
+            }
             #[cfg(debug_assertions)]
             if code_mode_smoke::start(app.handle())? {
                 return Ok(());
@@ -24759,6 +25694,8 @@ pub fn run() {
                 return Ok(());
             }
             menu_bar::setup(app)?;
+            #[cfg(target_os = "macos")]
+            desktop_shortcuts::setup(app.handle())?;
             #[cfg(target_os = "macos")]
             restore_main_window(app.handle())?;
             // Store recovery runs before any command can start a turn, but a
@@ -24789,6 +25726,8 @@ pub fn run() {
             start_automation_scheduler(app.handle().clone());
             agent_session_worker::start(app.handle().clone());
             goal_runner::recover(app.handle().clone());
+            #[cfg(all(debug_assertions, feature = "native-browser-shell-review"))]
+            browser_shell_review::start(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {

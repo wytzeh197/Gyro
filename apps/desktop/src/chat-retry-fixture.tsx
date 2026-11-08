@@ -245,6 +245,8 @@ function Fixture() {
 }
 
 function NativeRetryFixture() {
+  const isRateLimit = params.get("failure") === "rate-limit";
+  const [cooldownAt] = useState(() => Date.now() + waitMs);
   const [state, setState] = useState(params.get("state") ?? "native-wait");
   const [retryAt, setRetryAt] = useState<number | undefined>(() =>
     state === "native-wait" ? Date.now() + waitMs : undefined,
@@ -263,6 +265,8 @@ function NativeRetryFixture() {
   const isWaiting = state === "native-wait";
   const isCancelled = state === "native-cancelled";
   const isExhausted = state === "native-exhausted";
+  const isCooldown = state === "native-cooldown";
+  const isUnavailable = state === "native-unavailable";
   const isDone = state === "native-done";
   useEffect(() => {
     const fixtureWindow = window as Window & {
@@ -361,7 +365,7 @@ function NativeRetryFixture() {
         kind: "provider-status",
         status: isCancelled
           ? "cancelled"
-          : isExhausted
+          : isExhausted || isCooldown || isUnavailable
             ? "failed"
             : isDone
               ? "done"
@@ -375,20 +379,80 @@ function NativeRetryFixture() {
               retryAt: new Date(retryAt).toISOString(),
               retryAttempt: 1,
               retryMaxAttempts: 3,
-              recoveryKind: "model-capacity",
+              recoveryKind: isRateLimit ? "rate-limit" : "model-capacity",
+              recoveryOwner: "backend",
             }
           : {}),
         ...(isExhausted
           ? {
-              recoveryKind: "model-capacity-exhausted",
-              error:
-                "Selected model is at capacity after 3 automatic retries. Recorded work is preserved. Retry or choose a different model.",
+              recoveryKind: isRateLimit
+                ? "retry-exhausted"
+                : "model-capacity-exhausted",
+              error: isRateLimit
+                ? "Automatic retries exhausted. rate limit exceeded. Please try again in 1.783s."
+                : "Selected model is at capacity after 3 automatic retries. Recorded work is preserved. Retry or choose a different model.",
+            }
+          : {}),
+        ...(isCooldown
+          ? {
+              recoveryKind: "rate-limit",
+              error: "rate limit exceeded. Please try again in 60s.",
+              retryNotBefore: new Date(cooldownAt).toISOString(),
+              recoveryOwner: "backend",
+            }
+          : {}),
+        ...(isUnavailable
+          ? {
+              recoveryKind: "continuation-unavailable",
+              error: "Saved provider continuation is unavailable.",
+              recoveryMessage:
+                "Completed work is preserved. Automatic replay was stopped.",
             }
           : {}),
         ...(isCancelled ? { recoveryKind: "cancelled" } : {}),
       },
     ),
   ];
+  if (params.get("tools") === "failed")
+    events.splice(
+      1,
+      0,
+      event(
+        "failed-search",
+        "system-event",
+        "Workspace search path must be an existing file or directory",
+        {
+          kind: "capability-call",
+          schema: "gyro.capability.v1",
+          capabilityId: "workspace-search",
+          callId: "failed-search-call",
+          providerId: "openai",
+          policyRevision: 6,
+          status: "failed",
+          summary:
+            "Workspace search path must be an existing file or directory. Correct the path before retrying.",
+          inspection: {
+            query: "pointerDrag|useChatPointer|begin.*Drag",
+            path: "packages/ui/src/missing.ts",
+          },
+        },
+      ),
+      event("failed-read", "system-event", "No such file or directory", {
+        kind: "capability-call",
+        schema: "gyro.capability.v1",
+        capabilityId: "workspace-read",
+        callId: "failed-read-call",
+        providerId: "openai",
+        policyRevision: 6,
+        status: "failed",
+        summary:
+          "open workspace file packages/ui/src/not-created-yet.ts: No such file or directory (os error 2)",
+        inspection: {
+          path: "packages/ui/src/not-created-yet.ts",
+          errorCode: "path-not-found",
+        },
+      }),
+    );
   if (isDone)
     events.splice(
       events.length - 1,
@@ -474,7 +538,13 @@ function NativeRetryFixture() {
           draft={draft}
           onDraftChange={setDraft}
           onSend={() => {}}
-          isComposerSending={!isCancelled && !isExhausted && !isDone}
+          isComposerSending={
+            !isCancelled &&
+            !isExhausted &&
+            !isDone &&
+            !isCooldown &&
+            !isUnavailable
+          }
           onProviderStatusAction={(statusAction, statusEvent) => {
             setLastStatusAction({
               action: statusAction,

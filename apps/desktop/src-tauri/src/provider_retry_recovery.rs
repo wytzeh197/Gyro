@@ -1,9 +1,94 @@
-//! Recover overloads by continuing an acknowledged native conversation.
+//! Recover rate limits and overloads inside an acknowledged native conversation.
 use super::*;
 
 pub(super) const CAPACITY_RETRY_DELAY: Duration = Duration::from_secs(30);
 pub(super) const CAPACITY_RETRY_EXHAUSTED: &str =
     "The model is still busy after three automatic attempts.";
+pub(super) const RETRY_EXHAUSTED: &str = "Automatic retries exhausted.";
+pub(super) const CONTINUATION_UNAVAILABLE: &str = "Saved provider continuation is unavailable.";
+thread_local! {
+    static RECOVERY_KIND: std::cell::RefCell<String> = std::cell::RefCell::new("network".into());
+    static CYCLE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+pub(super) fn set_kind(kind: &str) {
+    RECOVERY_KIND.with(|value| *value.borrow_mut() = kind.into());
+}
+
+pub(super) struct Cycle(String);
+impl Cycle {
+    pub(super) fn start() -> Self {
+        Self(CYCLE.with(|cycle| {
+            if cycle.borrow().is_empty() {
+                cycle.replace(Uuid::new_v4().to_string())
+            } else {
+                cycle.borrow().clone()
+            }
+        }))
+    }
+}
+impl Drop for Cycle {
+    fn drop(&mut self) {
+        CYCLE.with(|cycle| {
+            cycle.replace(std::mem::take(&mut self.0));
+        });
+    }
+}
+
+pub(super) fn wait_for_shared_cooldown(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+) -> anyhow::Result<()> {
+    let waited = std::cell::Cell::new(false);
+    gyro_core::provider_cooldown::wait(
+        || {
+            provider_chat_cancelled(app, &request.session_id)
+                .then(|| provider_stop_message(app, &request.session_id))
+        },
+        |delay| {
+            waited.set(true);
+            set_kind("rate-limit");
+            emit_wait(
+                app,
+                request,
+                delay,
+                gyro_core::provider_retry::retries_used(),
+                3,
+            );
+        },
+    )
+    .map_err(anyhow::Error::msg)?;
+    if waited.get() {
+        emit_started(app, request, gyro_core::provider_retry::retries_used(), 3);
+    }
+    Ok(())
+}
+
+pub(super) fn cooldown_scope(store: &SessionStore, request: &ProviderChatRequest) -> String {
+    // Configured endpoints and imported native login homes identify separate
+    // profiles without reading or persisting the credential itself.
+    use sha2::{Digest, Sha256};
+    let endpoint = load_config_blocking().ok().and_then(|config| {
+        config
+            .model_providers
+            .into_iter()
+            .find(|provider| provider.id == request.provider_id)
+            .and_then(|provider| provider.base_url)
+    });
+    let profile = Uuid::parse_str(&request.session_id)
+        .ok()
+        .and_then(|id| store.get_session(id).ok().flatten())
+        .and_then(|session| session.import_source)
+        .filter(|source| source.source_kind.provider_id() == request.provider_id)
+        .map(|source| source.data_home)
+        .unwrap_or_default();
+    let namespace = serde_json::json!([request.provider_id, endpoint, request.model_id]);
+    format!(
+        "{:x}/{:x}",
+        Sha256::digest(namespace.to_string().as_bytes()),
+        Sha256::digest(profile.as_bytes())
+    )
+}
 const CONTINUATION_PREFIX: &str =
     "The previous attempt was interrupted by a temporary provider failure.";
 
@@ -55,12 +140,13 @@ pub(super) fn manual_retry_request(
     }
 }
 
-pub(super) fn can_resume_capacity_after_work(
+pub(super) fn can_resume_transient_after_work(
     request: &ProviderChatRequest,
     attempt: &ProviderRunAttempt,
     error: &str,
 ) -> bool {
-    provider_reliability::is_model_capacity_error(error)
+    (provider_reliability::is_model_capacity_error(error)
+        || provider_reliability::is_rate_limit_error(error))
         && durable_native_cursor(request, attempt.resume_cursor.as_ref())
 }
 
@@ -121,17 +207,50 @@ fn emit_retry_event(
         "sequence": next_provider_event_sequence(app, &request.session_id),
         "phase": phase,
         "status": status,
-        "recoveryKind": "model-capacity",
+        "recoveryKind": RECOVERY_KIND.with(|kind| kind.borrow().clone()),
+        "recovery": {
+            "cycleId": CYCLE.with(|cycle| cycle.borrow().clone()),
+            "state": if phase == "retry-wait" { "waiting" } else { "retrying" },
+            "attemptsUsed": retry_attempt,
+            "maxRetries": max_attempts,
+            "retryAt": retry_at.map(|at| at.to_rfc3339()),
+        },
         "retryAt": retry_at.map(|at| at.to_rfc3339()),
         "retryAttempt": retry_attempt,
         "retryMaxAttempts": max_attempts,
         "message": if phase == "retry-wait" {
-            "Model is temporarily busy. Continuing shortly."
+            "Waiting for the provider to continue"
         } else {
             "Continuing the saved work"
         },
     });
     provider_timeline::observe(app, &request.session_id, None, None).insert_into(&mut payload);
+    if let (Ok(store), Ok(session), Some(turn)) = (
+        open_store(),
+        Uuid::parse_str(&request.session_id),
+        request
+            .turn_id
+            .as_deref()
+            .and_then(|id| Uuid::parse_str(id).ok()),
+    ) {
+        let continuation = store
+            .get_provider_session_binding(session, &request.provider_id)
+            .ok()
+            .flatten()
+            .and_then(|binding| provider_resume_cursor_from_binding(&binding))
+            .is_some_and(|cursor| durable_native_cursor(request, Some(&cursor)));
+        payload["recovery"]["continuationAvailable"] = serde_json::json!(continuation);
+        let mut stored = payload.clone();
+        stored["kind"] = serde_json::json!("provider-status");
+        stored["nativeRetry"] = serde_json::json!(phase == "retry-wait");
+        let _ = store.append_event_with_turn_id(
+            session,
+            SessionEventKind::SystemEvent,
+            payload["message"].as_str().unwrap_or_default(),
+            stored,
+            Some(turn),
+        );
+    }
     let _ = app.emit(PROVIDER_CHAT_EVENT, payload);
 }
 
@@ -172,22 +291,68 @@ where
         &mut ProviderRunAttempt,
     ) -> anyhow::Result<ProviderRunnerOutput>,
 {
+    let _budget = gyro_core::provider_retry::RetryScope::start();
+    let _cycle = Cycle::start();
+    let retries_at_start = gyro_core::provider_retry::retries_used();
     let binding_cursor = binding
         .as_ref()
         .and_then(provider_resume_cursor_from_binding);
+    // A manual resend can arrive after the previous worker has gone away.
+    // Saved tool receipts still prohibit replay when its cursor was lost.
+    let saved_events = Uuid::parse_str(&request.session_id)
+        .ok()
+        .and_then(|session| store.read_events(session).ok())
+        .unwrap_or_default();
+    let saved_failure = saved_events.iter().any(|event| {
+        event.turn_id.map(|id| id.to_string()).as_deref() == request.turn_id.as_deref()
+            && event
+                .payload
+                .get("kind")
+                .and_then(serde_json::Value::as_str)
+                == Some("provider-status")
+            && event
+                .payload
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                == Some("failed")
+    });
+    let saved_work = saved_failure
+        && saved_events.iter().any(|event| {
+            event.turn_id.map(|id| id.to_string()).as_deref() == request.turn_id.as_deref()
+                && event
+                    .payload
+                    .get("schema")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|schema| {
+                        matches!(schema, "gyro.capability.v1" | "gyro.mutation.v1")
+                    })
+        });
+    if (saved_work || is_continuation(request))
+        && !durable_native_cursor(request, binding_cursor.as_ref())
+    {
+        anyhow::bail!(CONTINUATION_UNAVAILABLE);
+    }
     project_import_continuation::check_continuation(store, request, binding_cursor.as_ref())?;
     if let Some(stop) = stopped() {
         anyhow::bail!(stop);
     }
     let mut attempt = ProviderRunAttempt {
         resume_cursor: binding_cursor.clone(),
-        continuing_work: provider_retry_recovery::is_continuation(request),
+        continuing_work: provider_retry_recovery::is_continuation(request) || saved_work,
         ..Default::default()
     };
     match run_once(binding_cursor.as_ref(), &mut attempt) {
         // The adapter may have recovered from a stale cursor internally.
         // Its actual session outcome governs continuity and accounting.
         Ok(output) => Ok(output),
+        Err(error)
+            if is_stale_resume_error(&format!("{error:#}"))
+                && (attempt.published_output || attempt.continuing_work) =>
+        {
+            let error = error.context(CONTINUATION_UNAVAILABLE);
+            persist_failed_provider_attempt(store, request, binding.as_ref(), &attempt, &error);
+            Err(error)
+        }
         Err(error)
             if project_import_continuation::requires_native_session(store, request)?
                 && is_stale_resume_error(&format!("{error:#}")) =>
@@ -203,6 +368,7 @@ where
             if binding.is_some()
                 && !attempt.published_output
                 && !attempt.continuing_work
+                && gyro_core::provider_retry::take_retry()
                 && stopped().is_none()
                 && is_stale_resume_error(&format!("{error:#}")) =>
         {
@@ -235,7 +401,7 @@ where
         Err(error)
             if is_transient_provider_error(&format!("{error:#}"))
                 && (!attempt.published_output
-                    || provider_retry_recovery::can_resume_capacity_after_work(
+                    || provider_retry_recovery::can_resume_transient_after_work(
                         request,
                         &attempt,
                         &format!("{error:#}"),
@@ -257,18 +423,39 @@ where
                 // same instruction as text.
                 let capacity =
                     provider_reliability::is_model_capacity_error(&format!("{last_error:#}"));
-                let fallback = if capacity {
+                let rate_limit =
+                    provider_reliability::is_rate_limit_error(&format!("{last_error:#}"));
+                set_kind(if capacity {
+                    "model-capacity"
+                } else if rate_limit {
+                    "rate-limit"
+                } else {
+                    "network"
+                });
+                let fallback = if capacity || rate_limit {
                     provider_retry_recovery::CAPACITY_RETRY_DELAY
                 } else {
                     gyro_core::provider_retry::transient_retry_delay(retry_index)
                         .unwrap_or(retry_ladder[retry_index])
                 };
+                if rate_limit {
+                    gyro_core::provider_cooldown::observe_error(
+                        &format!("{last_error:#}"),
+                        gyro_core::provider_retry::provider_cooldown_hint(&format!(
+                            "{last_error:#}"
+                        ))
+                        .unwrap_or(fallback),
+                    );
+                }
                 let Some(delay) = gyro_core::provider_retry::retry_delay_with_hint(
                     &format!("{last_error:#}"),
                     fallback,
                 ) else {
                     break;
                 };
+                if !gyro_core::provider_retry::take_retry() {
+                    break;
+                }
                 if let Some(stop) = stopped() {
                     let stop = last_error.context(stop);
                     persist_failed_provider_attempt(
@@ -280,9 +467,18 @@ where
                     );
                     return Err(stop);
                 }
+                // Checkpoint the acknowledged cursor before the wait as well
+                // as on terminal failure, so a restart cannot erase it.
+                persist_failed_provider_attempt(
+                    store,
+                    request,
+                    binding.as_ref(),
+                    &last_attempt,
+                    &last_error,
+                );
                 if let Err(stop) = wait(
                     delay,
-                    retry_index as u32 + 1,
+                    gyro_core::provider_retry::retries_used(),
                     retry_ladder.len() as u32,
                     capacity,
                 ) {
@@ -315,6 +511,8 @@ where
                 recovered_activities.append(&mut last_attempt.activities);
                 last_attempt = ProviderRunAttempt {
                     resume_cursor: cursor.clone(),
+                    tools_dispatched: last_attempt.tools_dispatched,
+                    mutations_completed: last_attempt.mutations_completed,
                     published_output: false,
                     continuing_work,
                     activities: Vec::new(),
@@ -334,13 +532,14 @@ where
                             recovered_activities,
                             &output.response,
                         );
-                        output.retry_count = (retry_index as u32).saturating_add(1);
+                        output.retry_count = gyro_core::provider_retry::retries_used()
+                            .saturating_sub(retries_at_start);
                         return Ok(output);
                     }
                     Err(retry_error)
                         if is_transient_provider_error(&format!("{retry_error:#}"))
                             && (!last_attempt.published_output
-                                || provider_retry_recovery::can_resume_capacity_after_work(
+                                || provider_retry_recovery::can_resume_transient_after_work(
                                     request,
                                     &last_attempt,
                                     &format!("{retry_error:#}"),
@@ -350,13 +549,24 @@ where
                         last_error = retry_error;
                     }
                     Err(retry_error) => {
-                        let retry_error = if retry_index + 1 == retry_ladder.len()
+                        let retry_error = if is_stale_resume_error(&format!("{retry_error:#}"))
+                            && continuing_work
+                        {
+                            retry_error.context(CONTINUATION_UNAVAILABLE)
+                        } else if retry_index + 1 == retry_ladder.len()
                             && provider_reliability::is_model_capacity_error(&format!(
                                 "{retry_error:#}"
-                            )) {
+                            ))
+                        {
                             retry_error.context(provider_retry_recovery::CAPACITY_RETRY_EXHAUSTED)
                         } else {
-                            retry_error
+                            if is_transient_provider_error(&format!("{retry_error:#}"))
+                                && retry_index + 1 == retry_ladder.len()
+                            {
+                                retry_error.context(RETRY_EXHAUSTED)
+                            } else {
+                                retry_error
+                            }
                         };
                         persist_failed_provider_attempt(
                             store,
@@ -369,6 +579,9 @@ where
                     }
                 }
             }
+            if gyro_core::provider_retry::retries_used() >= 3 {
+                last_error = last_error.context(RETRY_EXHAUSTED);
+            }
             persist_failed_provider_attempt(
                 store,
                 request,
@@ -379,6 +592,14 @@ where
             Err(last_error)
         }
         Err(error) => {
+            let error = if (attempt.published_output || attempt.continuing_work)
+                && is_transient_provider_error(&format!("{error:#}"))
+                && !durable_native_cursor(request, attempt.resume_cursor.as_ref())
+            {
+                error.context(CONTINUATION_UNAVAILABLE)
+            } else {
+                error
+            };
             persist_failed_provider_attempt(store, request, binding.as_ref(), &attempt, &error);
             Err(error)
         }
@@ -388,6 +609,218 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_retry_does_not_inherit_exhausted_metadata_from_an_older_cycle() {
+        let (_temp, store, request) = setup("openai");
+        let session = Uuid::parse_str(&request.session_id).unwrap();
+        let turn = request
+            .turn_id
+            .as_deref()
+            .and_then(|id| Uuid::parse_str(id).ok());
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        append_provider_status_event(
+            &store,
+            session,
+            &request,
+            turn,
+            first,
+            HarnessRunStatus::Running,
+            None,
+        )
+        .unwrap();
+        let old = append_provider_status_event(
+            &store,
+            session,
+            &request,
+            turn,
+            first,
+            HarnessRunStatus::Failed,
+            Some(RETRY_EXHAUSTED),
+        )
+        .unwrap();
+        assert_eq!(old.payload["recovery"]["attemptsUsed"], 3);
+        append_provider_status_event(
+            &store,
+            session,
+            &request,
+            turn,
+            second,
+            HarnessRunStatus::Running,
+            None,
+        )
+        .unwrap();
+        let next = append_provider_status_event(
+            &store,
+            session,
+            &request,
+            turn,
+            second,
+            HarnessRunStatus::Failed,
+            Some("rate limit exceeded; retry after 90s"),
+        )
+        .unwrap();
+        assert_eq!(next.payload["recovery"]["attemptsUsed"], 0);
+        assert_eq!(next.payload["recovery"]["cycleId"], second.to_string());
+        assert_ne!(
+            next.payload["recovery"]["cycleId"],
+            old.payload["recovery"]["cycleId"]
+        );
+    }
+
+    #[test]
+    fn a_saved_failed_turn_without_its_cursor_never_dispatches() {
+        let (_temp, store, request) = setup("openai");
+        let session = Uuid::parse_str(&request.session_id).unwrap();
+        let turn = request
+            .turn_id
+            .as_deref()
+            .and_then(|id| Uuid::parse_str(id).ok());
+        store.append_event_with_turn_id(session, SessionEventKind::SystemEvent, "Edited file",
+            serde_json::json!({"kind":"capability-call", "schema":"gyro.capability.v1", "status":"completed"}), turn).unwrap();
+        store
+            .append_event_with_turn_id(
+                session,
+                SessionEventKind::SystemEvent,
+                "Rate limit reached",
+                serde_json::json!({"kind":"provider-status", "status":"failed"}),
+                turn,
+            )
+            .unwrap();
+        let error = run_provider_chat_with_retry_using_with_wait(
+            &store,
+            &request,
+            None,
+            |_, _| panic!("must not replay a saved failed turn without its cursor"),
+            || None,
+            |_, _, _, _| Ok(()),
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains(CONTINUATION_UNAVAILABLE));
+    }
+
+    #[test]
+    fn rate_limit_after_edit_resumes_the_acknowledged_conversation_once() {
+        let (temp, store, request) = setup("openai");
+        let target = temp.path().join("completed.txt");
+        let mut calls = 0;
+        let mut edits = 0;
+        let mut waits = Vec::new();
+        let result = run_provider_chat_with_retry_using_with_wait(
+            &store,
+            &request,
+            None,
+            |cursor, attempt| {
+                calls += 1;
+                if calls == 1 {
+                    edits += 1;
+                    std::fs::write(&target, "completed work").unwrap();
+                    attempt.published_output = true;
+                    attempt.resume_cursor = Some(ProviderResumeCursor {
+                        kind: "codex-session".into(),
+                        session_id: "saved-after-edit".into(),
+                    });
+                    anyhow::bail!("rate limit exceeded. Please try again in 1.783s.");
+                }
+                assert!(attempt.continuing_work);
+                assert_eq!(cursor.unwrap().session_id, "saved-after-edit");
+                assert_eq!(std::fs::read_to_string(&target).unwrap(), "completed work");
+                Ok(output(Vec::new()))
+            },
+            || None,
+            |delay, _, _, _| {
+                waits.push(delay);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(calls, 2);
+        assert_eq!(edits, 1);
+        assert_eq!(result.retry_count, 1);
+        assert_eq!(waits, vec![Duration::from_millis(1783)]);
+    }
+
+    #[test]
+    fn missing_cursor_after_work_cannot_start_a_fresh_task() {
+        let (_temp, store, request) = setup("openai");
+        let mut calls = 0;
+        let error = run_provider_chat_with_retry_using_with_wait(
+            &store,
+            &request,
+            None,
+            |_, attempt| {
+                calls += 1;
+                attempt.published_output = true;
+                anyhow::bail!("rate limit exceeded; try again in 1s")
+            },
+            || None,
+            |_, _, _, _| panic!("unsafe retry"),
+        )
+        .unwrap_err();
+        assert_eq!(calls, 1);
+        assert_eq!(
+            provider_failure_recovery(&format!("{error:#}")).0,
+            "continuation-unavailable"
+        );
+    }
+
+    #[test]
+    fn rate_limit_exhaustion_is_terminal_for_every_retry_owner() {
+        let (_temp, store, request) = setup("openai");
+        let mut calls = 0;
+        let error = run_provider_chat_with_retry_using_with_wait(
+            &store,
+            &request,
+            None,
+            |_, _| {
+                calls += 1;
+                anyhow::bail!("rate_limit_exceeded; try again in 0s")
+            },
+            || None,
+            |_, _, _, _| Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(calls, 4);
+        let text = format!("{error:#}");
+        assert_eq!(provider_failure_recovery(&text).0, "retry-exhausted");
+        assert!(!is_transient_provider_error(&text));
+    }
+
+    #[test]
+    fn a_nested_worker_cannot_reset_a_spent_recovery_budget() {
+        let _budget = gyro_core::provider_retry::RetryScope::start();
+        assert!(gyro_core::provider_retry::take_retry());
+        assert!(gyro_core::provider_retry::take_retry());
+        let (_temp, store, request) = setup("openai");
+        let mut calls = 0;
+        let error = run_provider_chat_with_retry_using_with_wait(
+            &store,
+            &request,
+            None,
+            |_, _| {
+                calls += 1;
+                anyhow::bail!("rate limit exceeded; try again in 0s")
+            },
+            || None,
+            |_, _, _, _| Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(calls, 2);
+        assert!(format!("{error:#}").contains(RETRY_EXHAUSTED));
+        assert_eq!(gyro_core::provider_retry::retries_used(), 3);
+    }
+
+    #[test]
+    fn rate_limits_are_explicit_but_billing_and_generic_try_again_are_not_transient() {
+        assert!(is_transient_provider_error("rate limit exceeded"));
+        assert!(is_transient_provider_error("rate_limit_exceeded"));
+        assert!(is_transient_provider_error("too many requests"));
+        assert!(!is_transient_provider_error(
+            "insufficient_quota; try again"
+        ));
+        assert!(!is_transient_provider_error("bad tool argument; try again"));
+    }
 
     fn setup(provider: &str) -> (tempfile::TempDir, SessionStore, ProviderChatRequest) {
         let temp = tempfile::tempdir().unwrap();
@@ -416,6 +849,7 @@ mod tests {
             workspace_context: None,
             workspace_check: None,
             side_chat_context: None,
+            internal_purpose: None,
         };
         (temp, store, request)
     }

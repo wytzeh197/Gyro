@@ -134,7 +134,7 @@ pub(super) fn execute(
 /// can exceed the tool budget after the mutation has already succeeded, which
 /// would incorrectly report failure and encourage the model to repeat a write.
 fn bounded_proposal_result(proposal: &MutationProposal) -> Value {
-    json!({
+    let mut data = json!({
         "schema": WORKSPACE_EDIT_SCHEMA,
         "id": proposal.id,
         "proposalId": proposal.id,
@@ -144,7 +144,13 @@ fn bounded_proposal_result(proposal: &MutationProposal) -> Value {
         "expectedHash": proposal.expected_hash,
         "contentHash": content_hash(proposal.content.as_bytes()),
         "error": proposal.error.as_deref().map(gyro_core::sanitize_capability_summary),
-    })
+        "applied": proposal.status == gyro_core::MutationProposalStatus::Applied,
+        "approvalRequired": proposal.status == gyro_core::MutationProposalStatus::Pending,
+    });
+    if proposal.status == gyro_core::MutationProposalStatus::Pending {
+        data["nextStep"] = json!("This proposal has not changed the file on disk. Keep its proposalId and wait for user review before verifying this edit; do not resubmit the same edit. Independent work can continue.");
+    }
+    data
 }
 
 fn bounded_edit_result(proposal: &MutationProposal, count: usize, line: u64) -> Value {
@@ -497,6 +503,16 @@ mod tests {
                     }
                 );
                 assert_eq!(data["contentHash"], content_hash(content.as_bytes()));
+                assert_eq!(data["applied"], apply_immediately);
+                assert_eq!(data["approvalRequired"], !apply_immediately);
+                if apply_immediately {
+                    assert!(data.get("nextStep").is_none());
+                } else {
+                    assert!(data["nextStep"]
+                        .as_str()
+                        .unwrap()
+                        .contains("has not changed the file on disk"));
+                }
                 assert!(data.get("content").is_none());
             }
             let target = temp.path().join("large.txt");

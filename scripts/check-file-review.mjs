@@ -435,7 +435,7 @@ const surfaces = readRepoSource(
 const cardStart = surfaces.indexOf("function ChatRunChangeSummary(");
 assert.doesNotMatch(surfaces, /additions: file\.additions \?\? 0/);
 const turnSource = surfaces.slice(
-  surfaces.indexOf("function ChatTurn("),
+  surfaces.indexOf("function ChatTurnView("),
   cardStart,
 );
 assert.doesNotMatch(

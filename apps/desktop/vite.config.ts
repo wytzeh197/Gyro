@@ -74,6 +74,14 @@ export default defineConfig(({ mode }) => ({
       }
     : {}),
   // QA entrypoints are embedded only by the explicit native acceptance build.
+  ...(mode === "native-browser-events-smoke"
+    ? {
+        build: {
+          outDir: process.env.GYRO_NATIVE_BROWSER_EVENTS_FRONTEND_DIR,
+          rollupOptions: { input: "browser-events-native-smoke.html" },
+        },
+      }
+    : {}),
   ...(mode === "native-syntax-smoke"
     ? {
         build: {

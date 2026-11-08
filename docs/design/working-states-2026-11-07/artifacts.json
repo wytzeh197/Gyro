@@ -1,0 +1,82 @@
+[
+  {
+    "slug": "live-thinking",
+    "title": "Live thinking and response",
+    "source": "/Users/wytze/.codex/generated_images/01a1b6ae-222e-75b2-9119-bd0288ecde20/exec-b696df21-cea0-43b8-a9e8-9c2d55a62cf7.png",
+    "filename": "01-live-thinking.png",
+    "path": "/Users/wytze/Gyro/docs/design/working-states-2026-11-07/01-live-thinking.png",
+    "refined": false
+  },
+  {
+    "slug": "activity-rows",
+    "title": "Working activity",
+    "source": "/Users/wytze/.codex/generated_images/01a1b6ae-222e-75b2-9119-bd0288ecde20/exec-6a704af9-1239-4958-8d81-dbe38832b9dc.png",
+    "filename": "02-activity-rows.png",
+    "path": "/Users/wytze/Gyro/docs/design/working-states-2026-11-07/02-activity-rows.png",
+    "refined": true
+  },
+  {
+    "slug": "approvals",
+    "title": "Approval decision",
+    "source": "/Users/wytze/.codex/generated_images/01a1b6ae-222e-75b2-9119-bd0288ecde20/exec-c9fab8f0-4d13-4ecf-8f44-6e86174270b3.png",
+    "filename": "03-approvals.png",
+    "path": "/Users/wytze/Gyro/docs/design/working-states-2026-11-07/03-approvals.png",
+    "refined": true
+  },
+  {
+    "slug": "questions",
+    "title": "Question while working",
+    "source": "/Users/wytze/.codex/generated_images/01a1b6ae-222e-75b2-9119-bd0288ecde20/exec-39cb6750-564d-43a3-ab18-64b97c36fb9f.png",
+    "filename": "04-questions.png",
+    "path": "/Users/wytze/Gyro/docs/design/working-states-2026-11-07/04-questions.png",
+    "refined": true
+  },
+  {
+    "slug": "subagents",
+    "title": "Subagent work",
+    "source": "/Users/wytze/.codex/generated_images/01a1b6ae-222e-75b2-9119-bd0288ecde20/exec-a09ce929-e64f-4ae5-ab94-e882e8222407.png",
+    "filename": "05-subagents.png",
+    "path": "/Users/wytze/Gyro/docs/design/working-states-2026-11-07/05-subagents.png",
+    "refined": true
+  },
+  {
+    "slug": "context-memory",
+    "title": "Memory and context",
+    "source": "/Users/wytze/.codex/generated_images/01a1b6ae-222e-75b2-9119-bd0288ecde20/exec-ea6d113b-bfa7-4f3c-9364-e557287c7dbf.png",
+    "filename": "06-context-memory.png",
+    "path": "/Users/wytze/Gyro/docs/design/working-states-2026-11-07/06-context-memory.png",
+    "refined": true
+  },
+  {
+    "slug": "recovery",
+    "title": "Retry and recovery",
+    "source": "/Users/wytze/.codex/generated_images/01a1b6ae-222e-75b2-9119-bd0288ecde20/exec-4eba1200-a526-42a0-b58a-24c88509fd80.png",
+    "filename": "07-recovery.png",
+    "path": "/Users/wytze/Gyro/docs/design/working-states-2026-11-07/07-recovery.png",
+    "refined": false
+  },
+  {
+    "slug": "completion",
+    "title": "Completed work and changes",
+    "source": "/Users/wytze/.codex/generated_images/01a1b6ae-222e-75b2-9119-bd0288ecde20/exec-894be0ea-650a-4e30-9435-275f652dab83.png",
+    "filename": "08-completion.png",
+    "path": "/Users/wytze/Gyro/docs/design/working-states-2026-11-07/08-completion.png",
+    "refined": true
+  },
+  {
+    "slug": "queued-messages",
+    "title": "Queued messages",
+    "source": "/Users/wytze/.codex/generated_images/01a1b6ae-222e-75b2-9119-bd0288ecde20/exec-0e49f4c3-bbd8-4259-967b-55655cef4924.png",
+    "filename": "09-queued-messages.png",
+    "path": "/Users/wytze/Gyro/docs/design/working-states-2026-11-07/09-queued-messages.png",
+    "refined": true
+  },
+  {
+    "slug": "plan-decision",
+    "title": "Plan ready to implement",
+    "source": "/Users/wytze/.codex/generated_images/01a1b6ae-222e-75b2-9119-bd0288ecde20/exec-c4741889-dce7-450b-94ae-4a0a65625390.png",
+    "filename": "10-plan-decision.png",
+    "path": "/Users/wytze/Gyro/docs/design/working-states-2026-11-07/10-plan-decision.png",
+    "refined": false
+  }
+]

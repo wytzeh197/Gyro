@@ -51,6 +51,7 @@ fn run(app: &tauri::AppHandle, directory: &Path) -> anyhow::Result<Value> {
         session_id: session_id.clone(),
         turn_id: Some(Uuid::new_v4().to_string()),
         provider_id: "openrouter".into(),
+        provider_kind: None,
         workspace: workspace.clone(),
         workspace_key: workspace.display().to_string(),
         workspace_identity_revision: session.workspace_identity.revision,

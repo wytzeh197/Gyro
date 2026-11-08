@@ -1,0 +1,4 @@
+{
+  "context-memory": "Edit this sheet only to correct two spacing errors and the read icon. Header must read exactly \"Working for 18s\", with spaces before and after the word for. The read row must read exactly \"Read 3 files\", with a space between Read and 3, and use a small outline file icon rather than a terminal icon. The active \"Compacting context\" row should have a tiny neutral spinner beside the label. Preserve every other layout element and all outcome wording exactly. Do not add panels or unrelated content.",
+  "questions": "Edit only the empty bottom receipt specimen beneath the divider. Under the existing caption \"After answering\", add one compact neutral check icon and exact text \"Answer sent · Surface the last error\". This is an alternative completed receipt. Keep the main question dock, two choices, input, text, colors, spacing, title and footer unchanged. Do not add anything else."
+}

@@ -1,0 +1,36 @@
+Window: "Gyro isolated native browser check", App: Gyro Browser Review.
+0 standard window Gyro isolated native browser check, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: GYRO_BROWSER_CAPTURE_REVIEW_RECOVERED, URL: tauri://localhost/browser-events-native-smoke.html
+			3 container
+				4 text Isolated native browser acceptance
+				5 container Gyro Fixture Original
+					6 text Gyro Fixture Original
+				7 container ready
+					8 text ready
+				9 button Continue acceptance
+				10 container Navigation
+					11 button (disabled) Back
+					12 button (disabled) Forward
+					13 button (disabled) Reload
+				14 text field (settable) Browser URL, Value: http://127.0.0.1:52750/browser-observation.html?label=Original, Placeholder: Search or enter a URL
+				15 button Open page in system browser, Help: Open in system browser
+				16 button (collapsed) Browser options, Secondary Actions: Expand
+				17 image Browser capture of 127.0.0.1:52750/browser-observation.html
+				18 text 390  ×  844  · 127.0.0.1:52750/browser-observation.html  · 10:51 PM
+				19 button Back to live
+				20 toggle button Comment on page, Value: off
+				21 button Reveal file
+	22 close button
+	23 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	24 minimize button
+	25 text Gyro isolated native browser check
+26 menu bar
+	27 Gyro Browser Review
+	28 File
+	29 Edit
+	30 View
+	31 Window
+	32 Help
+
+The focused UI element is 2 HTML content Description: GYRO_BROWSER_CAPTURE_REVIEW_RECOVERED, URL: tauri://localhost/browser-events-native-smoke.html

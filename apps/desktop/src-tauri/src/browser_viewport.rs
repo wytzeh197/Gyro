@@ -1,7 +1,8 @@
 //! Desktop layout is independent of the size of the visible Browser host.
 use crate::session_browser::{browser_url_is_loopback, parse_navigable_url, SessionBrowserBounds};
+use crate::session_browser::{BrowserLease, PendingCall, SessionBrowserManager};
 use serde::{Deserialize, Serialize};
-use tauri::{Runtime, Webview};
+use tauri::{Manager, Runtime, Webview};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -39,14 +40,18 @@ pub struct BrowserViewportGeometry {
 }
 
 impl BrowserViewportRequest {
-    pub fn validate(&self) -> Result<(), String> {
-        if matches!(
-            self.mode,
-            BrowserViewportMode::Auto | BrowserViewportMode::Responsive
-        ) && (self.width.is_some() || self.height.is_some())
+    pub fn normalized(mut self) -> Self {
+        if (self.width.is_some() || self.height.is_some())
+            && matches!(
+                self.mode,
+                BrowserViewportMode::Auto | BrowserViewportMode::Responsive
+            )
         {
-            return Err("custom dimensions require desktop, tablet, or mobile mode".into());
+            self.mode = BrowserViewportMode::Desktop;
         }
+        self
+    }
+    pub fn validate(&self) -> Result<(), String> {
         if self
             .width
             .is_some_and(|width| !(240..=2560).contains(&width))
@@ -65,6 +70,7 @@ pub fn geometry(
     url: &str,
     host: &SessionBrowserBounds,
 ) -> Result<BrowserViewportGeometry, String> {
+    let request = request.normalized();
     request.validate()?;
     if ![host.x, host.y, host.width, host.height]
         .iter()
@@ -110,15 +116,27 @@ pub fn geometry(
     })
 }
 
-/// WKWebView pageZoom changes the CSS viewport as well as the visible scale.
-/// Resizing NSView bounds alone does not change WebKit's layout viewport.
+#[cfg(target_os = "macos")]
+#[path = "browser_viewport_native.rs"]
+mod native;
+#[cfg(all(
+    target_os = "macos",
+    debug_assertions,
+    feature = "native-browser-events-smoke"
+))]
+pub(crate) use native::counts as native_container_counts;
+#[cfg(target_os = "macos")]
+pub(crate) use native::detach as detach_native_container;
+
+/// Keep the requested CSS viewport independent of its visible host rectangle.
 pub fn apply<R: Runtime>(
     webview: &Webview<R>,
     geometry: &BrowserViewportGeometry,
     previous: Option<BrowserViewportState>,
+    expected: Option<BrowserLease>,
 ) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
     use tauri::{LogicalPosition, LogicalSize, Rect};
-    // WebKit preserves a physical scroll offset when changing pageZoom.
     // Preserve CSS scroll coordinates when only the visible fit changes.
     let scroll = if previous.is_some_and(|old| {
         old.width == geometry.state.width
@@ -128,40 +146,71 @@ pub fn apply<R: Runtime>(
         Some(evaluate_position(
             webview,
             "JSON.stringify({ x: window.scrollX, y: window.scrollY })".into(),
+            expected.clone(),
         )?)
     } else {
         None
     };
-    webview
-        .set_bounds(Rect {
-            position: LogicalPosition::new(geometry.frame.x, geometry.frame.y).into(),
-            size: LogicalSize::new(geometry.frame.width, geometry.frame.height).into(),
-        })
-        .map_err(|error| format!("could not position browser viewport: {error}"))?;
-    #[cfg(target_os = "macos")]
-    {
-        use std::{sync::mpsc, time::Duration};
-        let scale = geometry.state.display_scale;
-        let (sender, receiver) = mpsc::channel();
-        webview
-            .with_webview(move |platform| unsafe {
-                let view: &objc2_web_kit::WKWebView = &*platform.inner().cast();
-                view.setPageZoom(scale);
-                let _ = sender.send(());
-            })
-            .map_err(|error| format!("could not scale browser viewport: {error}"))?;
-        receiver
-            .recv_timeout(Duration::from_secs(8))
-            .map_err(|_| "browser viewport update timed out".to_string())?;
-    }
     #[cfg(not(target_os = "macos"))]
+    let frame = Rect {
+        position: LogicalPosition::new(geometry.frame.x, geometry.frame.y).into(),
+        size: LogicalSize::new(geometry.frame.width, geometry.frame.height).into(),
+    };
+    let pending = PendingCall::new(
+        std::time::Duration::from_secs(8),
+        "browser viewport update timed out",
+    )?;
+    let dispatch = pending.guard();
+    let action_view = webview.clone();
+    let owner = expected.clone();
+    #[cfg(not(target_os = "macos"))]
+    let scale = geometry.state.display_scale;
+    #[cfg(target_os = "macos")]
+    let native_geometry = BrowserViewportGeometry {
+        frame: geometry.frame.clone(),
+        state: geometry.state,
+    };
+    let (sender, receiver) = std::sync::mpsc::channel();
     webview
-        .set_zoom(geometry.state.display_scale)
-        .map_err(|error| format!("could not scale browser viewport: {error}"))?;
+        .with_webview(move |_platform| {
+            let result: Result<(), String> = (|| {
+                dispatch.check()?;
+                if let Some(ref owner) = owner {
+                    owner.validate(&action_view.app_handle().state::<SessionBrowserManager>())?;
+                }
+                #[cfg(target_os = "macos")]
+                unsafe {
+                    let view: &objc2_web_kit::WKWebView = &*_platform.inner().cast();
+                    native::apply(view, &native_geometry)?;
+                    if let Some(owner) = owner {
+                        let app = action_view.app_handle().clone();
+                        native::on_interaction(
+                            view,
+                            Box::new(move || {
+                                owner.emit_user_interaction(&app);
+                            }),
+                        );
+                    }
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    action_view
+                        .set_bounds(frame)
+                        .map_err(|error| format!("could not position browser viewport: {error}"))?;
+                    action_view
+                        .set_zoom(scale)
+                        .map_err(|error| format!("could not scale browser viewport: {error}"))?;
+                }
+                Ok(())
+            })();
+            let _ = sender.send(result);
+        })
+        .map_err(|error| format!("could not queue browser viewport: {error}"))?;
+    pending.wait(receiver)??;
     if let Some(scroll) = scroll {
         let x = scroll["x"].as_f64().unwrap_or(0.0);
         let y = scroll["y"].as_f64().unwrap_or(0.0);
-        evaluate_position(webview, format!("window.scrollTo({{ left:{x}, top:{y}, behavior:'instant' }}); JSON.stringify({{ x:window.scrollX, y:window.scrollY }})"))?;
+        evaluate_position(webview, format!("window.scrollTo({{ left:{x}, top:{y}, behavior:'instant' }}); JSON.stringify({{ x:window.scrollX, y:window.scrollY }})"),expected)?;
     }
     Ok(())
 }
@@ -169,15 +218,28 @@ pub fn apply<R: Runtime>(
 fn evaluate_position<R: Runtime>(
     webview: &Webview<R>,
     script: String,
+    expected: Option<BrowserLease>,
 ) -> Result<serde_json::Value, String> {
     use std::{sync::mpsc, time::Duration};
     let (sender, receiver) = mpsc::channel();
+    let pending = PendingCall::new(Duration::from_secs(8), "browser scroll update timed out")?;
+    let dispatch = pending.guard();
+    let action_app = webview.app_handle().clone();
     #[cfg(target_os = "macos")]
     webview
         .with_webview(move |platform| unsafe {
             use block2::RcBlock;
             use objc2::runtime::AnyObject;
             use objc2_foundation::{NSError, NSString};
+            let valid = dispatch.check().and_then(|_| {
+                expected.as_ref().map_or(Ok(()), |owner| {
+                    owner.validate(&action_app.state::<SessionBrowserManager>())
+                })
+            });
+            if let Err(error) = valid {
+                let _ = sender.send(Err(error));
+                return;
+            }
             let completion = RcBlock::new(move |value: *mut AnyObject, _error: *mut NSError| {
                 let result = value
                     .as_ref()
@@ -207,19 +269,17 @@ fn evaluate_position<R: Runtime>(
             let _ = sender.send(result);
         })
         .map_err(|error| format!("could not preserve browser scroll: {error}"))?;
-    receiver
-        .recv_timeout(Duration::from_secs(8))
-        .map_err(|_| "browser scroll update timed out".to_string())?
+    pending.wait(receiver)?
 }
 
 pub(super) fn schema(
     id: gyro_core::CapabilityId,
 ) -> Option<(serde_json::Value, Vec<&'static str>)> {
     (id == gyro_core::CapabilityId::BrowserViewport).then(|| (serde_json::json!({
-        "mode":{"type":"string","enum":["auto","responsive","desktop","tablet","mobile"]},
+        "mode":{"type":"string","enum":["auto","responsive","desktop","tablet","mobile"],"description":"Defaults to auto. Explicit width or height with auto/responsive selects a fixed desktop viewport."},
         "width":{"type":"integer","minimum":240,"maximum":2560,"description":"Fixed layout width in CSS pixels."},
         "height":{"type":"integer","minimum":240,"maximum":1600,"description":"Fixed layout height in CSS pixels."}
-    }), vec!["mode"]))
+    }), vec![]))
 }
 
 pub(super) fn execute_capability(
@@ -345,6 +405,35 @@ mod tests {
         );
     }
     #[test]
+    fn explicit_dimensions_normalize_fluid_modes_to_a_fixed_viewport() {
+        for mode in [BrowserViewportMode::Auto, BrowserViewportMode::Responsive] {
+            let layout = geometry(
+                BrowserViewportRequest {
+                    mode,
+                    width: Some(1440),
+                    height: Some(960),
+                },
+                "https://example.com",
+                &host(480.0),
+            )
+            .unwrap();
+            assert_eq!(layout.state.mode, BrowserViewportMode::Desktop);
+            assert_eq!((layout.state.width, layout.state.height), (1440.0, 960.0));
+        }
+        let request: BrowserViewportRequest = serde_json::from_str(r#"{"width":1440}"#).unwrap();
+        assert_eq!(request.normalized().mode, BrowserViewportMode::Desktop);
+        assert_eq!(
+            BrowserViewportRequest {
+                mode: BrowserViewportMode::Responsive,
+                ..Default::default()
+            }
+            .normalized()
+            .mode,
+            BrowserViewportMode::Responsive
+        );
+    }
+
+    #[test]
     fn invalid_sizes_are_rejected_before_changing_the_page() {
         for width in [0, 239, 2561, u32::MAX] {
             assert!(BrowserViewportRequest {
@@ -366,6 +455,6 @@ mod tests {
             ..Default::default()
         }
         .validate()
-        .is_err());
+        .is_ok());
     }
 }

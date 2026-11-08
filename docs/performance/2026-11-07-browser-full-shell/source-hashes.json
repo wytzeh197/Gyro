@@ -1,0 +1,10 @@
+{
+  "apps/desktop/src-tauri/Cargo.toml": "8b1e090afe315e6b2993a54ae06d447dc2ae02e6f8c19a36bbea7a02aa44c625",
+  "apps/desktop/src-tauri/src/bin/browser-shell-review.rs": "08fdd4fef73ac41f5b3d14dedddab15ca1017b6765e1e5aa2e99c7ea406eb785",
+  "apps/desktop/src-tauri/src/session_browser.rs": "e596b023b15f5754bdb89cc6da6abb45d7b48ebc9bcad683385feecac3852757",
+  "apps/desktop/src/App.tsx": "4ec3fe8de81e1c6fba1cdc726c6d20ef317d122bb7e08bbe659147bc08881ace",
+  "scripts/run-browser-shell-review.mjs": "def31b5987560d2d4c8c5e82f7442a562fd3d71563fc1f6e059a863ad8d6fb17",
+  "scripts/check-browser-draft.mjs": "a3c81c6bdec200f52b3c15396128da95b107c6a9785190785885c1d1c1be9e66",
+  "apps/desktop/src-tauri/tauri.conf.json": "0d20aee8cfc34681002669c645766b2ea756110f26fc848f2ca761d2566c0e79",
+  "Cargo.lock": "e00ddd671f957eabad737b1b2b7ab998cddb9fbf5b5ad8cc7464a700b35febc8"
+}

@@ -160,6 +160,7 @@ let contextUpdates = 0;
 const callback = runInNewContext(callbackSource, {
   useCallback: (fn) => fn,
   isTauriRuntime: () => true,
+  isPreviewSessionId: (id) => id === "preview-history",
   sessionEventsRequestRef: { current: {} },
   completeHistorySessionsRef,
   historyRevisionsRef,
@@ -186,6 +187,8 @@ const callback = runInNewContext(callbackSource, {
   invoke: (_command, args) =>
     new Promise((resolve, reject) => rpc.push({ resolve, reject, args })),
 });
+await callback("preview-history");
+assert.equal(rpc.length, 0, "preview history never requests a backend UUID");
 const reopen = callback(sessionId);
 assert.equal(rpc[0].args.fullHistory, true, "opening requests every event");
 rpc.shift().resolve({
@@ -320,14 +323,12 @@ historyRevisionsRef.current[sessionId] = "cached-revision";
 const evictedOpen = callback(sessionId);
 assert.equal(rpc[0].args.fullHistory, true);
 assert.equal(rpc[0].args.knownRevision, undefined);
-rpc
-  .shift()
-  .resolve({
-    events: Array.from({ length: 801 }, (_, i) => event(i)),
-    contextEvents: [],
-    hasMoreBefore: false,
-    revision: "fresh-revision",
-  });
+rpc.shift().resolve({
+  events: Array.from({ length: 801 }, (_, i) => event(i)),
+  contextEvents: [],
+  hasMoreBefore: false,
+  revision: "fresh-revision",
+});
 await evictedOpen;
 assert.equal(rendered.length, 801);
 

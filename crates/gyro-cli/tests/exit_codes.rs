@@ -1417,7 +1417,10 @@ fn real_binary_setup_and_handoff_recover_stale_app_sockets() {
 
     let provider = write_script(
         &root,
-        r#"test "$1" = "app-server" || exit 21
+        r#"test "$1" = "-c" || exit 19
+test "$2" = 'model_provider="openai"' || exit 20
+shift 2
+test "$1" = "app-server" || exit 21
 test "$2" = "--stdio" || exit 22
 IFS= read -r initialize
 printf '%s\n' '{"id":1,"result":{}}'

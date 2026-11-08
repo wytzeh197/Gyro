@@ -119,6 +119,10 @@ assert.equal(
 
 console.log("chat message queue checks passed");
 
+assert.equal(selectQueuedMessageDelivery({ chat:[message("failed", {status:"failed"}), message("later")] }, {
+  dispatchingSessionIds:new Set(), sendingSessionIds:new Set(), now:100,
+}), undefined, "a failed unsent head cannot be overtaken by later user instructions");
+
 // Stop pauses only its own chat, including already-scheduled retry timers.
 const stoppedQueues = {
   stopped: [message("next"), message("later")],

@@ -27,7 +27,7 @@
 
 :root[data-native-material="sidebar"][data-theme="light"] {
   --gyro-window-tint: 65%;
-  --gyro-window-tint-color: #f5faff;
+  --gyro-window-tint-color: #f3f3f4;
   --gyro-window-blur: blur(32px) saturate(1.08);
 }
 

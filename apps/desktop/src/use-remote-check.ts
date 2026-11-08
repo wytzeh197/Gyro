@@ -27,6 +27,7 @@ export function useRemoteCheck({
   currentRoot,
   dispatch,
   notify,
+  onBranchesChanged,
 }: {
   root?: string;
   sourceControl: SourceControlState;
@@ -35,6 +36,7 @@ export function useRemoteCheck({
   currentRoot: React.RefObject<string | undefined>;
   dispatch: React.Dispatch<WorkbenchAction>;
   notify: (kind: "command-failed", title: string, detail: string) => void;
+  onBranchesChanged?: (root: string) => void;
 }) {
   const [remoteCheck, setRemoteCheck] = useState<RemoteCheck>();
   const inFlight = useRef(new Set<string>());
@@ -75,6 +77,7 @@ export function useRemoteCheck({
             type: "ide-set-source-control",
             sourceControl: result.status,
           });
+          onBranchesChanged?.(root);
         }
         setRemoteCheck({ root, branch, status: "checked" });
       } catch (error) {
@@ -85,7 +88,16 @@ export function useRemoteCheck({
         inFlight.current.delete(key);
       }
     },
-    [branch, currentRoot, dispatch, notify, root, trusted, upstream],
+    [
+      branch,
+      currentRoot,
+      dispatch,
+      notify,
+      onBranchesChanged,
+      root,
+      trusted,
+      upstream,
+    ],
   );
 
   useEffect(() => {

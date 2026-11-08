@@ -137,7 +137,8 @@ import {
   ProviderChatResponse,
   ProviderContextCompactionResponse,
   providerLabelForId,
-  providerStopDetail,
+  providerFailureNotice,
+  providerFailureBlocksReadiness,
   ProviderStreamBatch,
   providerStreamBatchKey,
   QueuedChatMessage,
@@ -188,6 +189,8 @@ import {
   revealBrowserCapture,
 } from "./browser-capture";
 import { createBrowserHostVisibility } from "./browser-host-visibility";
+import { sessionBrowserNative } from "./session-browser-native";
+import type { SessionBrowserSnapshot } from "./session-browser-queue";
 import {
   browserLiveStatusMessage,
   browserUnreachableMessage,
@@ -295,6 +298,7 @@ import {
   previewFiles,
   selectedSessionModelFromConfig,
   sessionModelSelectionFromSession,
+  isPreviewSessionId,
   workspaceRunMetadata,
 } from "./session-creation";
 import {
@@ -324,6 +328,7 @@ import { readBoundedLocalStorage, safeSetLocalStorage } from "./ui-storage";
 import { useUsageActions } from "./usage-actions";
 import { useAppearanceSaveFeedback } from "./use-appearance-save-feedback";
 import { useAutomaticChatBackup } from "./use-automatic-chat-backup";
+import { chatSendAccepted, queuedDeliveryDisposition, type ChatSendOutcome } from "./chat-send-outcome";
 import { useChatAutoRetry } from "./use-chat-auto-retry";
 import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
 import { useCheckReminders } from "./use-check-reminders";
@@ -906,7 +911,9 @@ export function App() {
   const retryDispatchRef = useRef(createChatRetryDispatcher());
   useEffect(() => () => retryDispatchRef.current.cancelAll(), []);
   const chatAutoRetry = useChatAutoRetry({
-    enabled: isTauriRuntime(),
+    // Native workers own recovery, including pre-output failures. A browser
+    // timer must never turn a terminal failure into a fresh backend budget.
+    enabled: false,
     eventsBySessionId: sessionEventsById,
     sendingSessionIds,
     queueVersion: chatMessageQueues,
@@ -1293,6 +1300,12 @@ export function App() {
   const activeChatLayout = chatGrid.layouts[currentChatProjectKey];
   const displayedChatLayout =
     activeChatLayout ?? createChatProjectLayout(currentChatProjectKey);
+  const visibleChatSessionIdsRef = useRef(new Set<string>());
+  visibleChatSessionIdsRef.current = new Set(
+    activeDestination === "workspace" && activeWorkspaceLayout !== "terminal-grid"
+      ? [activeSessionId, ...displayedChatLayout.slots.flatMap((pane) => pane?.kind === "session" ? [pane.sessionId] : [])].filter((id): id is string => Boolean(id))
+      : [],
+  );
   const activeChatPane = activeChatLayout?.slots.find(
     (pane) => pane?.paneId === activeChatLayout.focusedPaneId,
   );
@@ -1700,11 +1713,27 @@ export function App() {
       dispatchCompanion({ type: "close-tab", tab, paneId });
       if (tab === "browser") {
         closeLegacyRail();
-        const sessionId = paneId.startsWith("session:")
-          ? paneId.slice("session:".length)
-          : sessionBrowserKey;
+        // Pane IDs stay stable when a draft becomes a chat or its session is
+        // replaced. Resolve the current owner rather than decoding that key.
+        let sessionId: string | undefined;
+        if (paneId === SOLO_CHAT_PANE_ID) {
+          sessionId = sessionBrowserKey;
+        } else {
+          const pane = displayedChatLayout.slots.find(
+            (slot) => slot?.paneId === paneId,
+          );
+          if (pane) {
+            sessionId =
+              pane.kind === "session"
+                ? pane.sessionId
+                : pane.workspacePath
+                  ? `workbench:${pane.workspacePath}`
+                  : "workbench";
+          }
+        }
+        if (!sessionId) return;
         if (isTauriRuntime()) {
-          void invoke("session_browser_close", { sessionId }).catch((error) =>
+          void sessionBrowserNative.close(sessionId, (error) =>
             notify("command-failed", "Could not close browser", String(error)),
           );
         }
@@ -2062,21 +2091,34 @@ export function App() {
       kind: Parameters<typeof createNotification>[1],
       title: string,
       detail: string,
+      correlationKey?: string,
     ) => {
       dispatchWorkbench({
         type: "add-notification",
-        notification: createNotification(
-          // One action can raise two in the same millisecond, such as a media
-          // limit and a rejected file; each must stay separately dismissible.
-          `note-${crypto.randomUUID()}`,
-          kind,
-          title,
-          detail,
-        ),
+        notification: {
+          ...createNotification(
+            // One action can raise two in the same millisecond, such as a media
+            // limit and a rejected file; each must stay separately dismissible.
+            `note-${crypto.randomUUID()}`,
+            kind,
+            title,
+            detail,
+          ),
+          correlationKey,
+        },
       });
     },
     [],
   );
+
+  useEffect(() => {
+    for (const notification of workbench.notifications) {
+      if (notification.read || !notification.correlationKey) continue;
+      if ([...visibleChatSessionIdsRef.current].some((sessionId) => notification.correlationKey!.startsWith(`turn:${sessionId}:`))) {
+        dispatchWorkbench({ type: "resolve-notification", correlationKey: notification.correlationKey });
+      }
+    }
+  }, [activeDestination, activeSessionId, activeWorkspaceLayout, displayedChatLayout, workbench.notifications]);
 
   useEffect(() => {
     if (
@@ -2723,7 +2765,9 @@ export function App() {
     async (sessionId: string) => {
       const requestId = (sessionEventsRequestRef.current[sessionId] ?? 0) + 1;
       sessionEventsRequestRef.current[sessionId] = requestId;
-      if (!isTauriRuntime()) {
+      // A preview chat has no persisted history yet; its id is not a UUID the
+      // backend can read, so only its optimistic events exist.
+      if (!isTauriRuntime() || isPreviewSessionId(sessionId)) {
         setEventsForSession(sessionId, (current) =>
           mergePersistedAndOptimisticEvents(
             current,
@@ -4285,15 +4329,18 @@ export function App() {
       if (!isTauriRuntime()) {
         dispatchWorkbench({
           type: "ide-set-tasks",
+          workspacePath: root,
           tasks: [
             {
               id: "package:typecheck",
               label: "pnpm typecheck",
               command: "pnpm",
               args: ["run", "typecheck"],
-              group: "build",
+              group: "check",
               status: "idle",
               source: "suggested",
+              toolchain: "node",
+              role: "primary",
               outputChannelId: "task-package-typecheck",
             },
             {
@@ -4304,6 +4351,8 @@ export function App() {
               group: "test",
               status: "idle",
               source: "suggested",
+              toolchain: "node",
+              role: "primary",
               outputChannelId: "task-package-test",
             },
             {
@@ -4314,6 +4363,8 @@ export function App() {
               group: "dev",
               status: "idle",
               source: "suggested",
+              toolchain: "node",
+              role: "primary",
               outputChannelId: "task-package-dev",
             },
           ],
@@ -4335,12 +4386,16 @@ export function App() {
       void invoke<TaskDefinition[]>("task_discover", { workspacePath: root })
         .then((tasks) => {
           if (ideServicesRequestRef.current === requestId) {
-            dispatchWorkbench({ type: "ide-set-tasks", tasks });
+            dispatchWorkbench({ type: "ide-set-tasks", tasks, workspacePath: root });
           }
         })
         .catch(() => {
           if (ideServicesRequestRef.current === requestId) {
-            dispatchWorkbench({ type: "ide-set-tasks", tasks: [] });
+            dispatchWorkbench({
+              type: "ide-set-tasks",
+              tasks: [],
+              workspacePath: root,
+            });
           }
         });
 
@@ -4546,7 +4601,11 @@ export function App() {
           });
         }
         if (snapshot.branches) setBranchCatalog(snapshot.branches);
-        dispatchWorkbench({ type: "ide-set-tasks", tasks: snapshot.tasks });
+        dispatchWorkbench({
+          type: "ide-set-tasks",
+          tasks: snapshot.tasks,
+          workspacePath: root,
+        });
         dispatchWorkbench({ type: "ide-set-test-tree", tests: snapshot.tests });
         settleWorkspacePreparation(snapshot);
         refreshIdeSourceControl(root);
@@ -5040,15 +5099,25 @@ export function App() {
         return;
       }
       const channelId = task.outputChannelId ?? `task-${task.id}`;
+      const startedAt = Date.now();
+      const commandLine = [task.command, ...task.args].join(" ");
       const setTaskStatus = (
         status: TaskDefinition["status"],
         testStatus?: "running" | "passed" | "failed",
       ) => {
+        const finished =
+          status === "done" || status === "failed" || status === "cancelled";
         dispatchWorkbench({
           type: "ide-set-task-status",
           taskId: task.id,
           status,
           lastRunAt: new Date().toISOString(),
+          workspacePath: root,
+          commandLine,
+          durationMs:
+            finished && task.group !== "dev" && status !== "cancelled"
+              ? Date.now() - startedAt
+              : undefined,
         });
         if (task.group === "test" && testStatus) {
           // Update the run test in place. Replacing the tree with only the
@@ -5202,6 +5271,8 @@ export function App() {
             taskId: task.id,
             status: "cancelled",
             lastRunAt: new Date().toISOString(),
+            workspacePath: root,
+            commandLine: [task.command, ...task.args].join(" "),
           });
         } catch (error) {
           notify("command-failed", "Could not stop the command", String(error));
@@ -5217,6 +5288,9 @@ export function App() {
             type: "ide-set-task-status",
             taskId: task.id,
             status: "cancelled",
+            lastRunAt: new Date().toISOString(),
+            workspacePath: root,
+            commandLine: [task.command, ...task.args].join(" "),
           });
         }
       } catch (error) {
@@ -5263,7 +5337,11 @@ export function App() {
             cwd: draft.cwd,
           },
         });
-        dispatchWorkbench({ type: "ide-set-tasks", tasks });
+        dispatchWorkbench({
+          type: "ide-set-tasks",
+          tasks,
+          workspacePath: root,
+        });
       } catch (error) {
         notify("command-failed", "Could not save the command", String(error));
       }
@@ -5290,7 +5368,11 @@ export function App() {
         const tasks = await invoke<TaskDefinition[]>("task_delete_custom", {
           request: { workspacePath: root, taskId: task.id },
         });
-        dispatchWorkbench({ type: "ide-set-tasks", tasks });
+        dispatchWorkbench({
+          type: "ide-set-tasks",
+          tasks,
+          workspacePath: root,
+        });
       } catch (error) {
         notify("command-failed", "Could not remove the command", String(error));
       }
@@ -6483,6 +6565,9 @@ export function App() {
         return;
       }
       refreshIdeServices(root);
+      if (ideSourceControlRootRef.current === root) {
+        void refreshWorkspaceBranches(root);
+      }
       notify(
         "tests-passed",
         "Pulled from remote",
@@ -6498,6 +6583,7 @@ export function App() {
     notify,
     refreshIdeServices,
     refreshIdeSourceControl,
+    refreshWorkspaceBranches,
     workbench.preferences.workspaceTrust,
     workspaceActionRoot,
   ]);
@@ -6565,6 +6651,7 @@ export function App() {
     currentRoot: ideSourceControlRootRef,
     dispatch: dispatchWorkbench,
     notify,
+    onBranchesChanged: refreshWorkspaceBranches,
   });
 
   // Edits made outside Gyro — another editor, a terminal, a rebase — never
@@ -8016,6 +8103,46 @@ export function App() {
     },
     [acknowledgeFinishedChat, chatGrid.layouts, refreshEvents],
   );
+
+  const nativeBrowserInteraction = useRef<
+    (payload: { sessionId: string; resourceId: string }) => void
+  >(() => {});
+  nativeBrowserInteraction.current = ({ sessionId, resourceId }) => {
+    if (
+      workbench.browserPreviewsBySession?.[sessionId]?.nativeResourceId !==
+      resourceId
+    )
+      return;
+    const pane = displayedChatLayout.slots.find(
+      (pane) =>
+        pane &&
+        (pane.kind === "session"
+          ? pane.sessionId === sessionId
+          : (pane.workspacePath
+              ? `workbench:${pane.workspacePath}`
+              : "workbench") === sessionId),
+    );
+    if (
+      !pane ||
+      (chatGrid.maximizedPaneId && chatGrid.maximizedPaneId !== pane.paneId)
+    )
+      return;
+    focusChatPane(pane);
+  };
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    const pending = listen<{ sessionId: string; resourceId: string }>(
+      "session-browser-interaction",
+      ({ payload }) => {
+        if (!disposed) nativeBrowserInteraction.current(payload);
+      },
+    ).catch(() => undefined);
+    return () => {
+      disposed = true;
+      void pending.then((unlisten) => unlisten?.());
+    };
+  }, []);
 
   const addSessionToChatGrid = useCallback(
     (sessionId: string) => {
@@ -10781,11 +10908,14 @@ export function App() {
                 isProviderStop(String(error)) ? "cancelled" : "failed",
                 String(error),
               );
-              notify(
-                "command-failed",
-                "Context compaction failed",
-                String(error),
-              );
+              if (!isProviderStop(String(error)) && !visibleChatSessionIdsRef.current.has(compactSessionId)) {
+                notify(
+                  "command-failed",
+                  "Context compaction failed",
+                  String(error),
+                  `turn:${compactSessionId}:${compactionTurnId}`,
+                );
+              }
             })
             .finally(async () => {
               try {
@@ -11047,14 +11177,19 @@ export function App() {
     async (
       overrideMessage?: string,
       overrideContext?: ChatTurnContextSnapshot,
-    ) => {
+    ): Promise<ChatSendOutcome> => {
+      const outcome: ChatSendOutcome = {
+        kind: "not-started",
+        persisted: false,
+        reason: "precondition",
+      };
       if (isShellOptimizing) {
         notify(
           "command-failed",
           "Gyro is optimizing",
           "You can draft and pick a model — send unlocks in a moment.",
         );
-        return false;
+        return outcome;
       }
       // Fix the mode at the click, before pending media or provider checks can
       // await. A later chip change belongs to the following draft.
@@ -11071,8 +11206,7 @@ export function App() {
           : selectedMode);
       const consumeSelectedMode =
         overrideContext?.consumeDraftMode ??
-        (overrideContext?.mode === undefined &&
-          !overrideContext?.preserveDraft);
+        (overrideContext?.mode === undefined && !overrideContext?.preserveDraft);
       const message = normalizeChatMessage(overrideMessage ?? activeChatDraft);
       const draftAttachments =
         overrideContext?.attachments ?? activeChatAttachments;
@@ -11090,7 +11224,7 @@ export function App() {
           retryDispatchRef.current.cancelSession(requestedSessionId);
         }
       }
-      if (overrideContext?.retryDispatchGuard?.() === false) return false;
+      if (overrideContext?.retryDispatchGuard?.() === false) return outcome;
       // An image dropped a moment ago may still be uploading.
       let turnAttachments = draftAttachments;
       try {
@@ -11099,9 +11233,9 @@ export function App() {
         }
       } catch (error) {
         notify("command-failed", "Attachment upload failed", String(error));
-        return false;
+        return outcome;
       }
-      if (overrideContext?.retryDispatchGuard?.() === false) return false;
+      if (overrideContext?.retryDispatchGuard?.() === false) return outcome;
       // Every mode carries the goal, Plan included: planning toward a stated
       // outcome is the case the goal exists for.
       const turnGoal =
@@ -11113,18 +11247,18 @@ export function App() {
           ? (overrideContext.plan ?? { title: "Plan", items: [] })
           : activeSessionPlan;
       const previewSessionId =
-        isTauriRuntime() && requestedSessionId?.startsWith("preview-")
+        isTauriRuntime() && isPreviewSessionId(requestedSessionId)
           ? requestedSessionId
           : undefined;
       const targetSessionId = previewSessionId ? undefined : requestedSessionId;
+      outcome.sessionId = targetSessionId;
       const targetSession = requestedSessionId
         ? sessions.find((session) => session.id === requestedSessionId)
         : undefined;
       const targetSessionHasTranscriptEvents = targetSessionId
         ? (sessionEventsById[targetSessionId] ?? []).some(
             (event) =>
-              event.kind === "user-message" ||
-              event.kind === "assistant-message",
+              event.kind === "user-message" || event.kind === "assistant-message",
           )
         : activeSessionHasTranscriptEvents;
       const isBackgroundSend = Boolean(
@@ -11160,11 +11294,10 @@ export function App() {
           "Choose an available model",
           "The model saved for this draft is unavailable. Connect its provider or choose another model.",
         );
-        return false;
+        return outcome;
       }
       const requireCommandApproval =
-        overrideContext?.requireCommandApproval ??
-        config.requireCommandApproval;
+        overrideContext?.requireCommandApproval ?? config.requireCommandApproval;
       const requireFileEditApproval =
         overrideContext?.requireFileEditApproval ??
         config.requireFileEditApproval;
@@ -11188,7 +11321,7 @@ export function App() {
           ? workspaceContextSnapshot
           : undefined);
       if (message === "") {
-        return false;
+        return outcome;
       }
       if (isBranchLoading) {
         notify(
@@ -11196,7 +11329,7 @@ export function App() {
           "Branch is switching",
           "Wait for the selected branch to finish checking out before sending.",
         );
-        return false;
+        return outcome;
       }
       if (chatMessageLength(message) > MAX_CHAT_MESSAGE_CHARS) {
         notify(
@@ -11204,10 +11337,10 @@ export function App() {
           "Message too long",
           `Keep chat messages under ${MAX_CHAT_MESSAGE_CHARS.toLocaleString()} characters.`,
         );
-        return false;
+        return outcome;
       }
       if (!targetSessionId && isStartingFirstTurn) {
-        return false;
+        return outcome;
       }
       // Sending from the goal composer sets the goal and starts on it in one
       // step. A new chat saves it once the session exists (below).
@@ -11232,14 +11365,15 @@ export function App() {
           notify("command-failed", "Goal not saved", String(error));
         }
       }
-      if (
-        targetSessionId &&
-        sendingSessionIdsRef.current.has(targetSessionId)
-      ) {
+      if (targetSessionId && sendingSessionIdsRef.current.has(targetSessionId)) {
         // Recovery keeps the original turn. The dispatch controller waits for
         // a finishing invoke; it must never fall into the normal send queue.
-        if (overrideContext?.retryTurnId || overrideContext?.retryDispatchGuard)
-          return false;
+        if (
+          overrideContext?.retryTurnId ||
+          overrideContext?.retryDispatchGuard ||
+          overrideContext?.queuedDelivery
+        )
+          return { ...outcome, reason: "busy" };
         if (
           (chatMessageQueues[targetSessionId]?.length ?? 0) >=
           MAX_QUEUED_CHAT_MESSAGES_PER_SESSION
@@ -11249,7 +11383,7 @@ export function App() {
             "Queue full",
             `Finish or remove a queued message before adding more than ${MAX_QUEUED_CHAT_MESSAGES_PER_SESSION}.`,
           );
-          return false;
+          return outcome;
         }
         const queuedMessageCount = Object.values(chatMessageQueues).reduce(
           (total, queued) => total + queued.length,
@@ -11261,7 +11395,7 @@ export function App() {
             "Queue capacity reached",
             "Finish or remove a queued message in another chat before adding more.",
           );
-          return false;
+          return outcome;
         }
         const queuedMessage: QueuedChatMessage = {
           deliveryAttempts: 0,
@@ -11316,7 +11450,7 @@ export function App() {
           "Message queued",
           "It will send when this chat's current response finishes, even after you switch chats.",
         );
-        return true;
+        return { ...outcome, kind: "queued" };
       }
       const isCouncilTurn = turnMode === "council";
       if (isCouncilTurn && !isUserSelectedWorkspacePath(chatWorkspacePath)) {
@@ -11326,7 +11460,7 @@ export function App() {
           "Council needs a folder before starting a chat.",
         );
         void openWorkspace();
-        return false;
+        return outcome;
       }
       if (!isCouncilTurn) {
         if (targetSession?.importSource && isTauriRuntime()) {
@@ -11353,10 +11487,10 @@ export function App() {
               "Connect this chat's provider",
               "Use Connect to sign in with this imported chat's provider data folder.",
             );
-            return false;
+            return outcome;
           }
         } else if (!checkProviderReadiness("chat", sessionModel.providerId))
-          return false;
+          return outcome;
       }
       if (isCouncilTurn && COUNCIL_COMING_SOON) {
         notify(
@@ -11364,7 +11498,7 @@ export function App() {
           "Council is not available yet",
           "Model Council is still in development. It will return in a later release.",
         );
-        return false;
+        return outcome;
       }
       // Reads the normalized config rather than the raw one: a stale persisted
       // `enabled: true` must not be able to start a run.
@@ -11374,7 +11508,7 @@ export function App() {
           "Council disabled",
           "Enable Model Council in settings to use this mode.",
         );
-        return false;
+        return outcome;
       }
       const councilResolution = isCouncilTurn
         ? resolveCouncilSeatRequests(
@@ -11384,10 +11518,17 @@ export function App() {
         : null;
       if (isCouncilTurn && councilResolution?.error) {
         notify("command-failed", "Council not ready", councilResolution.error);
-        return false;
+        return outcome;
       }
       const retryTurnId = overrideContext?.retryTurnId;
       const turnId = retryTurnId ?? overrideContext?.turnId ?? createTurnId();
+      outcome.turnId = turnId;
+      outcome.persisted = Boolean(retryTurnId);
+      if (targetSessionId)
+        dispatchWorkbench({
+          type: "resolve-notification",
+          correlationKey: `turn:${targetSessionId}:${turnId}`,
+        });
       if (!isCouncilTurn) turnTiming.beginTurnTiming(turnId);
       setTurnSourceControlBaselines((current) => {
         if (
@@ -11531,18 +11672,19 @@ export function App() {
           );
           setSessionSending(session.id, false);
           setIsStartingFirstTurn(false);
-          return true;
+          return { ...outcome, kind: "completed" };
         }
 
         let optimisticSessionId = session.id;
         let didDeliverProviderResponse = false;
         try {
           await waitForNextPaint();
+          // The backend owns the persisted fallback and its pending state.
+          // Keep the optimistic name local until that atomic initialization.
           const persistedSession = await createTauriThreadSession(
             chatWorkspacePath,
             workbench.workspaceMode,
             sessionModel,
-            provisionalTitle,
           );
           optimisticSessionId = persistedSession.id;
           const migratedEvents = rekeySessionEvents(
@@ -11612,9 +11754,7 @@ export function App() {
                   },
                 },
               );
-              const terminalSource = readTerminalAttachmentSource(
-                attachment.id,
-              );
+              const terminalSource = readTerminalAttachmentSource(attachment.id);
               if (terminalSource) {
                 rememberTerminalAttachmentSource(prepared.id, terminalSource);
               }
@@ -11689,9 +11829,7 @@ export function App() {
           if (contextEvents.length) {
             setEvents((current) => {
               if (
-                !current.some(
-                  (event) => event.sessionId === persistedSession.id,
-                )
+                !current.some((event) => event.sessionId === persistedSession.id)
               ) {
                 return current;
               }
@@ -11705,6 +11843,8 @@ export function App() {
             message,
             turnId,
           });
+          persistedChatTurnIdsRef.current.add(turnId);
+          outcome.persisted = true;
           if (
             liveEditorEvidence &&
             liveEditorEvidence.workspaceKey !== persistedSession.workspacePath
@@ -11731,7 +11871,6 @@ export function App() {
             });
           }
           await configSaveQueueRef.current;
-          persistedChatTurnIdsRef.current.add(turnId);
           if (isCouncilTurn && councilResolution) {
             const councilResponse = await invoke<CouncilChatInvokeResponse>(
               "run_council_chat",
@@ -11742,13 +11881,11 @@ export function App() {
                   turnId,
                   presetId: councilResolution.presetId,
                   seats: councilResolution.seats,
-                  synthesizerProviderId:
-                    councilResolution.synthesizerProviderId,
+                  synthesizerProviderId: councilResolution.synthesizerProviderId,
                   synthesizerProviderLabel:
                     councilResolution.synthesizerProviderLabel,
                   synthesizerModelId: councilResolution.synthesizerModelId,
-                  synthesizerModelLabel:
-                    councilResolution.synthesizerModelLabel,
+                  synthesizerModelLabel: councilResolution.synthesizerModelLabel,
                   workspacePath: persistedSession.workspacePath,
                   attachments: persistedTurnAttachments,
                   requireCommandApproval: true,
@@ -11771,8 +11908,7 @@ export function App() {
                       selectedProvider?.id ??
                       config.selectedProviderId,
                     providerLabel:
-                      sessionModel.providerLabel ??
-                      selectedProvider?.displayName,
+                      sessionModel.providerLabel ?? selectedProvider?.displayName,
                     modelId: sessionModel.modelId,
                     modelLabel: sessionModel.modelLabel,
                     reasoningEffort: sessionModel.reasoningEffort,
@@ -11803,8 +11939,7 @@ export function App() {
           optimisticEventsRef.current.delete(persistedSession.id);
           // Refresh plan windows after every completed turn so Claude stream
           // limits and ledger spend stay current for every connected model.
-          const usageProviderId =
-            sessionModel.providerId ?? selectedProvider?.id;
+          const usageProviderId = sessionModel.providerId ?? selectedProvider?.id;
           if (usageProviderId && providerSupportsUsage(usageProviderId)) {
             void refreshProviderUsage(usageProviderId, false, true);
           }
@@ -11815,13 +11950,15 @@ export function App() {
           restoreUnsentMode(optimisticSessionId);
           const errorMessage = String(error);
           const wasCancelled = isProviderStop(errorMessage);
+          if (outcome.persisted)
+            stoppedChatSessionsRef.current.add(optimisticSessionId);
           if (
             wasCancelled &&
             !steeringChatSessionsRef.current.has(optimisticSessionId)
           ) {
             stoppedChatSessionsRef.current.add(optimisticSessionId);
           }
-          if (!wasCancelled)
+          if (!wasCancelled && providerFailureBlocksReadiness(errorMessage))
             dispatchWorkbench({
               type: "set-provider-readiness",
               status: "blocked",
@@ -11839,19 +11976,35 @@ export function App() {
           if (optimisticSessionId !== session.id) {
             await refreshEvents(optimisticSessionId);
           }
-          notify(
-            wasCancelled ? "terminal" : "command-failed",
-            wasCancelled ? "Turn stopped" : "Message fallback",
-            wasCancelled
-              ? providerStopDetail(errorMessage)
-              : "Chat stayed local",
+          const failureNotice = providerFailureNotice(
+            errorMessage,
+            wasCancelled,
+            optimisticSessionId !== session.id,
           );
-          if (wasCancelled) return true;
+          if (
+            !wasCancelled &&
+            !visibleChatSessionIdsRef.current.has(optimisticSessionId)
+          ) {
+            notify(
+              "command-failed",
+              failureNotice.title,
+              failureNotice.detail,
+              `turn:${optimisticSessionId}:${turnId}`,
+            );
+          }
+          if (wasCancelled) return { ...outcome, kind: "cancelled" };
         } finally {
           setSessionSending(sendingSessionId, false);
           setIsStartingFirstTurn(false);
         }
-        return didDeliverProviderResponse;
+        return {
+          ...outcome,
+          kind: didDeliverProviderResponse
+            ? "completed"
+            : outcome.persisted
+              ? "failed"
+              : "not-started",
+        };
       }
 
       const optimisticEvents = isRetry
@@ -11863,11 +12016,8 @@ export function App() {
             selectedProvider,
             turnAttachments,
           );
-      if (provisionalTitle) {
-        void updateSessionTitle(targetSessionId, provisionalTitle, {
-          notifyFailure: false,
-        });
-      }
+      // The backend initializes automatic titles before starting the provider.
+      // A fire-and-forget rename here can overwrite the model's title later.
       // Finish any pending model switch before appending the next user message.
       // A normal send already has this model bound and needs no extra disk read.
       const boundModel = sessionsRef.current.find(
@@ -11891,7 +12041,7 @@ export function App() {
         overrideContext?.retryDispatchGuard?.() === false ||
         (isRetry && sendingSessionIdsRef.current.has(targetSessionId))
       )
-        return false;
+        return outcome;
       if (isRetry) {
         const resetEvents = (items: SessionEvent[]) =>
           resetStreamingAssistantForRetry(items, turnId);
@@ -11957,7 +12107,7 @@ export function App() {
         );
         setSessionSending(targetSessionId, false);
         notify("terminal", "Message added", "Local optimistic event");
-        return true;
+        return { ...outcome, kind: "completed" };
       }
       let didDeliverProviderResponse = false;
       try {
@@ -11982,6 +12132,7 @@ export function App() {
             turnId,
           });
           persistedChatTurnIdsRef.current.add(turnId);
+          outcome.persisted = true;
         }
         if (
           liveEditorEvidence &&
@@ -12082,13 +12233,15 @@ export function App() {
         restoreUnsentMode(targetSessionId);
         const errorMessage = String(error);
         const wasCancelled = isProviderStop(errorMessage);
+        if (outcome.persisted)
+          stoppedChatSessionsRef.current.add(targetSessionId);
         if (
           wasCancelled &&
           !steeringChatSessionsRef.current.has(targetSessionId)
         ) {
           stoppedChatSessionsRef.current.add(targetSessionId);
         }
-        if (!wasCancelled)
+        if (!wasCancelled && providerFailureBlocksReadiness(errorMessage))
           dispatchWorkbench({
             type: "set-provider-readiness",
             status: "blocked",
@@ -12104,16 +12257,34 @@ export function App() {
           errorMessage,
         );
         await refreshEvents(targetSessionId);
-        notify(
-          wasCancelled ? "terminal" : "command-failed",
-          wasCancelled ? "Turn stopped" : "Message fallback",
-          wasCancelled ? providerStopDetail(errorMessage) : "Chat stayed local",
+        const failureNotice = providerFailureNotice(
+          errorMessage,
+          wasCancelled,
+          !isPreviewSessionId(targetSessionId),
         );
-        if (wasCancelled) return true;
+        if (
+          !wasCancelled &&
+          !visibleChatSessionIdsRef.current.has(targetSessionId)
+        ) {
+          notify(
+            "command-failed",
+            failureNotice.title,
+            failureNotice.detail,
+            `turn:${targetSessionId}:${turnId}`,
+          );
+        }
+        if (wasCancelled) return { ...outcome, kind: "cancelled" };
       } finally {
         setSessionSending(targetSessionId, false);
       }
-      return didDeliverProviderResponse;
+      return {
+        ...outcome,
+        kind: didDeliverProviderResponse
+          ? "completed"
+          : outcome.persisted
+            ? "failed"
+            : "not-started",
+      };
     },
     [
       activeSessionId,
@@ -12162,6 +12333,7 @@ export function App() {
   // sendDraft changes with every draft and status update. A stable handler
   // keeps the transcript memo (which lists onContinueChat) from rebuilding
   // every turn on each render.
+
   const sendDraftRef = useRef(sendDraft);
   sendDraftRef.current = sendDraft;
   const continueChat = useCallback(() => {
@@ -12367,14 +12539,14 @@ export function App() {
       // pane's own selection — so the run does not fall back to the global
       // picker's defaults.
       const planModel = chatDraftModels[target?.draftKey ?? activeDraftKey];
-      return sendDraft("Implement the approved plan.", {
+      return chatSendAccepted(await sendDraft("Implement the approved plan.", {
         goal: target ? target.goal : activeSessionGoal,
         mode: "normal",
         plan,
         preserveDraft: true,
         sessionId: target?.sessionId,
         ...(planModel ? { sessionModel: planModel } : {}),
-      });
+      }));
     },
     [
       activeDraftKey,
@@ -12424,54 +12596,36 @@ export function App() {
     void sendDraft(nextMessage.message, {
       ...nextMessage.context,
       preserveDraft: true,
+      queuedDelivery: true,
       sessionId,
     })
-      .then((accepted) => {
+      .then((outcome) => {
         if (stoppedChatSessionsRef.current.has(sessionId)) return;
-        if (!accepted) {
-          const willRetry = (nextMessage.deliveryAttempts ?? 0) + 1 < 2;
-          setChatMessageQueues((current) => {
-            const queued = current[sessionId] ?? [];
-            if (queued.some((item) => item.id === nextMessage.id)) {
-              return current;
-            }
-            const deliveryAttempts = (nextMessage.deliveryAttempts ?? 0) + 1;
-            const stableTurnId =
-              nextMessage.context.retryTurnId ?? nextMessage.context.turnId;
-            const didPersist = Boolean(
-              stableTurnId && persistedChatTurnIdsRef.current.has(stableTurnId),
-            );
-            const shouldRetry = deliveryAttempts < 2;
-            return {
-              ...current,
-              [sessionId]: [
-                {
-                  ...nextMessage,
-                  context: {
-                    ...nextMessage.context,
-                    retryTurnId: didPersist ? stableTurnId : undefined,
-                    turnId: didPersist ? undefined : stableTurnId,
-                  },
-                  deliveryAttempts,
-                  retryAt: shouldRetry ? Date.now() + 1_500 : undefined,
-                  status: shouldRetry ? "waiting" : "failed",
-                },
-                ...queued,
-              ],
-            };
-          });
-          notify(
-            "command-failed",
-            willRetry ? "Queued delivery delayed" : "Queued delivery failed",
-            willRetry
-              ? "Gyro kept the message and will retry it once."
-              : "Gyro kept the message in the queue. Retry, edit, or delete it.",
-          );
-        }
+        const disposition = queuedDeliveryDisposition(outcome);
+        if (disposition === "settled") return;
+        setChatMessageQueues((current) => {
+          const queued = current[sessionId] ?? [];
+          if (queued.some((item) => item.id === nextMessage.id)) return current;
+          return { ...current, [sessionId]: [
+            { ...nextMessage, retryAt: undefined, status: disposition }, ...queued,
+          ] };
+        });
+      })
+      .catch((error) => {
+        const turnId = nextMessage.context.retryTurnId ?? nextMessage.context.turnId;
+        if (turnId && persistedChatTurnIdsRef.current.has(turnId)) return;
+        setChatMessageQueues((current) => {
+          const queued = current[sessionId] ?? [];
+          return queued.some((item) => item.id === nextMessage.id) ? current : { ...current, [sessionId]: [
+            { ...nextMessage, status: "failed", retryAt: undefined }, ...queued,
+          ] };
+        });
+        notify("command-failed", "Queued message not sent", String(error));
       })
       .finally(() => {
         queuedChatDispatchesRef.current.delete(sessionId);
         queuedChatDispatchMessageIdsRef.current.delete(sessionId);
+        setQueueRetryTick((current) => current + 1);
       });
     return undefined;
   }, [chatMessageQueues, notify, queueRetryTick, sendDraft, sendingSessionIds]);
@@ -12833,7 +12987,7 @@ export function App() {
               return sendDraftRef.current(userMessage, {
                 ...retryContext,
                 retryDispatchGuard,
-              });
+              }).then(chatSendAccepted);
             },
           })
           .catch((error) =>
@@ -12956,7 +13110,7 @@ export function App() {
   const taskHandoff = useTaskHandoff({
     config,
     sessions,
-    send: (message, context) => sendDraftRef.current(message, context),
+    send: (message, context) => sendDraftRef.current(message, context).then(chatSendAccepted),
     refreshSessions,
     selectSession,
     notify,
@@ -14067,7 +14221,7 @@ export function App() {
       if (action === "resume") {
         return sendDraftRef.current(
           "Continue the goal from its saved checkpoint.",
-        );
+        ).then(chatSendAccepted);
       }
       if (action === "pause") {
         if (activeSessionId)
@@ -15019,56 +15173,74 @@ export function App() {
       } | null,
       owner: BrowserOwner = activeBrowserOwner,
     ) => {
-      if (!isTauriRuntime() || !owner.workspaceKey) {
+      if (!isTauriRuntime()) {
         return false;
       }
-      try {
-        sendBrowserAction(owner, {
-          type: "browser-status",
-          status: "loading",
-          message: "Loading…",
-          nativeHost: true,
-        });
-        const opened = await invoke<{
-          viewport: { mode: BrowserViewportMode };
-        }>("session_browser_open", {
-          request: {
-            sessionId: owner.sessionId,
-            workspaceKey: owner.workspaceKey,
-            url: normalizedPreviewUrl(url),
-            bounds: bounds ?? undefined,
-            visible: bounds != null,
-          },
-        });
-        const preview = previewForBrowser(owner);
-        if (preview.deviceOverride && opened.viewport.mode === "auto") {
-          await invoke("session_browser_set_viewport", {
-            sessionId: owner.sessionId,
-            request: {
-              mode: preview.viewport?.mode ?? preview.device,
-              width:
-                preview.viewport?.device === "responsive"
-                  ? undefined
-                  : preview.viewport?.width,
-              height:
-                preview.viewport?.device === "responsive"
-                  ? undefined
-                  : preview.viewport?.height,
+      sendBrowserAction(owner, {
+        type: "browser-status",
+        status: "loading",
+        message: "Loading…",
+        nativeHost: true,
+      });
+      const preview = previewForBrowser(owner);
+      return sessionBrowserNative.replace(
+        owner.sessionId,
+        async () => {
+          const opened = await invoke<SessionBrowserSnapshot>(
+            "session_browser_open",
+            {
+              request: {
+                sessionId: owner.sessionId,
+                workspaceKey: owner.workspaceKey,
+                url: normalizedPreviewUrl(url),
+                bounds: bounds ?? undefined,
+                visible: bounds != null,
+              },
             },
+          );
+          if (preview.deviceOverride && opened.viewport.mode === "auto") {
+            await invoke("session_browser_set_viewport", {
+              sessionId: owner.sessionId,
+              request: {
+                mode: preview.viewport?.mode ?? preview.device,
+                width:
+                  preview.viewport?.device === "responsive"
+                    ? undefined
+                    : preview.viewport?.width,
+                height:
+                  preview.viewport?.device === "responsive"
+                    ? undefined
+                    : preview.viewport?.height,
+              },
+            });
+          }
+          const snapshot = await invoke<SessionBrowserSnapshot | null>(
+            "session_browser_snapshot",
+            { sessionId: owner.sessionId },
+          );
+          if (!snapshot)
+            throw new Error(
+              "The browser closed before its open request completed",
+            );
+          return snapshot;
+        },
+        (snapshot) => {
+          sendBrowserAction(owner, {
+            type: "browser-native-state",
+            ...snapshot,
           });
-        }
-        return true;
-      } catch (error) {
-        notify("command-failed", "Browser open failed", String(error));
-        sendBrowserAction(owner, {
-          type: "browser-status",
-          status: "verification-failed",
-          message:
-            "Gyro could not open the native browser. Retry or open it externally.",
-          nativeHost: true,
-        });
-        return false;
-      }
+        },
+        (error) => {
+          notify("command-failed", "Browser open failed", String(error));
+          sendBrowserAction(owner, {
+            type: "browser-status",
+            status: "verification-failed",
+            message:
+              "Gyro could not open the native browser. Retry or open it externally.",
+            nativeHost: true,
+          });
+        },
+      );
     },
     [activeBrowserOwner, notify, workbench.browserPreviewsBySession],
   );
@@ -15107,17 +15279,23 @@ export function App() {
     (owner: BrowserOwner = activeBrowserOwner) => {
       sendBrowserAction(owner, { type: "browser-back" });
       if (isTauriRuntime()) {
-        void invoke("session_browser_history", {
-          sessionId: owner.sessionId,
-          direction: "back",
-        }).catch((error) => {
-          notify("command-failed", "Browser back failed", String(error));
-          sendBrowserAction(owner, {
-            type: "browser-status",
-            status: "verification-failed",
-            message: String(error),
-          });
-        });
+        void sessionBrowserNative.run(
+          owner.sessionId,
+          () =>
+            invoke("session_browser_history", {
+              sessionId: owner.sessionId,
+              direction: "back",
+            }),
+          () => {},
+          (error) => {
+            notify("command-failed", "Browser back failed", String(error));
+            sendBrowserAction(owner, {
+              type: "browser-status",
+              status: "verification-failed",
+              message: String(error),
+            });
+          },
+        );
       }
     },
     [notify, activeBrowserOwner],
@@ -15127,17 +15305,23 @@ export function App() {
     (owner: BrowserOwner = activeBrowserOwner) => {
       sendBrowserAction(owner, { type: "browser-forward" });
       if (isTauriRuntime()) {
-        void invoke("session_browser_history", {
-          sessionId: owner.sessionId,
-          direction: "forward",
-        }).catch((error) => {
-          notify("command-failed", "Browser forward failed", String(error));
-          sendBrowserAction(owner, {
-            type: "browser-status",
-            status: "verification-failed",
-            message: String(error),
-          });
-        });
+        void sessionBrowserNative.run(
+          owner.sessionId,
+          () =>
+            invoke("session_browser_history", {
+              sessionId: owner.sessionId,
+              direction: "forward",
+            }),
+          () => {},
+          (error) => {
+            notify("command-failed", "Browser forward failed", String(error));
+            sendBrowserAction(owner, {
+              type: "browser-status",
+              status: "verification-failed",
+              message: String(error),
+            });
+          },
+        );
       }
     },
     [notify, activeBrowserOwner],
@@ -15147,16 +15331,22 @@ export function App() {
     (owner: BrowserOwner = activeBrowserOwner) => {
       sendBrowserAction(owner, { type: "browser-reload" });
       if (isTauriRuntime()) {
-        void invoke("session_browser_reload", {
-          sessionId: owner.sessionId,
-        }).catch((error) => {
-          notify("command-failed", "Browser reload failed", String(error));
-          sendBrowserAction(owner, {
-            type: "browser-status",
-            status: "verification-failed",
-            message: String(error),
-          });
-        });
+        void sessionBrowserNative.run(
+          owner.sessionId,
+          () =>
+            invoke("session_browser_reload", {
+              sessionId: owner.sessionId,
+            }),
+          () => {},
+          (error) => {
+            notify("command-failed", "Browser reload failed", String(error));
+            sendBrowserAction(owner, {
+              type: "browser-status",
+              status: "verification-failed",
+              message: String(error),
+            });
+          },
+        );
       }
     },
     [notify, activeBrowserOwner],
@@ -15188,7 +15378,11 @@ export function App() {
           "prepare_chat_attachment",
           {
             request: {
-              sessionId: owner.sessionId,
+              sessionId:
+                owner.sessionId === "workbench" ||
+                owner.sessionId.startsWith("workbench:")
+                  ? NEW_CHAT_DRAFT_KEY
+                  : owner.sessionId,
               path: capture.path,
               workspacePath: owner.workspaceKey || undefined,
               kind: "image",
@@ -15256,31 +15450,37 @@ export function App() {
       }
       if (action === "reveal") {
         const error = await revealBrowserCapture(preview.latestCapture?.path);
-        if (error)
-          notify("command-failed", "Could not reveal screenshot", error);
+        if (error) notify("command-failed", "Could not reveal screenshot", error);
         return undefined;
       }
       sendBrowserAction(owner, { type: "browser-capture-start" });
-      try {
-        const captureWithSrc = await captureChatBrowserPage({
-          sessionId: owner.sessionId,
-          nativeHost: preview.nativeHost === true,
-          device: preview.device,
-          url: preview.url,
-        });
-        sendBrowserAction(owner, {
-          type: "browser-capture-success",
-          capture: captureWithSrc,
-        });
-        await attachBrowserCaptureToChat(captureWithSrc, owner);
-      } catch (error) {
-        const message = String(error);
-        sendBrowserAction(owner, {
-          type: "browser-capture-failure",
-          error: message,
-        });
-        notify("command-failed", "Screenshot failed", message);
-      }
+      let attachment: Promise<void> | undefined;
+      await sessionBrowserNative.run(
+        owner.sessionId,
+        () =>
+          captureChatBrowserPage({
+            sessionId: owner.sessionId,
+            nativeHost: preview.nativeHost === true,
+            device: preview.device,
+            url: preview.url,
+          }),
+        (captureWithSrc) => {
+          sendBrowserAction(owner, {
+            type: "browser-capture-success",
+            capture: captureWithSrc,
+          });
+          attachment = attachBrowserCaptureToChat(captureWithSrc, owner);
+        },
+        (error) => {
+          const message = String(error);
+          sendBrowserAction(owner, {
+            type: "browser-capture-failure",
+            error: message,
+          });
+          notify("command-failed", "Screenshot failed", message);
+        },
+      );
+      await attachment;
       return undefined;
     },
     [
@@ -15860,7 +16060,9 @@ export function App() {
           dispatchWorkbench({ type: "open-tool-panel", tab: "output" });
           break;
         case "open-browser-preview":
-          handleBrowserNavigate(browserPreview.url);
+          if (browserPreview.url.trim()) {
+            handleBrowserNavigate(browserPreview.url);
+          }
           break;
         case "show-diffs":
           dispatchWorkbench({
@@ -16116,9 +16318,11 @@ export function App() {
     );
   }, [workbench.selectedTerminalPaneId, workbench.terminalPanes]);
 
+  const appShortcutHandler = useRef<(event: KeyboardEvent) => void>(() => {});
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const isCommand = event.metaKey || event.ctrlKey;
+      if (event.defaultPrevented) return;
       if (event.key === "Escape") {
         if (event.defaultPrevented) return;
         closeGlobalSearch();
@@ -16172,7 +16376,19 @@ export function App() {
         startNewChat();
       } else if (event.key.toLowerCase() === "t") {
         event.preventDefault();
-        addTerminalPane();
+        if (
+          event.metaKey &&
+          !event.ctrlKey &&
+          !event.altKey &&
+          !event.shiftKey &&
+          workbench.activeDestination === "workspace" &&
+          workbench.activeWorkspaceLayout === "thread"
+        ) {
+          clearPaneLegacyPanel(companionFocusPaneId);
+          openCompanionTab("browser", companionFocusPaneId);
+        } else {
+          addTerminalPane();
+        }
       } else if (event.key === ",") {
         event.preventDefault();
         dispatchWorkbench({
@@ -16196,14 +16412,18 @@ export function App() {
         dispatchWorkbench({ type: "select-workspace-layout", layout: "code" });
       }
     };
+    appShortcutHandler.current = onKeyDown;
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     activeSession?.workspacePath,
     addTerminalPane,
+    clearPaneLegacyPanel,
+    companionFocusPaneId,
     closeGlobalSearch,
     dismissModelStandardPrompt,
     openGlobalSearch,
+    openCompanionTab,
     openToolPanel,
     runCommandPaletteCommand,
     saveEditorBuffer,
@@ -16211,11 +16431,28 @@ export function App() {
     selectWorkspaceLayout,
     startNewChat,
     workbench.activeWorkspaceLayout,
+    workbench.activeDestination,
     workbench.ide.activePath,
     workbench.preferences.workspaceKeybindings,
     workspacePath,
     workspaceTrusted,
   ]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    const pending = listen<{ key: string }>("desktop-shortcut", ({ payload }) => {
+      if (!disposed && payload.key === "k") {
+        appShortcutHandler.current(
+          new KeyboardEvent("keydown", { key: "k", metaKey: true }),
+        );
+      }
+    }).catch(() => undefined);
+    return () => {
+      disposed = true;
+      void pending.then((unlisten) => unlisten?.());
+    };
+  }, []);
 
   useEffect(() => {
     if (activeSessionId) {
@@ -16639,6 +16876,8 @@ export function App() {
         taskId: task.id,
         status: pane.status === "done" ? "done" : "failed",
         lastRunAt: new Date().toISOString(),
+        workspacePath: pane.projectPath,
+        commandLine: [task.command, ...task.args].join(" "),
       });
     }
   }, [workbench.ide.taskDefinitions, workbench.terminalPanes]);
@@ -17519,7 +17758,9 @@ export function App() {
       sessionId:
         pane.kind === "session"
           ? pane.sessionId
-          : `workbench:${pane.workspacePath}`,
+          : pane.workspacePath
+            ? `workbench:${pane.workspacePath}`
+            : "workbench",
       workspaceKey: pane.workspacePath,
       draftKey: paneDraftKey,
     };
@@ -17542,7 +17783,7 @@ export function App() {
           railTerminalTools={railTerminalTools}
           browserPreview={previewForBrowser(paneBrowserOwner)}
           browserNativeHost={browserNativeHost}
-          browserOverlayOccluded={browserOverlayOccluded || !isFocused}
+          browserOverlayOccluded={browserOverlayOccluded}
           onBrowserBack={() => handleBrowserBack(paneBrowserOwner)}
           onBrowserDeviceChange={(device) =>
             handleBrowserDeviceChange(device, paneBrowserOwner)
@@ -17550,7 +17791,7 @@ export function App() {
           onBrowserForward={() => handleBrowserForward(paneBrowserOwner)}
           onBrowserHostBoundsChange={(bounds) =>
             handleBrowserHostBoundsChange(
-              isFocused ? bounds : null,
+              bounds,
               paneBrowserOwner,
             )
           }
@@ -18136,6 +18377,7 @@ export function App() {
       }}
       workspaceSidebarHidden={workbench.preferences.workspaceSidebarHidden}
       workspaceSidebarWidth={workbench.preferences.workspaceSidebarWidth}
+      chatSidebarWidth={workbench.preferences.chatSidebarWidth}
       workspacePreparation={workspacePreparation}
       files={visibleWorkspaceFiles}
       ide={scopedIde}
@@ -18169,6 +18411,9 @@ export function App() {
       }
       onWorkspaceSidebarWidthChange={(width) =>
         dispatchWorkbench({ type: "set-workspace-sidebar-width", width })
+      }
+      onChatSidebarWidthChange={(width) =>
+        dispatchWorkbench({ type: "set-chat-sidebar-width", width })
       }
       onRetryWorkspacePreparation={() => {
         const root = activeSession?.workspacePath ?? workspacePath;

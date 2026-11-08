@@ -1,0 +1,158 @@
+Window: "Gyro", App: Gyro Browser Shell Review.
+0 standard window Gyro, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: Gyro, URL: tauri://localhost
+			3 container
+				4 container Window navigation
+					5 button Hide sidebar
+					6 container Primary surfaces
+						7 toggle button Sessions, Value: on
+						8 toggle button Workspace, Value: off
+				9 pop up button New Session
+				10 button Search ⌘K
+				11 button Automations
+				12 text Projects
+				13 button (expanded) Collapse Browser acceptance, Secondary Actions: Collapse
+				14 button Browser review Beta
+				15 container Chat actions
+					16 toggle button Pin chat, Help: Pin, Value: off
+					17 button (collapsed) Chat options, Help: More, Secondary Actions: Expand
+				18 button Browser review Alpha
+				19 container Chat actions
+					20 toggle button Pin chat, Help: Pin, Value: off
+					21 button (collapsed) Chat options, Help: More, Secondary Actions: Expand
+				22 container Recent chats
+					23 text Recents
+					24 text No standalone chats yet
+				25 button Settings
+				26 splitter Resize sidebar, Help: Drag to resize. Double-click to reset., Value: 224
+			27 container
+				28 container Claude Code 2.1.318 → 2.1.319 is available
+					29 container
+						30 text Claude Code 2.1.318 → 2.1.319 is available
+					31 button Update
+					32 button Dismiss CLI update notice
+				33 container Thread
+					34 container Chat pane 1
+						35 container Chat companion
+							36 splitter Resize companion, Value: 320
+							37 container
+								38 tab group (selectable) Open companion tabs
+									39 tab (selected) Browser, Help: Gyro Browser Observation Fixture
+									40 button Close Browser
+								41 button Add companion tab
+								42 toggle button (disabled) Not enough room to split, Help: This window is too narrow to keep the conversation beside Review., Value: off
+								43 button Hide companion
+							44 container Browser
+								45 container Browser
+									46 container App preview and inspection
+										47 pop up button Preview target, Value: Web preview
+										48 button Refresh targets, Help: Discover windows and Simulator devices
+										49 button Capture
+										50 summary Runtime availability (1), Value: off
+											51 text Runtime availability (
+											52 text 1
+											53 text )
+										54 container Navigation
+											55 button (disabled) Back
+											56 button (disabled) Forward
+											57 button Reload
+										58 container
+											59 text field (settable) Browser URL, Value: http://127.0.0.1:50916/browser-observation.html, Placeholder: Search or enter a URL
+											60 button Open page in system browser, Help: Open in system browser
+										61 button (collapsed) Browser options, Secondary Actions: Expand
+										62 container Native browser surface
+											63 text Preview hidden
+											64 text Close the overlay to show the native browser surface again.
+										65 text Web preview ·  Desktop  ·  1280  ×  800  · 41%
+					66 container Chat pane 2
+						67 container Chat companion
+							68 splitter Resize companion, Value: 320
+							69 container
+								70 tab group (selectable) Open companion tabs
+									71 tab (selected) Browser, Help: Gyro Browser Observation Fixture
+									72 button Close Browser
+								73 button Add companion tab
+								74 toggle button (disabled) Not enough room to split, Help: This window is too narrow to keep the conversation beside Review., Value: off
+								75 button Hide companion
+							76 container Browser
+								77 container Browser
+									78 container App preview and inspection
+										79 pop up button Preview target, Value: Web preview
+										80 button Refresh targets, Help: Discover windows and Simulator devices
+										81 button Capture
+										82 summary Runtime availability (1), Value: off
+											83 text Runtime availability (
+											84 text 1
+											85 text )
+										86 container Navigation
+											87 button (disabled) Back
+											88 button (disabled) Forward
+											89 button Reload
+										90 container
+											91 text field (settable) Browser URL, Value: http://127.0.0.1:50916/browser-observation.html?page=second, Placeholder: Search or enter a URL
+											92 button Open page in system browser, Help: Open in system browser
+										93 button (collapsed) Browser options, Secondary Actions: Expand
+										94 container Native browser surface
+										95 text Web preview ·  Desktop  ·  1280  ×  800  · 41%
+					96 splitter Resize right pane, Value: 50
+	97 scroll area
+		98 HTML content Description: Gyro Browser Observation Fixture, URL: 127.0.0.1:50916/browser-observation.html?page=second
+			99 container
+				100 text Deterministic loopback page for Gyro Browser acceptance.
+				101 heading Shell Second ready, Value: 1
+					102 text Shell Second ready
+				103 container
+					104 text Viewport: desktop
+				105 container State-changing control
+					106 heading State-changing control, Value: 2
+						107 text State-changing control
+					108 button Change visible state
+					109 container State: initial
+						110 text State: initial
+					111 container Clicks: 0
+						112 text Clicks: 0
+				113 container Mouse interaction
+					114 heading Mouse interaction, Value: 2
+						115 text Mouse interaction
+					116 button Hover target
+					117 container Hover: initial
+						118 text Hover: initial
+					119 image Canvas target
+					120 container Canvas: initial
+						121 text Canvas: initial
+					122 button Drag handle
+					123 button Drop zone
+					124 container Drag: initial
+						125 text Drag: initial
+					126 container Context: initial
+						127 text Context: initial
+				128 container Form controls
+					129 heading Form controls, Value: 2
+						130 text Form controls
+					131 container
+						132 text Project name
+						133 text field (settable) Project name, Value: Gyro
+						134 pop up button Project kind, Value: Site
+						135 checkbox Enabled, Value: 0
+						136 container Kind: site; enabled: false
+							137 text Kind: site; enabled: false
+						138 button Save project
+						139 container Form: untouched
+							140 text Form: untouched
+					141 text Blocked credential field
+					142 secure text field (settable) Blocked credential field, Value: ••••••••••••••
+			143 link Open second fixture page, Value: 127.0.0.1:50916/browser-observation.html?page=second
+		144 scroll bar (settable, float) 0
+	145 close button
+	146 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	147 minimize button
+148 menu bar
+	149 Gyro Browser Shell Review
+	150 File
+	151 Edit
+	152 View
+	153 Window
+	154 Help
+
+The focused UI element is 91 text field (settable) Browser URL, Value: http://127.0.0.1:50916/browser-observation.html?page=second, Placeholder: Search or enter a URL

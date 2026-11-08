@@ -7,6 +7,8 @@
  */
 
 export type DictationListener = {
+  /** Capture is ready; permission/setup time is not listening time. */
+  onStart?: () => void;
   /** In-progress words. Replaces the previous partial from this session. */
   onPartial: (utterance: string) => void;
   /** Finished words. Replaces the partial. */
@@ -23,6 +25,8 @@ export type DictationController = {
    */
   start: (listener: DictationListener) => void;
   stop: () => void;
+  /** Release capture and deliver the final words. `stop` cancels silently. */
+  finish?: () => void;
 };
 
 export function dictationDraft(
@@ -34,9 +38,7 @@ export function dictationDraft(
   const at = Math.min(Math.max(0, Math.trunc(caret)), base.length);
   const spoken = utterance.trim();
   const gap =
-    spoken.length > 0 && at > 0 && !/\s$/u.test(base.slice(0, at))
-      ? " "
-      : "";
+    spoken.length > 0 && at > 0 && !/\s$/u.test(base.slice(0, at)) ? " " : "";
   let insert = gap + spoken;
   if (maxLength != null) {
     const room = Math.max(0, maxLength - base.length);
@@ -54,6 +56,8 @@ export type BrowserDictationRecognition = {
   lang: string;
   start: () => void;
   abort: () => void;
+  stop?: () => void;
+  onstart?: (() => void) | null;
   onresult:
     | ((event: {
         results: ArrayLike<{
@@ -127,10 +131,7 @@ export function setDictationAccessRequest(
 export function dictationAccessError(
   access: { microphone?: string; speech?: string } | null | undefined,
 ): string | null {
-  if (
-    access?.microphone === "unsupported" &&
-    access.speech === "unsupported"
-  ) {
+  if (access?.microphone === "unsupported" && access.speech === "unsupported") {
     return null;
   }
   if (access?.microphone !== "authorized") {
@@ -163,6 +164,7 @@ export function createBrowserDictation(
     settle?.();
     settle = null;
     if (!current) return;
+    current.onstart = null;
     current.onresult = null;
     current.onerror = null;
     current.onend = null;
@@ -209,6 +211,10 @@ export function createBrowserDictation(
         ? navigator.language
         : "en-US";
     let latest = "";
+    session.onstart = () => {
+      if (!settled && !next.signal.aborted && listener === next)
+        next.onStart?.();
+    };
     session.onresult = (event) => {
       if (settled || next.signal.aborted || listener !== next) return;
       const spoken = spokenUtterance(event);
@@ -248,6 +254,15 @@ export function createBrowserDictation(
   };
 
   return {
+    finish() {
+      const current = recognition;
+      if (!current) return;
+      try {
+        current.stop?.();
+      } catch {
+        current.onend?.();
+      }
+    },
     start(next) {
       stop();
       const id = ++generation;

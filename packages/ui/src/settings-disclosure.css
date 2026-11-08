@@ -105,6 +105,16 @@
   padding: 0 var(--gyro-space-section) var(--gyro-space-panel);
   min-width: 0;
 }
+/* An open card's title introduces its body; the collapsed band's bottom
+   padding would leave the title floating above the first row. :root keeps
+   this ahead of the compact-density heading rule. */
+:root .gyro-settings-disclosure-group.is-open
+  > .gyro-settings-disclosure-heading
+  > h2
+  > button {
+  min-height: 0;
+  padding-bottom: var(--gyro-space-compact);
+}
 .gyro-settings-disclosure-body[hidden] {
   display: none !important;
 }
@@ -135,11 +145,13 @@
   min-height: calc(var(--gyro-control-standard) + var(--gyro-space-card) * 2);
   padding-block: var(--gyro-space-card);
 }
+/* Same inset, edge and corner as the disclosure cards below it, so the
+   notice lines up with their titles instead of sitting 4px further left. */
 .gyro-settings-page-status {
-  padding: 12px 16px;
-  margin: 0 0 20px;
+  padding: var(--gyro-space-card) var(--gyro-disclosure-inline, var(--gyro-space-section));
+  margin: 0 0 var(--gyro-space-card);
   border: 1px solid var(--gyro-border-soft);
-  border-radius: var(--gyro-radius-md);
+  border-radius: var(--gyro-radius-lg);
   color: var(--gyro-muted);
   font-size: var(--gyro-font-support);
   line-height: 1.5;
@@ -336,4 +348,14 @@
   .gyro-last-payment {
     flex-basis: 100%;
   }
+}
+
+.gyro-settings-page-status > strong {
+  display: block;
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-chrome);
+  font-weight: 600;
+}
+.gyro-settings-page-status > p {
+  margin: var(--gyro-space-compact) 0 0;
 }

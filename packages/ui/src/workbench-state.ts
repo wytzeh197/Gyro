@@ -1,4 +1,9 @@
 import { normalizedInterfaceSize, normalizedMotionSpeed } from "./appearance.ts";
+import {
+  mergeDiscoveredTaskRuns,
+  rememberTaskRun,
+  sanitizeTaskRunRecords,
+} from "./task-run-records.ts";
 import { automaticBrowserDevice } from "./browser-viewport.ts";
 import { addNotification } from "./failure-notifications.ts";
 import type {
@@ -973,6 +978,7 @@ export function sanitizeStoredIdeState(
   // Recovery belongs to buffers, including files edited in the background.
   // Turning off layout restoration must not discard their unsaved text.
   const buffers = restoredDirtyEditorBuffers(ide.buffers);
+  const taskRunRecords = sanitizeTaskRunRecords(ide.taskRunRecords);
 
   if (!restoreOnLaunch) {
     return {
@@ -981,6 +987,7 @@ export function sanitizeStoredIdeState(
       activeView,
       tabs: [],
       buffers,
+      taskRunRecords,
       layout: {
         ...base.layout,
         ...layoutPreferences,
@@ -1149,6 +1156,7 @@ export function sanitizeStoredIdeState(
     activeView,
     tabs: tabsWithRecovery,
     buffers,
+    taskRunRecords,
     layout: {
       ...base.layout,
       ...layoutPreferences,
@@ -1656,6 +1664,7 @@ export type WorkbenchAction =
     }
   | { type: "set-workspace-sidebar-hidden"; hidden: boolean }
   | { type: "set-workspace-sidebar-width"; width?: number }
+  | { type: "set-chat-sidebar-width"; width?: number }
   | { type: "set-workspace-panel-height"; height: number }
   | {
       type: "set-workspace-trust";
@@ -1764,12 +1773,15 @@ export type WorkbenchAction =
   | { type: "github-set-run-logs"; logs?: string; runId?: number }
   | { type: "github-set-pull-requests"; pullRequests: GithubPullRequest[] }
   | { type: "github-error"; error?: string }
-  | { type: "ide-set-tasks"; tasks: TaskDefinition[] }
+  | { type: "ide-set-tasks"; tasks: TaskDefinition[]; workspacePath?: string }
   | {
       type: "ide-set-task-status";
       taskId: string;
       status: TaskDefinition["status"];
       lastRunAt?: string;
+      workspacePath?: string;
+      commandLine?: string;
+      durationMs?: number;
     }
   | { type: "ide-set-test-tree"; tests: TestTreeItem[] }
   | { type: "ide-set-debug-session"; session: DebugSessionState }
@@ -1794,6 +1806,7 @@ export type WorkbenchAction =
   | { type: "record-command"; commandId: string }
   | { type: "add-notification"; notification: Notification }
   | { type: "dismiss-notification"; id: string }
+  | { type: "resolve-notification"; correlationKey: string }
   | { type: "clear-notifications" }
   | { type: "select-terminal-pane"; paneId: string }
   | { type: "add-terminal-pane"; pane: TerminalPane }
@@ -1921,6 +1934,16 @@ export type WorkbenchAction =
   | { type: "browser-forward" }
   | { type: "browser-reload" }
   | { type: "browser-loaded"; url: string }
+  | {
+      type: "browser-native-state";
+      resourceId: string;
+      navigationId: number;
+      navigationError?: { kind: string; message: string; code: number } | null;
+      loading: boolean;
+      url: string;
+      title: string;
+      viewport: BrowserViewportState;
+    }
   | { type: "browser-device"; device: BrowserViewportMode }
   | { type: "browser-viewport"; viewport: BrowserViewportState }
   | { type: "browser-capture-start" }
@@ -2012,6 +2035,7 @@ export function createInitialWorkbenchState(
     diagnostics: [],
     sourceControl: defaultSourceControlState(),
     taskDefinitions: [],
+    taskRunRecords: {},
     testTree: [],
     debugSessions: [],
     languageServers: [],
@@ -2173,6 +2197,7 @@ export function workbenchReducer(
           usageVisualization: defaults.usageVisualization,
           workspaceSidebarHidden: defaults.workspaceSidebarHidden,
           workspaceSidebarWidth: defaults.workspaceSidebarWidth,
+          chatSidebarWidth: defaults.chatSidebarWidth,
           workspacePanelHeight: defaults.workspacePanelHeight,
         },
       };
@@ -2348,6 +2373,14 @@ export function workbenchReducer(
             typeof action.width === "number" && Number.isFinite(action.width)
               ? Math.min(520, Math.max(180, Math.round(action.width)))
               : undefined,
+        },
+      };
+    case "set-chat-sidebar-width":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          chatSidebarWidth: normalizedChatSidebarWidth(action.width),
         },
       };
     case "set-workspace-panel-height":
@@ -3531,27 +3564,74 @@ export function workbenchReducer(
           github: { ...state.ide.github, error: action.error },
         },
       };
-    case "ide-set-tasks":
-      return {
-        ...state,
-        ide: { ...state.ide, taskDefinitions: action.tasks },
-      };
-    case "ide-set-task-status":
+    case "ide-set-tasks": {
+      const workspacePath = action.workspacePath?.trim();
+      if (!workspacePath) {
+        return {
+          ...state,
+          ide: { ...state.ide, taskDefinitions: action.tasks },
+        };
+      }
+      const key = normalizedWorkspaceFolderPath(workspacePath);
+      const storedRecords = state.ide.taskRunRecords ?? {};
+      const merged = mergeDiscoveredTaskRuns(
+        state.ide.taskDefinitions,
+        action.tasks,
+        storedRecords[key],
+      );
       return {
         ...state,
         ide: {
           ...state.ide,
-          taskDefinitions: state.ide.taskDefinitions.map((task) =>
-            task.id === action.taskId
-              ? {
-                  ...task,
-                  status: action.status,
-                  lastRunAt: action.lastRunAt ?? task.lastRunAt,
-                }
-              : task,
-          ),
+          taskDefinitions: merged.tasks,
+          taskRunRecords: {
+            ...storedRecords,
+            [key]: merged.records,
+          },
         },
       };
+    }
+    case "ide-set-task-status": {
+      const taskDefinitions = state.ide.taskDefinitions.map((task) =>
+        task.id === action.taskId
+          ? {
+              ...task,
+              status: action.status,
+              lastRunAt: action.lastRunAt ?? task.lastRunAt,
+              durationMs:
+                action.durationMs === undefined
+                  ? task.durationMs
+                  : action.durationMs,
+            }
+          : task,
+      );
+      const commandLine = action.commandLine?.trim();
+      const workspacePath = action.workspacePath?.trim();
+      const status = action.status;
+      const taskRunRecords =
+        (status === "done" || status === "failed" || status === "cancelled") &&
+        workspacePath &&
+        commandLine &&
+        action.lastRunAt
+          ? rememberTaskRun(
+              state.ide.taskRunRecords ?? {},
+              workspacePath,
+              action.taskId,
+              {
+                status,
+                lastRunAt: action.lastRunAt,
+                commandLine,
+                ...(action.durationMs === undefined
+                  ? {}
+                  : { durationMs: action.durationMs }),
+              },
+            )
+          : (state.ide.taskRunRecords ?? {});
+      return {
+        ...state,
+        ide: { ...state.ide, taskDefinitions, taskRunRecords },
+      };
+    }
     case "ide-set-test-tree":
       return {
         ...state,
@@ -3736,6 +3816,9 @@ export function workbenchReducer(
           action.notification,
         ),
       };
+    case "resolve-notification":
+      return { ...state, notifications: state.notifications.map((notification) =>
+        notification.correlationKey === action.correlationKey ? { ...notification, read: true } : notification) };
     case "dismiss-notification":
       return {
         ...state,
@@ -4404,6 +4487,9 @@ export function workbenchReducer(
           deviceOverride: false,
           viewport: undefined,
           nativeHost: false,
+          nativeResourceId: undefined,
+          nativeNavigationId: undefined,
+          nativeLoading: undefined,
           title: undefined,
           status: "idle",
           history: [],
@@ -4450,6 +4536,56 @@ export function workbenchReducer(
           captureError: undefined,
           latestCapture: undefined,
           verificationMessage: "Loading…",
+        },
+      };
+    }
+    case "browser-native-state": {
+      const preview = state.browserPreview;
+      if (preview.nativeResourceId === action.resourceId &&
+          (preview.nativeNavigationId ?? -1) > action.navigationId) return state;
+      // Back/Forward/Reload update the UI before WebKit starts the request.
+      // A queued observation of the previous finished document must not undo it.
+      if (preview.status === "loading" && preview.nativeLoading === false &&
+          !action.loading && preview.nativeResourceId === action.resourceId &&
+          preview.nativeNavigationId === action.navigationId) return state;
+      const history = [...preview.history];
+      let historyIndex = preview.historyIndex;
+      if (historyIndex >= 0 && preview.status === "loading") {
+        // Preserve the pending entry for submitted URLs, redirects and history.
+        history[historyIndex] = action.url;
+      } else if (history[historyIndex] !== action.url) {
+        history.splice(historyIndex + 1);
+        history.push(action.url);
+        historyIndex = history.length - 1;
+      }
+      const documentChanged = preview.nativeResourceId !== action.resourceId ||
+        preview.nativeNavigationId !== action.navigationId || preview.url !== action.url;
+      const resized = preview.viewport?.width !== action.viewport.width ||
+        preview.viewport?.height !== action.viewport.height;
+      return {
+        ...state,
+        browserPreview: {
+          ...preview,
+          url: action.url,
+          title: action.title.trim() || undefined,
+          nativeResourceId: action.resourceId,
+          nativeNavigationId: action.navigationId,
+          nativeLoading: action.loading,
+          navigationError: action.navigationError ?? undefined,
+          nativeHost: true,
+          viewport: action.viewport,
+          device: action.viewport.device,
+          deviceOverride: action.viewport.mode !== "auto",
+          history,
+          historyIndex,
+          status: action.navigationError ? "verification-failed" : action.loading ? "loading" : "ready",
+          verificationMessage: action.navigationError?.message ?? (action.loading ? "Loading…" : `Native · ${action.url}`),
+          ...(documentChanged ? {
+            consoleErrors: 0, diagnostics: [], diagnosticsCaptured: false,
+          } : {}),
+          ...(documentChanged || resized || action.navigationError ? {
+            captureStatus: "idle", captureError: undefined, latestCapture: undefined,
+          } : {}),
         },
       };
     }
@@ -5026,6 +5162,20 @@ export function normalizedDesktopNotifications(
   };
 }
 
+/** Drag range for the Sessions sidebar outside the code view. */
+export const CHAT_SIDEBAR_MIN_WIDTH = 200;
+export const CHAT_SIDEBAR_MAX_WIDTH = 400;
+
+/**
+ * The handle may go below CHAT_SIDEBAR_MIN_WIDTH when the window's own default
+ * is narrower (190px), so storage accepts a little less than the drag minimum.
+ */
+function normalizedChatSidebarWidth(width: unknown): number | undefined {
+  return typeof width === "number" && Number.isFinite(width)
+    ? Math.min(CHAT_SIDEBAR_MAX_WIDTH, Math.max(180, Math.round(width)))
+    : undefined;
+}
+
 function normalizeWorkbenchPreferences(
   preferences?: Partial<WorkbenchPreferences>,
 ): WorkbenchPreferences {
@@ -5123,6 +5273,7 @@ function normalizeWorkbenchPreferences(
             Math.max(180, Math.round(preferences.workspaceSidebarWidth)),
           )
         : undefined,
+    chatSidebarWidth: normalizedChatSidebarWidth(preferences?.chatSidebarWidth),
     workspacePanelHeight:
       typeof preferences?.workspacePanelHeight === "number" &&
       Number.isFinite(preferences.workspacePanelHeight)
@@ -5833,12 +5984,19 @@ function workspaceNameFromPath(path: string) {
   return path.split("/").filter(Boolean).at(-1) ?? path;
 }
 
+/**
+ * A folder the user chose, as opposed to a Gyro-generated scratch directory.
+ *
+ * Scratch names end in a compact stamp (`gyro-live-provider-20260713`) or an
+ * ISO date (`gyro-luna-benchmark-2026-11-04`). A real project such as
+ * `gyro-cloud` stays.
+ */
 export function isUserSelectedWorkspacePath(path?: string) {
   if (!path?.trim()) {
     return false;
   }
   const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
-  return !/^gyro-.+-\d{8,}$/i.test(name);
+  return !/^gyro-.+-(?:\d{8,}|\d{4}-\d{2}-\d{2})$/i.test(name);
 }
 
 /**

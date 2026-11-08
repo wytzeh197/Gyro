@@ -41,6 +41,7 @@ function createFixtureDictation(): DictationController {
     start(listener) {
       clear();
       active = listener;
+      listener.onStart?.();
       spoken.forEach((text, index) => {
         const id = window.setTimeout(() => {
           if (listener.signal.aborted || active !== listener) return;
@@ -53,6 +54,11 @@ function createFixtureDictation(): DictationController {
         }, 1600 * (index + 1));
         timers.push(id);
       });
+    },
+    finish() {
+      const listener = active;
+      clear();
+      if (listener && !listener.signal.aborted) listener.onFinal(spoken.at(-1)!);
     },
     stop: clear,
   };
@@ -78,7 +84,7 @@ function Fixture() {
         <button type="button" onClick={() => setDraft("Please")}>Draft: Please</button>
         <button type="button" onClick={() => setDraft("")}>Clear draft</button>
       </nav>
-      <p className="dictation-preview-caption">Actual Gyro composer. Fixture transcriber, no microphone. The mic sits left of Send. Click it to stream a canned sentence into the draft. Click again to drop the unconfirmed words. Send stays a separate press.</p>
+      <p className="dictation-preview-caption">Actual Gyro composer. Fixture transcriber, no microphone. The mic sits left of Send. Click it to stream a canned sentence into the draft. Click again to finish and keep the words. Send stays a separate press.</p>
       <main className="dictation-preview-stage">
         <ChatSurface
           config={config}

@@ -1,0 +1,293 @@
+{
+  "schema": "gyro.navigation-dispatch-validation.v1",
+  "generatedAt": "2026-11-07T21:06:21.851494+00:00",
+  "head": "1d0b7e1321790246390b9ad64d78f73813a37ab6",
+  "workspace": "dirty; unrelated work preserved",
+  "baseline": {
+    "checks": 68,
+    "failed": [
+      "queued navigation cancellation returns promptly",
+      "cancelled queued navigation never reaches the server",
+      "cancelled queued navigation leaves the actual document unchanged",
+      "cancelled queued navigation settles without a false successful destination"
+    ],
+    "queuedCancellation": {
+      "actual": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:63336/browser-observation.html?label=QueuedCancelled"
+      },
+      "elapsedMs": 502,
+      "result": {
+        "Ok": {
+          "backgroundOnly": false,
+          "documentCommitted": false,
+          "label": "session-browser-f48a25c7847b40eb8c7d13f09f11111c",
+          "loading": true,
+          "navigationError": null,
+          "navigationId": 2,
+          "resourceId": "64c8eaba-ac2a-4662-9071-d4ae8f3c4805",
+          "sessionId": "f48a25c7-847b-40eb-8c7d-13f09f11111c",
+          "title": "",
+          "url": "http://127.0.0.1:63336/browser-observation.html?label=QueuedCancelled",
+          "viewport": {
+            "device": "desktop",
+            "displayScale": 1.0,
+            "height": 800.0,
+            "mode": "auto",
+            "width": 1280.0
+          },
+          "visible": false,
+          "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-V00lHX/workspaces/first"
+        }
+      },
+      "settled": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-f48a25c7847b40eb8c7d13f09f11111c",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 2,
+        "resourceId": "64c8eaba-ac2a-4662-9071-d4ae8f3c4805",
+        "sessionId": "f48a25c7-847b-40eb-8c7d-13f09f11111c",
+        "title": "Gyro Fixture QueuedCancelled",
+        "url": "http://127.0.0.1:63336/browser-observation.html?label=QueuedCancelled",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-V00lHX/workspaces/first"
+      },
+      "wireState": {
+        "failedDocumentRequests": 9,
+        "heldDocuments": 0,
+        "heldFrames": 0,
+        "heldImages": 0,
+        "queuedCancelledRequests": 1
+      }
+    }
+  },
+  "nativeRuns": {
+    "native-navigation": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov",
+    "native-frontend": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-F3dQs7",
+    "native-visual-review": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-4buNIc"
+  },
+  "nativeNavigationChecks": 83,
+  "nativeFrontendChecks": 53,
+  "nativeVisualFrontendChecks": 53,
+  "rustBrowserTests": 57,
+  "browserRegressionScripts": [
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-event-routing.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-navigation.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-viewport.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-host-bounds.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-pointer-feedback.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-reveal.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-observation-cost.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-subagent-browsers.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-agent-runtime.mjs"
+      ],
+      "exitCode": 0
+    }
+  ],
+  "singleSampleCancellationMs": [
+    {
+      "operation": "navigate",
+      "elapsedMs": 22
+    },
+    {
+      "operation": "reload",
+      "elapsedMs": 22
+    },
+    {
+      "operation": "reopen",
+      "elapsedMs": 24
+    },
+    {
+      "operation": "viewport",
+      "elapsedMs": 28
+    }
+  ],
+  "observerLifecycle": {
+    "detached": 16,
+    "dropped": 16,
+    "forwardedCallbacks": 61,
+    "installed": 16
+  },
+  "endOfRunWireCounters": {
+    "queuedCancelledRequests": 0,
+    "requestsByLabel": {
+      "Original": 9,
+      "Provisional": 7,
+      "Fast": 8,
+      "Failure": 10,
+      "Second": 2
+    }
+  },
+  "isolatedStoreCounts": {
+    "native-navigation": {
+      "provider_session_bindings": 0,
+      "session_turn_messages": 0,
+      "session_turn_status": 0,
+      "usage_turn_links": 0,
+      "efficiency_task_turns": 0
+    },
+    "native-frontend": {
+      "provider_session_bindings": 0,
+      "session_turn_messages": 0,
+      "session_turn_status": 0,
+      "usage_turn_links": 0,
+      "efficiency_task_turns": 0
+    },
+    "native-visual-review": {
+      "provider_session_bindings": 0,
+      "session_turn_messages": 0,
+      "session_turn_status": 0,
+      "usage_turn_links": 0,
+      "efficiency_task_turns": 0
+    }
+  },
+  "modelTurnsDispatched": 0,
+  "unitIsolation": {
+    "root": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-navigation-dispatch-unit-8frgye5u",
+    "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-navigation-dispatch-unit-8frgye5u/data",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "-p",
+      "gyro-desktop",
+      "--lib",
+      "browser",
+      "--",
+      "--nocapture"
+    ],
+    "exitCode": 0,
+    "remainingAttachmentFixtureDirectories": 0
+  },
+  "productionCspUnchanged": true,
+  "captureAssetsAllowed": true,
+  "workspaceAssetAllowed": false,
+  "fullAppShellMounted": false,
+  "nativeVisualReview": {
+    "missingImageObserved": true,
+    "feedbackDisabledBeforeDecode": true,
+    "nativeRecoveryClick": true,
+    "newImageVisible": true,
+    "feedbackEnabledAfterDecode": true,
+    "continueAcceptanceClicked": true,
+    "temporaryAppExitedSuccessfully": true,
+    "keyboardTraversalVerified": false,
+    "screenshots": [
+      "screenshot-unavailable.png",
+      "screenshot-recovered.png"
+    ],
+    "accessibilityEvidence": "recovered-accessibility.txt",
+    "captures": [
+      {
+        "width": 389,
+        "height": 844,
+        "viewport": {
+          "deviceScaleFactor": 1,
+          "height": 844,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 389
+        }
+      },
+      {
+        "width": 390,
+        "height": 843,
+        "viewport": {
+          "deviceScaleFactor": 1,
+          "height": 843,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 390
+        }
+      }
+    ]
+  },
+  "checks": {
+    "defaultFeatureCargoCheck": "passed",
+    "desktopTypecheck": "passed",
+    "scopedWhitespace": "passed"
+  },
+  "sourceSha256": {
+    "apps/desktop/src-tauri/src/session_browser.rs": "2df29d1cda5a17deec516f12d8200516848c74ce4294740648c8f3fb1e02a0ca",
+    "apps/desktop/src-tauri/src/browser_operation.rs": "f5c8bbbd11b935fff0b697b6536319b88a5d833a467a2d8bf7e6a03a21d6c6b3",
+    "apps/desktop/src-tauri/src/browser_viewport.rs": "cf3808b32bb33d1bfdd476b72850ecebe4962135acc4fd70ea78d4d2a40b678e",
+    "apps/desktop/src-tauri/src/browser_navigation_smoke.rs": "2de13bc77d095d8e3c90ed647d665c94f0cbedcb77f078f8de88ebb95781e344",
+    "apps/desktop/src/browser-events-native-smoke.tsx": "aad0793724755c68fae650f196449967aa7db8b872d80d55ca02846d0ff94179",
+    "scripts/run-browser-events-native.mjs": "14c963e0929a20450df466062f69d1874434cadaa20f42762e3e11ffa9663c0b",
+    "docs/model-tools.md": "fc8838609d1e6cd0b67073ad1692ccf8592202b510846c0420f96b32827ef0b6",
+    "apps/desktop/src-tauri/tauri.conf.json": "0d20aee8cfc34681002669c645766b2ea756110f26fc848f2ca761d2566c0e79",
+    "Cargo.lock": "e00ddd671f957eabad737b1b2b7ab998cddb9fbf5b5ad8cc7464a700b35febc8"
+  },
+  "open": [
+    "fresh-browser creation cancellation",
+    "complex redirects and superseded native start callbacks",
+    "real post-commit network interruption and before-unload recovery",
+    "exact native viewport geometry; nominal800 vs actual768 hidden height, nominal390x844 vs389x844 and390x843 visual captures",
+    "close/reopen between native view lookup and resource capture",
+    "full App/companion/split shell, keyboard focus/traversal and broader OS input/accessibility",
+    "live GPT/Grok task completion and response-speed benchmark"
+  ]
+}

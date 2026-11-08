@@ -467,5 +467,61 @@
   "check-failure-notifications.mjs": {
     "kind": "behavioral",
     "note": "Exercises failure notification routing and visibility with isolated event fixtures."
+  },
+  "check-activity-composer-browser.mjs": {
+    "kind": "behavioral",
+    "note": "Drives the production composer in an isolated Chromium profile, checking menu layout, keyboard focus and tooltips at three viewport widths."
+  },
+  "check-browser-agent-runtime.mjs": {
+    "kind": "behavioral",
+    "note": "Executes the shipped DOM agent in headless Chromium against disposable DOM fixtures without provider calls."
+  },
+  "check-browser-draft.mjs": {
+    "kind": "behavioral",
+    "note": "Executes production App draft-browser callbacks and chat reducers for stable ownership and migration."
+  },
+  "check-browser-event-routing.mjs": {
+    "kind": "behavioral",
+    "note": "Executes native browser queue, event callbacks and reducers for ordering and cross-chat ownership."
+  },
+  "check-browser-interaction.mjs": {
+    "kind": "behavioral",
+    "note": "Executes the production native-browser interaction owner callback."
+  },
+  "check-browser-pane-visibility.mjs": {
+    "kind": "behavioral",
+    "note": "Executes split ChatSurface visibility props and native bounds callbacks."
+  },
+  "check-capability-lifecycle.mjs": {
+    "kind": "behavioral",
+    "note": "Executes call reconciliation and run projection for terminal states, chronology and scoped identifiers."
+  },
+  "check-chat-browser-shortcut.mjs": {
+    "kind": "behavioral",
+    "note": "Executes the production chat browser keyboard handler and panel transitions."
+  },
+  "check-chat-send-outcome.mjs": {
+    "kind": "behavioral",
+    "note": "Executes structured send outcomes and retry ownership, including saved failures and cancellation."
+  },
+  "check-companion-motion.mjs": {
+    "kind": "behavioral",
+    "note": "Executes the production companion motion hook with deterministic layout and animation clocks."
+  },
+  "check-native-shortcut-routing.mjs": {
+    "kind": "behavioral",
+    "note": "Executes the production native shortcut dispatch callback with fixture events."
+  },
+  "check-provider-quota.mjs": {
+    "kind": "behavioral",
+    "note": "Executes quota classification, run projection and notice lifecycle across providers."
+  },
+  "check-run-tasks.mjs": {
+    "kind": "behavioral",
+    "note": "Bundles and executes production task grouping, presentation and persisted run records."
+  },
+  "check-sidebar-project-groups.mjs": {
+    "kind": "behavioral",
+    "note": "Bundles and executes production project grouping and draft keys."
   }
 }

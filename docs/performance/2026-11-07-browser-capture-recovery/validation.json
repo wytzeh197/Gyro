@@ -1,0 +1,90 @@
+{
+  "schema": "gyro.capture-recovery-validation.v1",
+  "generatedAt": "2026-11-07T18:36:21.636742+00:00",
+  "head": "1d0b7e1321790246390b9ad64d78f73813a37ab6",
+  "workspace": "dirty; unrelated changes preserved",
+  "nativeChecks": 41,
+  "baseline": {
+    "source": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-9IRwtk",
+    "passed": false,
+    "completedChecks": 16,
+    "error": "Error: failed screenshot did not expose an unavailable state",
+    "productSha256": {
+      "packages/ui/src/browser-capture-view.tsx": "373e86bc3aabb43a3749ac4820bf3ec5fa2b1e75de2daa4ee41110a5d68c9017",
+      "packages/ui/src/browser-capture.css": "7b8ef3d1c185daebc56607ff14ba857f3072015985f4d24b4a9953c52dc787c6"
+    }
+  },
+  "nativeSource": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-uGZfC9",
+  "engine": "AppleWebKit",
+  "origin": "tauri://localhost/browser-events-native-smoke.html",
+  "measurements": {
+    "closeWithHeldNativeReadMs": 2.9999999999997726,
+    "imageRecovery": {
+      "feedbackBlockedUntilReady": true,
+      "freshNativeCaptureDecoded": true,
+      "missingAssetFailed": true
+    }
+  },
+  "isolatedStoreCounts": {
+    "provider_session_bindings": 0,
+    "session_turn_messages": 0,
+    "session_turn_status": 0,
+    "usage_turn_links": 0,
+    "efficiency_task_turns": 0
+  },
+  "modelTurnsDispatched": 0,
+  "productionCspUnchanged": true,
+  "captureAssetAllowed": true,
+  "workspaceAssetAllowed": false,
+  "faultInjection": "unavailable asset record and held real IPC results; native command responses unmodified",
+  "fullAppShellMounted": false,
+  "nativeOsMouseTested": false,
+  "visualReview": {
+    "environment": "in-app browser with production BrowserCaptureView in browser-layout-fixture",
+    "url": "http://127.0.0.1:1437/browser-layout-fixture.html?native=1&capture=missing&theme=dark",
+    "unavailableMessageVisible": true,
+    "commentDisabledOnFailure": true,
+    "retryClicked": true,
+    "replacementVisible": true,
+    "commentEnabledAfterDecode": true,
+    "recoveryCapture": "mock SVG source; native capture separately verified by native.json",
+    "nativeDesktopVisualReview": "unverified; computer-use service reported Mac locked"
+  },
+  "checks": {
+    "desktopTypecheck": "passed",
+    "uiTypecheck": "passed",
+    "normalDesktopViteBuild": "passed",
+    "eventRoutingCases": 16,
+    "browserRegressions": "passed; see browser-regressions.log",
+    "normalFrontendExcludesFixture": true,
+    "normalJavaScriptFilesScanned": 104,
+    "whitespace": "passed",
+    "architectureBoundaries": "passed",
+    "focusedFormatting": "passed"
+  },
+  "preparation": [
+    "preparation/01-pOHfmN-manifest.json",
+    "preparation/01-pOHfmN-browser-frontend.json",
+    "preparation/02-EkFL0n-manifest.json"
+  ],
+  "sourceSha256": {
+    "packages/ui/src/browser-capture-view.tsx": "995d50c664648090a010553261aee67e56bdafce1df65309303c4b3e8f2a7b31",
+    "packages/ui/src/browser-capture.css": "4045453e2cfa7accd4401ee45cdcea411d21db40738b8efc16b3190ea67a5c5a",
+    "apps/desktop/src/browser-layout-fixture.tsx": "759cf3766b1d072ae269da1cd58f24548753ed33be98ccc599d162e43e596dcd",
+    "apps/desktop/src/browser-events-native-smoke.tsx": "8ceea01ae1ecd4165bd6262990aacf92c2d90bcf7859aba9970515df84554d39",
+    "apps/desktop/src-tauri/src/browser_frontend_smoke.rs": "13b3bc35aef0cde4fd2ca9e775960a09f2d07e9c3671bd0804c808263d190605",
+    "apps/desktop/src-tauri/src/bin/browser-events-smoke.rs": "bab032bec94035bd1799bf3ecc5ae542c55fe9ce6a01f60497a2c41691d2e592",
+    "apps/desktop/src-tauri/tauri.conf.json": "0d20aee8cfc34681002669c645766b2ea756110f26fc848f2ca761d2566c0e79",
+    "scripts/run-browser-events-native.mjs": "0f02fedba28d8bd6616eb438d0391adbea193163edadbf9e009257a9916c13b0",
+    "apps/desktop/vite.config.ts": "1c92d238fad518fb3d3878983a488bde48e9642fa75ec43f6b8a1a362139039e",
+    "apps/desktop/src/session-browser-queue.ts": "71f4a0509f3dd0a38fad15b07b7e30bf6f476df06235e56d3a3184307b3125ab",
+    "apps/desktop/src/use-session-browser-events.ts": "8575c0bfba0a9daf5f97f5a15bc68b9067cbe9ccc570f8992316ee7ccc5e0a4c"
+  },
+  "binarySha256": "065974b2f06aacfebe5138b06186ba670b51793c89ecd183d8567d1b0fe74e1b",
+  "open": [
+    "full App/companion/split-shell acceptance",
+    "OS input/accessibility",
+    "same-resource ready-state ordering",
+    "live GPT/Grok/provider task completion"
+  ]
+}

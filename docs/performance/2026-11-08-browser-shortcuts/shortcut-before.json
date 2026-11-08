@@ -1,0 +1,50 @@
+{
+  "passed": false,
+  "checks": [
+    {
+      "name": "closed chat dock opens Browser for the focused pane",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    [\n+     'terminal'\n-     'clear',\n-     'alpha'\n    ],\n-   [\n-     'browser',\n-     'alpha'\n-   ]\n  ]\n"
+    },
+    {
+      "name": "split Beta receives Browser shortcut",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    [\n+     'terminal'\n-     'clear',\n-     'beta-stable-id'\n    ],\n-   [\n-     'browser',\n-     'beta-stable-id'\n-   ]\n  ]\n"
+    },
+    {
+      "name": "folderless draft can open Browser",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n    [\n+     'terminal'\n-     'clear',\n-     'solo-chat'\n    ],\n-   [\n-     'browser',\n-     'solo-chat'\n-   ]\n  ]\n"
+    },
+    {
+      "name": "IDE keeps New Terminal",
+      "passed": true
+    },
+    {
+      "name": "terminal grid keeps New Terminal",
+      "passed": true
+    },
+    {
+      "name": "a consumed companion shortcut is not run twice",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n+ [\n+   [\n+     'terminal'\n+   ]\n+ ]\n- []\n"
+    },
+    {
+      "name": "a consumed editor/search shortcut stays consumed",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n+ [\n+   [\n+     'search',\n+     'global'\n+   ]\n+ ]\n- []\n"
+    },
+    {
+      "name": "Cmd+K still opens global search",
+      "passed": true
+    },
+    {
+      "name": "explicit workspace shortcut keeps precedence",
+      "passed": true
+    },
+    {
+      "name": "plain typing does not invoke Browser",
+      "passed": true
+    }
+  ]
+}

@@ -571,7 +571,9 @@ pub(super) fn observe(
     response: &mut CapabilityResponse,
 ) {
     let cfg = config();
-    if !cfg.policies() || response.result.is_none() {
+    let checkpoints = cfg.policies() && (cfg.task_state || cfg.repository_retrieval);
+    let progress = cfg.progress_active();
+    if !(checkpoints || progress) || response.result.is_none() {
         return;
     }
     let Ok(bound) = active_provider_capability_context(app, &request.context.session_id) else {
@@ -583,7 +585,7 @@ pub(super) fn observe(
         .lock()
         .ok()
         .and_then(|f| f.get(&bound.session_id).cloned());
-    if cfg.task_state || cfg.repository_retrieval {
+    if checkpoints {
         let _measure = timing::EfficiencyTimer::start(timing::EfficiencyComponent::Checkpoint);
         if let Some(result) = response.result.as_ref() {
             if let Ok(store) = open_store() {
@@ -664,7 +666,7 @@ pub(super) fn observe(
             }
         }
     }
-    if !cfg.progress_detection {
+    if !progress {
         return;
     }
     let _measure = timing::EfficiencyTimer::start(timing::EfficiencyComponent::Progress);

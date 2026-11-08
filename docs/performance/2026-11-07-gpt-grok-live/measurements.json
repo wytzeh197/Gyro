@@ -1,0 +1,835 @@
+{
+  "schema": "gyro.benchmark.summary.v1",
+  "generatedAt": "2026-11-07T16:11:35.133Z",
+  "fixture": "meridian-v1",
+  "build": "debug",
+  "frontendMeasured": false,
+  "expectedSlots": 8,
+  "recordedSlots": 8,
+  "excludedRateGuardRecords": 0,
+  "groups": [
+    {
+      "provider": "openai",
+      "task": "readme",
+      "session": "fresh",
+      "slots": 1,
+      "completed": 0,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 1,
+      "incorrect": 0,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "slowestMs": null
+    },
+    {
+      "provider": "openai",
+      "task": "readme",
+      "session": "resumed",
+      "slots": 1,
+      "completed": 0,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 1,
+      "incorrect": 0,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "slowestMs": null
+    },
+    {
+      "provider": "openai",
+      "task": "code",
+      "session": "fresh",
+      "slots": 1,
+      "completed": 1,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 0,
+      "incorrect": 1,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 1,
+      "medianMs": 48920.88,
+      "p95Ms": 48920.88,
+      "slowestMs": 48920.88
+    },
+    {
+      "provider": "openai",
+      "task": "code",
+      "session": "resumed",
+      "slots": 1,
+      "completed": 0,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 1,
+      "incorrect": 0,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "slowestMs": null
+    },
+    {
+      "provider": "xai",
+      "task": "readme",
+      "session": "fresh",
+      "slots": 1,
+      "completed": 0,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 1,
+      "incorrect": 0,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "slowestMs": null
+    },
+    {
+      "provider": "xai",
+      "task": "readme",
+      "session": "resumed",
+      "slots": 1,
+      "completed": 0,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 1,
+      "incorrect": 0,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "slowestMs": null
+    },
+    {
+      "provider": "xai",
+      "task": "code",
+      "session": "fresh",
+      "slots": 1,
+      "completed": 0,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 1,
+      "incorrect": 0,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "slowestMs": null
+    },
+    {
+      "provider": "xai",
+      "task": "code",
+      "session": "resumed",
+      "slots": 1,
+      "completed": 0,
+      "correct": 0,
+      "unavailable": 0,
+      "failed": 1,
+      "incorrect": 0,
+      "retries": 0,
+      "actualResumes": 0,
+      "correctTiming": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "n": 0,
+      "medianMs": null,
+      "p95Ms": null,
+      "slowestMs": null
+    }
+  ],
+  "stageSummary": {
+    "openai": {
+      "workspaceMs": {
+        "n": 1,
+        "medianMs": 633.53,
+        "p95Ms": 633.53,
+        "slowestMs": 633.53
+      },
+      "processSpawnMs": {
+        "n": 1,
+        "medianMs": 4.07,
+        "p95Ms": 4.07,
+        "slowestMs": 4.07
+      },
+      "protocolReadinessMs": {
+        "n": 1,
+        "medianMs": 9241.95,
+        "p95Ms": 9241.95,
+        "slowestMs": 9241.95
+      },
+      "firstActivityMs": {
+        "n": 1,
+        "medianMs": 16495.15,
+        "p95Ms": 16495.15,
+        "slowestMs": 16495.15
+      },
+      "firstTokenMs": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "providerPhaseMs": {
+        "n": 1,
+        "medianMs": 36996.75,
+        "p95Ms": 36996.75,
+        "slowestMs": 36996.75
+      },
+      "finalizationMs": {
+        "n": 1,
+        "medianMs": 76.04,
+        "p95Ms": 76.04,
+        "slowestMs": 76.04
+      },
+      "toolBusyMs": {
+        "n": 1,
+        "medianMs": 2182.59,
+        "p95Ms": 2182.59,
+        "slowestMs": 2182.59
+      },
+      "tools": {
+        "median": 10,
+        "max": 10,
+        "open": 0
+      }
+    },
+    "xai": {
+      "workspaceMs": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "processSpawnMs": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "protocolReadinessMs": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "firstActivityMs": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "firstTokenMs": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "providerPhaseMs": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "finalizationMs": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "toolBusyMs": {
+        "n": 0,
+        "medianMs": null,
+        "p95Ms": null,
+        "slowestMs": null
+      },
+      "tools": {
+        "median": null,
+        "max": null,
+        "open": 0
+      }
+    }
+  },
+  "records": [
+    {
+      "correct": false,
+      "effort": "medium",
+      "failureClass": "timeout-or-cancelled",
+      "model": "gpt-6.1-sol",
+      "outcome": "failed",
+      "provider": "openai",
+      "resumedRequested": false,
+      "sessionId": "42c1cc17-6f96-435c-bb9c-617c78d13b58",
+      "task": "readme",
+      "trial": 1,
+      "wallMs": 60467.957375,
+      "turnId": "50c9332d-bd75-4f26-9928-b479a29e3367",
+      "nativeStatus": "cancelled",
+      "nativeRecoveryKind": "stopped",
+      "durableResponsePresent": false,
+      "fixtureCleanAtStart": true,
+      "pendingProposalCount": 1,
+      "timing": {
+        "workspaceMs": 899.157458,
+        "processSpawnMs": 4.756041999999752,
+        "protocolReadinessMs": 13724.095125000002,
+        "firstActivityMs": 25919.10875,
+        "requestCount": null,
+        "nativeModelCalls": null,
+        "observedUsage": {
+          "inputTokens": 144170,
+          "cachedInputTokens": 119552,
+          "cacheWriteTokens": 0,
+          "outputTokens": 317,
+          "reasoningOutputTokens": 63,
+          "totalTokens": 144487,
+          "measured": false,
+          "accounting": {
+            "source": "provider",
+            "scope": "turn",
+            "coverage": "partial",
+            "known": {
+              "input": true,
+              "output": true,
+              "cacheRead": true,
+              "cacheWrite": true,
+              "reasoning": true
+            },
+            "reason": "interrupted"
+          }
+        },
+        "unmeasuredContent": true,
+        "toolDurationsMs": [
+          718.1889160000064,
+          1017.0623330000017,
+          210.21458300000086
+        ],
+        "brokerToolDurationsMs": [
+          71.75445900000341,
+          96.69779199999903,
+          35.64108299999498
+        ],
+        "providerPhaseMs": 45351.76979200001,
+        "finalizationMs": 27.39837499999703,
+        "toolCount": 3,
+        "brokerToolCount": 3,
+        "toolBusyMs": 1945.465832000009,
+        "openTools": 0,
+        "retriesObserved": 0,
+        "toolSource": "protocol-and-broker"
+      }
+    },
+    {
+      "correct": false,
+      "effort": "medium",
+      "failureClass": "timeout-or-cancelled",
+      "model": "gpt-6.1-sol",
+      "outcome": "failed",
+      "provider": "openai",
+      "resumedRequested": true,
+      "sessionId": "43c8edc8-1c0c-497e-84c2-c0bcf09ec11d",
+      "task": "readme",
+      "trial": 1,
+      "wallMs": 63011.237,
+      "turnId": "1bd5f31d-b1f8-4dc2-8392-8dac02425054",
+      "nativeStatus": "cancelled",
+      "nativeRecoveryKind": "stopped",
+      "durableResponsePresent": false,
+      "fixtureCleanAtStart": true,
+      "pendingProposalCount": 0,
+      "timing": {
+        "workspaceMs": 167.445208,
+        "processSpawnMs": 11.05008300000003,
+        "protocolReadinessMs": 19249.004957999998,
+        "firstActivityMs": 30141.021584000002,
+        "requestCount": null,
+        "nativeModelCalls": null,
+        "observedUsage": {
+          "inputTokens": 171147,
+          "cachedInputTokens": 167552,
+          "cacheWriteTokens": 0,
+          "outputTokens": 534,
+          "reasoningOutputTokens": 246,
+          "totalTokens": 171681,
+          "measured": false,
+          "accounting": {
+            "source": "provider",
+            "scope": "turn",
+            "coverage": "partial",
+            "known": {
+              "input": true,
+              "output": true,
+              "cacheRead": true,
+              "cacheWrite": true,
+              "reasoning": true
+            },
+            "reason": "interrupted"
+          }
+        },
+        "unmeasuredContent": true,
+        "toolDurationsMs": [
+          241.25504100000398,
+          251.37341700000252,
+          262.91495799999393
+        ],
+        "brokerToolDurationsMs": [
+          40.08204200000182,
+          9.895958000000974,
+          55.89425000000483
+        ],
+        "providerPhaseMs": 42123.742541,
+        "finalizationMs": 692.8727919999947,
+        "toolCount": 3,
+        "brokerToolCount": 3,
+        "toolBusyMs": 755.5434160000004,
+        "openTools": 0,
+        "retriesObserved": 0,
+        "toolSource": "protocol-and-broker"
+      }
+    },
+    {
+      "correct": false,
+      "effort": "medium",
+      "model": "gpt-6.1-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "8038ee7a-eeae-4494-b53e-f8c61c027598",
+      "task": "code",
+      "trial": 1,
+      "turnId": "3f14f384-1470-4104-af19-b49276d37afa",
+      "wallMs": 48920.884125000004,
+      "nativeStatus": "done",
+      "nativeRecoveryKind": null,
+      "durableResponsePresent": true,
+      "resumeMetadataSource": "provider-response",
+      "fixtureCleanAtStart": true,
+      "pendingProposalCount": 2,
+      "correctnessFailure": "pending-workspace-proposal",
+      "timing": {
+        "workspaceMs": 633.531042,
+        "processSpawnMs": 4.065458999999919,
+        "protocolReadinessMs": 9241.949541,
+        "firstActivityMs": 16495.153625,
+        "requestCount": null,
+        "nativeModelCalls": null,
+        "observedUsage": {
+          "inputTokens": 197228,
+          "cachedInputTokens": 168832,
+          "cacheWriteTokens": 0,
+          "outputTokens": 740,
+          "reasoningOutputTokens": 37,
+          "totalTokens": 197968,
+          "measured": true,
+          "accounting": {
+            "source": "provider",
+            "scope": "turn",
+            "coverage": "complete",
+            "known": {
+              "input": true,
+              "output": true,
+              "cacheRead": true,
+              "cacheWrite": true,
+              "reasoning": true
+            }
+          }
+        },
+        "unmeasuredContent": false,
+        "toolDurationsMs": [
+          114.8627090000009,
+          23.250457999998616,
+          133.9535410000026,
+          35.822291999997105,
+          490.14920800000255,
+          68.97783399999753,
+          389.3151249999937,
+          397.7316249999931,
+          310.82183399999485,
+          217.70762500000274
+        ],
+        "brokerToolDurationsMs": [
+          22.529042000001937,
+          5.03716699999859,
+          65.47945799999798,
+          18.631375000000844,
+          41.420915999995486,
+          16.49920800000109,
+          326.74412499999744,
+          214.9670000000042,
+          270.48104199999943,
+          166.19783299999835
+        ],
+        "providerPhaseMs": 36996.749417,
+        "finalizationMs": 76.03725000000122,
+        "toolCount": 10,
+        "brokerToolCount": 10,
+        "toolBusyMs": 2182.5922509999873,
+        "openTools": 0,
+        "retriesObserved": 0,
+        "toolSource": "protocol-and-broker"
+      }
+    },
+    {
+      "effort": "medium",
+      "failureClass": "timeout-or-cancelled",
+      "model": "gpt-6.1-sol",
+      "outcome": "setup-failed",
+      "provider": "openai",
+      "resumedRequested": true,
+      "task": "code",
+      "trial": 1
+    },
+    {
+      "correct": false,
+      "effort": "medium",
+      "failureClass": "timeout-or-cancelled",
+      "model": "grok-4.7",
+      "outcome": "failed",
+      "provider": "xai",
+      "resumedRequested": false,
+      "sessionId": "f2e20f46-23a6-416a-ac5f-6c79d43664af",
+      "task": "readme",
+      "trial": 1,
+      "wallMs": 60431.803584,
+      "turnId": "60fbb9a7-ad86-4426-aabf-4b83a30b2c54",
+      "nativeStatus": "cancelled",
+      "nativeRecoveryKind": "stopped",
+      "durableResponsePresent": false,
+      "fixtureCleanAtStart": true,
+      "pendingProposalCount": 1,
+      "timing": {
+        "workspaceMs": 899.1685,
+        "processSpawnMs": 5.066917000000103,
+        "protocolReadinessMs": 5963.469832999999,
+        "firstActivityMs": 14329.167625,
+        "firstTokenMs": 15313.098417000001,
+        "requestCount": null,
+        "nativeModelCalls": null,
+        "observedUsage": {
+          "inputTokens": 0,
+          "cachedInputTokens": 0,
+          "cacheWriteTokens": 0,
+          "outputTokens": 0,
+          "reasoningOutputTokens": 0,
+          "totalTokens": 0,
+          "measured": false,
+          "accounting": {
+            "source": "provider",
+            "scope": "turn",
+            "coverage": "unavailable",
+            "known": {
+              "input": false,
+              "output": false,
+              "cacheRead": false,
+              "cacheWrite": false,
+              "reasoning": false
+            },
+            "reason": "interrupted"
+          }
+        },
+        "unmeasuredContent": true,
+        "toolDurationsMs": [
+          309.7542910000011,
+          4544.202791,
+          8775.837625,
+          703.137917,
+          243.92900000000373,
+          22.276708000004874
+        ],
+        "brokerToolDurationsMs": [
+          81.95079199999964,
+          179.46916699999565
+        ],
+        "providerPhaseMs": 53028.95512499999,
+        "finalizationMs": 44.3995419999992,
+        "toolCount": 7,
+        "brokerToolCount": 2,
+        "toolBusyMs": 14599.13833200001,
+        "openTools": 1,
+        "retriesObserved": 0,
+        "toolSource": "protocol-and-broker"
+      }
+    },
+    {
+      "correct": false,
+      "effort": "medium",
+      "failureClass": "timeout-or-cancelled",
+      "model": "grok-4.7",
+      "outcome": "failed",
+      "provider": "xai",
+      "resumedRequested": true,
+      "sessionId": "d44982de-5dfa-4c73-af98-e5f198c00883",
+      "task": "readme",
+      "trial": 1,
+      "wallMs": 63275.542041,
+      "turnId": "c94a6f9a-e084-49f9-a5bc-65a6f5c09004",
+      "nativeStatus": "cancelled",
+      "nativeRecoveryKind": "stopped",
+      "durableResponsePresent": false,
+      "fixtureCleanAtStart": true,
+      "pendingProposalCount": 1,
+      "timing": {
+        "workspaceMs": 246.13904200000002,
+        "processSpawnMs": 17.057500000000005,
+        "protocolReadinessMs": 10476.025333,
+        "firstActivityMs": 16330.983,
+        "firstTokenMs": 28498.70325,
+        "requestCount": null,
+        "nativeModelCalls": null,
+        "observedUsage": {
+          "inputTokens": 0,
+          "cachedInputTokens": 0,
+          "cacheWriteTokens": 0,
+          "outputTokens": 0,
+          "reasoningOutputTokens": 0,
+          "totalTokens": 0,
+          "measured": false,
+          "accounting": {
+            "source": "provider",
+            "scope": "turn",
+            "coverage": "unavailable",
+            "known": {
+              "input": false,
+              "output": false,
+              "cacheRead": false,
+              "cacheWrite": false,
+              "reasoning": false
+            },
+            "reason": "interrupted"
+          }
+        },
+        "unmeasuredContent": true,
+        "toolDurationsMs": [
+          3182.9688749999987,
+          4229.731291999997,
+          403.43091700000514,
+          73.78899999999703,
+          9.26258300000336,
+          71.24070799999754
+        ],
+        "brokerToolDurationsMs": [
+          14.855333999996219,
+          84.46854200000234
+        ],
+        "providerPhaseMs": 50591.073083999996,
+        "finalizationMs": 1079.4807500000024,
+        "toolCount": 7,
+        "brokerToolCount": 2,
+        "toolBusyMs": 7566.992457999993,
+        "openTools": 1,
+        "retriesObserved": 0,
+        "toolSource": "protocol-and-broker"
+      }
+    },
+    {
+      "correct": false,
+      "effort": "medium",
+      "failureClass": "timeout-or-cancelled",
+      "model": "grok-4.7",
+      "outcome": "failed",
+      "provider": "xai",
+      "resumedRequested": false,
+      "sessionId": "4b93e214-4108-49ea-936f-d79485644671",
+      "task": "code",
+      "trial": 1,
+      "wallMs": 64559.1505,
+      "turnId": "01fbe787-9dd6-4953-9812-402a795530d1",
+      "nativeStatus": "cancelled",
+      "nativeRecoveryKind": "stopped",
+      "durableResponsePresent": false,
+      "fixtureCleanAtStart": true,
+      "pendingProposalCount": 0,
+      "timing": {
+        "workspaceMs": 633.4951249999999,
+        "processSpawnMs": 85.30004199999985,
+        "protocolReadinessMs": 5700.440291,
+        "firstActivityMs": 12050.404084,
+        "firstTokenMs": 16576.988666999998,
+        "requestCount": null,
+        "nativeModelCalls": null,
+        "observedUsage": {
+          "inputTokens": 0,
+          "cachedInputTokens": 0,
+          "cacheWriteTokens": 0,
+          "outputTokens": 0,
+          "reasoningOutputTokens": 0,
+          "totalTokens": 0,
+          "measured": false,
+          "accounting": {
+            "source": "provider",
+            "scope": "turn",
+            "coverage": "unavailable",
+            "known": {
+              "input": false,
+              "output": false,
+              "cacheRead": false,
+              "cacheWrite": false,
+              "reasoning": false
+            },
+            "reason": "interrupted"
+          }
+        },
+        "unmeasuredContent": true,
+        "toolDurationsMs": [
+          106.52299999999741,
+          76.12804200000028,
+          7514.855,
+          3699.171875,
+          44.89741700000377,
+          6839.564709000006,
+          699.9789999999994
+        ],
+        "brokerToolDurationsMs": [
+          19.81550000000061,
+          23.774541999995563,
+          213.94116599999688,
+          878.5763329999972,
+          873.6747500000129
+        ],
+        "providerPhaseMs": 53736.648667,
+        "finalizationMs": 1390.360332999997,
+        "toolCount": 9,
+        "brokerToolCount": 5,
+        "toolBusyMs": 15388.113626000006,
+        "openTools": 2,
+        "retriesObserved": 0,
+        "toolSource": "protocol-and-broker"
+      }
+    },
+    {
+      "correct": false,
+      "effort": "medium",
+      "failureClass": "timeout-or-cancelled",
+      "model": "grok-4.7",
+      "outcome": "failed",
+      "provider": "xai",
+      "resumedRequested": true,
+      "sessionId": "a5fa8058-2b13-447a-8053-abe9dde02681",
+      "task": "code",
+      "trial": 1,
+      "wallMs": 62605.519,
+      "turnId": "930687e5-5407-4d80-a4a7-003b3ec194f7",
+      "nativeStatus": "cancelled",
+      "nativeRecoveryKind": "stopped",
+      "durableResponsePresent": false,
+      "fixtureCleanAtStart": true,
+      "pendingProposalCount": 0,
+      "timing": {
+        "workspaceMs": 1383.5356660000002,
+        "processSpawnMs": 24.220290999999634,
+        "protocolReadinessMs": 1486.4805840000008,
+        "firstActivityMs": 12949.527667,
+        "firstTokenMs": 15296.057958000001,
+        "requestCount": null,
+        "nativeModelCalls": null,
+        "observedUsage": {
+          "inputTokens": 0,
+          "cachedInputTokens": 0,
+          "cacheWriteTokens": 0,
+          "outputTokens": 0,
+          "reasoningOutputTokens": 0,
+          "totalTokens": 0,
+          "measured": false,
+          "accounting": {
+            "source": "provider",
+            "scope": "turn",
+            "coverage": "unavailable",
+            "known": {
+              "input": false,
+              "output": false,
+              "cacheRead": false,
+              "cacheWrite": false,
+              "reasoning": false
+            },
+            "reason": "interrupted"
+          }
+        },
+        "unmeasuredContent": true,
+        "toolDurationsMs": [
+          7606.105375000003,
+          4196.562292000002,
+          122.36320900000283,
+          1.4422919999997248,
+          9708.402500000004,
+          5215.175624999996,
+          10445.568833000005,
+          7235.383333000005
+        ],
+        "brokerToolDurationsMs": [
+          127.4008329999997,
+          129.56312500000058,
+          315.8546670000069,
+          368.42291600000317,
+          16.68649999999616,
+          15.834833000000799
+        ],
+        "providerPhaseMs": 53963.827,
+        "finalizationMs": 117.72812500000146,
+        "toolCount": 9,
+        "brokerToolCount": 6,
+        "toolBusyMs": 27761.519000000008,
+        "openTools": 1,
+        "retriesObserved": 0,
+        "toolSource": "protocol-and-broker"
+      }
+    }
+  ]
+}

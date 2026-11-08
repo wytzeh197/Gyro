@@ -71,6 +71,21 @@ pub(super) fn declared_provider_kind(provider_id: &str) -> Option<String> {
         .and_then(|provider| provider.kind.clone())
 }
 
+pub(super) fn configured_capability_support(
+    provider_id: &str,
+) -> Result<ProviderCapabilitySupport, String> {
+    let config = load_config_blocking()?;
+    let kind = config
+        .model_providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+        .and_then(|provider| provider.kind.as_deref());
+    Ok(gyro_core::provider_capability_support_with_kind(
+        provider_id,
+        kind,
+    ))
+}
+
 /// Image support is model-specific for DeepSeek. Ollama vision is discovered
 /// per installed model, so this shared check stays false and the Ollama runner
 /// decides on its own. Every other provider, including a user-defined endpoint,
@@ -319,6 +334,8 @@ pub(super) fn run_openai_compatible_chat(
         // event the user can inspect afterwards.
         let mut auto_compactions = Vec::new();
         let mut catalog_memory = provider_tool_batch::CatalogMemory::default();
+        let mut prefix_retention =
+            gyro_core::efficiency::prefix_retention::PrefixRetention::default();
         let retain_catalog =
             config.efficiency.policies() && config.efficiency.retain_tool_catalog && !compatibility;
         // One turn's tool loop, not a whole task, bounded by
@@ -399,9 +416,10 @@ pub(super) fn run_openai_compatible_chat(
                     e.catalog_fallbacks = e.catalog_fallbacks.saturating_add(1)
                 });
             }
-            let retired = gyro_core::efficiency::context::prepare_owned_model_request_with_policy(
+            let retired = prefix_retention.prepare(
                 &mut messages,
                 config.efficiency.evidence_policy(),
+                config.efficiency.enabled && config.efficiency.stable_api_prefix && !compatibility,
             );
             gyro_core::provider_observation::retired_context(retired);
             let (request_tools, tools_offered) = if compatibility {

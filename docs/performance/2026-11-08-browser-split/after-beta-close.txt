@@ -1,0 +1,143 @@
+Window: "Gyro", App: Gyro Browser Shell Review.
+0 standard window Gyro, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: Gyro, URL: tauri://localhost
+			3 container
+				4 container Window navigation
+					5 button Hide sidebar
+					6 container Primary surfaces
+						7 toggle button Sessions, Value: on
+						8 toggle button Workspace, Value: off
+				9 pop up button New Session
+				10 button Search ⌘K
+				11 button Automations
+				12 text Projects
+				13 button (expanded) Collapse Browser acceptance, Secondary Actions: Collapse
+				14 button Browser review Beta
+				15 container Chat actions
+					16 toggle button Pin chat, Help: Pin, Value: off
+					17 button (collapsed) Chat options, Help: More, Secondary Actions: Expand
+				18 button Browser review Alpha
+				19 container Chat actions
+					20 toggle button Pin chat, Help: Pin, Value: off
+					21 button (collapsed) Chat options, Help: More, Secondary Actions: Expand
+				22 container Recent chats
+					23 text Recents
+					24 text No standalone chats yet
+				25 button Settings
+				26 splitter Resize sidebar, Help: Drag to resize. Double-click to reset., Value: 224
+			27 container
+				28 container Claude Code 2.1.318 → 2.1.319 is available
+					29 container
+						30 text Claude Code 2.1.318 → 2.1.319 is available
+					31 button Update
+					32 button Dismiss CLI update notice
+				33 container Thread
+					34 container Chat pane 1
+						35 container Chat companion
+							36 splitter Resize companion, Value: 320
+							37 container
+								38 tab group (selectable) Open companion tabs
+									39 tab (selected) Browser, Help: Gyro Browser Observation Fixture
+									40 button Close Browser
+								41 button Add companion tab
+								42 toggle button (disabled) Not enough room to split, Help: This window is too narrow to keep the conversation beside Review., Value: off
+								43 button Hide companion
+							44 container Browser
+								45 container Browser
+									46 container App preview and inspection
+										47 pop up button Preview target, Value: Web preview
+										48 button Refresh targets, Help: Discover windows and Simulator devices
+										49 button Capture
+										50 summary Runtime availability (1), Value: off
+											51 text Runtime availability (
+											52 text 1
+											53 text )
+										54 container Navigation
+											55 button (disabled) Back
+											56 button (disabled) Forward
+											57 button Reload
+										58 container
+											59 text field (settable) Browser URL, Value: http://127.0.0.1:51619/browser-observation.html, Placeholder: Search or enter a URL
+											60 button Open page in system browser, Help: Open in system browser
+										61 button (collapsed) Browser options, Secondary Actions: Expand
+										62 container Native browser surface
+										63 text Web preview ·  Desktop  ·  1280  ×  800  · 41%
+					64 container Chat pane 2
+						65 container Chat companion
+							66 splitter Resize companion, Value: 320
+							67 container
+								68 tab group (selectable) Open companion tabs
+								69 toggle button (disabled) Not enough room to split, Help: This window is too narrow to keep the conversation beside Review., Value: off
+								70 button Hide companion
+							71 container Open a tool
+								72 container Companion tools
+									73 heading Open a tool, Value: 2
+										74 text Open a tool
+									75 button Canvas
+									76 button Review ⌃⇧G
+									77 button Terminal ⌃`
+									78 button Browser ⌘T
+									79 button Files ⌘P
+									80 button Side chat ⌥⌘S
+					81 splitter Resize right pane, Value: 50
+	82 scroll area
+		83 HTML content Description: Gyro Browser Observation Fixture, URL: 127.0.0.1:51619/browser-observation.html
+			84 container
+				85 text Deterministic loopback page for Gyro Browser acceptance.
+				86 heading Shell Original ready, Value: 1
+					87 text Shell Original ready
+				88 container
+					89 text Viewport: desktop
+				90 container State-changing control
+					91 heading State-changing control, Value: 2
+						92 text State-changing control
+					93 button Change visible state
+					94 container State: changed
+						95 text State: changed
+					96 container Clicks: 2
+						97 text Clicks: 2
+				98 container Mouse interaction
+					99 heading Mouse interaction, Value: 2
+						100 text Mouse interaction
+					101 button Hover target
+					102 container Hover: initial
+						103 text Hover: initial
+					104 image Canvas target
+					105 container Canvas: initial
+						106 text Canvas: initial
+					107 button Drag handle
+					108 button Drop zone
+					109 container Drag: initial
+						110 text Drag: initial
+					111 container Context: initial
+						112 text Context: initial
+				113 container Form controls
+					114 heading Form controls, Value: 2
+						115 text Form controls
+					116 container
+						117 text Project name
+						118 text field (settable) Project name, Value: Gyro
+						119 pop up button Project kind, Value: Site
+						120 checkbox Enabled, Value: 0
+						121 container Kind: site; enabled: false
+							122 text Kind: site; enabled: false
+						123 button Save project
+						124 container Form: untouched
+							125 text Form: untouched
+					126 text Blocked credential field
+					127 secure text field (settable) Blocked credential field, Value: ••••••••••••••
+			128 link Open second fixture page, Value: 127.0.0.1:51619/browser-observation.html?page=second
+		129 scroll bar (settable, float) 0
+	130 close button
+	131 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	132 minimize button
+133 menu bar
+	134 Gyro Browser Shell Review
+	135 File
+	136 Edit
+	137 View
+	138 Window
+	139 Help
+
+The focused UI element is 2 HTML content Description: Gyro, URL: tauri://localhost

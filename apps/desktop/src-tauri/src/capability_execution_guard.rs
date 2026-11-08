@@ -1,6 +1,12 @@
 //! Revalidate the owning chat after a potentially long approval wait.
 use super::*;
 
+/// Keep the operation and its underlying cause so the model can repair a
+/// missing path or argument. Sanitize the complete chain before exposing it.
+pub(super) fn error_message(error: &anyhow::Error) -> String {
+    gyro_core::sanitize_capability_summary(&format!("{error:#}"))
+}
+
 pub(super) fn rejection(
     app: &tauri::AppHandle,
     store: &SessionStore,
@@ -86,6 +92,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tool_errors_explain_the_underlying_io_failure() {
+        let error = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::NotFound))
+            .context("open workspace file src/clamp.test.mjs");
+        assert!(!error.to_string().contains("not found"));
+        let message = error_message(&error);
+        assert!(message.contains("open workspace file src/clamp.test.mjs"));
+        assert!(message.contains("entity not found"));
+    }
+
+    #[test]
+    fn tool_error_causes_remain_redacted_and_bounded() {
+        let secret = "sk-abcdefghijklmnopqrstuvwxyz123456";
+        let error =
+            anyhow::anyhow!("OPENAI_API_KEY={secret}").context("workspace operation failed");
+        let message = error_message(&error);
+        assert!(message.contains("workspace operation failed"));
+        assert!(!message.contains(secret));
+        let oversized = anyhow::anyhow!("é".repeat(5000)).context("read failed");
+        assert_eq!(
+            error_message(&oversized).chars().count(),
+            gyro_core::capabilities::MAX_CAPABILITY_SUMMARY_CHARS
+        );
+    }
+
+    #[test]
     fn retrieving_owned_research_is_inspection_rather_than_another_model_run() {
         assert_eq!(
             effective_capability_class(
@@ -125,6 +156,7 @@ mod tests {
             session_id: session.id.to_string(),
             turn_id: Some(Uuid::new_v4().to_string()),
             provider_id: "ollama".into(),
+            provider_kind: None,
             workspace,
             workspace_key: workspace_key.clone(),
             workspace_identity_revision: session.workspace_identity.revision,

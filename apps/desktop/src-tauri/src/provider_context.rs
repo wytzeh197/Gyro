@@ -488,6 +488,32 @@ pub(super) enum ClaudeUsageFrame {
     Turn,
 }
 
+/// What one Antigravity step sent the model: its own prompt and reply.
+///
+/// `step_update` usage is per step (the `result` frame's is cumulative, and on
+/// a resumed conversation spans earlier turns), and its `input_tokens` already
+/// counts the cache-read share, so the latest step's prompt is the occupancy.
+/// The window comes from the catalog; the CLI does not report one.
+pub(super) fn antigravity_step_occupancy(value: &Value) -> Option<ProviderContextUsage> {
+    let (event, _) = gyro_core::antigravity_cli::frame(value)?;
+    if event != "step_update" {
+        return None;
+    }
+    let usage = gyro_core::antigravity_cli::usage(value)?;
+    if usage.input_tokens == 0 {
+        return None;
+    }
+    Some(ProviderContextUsage {
+        input_tokens: Some(usage.input_tokens),
+        cached_input_tokens: Some(usage.cache_read_tokens),
+        output_tokens: Some(usage.output_tokens),
+        reasoning_output_tokens: Some(usage.thinking_tokens),
+        total_tokens: Some(usage.input_tokens.saturating_add(usage.output_tokens)),
+        model_context_window: None,
+        ..ProviderContextUsage::default()
+    })
+}
+
 /// Occupancy of one completed model request.
 ///
 /// The prompt count is what that request held, and output is what it added.
@@ -710,11 +736,13 @@ pub(super) fn catalog_context_window(provider_id: &str, model_id: Option<&str>) 
             _ => return None,
         },
         "anthropic" => match model_id {
-            // Claude Code runs bare Opus ids at 200K; the `-1m` rows select 1M.
-            "claude-haiku-4-5" | "claude-opus-5-5" | "claude-opus-5" | "claude-opus-4-8" => 200_000,
-            "" | "claude-fable-5-1" | "claude-fable-5" | "claude-opus-5-5-1m"
-            | "claude-opus-5-1m" | "claude-opus-4-8-1m" | "claude-sonnet-5-5"
-            | "claude-sonnet-5" | "claude-haiku-5-5" => 1_000_000,
+            // Opus 4.7 and later have native 1M context, without a suffix.
+            // Explicit runtime restrictions (for example disabling 1M) win.
+            "claude-haiku-4-5" => 200_000,
+            "" | "claude-fable-5-1" | "claude-fable-5" | "claude-opus-5-5" | "claude-opus-5"
+            | "claude-opus-4-8" | "claude-opus-5-5-1m" | "claude-opus-5-1m"
+            | "claude-opus-4-8-1m" | "claude-sonnet-5-5" | "claude-sonnet-5"
+            | "claude-haiku-5-5" => 1_000_000,
             _ => return None,
         },
         // K3 and K3.1 Pro entitlements depend on the plan; retain the Plus
@@ -809,8 +837,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn antigravity_steps_report_their_own_prompt_as_occupancy() {
+        let step = serde_json::json!({"event":"step_update","step_update":{"step_index":3,
+            "usage":{"input_tokens":30384,"output_tokens":4,"thinking_tokens":2,
+            "cache_read_tokens":30214,"total_tokens":30388}}});
+        let usage = antigravity_step_occupancy(&step).expect("step occupancy");
+        assert_eq!(usage.input_tokens, Some(30384));
+        assert_eq!(usage.cached_input_tokens, Some(30214));
+        assert_eq!(usage.total_tokens, Some(30388));
+        assert_eq!(usage.model_context_window, None);
+        // The result frame is cumulative across a resumed conversation.
+        let result = serde_json::json!({"event":"result","result":{"status":"SUCCESS",
+            "usage":{"input_tokens":90000,"output_tokens":20,"total_tokens":90020}}});
+        assert!(antigravity_step_occupancy(&result).is_none());
+        let text = serde_json::json!({"event":"step_update","step_update":{"text_delta":"Hi"}});
+        assert!(antigravity_step_occupancy(&text).is_none());
+    }
+
+    #[test]
     fn api_models_supply_windows_for_usage_and_compaction() {
         for (provider, model, window) in [
+            ("anthropic", "claude-opus-5-5", 1_000_000),
+            ("anthropic", "claude-opus-5", 1_000_000),
+            ("anthropic", "claude-opus-4-8", 1_000_000),
+            ("anthropic", "claude-haiku-4-5", 200_000),
             ("deepseek", "deepseek-flash", 1_000_000),
             ("deepseek", "deepseek-v4-pro", 1_000_000),
             ("mistral", "mistral-medium-latest", 256_000),

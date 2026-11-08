@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./check-provider-quota.mjs";
 import { remainingUsage } from "../packages/ui/src/usage-remaining.ts";
 
 for (const [used, expected, label] of [
@@ -214,6 +215,9 @@ assert.equal(
 
 for (const [providerId, modelId, window] of [
   ["openai", "gpt-6.1-sol", 500_000],
+  ["anthropic", "claude-opus-5", 1_000_000],
+  ["anthropic", "claude-opus-4-8", 1_000_000],
+  ["anthropic", "claude-haiku-4-5", 200_000],
   ["xai", "grok-4.7", 256_000],
   ["antigravity", "antigravity-default", 0],
   ["openrouter", "z-ai/glm-5.3", 1_048_576],
@@ -238,6 +242,8 @@ assert.equal(
 // offline catalog, in either direction. Counts must use the actual window.
 for (const [providerId, modelId, catalog, runtime] of [
   ["kimi", "k3", 262_144, 1_048_576],
+  ["anthropic", "claude-opus-5", 1_000_000, 200_000],
+  ["openai", "gpt-6.1-sol", 500_000, 475_000],
   ["ollama", "local-model", 131_072, 4_096],
 ]) {
   const actual = estimateComposerContextUsage(

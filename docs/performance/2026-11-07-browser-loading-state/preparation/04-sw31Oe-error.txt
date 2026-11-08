@@ -1,0 +1,2 @@
+native browser frontend report failed: EOF while parsing a string at line 1 column 972
+No complete native report was written. The runner exited 1.

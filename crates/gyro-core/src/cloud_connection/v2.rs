@@ -515,6 +515,9 @@ pub struct View {
     pub auth_stage: Option<String>,
     pub last_verified: Option<DateTime<Utc>>,
     pub snapshot: Option<Snapshot>,
+    /// Who is signed in, from the verified session. Present only while a
+    /// snapshot is, so a signed-out or expired view never names an account.
+    pub account_email: Option<String>,
     pub revocation_pending: bool,
     pub remember_session: bool,
 }
@@ -527,6 +530,7 @@ impl Default for View {
             auth_stage: None,
             last_verified: None,
             snapshot: None,
+            account_email: None,
             revocation_pending: false,
             remember_session: false,
         }
@@ -853,6 +857,7 @@ impl Connection {
     /// Publish a verified snapshot without touching the refresh credential.
     /// Callers must hold the generation-checked state lock.
     fn connected(s: &mut Inner, session: Arc<Session>, snapshot: Snapshot, remember: bool) -> View {
+        s.view.account_email = Some(session.email().to_owned());
         s.session = Some(session);
         s.pending = None;
         s.busy = false;
@@ -1072,6 +1077,7 @@ impl Connection {
                         }
                         state.session = None;
                         state.view.snapshot = None;
+                        state.view.account_email = None;
                         state.view.last_verified = None;
                         return Err(error.into());
                     }
@@ -1105,6 +1111,7 @@ impl Connection {
                     if matches!(error, Error::Authentication | Error::Denied) {
                         state.session = None;
                         state.view.snapshot = None;
+                        state.view.account_email = None;
                         state.view.last_verified = None;
                         state.view.state = "expired".into();
                         state.view.revocation_pending = self.store.clear().is_err();
@@ -1350,6 +1357,35 @@ mod tests {
         ));
         assert!(store.value.lock().unwrap().is_none());
         assert!(c.view().snapshot.is_none());
+    }
+    #[test]
+    fn connected_view_names_the_verified_account_until_signout() {
+        let config = Config::production(
+            "https://cloud.example",
+            "abcdefghijklmnopqrst",
+            "sb_publishable_fixture_only_not_a_secret",
+        )
+        .unwrap();
+        let a = Uuid::new_v4();
+        let s = Uuid::new_v4();
+        let d = Uuid::new_v4();
+        let session = Arc::new(super::super::supabase::fixture_session(&config.auth, a, s));
+        let store = Arc::new(super::super::supabase::store::fixture::MemoryStore {
+            project_ref: "abcdefghijklmnopqrst".into(),
+            ..Default::default()
+        });
+        let c = Connection::new(
+            config,
+            store,
+            Arc::new(IdleTransport(std::sync::atomic::AtomicUsize::new(0))),
+            d,
+        );
+        assert!(c.view().account_email.is_none());
+        let ticket = c.start().unwrap();
+        let view = c.commit(ticket, session, snapshot(a, s, d), false).unwrap();
+        assert_eq!(view.account_email.as_deref(), Some("fixture@example.com"));
+        c.sign_out().unwrap();
+        assert!(c.view().account_email.is_none());
     }
     #[test]
     fn app_only_release_never_constructs_a_production_adapter() {

@@ -1,0 +1,61 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "name": "ordinary opening reaches its measured width and releases the native host",
+      "passed": true
+    },
+    {
+      "name": "detached portal measures after its parent reveals it",
+      "passed": true
+    },
+    {
+      "name": "hidden rail measures after its parent reveals it",
+      "passed": true
+    },
+    {
+      "name": "a portal that remains hidden does not retain a zero-width animation",
+      "passed": true
+    },
+    {
+      "name": "a missed animation completion releases the native host within 300ms",
+      "passed": true
+    },
+    {
+      "name": "a stalled animation frame cannot hold the native host indefinitely",
+      "passed": true
+    },
+    {
+      "name": "external animation cancellation releases the native host",
+      "passed": true
+    },
+    {
+      "name": "a closing animation with no completion still removes the retained panel once",
+      "passed": true
+    },
+    {
+      "name": "unmount cancels pending work and ignores a queued completion",
+      "passed": true
+    },
+    {
+      "name": "a resized animation ignores its predecessor's queued callback and deadline",
+      "passed": true
+    },
+    {
+      "name": "reduced motion opens without an animation",
+      "passed": true
+    },
+    {
+      "name": "switching to reduced motion settles even while portal layout is pending",
+      "passed": true
+    },
+    {
+      "name": "active pointer resizing settles without adding another animation",
+      "passed": true
+    },
+    {
+      "name": "reopening before close completes does not run a stale exit",
+      "passed": true
+    }
+  ]
+}

@@ -78,6 +78,7 @@ mod tests {
             workspace_context: None,
             workspace_check: None,
             side_chat_context: None,
+            internal_purpose: None,
         }
     }
 

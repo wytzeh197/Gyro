@@ -129,8 +129,8 @@ assert.ok(
   "The native browser-opened listener should resolve a reveal decision",
 );
 assert.ok(
-  listener.includes("background: !isActive || !decision.reveal"),
-  "A suppressed reveal should navigate in the background",
+  listener.includes('send({ type: "browser-native-state", ...snapshot })'),
+  "A native observation should publish state without dispatching a navigation reveal",
 );
 assert.ok(
   listener.includes("revealRequested: event.payload.reveal === true"),
@@ -172,7 +172,7 @@ for (const panel of [undefined, "terminal", "diff", "browser"]) {
   }
 }
 assert.ok(
-  /if \(isActive && decision\.reveal\) \{\s*dispatchRef\.current\(\{ type: "set-chat-panel", panel: "browser" \}\);/.test(
+  /if \(isActive && decision\.reveal\) \{\s*dispatchRef\.current\(\{\s*type: "set-chat-panel",\s*panel: "browser",?\s*\}\);/.test(
     listener,
   ),
   "The panel should only open when the decision says to reveal",

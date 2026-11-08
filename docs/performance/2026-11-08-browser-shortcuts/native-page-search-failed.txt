@@ -1,0 +1,151 @@
+Window: "Gyro", App: Gyro Browser Shell Review.
+0 standard window Gyro, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: Gyro, URL: tauri://localhost
+			3 container
+				4 container Window navigation
+					5 button Hide sidebar
+					6 container Primary surfaces
+						7 toggle button Sessions, Value: on
+						8 toggle button Workspace, Value: off
+				9 pop up button New Session
+				10 button Search ⌘K
+				11 button Automations
+				12 text Projects
+				13 button (expanded) Collapse Browser acceptance, Secondary Actions: Collapse
+				14 button Browser review Beta
+				15 container Chat actions
+					16 toggle button Pin chat, Help: Pin, Value: off
+					17 button (collapsed) Chat options, Help: More, Secondary Actions: Expand
+				18 button Browser review Alpha
+				19 container Chat actions
+					20 toggle button Pin chat, Help: Pin, Value: off
+					21 button (collapsed) Chat options, Help: More, Secondary Actions: Expand
+				22 container Recent chats
+					23 text Recents
+					24 text No standalone chats yet
+				25 button Settings
+				26 splitter Resize sidebar, Help: Drag to resize. Double-click to reset., Value: 224
+			27 container
+				28 container Claude Code 2.1.318 → 2.1.319 is available
+					29 container
+						30 text Claude Code 2.1.318 → 2.1.319 is available
+					31 button Update
+					32 button Dismiss CLI update notice
+				33 container Thread
+					34 container Chat pane 1
+						35 container Browser review Alpha
+							36 text Browser review Alpha
+						37 container Chat surfaces
+						38 container Chat surfaces
+							39 toggle button Environment, Value: off
+						40 container Chat
+							41 container
+								42 text Synthetic fixture Alpha. No provider turn ran; use the browser controls for this review.
+								43 button Copy response
+								44 text Synthetic Alpha conversation for native browser acceptance.
+								45 container
+									46 button Use prompt again
+									47 text 12:24 PM
+									48 button Copy message
+								49 text Worked
+							50 text entry area (settable) Message Gyro, Value: [text entry area: Message Gyro], Placeholder: Connect a provider to send a message…
+								51 text Connect a provider to send a message…
+							52 container
+								53 text Connect a provider to start chatting.
+								54 button Connect a provider
+							55 pop up button Add context
+							56 pop up button Approval mode: Ask for approval
+							57 progress indicator (settable, float) Selected model context: 0 tokens used; context window unknown, Value: 50
+							58 pop up button Model: Choose model
+							59 toggle button Dictate, Value: off
+							60 button (disabled) Send message, Help: Connect a provider before sending
+						61 container Chat companion
+							62 splitter Resize companion, Value: 570
+							63 container
+								64 tab group (selectable) Open companion tabs
+									65 tab (selected) Browser, Help: Gyro Browser Observation Fixture
+									66 button Close Browser
+								67 button Add companion tab
+								68 toggle button Expand panel, Value: off
+								69 button Hide companion
+							70 container Browser
+								71 container Browser
+									72 container App preview and inspection
+										73 pop up button Preview target, Value: Web preview
+										74 button Refresh targets, Help: Discover windows and Simulator devices
+										75 button Capture
+										76 summary Runtime availability (1), Value: off
+											77 text Runtime availability (
+											78 text 1
+											79 text )
+										80 container Navigation
+											81 button (disabled) Back
+											82 button (disabled) Forward
+											83 button Reload
+										84 container
+											85 text field (settable) Browser URL, Value: http://127.0.0.1:54040/browser-observation.html, Placeholder: Search or enter a URL
+											86 button Open page in system browser, Help: Open in system browser
+										87 button (collapsed) Browser options, Secondary Actions: Expand
+										88 container Native browser surface
+										89 text Web preview ·  Desktop  ·  1280  ×  800  · 45%
+	90 scroll area
+		91 HTML content Description: Gyro Browser Observation Fixture, URL: 127.0.0.1:54040/browser-observation.html
+			92 container
+				93 text Deterministic loopback page for Gyro Browser acceptance.
+				94 heading Shell Original ready, Value: 1
+					95 text Shell Original ready
+				96 container
+					97 text Viewport: desktop
+				98 container State-changing control
+					99 heading State-changing control, Value: 2
+						100 text State-changing control
+					101 button Change visible state
+					102 container State: changed
+						103 text State: changed
+					104 container Clicks: 1
+						105 text Clicks: 1
+				106 container Mouse interaction
+					107 heading Mouse interaction, Value: 2
+						108 text Mouse interaction
+					109 button Hover target
+					110 container Hover: initial
+						111 text Hover: initial
+					112 image Canvas target
+					113 container Canvas: initial
+						114 text Canvas: initial
+					115 button Drag handle
+					116 button Drop zone
+					117 container Drag: initial
+						118 text Drag: initial
+					119 container Context: initial
+						120 text Context: initial
+				121 container Form controls
+					122 heading Form controls, Value: 2
+						123 text Form controls
+					124 container
+						125 text Project name
+						126 text field (settable) Project name, Value: Gyro
+						127 pop up button Project kind, Value: Site
+						128 checkbox Enabled, Value: 0
+						129 container Kind: site; enabled: false
+							130 text Kind: site; enabled: false
+						131 button Save project
+						132 container Form: untouched
+							133 text Form: untouched
+					134 text Blocked credential field
+					135 secure text field (settable) Blocked credential field, Value: ••••••••••••••
+			136 link Open second fixture page, Value: 127.0.0.1:54040/browser-observation.html?page=second
+		137 scroll bar (settable, float) 0
+	138 close button
+	139 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	140 minimize button
+141 menu bar
+	142 Gyro Browser Shell Review
+	143 File
+	144 Edit
+	145 View
+	146 Window
+	147 Help
+
+The focused UI element is 101 button Change visible state

@@ -29,6 +29,7 @@ pub enum CapabilityId {
     WorkspaceReadEditor,
     WorkspaceDiagnostics,
     WorkspaceGitStatus,
+    WorkspaceGitBranches,
     WorkspaceDiff,
     WorkspaceGitLog,
     WorkspaceGitShow,
@@ -111,6 +112,7 @@ impl CapabilityId {
             Self::WorkspaceReadEditor => "workspace.read_editor",
             Self::WorkspaceDiagnostics => "workspace.diagnostics",
             Self::WorkspaceGitStatus => "workspace.git_status",
+            Self::WorkspaceGitBranches => "workspace.git_branches",
             Self::WorkspaceDiff => "workspace.diff",
             Self::WorkspaceGitLog => "workspace.git_log",
             Self::WorkspaceGitShow => "workspace.git_show",
@@ -193,6 +195,7 @@ impl CapabilityId {
             Self::WorkspaceReadEditor => "gyro_workspace_read_editor",
             Self::WorkspaceDiagnostics => "gyro_workspace_diagnostics",
             Self::WorkspaceGitStatus => "gyro_workspace_git_status",
+            Self::WorkspaceGitBranches => "gyro_workspace_git_branches",
             Self::WorkspaceDiff => "gyro_workspace_diff",
             Self::WorkspaceGitLog => "gyro_git_log",
             Self::WorkspaceGitShow => "gyro_git_show",
@@ -751,7 +754,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceSearch,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Search workspace text with a ripgrep regular expression. Pass path to search one workspace-relative directory. Narrow with globs and maxResults; maxBytes bounds output (16 KiB default). Use returned locations for targeted reads. A truncated read continues with nextLine, nextColumn, or the returned offset. Invalid patterns and ripgrep failures are reported.",
+        description: "Search workspace text with a ripgrep regular expression in an optional existing workspace-relative file or directory. Omit path or use . for the root; filename patterns belong in globs. Narrow with globs and maxResults; maxBytes bounds output (16 KiB default). Use returned locations for targeted reads. Invalid paths and patterns return correction guidance; fix the arguments before retrying. Searches never silently broaden scope or retry as literal text.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRead,
@@ -777,6 +780,11 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         id: CapabilityId::WorkspaceGitStatus,
         class: CapabilityClass::WorkspaceInspect,
         description: "List changed, staged, and untracked files in the workspace Git repository with the current branch. Use this instead of shelling out to git status.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceGitBranches,
+        class: CapabilityClass::WorkspaceInspect,
+        description: "Find the newest branch commits in one read: current branch, local and last-fetched remote branches, commit dates, exact refs, and linked worktree paths. Results are newest first; tied latest matches are marked within query/scope. Remote refs are cached until a fetch; this tool does not fetch, switch, or change files. Use query to find a branch name. For another page, pass nextOffset as offset and reuse snapshotId; restart at offset 0 if the snapshot changes.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceDiff,
@@ -896,7 +904,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::TerminalOpen,
         class: CapabilityClass::TerminalExecute,
-        description: "Open one visible, model-owned long-running process in Gyro Terminal. For builds and other finite commands, use gyro_terminal_wait with the returned resource.id to await completion and then continue the task. A process still running when the turn ends is watched under the reply; if it exits without the user or model stopping it, Gyro relaunches the same command.",
+        description: "Start one visible, model-owned process in Gyro Terminal. Waits up to 1000ms by default so quick commands return completed, exitCode, and bounded output in this call. Inspect the exit code before continuing. Use yieldTimeMs: 0 for servers and watchers. For a finite command that is still running, use gyro_terminal_wait with the returned resource.id. A process still running when the turn ends is watched under the reply; if it exits without the user or model stopping it, Gyro relaunches the same command.",
     },
     CapabilityDescriptor {
         id: CapabilityId::TerminalRead,
@@ -1056,7 +1064,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WebFetch,
         class: CapabilityClass::BrowserNavigate,
-        description: "Read one http(s) URL as text without opening the browser rail. Prefer this for reading or summarizing articles, announcements, documentation, and other links when rendered content or interaction is unnecessary. Use the browser if fetching fails or needed content requires rendering. Egress is gated per origin exactly like browser navigation. Responses are bounded and secret-redacted; HTML arrives as source rather than rendered, and a non-text content type is refused.",
+        description: "Read one http(s) URL as text without opening the browser rail. Prefer this for reading or summarizing articles, announcements, documentation, and other links when rendered content or interaction is unnecessary. Use the browser if fetching fails or needed content requires rendering. Egress is gated per origin exactly like browser navigation. Responses are bounded and secret-redacted. HTML defaults to readable text with source links and page-supplied title/date/canonical metadata; format: source returns raw markup. Sparse HTML, sign-in pages, and challenges may need the background browser; they are not evidence that content is absent. Plain text, JSON and feeds are preserved; non-text content types are refused.",
     },
     CapabilityDescriptor {
         id: CapabilityId::GithubStatus,
@@ -1129,8 +1137,18 @@ pub fn capability_descriptor(id: CapabilityId) -> &'static CapabilityDescriptor 
 /// providers receive it through `session/new`, and API runners dispatch tools
 /// directly. Antigravity print mode does not connect a Gyro tool transport.
 pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySupport {
+    provider_capability_support_with_kind(provider_id, None)
+}
+
+/// Resolve tool support from the same trusted config kind as the chat runner.
+/// A model-supplied capability request must never supply this declaration.
+pub fn provider_capability_support_with_kind(
+    provider_id: &str,
+    declared_kind: Option<&str>,
+) -> ProviderCapabilitySupport {
     let descriptor = crate::provider_registry::provider_descriptor(provider_id);
-    let custom = crate::provider_registry::is_custom_provider_id(provider_id);
+    let custom =
+        crate::provider_registry::is_openai_compatible_provider(provider_id, declared_kind);
     let available = custom
         || descriptor.is_some_and(|provider| {
             use crate::provider_registry::ProviderExecutionKind as Kind;
@@ -1148,12 +1166,11 @@ pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySuppo
         schema: PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1.into(),
         provider_id: provider_id.into(),
         available,
-        execution_kind: descriptor
-            .map(|provider| provider.execution_kind)
-            .or_else(|| {
-                custom
-                    .then_some(crate::provider_registry::ProviderExecutionKind::OpenAiCompatibleApi)
-            }),
+        execution_kind: if custom {
+            Some(crate::provider_registry::ProviderExecutionKind::OpenAiCompatibleApi)
+        } else {
+            descriptor.map(|provider| provider.execution_kind)
+        },
         support_tier: descriptor.map_or(
             if custom {
                 crate::provider_registry::ProviderSupportTier::Experimental
@@ -1164,7 +1181,8 @@ pub fn provider_capability_support(provider_id: &str) -> ProviderCapabilitySuppo
         ),
         supports_approvals: custom
             || descriptor.is_some_and(|provider| provider.supports_approvals),
-        supports_images: crate::provider_registry::provider_accepts_images(provider_id),
+        supports_images: (custom && descriptor.is_none())
+            || crate::provider_registry::provider_accepts_images(provider_id),
         supports_resume: custom || descriptor.is_some_and(|provider| provider.supports_resume),
         supports_usage: descriptor.is_some_and(|provider| provider.supports_usage),
         efficiency: crate::efficiency::controls(provider_id),
@@ -1511,6 +1529,26 @@ mod tests {
     }
 
     #[test]
+    fn configured_api_transport_and_tool_support_agree_without_a_custom_prefix() {
+        let id = "local-runtime-fixture";
+        assert!(!provider_capability_support(id).available);
+        let support =
+            provider_capability_support_with_kind(id, Some(crate::OPENAI_COMPATIBLE_KIND));
+        assert!(support.available);
+        assert!(support.supports_approvals && support.supports_resume && support.supports_images);
+        assert_eq!(
+            support.execution_kind,
+            Some(crate::ProviderExecutionKind::OpenAiCompatibleApi)
+        );
+        assert!(support.capabilities.contains(&CapabilityId::WorkspaceRead));
+        assert!(support.reason.is_none());
+        assert!(
+            !provider_capability_support_with_kind(id, Some("unrecognized-transport")).available
+        );
+        assert!(!provider_capability_support_with_kind("antigravity", None).available);
+    }
+
+    #[test]
     fn plan_and_council_advertise_only_the_tools_they_can_grant() {
         assert!(
             advertised_capability_descriptors(CapabilityRunMode::Council)
@@ -1530,6 +1568,7 @@ mod tests {
         assert!(plan.contains(&CapabilityId::CodeSymbols));
         // Git history is read-only inspection too, so Plan keeps it.
         assert!(plan.contains(&CapabilityId::WorkspaceGitLog));
+        assert!(plan.contains(&CapabilityId::WorkspaceGitBranches));
         assert!(plan.contains(&CapabilityId::WorkspaceGitShow));
         assert!(plan.contains(&CapabilityId::WorkspaceGitBlame));
         assert!(!plan.contains(&CapabilityId::WorkspaceProposeEdit));

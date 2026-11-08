@@ -1,0 +1,10 @@
+The following is a diff from the previous accessibility tree for Window: "Gyro" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
+Removed element IDs: 177-178
++				177 container invalid length: found 50
++					178 text Browser open failed
++					179 text invalid length: found 50
++					180 button Dismiss Browser open failed
+~							168 text Can't reach this page
+~							169 text Nothing is responding at 127.0.0.1:55719. Start the app, then try again.
++						181 text Unreachable · Gyro could not open the native browser. Retry or open it externally.
+The focused UI element is 156 text field (settable) Browser URL, Value: http://127.0.0.1:55719/browser-observation.html, Placeholder: https://example.com

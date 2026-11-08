@@ -1,0 +1,307 @@
+{
+  "actions": [
+    {
+      "action": {
+        "background": true,
+        "type": "browser-navigate",
+        "url": "http://127.0.0.1:57285/browser-observation.html?label=Original"
+      },
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "title": "",
+        "type": "browser-title"
+      },
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1,
+          "height": 800,
+          "mode": "auto",
+          "width": 1280
+        }
+      },
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "title": "Gyro Fixture Original",
+        "type": "browser-title"
+      },
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-loaded",
+        "url": "http://127.0.0.1:57285/browser-observation.html?label=Original"
+      },
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1,
+          "height": 800,
+          "mode": "auto",
+          "width": 1280
+        }
+      },
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 0.859375,
+          "height": 800,
+          "mode": "auto",
+          "width": 1280
+        }
+      },
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "mobile",
+          "displayScale": 0.8145734597156398,
+          "height": 844,
+          "mode": "mobile",
+          "width": 390
+        }
+      },
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-capture-start"
+      },
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "capture": {
+          "createdAt": "2026-11-07T18:22:32.881Z",
+          "filename": "browser-preview-20261107T182232881Z-655bb97e-15f9-4f9a-9ed8-b059f51a7d4e.png",
+          "height": 844,
+          "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-9IRwtk/data/browser-captures/browser-preview-20261107T182232881Z-655bb97e-15f9-4f9a-9ed8-b059f51a7d4e.png",
+          "resourceId": "5fa47e4c-8be8-48c0-8d0d-f53212ff14eb",
+          "sourceUrl": "http://127.0.0.1:57285/browser-observation.html?label=Original",
+          "src": "asset://localhost/%2Fprivate%2Fvar%2Ffolders%2F20%2Fn8przxcs0g72jllfg677ys600000gn%2FT%2Fgyro-browser-events-native-9IRwtk%2Fdata%2Fbrowser-captures%2Fbrowser-preview-20261107T182232881Z-655bb97e-15f9-4f9a-9ed8-b059f51a7d4e.png",
+          "title": "Gyro Fixture Original",
+          "viewport": {
+            "deviceScaleFactor": 1,
+            "height": 844,
+            "scrollX": 0,
+            "scrollY": 0,
+            "width": 390
+          },
+          "width": 390
+        },
+        "type": "browser-capture-success"
+      },
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "capture": {
+          "createdAt": "2026-11-07T18:22:32.881Z",
+          "filename": "unavailable-preview.png",
+          "height": 844,
+          "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-9IRwtk/data/browser-captures/browser-preview-20261107T182232881Z-655bb97e-15f9-4f9a-9ed8-b059f51a7d4e.png.missing",
+          "resourceId": "5fa47e4c-8be8-48c0-8d0d-f53212ff14eb",
+          "sourceUrl": "http://127.0.0.1:57285/browser-observation.html?label=Original",
+          "src": "asset://localhost/%2Fprivate%2Fvar%2Ffolders%2F20%2Fn8przxcs0g72jllfg677ys600000gn%2FT%2Fgyro-browser-events-native-9IRwtk%2Fdata%2Fbrowser-captures%2Fbrowser-preview-20261107T182232881Z-655bb97e-15f9-4f9a-9ed8-b059f51a7d4e.png.missing",
+          "title": "Gyro Fixture Original",
+          "viewport": {
+            "deviceScaleFactor": 1,
+            "height": 844,
+            "scrollX": 0,
+            "scrollY": 0,
+            "width": 390
+          },
+          "width": 390
+        },
+        "type": "browser-capture-success"
+      },
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7",
+      "type": "browser-session"
+    }
+  ],
+  "activeSessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7",
+  "captureAssetScope": [
+    {
+      "allowed": true,
+      "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-9IRwtk/data/browser-captures/browser-preview-20261107T182232881Z-655bb97e-15f9-4f9a-9ed8-b059f51a7d4e.png"
+    }
+  ],
+  "captureImages": [
+    {
+      "complete": true,
+      "height": 0,
+      "src": "asset://localhost/%2Fprivate%2Fvar%2Ffolders%2F20%2Fn8przxcs0g72jllfg677ys600000gn%2FT%2Fgyro-browser-events-native-9IRwtk%2Fdata%2Fbrowser-captures%2Fbrowser-preview-20261107T182232881Z-655bb97e-15f9-4f9a-9ed8-b059f51a7d4e.png.missing",
+      "width": 0
+    }
+  ],
+  "captures": [
+    {
+      "createdAt": "2026-11-07T18:22:32.881Z",
+      "filename": "browser-preview-20261107T182232881Z-655bb97e-15f9-4f9a-9ed8-b059f51a7d4e.png",
+      "height": 844,
+      "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-9IRwtk/data/browser-captures/browser-preview-20261107T182232881Z-655bb97e-15f9-4f9a-9ed8-b059f51a7d4e.png",
+      "resourceId": "5fa47e4c-8be8-48c0-8d0d-f53212ff14eb",
+      "sourceUrl": "http://127.0.0.1:57285/browser-observation.html?label=Original",
+      "src": "asset://localhost/%2Fprivate%2Fvar%2Ffolders%2F20%2Fn8przxcs0g72jllfg677ys600000gn%2FT%2Fgyro-browser-events-native-9IRwtk%2Fdata%2Fbrowser-captures%2Fbrowser-preview-20261107T182232881Z-655bb97e-15f9-4f9a-9ed8-b059f51a7d4e.png",
+      "title": "Gyro Fixture Original",
+      "viewport": {
+        "deviceScaleFactor": 1,
+        "height": 844,
+        "scrollX": 0,
+        "scrollY": 0,
+        "width": 390
+      },
+      "width": 390
+    }
+  ],
+  "checks": [
+    "Native bootstrap supplies two isolated session owners",
+    "Production hooks run from embedded Tauri assets",
+    "Renderer is native Apple WebKit",
+    "Production browser renders its empty state",
+    "Native load notification updates the real reducer URL",
+    "Native title notification updates the real reducer title",
+    "Production URL toolbar renders the native page URL",
+    "Normal browser events do not reveal the active panel",
+    "Production address field receives DOM focus",
+    "Production Escape handler releases DOM focus",
+    "Rendered viewport control changes the native browser to 390x844",
+    "Production viewport button reflects the native selection",
+    "Native screenshot command succeeds (no error)",
+    "Native screenshot carries its browser resource ID",
+    "Production capture view decodes the real native PNG asset",
+    "Missing asset produces a real image decode failure"
+  ],
+  "commands": [
+    "session_browser_open",
+    "session_browser_snapshot",
+    "session_browser_snapshot"
+  ],
+  "error": "Error: failed screenshot did not expose an unavailable state",
+  "errors": [],
+  "faultInjection": "unavailable asset record and held real IPC results; native command responses unmodified",
+  "finalPreferences": {
+    "chatEnvironmentRailOpen": true,
+    "checkReminders": false,
+    "cliLaunchPreset": {
+      "entries": [
+        {
+          "count": 1,
+          "profileId": "shell"
+        }
+      ],
+      "focus": "first"
+    },
+    "commandPaletteRecents": [],
+    "dailyPaceWarning": true,
+    "defaultWorkspaceMode": "local",
+    "density": "comfortable",
+    "desktopNotifications": {
+      "approvals": true,
+      "enabled": true,
+      "failed": true,
+      "finished": true,
+      "showNames": true
+    },
+    "interfaceSize": "default",
+    "lastSettingsSection": "general",
+    "launchView": "last",
+    "mainColor": "#0874df",
+    "missionSessionIds": [],
+    "modelFollow": "peek",
+    "motionSpeed": "default",
+    "projectDetails": {},
+    "secondaryColor": "#8b6fcb",
+    "settingsSections": {},
+    "showMenuBarIcon": true,
+    "sideChatSessionIds": [],
+    "sidebarChatsCollapsed": false,
+    "theme": "system",
+    "usageVisualization": "bars",
+    "workspaceFolders": {},
+    "workspaceKeybindings": {},
+    "workspacePanelHeight": 280,
+    "workspaceSettingsByFolder": {},
+    "workspaceSettingsByWorkspace": {},
+    "workspaceSidebarHidden": false,
+    "workspaceTrust": {},
+    "workspaceUserSettings": {
+      "editorMinimapEnabled": true,
+      "filesExclude": [
+        ".git/**"
+      ],
+      "searchExclude": [
+        ".git/**",
+        "node_modules/**",
+        "dist/**",
+        "build/**",
+        "target/**"
+      ],
+      "searchMaxResults": 200
+    }
+  },
+  "fullAppShellMounted": false,
+  "href": "tauri://localhost/browser-events-native-smoke.html",
+  "measurements": {},
+  "nativeBuild": "debug-embedded-tauri-production-handlers",
+  "nativeCsp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob:;style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost; frame-src gyro-canvas: http://localhost:* http://127.0.0.1:* https:",
+  "nativeOsMouseTested": false,
+  "passed": false,
+  "routed": [
+    {
+      "accepted": true,
+      "kind": "title",
+      "resourceId": "5fa47e4c-8be8-48c0-8d0d-f53212ff14eb",
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7"
+    },
+    {
+      "accepted": true,
+      "kind": "loaded",
+      "resourceId": "5fa47e4c-8be8-48c0-8d0d-f53212ff14eb",
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7"
+    },
+    {
+      "accepted": true,
+      "kind": "viewport",
+      "resourceId": "5fa47e4c-8be8-48c0-8d0d-f53212ff14eb",
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7"
+    },
+    {
+      "accepted": true,
+      "kind": "viewport",
+      "resourceId": "5fa47e4c-8be8-48c0-8d0d-f53212ff14eb",
+      "sessionId": "fc81f5e6-281a-4228-b225-9f3ffa974ba7"
+    }
+  ],
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+  "violations": [],
+  "workspaceAssetAllowed": false
+}

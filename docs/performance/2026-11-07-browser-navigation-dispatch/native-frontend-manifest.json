@@ -1,0 +1,15 @@
+{
+  "root": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-F3dQs7",
+  "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-F3dQs7/data",
+  "frontend": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-F3dQs7/frontend",
+  "build": "passed",
+  "native": "passed",
+  "binary": "/Users/wytze/Gyro/target/debug/gyro-browser-events-smoke",
+  "checks": 53,
+  "pageRequests": 9,
+  "heldImageRequests": 1,
+  "releasedImageRequests": 1,
+  "heldDocumentRequests": 0,
+  "releasedDocumentRequests": 0,
+  "report": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-F3dQs7/data/browser-frontend.json"
+}

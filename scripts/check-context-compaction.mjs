@@ -35,6 +35,7 @@ for (const [providerId, outcome] of [
   });
   const context = {
     activeSessionId: "chat",
+    visibleChatSessionIdsRef: { current: new Set(["chat"]) },
     activeSession: { providerId },
     sendingSessionIdsRef: { current: busy },
     notify() {},

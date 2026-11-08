@@ -1,0 +1,15 @@
+{
+  "date": "2026-11-07",
+  "runtime": "Gyro debug app with real WKWebView",
+  "fixture": "scripts/fixtures/browser-observation.html",
+  "dataRoot": "/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-native-smoke-LGbHUm",
+  "modelCalls": 0,
+  "osMouseInputTested": false,
+  "languageServerTested": false,
+  "baseline": "Prior callback implementation waited up to eight seconds without observing cancellation; source bound, not a before-runtime measurement.",
+  "browserUnitTests": 17,
+  "workspaceEditUnitTests": 13,
+  "workflowCancellationUnitTests": 1,
+  "nativeBrowserSteps": 19,
+  "measurement": "One controlled native main-thread queue stall; Stop issued after 20 ms; latency measured from cancellation signal to call_agent return."
+}

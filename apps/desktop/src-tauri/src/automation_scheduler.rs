@@ -429,6 +429,7 @@ fn execute_claimed_automation(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
     };
     // Register cancellation first, then re-read persisted state. A pause between
     // claiming the lease and registering this session must still prevent dispatch.

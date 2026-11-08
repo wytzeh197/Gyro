@@ -390,6 +390,8 @@ pub(super) fn run_ollama_chat(
     // `usageGuard.autoCompactPercent`, read once: the guard is native-owned and
     // a settings save cannot change it mid-turn.
     let auto_compact_percent = config.usage_guard.auto_compact_percent;
+    // The num_ctx allocated so far this turn, separate from the meter's window.
+    let mut allocated_window: Option<u64> = None;
     let run_result = (|| {
         let mut turn_usage = OllamaTurnUsage::default();
         let mut accounted_usage: Option<UsageTokens> = None;
@@ -490,7 +492,10 @@ pub(super) fn run_ollama_chat(
                     messages: messages.clone(),
                     tools: round_tools,
                     context_window_tokens: discovered.context_window_tokens,
-                    minimum_context_window_tokens: context_window,
+                    // The allocation this turn already made, never the meter's
+                    // window: a model maximum here would allocate (and reload
+                    // with) the full KV cache for every short prompt.
+                    minimum_context_window_tokens: allocated_window,
                 },
                 &cancellation,
                 |delta| {
@@ -541,11 +546,19 @@ pub(super) fn run_ollama_chat(
             if cancellation.is_cancelled() {
                 anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled during Ollama response");
             }
-            // What the live context note reports before the next request.
-            // A missing report must not wipe a window already resolved.
-            context_window = turn
+            // num_ctx only grows within a turn, so later rounds keep the
+            // loaded model instead of reloading it at a smaller size.
+            allocated_window = turn
                 .context_window_tokens
                 .filter(|window| *window > 0)
+                .or(allocated_window);
+            // What the live context note reports before the next request: the
+            // model's capacity, since an allocation grows on demand up to it.
+            // A missing report must not wipe a window already resolved.
+            context_window = discovered
+                .context_window_tokens
+                .filter(|window| *window > 0)
+                .or(allocated_window)
                 .or(context_window);
             last_measured = Some((turn.input_tokens, turn.output_tokens));
             // The meter shows this request's prompt, not the turn's summed bill.
@@ -553,7 +566,7 @@ pub(super) fn run_ollama_chat(
                 turn.input_tokens,
                 turn.output_tokens,
                 &turn.accounted_usage,
-                turn.context_window_tokens,
+                context_window,
             ) {
                 emit_provider_context_usage(app, request, &usage);
             }
@@ -777,7 +790,10 @@ pub(super) fn run_ollama_chat(
                 response.input_tokens,
                 response.output_tokens,
                 &response.accounted_usage,
-                response.context_window_tokens,
+                discovered
+                    .context_window_tokens
+                    .filter(|window| *window > 0)
+                    .or(response.context_window_tokens),
             ),
             billed_usage: turn_usage.measured(),
             rate_limits: Vec::new(),

@@ -12,6 +12,38 @@ use std::{
 };
 use tauri::{AppHandle, Manager};
 
+/// The fixture owns this isolated window. Activate it immediately before OS
+/// input, after startup and page loading have finished; setup-time activation
+/// alone can be lost while AppKit finishes launching the bare debug binary.
+pub(super) fn prepare_mouse(app: &AppHandle) -> Result<(), String> {
+    let owned_app = app.clone();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let result = (|| -> Result<(), String> {
+            #[cfg(target_os = "macos")]
+            {
+                let mtm = objc2::MainThreadMarker::new()
+                    .ok_or("native browser smoke activation left the main thread")?;
+                #[allow(deprecated)]
+                objc2_app_kit::NSApplication::sharedApplication(mtm)
+                    .activateIgnoringOtherApps(true);
+            }
+            let window = owned_app
+                // Adding the browser child turns this into a multi-webview
+                // window, so it is no longer a WebviewWindow facade.
+                .get_window("main")
+                .ok_or("native browser smoke window disappeared")?;
+            window.show().map_err(|error| error.to_string())?;
+            window.set_focus().map_err(|error| error.to_string())
+        })();
+        let _ = sender.send(result);
+    })
+    .map_err(|error| error.to_string())?;
+    receiver
+        .recv_timeout(Duration::from_secs(3))
+        .map_err(|error| format!("native browser smoke activation timed out: {error}"))?
+}
+
 pub fn start(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
     let Ok(url) = std::env::var("GYRO_BROWSER_SMOKE_URL") else {
         return Ok(false);
@@ -149,6 +181,178 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
     // A second read used to clear the map but retain invalid refs on elements.
     wait_page("Browser observation ready")?;
     let button = find("#change-state")?;
+    // Simulate a busy native event queue. Stop must release the model worker
+    // promptly, and the queued click must still be skipped when the queue drains.
+    let (blocked, ready) = std::sync::mpsc::channel();
+    let (release, unblock) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = blocked.send(());
+        let _ = unblock.recv_timeout(Duration::from_secs(2));
+    })
+    .map_err(|error| error.to_string())?;
+    ready
+        .recv_timeout(Duration::from_secs(2))
+        .map_err(|error| error.to_string())?;
+    let token = gyro_core::CancellationToken::default();
+    let operation =
+        begin_model_operation(gyro_core::CapabilityId::BrowserClick, token.clone()).unwrap();
+    let (stopped, stop_time) = std::sync::mpsc::channel();
+    let canceller = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(20));
+        let at = Instant::now();
+        token.cancel();
+        let _ = stopped.send(at);
+    });
+    let cancelled = call_agent(app, session, "click", json!({"ref":button}));
+    let returned = Instant::now();
+    drop(operation);
+    let _ = release.send(());
+    let _ = canceller.join();
+    let cancelled_at = stop_time.recv().map_err(|error| error.to_string())?;
+    let cancellation_latency = returned.saturating_duration_since(cancelled_at);
+    if !cancelled
+        .as_ref()
+        .err()
+        .is_some_and(|error| operation_was_cancelled(error))
+        || cancellation_latency >= Duration::from_secs(1)
+    {
+        return Err(format!(
+            "queued browser cancellation failed: {cancelled:?}, latency {cancellation_latency:?}"
+        ));
+    }
+    let count = find("#click-count")?;
+    if !call("readPage", json!({"ref":count}))?
+        .to_string()
+        .contains("Clicks: 0")
+    {
+        return Err("a cancelled queued click changed the page".into());
+    }
+    std::fs::write(
+        output.join("browser-cancellation.json"),
+        json!({
+            "cancellationToReturnMs":cancellation_latency.as_secs_f64() * 1000.0,
+            "queuedClickSkipped":true,
+            "engine":"WKWebView",
+        })
+        .to_string(),
+    )
+    .map_err(|error| error.to_string())?;
+    steps.push("Stop releases a queued browser call and suppresses its late click".into());
+    let previous_resource = app
+        .state::<SessionBrowserManager>()
+        .get_snapshot(session)?
+        .ok_or("browser disappeared before replacement")?;
+    let previous_owner = super::ModelBrowserResource {
+        resource_id: previous_resource.resource_id.clone(),
+        session_id: session.into(),
+        turn_id: None,
+        call_id: uuid::Uuid::new_v4(),
+        workspace_key: output.display().to_string(),
+        url: previous_resource.url.clone(),
+    };
+    close_session_browser(app, session)?;
+    if super::browser_observation(
+        app,
+        &previous_owner,
+        &json!({}),
+        None,
+        None,
+        Vec::new(),
+        Vec::new(),
+    )
+    .is_ok()
+    {
+        return Err("an observation was accepted after its browser closed".into());
+    }
+    let replacement = open_session_browser(
+        app,
+        SessionBrowserOpenRequest {
+            session_id: session.into(),
+            workspace_key: output.display().to_string(),
+            url: url.into(),
+            bounds: Some(SessionBrowserBounds {
+                x: 20.,
+                y: 90.,
+                width: 800.,
+                height: 650.,
+            }),
+            visible: Some(true),
+        },
+    )?;
+    wait_page("Browser observation ready")?;
+    if super::browser_observation(
+        app,
+        &previous_owner,
+        &json!({}),
+        None,
+        None,
+        Vec::new(),
+        Vec::new(),
+    )
+    .is_ok()
+    {
+        return Err("an observation was accepted from a replaced browser".into());
+    }
+    if replacement.resource_id == previous_resource.resource_id {
+        return Err("reopened browser retained the previous resource ID".into());
+    }
+    let stale_operation = begin_model_operation(
+        gyro_core::CapabilityId::BrowserClick,
+        gyro_core::CancellationToken::default(),
+    )
+    .unwrap();
+    bind_model_resource(&previous_resource.resource_id)?;
+    let stale_click = call_agent(app, session, "click", json!({"ref":button}));
+    drop(stale_operation);
+    if !stale_click
+        .as_ref()
+        .err()
+        .is_some_and(|error| error.contains("browser resource changed"))
+    {
+        return Err(format!(
+            "stale model operation reached a reopened browser: {stale_click:?}"
+        ));
+    }
+    wait_page("Clicks: 0")?;
+    std::fs::write(
+        output.join("browser-replacement.json"),
+        json!({
+            "resourceChanged":true,
+            "staleModelClickRejected":true,
+            "closedObservationRejected":true,
+            "replacementObservationRejected":true,
+            "replacementClickCount":0,
+            "engine":"WKWebView",
+        })
+        .to_string(),
+    )
+    .map_err(|error| error.to_string())?;
+    steps.push("close/reopen rejects a stale model operation before its click".into());
+    let button = find("#change-state")?;
+    let form = find("#safe-form")?;
+    call("readPage", json!({"ref":form,"maxDepth":8}))?;
+    let labelled = call("find", json!({"query":"Project name"}))?;
+    if !labelled["results"].as_array().is_some_and(|results| {
+        results
+            .iter()
+            .any(|item| item["tag"] == "input" && item["name"] == "Project name")
+    }) {
+        return Err(format!(
+            "associated label did not locate its input: {labelled}"
+        ));
+    }
+    let select = find("#project-kind")?;
+    if call_agent(
+        app,
+        session,
+        "formInput",
+        json!({"ref":select,"value":"missing"}),
+    )
+    .is_ok()
+    {
+        return Err("a missing select option was accepted".into());
+    }
+    steps.push("label lookup/subtree reference preservation/invalid select rejection".into());
     let clicked = call("click", json!({"ref":button,"actor":"Codex"}))?;
     if clicked["name"] != "Change visible state" {
         return Err(format!("click did not name its element: {clicked}"));
@@ -192,6 +396,7 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
                 Value::Object(pointer_viewport.clone()),
             )?;
         let mouse = |action: &str, x: f64, y: f64, to_x: f64, to_y: f64| -> Result<(), String> {
+            prepare_mouse(app)?;
             let outcome = browser_pointer::execute(
                 app,
                 session,
@@ -247,7 +452,7 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
         wait_page("Drag: completed")?;
         steps.push("native hover/secondary-click/canvas click/drag".into());
     } else {
-        steps.push("SKIPPED native OS mouse: GYRO_BROWSER_SMOKE_SKIP_MOUSE=1 (macOS Accessibility permission unavailable)".into());
+        steps.push("SKIPPED native OS mouse: GYRO_BROWSER_SMOKE_SKIP_MOUSE=1".into());
     }
     let input = find("#project-name")?;
     let typed = call(

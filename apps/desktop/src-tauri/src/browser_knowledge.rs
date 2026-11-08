@@ -21,6 +21,10 @@ pub fn needs_surface_guide(message: &str) -> bool {
         || lower.contains("ui preview")
         || lower.contains("component preview")
         || lower.contains("dev server")
+        || lower.contains("research")
+        || lower.contains("web search")
+        || lower.contains("browse the web")
+        || lower.contains("model release")
 }
 
 pub fn contract(tools: bool, images: bool, mode: &str) -> Value {
@@ -97,6 +101,13 @@ mod tests {
         assert!(!ordinary.contains(SIDE_PANEL_GUIDE));
         assert!(!needs_surface_guide("preview the diff"));
         assert!(needs_surface_guide("open https://example.com"));
+        assert!(needs_surface_guide(
+            "Research whether a new model was released"
+        ));
+        assert!(needs_surface_guide(
+            "Run a web search for model announcements"
+        ));
+        assert!(!needs_surface_guide("Refactor the serializer"));
         assert!(needs_surface_guide(
             "check the component preview and dev server"
         ));

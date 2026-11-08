@@ -23,6 +23,16 @@
   width: 100%;
 }
 
+.gyro-browser-capture-view:not([data-image-state="ready"])
+  .gyro-browser-capture-image {
+  visibility: hidden;
+}
+
+.gyro-browser-capture-stage > .gyro-browser-capture-state {
+  inset: 0;
+  position: absolute;
+}
+
 .gyro-browser-feedback-layer {
   cursor: crosshair;
   inset: 0;
@@ -107,8 +117,13 @@
   padding: 4px 10px;
 }
 
-.gyro-browser-capture-actions > button:hover {
+.gyro-browser-capture-actions > button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--gyro-text) 10%, transparent);
+}
+
+.gyro-browser-capture-actions > button:disabled {
+  color: var(--gyro-status-disabled);
+  cursor: default;
 }
 .gyro-browser-preview.is-chat .gyro-url-bar {
   /* The address field uses flex sizing even when this surface is rendered

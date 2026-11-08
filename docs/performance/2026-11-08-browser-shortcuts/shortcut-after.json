@@ -1,0 +1,45 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "name": "closed chat dock opens Browser for the focused pane",
+      "passed": true
+    },
+    {
+      "name": "split Beta receives Browser shortcut",
+      "passed": true
+    },
+    {
+      "name": "folderless draft can open Browser",
+      "passed": true
+    },
+    {
+      "name": "IDE keeps New Terminal",
+      "passed": true
+    },
+    {
+      "name": "terminal grid keeps New Terminal",
+      "passed": true
+    },
+    {
+      "name": "a consumed companion shortcut is not run twice",
+      "passed": true
+    },
+    {
+      "name": "a consumed editor/search shortcut stays consumed",
+      "passed": true
+    },
+    {
+      "name": "Cmd+K still opens global search",
+      "passed": true
+    },
+    {
+      "name": "explicit workspace shortcut keeps precedence",
+      "passed": true
+    },
+    {
+      "name": "plain typing does not invoke Browser",
+      "passed": true
+    }
+  ]
+}

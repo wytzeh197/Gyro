@@ -1,0 +1,96 @@
+{
+  "root": "/private/tmp/gyro-shell-WZRuqH",
+  "data": "/private/tmp/gyro-shell-WZRuqH/data",
+  "workspace": "/Users/wytze/Gyro/docs/performance/2026-11-08-browser-split/projects/gyro-shell-WZRuqH/Browser acceptance",
+  "visibleWorkspace": true,
+  "frontend": "/private/tmp/gyro-shell-WZRuqH/frontend",
+  "identifier": "dev.gyro.browser-shell-review.gyro-shell-WZRuqH",
+  "mode": "normal-app-manual-review",
+  "build": "passed",
+  "uiVerdict": "unverified",
+  "binary": "/Users/wytze/Gyro/target/debug/gyro-browser-shell-review",
+  "executableSha256": "3f309de9626c7436548475416201a2989d7393a8465eef7fc5deee02dbc98e86",
+  "app": "/private/tmp/gyro-shell-WZRuqH/Gyro Browser Shell Review.app",
+  "seededChats": [
+    {
+      "id": "50dc5c4d-d18f-4e4f-a7dd-261e0e399c8e",
+      "title": "Browser review Alpha",
+      "workspacePath": "/Users/wytze/Gyro/docs/performance/2026-11-08-browser-split/projects/gyro-shell-WZRuqH/Browser acceptance",
+      "workspaceIdentity": {
+        "schema": "gyro.workspace.v2",
+        "revision": 1,
+        "roots": [
+          {
+            "id": "root-1e48e4d3b10b4f14",
+            "path": "/Users/wytze/Gyro/docs/performance/2026-11-08-browser-split/projects/gyro-shell-WZRuqH/Browser acceptance"
+          }
+        ],
+        "activeRootId": "root-1e48e4d3b10b4f14"
+      },
+      "origin": "desktop",
+      "workspaceMode": "local",
+      "branch": "main",
+      "worktreeName": null,
+      "providerId": null,
+      "providerLabel": null,
+      "modelId": null,
+      "modelLabel": null,
+      "reasoningEffort": null,
+      "summary": null,
+      "summaryUpdatedAt": null,
+      "createdAt": "2026-11-08T11:24:44.777207Z",
+      "updatedAt": "2026-11-08T11:24:44.778689Z",
+      "eventsPath": "/private/tmp/gyro-shell-WZRuqH/data/sessions/50dc5c4d-d18f-4e4f-a7dd-261e0e399c8e.jsonl"
+    },
+    {
+      "id": "7310d173-b2de-4fde-83bb-ccd3cf8bd275",
+      "title": "Browser review Beta",
+      "workspacePath": "/Users/wytze/Gyro/docs/performance/2026-11-08-browser-split/projects/gyro-shell-WZRuqH/Browser acceptance",
+      "workspaceIdentity": {
+        "schema": "gyro.workspace.v2",
+        "revision": 1,
+        "roots": [
+          {
+            "id": "root-1e48e4d3b10b4f14",
+            "path": "/Users/wytze/Gyro/docs/performance/2026-11-08-browser-split/projects/gyro-shell-WZRuqH/Browser acceptance"
+          }
+        ],
+        "activeRootId": "root-1e48e4d3b10b4f14"
+      },
+      "origin": "desktop",
+      "workspaceMode": "local",
+      "branch": "main",
+      "worktreeName": null,
+      "providerId": null,
+      "providerLabel": null,
+      "modelId": null,
+      "modelLabel": null,
+      "reasoningEffort": null,
+      "summary": null,
+      "summaryUpdatedAt": null,
+      "createdAt": "2026-11-08T11:24:44.822504Z",
+      "updatedAt": "2026-11-08T11:24:44.823797Z",
+      "eventsPath": "/private/tmp/gyro-shell-WZRuqH/data/sessions/7310d173-b2de-4fde-83bb-ccd3cf8bd275.jsonl"
+    }
+  ],
+  "fixtureUrl": "http://127.0.0.1:51619/browser-observation.html",
+  "native": {
+    "status": "exited",
+    "pid": 29258,
+    "startedAt": "2026-11-08T11:33:11.459Z",
+    "code": null,
+    "signal": "SIGTERM",
+    "exitedAt": "2026-11-08T11:35:45.906Z"
+  },
+  "requests": [
+    {
+      "page": "Original",
+      "at": "2026-11-08T11:34:06.756Z"
+    },
+    {
+      "page": "Second",
+      "at": "2026-11-08T11:34:26.771Z"
+    }
+  ],
+  "executableUnchanged": true
+}

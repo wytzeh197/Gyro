@@ -1,0 +1,15 @@
+Use case: ui-mockup. Refine the chosen Gyro working-process concept.
+Image 1 is the selected option 3 and the edit target for visual language. Image 2 is the user's Codex screenshot and a BEHAVIOR reference only: it demonstrates readable AI narration between completed tool groups. Do not copy its red annotation rectangle or its exact prose.
+Keep option 3's minimal graphite palette, quiet SF system type, monospace paths, flat base surface, compact summaries and a single current operation. Uniform #1c1c1c background, text #ededed, muted #b5b5b5, subtle white5.5% dividers only where needed. 14–16px prose,13px work rows at natural UI scale, content column760px. No nested cards, colored panels, badges, large icons, checkmark chains, decorative headings, large empty poster margins, gradients or glow.
+Generate ONE revised design, 1200 x 900 landscape. Show one chronological transcript with both a collapsed and an expanded work group separated by genuine AI progress narration. This is one visual direction and one live run, not comparison boards.
+Exact content and order:
+Top quiet header "Working for 42s" and small stop control at far right.
+AI narration, normal readable prose: "I’ll trace the retry loop, then add a limit and check the failure case."
+Collapsed history group: right-pointing chevron and muted summary "Read 2 files · Ran 1 command". It is clearly clickable to expand.
+Next AI narration in bright body text, as its own full paragraph OUTSIDE the work summaries: "The retry loop has no ceiling. I’ve added a five-attempt limit and I’m checking how it handles the last error."
+Next history group: downward-pointing chevron and muted summary "Edited 2 files · Ran 1 command" plus small illustrative diff counts "+18 −4".
+Because this second group is expanded, immediately underneath it show three compact indented neutral detail rows with exact content "Edited src/sync.ts", "Edited src/sync.test.ts", "Ran pnpm lint". All this recorded work is done; do not show active spinners on these rows. No containers around the expanded list.
+After the expanded group, next AI commentary as prose: "The checks are clean. I’m running the retry tests now."
+Bottom only CURRENT operation: tiny neutral spinner, bright "Running tests" and muted monospace "pnpm test". Do not show passed output for running tests.
+Use precise spacing and alignment to distinguish prose, collapsed history, expanded details and active work. No large separators between every narration beat. The AI narration remains visible when a work group is collapsed, and an expanded work group can be collapsed again. Header remains stable while narration and tool groups arrive chronologically.
+No footer legends, mock-up captions, tokens, prices, dates or extra app navigation. Keep all prose accurately spelled and neatly wrapped. No red outline from the screenshot.

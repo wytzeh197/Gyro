@@ -13,7 +13,7 @@
      and tauri.conf.json — scripts/check-workbench-ui.mjs enforces it. */
   --gyro-traffic-light-size: 14px;
   --gyro-traffic-light-inset-x: 16px;
-  --gyro-traffic-light-inset-y: 17px;
+  --gyro-traffic-light-inset-y: 15px;
   --gyro-traffic-light-gap: 9px;
   --gyro-traffic-light-close: #ff5f57;
   --gyro-traffic-light-minimize: #febc2e;
@@ -22,13 +22,13 @@
      free of cream casts. Accent hues belong to actions and semantic states. */
   --gyro-user-main: #0874df;
   --gyro-user-secondary: #8b6fcb;
-  --gyro-app: #181818;
-  --gyro-sidebar: #202020;
-  --gyro-sidebar-soft: #292929;
-  --gyro-pane: #1c1c1c;
-  --gyro-surface: #222222;
-  --gyro-surface-raised: #2b2b2b;
-  --gyro-surface-soft: #252525;
+  --gyro-app: #141415;
+  --gyro-sidebar: #1c1c1e;
+  --gyro-sidebar-soft: #262628;
+  --gyro-pane: #141415;
+  --gyro-surface: #1c1c1e;
+  --gyro-surface-raised: #242426;
+  --gyro-surface-soft: #1f1f21;
   /* Lines are translucent ink, not grey paint: one hairline reads the same
      on the canvas, a card, or the frosted sidebar, so tonal steps can stay
      small without seams turning into stripes. */
@@ -54,6 +54,12 @@
     var(--gyro-user-secondary) 66%,
     white 34%
   );
+  /* usegyro.io brand: cobalt carries links and focus, coral means the agent
+     is waiting for you. Neither replaces the user's chosen accent. */
+  --gyro-cobalt: #8fa8ff;
+  --gyro-cobalt-strong: #2056ee;
+  --gyro-attention: #ff7150;
+  --gyro-attention-soft: color-mix(in srgb, #ff7150 14%, transparent);
   --gyro-update-blue: #356fd6;
   --gyro-update-blue-hover: #2f63be;
   --gyro-warn: #f4bf5a;
@@ -66,19 +72,15 @@
   --gyro-topbar: var(--gyro-app);
   --gyro-topbar-border: var(--gyro-border-soft);
   --gyro-brand-text: #111210;
-  --gyro-primary-bg: color-mix(in srgb, var(--gyro-user-main) 56%, white 44%);
-  --gyro-primary-text: #101724;
-  --gyro-primary-hover: color-mix(
-    in srgb,
-    var(--gyro-user-main) 40%,
-    white 60%
-  );
+  --gyro-primary-bg: #fafafa;
+  --gyro-primary-text: #111113;
+  --gyro-primary-hover: #e4e4e7;
   --gyro-user-bubble: var(--gyro-surface-soft);
   --gyro-user-bubble-text: var(--gyro-text);
-  --gyro-code-bg: #141414;
+  --gyro-code-bg: #0f0f10;
   --gyro-code-text: #e6e6e8;
   --gyro-segment-bg: var(--gyro-sidebar);
-  --gyro-segment-active: #2e2e2e;
+  --gyro-segment-active: #2a2a2d;
   --gyro-segment-active-text: var(--gyro-text);
   /* An off switch keeps a quiet track and a muted thumb on graphite; light
      mode restates both as a pale track with a white thumb. */
@@ -92,8 +94,8 @@
   --gyro-theme-preview-light-content: #e5e5e5;
   --gyro-sidebar-mode-track: var(--gyro-sidebar);
   --gyro-sidebar-mode-active: var(--gyro-control-hover);
-  --gyro-shadow: rgba(0, 0, 0, 0.3);
-  --gyro-heavy-shadow: rgba(0, 0, 0, 0.42);
+  --gyro-shadow: rgba(0, 0, 0, 0.34);
+  --gyro-heavy-shadow: rgba(0, 0, 0, 0.5);
   --gyro-focus-ring: var(--gyro-accent);
   --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
   --gyro-secondary-soft: color-mix(
@@ -110,7 +112,7 @@
   --gyro-window: var(--gyro-app);
   --gyro-workbench-line: rgba(255, 255, 255, 0.06);
   --gyro-control-bg: var(--gyro-surface-soft);
-  --gyro-control-hover: #2e2e2e;
+  --gyro-control-hover: #2a2a2d;
   --gyro-premium-app: var(--gyro-app);
   --gyro-premium-sidebar: var(--gyro-sidebar);
   --gyro-premium-panel: var(--gyro-surface);
@@ -135,24 +137,28 @@
   /* Supporting UI uses restrained corners: crisp controls, lightly rounded
      cards and menus. The composer and workspace seams keep their softer
      geometry so the main surfaces remain distinct from utility chrome. */
-  --gyro-radius-xs: 3px;
-  --gyro-radius-sm: 4px;
-  --gyro-radius-md: 6px;
-  --gyro-radius-lg: 8px;
-  --gyro-radius-xl: 10px;
+  --gyro-radius-xs: 4px;
+  --gyro-radius-sm: 6px;
+  --gyro-radius-md: 8px;
+  --gyro-radius-lg: 12px;
+  --gyro-radius-xl: 16px;
   --gyro-radius-composer: 18px;
   --gyro-radius-pill: 999px;
-  --gyro-seam-radius: 12px;
+  --gyro-seam-radius: 16px;
   /* Motion ladder. Fast is a state flip, motion is a control settling, slow is
      a surface arriving. Everything shares one ease. */
   --gyro-premium-motion-fast: calc(80ms * var(--gyro-motion-factor, 1));
   --gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1));
   --gyro-premium-motion-slow: calc(180ms * var(--gyro-motion-factor, 1));
-  --gyro-premium-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --gyro-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --gyro-premium-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  /* Geist and Geist Mono are the usegyro.io typefaces, bundled in
+     assets/fonts so the app and the site read as one product. */
+  --gyro-font-sans:
+    "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --gyro-font-display:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --gyro-font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --gyro-font-mono:
+    "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --gyro-mono: var(--gyro-font-mono);
   /* Type ladder, smallest first: tiny 10, caption 11, micro 12, support 13,
      chrome and body 14, lead 16, heading 22. Chat re-scopes body to its own
@@ -199,14 +205,14 @@
   --gyro-hero-placeholder: var(--gyro-faint);
   --gyro-hero-hover: rgba(255, 255, 255, 0.06);
   --gyro-hero-hover-text: var(--gyro-hover-text);
-  --gyro-hero-send: #ededed;
-  --gyro-hero-send-hover: #fafafa;
+  --gyro-hero-send: #fafafa;
+  --gyro-hero-send-hover: #e6e6ea;
   --gyro-hero-send-text: var(--gyro-app);
   --gyro-hero-focus-border: rgba(255, 255, 255, 0.2);
   --gyro-hero-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.2), 0 12px 28px -14px rgba(0, 0, 0, 0.45);
+    0 1px 2px rgba(4, 2, 10, 0.24), 0 24px 56px -28px rgba(4, 2, 10, 0.7);
   --gyro-hero-shadow-focus:
-    0 1px 2px rgba(0, 0, 0, 0.24), 0 16px 36px -14px rgba(0, 0, 0, 0.5);
+    0 1px 2px rgba(4, 2, 10, 0.28), 0 28px 64px -28px rgba(4, 2, 10, 0.78);
   --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --gyro-page-header-bg: var(--gyro-surface);
   --gyro-page-canvas: var(--gyro-app);
@@ -248,7 +254,7 @@
   --gyro-icon-standard: 15px;
   --gyro-status-active: var(--gyro-accent);
   --gyro-status-running: var(--gyro-blue);
-  --gyro-status-waiting: var(--gyro-warn);
+  --gyro-status-waiting: var(--gyro-attention);
   --gyro-status-success: var(--gyro-success);
   --gyro-status-warning: var(--gyro-warn);
   --gyro-status-failed: var(--gyro-danger);
@@ -504,14 +510,12 @@
 
 .gyro-composer-safety-notice.is-paused {
   background: color-mix(in srgb, var(--gyro-danger) 12%, transparent);
-  border: 1px solid
-    color-mix(in srgb, var(--gyro-danger) 36%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gyro-danger) 36%, transparent);
 }
 
 .gyro-composer-safety-notice.is-warning {
   background: color-mix(in srgb, var(--gyro-warn) 10%, transparent);
-  border: 1px solid
-    color-mix(in srgb, var(--gyro-warn) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gyro-warn) 30%, transparent);
 }
 
 .gyro-composer-safety-notice > span {
@@ -547,8 +551,7 @@
 .gyro-composer-cost-confirm {
   align-items: center;
   background: color-mix(in srgb, var(--gyro-warn) 10%, transparent);
-  border: 1px solid
-    color-mix(in srgb, var(--gyro-warn) 34%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gyro-warn) 34%, transparent);
   border-radius: var(--gyro-radius-lg);
   color: var(--gyro-text);
   display: flex;
@@ -639,11 +642,7 @@
 }
 
 .gyro-council-status.is-done {
-  border-color: color-mix(
-    in srgb,
-    var(--gyro-success) 45%,
-    transparent
-  );
+  border-color: color-mix(in srgb, var(--gyro-success) 45%, transparent);
   color: var(--gyro-success);
 }
 
@@ -654,11 +653,7 @@
 
 .gyro-council-status.is-failed,
 .gyro-council-status.is-cancelled {
-  border-color: color-mix(
-    in srgb,
-    var(--gyro-danger) 45%,
-    transparent
-  );
+  border-color: color-mix(in srgb, var(--gyro-danger) 45%, transparent);
   color: var(--gyro-danger);
 }
 
@@ -678,8 +673,7 @@
 
 .gyro-council-banner {
   background: color-mix(in srgb, var(--gyro-accent) 10%, transparent);
-  border: 1px solid
-    color-mix(in srgb, var(--gyro-accent) 28%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gyro-accent) 28%, transparent);
   border-radius: var(--gyro-radius-md);
   color: var(--gyro-text);
   font-size: var(--gyro-font-micro);
@@ -705,11 +699,7 @@
 
 .gyro-council-seat.is-failed,
 .gyro-council-seat.is-cancelled {
-  border-color: color-mix(
-    in srgb,
-    var(--gyro-danger) 35%,
-    transparent
-  );
+  border-color: color-mix(in srgb, var(--gyro-danger) 35%, transparent);
 }
 
 .gyro-council-seat-header {
@@ -849,17 +839,31 @@
 }
 
 :root[data-theme="light"] {
+  /* Existing brand values share the theme token scope. */
+  --gyro-beam-1: rgb(190 204 255 / 14%);
+  --gyro-beam-2: rgb(120 146 245 / 24%);
+  --gyro-beam-3: rgb(84 112 235 / 44%);
+  --gyro-beam-4: rgb(255 140 110 / 48%);
+  --gyro-beam-drift: rgb(232 236 248 / 30%);
+  --gyro-beam-strength: 0.24;
+  --gyro-ink-bg: #000000;
+  --gyro-ink-hover: #2b2b2f;
+  --gyro-ink-text: #ffffff;
+  --gyro-send-disabled-bg: #e6e6e8;
+  --gyro-send-disabled-text: #9d9da4;
+  --gyro-lift-shadow:
+    0 1px 0 rgb(255 255 255 / 18%) inset, 0 10px 22px -12px rgb(19 19 22 / 40%);
   color-scheme: light;
-  --gyro-app: #f7f7f7;
-  --gyro-sidebar: #ffffff;
-  --gyro-sidebar-soft: #f0f0f0;
-  --gyro-pane: #fcfcfc;
+  --gyro-app: #fbfbfb;
+  --gyro-sidebar: #f3f3f4;
+  --gyro-sidebar-soft: #e8e8ea;
+  --gyro-pane: #fdfdfd;
   --gyro-surface: #ffffff;
   --gyro-surface-raised: #ffffff;
-  --gyro-surface-soft: #f3f3f3;
-  --gyro-border: color-mix(in srgb, black 10%, transparent);
-  --gyro-border-soft: color-mix(in srgb, black 6%, transparent);
-  --gyro-border-strong: color-mix(in srgb, black 42%, transparent);
+  --gyro-surface-soft: #f2f2f3;
+  --gyro-border: rgb(19 19 22 / 11%);
+  --gyro-border-soft: rgb(19 19 22 / 7%);
+  --gyro-border-strong: rgb(19 19 22 / 40%);
   --gyro-text: #0e0e11;
   --gyro-muted: #3d3d44;
   /* Lighter than muted so meta text keeps a step of hierarchy, while staying
@@ -881,6 +885,10 @@
     var(--gyro-user-secondary) 68%,
     #201033 32%
   );
+  --gyro-cobalt: #2056ee;
+  --gyro-cobalt-strong: #2056ee;
+  --gyro-attention: #c8442a;
+  --gyro-attention-soft: color-mix(in srgb, #ff7150 14%, transparent);
   --gyro-warn: #8d5200;
   --gyro-permission-full: #a64303;
   --gyro-effort-max: #7937cb;
@@ -890,7 +898,7 @@
      and drops to roughly 2:1 on a light surface, so every state that carries
      meaning is restated here from the light semantic colors already set. */
   --gyro-status-running: var(--gyro-blue);
-  --gyro-status-waiting: var(--gyro-warn);
+  --gyro-status-waiting: var(--gyro-attention);
   --gyro-status-success: var(--gyro-success);
   --gyro-status-warning: var(--gyro-warn);
   --gyro-status-failed: var(--gyro-danger);
@@ -901,29 +909,25 @@
     transparent
   );
   --gyro-sidebar-text: #26262b;
-  --gyro-hover-text: #191919;
+  --gyro-hover-text: #131316;
   --gyro-topbar: var(--gyro-pane);
   --gyro-topbar-border: var(--gyro-border);
   --gyro-brand-text: #ffffff;
-  --gyro-primary-bg: color-mix(in srgb, var(--gyro-user-main) 84%, #10203b 16%);
+  --gyro-primary-bg: #000000;
   --gyro-primary-text: #ffffff;
-  --gyro-primary-hover: color-mix(
-    in srgb,
-    var(--gyro-user-main) 72%,
-    #08182f 28%
-  );
+  --gyro-primary-hover: #2b2b2f;
   --gyro-user-bubble: var(--gyro-surface-soft);
   --gyro-user-bubble-text: var(--gyro-text);
-  --gyro-code-bg: #f5f5f5;
+  --gyro-code-bg: #f4f4f5;
   --gyro-code-text: #18181c;
-  --gyro-segment-bg: #e5e5e5;
+  --gyro-segment-bg: #e8e8ea;
   --gyro-segment-active: var(--gyro-surface);
   --gyro-segment-active-text: var(--gyro-text);
-  --gyro-switch-off-track: #e3e3e3;
+  --gyro-switch-off-track: #e4e4e7;
   --gyro-switch-off-thumb: #ffffff;
-  --gyro-switch-off-rim: #cfcfcf;
-  --gyro-shadow: rgba(24, 24, 24, 0.08);
-  --gyro-heavy-shadow: rgba(24, 24, 24, 0.16);
+  --gyro-switch-off-rim: #d4d4d8;
+  --gyro-shadow: rgba(19, 19, 22, 0.08);
+  --gyro-heavy-shadow: rgba(19, 19, 22, 0.18);
   --gyro-focus-ring: var(--gyro-accent);
   --gyro-accent-soft: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
   --gyro-secondary-soft: color-mix(
@@ -1020,16 +1024,16 @@
   --gyro-hero-text: var(--gyro-text);
   --gyro-hero-muted: var(--gyro-muted);
   --gyro-hero-placeholder: var(--gyro-faint);
-  --gyro-hero-hover: rgba(32, 32, 32, 0.05);
+  --gyro-hero-hover: rgb(19 19 22 / 5%);
   --gyro-hero-hover-text: var(--gyro-hover-text);
-  --gyro-hero-send: var(--gyro-text);
-  --gyro-hero-send-hover: #191919;
-  --gyro-hero-send-text: var(--gyro-surface);
-  --gyro-hero-focus-border: var(--gyro-accent);
+  --gyro-hero-send: #000000;
+  --gyro-hero-send-hover: #2b2b2f;
+  --gyro-hero-send-text: #ffffff;
+  --gyro-hero-focus-border: rgb(19 19 22 / 28%);
   --gyro-hero-shadow:
-    0 1px 2px rgba(24, 24, 24, 0.03), 0 12px 28px -14px rgba(24, 24, 24, 0.14);
+    0 1px 2px rgba(19, 19, 22, 0.04), 0 24px 56px -30px rgba(19, 19, 22, 0.26);
   --gyro-hero-shadow-focus:
-    0 1px 2px rgba(24, 24, 24, 0.04), 0 16px 36px -14px rgba(24, 24, 24, 0.18);
+    0 1px 2px rgba(19, 19, 22, 0.05), 0 28px 64px -30px rgba(19, 19, 22, 0.32);
   --gyro-hero-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 

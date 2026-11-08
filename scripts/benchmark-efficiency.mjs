@@ -4,6 +4,9 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { parseArgs } from "node:util";
+import {
+  captureRunSources, assertSameSources, captureRunManifest,
+} from "./efficiency-run-manifest.mjs";
 const { values } = parseArgs({
   options: {
     spec: { type: "string" },
@@ -47,6 +50,7 @@ const run = (command, args, env = process.env) =>
       code === 0 ? ok() : fail(Error(`${command} exited ${code}`)),
     );
   });
+const sources = await captureRunSources();
 if (!values["skip-build"])
   await run("cargo", [
     "build",
@@ -56,6 +60,13 @@ if (!values["skip-build"])
     "gyro-desktop",
     "--offline",
   ]);
+assertSameSources(sources, await captureRunSources());
+const manifest = await captureRunManifest(
+  sources, resolve("target/debug/gyro-desktop"), spec, !values["skip-build"],
+);
+await writeFile(join(root, "run-manifest.json"), JSON.stringify(manifest, null, 2) + "\n", {
+  mode: 0o600,
+});
 console.log(`Pilot evidence: ${root}`);
 await run(resolve("target/debug/gyro-desktop"), [], {
   ...process.env,

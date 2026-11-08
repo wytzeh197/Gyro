@@ -13,6 +13,7 @@
  * session, repository, or provider account.
  */
 import appearanceCss from "../../../packages/ui/src/appearance.css?inline";
+import { disconnectedCloudView } from "./cloud-connection-view";
 
 type Invoke = (command: string, args?: Record<string, unknown>) => unknown;
 
@@ -898,10 +899,35 @@ const terminalPanes = [
 
 // `GitBranchCatalog.branches` is a list of names — the picker renders each
 // entry directly, so objects here crash the branch menu.
+const recentBranchPreview = parameters.get("branches") === "recent";
+const branchPreviewNow = Math.floor(Date.now() / 1000);
 const branches = {
   available: true,
   current: "main",
-  branches: ["main", "sync-retry-guard"],
+  branches: recentBranchPreview
+    ? [
+        "main",
+        "Heads/v0.1.1",
+        "v0.1.0",
+        "feature/search",
+        "fix/retry",
+        "release/v0.0.9",
+        "backup/old-work",
+      ]
+    : ["main", "sync-retry-guard"],
+  ...(recentBranchPreview
+    ? {
+        lastCommitAt: {
+          main: branchPreviewNow - 86400 * 3,
+          "Heads/v0.1.1": branchPreviewNow - 300,
+          "v0.1.0": branchPreviewNow - 3600,
+          "feature/search": branchPreviewNow - 7200,
+          "fix/retry": branchPreviewNow - 86400,
+          "release/v0.0.9": branchPreviewNow - 86400 * 14,
+          "backup/old-work": branchPreviewNow - 86400 * 60,
+        },
+      }
+    : {}),
   worktrees: [],
 };
 
@@ -924,6 +950,7 @@ const preparation = {
 };
 
 const responses: Record<string, unknown> = {
+  cloud_connection_view: disconnectedCloudView,
   // Use the bundled provider catalog in this development-only fixture.
   list_provider_capability_support: [],
   load_config: config,

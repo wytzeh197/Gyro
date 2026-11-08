@@ -162,7 +162,17 @@ fn local_openai_windows(raw: &str) -> Vec<(String, u64)> {
         .filter_map(|model| {
             let id = model.get("slug")?.as_str()?.trim();
             let window = model.get("context_window")?.as_u64()?;
-            (!id.is_empty() && (1..=MAX_WINDOW).contains(&window)).then(|| (id.to_string(), window))
+            if !(1..=MAX_WINDOW).contains(&window) {
+                return None;
+            }
+            // Codex reports its usable window after reserving headroom. Apply
+            // that model's own percentage so discovery and runtime agree.
+            let percent = match model.get("effective_context_window_percent") {
+                None | Some(serde_json::Value::Null) => 100,
+                Some(value) => value.as_u64().filter(|value| (1..=100).contains(value))?,
+            };
+            let usable = window * percent / 100;
+            (!id.is_empty() && usable > 0).then(|| (id.to_string(), usable))
         })
         .collect()
 }
@@ -398,6 +408,33 @@ mod tests {
         entry.at = Instant::now() - METADATA_TTL - Duration::from_secs(1);
         assert!(!fresh(entry, &entry.scope));
     }
+    #[test]
+    fn codex_metadata_uses_each_models_effective_window() {
+        let windows = local_openai_windows(
+            r#"{"models":[
+                {"slug":"gpt-6.1-sol","context_window":500000,"effective_context_window_percent":95},
+                {"slug":"gpt-6-astra","context_window":272000,"effective_context_window_percent":95},
+                {"slug":"custom","context_window":128001,"effective_context_window_percent":80},
+                {"slug":"no-reserve","context_window":1000},
+                {"slug":"null-reserve","context_window":1000,"effective_context_window_percent":null},
+                {"slug":"zero","context_window":1000,"effective_context_window_percent":0},
+                {"slug":"too-large","context_window":1000,"effective_context_window_percent":101},
+                {"slug":"fraction","context_window":1000,"effective_context_window_percent":95.5},
+                {"slug":"string","context_window":1000,"effective_context_window_percent":"95"}
+            ]}"#,
+        );
+        assert_eq!(
+            windows,
+            vec![
+                ("gpt-6.1-sol".into(), 475_000),
+                ("gpt-6-astra".into(), 258_400),
+                ("custom".into(), 102_400),
+                ("no-reserve".into(), 1_000),
+                ("null-reserve".into(), 1_000),
+            ]
+        );
+    }
+
     #[test]
     fn local_metadata_rejects_invalid_windows_and_preserves_exact_ids() {
         let windows = local_openai_windows(

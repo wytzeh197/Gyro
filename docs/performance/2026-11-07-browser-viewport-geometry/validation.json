@@ -1,0 +1,182 @@
+{
+  "updatedAt": "2026-11-07T22:07:39.557440+00:00",
+  "head": "1d0b7e1321790246390b9ad64d78f73813a37ab6",
+  "macOS": "26.2",
+  "backingScale": 1,
+  "nativeRuns": [
+    {
+      "name": "native-geometry-final",
+      "passed": true,
+      "checks": 70,
+      "report": "native-geometry-final.json",
+      "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-jf6GLa/data",
+      "providerRows": {
+        "provider_session_bindings": 0,
+        "session_turn_messages": 0,
+        "session_turn_status": 0,
+        "usage_turn_links": 0,
+        "efficiency_task_turns": 0
+      }
+    },
+    {
+      "name": "native-navigation-final",
+      "passed": true,
+      "checks": 83,
+      "report": "native-navigation-final.json",
+      "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-XWcxFE/data",
+      "providerRows": {
+        "provider_session_bindings": 0,
+        "session_turn_messages": 0,
+        "session_turn_status": 0,
+        "usage_turn_links": 0,
+        "efficiency_task_turns": 0
+      }
+    },
+    {
+      "name": "native-frontend-final",
+      "passed": true,
+      "checks": 55,
+      "report": "native-frontend-final.json",
+      "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-HzfvLD/data",
+      "providerRows": {
+        "provider_session_bindings": 0,
+        "session_turn_messages": 0,
+        "session_turn_status": 0,
+        "usage_turn_links": 0,
+        "efficiency_task_turns": 0
+      }
+    },
+    {
+      "name": "native-input-review",
+      "passed": true,
+      "checks": 66,
+      "report": "native-input-review.json",
+      "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-wNBHbA/data",
+      "providerRows": {
+        "provider_session_bindings": 0,
+        "session_turn_messages": 0,
+        "session_turn_status": 0,
+        "usage_turn_links": 0,
+        "efficiency_task_turns": 0
+      }
+    },
+    {
+      "name": "native-recovery-review",
+      "passed": true,
+      "checks": 53,
+      "report": "native-recovery-review.json",
+      "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-TIkqCH/data",
+      "providerRows": {
+        "provider_session_bindings": 0,
+        "session_turn_messages": 0,
+        "session_turn_status": 0,
+        "usage_turn_links": 0,
+        "efficiency_task_turns": 0
+      }
+    }
+  ],
+  "pixelCases": 9,
+  "pixelPassed": true,
+  "containerLifecycle": {
+    "detached": 9,
+    "dropped": 9,
+    "installed": 9
+  },
+  "rustBrowserTests": {
+    "passed": 57,
+    "manifest": "browser-tests-manifest.json"
+  },
+  "regressions": {
+    "passed": [
+      {
+        "command": [
+          "node",
+          "scripts/check-browser-event-routing.mjs"
+        ],
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "scripts/check-browser-navigation.mjs"
+        ],
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "scripts/check-browser-viewport.mjs"
+        ],
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "scripts/check-browser-host-bounds.mjs"
+        ],
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "scripts/check-browser-pointer-feedback.mjs"
+        ],
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "scripts/check-browser-reveal.mjs"
+        ],
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "scripts/check-browser-observation-cost.mjs"
+        ],
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "scripts/check-subagent-browsers.mjs"
+        ],
+        "exitCode": 0
+      },
+      {
+        "command": [
+          "node",
+          "scripts/check-browser-agent-runtime.mjs"
+        ],
+        "exitCode": 0
+      }
+    ],
+    "failed": [
+      {
+        "command": [
+          "node",
+          "scripts/check-local-check-browser.mjs"
+        ],
+        "exitCode": 1
+      }
+    ],
+    "failure": "Legacy Check mockup file is absent; not counted as passing."
+  },
+  "cargoCheckDefault": "passed",
+  "desktopTypeScript": "passed",
+  "manualReviews": [
+    "native-input-verified.png",
+    "geometry-input-verified.json",
+    "recovery-unavailable.png",
+    "recovery-verified.png"
+  ],
+  "limits": [
+    "debug isolated fixture; full shell unverified",
+    "macOS 26.2, backing scale 1; older WebKit and Retina unverified",
+    "private inset selectors are checked but need release compatibility acceptance",
+    "live model throughput/task success unverified; further usage budget pending"
+  ],
+  "focusedChecks": "focused-checks.json",
+  "sourceHashesCurrent": true
+}

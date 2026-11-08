@@ -1,0 +1,49 @@
+[
+  {
+    "command": [
+      "pnpm",
+      "exec",
+      "prettier",
+      "--check",
+      "scripts/run-browser-events-native.mjs",
+      "docs/performance/2026-11-07-browser-viewport-geometry/README.md",
+      "docs/model-tools.md"
+    ],
+    "exitCode": 0
+  },
+  {
+    "command": [
+      "rustfmt",
+      "--check",
+      "--edition",
+      "2021",
+      "--config",
+      "skip_children=true",
+      "apps/desktop/src-tauri/src/browser_viewport.rs",
+      "apps/desktop/src-tauri/src/browser_viewport_native.rs",
+      "apps/desktop/src-tauri/src/browser_geometry_smoke.rs"
+    ],
+    "exitCode": 0
+  },
+  {
+    "command": [
+      "git",
+      "diff",
+      "--check",
+      "--",
+      "apps/desktop/src-tauri/src/browser_viewport.rs",
+      "apps/desktop/src-tauri/src/session_browser.rs",
+      "apps/desktop/src/browser-events-native-smoke.tsx",
+      "docs/model-tools.md"
+    ],
+    "exitCode": 0
+  },
+  {
+    "command": [
+      "node",
+      "--check",
+      "scripts/run-browser-events-native.mjs"
+    ],
+    "exitCode": 0
+  }
+]

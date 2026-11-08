@@ -8,6 +8,7 @@ import {
   getProviderModel,
   isProviderId,
   isTransientWorkspacePath,
+  isUserSelectedWorkspacePath,
   normalizedConfig,
   normalizedCouncilConfig,
   resolveLanguage,
@@ -184,6 +185,8 @@ export type TurnSourceControlBaselines = Record<
 >;
 
 export type ChatTurnContextSnapshot = {
+  /** Scheduler delivery may wait, but must never enqueue another copy. */
+  queuedDelivery?: boolean;
   mode?: ChatMode;
   /** Captured when a send must focus another chat pane first. */
   draftModeKey?: string;
@@ -2041,6 +2044,7 @@ export function savedProjectsFromSessions(
     { path: string; label: string; lastUsedAt: number; sessionCount: number }
   >();
   const removed = new Set(removedProjectPaths.map(normalizeProjectPath));
+  const currentPath = normalizeProjectPath(currentWorkspacePath);
 
   const upsertProject = (
     path: string | undefined,
@@ -2055,6 +2059,13 @@ export function savedProjectsFromSessions(
       return;
     }
     if (removed.has(normalizedPath) && !options.includeRemoved) {
+      return;
+    }
+    // A generated scratch folder stays out of the switcher unless it is open.
+    if (
+      normalizedPath !== currentPath &&
+      !isUserSelectedWorkspacePath(normalizedPath)
+    ) {
       return;
     }
     const existing = projects.get(normalizedPath);
@@ -2091,7 +2102,6 @@ export function savedProjectsFromSessions(
       upsertProject(session.workspacePath, session.updatedAt),
     );
 
-  const currentPath = normalizeProjectPath(currentWorkspacePath);
   return [...projects.values()]
     .sort((first, second) => {
       if (first.path === currentPath) {
@@ -2404,6 +2414,41 @@ export function providerStopDetail(errorMessage: string) {
     return "The provider process was stopped";
   }
   return `Gyro stopped this turn: ${errorMessage.slice(at + PROVIDER_SELF_STOP_MARKER.length)}`;
+}
+
+/** Toast copy for a send that failed or was stopped. The failed turn card in
+ * the transcript carries the full error; the toast names the outcome. */
+export function providerFailureNotice(
+  errorMessage: string,
+  wasCancelled: boolean,
+  chatPersisted: boolean,
+): { title: string; detail: string } {
+  if (wasCancelled) {
+    return { title: "Turn stopped", detail: providerStopDetail(errorMessage) };
+  }
+  if (!chatPersisted) {
+    return { title: "Message not sent", detail: "Chat stayed local" };
+  }
+  if (/rate.limit|too many requests|provider cooldown/i.test(errorMessage)) {
+    return { title: "Provider rate limit reached", detail: "Open the chat to continue when the provider cooldown ends." };
+  }
+  const firstLine =
+    errorMessage
+      .replace(/^(Error:\s*)+/, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .find(Boolean) ?? "";
+  const detail =
+    firstLine.length > 160 ? `${firstLine.slice(0, 159)}…` : firstLine;
+  return {
+    title: "Message failed",
+    detail: detail || "The provider could not complete this turn",
+  };
+}
+
+/** Temporary request failures do not invalidate a connected provider. */
+export function providerFailureBlocksReadiness(error: string): boolean {
+  return /unauthori[sz]ed|authentication|invalid api key|not logged in|login required|credential|missing environment variable|insufficient_quota|payment required|balance exhausted|HTTP\s+(?:401|402|403)\b/i.test(error);
 }
 
 export function providerStatusMessage(

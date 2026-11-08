@@ -4,15 +4,7 @@ import type { BrowserFeedback, BrowserPreviewCapture } from "./types";
 
 type BrowserScreenshotAction = "capture" | "reveal" | "feedback";
 
-export function BrowserCaptureView({
-  capture,
-  src,
-  fallbackUrl,
-  deviceLabel,
-  isChat,
-  onBackToLive,
-  onScreenshot,
-}: {
+type BrowserCaptureViewProps = {
   capture: BrowserPreviewCapture;
   src: string;
   fallbackUrl: string;
@@ -23,7 +15,36 @@ export function BrowserCaptureView({
     action?: BrowserScreenshotAction,
     feedback?: BrowserFeedback,
   ) => void | boolean | Promise<boolean | void>;
-}) {
+};
+
+export function BrowserCaptureView(props: BrowserCaptureViewProps) {
+  // Readiness and feedback belong to these exact image bytes/capture. Remounting
+  // on a source change also discards events and drafts from the previous image.
+  return (
+    <CaptureImageView
+      key={JSON.stringify([
+        props.src,
+        props.capture.filename,
+        props.capture.createdAt,
+      ])}
+      {...props}
+    />
+  );
+}
+
+function CaptureImageView({
+  capture,
+  src,
+  fallbackUrl,
+  deviceLabel,
+  isChat,
+  onBackToLive,
+  onScreenshot,
+}: BrowserCaptureViewProps) {
+  const [imageStatus, setImageStatus] = useState<
+    "loading" | "ready" | "failed"
+  >("loading");
+  const imageReady = imageStatus === "ready";
   const [feedbackMode, setFeedbackMode] = useState(false);
   const [feedbackComment, setFeedbackComment] = useState("");
   const [feedbackRegion, setFeedbackRegion] = useState<
@@ -41,6 +62,13 @@ export function BrowserCaptureView({
   const sourceLabel = browserPreviewLocationLabel(
     capture.sourceUrl ?? fallbackUrl,
   );
+  const imageFailed = () => {
+    setImageStatus("failed");
+    setFeedbackMode(false);
+    setFeedbackRegion(null);
+    setFeedbackComment("");
+    feedbackStartRef.current = null;
+  };
 
   useEffect(() => {
     const image = captureImageRef.current;
@@ -54,6 +82,7 @@ export function BrowserCaptureView({
   }, [src]);
 
   const capturePoint = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!imageReady) return null;
     const rect = captureImageRef.current?.getBoundingClientRect();
     if (!rect || !fitWidth || !fitHeight) return null;
     const x = (event.clientX - rect.left - fitLeft) / fitWidth;
@@ -76,16 +105,65 @@ export function BrowserCaptureView({
   };
 
   return (
-    <div className="gyro-browser-capture-view">
+    <div className="gyro-browser-capture-view" data-image-state={imageStatus}>
       <div className="gyro-browser-capture-stage">
         <img
           alt={`Browser capture of ${sourceLabel || capture.sourceUrl || fallbackUrl}`}
           className="gyro-browser-capture-image"
           draggable={false}
+          aria-hidden={!imageReady || undefined}
+          onLoad={(event) => {
+            if (
+              event.currentTarget.naturalWidth > 0 &&
+              event.currentTarget.naturalHeight > 0
+            )
+              setImageStatus("ready");
+            else imageFailed();
+          }}
+          onError={imageFailed}
           ref={captureImageRef}
           src={src}
         />
-        {feedbackMode ? (
+        {!imageReady ? (
+          <div
+            className="gyro-browser-capture-state gyro-browser-placeholder has-capture"
+            role={imageStatus === "failed" ? "alert" : "status"}
+          >
+            <div className="gyro-browser-placeholder-body">
+              {imageStatus === "loading" ? (
+                <span
+                  aria-hidden="true"
+                  className="gyro-ring is-running gyro-browser-loading-mark"
+                />
+              ) : null}
+              <strong>
+                {imageStatus === "failed"
+                  ? "Screenshot unavailable"
+                  : "Loading screenshot"}
+              </strong>
+              <p>
+                {imageStatus === "failed"
+                  ? onScreenshot
+                    ? "This image could not be loaded. Take a new screenshot or return to the live page."
+                    : "This image could not be loaded. Return to the live page to continue."
+                  : "Loading the captured image…"}
+              </p>
+              {imageStatus === "failed" && onScreenshot ? (
+                <div className="gyro-browser-placeholder-actions">
+                  <button
+                    onClick={() => {
+                      void onScreenshot("capture");
+                    }}
+                    type="button"
+                  >
+                    Take new screenshot
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {feedbackMode && imageReady ? (
           <div
             aria-label="Select an area of the browser capture"
             className="gyro-browser-feedback-layer"
@@ -130,12 +208,13 @@ export function BrowserCaptureView({
           </div>
         ) : null}
       </div>
-      {feedbackMode ? (
+      {feedbackMode && imageReady ? (
         <form
           className="gyro-browser-feedback-form"
           onSubmit={async (event) => {
             event.preventDefault();
-            if (!feedbackRegion || !feedbackComment.trim()) return;
+            if (!imageReady || !feedbackRegion || !feedbackComment.trim())
+              return;
             const accepted = await onScreenshot?.("feedback", {
               captureId: capture.filename,
               comment: feedbackComment.trim(),
@@ -187,7 +266,9 @@ export function BrowserCaptureView({
           {isChat && onScreenshot ? (
             <button
               aria-pressed={feedbackMode}
+              disabled={!imageReady}
               onClick={() => {
+                if (!imageReady) return;
                 setFeedbackMode((current) => !current);
                 setFeedbackRegion(null);
                 setFeedbackComment("");

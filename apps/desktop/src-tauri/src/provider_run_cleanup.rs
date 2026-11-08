@@ -143,7 +143,7 @@ impl Drop for ProviderTurnFinalizer<'_> {
             .latest_provider_status_for_turn(self.session_id, self.run_id)
             .ok()
             .flatten()
-            .is_some_and(|status| status != "running")
+            .is_some_and(|status| !matches!(status.as_str(), "running" | "waiting" | "queued"))
         {
             return;
         }
@@ -188,6 +188,31 @@ mod tests {
         }))
         .unwrap();
         (temp, store, request, session.id, run)
+    }
+
+    #[test]
+    fn abandoned_retry_wait_is_closed_as_a_failure() {
+        let (_temp, store, request, session, run) = setup();
+        store.append_event_with_turn_id(session, SessionEventKind::SystemEvent, "Waiting for provider",
+            serde_json::json!({"kind":"provider-status", "status":"waiting", "nativeRetry":true}), Some(run)).unwrap();
+        assert!(provider_turn_has_unfinished_attempt(&store, session, run).unwrap());
+        {
+            let _finalizer = ProviderTurnFinalizer::new(
+                &store,
+                &request,
+                session,
+                run,
+                Uuid::new_v4(),
+                |status, _| assert_eq!(status, HarnessRunStatus::Failed),
+            );
+        }
+        assert_eq!(
+            store
+                .latest_provider_status_for_turn(session, run)
+                .unwrap()
+                .as_deref(),
+            Some("failed")
+        );
     }
 
     #[test]

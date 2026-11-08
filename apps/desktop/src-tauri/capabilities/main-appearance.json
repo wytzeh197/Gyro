@@ -1,7 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-appearance",
-  "description": "Let the main window apply Gyro's selected native appearance.",
+  "description": "Let the main window apply Gyro's selected native appearance and drag its title bar.",
   "windows": ["main"],
-  "permissions": ["core:app:allow-set-app-theme"]
+  "permissions": [
+    "core:app:allow-set-app-theme",
+    "core:window:allow-start-dragging"
+  ]
 }

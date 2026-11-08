@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   isSplitChatLayout,
@@ -7,6 +6,7 @@ import {
   type BrowserRevealRequest,
   type WorkbenchAction,
 } from "@gyro-dev/ui";
+import { sessionBrowserNative } from "./session-browser-native";
 
 /**
  * What the native browser does to the chat's surfaces when a model opens it.
@@ -27,6 +27,7 @@ export type ModelBrowserRevealContext = Omit<
 
 type SessionBrowserOpened = {
   sessionId: string;
+  resourceId?: string;
   url: string;
   reveal?: boolean;
 };
@@ -65,53 +66,51 @@ export function useModelBrowserReveal(options: {
 
   useEffect(() => {
     if (!isTauriRuntime) return;
+    let disposed = false;
     let unlisten: Promise<(() => void) | undefined> =
       Promise.resolve(undefined);
     try {
       unlisten = listen<SessionBrowserOpened>(
         "session-browser-opened",
         (event) => {
-          const sessionId = event.payload.sessionId;
-          const isActive = sessionId === activeSessionRef.current;
-          const send = (action: WorkbenchAction) =>
-            dispatchRef.current({
-              type: "browser-session",
-              sessionId,
-              action,
-            });
-          const decision = resolveBrowserReveal({
-            isUserInitiated: false,
-            ...contextRef.current,
-            revealRequested: event.payload.reveal === true,
-          });
-          send({
-            type: "browser-navigate",
-            url: event.payload.url,
-            background: !isActive || !decision.reveal,
-          });
-          if (isActive && decision.reveal) {
-            dispatchRef.current({ type: "set-chat-panel", panel: "browser" });
-          }
-          send({
-            type: "browser-status",
-            status: "ready",
-            message: `Native · ${event.payload.url}`,
-            nativeHost: true,
-          });
-          void invoke<{ title: string } | null>("session_browser_snapshot", {
-            sessionId: event.payload.sessionId,
-          })
-            .then((snapshot) => {
-              if (snapshot?.title)
-                send({ type: "browser-title", title: snapshot.title });
-            })
-            .catch(() => {});
+          if (disposed) return;
+          void sessionBrowserNative.observe(
+            event.payload.sessionId,
+            event.payload.resourceId,
+            "opened",
+            (snapshot) => {
+              if (disposed) return;
+              const sessionId = event.payload.sessionId;
+              const isActive = sessionId === activeSessionRef.current;
+              const send = (action: WorkbenchAction) =>
+                dispatchRef.current({
+                  type: "browser-session",
+                  sessionId,
+                  action,
+                });
+              const decision = resolveBrowserReveal({
+                isUserInitiated: false,
+                ...contextRef.current,
+                revealRequested: event.payload.reveal === true,
+              });
+              if (isActive && decision.reveal) {
+                dispatchRef.current({
+                  type: "set-chat-panel",
+                  panel: "browser",
+                });
+              }
+              // Native state never reveals a panel. Only the explicit decision
+              // above does, and an accepted open is not proof of a loaded page.
+              send({ type: "browser-native-state", ...snapshot });
+            },
+          );
         },
-      );
+      ).catch(() => undefined);
     } catch {
       unlisten = Promise.resolve(undefined);
     }
     return () => {
+      disposed = true;
       void unlisten.then((dispose) => dispose?.());
     };
   }, [isTauriRuntime]);

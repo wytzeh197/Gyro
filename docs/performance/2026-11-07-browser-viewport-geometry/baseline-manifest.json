@@ -1,0 +1,18 @@
+{
+  "root": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-0Hsz3X",
+  "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-0Hsz3X/data",
+  "frontend": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-0Hsz3X/frontend",
+  "build": "passed",
+  "native": "failed",
+  "binary": "/Users/wytze/Gyro/target/debug/gyro-browser-events-smoke",
+  "error": "AssertionError [ERR_ASSERTION]: native fixture failed\n\nfalse !== true\n",
+  "pageRequests": 8,
+  "requestsByLabel": {
+    "Original": 8
+  },
+  "queuedCancelledRequests": 0,
+  "heldImageRequests": 0,
+  "releasedImageRequests": 0,
+  "heldDocumentRequests": 0,
+  "releasedDocumentRequests": 0
+}

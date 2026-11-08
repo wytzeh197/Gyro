@@ -116,7 +116,9 @@ impl Read for Reader {
                 }
             })?;
             let Some(chunk) = chunk else { return Ok(0) };
-            self.pending = chunk.to_vec();
+            // Reuse the buffer's capacity instead of allocating per chunk.
+            self.pending.clear();
+            self.pending.extend_from_slice(&chunk);
             self.offset = 0;
         }
         let count = output.len().min(self.pending.len() - self.offset);

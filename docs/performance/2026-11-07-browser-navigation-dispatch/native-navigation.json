@@ -1,0 +1,1029 @@
+{
+  "checks": [
+    {
+      "name": "cycle 1: previous document read is rejected before response headers",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: previous document click is rejected before response headers",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: rejected click leaves the actual old document unchanged",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: old tool result cannot overwrite the requested native URL",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: native screenshot cannot return previous-document pixels",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: background pointer cannot act on the previous document",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: current interactive document remains usable while an image is held",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: old document reference is rejected after commit",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: a fresh reference changes the current interactive document",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: background pointer can act on the committed interactive document",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: previous document read is rejected before response headers",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: previous document click is rejected before response headers",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: rejected click leaves the actual old document unchanged",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: old tool result cannot overwrite the requested native URL",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: native screenshot cannot return previous-document pixels",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: background pointer cannot act on the previous document",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: current interactive document remains usable while an image is held",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: old document reference is rejected after commit",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: a fresh reference changes the current interactive document",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: background pointer can act on the committed interactive document",
+      "passed": true
+    },
+    {
+      "name": "native Back reaches the actual previous document",
+      "passed": true
+    },
+    {
+      "name": "native Forward reaches the actual next document",
+      "passed": true
+    },
+    {
+      "name": "unavailable history fails without invalidating the current document",
+      "passed": true
+    },
+    {
+      "name": "native browser closes after both navigation cycles",
+      "passed": true
+    },
+    {
+      "name": "eight immediate initial documents remain usable after native creation",
+      "passed": true
+    },
+    {
+      "name": "page link: old reads fail while response headers are held",
+      "passed": true
+    },
+    {
+      "name": "page link: old clicks fail while response headers are held",
+      "passed": true
+    },
+    {
+      "name": "page link: actual old document stays unchanged",
+      "passed": true
+    },
+    {
+      "name": "page link: screenshot cannot return old pixels",
+      "passed": true
+    },
+    {
+      "name": "page link: pointer cannot act on old document",
+      "passed": true
+    },
+    {
+      "name": "page link: native state records the pending main document",
+      "passed": true
+    },
+    {
+      "name": "page link: committed interactive document accepts fresh work",
+      "passed": true
+    },
+    {
+      "name": "page form: old reads fail while response headers are held",
+      "passed": true
+    },
+    {
+      "name": "page form: old clicks fail while response headers are held",
+      "passed": true
+    },
+    {
+      "name": "page form: actual old document stays unchanged",
+      "passed": true
+    },
+    {
+      "name": "page form: screenshot cannot return old pixels",
+      "passed": true
+    },
+    {
+      "name": "page form: pointer cannot act on old document",
+      "passed": true
+    },
+    {
+      "name": "page form: native state records the pending main document",
+      "passed": true
+    },
+    {
+      "name": "page form: committed interactive document accepts fresh work",
+      "passed": true
+    },
+    {
+      "name": "page script: old reads fail while response headers are held",
+      "passed": true
+    },
+    {
+      "name": "page script: old clicks fail while response headers are held",
+      "passed": true
+    },
+    {
+      "name": "page script: actual old document stays unchanged",
+      "passed": true
+    },
+    {
+      "name": "page script: screenshot cannot return old pixels",
+      "passed": true
+    },
+    {
+      "name": "page script: pointer cannot act on old document",
+      "passed": true
+    },
+    {
+      "name": "page script: native state records the pending main document",
+      "passed": true
+    },
+    {
+      "name": "page script: committed interactive document accepts fresh work",
+      "passed": true
+    },
+    {
+      "name": "prevented link leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "SPA route leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "fragment leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "iframe leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "blocked credential URL leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "connection failure stops loading",
+      "passed": true
+    },
+    {
+      "name": "connection failure reports an explicit recovery error",
+      "passed": true
+    },
+    {
+      "name": "connection failure cannot expose the old document",
+      "passed": true
+    },
+    {
+      "name": "Back recovers the actual previous document after provisional failure",
+      "passed": true
+    },
+    {
+      "name": "a failed initial document settles without a previously committed page",
+      "passed": true
+    },
+    {
+      "name": "Back on a failed initial document reports unavailable history",
+      "passed": true
+    },
+    {
+      "name": "a second failure settles independently",
+      "passed": true
+    },
+    {
+      "name": "Retry loads the failed URL instead of reloading the old page",
+      "passed": true
+    },
+    {
+      "name": "native cancellation stops loading with an explicit cancelled state",
+      "passed": true
+    },
+    {
+      "name": "native cancellation keeps old DOM unavailable until explicit recovery",
+      "passed": true
+    },
+    {
+      "name": "Back recovers after native cancellation",
+      "passed": true
+    },
+    {
+      "name": "superseding a held load leaves its replacement ready without cancellation errors",
+      "passed": true
+    },
+    {
+      "name": "queued navigation cancellation returns promptly",
+      "passed": true
+    },
+    {
+      "name": "cancelled queued navigation never reaches the server",
+      "passed": true
+    },
+    {
+      "name": "cancelled queued navigation leaves the actual document unchanged",
+      "passed": true
+    },
+    {
+      "name": "cancelled queued navigation settles without a false successful destination",
+      "passed": true
+    },
+    {
+      "name": "cancelled reload returns promptly",
+      "passed": true
+    },
+    {
+      "name": "cancelled reload does not change the actual document or viewport",
+      "passed": true
+    },
+    {
+      "name": "cancelled reload preserves current resource metadata",
+      "passed": true
+    },
+    {
+      "name": "cancelled reload does not issue a late page request",
+      "passed": true
+    },
+    {
+      "name": "cancelled reopen returns promptly",
+      "passed": true
+    },
+    {
+      "name": "cancelled reopen does not change the actual document or viewport",
+      "passed": true
+    },
+    {
+      "name": "cancelled reopen preserves current resource metadata",
+      "passed": true
+    },
+    {
+      "name": "cancelled reopen does not issue a late page request",
+      "passed": true
+    },
+    {
+      "name": "cancelled viewport returns promptly",
+      "passed": true
+    },
+    {
+      "name": "cancelled viewport does not change the actual document or viewport",
+      "passed": true
+    },
+    {
+      "name": "cancelled viewport preserves current resource metadata",
+      "passed": true
+    },
+    {
+      "name": "cancelled viewport does not issue a late page request",
+      "passed": true
+    },
+    {
+      "name": "a superseded queued navigation is rejected before native dispatch",
+      "passed": true
+    },
+    {
+      "name": "a superseded queued destination never reaches the server",
+      "passed": true
+    },
+    {
+      "name": "the latest queued navigation reaches the actual requested document",
+      "passed": true
+    },
+    {
+      "name": "navigation observer restores and releases every installed delegate",
+      "passed": true
+    }
+  ],
+  "engine": "native-WKWebView",
+  "error": null,
+  "nativeBuild": "debug-embedded-tauri-production-handlers",
+  "nativeOsInputTested": false,
+  "observations": [
+    {
+      "after": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "clickResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "cycle": 1,
+      "interactiveState": "interactive",
+      "newRef": "ref_60t16knj1ej_20",
+      "readResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "snapshotAfterOldRead": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+        "loading": true,
+        "navigationError": null,
+        "navigationId": 2,
+        "resourceId": "8480c970-cd27-4099-9aba-a05380f906cc",
+        "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+        "title": "",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 2",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Provisional",
+        "width": 1280
+      },
+      "before": {
+        "clicks": "Clicks: 2",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Provisional",
+        "width": 1280
+      },
+      "clickResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "cycle": 2,
+      "interactiveState": "interactive",
+      "newRef": "ref_heq8ungwav6_20",
+      "readResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "snapshotAfterOldRead": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+        "loading": true,
+        "navigationError": null,
+        "navigationId": 3,
+        "resourceId": "8480c970-cd27-4099-9aba-a05380f906cc",
+        "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+        "title": "",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "clickResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "pageNavigation": "link",
+      "pending": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+        "loading": true,
+        "navigationError": null,
+        "navigationId": 2,
+        "resourceId": "cd50ac3f-d545-4534-b8b0-529ae411509b",
+        "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+        "title": "",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+      },
+      "readResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "triggerResult": {
+        "Ok": {
+          "name": "Open next page",
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "ref": "ref_w5eh47ane8s_4"
+        }
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "clickResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "pageNavigation": "form",
+      "pending": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+        "loading": true,
+        "navigationError": null,
+        "navigationId": 2,
+        "resourceId": "54e821a4-4f9f-47b2-a3eb-8e9fdbefe893",
+        "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+        "title": "",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+      },
+      "readResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "triggerResult": {
+        "Ok": {
+          "name": "Submit next page",
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "ref": "ref_u29cmikyf3f_6"
+        }
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "clickResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "pageNavigation": "script",
+      "pending": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+        "loading": true,
+        "navigationError": null,
+        "navigationId": 2,
+        "resourceId": "b4723237-6f12-489f-a9f2-8e00daee6821",
+        "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+        "title": "",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+      },
+      "readResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "triggerResult": {
+        "Ok": {
+          "name": "Script navigation",
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "ref": "ref_3mvpyncdk14_7"
+        }
+      }
+    },
+    {
+      "failure": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+        "loading": false,
+        "navigationError": {
+          "code": -1005,
+          "kind": "failed",
+          "message": "The page could not load. Check the address or connection, then try again."
+        },
+        "navigationId": 2,
+        "resourceId": "6a8220a2-25bc-45e2-9818-f2183fab707a",
+        "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+        "title": "",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Failure",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+      },
+      "readResult": {
+        "Err": "browser navigation failed: The page could not load. Check the address or connection, then try again."
+      },
+      "wireState": {
+        "failedDocumentRequests": 3,
+        "heldDocuments": 0,
+        "heldFrames": 0,
+        "heldImages": 0,
+        "queuedCancelledRequests": 0,
+        "requestsByLabel": {
+          "Failure": 3,
+          "Fast": 8,
+          "Original": 6,
+          "Provisional": 5
+        }
+      }
+    },
+    {
+      "initialFailure": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+        "loading": false,
+        "navigationError": {
+          "code": -1005,
+          "kind": "failed",
+          "message": "The page could not load. Check the address or connection, then try again."
+        },
+        "navigationId": 1,
+        "resourceId": "fc94fd59-f95e-4a33-925c-1d536327a5fd",
+        "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+        "title": "",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Failure",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+      }
+    },
+    {
+      "cancelled": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+        "loading": false,
+        "navigationError": {
+          "code": -999,
+          "kind": "cancelled",
+          "message": "Navigation was cancelled. Try again or go back."
+        },
+        "navigationId": 6,
+        "resourceId": "fc94fd59-f95e-4a33-925c-1d536327a5fd",
+        "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+        "title": "",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+      },
+      "replacement": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 9,
+        "resourceId": "fc94fd59-f95e-4a33-925c-1d536327a5fd",
+        "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+        "title": "Gyro Fixture Second",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Second",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+      },
+      "retried": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 4,
+        "resourceId": "fc94fd59-f95e-4a33-925c-1d536327a5fd",
+        "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+        "title": "Gyro Fixture Failure",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Failure",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+      }
+    },
+    {
+      "queuedCancellation": {
+        "actual": {
+          "clicks": "Clicks: 0",
+          "height": 768,
+          "navigationMarker": "Initial",
+          "readyState": "complete",
+          "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+          "width": 1280
+        },
+        "elapsedMs": 22,
+        "result": {
+          "Err": "browser operation cancelled"
+        },
+        "settled": {
+          "backgroundOnly": false,
+          "documentCommitted": true,
+          "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+          "loading": false,
+          "navigationError": null,
+          "navigationId": 2,
+          "resourceId": "eed1256b-c427-43ca-a276-38c1d4b36c49",
+          "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+          "title": "Gyro Fixture Original",
+          "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+          "viewport": {
+            "device": "desktop",
+            "displayScale": 1.0,
+            "height": 800.0,
+            "mode": "auto",
+            "width": 1280.0
+          },
+          "visible": false,
+          "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+        },
+        "wireState": {
+          "failedDocumentRequests": 9,
+          "heldDocuments": 0,
+          "heldFrames": 0,
+          "heldImages": 0,
+          "queuedCancelledRequests": 0,
+          "requestsByLabel": {
+            "Failure": 10,
+            "Fast": 8,
+            "Original": 9,
+            "Provisional": 7,
+            "Second": 1
+          }
+        }
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "cancelledOperation": "reload",
+      "elapsedMs": 22,
+      "result": {
+        "Err": "browser operation cancelled"
+      },
+      "snapshot": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 3,
+        "resourceId": "eed1256b-c427-43ca-a276-38c1d4b36c49",
+        "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+      },
+      "wireState": {
+        "failedDocumentRequests": 9,
+        "heldDocuments": 0,
+        "heldFrames": 0,
+        "heldImages": 0,
+        "queuedCancelledRequests": 0,
+        "requestsByLabel": {
+          "Failure": 10,
+          "Fast": 8,
+          "Original": 9,
+          "Provisional": 7,
+          "Second": 1
+        }
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "cancelledOperation": "reopen",
+      "elapsedMs": 24,
+      "result": {
+        "Err": "browser operation cancelled"
+      },
+      "snapshot": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 4,
+        "resourceId": "eed1256b-c427-43ca-a276-38c1d4b36c49",
+        "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+      },
+      "wireState": {
+        "failedDocumentRequests": 9,
+        "heldDocuments": 0,
+        "heldFrames": 0,
+        "heldImages": 0,
+        "queuedCancelledRequests": 0,
+        "requestsByLabel": {
+          "Failure": 10,
+          "Fast": 8,
+          "Original": 9,
+          "Provisional": 7,
+          "Second": 1
+        }
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "height": 768,
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "width": 1280
+      },
+      "cancelledOperation": "viewport",
+      "elapsedMs": 28,
+      "result": {
+        "Err": "browser operation cancelled"
+      },
+      "snapshot": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 4,
+        "resourceId": "eed1256b-c427-43ca-a276-38c1d4b36c49",
+        "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:64143/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+      },
+      "wireState": {
+        "failedDocumentRequests": 9,
+        "heldDocuments": 0,
+        "heldFrames": 0,
+        "heldImages": 0,
+        "queuedCancelledRequests": 0,
+        "requestsByLabel": {
+          "Failure": 10,
+          "Fast": 8,
+          "Original": 9,
+          "Provisional": 7,
+          "Second": 1
+        }
+      }
+    },
+    {
+      "supersededQueuedRequest": {
+        "latest": {
+          "Ok": {
+            "backgroundOnly": false,
+            "documentCommitted": false,
+            "label": "session-browser-232471114c3242899d8a1aaf7e77bf81",
+            "loading": true,
+            "navigationError": null,
+            "navigationId": 6,
+            "resourceId": "eed1256b-c427-43ca-a276-38c1d4b36c49",
+            "sessionId": "23247111-4c32-4289-9d8a-1aaf7e77bf81",
+            "title": "",
+            "url": "http://127.0.0.1:64143/browser-observation.html?label=Second",
+            "viewport": {
+              "device": "desktop",
+              "displayScale": 1.0,
+              "height": 800.0,
+              "mode": "auto",
+              "width": 1280.0
+            },
+            "visible": false,
+            "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-fythov/workspaces/first"
+          }
+        },
+        "older": {
+          "Err": "browser navigation changed before dispatch; observe the current page before retrying"
+        },
+        "wireState": {
+          "failedDocumentRequests": 9,
+          "heldDocuments": 0,
+          "heldFrames": 0,
+          "heldImages": 0,
+          "queuedCancelledRequests": 0,
+          "requestsByLabel": {
+            "Failure": 10,
+            "Fast": 8,
+            "Original": 9,
+            "Provisional": 7,
+            "Second": 2
+          }
+        }
+      }
+    },
+    {
+      "delegateLifecycle": {
+        "detached": 16,
+        "dropped": 16,
+        "forwardedCallbacks": 61,
+        "installed": 16
+      }
+    }
+  ],
+  "passed": true
+}

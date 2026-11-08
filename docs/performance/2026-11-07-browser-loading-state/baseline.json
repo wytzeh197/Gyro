@@ -1,0 +1,13 @@
+{
+  "command": "node --experimental-strip-types scripts/check-browser-event-routing.mjs",
+  "exitCode": 1,
+  "case": "opening a model browser does not claim a pending page is ready",
+  "actual": "ready",
+  "expected": "loading",
+  "sourceSha256": {
+    "apps/desktop/src/use-session-browser-events.ts": "8575c0bfba0a9daf5f97f5a15bc68b9067cbe9ccc570f8992316ee7ccc5e0a4c",
+    "apps/desktop/src/model-browser-reveal.ts": "b11fb2ea9ce2efa3d0cb7e243651c5d6b6cdd3ae603dae8f0448e5782dbfe56f",
+    "apps/desktop/src-tauri/src/session_browser.rs": "19846d4a7cf7d26b7d03200bef934a2ba5413c9a0c83564f9ec0d23d2eaf3d95",
+    "packages/ui/src/workbench-state.ts": "b6b95f6ab0d3fe2004dc4bb549398d34d990e58ffa1e77cc5836bee9e7b65892"
+  }
+}

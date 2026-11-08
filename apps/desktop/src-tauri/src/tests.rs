@@ -344,6 +344,55 @@ fn anthropic_provider_request() -> ProviderChatRequest {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
+    }
+}
+
+#[test]
+fn internal_summary_requests_carry_only_their_own_input() {
+    let mut request = anthropic_provider_request();
+    request.mode = ChatMode::Council;
+    request.message = "Summarize these diffs.\n\n---\n\n+ added line".into();
+    request.workspace_check = None;
+    let history = "User: an earlier unrelated question\n\nAssistant: an earlier answer";
+    let chat = provider_context_message_with_capabilities(&request, Some(history), true, true);
+    assert!(chat.contains(history), "ordinary chats keep their history");
+
+    for purpose in [
+        InternalRequestPurpose::ChangeSummary,
+        InternalRequestPurpose::ContextSummary,
+        InternalRequestPurpose::SessionTitle,
+    ] {
+        request.internal_purpose = Some(purpose);
+        assert_eq!(local_conversation_history_for_request(&request), None);
+        let prompt =
+            provider_context_message_with_capabilities(&request, Some(history), true, true);
+        assert!(!prompt.contains(history), "{purpose:?} leaked chat history");
+        assert_eq!(prompt.matches("+ added line").count(), 1, "{purpose:?}");
+        assert!(prompt.contains(purpose.label()));
+        for chat_only in [
+            "GYRO_QUESTIONS",
+            "GYRO_TASKS",
+            "Selected workspace",
+            "Gyro Browser",
+        ] {
+            assert!(
+                !prompt.contains(chat_only),
+                "{purpose:?} carried {chat_only}"
+            );
+        }
+        assert!(
+            prompt.len() * 4 < chat.len(),
+            "{purpose:?} prompt was {} bytes against {} for chat",
+            prompt.len(),
+            chat.len()
+        );
+        // Owned runners split the same prompt into a cacheable prefix and a tail.
+        let (stable, dynamic) = efficiency::capture_prompt(|| {
+            provider_context_message_with_capabilities(&request, None, true, true)
+        });
+        assert!(stable.starts_with("Gyro internal request:"));
+        assert!(dynamic.ends_with("+ added line"));
     }
 }
 
@@ -355,6 +404,7 @@ fn bound_capability_context(request: &ProviderChatRequest) -> BoundProviderCapab
         session_id: request.session_id.clone(),
         turn_id: request.turn_id.clone(),
         provider_id: request.provider_id.clone(),
+        provider_kind: None,
         workspace: PathBuf::from(&workspace_key),
         workspace_identity_revision: 1,
         allow_delegation: delegated_agents::request_allows_delegation(request),
@@ -2734,10 +2784,189 @@ fn suggested_tasks_cover_common_project_manifests() {
     let tasks = task_discover_impl(&workspace.path().display().to_string()).unwrap();
     let ids: Vec<&str> = tasks.iter().map(|task| task.id.as_str()).collect();
     assert!(ids.contains(&"cargo:test"));
-    assert!(ids.contains(&"cargo:clippy"));
+    assert!(ids.contains(&"cargo:check"));
+    assert!(!ids.contains(&"cargo:clippy"));
     assert!(ids.contains(&"make:ship"));
     assert!(ids.contains(&"go:test"));
     assert!(tasks.iter().all(|task| task.source == "suggested"));
+    let cargo_check = tasks.iter().find(|task| task.id == "cargo:check").unwrap();
+    assert_eq!(cargo_check.group, "check");
+    assert_eq!(cargo_check.toolchain, "cargo");
+    assert_eq!(cargo_check.role, "primary");
+}
+
+#[test]
+fn package_scripts_keep_later_names_and_split_checks_from_tests() {
+    let workspace = tempfile::tempdir().unwrap();
+    let names: Vec<String> = (0..45).map(|index| format!("task-{index:02}")).collect();
+    let mut scripts = names
+        .iter()
+        .map(|name| format!("\"{name}\": \"echo {name}\""))
+        .collect::<Vec<_>>();
+    scripts.push("\"test\": \"vitest\"".into());
+    scripts.push("\"test:reliability\": \"vitest reliability\"".into());
+    scripts.push("\"release:check\": \"node check.js\"".into());
+    scripts.push("\"test:local-check-browser\": \"node browser.js\"".into());
+    std::fs::write(
+        workspace.path().join("package.json"),
+        format!("{{\"scripts\":{{{}}}}}", scripts.join(",")),
+    )
+    .unwrap();
+    std::fs::write(
+        workspace.path().join("pnpm-lock.yaml"),
+        "lockfileVersion: 9\n",
+    )
+    .unwrap();
+
+    let tasks = task_discover_impl(&workspace.path().display().to_string()).unwrap();
+    let by_id = |id: &str| tasks.iter().find(|task| task.id == id).unwrap();
+    assert!(tasks.iter().any(|task| task.id == "package:task-44"));
+    assert_eq!(by_id("package:test").group, "test");
+    assert_eq!(by_id("package:test").role, "primary");
+    assert_eq!(by_id("package:test:reliability").group, "test");
+    assert_eq!(by_id("package:test:reliability").role, "variant");
+    assert_eq!(by_id("package:release:check").group, "check");
+    assert_eq!(by_id("package:test:local-check-browser").group, "test");
+}
+
+#[test]
+fn pnpm_workspace_members_keep_primary_scripts_only() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(
+        workspace.path().join("package.json"),
+        r#"{"scripts":{"test":"vitest"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        workspace.path().join("pnpm-lock.yaml"),
+        "lockfileVersion: 9\n",
+    )
+    .unwrap();
+    std::fs::write(
+        workspace.path().join("pnpm-workspace.yaml"),
+        "packages:\n  - \"packages/*\"\n  - \"packages/skipped\"\n",
+    )
+    .unwrap();
+    let ui = workspace.path().join("packages/ui");
+    let skipped = workspace.path().join("packages/skipped");
+    let hidden = workspace.path().join("packages/node_modules/nested");
+    std::fs::create_dir_all(&ui).unwrap();
+    std::fs::create_dir_all(&skipped).unwrap();
+    std::fs::create_dir_all(&hidden).unwrap();
+    std::fs::write(
+        ui.join("package.json"),
+        r#"{"name":"@gyro/ui","scripts":{"test":"vitest","test:browser":"vitest browser","lint":"eslint"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        skipped.join("package.json"),
+        r#"{"name":"@gyro/skipped","scripts":{"test:only":"vitest"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        hidden.join("package.json"),
+        r#"{"name":"@gyro/hidden","scripts":{"test":"vitest"}}"#,
+    )
+    .unwrap();
+
+    let tasks = task_discover_impl(&workspace.path().display().to_string()).unwrap();
+    let ui_test = tasks
+        .iter()
+        .find(|task| task.id == "package:packages/ui:test")
+        .unwrap();
+    assert_eq!(ui_test.command, "pnpm");
+    assert_eq!(ui_test.args, vec!["--filter", "@gyro/ui", "test"]);
+    assert_eq!(ui_test.package_path.as_deref(), Some("packages/ui"));
+    assert!(tasks
+        .iter()
+        .any(|task| task.id == "package:packages/ui:lint"));
+    assert!(tasks
+        .iter()
+        .all(|task| task.id != "package:packages/ui:test:browser"));
+    assert!(tasks
+        .iter()
+        .all(|task| !task.id.contains("skipped") && !task.id.contains("hidden")));
+}
+
+#[test]
+fn cargo_workspace_members_are_package_scoped() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(
+        workspace.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\n  \"crates/*\",\n]\n",
+    )
+    .unwrap();
+    let core = workspace.path().join("crates/gyro-core");
+    std::fs::create_dir_all(&core).unwrap();
+    std::fs::write(
+        core.join("Cargo.toml"),
+        "[package]\nname = \"gyro-core\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+
+    let tasks = task_discover_impl(&workspace.path().display().to_string()).unwrap();
+    let root_test = tasks.iter().find(|task| task.id == "cargo:test").unwrap();
+    assert_eq!(root_test.args, vec!["test", "--workspace"]);
+    let member = tasks
+        .iter()
+        .find(|task| task.id == "cargo:crates/gyro-core:test")
+        .unwrap();
+    assert_eq!(member.args, vec!["test", "-p", "gyro-core"]);
+    assert!(tasks.iter().all(|task| task.id != "cargo:clippy"));
+}
+
+#[test]
+fn python_pytest_is_offered_only_when_the_project_asks() {
+    let bare = tempfile::tempdir().unwrap();
+    std::fs::write(
+        bare.path().join("pyproject.toml"),
+        "[project]\nname = \"bare\"\n",
+    )
+    .unwrap();
+    let bare_tasks = task_discover_impl(&bare.path().display().to_string()).unwrap();
+    assert!(bare_tasks.iter().all(|task| task.id != "python:pytest"));
+
+    let tested = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tested.path().join("pyproject.toml"),
+        "[project]\nname = \"tested\"\n[tool.pytest.ini_options]\n",
+    )
+    .unwrap();
+    std::fs::write(tested.path().join("uv.lock"), "").unwrap();
+    let tasks = task_discover_impl(&tested.path().display().to_string()).unwrap();
+    let pytest = tasks
+        .iter()
+        .find(|task| task.id == "python:pytest")
+        .unwrap();
+    assert_eq!(pytest.command, "uv");
+    assert_eq!(pytest.args, vec!["run", "pytest"]);
+}
+
+#[test]
+fn workspace_member_expansion_stops_at_the_cap() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("package.json"), "{}").unwrap();
+    std::fs::write(
+        workspace.path().join("pnpm-workspace.yaml"),
+        "packages:\n  - \"packages/*\"\n",
+    )
+    .unwrap();
+    for index in 0..40 {
+        let dir = workspace.path().join(format!("packages/pkg-{index:02}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("package.json"),
+            format!("{{\"name\":\"pkg-{index:02}\",\"scripts\":{{\"test\":\"vitest\"}}}}"),
+        )
+        .unwrap();
+    }
+
+    let tasks = task_discover_impl(&workspace.path().display().to_string()).unwrap();
+    let members = tasks
+        .iter()
+        .filter(|task| task.package_path.is_some())
+        .count();
+    assert_eq!(members, 32);
 }
 
 #[test]
@@ -2753,6 +2982,9 @@ fn test_catalog_is_derived_from_the_discovered_task_catalog() {
             status: "idle".into(),
             output_channel_id: None,
             source: "suggested".into(),
+            toolchain: "node".into(),
+            package_path: None,
+            role: "primary".into(),
         },
         TaskDefinitionResult {
             id: "package:build".into(),
@@ -2764,6 +2996,9 @@ fn test_catalog_is_derived_from_the_discovered_task_catalog() {
             status: "idle".into(),
             output_channel_id: None,
             source: "suggested".into(),
+            toolchain: "node".into(),
+            package_path: None,
+            role: "primary".into(),
         },
     ];
 
@@ -2951,6 +3186,7 @@ fn prepares_and_revalidates_workspace_chat_attachments() {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
     };
     validate_chat_context(&request).unwrap();
     std::fs::write(&file, "changed\n").unwrap();
@@ -5601,7 +5837,12 @@ fn live_kimi_provider_usage_reads_the_current_account() {
     // an earlier build would otherwise pass for a fresh reading.
     let snapshot = fetch_kimi_provider_usage("kimi").unwrap();
     assert_eq!(snapshot.provider_id, "kimi");
-    assert!(!snapshot.windows.is_empty());
+    assert!(!snapshot.stale);
+    // An account outside the Kimi For Coding membership is metered by
+    // nothing: a settled empty reading that says so, never a failure.
+    if snapshot.windows.is_empty() {
+        assert_eq!(snapshot.error.as_deref(), Some(KIMI_NO_PLAN_LIMITS));
+    }
     for window in &snapshot.windows {
         eprintln!(
             "{} ({}) {:?}% resets {:?}",
@@ -6121,6 +6362,7 @@ fn stale_resume_binding_is_cleared_and_retried_without_cursor() {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
     };
     let mut attempts = Vec::new();
     let output = run_provider_chat_with_retry_using(
@@ -6201,6 +6443,7 @@ fn model_handoff_skips_incompatible_provider_binding() {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
     };
     assert!(compatible_provider_session_binding(binding.clone(), &request).is_none());
     let same_model = ProviderChatRequest {
@@ -6345,6 +6588,7 @@ fn provider_chat_request_for(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
     }
 }
 #[test]
@@ -6851,6 +7095,7 @@ fn provider_status_event_stores_run_metadata_without_tokens() {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
     };
 
     let event = append_provider_status_event(
@@ -6940,6 +7185,7 @@ fn native_provider_binding_owns_execution_authority() {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
     };
 
     bind_provider_chat_request(&mut request, &session, &config, store.paths()).unwrap();
@@ -7600,6 +7846,7 @@ fn governed_pane_launch_args_route_approvals_through_gyro() {
         session_id: "session".into(),
         turn_id: None,
         provider_id: "anthropic".into(),
+        provider_kind: None,
         workspace: PathBuf::from("/tmp/workspace"),
         workspace_key: "/tmp/workspace".into(),
         workspace_identity_revision: 1,
@@ -8051,7 +8298,7 @@ fn git_status_reports_clean_and_live_line_stats() {
 }
 
 #[test]
-fn branch_catalog_order_pins_main_then_sorts_newest_first() {
+fn branch_catalog_order_sorts_newest_first_even_when_main_is_older() {
     let mut branches = vec![
         (300, "feature/newest".to_string()),
         (100, "feature/oldest".to_string()),
@@ -8066,7 +8313,7 @@ fn branch_catalog_order_pins_main_then_sorts_newest_first() {
             .into_iter()
             .map(|(_, branch)| branch)
             .collect::<Vec<_>>(),
-        vec!["main", "feature/newest", "feature/middle", "feature/oldest"]
+        vec!["feature/newest", "feature/middle", "feature/oldest", "main"]
     );
 }
 
@@ -8083,6 +8330,11 @@ fn git_branch_catalog_switches_preserving_edits_and_refuses_conflicts() {
     let catalog = git_branch_catalog_impl(&workspace_path).unwrap();
     assert_eq!(catalog.current.as_deref(), Some("main"));
     assert_eq!(catalog.branches, vec!["main", "feature/picker"]);
+    assert!(catalog.last_commit_at["main"] > 0);
+    assert_eq!(
+        catalog.last_commit_at["main"],
+        catalog.last_commit_at["feature/picker"]
+    );
 
     let switched = git_checkout_branch_impl(&GitCheckoutBranchRequest {
         workspace_path: workspace_path.clone(),
@@ -9422,8 +9674,18 @@ fn every_tool_schema_is_consistent_and_scoped() {
 
 #[test]
 fn unknown_workspace_task_lists_the_valid_ids() {
-    let task =
-        |id: &str, group: &str| suggested_task(id.into(), id.into(), "npm", Vec::new(), group);
+    let task = |id: &str, group: &str| {
+        suggested_task(
+            id.into(),
+            id.into(),
+            "npm",
+            Vec::new(),
+            group,
+            "node",
+            None,
+            "primary",
+        )
+    };
     let tasks = vec![task("package:build", "build"), task("package:test", "test")];
     let message = unknown_workspace_task_message("build", &tasks, false);
     assert!(message.contains("package:build, package:test"), "{message}");
@@ -9439,4 +9701,44 @@ fn unknown_workspace_task_lists_the_valid_ids() {
         "{message}"
     );
     assert!(unknown_workspace_task_message("x", &[], true).contains("no discovered test tasks"));
+}
+
+#[test]
+fn codex_early_exit_reports_the_tail_of_its_stderr() {
+    assert_eq!(
+        codex_app_server_closed_message(" \n"),
+        "Codex app server closed unexpectedly"
+    );
+    assert_eq!(
+        codex_app_server_closed_message(
+            "Error: model_providers contains reserved built-in provider IDs: `openai`.\nin `model_providers`\n"
+        ),
+        "Codex app server closed unexpectedly: Error: model_providers contains reserved built-in provider IDs: `openai`. in `model_providers`"
+    );
+    let long = format!("{}final cause", "noise ".repeat(400));
+    let message = codex_app_server_closed_message(&long);
+    assert!(message.ends_with("final cause"));
+    assert!(message.contains('…'));
+    assert!(message.chars().count() < 700);
+}
+
+#[test]
+fn codex_early_exit_includes_stderr_from_the_real_process() {
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", "echo 'fatal: bad config' >&2; exit 1"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let messages = spawn_codex_app_server_reader(child.stdout.take().unwrap(), child.stderr.take());
+    let error = messages
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap()
+        .unwrap_err();
+    let _ = child.wait();
+    assert_eq!(
+        error,
+        "Codex app server closed unexpectedly: fatal: bad config"
+    );
 }

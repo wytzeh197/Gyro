@@ -59,6 +59,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { AntigravityMark } from "./antigravity-mark";
+import { branchCommitDetail, recentBranches } from "./branch-recency";
+import { formatRunDuration } from "./chat-run";
 import "./automation-detail.css";
 import "./chat-canvas.css";
 import { startChatPointerDrag } from "./chat-pointer-drag";
@@ -1079,7 +1081,7 @@ export function WorkspaceSidebarContent({
   const unprojectedDraftChats: SidebarDraftChat[] = [];
   for (const draft of draftChats) {
     // Empty draft panes remain available in the grid, but are not chats yet.
-    if (isSidebarPlaceholderSessionTitle(draft.title)) continue;
+    if (!draftHasStartedForSidebar(draft)) continue;
     if (!isUserSelectedWorkspacePath(draft.workspacePath)) {
       unprojectedDraftChats.push(draft);
       continue;
@@ -1370,9 +1372,39 @@ export function WorkspaceSidebarContent({
   const [runCommandGroupDraft, setRunCommandGroupDraft] =
     useState<TaskDefinition["group"]>("custom");
   const [runCommandFilter, setRunCommandFilter] = useState("");
+  const matchedRunPackage = useMemo(
+    () =>
+      matchingRunPackage(
+        ide?.taskDefinitions ?? [],
+        ide?.activePath,
+        workspacePath,
+      ),
+    [ide?.activePath, ide?.taskDefinitions, workspacePath],
+  );
+  const [runScopeOverride, setRunScopeOverride] = useState<{
+    packagePath: string;
+    mode: "package" | "repo";
+  } | null>(null);
+  const runScopeMode =
+    matchedRunPackage && runScopeOverride?.packagePath === matchedRunPackage
+      ? runScopeOverride.mode
+      : "package";
+  const runScopePackage =
+    matchedRunPackage && runScopeMode === "package"
+      ? matchedRunPackage
+      : undefined;
   const runTaskGroups = useMemo(
-    () => groupedRunTasks(ide?.taskDefinitions ?? [], runCommandFilter),
-    [ide?.taskDefinitions, runCommandFilter],
+    () =>
+      groupedRunTasks(
+        ide?.taskDefinitions ?? [],
+        runCommandFilter,
+        runScopePackage,
+      ),
+    [ide?.taskDefinitions, runCommandFilter, runScopePackage],
+  );
+  const runToolchain = useMemo(
+    () => runToolchainSummary(ide?.taskDefinitions ?? []),
+    [ide?.taskDefinitions],
   );
   const visibleFiles = useMemo(
     () =>
@@ -1386,9 +1418,6 @@ export function WorkspaceSidebarContent({
   const explorerTreeRef = useRef<HTMLDivElement>(null);
   const explorerRowRefs = useRef(new Map<string, HTMLButtonElement>());
   const activeIdeView = ide?.activeView ?? "explorer";
-  const defaultTestTask = ide?.taskDefinitions.find(
-    (task) => task.group === "test",
-  );
   const [sidebarSearchDraft, setSidebarSearchDraft] = useState(
     ide?.searchQuery.query ?? "",
   );
@@ -3242,7 +3271,6 @@ export function WorkspaceSidebarContent({
                   </button>
                 </div>
               }
-              meta={String(ide?.taskDefinitions.length ?? 0)}
               title="Run and Test"
             >
               {isAddingRunCommand ? (
@@ -3291,6 +3319,7 @@ export function WorkspaceSidebarContent({
                     >
                       <option value="custom">Command</option>
                       <option value="test">Test</option>
+                      <option value="check">Check</option>
                       <option value="build">Build</option>
                       <option value="dev">Dev</option>
                     </select>
@@ -3314,6 +3343,42 @@ export function WorkspaceSidebarContent({
                   </p>
                 </form>
               ) : null}
+              {runToolchain ? (
+                <p className="gyro-run-toolchain">{runToolchain}</p>
+              ) : null}
+              {matchedRunPackage ? (
+                <div
+                  aria-label="Command scope"
+                  className="gyro-run-scope"
+                  role="group"
+                >
+                  <button
+                    aria-pressed={runScopeMode === "package"}
+                    onClick={() =>
+                      setRunScopeOverride({
+                        packagePath: matchedRunPackage,
+                        mode: "package",
+                      })
+                    }
+                    title={matchedRunPackage}
+                    type="button"
+                  >
+                    This package
+                  </button>
+                  <button
+                    aria-pressed={runScopeMode === "repo"}
+                    onClick={() =>
+                      setRunScopeOverride({
+                        packagePath: matchedRunPackage,
+                        mode: "repo",
+                      })
+                    }
+                    type="button"
+                  >
+                    Whole repo
+                  </button>
+                </div>
+              ) : null}
               {(ide?.taskDefinitions.length ?? 0) > 0 ? (
                 <input
                   aria-label="Filter commands"
@@ -3324,32 +3389,71 @@ export function WorkspaceSidebarContent({
                 />
               ) : null}
               {runTaskGroups.length > 0 ? (
-                runTaskGroups.map((group) => (
-                  <div className="gyro-run-task-group" key={group.id}>
-                    <div className="gyro-run-task-group-label">
-                      {group.label}
-                      <small>{group.tasks.length}</small>
-                    </div>
-                    {group.tasks.map((task) => (
+                runTaskGroups.map((group) => {
+                  const rows = group.tasks.map((entry) => (
+                    <div className="gyro-run-task-entry" key={entry.task.id}>
                       <RunTaskRow
-                        key={task.id}
                         onRemove={
-                          task.source === "custom" && onDeleteCustomTask
-                            ? () => void onDeleteCustomTask(task)
+                          entry.task.source === "custom" && onDeleteCustomTask
+                            ? () => void onDeleteCustomTask(entry.task)
                             : undefined
                         }
                         onFixWithAi={
-                          task.status === "failed" && onFixIdeTaskWithAi
-                            ? () => onFixIdeTaskWithAi(task)
+                          entry.task.status === "failed" && onFixIdeTaskWithAi
+                            ? () => onFixIdeTaskWithAi(entry.task)
                             : undefined
                         }
-                        onRun={() => onRunIdeTask?.(task)}
-                        onStop={() => void onStopIdeTask?.(task)}
-                        task={task}
+                        onRun={() => onRunIdeTask?.(entry.task)}
+                        onStop={() => void onStopIdeTask?.(entry.task)}
+                        task={entry.task}
                       />
-                    ))}
-                  </div>
-                ))
+                      {entry.variants.length > 0 ? (
+                        <details className="gyro-run-task-variants">
+                          <summary>
+                            {entry.variants.length} more
+                          </summary>
+                          {entry.variants.map((variant) => (
+                            <RunTaskRow
+                              key={variant.id}
+                              onFixWithAi={
+                                variant.status === "failed" &&
+                                onFixIdeTaskWithAi
+                                  ? () => onFixIdeTaskWithAi(variant)
+                                  : undefined
+                              }
+                              onRun={() => onRunIdeTask?.(variant)}
+                              onStop={() => void onStopIdeTask?.(variant)}
+                              task={variant}
+                            />
+                          ))}
+                        </details>
+                      ) : null}
+                    </div>
+                  ));
+                  if (group.collapsed) {
+                    return (
+                      <details
+                        className="gyro-run-task-group"
+                        key={group.id}
+                      >
+                        <summary className="gyro-run-task-group-label">
+                          {group.label}
+                          <small>{group.tasks.length}</small>
+                        </summary>
+                        {rows}
+                      </details>
+                    );
+                  }
+                  return (
+                    <div className="gyro-run-task-group" key={group.id}>
+                      <div className="gyro-run-task-group-label">
+                        {group.label}
+                        <small>{group.tasks.length}</small>
+                      </div>
+                      {rows}
+                    </div>
+                  );
+                })
               ) : (
                 <div className="gyro-sidebar-mini-copy">
                   {runCommandFilter.trim()
@@ -3373,35 +3477,6 @@ export function WorkspaceSidebarContent({
                   ) : null}
                 </div>
               )}
-              {(ide?.testTree?.[0]?.children ?? []).length > 0 ? (
-                <div className="gyro-run-task-group">
-                  <div className="gyro-run-task-group-label">Last results</div>
-                  {(ide?.testTree?.[0]?.children ?? [])
-                    .slice(0, 8)
-                    .map((test) => (
-                      <SidebarDestinationRow
-                        icon={ListChecks}
-                        isActive={test.status === "running"}
-                        key={test.id}
-                        label={test.label}
-                        meta={test.status}
-                        onClick={() => {
-                          if (test.path) {
-                            onOpenWorkspaceFile?.(test.path);
-                            return;
-                          }
-                          const matchingTask = ide?.taskDefinitions.find(
-                            (task) => task.id === test.id,
-                          );
-                          const task = matchingTask ?? defaultTestTask;
-                          if (task) {
-                            onRunIdeTask?.(task);
-                          }
-                        }}
-                      />
-                    ))}
-                </div>
-              ) : null}
               <details
                 className="gyro-run-task-group gyro-settings-disclosure"
                 open={
@@ -4532,12 +4607,22 @@ export function sidebarProjectGroups(
   const currentProjectKey = groupKeyForPath(workspacePath);
   for (const session of sessions) {
     const key = groupKeyForPath(session.workspacePath);
+    // Generated scratch folders are not projects. The open workspace is added
+    // below, so the folder the user is in stays reachable.
+    if (
+      key !== currentProjectKey &&
+      !isUserSelectedWorkspacePath(session.workspacePath)
+    ) {
+      continue;
+    }
     const existing = groups.get(key);
     if (existing) {
       existing.items.push(session);
     } else {
       groups.set(key, {
-        hasWorkspace: key !== "gyro" && isUserSelectedWorkspacePath(key),
+        hasWorkspace:
+          key === currentProjectKey ||
+          (key !== "gyro" && isUserSelectedWorkspacePath(key)),
         key,
         label: projectSidebarName(session.workspacePath),
         items: [session],
@@ -4546,6 +4631,9 @@ export function sidebarProjectGroups(
   }
 
   for (const draft of drafts) {
+    // Restored layouts retain empty drafts for other projects. A hidden row
+    // must not create a project by itself; the active workspace is added below.
+    if (!draftHasStartedForSidebar(draft)) continue;
     if (!isUserSelectedWorkspacePath(draft.workspacePath)) continue;
     const key = groupKeyForPath(draft.workspacePath);
     if (groups.has(key)) continue;
@@ -4588,6 +4676,11 @@ export function isSidebarPlaceholderSessionTitle(title: string) {
     "worktree cli workspace",
     "agent workspace cli",
   ].includes(title.trim().toLowerCase());
+}
+
+/** Use the same visibility rule for a draft row and its project group. */
+function draftHasStartedForSidebar(draft: SidebarDraftChat) {
+  return Boolean(draft.title.trim()) && !isSidebarPlaceholderSessionTitle(draft.title);
 }
 
 /**
@@ -4716,43 +4809,289 @@ export const RUN_TASK_GROUP_LABELS: Array<{
 }> = [
   { id: "test", label: "Tests" },
   { id: "build", label: "Build" },
+  { id: "check", label: "Checks" },
   { id: "dev", label: "Dev servers" },
   { id: "custom", label: "Other commands" },
 ];
+
+export type RunTaskEntry = {
+  task: TaskDefinition;
+  variants: TaskDefinition[];
+};
+
+export type RunTaskGroup = {
+  id: string;
+  label: string;
+  tasks: RunTaskEntry[];
+  /** Other commands start closed once the list is long. */
+  collapsed?: boolean;
+};
 
 export function taskCommandLine(task: TaskDefinition): string {
   return [task.command, ...task.args].join(" ");
 }
 
+/** The script or cargo subcommand a row should be named, when it has one. */
+export function taskScriptName(task: TaskDefinition): string {
+  const { args, command } = task;
+  if (
+    (command === "pnpm" && args[0] === "--filter" && args.length >= 3) ||
+    (command === "yarn" && args[0] === "workspace" && args.length >= 3) ||
+    (command === "bun" && args[0] === "run" && args[1] === "--filter")
+  ) {
+    return args.at(-1) ?? task.label;
+  }
+  if (
+    command === "npm" &&
+    args[0] === "run" &&
+    args.some((arg) => arg.startsWith("--workspace="))
+  ) {
+    return args[1] ?? task.label;
+  }
+  if (args[0] === "run" && args[1] && !args[1].startsWith("-")) {
+    return args[1];
+  }
+  if (task.toolchain === "deno" && args[0] === "task" && args[1]) {
+    return args[1];
+  }
+  const cargoCommand = task.toolchain === "cargo" ? args[0] : undefined;
+  if (cargoCommand) {
+    return cargoCommand;
+  }
+  if ((command === "make" || command === "just") && args.length === 1) {
+    return args[0] ?? task.label;
+  }
+  return task.label;
+}
+
+/** A root package script whose command is exactly `<runner> run <name>`. */
+export function isObviousPackageScript(task: TaskDefinition): boolean {
+  return (
+    task.source !== "custom" &&
+    !task.packagePath &&
+    task.args[0] === "run" &&
+    task.args.length === 2 &&
+    (task.toolchain === undefined || task.toolchain === "node")
+  );
+}
+
+export function taskRowTitle(task: TaskDefinition): string {
+  if (
+    isObviousPackageScript(task) ||
+    (task.packagePath && task.toolchain === "node") ||
+    (task.toolchain === "deno" && task.args[0] === "task") ||
+    ((task.command === "make" || task.command === "just") &&
+      task.args.length === 1)
+  ) {
+    return taskScriptName(task);
+  }
+  return task.label;
+}
+
+export function taskShowsCommandLine(task: TaskDefinition): boolean {
+  return !isObviousPackageScript(task);
+}
+
+const NODE_RUNNERS = new Set(["pnpm", "npm", "yarn", "bun"]);
+
+/** One line naming the toolchains discovery actually found. */
+export function runToolchainSummary(tasks: TaskDefinition[]): string {
+  const parts: string[] = [];
+  const nodeTasks = tasks.filter(
+    (task) => task.toolchain === "node" || NODE_RUNNERS.has(task.command),
+  );
+  if (nodeTasks.length > 0) {
+    const runner =
+      nodeTasks.find((task) => NODE_RUNNERS.has(task.command))?.command ??
+      "node";
+    parts.push(
+      nodeTasks.some((task) => task.packagePath)
+        ? `${runner} workspace`
+        : runner,
+    );
+  }
+  const cargoTasks = tasks.filter(
+    (task) => task.toolchain === "cargo" || task.command === "cargo",
+  );
+  if (cargoTasks.length > 0) {
+    parts.push(
+      cargoTasks.some(
+        (task) => task.packagePath || task.args.includes("--workspace"),
+      )
+        ? "Cargo workspace"
+        : "Cargo",
+    );
+  }
+  if (tasks.some((task) => task.toolchain === "python")) parts.push("Python");
+  if (tasks.some((task) => task.toolchain === "go")) parts.push("Go");
+  if (tasks.some((task) => task.toolchain === "deno")) parts.push("Deno");
+  if (tasks.some((task) => task.toolchain === "make" || task.command === "make")) {
+    parts.push("Make");
+  }
+  if (tasks.some((task) => task.toolchain === "just" || task.command === "just")) {
+    parts.push("just");
+  }
+  return parts.join(" · ");
+}
+
 /**
- * Buckets the discovered catalog for the sidebar: saved commands stay on top,
- * then suggestions by what they do.
+ * The workspace member that owns the open file, when the catalog has one.
+ * The longest matching directory wins.
+ */
+export function matchingRunPackage(
+  tasks: TaskDefinition[],
+  activePath: string | undefined,
+  workspacePath: string | undefined,
+): string | undefined {
+  if (!activePath || !workspacePath) return undefined;
+  const relative = workspaceRelativeFilePath(activePath, workspacePath);
+  if (!relative || relative.startsWith("/")) return undefined;
+  const packages = [
+    ...new Set(
+      tasks
+        .map((task) => task.packagePath)
+        .filter((path): path is string => Boolean(path)),
+    ),
+  ];
+  return packages
+    .filter(
+      (packagePath) =>
+        relative === packagePath || relative.startsWith(`${packagePath}/`),
+    )
+    .sort((first, second) => second.length - first.length)[0];
+}
+
+function variantFoldsUnder(variant: TaskDefinition, primary: TaskDefinition) {
+  if (variant.role === "primary" || primary.role === "variant") return false;
+  if (variant.group !== primary.group) return false;
+  if ((variant.toolchain ?? "") !== (primary.toolchain ?? "")) return false;
+  if ((variant.packagePath ?? "") !== (primary.packagePath ?? "")) return false;
+  return taskScriptName(variant).startsWith(`${taskScriptName(primary)}:`);
+}
+
+function taskInRunScope(task: TaskDefinition, packagePath: string | undefined) {
+  if (task.source === "custom") return true;
+  if (!packagePath) return !task.packagePath;
+  if (task.packagePath === packagePath) return task.role !== "variant";
+  if (task.packagePath) return false;
+  if (task.role === "variant") return false;
+  const name = taskScriptName(task);
+  return name === "test" || name === "check";
+}
+
+function foldRunEntries(tasks: TaskDefinition[]): RunTaskEntry[] {
+  const primaries = tasks.filter((task) => task.role !== "variant");
+  const variants = tasks.filter((task) => task.role === "variant");
+  const folded = new Set<string>();
+  const entries = primaries.map((task) => {
+    const children = variants.filter((variant) =>
+      variantFoldsUnder(variant, task),
+    );
+    for (const child of children) folded.add(child.id);
+    return { task, variants: children };
+  });
+  for (const variant of variants) {
+    if (!folded.has(variant.id)) {
+      entries.push({ task: variant, variants: [] });
+    }
+  }
+  return entries;
+}
+
+function runTaskGroupsFromEntries(
+  entries: RunTaskEntry[],
+  recent: RunTaskEntry[],
+): RunTaskGroup[] {
+  const hidden = new Set(
+    recent.flatMap((entry) => [
+      entry.task.id,
+      ...entry.variants.map((variant) => variant.id),
+    ]),
+  );
+  const rest = entries
+    .filter((entry) => !hidden.has(entry.task.id))
+    .map((entry) => ({
+      ...entry,
+      variants: entry.variants.filter((variant) => !hidden.has(variant.id)),
+    }))
+    .filter((entry) => entry.task);
+  const groups: RunTaskGroup[] = [];
+  if (recent.length > 0) {
+    groups.push({ id: "recent", label: "Recent", tasks: recent });
+  }
+  const saved = rest.filter((entry) => entry.task.source === "custom");
+  const suggested = rest.filter((entry) => entry.task.source !== "custom");
+  if (saved.length > 0) {
+    groups.push({ id: "saved", label: "Saved commands", tasks: saved });
+  }
+  for (const group of RUN_TASK_GROUP_LABELS) {
+    const grouped = suggested.filter((entry) => entry.task.group === group.id);
+    if (grouped.length === 0) continue;
+    groups.push({
+      id: group.id,
+      label: group.label,
+      tasks: grouped,
+      collapsed: group.id === "custom" && grouped.length > 4,
+    });
+  }
+  return groups;
+}
+
+/**
+ * Buckets the catalog. An empty filter shows the scoped front door, with
+ * `test:*` folded under `test`. A filter searches the whole catalog.
  */
 export function groupedRunTasks(
   tasks: TaskDefinition[],
   filter: string,
-): Array<{ id: string; label: string; tasks: TaskDefinition[] }> {
+  packagePath?: string,
+): RunTaskGroup[] {
   const needle = filter.trim().toLowerCase();
-  const matching = needle
-    ? tasks.filter(
-        (task) =>
-          task.label.toLowerCase().includes(needle) ||
-          taskCommandLine(task).toLowerCase().includes(needle),
-      )
-    : tasks;
-  const saved = matching.filter((task) => task.source === "custom");
-  const suggested = matching.filter((task) => task.source !== "custom");
-  const groups: Array<{ id: string; label: string; tasks: TaskDefinition[] }> =
-    saved.length > 0
-      ? [{ id: "saved", label: "Saved commands", tasks: saved }]
-      : [];
-  for (const group of RUN_TASK_GROUP_LABELS) {
-    const grouped = suggested.filter((task) => task.group === group.id);
-    if (grouped.length > 0) {
-      groups.push({ id: group.id, label: group.label, tasks: grouped });
-    }
+  if (needle) {
+    const matching = tasks.filter((task) => {
+      const haystack = [
+        task.label,
+        taskCommandLine(task),
+        taskScriptName(task),
+        task.packagePath ?? "",
+      ]
+        .join("\n")
+        .toLowerCase();
+      return haystack.includes(needle);
+    });
+    return runTaskGroupsFromEntries(
+      matching.map((task) => ({ task, variants: [] })),
+      [],
+    );
   }
-  return groups;
+  const scoped = tasks.filter((task) => taskInRunScope(task, packagePath));
+  const recentTasks = scoped
+    .filter((task) => task.lastRunAt)
+    .sort((first, second) =>
+      (second.lastRunAt ?? "").localeCompare(first.lastRunAt ?? ""),
+    )
+    .slice(0, 5);
+  const recentIds = new Set(recentTasks.map((task) => task.id));
+  const recent = recentTasks.map((task) => ({
+    task,
+    variants:
+      task.role === "variant"
+        ? []
+        : scoped.filter(
+            (variant) =>
+              !recentIds.has(variant.id) && variantFoldsUnder(variant, task),
+          ),
+  }));
+  const hidden = new Set(
+    recent.flatMap((entry) => [
+      entry.task.id,
+      ...entry.variants.map((variant) => variant.id),
+    ]),
+  );
+  return runTaskGroupsFromEntries(
+    foldRunEntries(scoped.filter((task) => !hidden.has(task.id))),
+    recent,
+  );
 }
 
 export function runTaskStatusCopy(task: TaskDefinition): string | undefined {
@@ -4786,14 +5125,24 @@ export function RunTaskRow({
   const commandLine = taskCommandLine(task);
   const isRunning = task.status === "running";
   const status = runTaskStatusCopy(task);
+  const duration =
+    task.durationMs !== undefined &&
+    task.status !== "running" &&
+    task.status !== "cancelled"
+      ? formatRunDuration(Math.max(0, Math.round(task.durationMs / 1000)))
+      : undefined;
+  const statusLabel = status
+    ? duration
+      ? `${status} · ${duration}`
+      : status
+    : undefined;
+  const title = taskRowTitle(task);
   const LaunchIcon = task.group === "test" ? ListChecks : Play;
 
   return (
     <div className="gyro-run-task-row" data-status={task.status}>
       <button
-        aria-label={
-          isRunning ? `Stop ${task.label}` : `Run ${task.label}: ${commandLine}`
-        }
+        aria-label={isRunning ? `Stop ${title}` : `Run ${title}: ${commandLine}`}
         className="gyro-run-task-main"
         onClick={isRunning ? onStop : onRun}
         title={isRunning ? `Stop ${commandLine}` : commandLine}
@@ -4801,17 +5150,15 @@ export function RunTaskRow({
       >
         {isRunning ? <Square size={11} /> : <LaunchIcon size={13} />}
         <span>
-          <strong>
-            {task.source === "suggested" && task.args[0] === "run"
-              ? task.args.slice(1).join(" ")
-              : task.label}
-          </strong>
-          {commandLine !== task.label || task.args[0] === "run" ? (
+          <strong>{title}</strong>
+          {taskShowsCommandLine(task) && commandLine !== title ? (
             <small>{commandLine}</small>
           ) : null}
         </span>
       </button>
-      {status ? <em className="gyro-run-task-status">{status}</em> : null}
+      {statusLabel ? (
+        <em className="gyro-run-task-status">{statusLabel}</em>
+      ) : null}
       {onFixWithAi ? (
         <button
           aria-label={`Fix ${task.label} with AI`}
@@ -5300,6 +5647,7 @@ export function ScmBranchPicker({
   onSelectBranch?: (branch: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
@@ -5307,7 +5655,11 @@ export function ScmBranchPicker({
     () => setOpen(false),
     triggerRef,
   );
-  const branches = branchCatalog?.branches ?? [];
+  const branches = recentBranches(branchCatalog, currentBranch);
+  const needle = query.trim().toLowerCase();
+  const visibleBranches = branches.filter((branch) =>
+    branch.name.toLowerCase().includes(needle),
+  );
   const label =
     currentBranch && currentBranch !== "(detached)"
       ? currentBranch
@@ -5333,18 +5685,11 @@ export function ScmBranchPicker({
     };
   }, [open]);
 
-  useLayoutEffect(() => {
-    if (!open) return;
-    menuRef.current
-      ?.querySelector<HTMLElement>(".gyro-scm-branch-item.is-current")
-      ?.scrollIntoView({ block: "nearest" });
-  }, [open, menuRef, currentBranch]);
-
   return (
     <div className="gyro-scm-branch-picker">
       <button
         aria-expanded={open}
-        aria-haspopup="listbox"
+        aria-haspopup="menu"
         className="gyro-scm-branch-trigger"
         disabled={disabled || isLoading}
         onClick={() => {
@@ -5355,6 +5700,7 @@ export function ScmBranchPicker({
           if (triggerRef.current) {
             setMenuStyle(scmBranchMenuStyle(triggerRef.current));
           }
+          setQuery("");
           setOpen(true);
         }}
         ref={triggerRef}
@@ -5372,15 +5718,48 @@ export function ScmBranchPicker({
             <div
               className="gyro-scm-branch-menu"
               ref={menuRef}
-              role="listbox"
+              role="menu"
+              aria-label="Local branches"
               style={menuStyle}
             >
+              {branches.length >= 6 ? (
+                <label className="gyro-composer-menu-search">
+                  <Search size={12} aria-hidden="true" />
+                  <input
+                    aria-label="Find branch"
+                    autoFocus
+                    onChange={(event) => setQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
+                        return;
+                      const rows =
+                        menuRef.current?.querySelectorAll<HTMLButtonElement>(
+                          '[role="menuitem"]:not(.is-action):not(:disabled)',
+                        );
+                      const row =
+                        event.key === "ArrowDown"
+                          ? rows?.[0]
+                          : rows?.[rows.length - 1];
+                      if (row) {
+                        event.preventDefault();
+                        row.focus();
+                      }
+                    }}
+                    placeholder="Find branch…"
+                    spellCheck={false}
+                    type="search"
+                    value={query}
+                  />
+                </label>
+              ) : null}
               <button
                 className="gyro-scm-branch-item is-action"
+                disabled={disabled || isLoading}
                 onClick={() => {
                   setOpen(false);
                   onCreateBranch?.();
                 }}
+                role="menuitem"
                 type="button"
               >
                 <GitBranchPlus size={12} aria-hidden="true" />
@@ -5390,37 +5769,63 @@ export function ScmBranchPicker({
                 <div className="gyro-scm-branch-empty">
                   {branchCatalog?.error ?? error ?? "No local branches found."}
                 </div>
+              ) : visibleBranches.length === 0 ? (
+                <div className="gyro-scm-branch-empty" role="status">
+                  No matching branches
+                </div>
               ) : (
-                branches.map((branch) => {
-                  const isCurrent = branch === currentBranch;
-                  return (
-                    <button
-                      aria-selected={isCurrent}
-                      className={[
-                        "gyro-scm-branch-item",
-                        isCurrent ? "is-current" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                      key={branch}
-                      onClick={() => {
-                        setOpen(false);
-                        if (!isCurrent) {
-                          onSelectBranch?.(branch);
-                        }
-                      }}
-                      role="option"
-                      title={branch}
-                      type="button"
-                    >
-                      <GitBranch size={12} aria-hidden="true" />
-                      <span>{branch}</span>
-                      {isCurrent ? (
-                        <Check size={12} aria-hidden="true" />
-                      ) : null}
-                    </button>
-                  );
-                })
+                visibleBranches.map(
+                  ({
+                    name: branch,
+                    current: isCurrent,
+                    latest,
+                    committedAt,
+                  }) => {
+                    const detail = branchCommitDetail(committedAt);
+                    return (
+                      <button
+                        aria-current={isCurrent ? "true" : undefined}
+                        disabled={disabled || isLoading}
+                        className={[
+                          "gyro-scm-branch-item",
+                          isCurrent ? "is-current" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        key={branch}
+                        onClick={() => {
+                          setOpen(false);
+                          if (!isCurrent) {
+                            onSelectBranch?.(branch);
+                          }
+                        }}
+                        role="menuitem"
+                        title={[
+                          branch,
+                          detail,
+                          latest ? "Latest local commit" : undefined,
+                        ]
+                          .filter(Boolean)
+                          .join(" — ")}
+                        type="button"
+                      >
+                        <GitBranch size={12} aria-hidden="true" />
+                        <span className="gyro-scm-branch-copy">
+                          <span className="gyro-scm-branch-name">{branch}</span>
+                          {latest ? (
+                            <em className="gyro-scm-branch-badge">
+                              Latest commit
+                            </em>
+                          ) : null}
+                          {detail ? <small>{detail}</small> : null}
+                        </span>
+                        {isCurrent ? (
+                          <Check size={12} aria-hidden="true" />
+                        ) : null}
+                      </button>
+                    );
+                  },
+                )
               )}
             </div>,
             document.body,

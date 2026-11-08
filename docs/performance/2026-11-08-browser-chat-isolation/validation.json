@@ -1,0 +1,37 @@
+{
+  "head": "1d0b7e1321790246390b9ad64d78f73813a37ab6",
+  "macOS": "26.2",
+  "backingScale": 1,
+  "callbackChecks": 10,
+  "negativeControlFailures": 4,
+  "routingCases": 21,
+  "rustBrowserTests": 59,
+  "nativeNotificationLogicTests": 8,
+  "desktopTypeScript": "passed",
+  "fullReliabilitySuite": "not rerun; new callback script is wired into it",
+  "nativeReview": "manual-native-review.json",
+  "ownershipAfterViewportRecovery": "passed",
+  "firstReveal": "failed; cause not isolated",
+  "splitAcceptance": "unverified",
+  "providerRows": {
+    "provider_session_bindings": 0,
+    "session_turn_messages": 0,
+    "session_turn_status": 0,
+    "usage_turn_links": 0,
+    "efficiency_task_turns": 0
+  },
+  "nativeBinarySha256": "907931809a6535687edd2af057927bf2899752e8789ceac0825e5e576ac18d29",
+  "nativeBinaryUnchanged": true,
+  "productSourcesPredateNativeLaunch": {
+    "apps/desktop/src/App.tsx": true,
+    "apps/desktop/src-tauri/src/lib.rs": true,
+    "apps/desktop/src-tauri/src/bin/browser-shell-review.rs": true
+  },
+  "goalComplete": false,
+  "nextActions": [
+    "Reproduce and repair native first companion reveal without a viewport resize",
+    "Review the main-window start-dragging permission rejection",
+    "Prepare visible fixture chats or a restored layout for simultaneous split acceptance",
+    "Retina/older WebKit and live-provider acceptance remain pending"
+  ]
+}

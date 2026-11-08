@@ -1,0 +1,97 @@
+{
+  "head": "1d0b7e1321790246390b9ad64d78f73813a37ab6",
+  "os": "",
+  "scale": 1.0,
+  "sourceHashes": {
+    "packages/ui/src/use-companion-motion.ts": "2ce3d77e16e1133eae039af013cdac87d1600b38d48762ba09ca8f16dc661d56",
+    "apps/desktop/src-tauri/capabilities/main-appearance.json": "118279853fd27c728eac9d5d78af3885b5d0c4c1370a5b37f83edb515b3cd27b",
+    "apps/desktop/src-tauri/src/browser_shell_review.rs": "4c4ceb26d01128be5679381266d2d580cc693a50b0d2bcf48375fb50832e22ab",
+    "apps/desktop/src-tauri/src/lib.rs": "bf61f3c9c3d1371ca9747b13d5bbbb62ebc3e833994c29664f901a4305fd28d6",
+    "scripts/check-companion-motion.mjs": "bb55269a118a7eeda335d65d904dfb48eabdebcb197cd1bb33e8f926a6e09079",
+    "scripts/run-browser-shell-review.mjs": "ab265d91108d31f5efdf64ff944b95e7718f89d3d9280d7f27e245a55fd3c57b",
+    "apps/desktop/src-tauri/src/bin/browser-shell-review.rs": "3ab6d44698061e3f7af7e4ad8c33250f6c767ced914876a179fedfa215fd3fde",
+    "package.json": "040c69985f46c9d33ef9834647d207fd57e06b713739118a835cca4b44c7038a",
+    "Cargo.lock": "e00ddd671f957eabad737b1b2b7ab998cddb9fbf5b5ad8cc7464a700b35febc8",
+    "apps/desktop/src-tauri/tauri.conf.json": "0d20aee8cfc34681002669c645766b2ea756110f26fc848f2ca761d2566c0e79"
+  },
+  "hookChecks": 14,
+  "failedOnPreviousHook": 10,
+  "native": {
+    "firstReveal": "passed twice after motion change",
+    "firstAnimationBefore": [
+      {
+        "at": 1794135974264,
+        "paintedWidth": 0,
+        "currentTime": 37,
+        "from": "0px",
+        "to": "0px"
+      },
+      {
+        "at": 1794135974373,
+        "paintedWidth": 0,
+        "currentTime": 153,
+        "from": "0px",
+        "to": "0px"
+      }
+    ],
+    "firstAnimationAfter": [
+      {
+        "at": 1794136730865,
+        "paintedWidth": 0,
+        "currentTime": 0,
+        "from": "0px",
+        "to": "420px"
+      },
+      {
+        "at": 1794136730979,
+        "paintedWidth": 416.453125,
+        "currentTime": 120,
+        "from": "0px",
+        "to": "420px"
+      },
+      {
+        "at": 1794136763113,
+        "paintedWidth": 570,
+        "currentTime": 57,
+        "from": "570px",
+        "to": "570px"
+      },
+      {
+        "at": 1794136763225,
+        "paintedWidth": 570,
+        "currentTime": 155,
+        "from": "570px",
+        "to": "570px"
+      }
+    ],
+    "viewportDimensions": [
+      [
+        1280,
+        820
+      ]
+    ],
+    "viewportResized": false,
+    "inspectorOpened": false,
+    "finalDockWidth": 570,
+    "reopenPageState": "Clicks: 1",
+    "javascriptErrors": [],
+    "titleDragRegionHitVerified": true,
+    "actualWindowMovement": "unverified; CUA gesture did not change recorded position",
+    "requests": [
+      {
+        "page": "Original",
+        "at": "2026-11-08T11:19:03.924Z"
+      }
+    ],
+    "pid": 61839
+  },
+  "fullReliabilitySuiteRun": false,
+  "paidProviderCallsThisPass": 0,
+  "goalComplete": false,
+  "limits": [
+    "Earlier persistent blank dock did not recur in the pre-change review; the zero-width animation target was confirmed. Missed completion is covered by fault checks of the actual hook, not a native fault injection.",
+    "Main-window drag permission added and title-region gestures produced no rejection, but actual movement remains unverified.",
+    "Simultaneous split layout, native draft migration/provider flow, Retina and older WebKit still need acceptance.",
+    "Live GPT/Grok task success and response-speed comparison await additional provider budget."
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "passed": false,
+  "checks": [
+    {
+      "name": "folderless draft navigation reaches the native open command",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n0 !== 1\n"
+    },
+    {
+      "name": "capture attaches to its draft for workbench",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\nundefined !== 1\n"
+    },
+    {
+      "name": "capture attaches to its draft for workbench:/tmp/Project with spaces",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\nundefined !== 1\n"
+    },
+    {
+      "name": "capture attaches to its draft for 00000000-0000-4000-8000-000000000001",
+      "passed": true
+    }
+  ]
+}

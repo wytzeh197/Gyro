@@ -20,6 +20,7 @@ import {
   measuredFileCounts,
 } from "./file-change-counts.ts";
 import type { SessionEvent } from "./types.ts";
+import { isProviderQuotaError, PROVIDER_QUOTA_RECOVERY } from "./provider-quota.ts";
 import {
   capabilityLabel,
   capabilityUi,
@@ -596,6 +597,7 @@ export type RunPhase =
       message: string;
       recoveryKind?: string;
       recoveryMessage?: string;
+      retryNotBefore?: number;
     }
   | { name: "interrupted" };
 
@@ -645,6 +647,7 @@ export type RunStatusInput = {
   error?: string;
   recoveryKind?: string;
   recoveryMessage?: string;
+  retryNotBefore?: number;
   /** When this status was last refreshed. A heartbeat moves it forward. */
   at?: string;
   /** How long the backend has heard nothing from a run that is still alive. */
@@ -1134,14 +1137,17 @@ function runPhase(
   }
   if (status && PROBLEM_STATUSES.includes(status.status)) {
     const cancelled = status.status === "cancelled";
+    // Older saved failures classified Codex quota refusals as generic retries.
+    const quotaExceeded = !cancelled && isProviderQuotaError(status.error ?? "");
     return {
       name: "failed",
       message: cancelled
         ? status.message?.trim() || "Stopped"
         : status.error?.trim() || status.message || "The run stopped early",
       // Normalize so the header and problem tone can tell user-stop from crash.
-      recoveryKind: cancelled ? "cancelled" : status.recoveryKind,
-      recoveryMessage: status.recoveryMessage,
+      recoveryKind: cancelled ? "cancelled" : quotaExceeded ? "quota-exceeded" : status.recoveryKind,
+      recoveryMessage: quotaExceeded ? PROVIDER_QUOTA_RECOVERY : status.recoveryMessage,
+      ...(status.retryNotBefore !== undefined ? { retryNotBefore: status.retryNotBefore } : {}),
     };
   }
   return { name: "done", durationMs: options.durationMs };

@@ -5,6 +5,7 @@ export type CloudView = {
   contractVersion?: "2.0.0";
   rememberSession?: boolean;
   authStage?: "email" | "proof" | null;
+  accountEmail?: string | null;
   state:
     | "unconfigured"
     | "signed-out"
@@ -147,6 +148,9 @@ export function cloudBillingView(view: CloudView): BillingSnapshot {
                   : view.environment === "staging"
                     ? "Signed in to Gyro staging"
                     : "Synthetic account · local simulation",
+            ...(isV2CloudView(view) && view.accountEmail
+              ? { accountEmail: view.accountEmail }
+              : {}),
           }
         : {}),
     ...(sub?.planId === "lite" ||

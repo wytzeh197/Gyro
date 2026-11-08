@@ -545,6 +545,17 @@ expect(
     !isTransientWorkspacePath("/Users/example/Project"),
   "Chat send requires a connected provider; a project is optional.",
 );
+expect(
+  !isUserSelectedWorkspacePath(
+    "/Users/dev/Documents/gyro-luna-benchmark-2026-11-04",
+  ) &&
+    !isUserSelectedWorkspacePath("/private/tmp/gyro-live-provider-20260713") &&
+    !isUserSelectedWorkspacePath("/Users/dev/gyro-session-1783969000000") &&
+    isUserSelectedWorkspacePath("/projects/gyro-cloud") &&
+    isUserSelectedWorkspacePath("/Users/dev/Gyro") &&
+    isUserSelectedWorkspacePath("/Users/dev/Documents/notes-2026-11-04"),
+  "Generated Gyro scratch folders are not projects, including hyphenated dates.",
+);
 
 const appSource = [
   readRepoFile("apps/desktop/src/provider-login-profile.ts"),
@@ -1121,10 +1132,10 @@ expect(
   "Chat turns should build one flat run model, with file edits inline rather than hoisted into a completion-only summary.",
 );
 const chatTurnSource = surfaceSource.slice(
-  surfaceSource.indexOf("function ChatTurn({"),
+  surfaceSource.indexOf("function ChatTurnView({"),
   surfaceSource.indexOf(
     "function formatMessageTime(",
-    surfaceSource.indexOf("function ChatTurn({"),
+    surfaceSource.indexOf("function ChatTurnView({"),
   ),
 );
 expect(
@@ -4719,15 +4730,22 @@ expect(
     /queuedChatDispatchMessageIdsRef\.current\.set\([\s\S]*?setChatMessageQueues\([\s\S]*?item\.id !== nextMessage\.id[\s\S]*?void sendDraft\(nextMessage\.message/.test(
       appSource,
     ) &&
-    sourceIncludes(appSource, ".then((accepted) =>") &&
-    sourceIncludes(appSource, "if (!accepted)") &&
+    sourceIncludes(appSource, ".then((outcome) =>") &&
+    sourceIncludes(
+      appSource,
+      "const disposition = queuedDeliveryDisposition(outcome)",
+    ) &&
+    sourceIncludes(appSource, 'if (disposition === "settled") return') &&
     sourceIncludes(appSource, "queuedChatDispatchMessageIdsRef") &&
     sourceIncludes(appSource, "persistedChatTurnIdsRef") &&
     sourceIncludes(appSource, "didDeliverProviderResponse") &&
-    sourceIncludes(appSource, "deliveryAttempts < 2") &&
-    sourceIncludes(appSource, 'status: shouldRetry ? "waiting" : "failed"') &&
-    sourceIncludes(appSource, "Date.now() + 1_500") &&
-    sourceIncludes(appSource, "Queued delivery failed") &&
+    sourceIncludes(appSource, "retryAt: undefined, status: disposition") &&
+    sourceIncludes(appSource, 'status: "failed", retryAt: undefined') &&
+    sourceIncludes(appSource, "Queued message not sent") &&
+    sourceIncludes(
+      readRepoFile("apps/desktop/src/chat-send-outcome.ts"),
+      'if (outcome.persisted || ["completed", "cancelled"].includes(outcome.kind))',
+    ) &&
     sourceIncludes(surfaceSource, 'message.hasFailed ? "Retry" : "Steer"') &&
     styleSource.includes(".gyro-chat-message-queue article.is-failed") &&
     sourceIncludes(appSource, "sessionModel: { ...sessionModel }") &&
@@ -5048,9 +5066,13 @@ expect(
 expect(
   appSource.includes('"New chat"') &&
     appSource.includes("normalizeSessionTitleInput") &&
-    appSource.includes(
-      "updateSessionTitle(targetSessionId, provisionalTitle",
+    !appSource.includes(
+      "void updateSessionTitle(targetSessionId, provisionalTitle",
     ) &&
+    tauriSource.includes("begin_session_title") &&
+    tauriSource.includes("pending_session_title") &&
+    tauriSource.includes("apply_session_title") &&
+    tauriSource.includes("session_title_stream::repair_missing") &&
     styleSource.includes(".gyro-session-row.is-active .gyro-session-actions") &&
     styleSource.includes(
       ".gyro-session-row.is-active .gyro-sidebar-thread-main",
@@ -5540,8 +5562,12 @@ expect(
     surfaceSource.includes('label="Sessions"') &&
     surfaceSource.includes('label="Workspace"') &&
     !surfaceSource.includes('label="IDE"') &&
-    surfaceSource.indexOf('label="Primary surfaces"') <
-      surfaceSource.indexOf('className="gyro-sidebar-actions"') &&
+    readRepoFile("packages/ui/src/workspace-sidebar.tsx").indexOf(
+      "<PrimarySurfaceSwitch",
+    ) <
+      readRepoFile("packages/ui/src/workspace-sidebar.tsx").indexOf(
+        'className="gyro-sidebar-actions"',
+      ) &&
     surfaceSource.includes("gyro-sidebar-project-chat-list") &&
     surfaceSource.includes("gyro-sidebar-small-title") &&
     surfaceSource.includes("collapsedProjectIds") &&
@@ -8081,7 +8107,9 @@ expect(
     surfaceSource.includes('aria-label="Source control message"') &&
     surfaceSource.includes('aria-label="Debug adapter command"') &&
     scmFileActionsSource.includes("Discard all local changes in") &&
-    surfaceSource.includes("task.id === test.id") &&
+    surfaceSource.includes(
+      "ide?.taskDefinitions.find((item) => item.id === test.id)",
+    ) &&
     appSource.includes("const createWorkspacePath = useCallback") &&
     appSource.includes("const renameWorkspacePath = useCallback") &&
     appSource.includes("const deleteWorkspacePath = useCallback") &&
@@ -8363,19 +8391,19 @@ expect(
     styleSource.includes(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
-    styleSource.includes("--gyro-radius-md: 6px") &&
+    styleSource.includes("--gyro-radius-md: 8px") &&
     styleSource.includes(
       "--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))",
     ) &&
-    styleSource.includes("--gyro-app: #181818") &&
-    styleSource.includes("--gyro-pane: #1c1c1c") &&
+    styleSource.includes("--gyro-app: #141415") &&
+    styleSource.includes("--gyro-pane: #141415") &&
     styleSource.includes("--gyro-hero-composer: var(--gyro-surface)") &&
     styleSource.includes("--gyro-user-main: #0874df") &&
     styleSource.includes("--gyro-user-secondary: #8b6fcb") &&
     styleSource.includes("var(--gyro-user-main) 86%") &&
     styleSource.includes(':root[data-theme="light"]') &&
-    styleSource.includes("--gyro-app: #f7f7f7") &&
-    styleSource.includes("--gyro-sidebar: #ffffff") &&
+    styleSource.includes("--gyro-app: #fbfbfb") &&
+    styleSource.includes("--gyro-sidebar: #f3f3f4") &&
     styleSource.includes("--gyro-premium-hairline: rgba(32, 32, 32, 0.1)") &&
     styleSource.includes("var(--gyro-user-main) 82%") &&
     styleSource.includes("--gyro-secondary-accent") &&

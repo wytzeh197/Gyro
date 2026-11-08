@@ -1,0 +1,37 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "name": "native Alpha click selects its stable migrated pane",
+      "passed": true
+    },
+    {
+      "name": "native Beta click selects Beta",
+      "passed": true
+    },
+    {
+      "name": "closed browser resource is ignored",
+      "passed": true
+    },
+    {
+      "name": "removed pane is ignored",
+      "passed": true
+    },
+    {
+      "name": "maximized-away Alpha is ignored",
+      "passed": true
+    },
+    {
+      "name": "visible maximized Beta remains selectable",
+      "passed": true
+    },
+    {
+      "name": "project draft click selects that draft",
+      "passed": true
+    },
+    {
+      "name": "folderless draft click selects that draft",
+      "passed": true
+    }
+  ]
+}

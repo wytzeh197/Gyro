@@ -1,0 +1,49 @@
+{
+  "passed": false,
+  "checks": [
+    {
+      "name": "folderless draft navigation reaches the native open command",
+      "passed": true
+    },
+    {
+      "name": "capture attaches to its draft for workbench",
+      "passed": true
+    },
+    {
+      "name": "capture attaches to its draft for workbench:/tmp/Project with spaces",
+      "passed": true
+    },
+    {
+      "name": "capture attaches to its draft for 00000000-0000-4000-8000-000000000001",
+      "passed": true
+    },
+    {
+      "name": "closing a migrated draft pane closes its own chat browser",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n+   '00000000-0000-4000-8000-000000000002'\n-   '00000000-0000-4000-8000-000000000001'\n  ]\n"
+    },
+    {
+      "name": "closing a rekeyed pane closes its current chat browser",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n+   '00000000-0000-4000-8000-000000000001'\n-   '00000000-0000-4000-8000-000000000003'\n  ]\n"
+    },
+    {
+      "name": "closing an unfocused draft preserves the active chat browser",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n+   '00000000-0000-4000-8000-000000000002'\n-   'workbench:/tmp/Browser review project'\n  ]\n"
+    },
+    {
+      "name": "a removed pane cannot close the active chat browser",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n+ [\n+   '00000000-0000-4000-8000-000000000002'\n+ ]\n- []\n"
+    },
+    {
+      "name": "a solo pane closes the active browser",
+      "passed": true
+    },
+    {
+      "name": "an ordinary session pane closes its own browser",
+      "passed": true
+    }
+  ]
+}

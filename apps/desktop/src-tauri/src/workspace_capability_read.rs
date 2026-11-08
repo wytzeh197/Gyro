@@ -573,6 +573,48 @@ mod tests {
     }
 
     #[test]
+    fn repaired_byte_hints_read_files_with_bounded_continuable_results() {
+        let temp = tempfile::tempdir().unwrap();
+        let text = ".window { color: red; }\n".repeat(1000);
+        fs::write(temp.path().join("styles.css"), &text).unwrap();
+        let file = read_range_source(temp.path().to_str().unwrap(), "styles.css").unwrap();
+        for value in [json!(null), json!(-1), json!(0), json!(512), json!(200000)] {
+            let arguments = json!({"path":"styles.css","line":1,"endLine":1,"maxBytes":value});
+            let budget = workspace_result_byte_limit(&arguments).unwrap();
+            let mut data = select_safe_range(&file.content, &arguments).unwrap();
+            data["contentHash"] = json!(file.content_hash);
+            let result = bound_read_result(data, budget).unwrap();
+            assert_eq!(result["content"], ".window { color: red; }");
+            assert_eq!(result["contentHash"], file.content_hash);
+            assert!(serde_json::to_vec(&result).unwrap().len() <= budget);
+
+            let truncated = bound_read_result(
+                json!({"content":text,"line":1,"column":1,"truncated":false}),
+                budget.min(DEFAULT_WORKSPACE_RESULT_BYTES),
+            )
+            .unwrap();
+            assert_eq!(truncated["truncated"], true);
+            let rest = select_range(
+                &text,
+                &json!({
+                    "line":truncated["nextLine"], "column":truncated["nextColumn"],
+                    "endLine":1001,
+                }),
+            )
+            .unwrap();
+            assert_eq!(
+                text,
+                format!(
+                    "{}{}",
+                    truncated["content"].as_str().unwrap(),
+                    rest["content"].as_str().unwrap()
+                )
+            );
+            assert!(serde_json::to_vec(&truncated).unwrap().len() <= budget);
+        }
+    }
+
+    #[test]
     fn workspace_read_honors_range_beyond_preview() {
         let temp = tempfile::tempdir().unwrap();
         let text = format!(

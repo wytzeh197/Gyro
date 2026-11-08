@@ -4,6 +4,8 @@ pub(super) fn is_transient_provider_error(error: &str) -> bool {
     let normalized = error.to_ascii_lowercase();
     if is_provider_cancellation(error)
         || error.contains(provider_retry_recovery::CAPACITY_RETRY_EXHAUSTED)
+        || error.contains(provider_retry_recovery::RETRY_EXHAUSTED)
+        || error.contains(provider_retry_recovery::CONTINUATION_UNAVAILABLE)
         || is_stale_resume_error(error)
         || gyro_core::is_workspace_unavailable_error(error)
         || is_hopeless_provider_timeout(error)
@@ -14,6 +16,9 @@ pub(super) fn is_transient_provider_error(error: &str) -> bool {
             "invalid api key",
             "unauthorized",
             "insufficient_quota",
+            "quota exceeded",
+            "usagelimitexceeded",
+            "usage_limit_exceeded",
             "status 402",
             "http 402",
             "payment required",
@@ -32,7 +37,7 @@ pub(super) fn is_transient_provider_error(error: &str) -> bool {
         || normalized.contains("timeout")
         || normalized.contains("temporarily unavailable")
         || is_model_capacity_error(error)
-        || normalized.contains("try again")
+        || is_rate_limit_error(error)
         || normalized.contains("network is unreachable")
         || normalized.contains("could not resolve host")
         || normalized.contains("dns")
@@ -43,6 +48,31 @@ pub(super) fn is_transient_provider_error(error: &str) -> bool {
         ]
         .iter()
         .any(|status| normalized.contains(status))
+}
+
+pub(super) fn is_rate_limit_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    ![
+        "insufficient_quota",
+        "quota exceeded",
+        "usagelimitexceeded",
+        "usage_limit_exceeded",
+        "payment required",
+        "balance exhausted",
+        "billing",
+        "invalid api key",
+    ]
+    .iter()
+    .any(|cause| normalized.contains(cause))
+        && [
+            "http 429",
+            "rate limit",
+            "rate_limit",
+            "too many requests",
+            "provider cooldown",
+        ]
+        .iter()
+        .any(|cause| normalized.contains(cause))
 }
 
 pub(super) fn is_model_capacity_error(error: &str) -> bool {
@@ -145,6 +175,25 @@ pub(super) fn openai_tools_for_round(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn codex_quota_refusals_do_not_offer_generic_or_automatic_retry() {
+        for error in [
+            "Quota exceeded. Check your plan and billing details.",
+            "Request rejected [Codex error: \"usageLimitExceeded\"]",
+            "usage_limit_exceeded; HTTP 429; try again",
+        ] {
+            let (kind, advice) = provider_failure_recovery(error);
+            assert_eq!(kind, "quota-exceeded");
+            assert!(advice.contains("may not include this limit"));
+            assert!(!is_transient_provider_error(error));
+            assert!(!is_rate_limit_error(error));
+        }
+        assert!(is_rate_limit_error("HTTP 429: too many requests"));
+        assert_eq!(
+            provider_failure_recovery("insufficient_quota").0,
+            "plan-exhausted"
+        );
+    }
     #[test]
     fn checkpoint_continuations_do_not_accumulate_budget_notices() {
         let tools = vec![serde_json::json!({"type":"function"})];
@@ -292,6 +341,12 @@ pub(super) fn readable_provider_error(error: &str) -> String {
 }
 
 pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static str) {
+    if error.contains(provider_retry_recovery::CONTINUATION_UNAVAILABLE) {
+        return ("continuation-unavailable", "Completed work is preserved. The saved provider conversation is unavailable; automatic replay was stopped.");
+    }
+    if error.contains(provider_retry_recovery::RETRY_EXHAUSTED) {
+        return ("retry-exhausted", "Automatic recovery has ended. Retry to continue the saved conversation when the provider is ready.");
+    }
     let normalized = error.to_ascii_lowercase();
     // Checked first: the turn completed, so nothing below -- least of all the
     // retry fallback -- describes it.
@@ -382,6 +437,19 @@ pub(super) fn provider_failure_recovery(error: &str) -> (&'static str, &'static 
         return (
             "plan-exhausted",
             "This provider's plan or credit balance is used up. Top it up or switch provider; retrying will fail the same way.",
+        );
+    }
+    if [
+        "quota exceeded",
+        "usagelimitexceeded",
+        "usage_limit_exceeded",
+    ]
+    .iter()
+    .any(|cause| normalized.contains(cause))
+    {
+        return (
+            "quota-exceeded",
+            "The provider rejected this turn because of a usage or credit limit. Reported plan windows may not include this limit. Check usage with the provider or switch provider; retry after the restriction is resolved.",
         );
     }
     if normalized.contains("missing environment variable") {
@@ -495,7 +563,16 @@ pub(super) fn validate_tool_call(
     if !arguments.is_object() {
         return Err("Tool arguments must be a JSON object. Correct the arguments and try again. No action was executed.".into());
     }
-    validate_compatibility_schema_value(arguments, &desktop_capability_tool_schema(id), "arguments")
+    let schema = desktop_capability_tool_schema(id);
+    let mut normalized = std::borrow::Cow::Borrowed(arguments);
+    // Validate the same effective observation budget the broker will use.
+    // Only advertised size hints are repaired; paths, ranges, and mutation
+    // arguments still have to satisfy their original schema.
+    if schema["properties"].get("maxBytes").is_some() && arguments.get("maxBytes").is_some() {
+        let budget = workspace_result_byte_limit(arguments).map_err(|error| error.to_string())?;
+        normalized.to_mut()["maxBytes"] = serde_json::json!(budget);
+    }
+    validate_compatibility_schema_value(&normalized, &schema, "arguments")
         .map_err(|error| {
             let catalog = if provider_tool_batch::inline_tool_schema(id) {
                 String::new()
@@ -515,6 +592,45 @@ pub(super) fn validate_tool_call(
 #[cfg(test)]
 mod tool_validation_tests {
     use super::*;
+    #[test]
+    fn observation_size_hints_are_repaired_before_schema_validation() {
+        use serde_json::json;
+        for id in [
+            CapabilityId::WorkspaceRead,
+            CapabilityId::WorkspaceReadRange,
+        ] {
+            for value in [json!(null), json!(-1), json!(0), json!(512), json!(200000)] {
+                let arguments = json!({"path":"styles.css","maxBytes":value});
+                assert_eq!(
+                    validate_tool_call(id.provider_tool_name(), &arguments),
+                    Ok(id)
+                );
+                // Validation leaves the original call intact; execution applies
+                // the same shared helper to select the effective byte budget.
+                assert_eq!(arguments["maxBytes"], value);
+            }
+            for value in [json!("4096"), json!(1.5), json!(true)] {
+                assert!(validate_tool_call(
+                    id.provider_tool_name(),
+                    &json!({"path":"styles.css","maxBytes":value})
+                )
+                .is_err());
+            }
+        }
+        for arguments in [
+            json!({"maxBytes":0}),
+            json!({"path":42,"maxBytes":0}),
+            json!({"path":"styles.css","line":0,"maxBytes":0}),
+            json!({"path":"styles.css","extra":true,"maxBytes":0}),
+        ] {
+            assert!(validate_tool_call(
+                CapabilityId::WorkspaceRead.provider_tool_name(),
+                &arguments
+            )
+            .is_err());
+        }
+    }
+
     #[test]
     fn malformed_calls_can_be_repaired_without_execution() {
         assert!(validate_tool_call("invented_tool", &serde_json::json!({})).is_err());

@@ -1,5 +1,18 @@
 use serde_json::Value;
 
+/// Keep the structured category: a friendly message alone may omit the cause.
+pub(super) fn failure_message(params: &Value) -> String {
+    let error = &params["turn"]["error"];
+    let message = error
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("Codex turn did not complete");
+    match error.get("codexErrorInfo").filter(|info| !info.is_null()) {
+        Some(info) => format!("{message} [Codex error: {info}]"),
+        None => message.to_string(),
+    }
+}
+
 /// Only the provider's matching turn-completion notification closes a run.
 /// A completed message (including a preview/Canvas artifact) is intermediate
 /// output and may be followed by a long verification command.
@@ -38,6 +51,23 @@ pub(super) fn completion_status<'a>(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn failure_preserves_structured_quota_category_even_with_generic_copy() {
+        let message = failure_message(&json!({"turn":{"error":{
+            "message":"Request rejected",
+            "codexErrorInfo":"usageLimitExceeded"
+        }}}));
+        assert!(message.contains("Request rejected"));
+        assert!(message.contains("usageLimitExceeded"));
+        assert_eq!(
+            failure_message(&json!({"turn":{"error":{
+                "message":"Disconnected", "codexErrorInfo":null
+            }}})),
+            "Disconnected"
+        );
+        assert_eq!(failure_message(&json!({})), "Codex turn did not complete");
+    }
 
     #[test]
     fn artifacts_and_quiet_verification_do_not_complete_a_turn() {

@@ -21,6 +21,7 @@ import {
   Columns2,
   Command,
   Copy,
+  CreditCard,
   CornerDownRight,
   Download,
   Edit3,
@@ -87,6 +88,7 @@ import {
   XCircle,
   createLucideIcon,
 } from "lucide-react";
+import { branchCommitDetail, recentBranches } from "./branch-recency";
 import {
   Fragment,
   memo,
@@ -148,6 +150,7 @@ import {
   parseChatMarkdownLink,
 } from "./chat-file-links";
 import { createTranscriptTurnCache } from "./chat-history-efficiency";
+import { memoWithStableCallbacks } from "./stable-callback-props";
 import {
   chatMediaFiles,
   deliverChatMediaDrop,
@@ -278,6 +281,16 @@ import { SubagentsEnvironment } from "./subagents-environment";
 import { SubagentMark, SubagentPanel, SubagentStrip } from "./subagents-view";
 import { navigateTabList } from "./tab-navigation";
 import {
+  beginTerminalSessionDrag,
+  dropTerminalSessionDrag,
+  finishTerminalSessionDrag,
+  hoverTerminalSessionDrag,
+  placeTerminalSessionByKeyboard,
+  startTerminalSessionPointerDrag,
+  subscribeTerminalSessionDrag,
+  subscribeTerminalSessionDrop,
+} from "./terminal-session-drag";
+import {
   activeTerminalPaneId,
   listedTerminalPanes,
   placeTerminalTab,
@@ -388,6 +401,7 @@ import {
   runNeedsFinalResponse,
 } from "./chat-run";
 import { ChatRun } from "./chat-run-view";
+import { providerQuotaNotice } from "./provider-quota";
 import { browserCapabilityText } from "./chat-run.ts";
 import {
   interleaveModelSwitches,
@@ -607,6 +621,8 @@ import {
 } from "./usage-ledger";
 import { remainingUsage } from "./usage-remaining";
 import {
+  CHAT_SIDEBAR_MAX_WIDTH,
+  CHAT_SIDEBAR_MIN_WIDTH,
   CLI_LAUNCH_PRESET_MAX_PANES,
   canSendChat,
   chatGridReducer,
@@ -623,6 +639,7 @@ import {
   workspaceModeTechnicalHint,
 } from "./workspace-mode";
 import { workspaceRelativeFilePath } from "./workspace-project";
+import { useSidebarResize } from "./use-sidebar-resize";
 import {
   workspaceCommandRegistry,
   workspacePanelContributions,
@@ -668,13 +685,18 @@ const IDE_SIDEBAR_KEYBOARD_STEP = 16;
 const AI_VIEW_SIDEBAR_MINIMUM_WIDTH = 440;
 const SOURCE_CONTROL_SIDEBAR_MINIMUM_WIDTH = 360;
 function restingSidebarWidth() {
-  if (typeof window === "undefined") {
-    return 240;
-  }
-  if (window.innerWidth <= 980) {
+  return restingSidebarWidthFor(
+    typeof window === "undefined" ? 1440 : window.innerWidth,
+  );
+}
+/** A dragged Sessions sidebar never takes more than this share of the window. */
+const CHAT_SIDEBAR_MAX_VIEWPORT_SHARE = 0.3;
+/** Mirrors the Sessions sidebar breakpoints in styles.css. */
+function restingSidebarWidthFor(viewportWidth: number) {
+  if (viewportWidth <= 980) {
     return 190;
   }
-  if (window.innerWidth <= 1280) {
+  if (viewportWidth <= 1280) {
     return 224;
   }
   return 240;
@@ -719,72 +741,180 @@ function ChatSwitcher({
   chatSwitcher: NonNullable<ChatSurfaceProps["chatSwitcher"]>;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const switcherRef = useOutsidePointerDismiss<HTMLDivElement>(isOpen, () =>
-    setIsOpen(false),
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useOutsidePointerDismiss<HTMLDivElement>(
+    isOpen,
+    () => setIsOpen(false),
+    triggerRef,
   );
+  // The list is portaled onto the workspace chat so it can fill that column.
+  // A menu anchored to the trigger cannot: the trigger sits in a 24px corner.
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  const menuId = useId();
+
+  useLayoutEffect(() => {
+    const surface = triggerRef.current?.closest(".gyro-chat-surface");
+    setHost(
+      surface instanceof HTMLElement &&
+        surface.closest(".gyro-sidebar-ai-chat")
+        ? surface
+        : null,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const frame = requestAnimationFrame(() => {
+      panelRef.current
+        ?.querySelector<HTMLElement>('[role="menuitem"]')
+        ?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [isOpen]);
+
+  const close = () => setIsOpen(false);
+  const menu =
+    host && isOpen ? (
+      <div className="gyro-chat-mini-sidebar-layer" id={menuId} ref={panelRef}>
+        <button
+          aria-label="Close chats"
+          className="gyro-chat-mini-sidebar-scrim"
+          onClick={close}
+          type="button"
+        />
+        <div
+          aria-label="Chats"
+          className="gyro-chat-mini-sidebar"
+          role="menu"
+        >
+          <div className="gyro-sidebar-actions">
+            <button
+              className="gyro-sidebar-action"
+              onClick={() => {
+                close();
+                chatSwitcher.onNewChat();
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <Plus size={15} />
+              <span>New chat</span>
+            </button>
+          </div>
+          <div className="gyro-sidebar-project-chat-list">
+            <div className="gyro-sidebar-small-title">Recents</div>
+            {chatSwitcher.chats.length > 0 ? (
+              chatSwitcher.chats.map((chat) => {
+                const isActive = chat.id === chatSwitcher.activeChatId;
+                return (
+                  <div
+                    className={[
+                      "gyro-session-row",
+                      "is-draft",
+                      isActive ? "is-active" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    key={chat.id}
+                  >
+                    <button
+                      aria-current={isActive ? "page" : undefined}
+                      className="gyro-sidebar-thread-main"
+                      onClick={() => {
+                        close();
+                        chatSwitcher.onSelect(chat.id);
+                      }}
+                      role="menuitem"
+                      title={chat.title}
+                      type="button"
+                    >
+                      <span className="gyro-sidebar-thread-title">
+                        <span>{chat.title}</span>
+                      </span>
+                      {chat.meta ? <small>{chat.meta}</small> : null}
+                    </button>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="gyro-sidebar-recents-empty">
+                No other chats in this project
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    ) : isOpen ? (
+      <div
+        className="gyro-chat-switcher-menu"
+        id={menuId}
+        ref={panelRef}
+        role="menu"
+      >
+        <button
+          className="gyro-chat-switcher-item is-action"
+          onClick={() => {
+            close();
+            chatSwitcher.onNewChat();
+          }}
+          role="menuitem"
+          type="button"
+        >
+          <Plus size={13} />
+          New chat
+        </button>
+        {chatSwitcher.chats.length > 0 ? (
+          <>
+            <span className="gyro-chat-switcher-label">Recent</span>
+            {chatSwitcher.chats.map((chat) => (
+              <button
+                aria-current={
+                  chat.id === chatSwitcher.activeChatId ? "true" : undefined
+                }
+                className={
+                  chat.id === chatSwitcher.activeChatId
+                    ? "gyro-chat-switcher-item is-active"
+                    : "gyro-chat-switcher-item"
+                }
+                key={chat.id}
+                onClick={() => {
+                  close();
+                  chatSwitcher.onSelect(chat.id);
+                }}
+                role="menuitem"
+                title={chat.title}
+                type="button"
+              >
+                <MessageSquare size={13} />
+                <span>{chat.title}</span>
+                {chat.meta ? <small>{chat.meta}</small> : null}
+              </button>
+            ))}
+          </>
+        ) : (
+          <div className="gyro-chat-switcher-empty">
+            No other chats in this project
+          </div>
+        )}
+      </div>
+    ) : null;
 
   return (
-    <div className="gyro-chat-switcher" ref={switcherRef}>
+    <div className="gyro-chat-switcher">
       <button
+        aria-controls={menuId}
         aria-expanded={isOpen}
         aria-haspopup="menu"
         aria-label="Recent chats"
         className="gyro-chat-switcher-trigger"
         onClick={() => setIsOpen((open) => !open)}
+        ref={triggerRef}
         title="Recent chats"
         type="button"
       >
         <ChatSwitcherIcon />
       </button>
-      {isOpen ? (
-        <div className="gyro-chat-switcher-menu" role="menu">
-          <button
-            className="gyro-chat-switcher-item is-action"
-            onClick={() => {
-              setIsOpen(false);
-              chatSwitcher.onNewChat();
-            }}
-            role="menuitem"
-            type="button"
-          >
-            <Plus size={13} />
-            New chat
-          </button>
-          {chatSwitcher.chats.length > 0 ? (
-            <>
-              <span className="gyro-chat-switcher-label">Recent</span>
-              {chatSwitcher.chats.map((chat) => (
-                <button
-                  aria-current={
-                    chat.id === chatSwitcher.activeChatId ? "true" : undefined
-                  }
-                  className={
-                    chat.id === chatSwitcher.activeChatId
-                      ? "gyro-chat-switcher-item is-active"
-                      : "gyro-chat-switcher-item"
-                  }
-                  key={chat.id}
-                  onClick={() => {
-                    setIsOpen(false);
-                    chatSwitcher.onSelect(chat.id);
-                  }}
-                  role="menuitem"
-                  title={chat.title}
-                  type="button"
-                >
-                  <MessageSquare size={13} />
-                  <span>{chat.title}</span>
-                  {chat.meta ? <small>{chat.meta}</small> : null}
-                </button>
-              ))}
-            </>
-          ) : (
-            <div className="gyro-chat-switcher-empty">
-              No other chats in this project
-            </div>
-          )}
-        </div>
-      ) : null}
+      {host && menu ? createPortal(menu, host) : menu}
     </div>
   );
 }
@@ -834,6 +964,8 @@ type AppChromeProps = {
   onProviderReadinessAction?: () => void;
   workspaceSidebarHidden?: boolean;
   workspaceSidebarWidth?: number;
+  /** Saved width of the Sessions sidebar outside the code view. */
+  chatSidebarWidth?: number;
   workspacePreparation?: WorkspacePreparationProgress;
   onSelectSession: (sessionId: string) => void;
   onAddSessionToGrid?: (sessionId: string) => void;
@@ -940,6 +1072,8 @@ type AppChromeProps = {
   onUpdateAction?: (state: UpdateState) => void;
   onWorkspaceSidebarHiddenChange?: (hidden: boolean) => void;
   onWorkspaceSidebarWidthChange?: (width?: number) => void;
+  /** Omit to keep the Sessions sidebar at its fixed responsive width. */
+  onChatSidebarWidthChange?: (width?: number) => void;
   onRetryWorkspacePreparation?: () => void;
   /**
    * The AI view is the workspace's chat: the sidebar renders the same
@@ -1036,7 +1170,7 @@ const settingsSidebarItems: Array<{
   {
     id: "billing",
     label: "Plan & billing",
-    icon: Gauge,
+    icon: CreditCard,
     group: "Gyro account",
   },
   { id: "advanced", label: "Data & privacy", icon: Settings, group: "System" },
@@ -1811,6 +1945,7 @@ export function AppChrome({
   onProviderReadinessAction,
   workspaceSidebarHidden,
   workspaceSidebarWidth,
+  chatSidebarWidth,
   onSelectSession,
   onAddSessionToGrid,
   onSelectWorkspaceLayout,
@@ -1891,6 +2026,7 @@ export function AppChrome({
   onUpdateAction,
   onWorkspaceSidebarHiddenChange,
   onWorkspaceSidebarWidthChange,
+  onChatSidebarWidthChange,
   workspacePreparation,
   onRetryWorkspacePreparation,
   renderAiChat,
@@ -2008,6 +2144,27 @@ export function AppChrome({
   const [isIdeSidebarCustomized, setIsIdeSidebarCustomized] = useState(false);
   const [isIdeSidebarResizing, setIsIdeSidebarResizing] = useState(false);
   const appShellRef = useRef<HTMLDivElement>(null);
+  // The Sessions sidebar (every view but code, Settings included so the rail
+  // never jumps when Settings opens) keeps its own saved width, apart from the
+  // code view's, whose panels need other minimums.
+  const isChatSidebarResizable =
+    !isIdeSurface && onChatSidebarWidthChange !== undefined;
+  const chatSidebarResize = useSidebarResize({
+    targetRef: appShellRef,
+    cssVariable: "--gyro-chat-sidebar-width",
+    savedWidth: chatSidebarWidth,
+    defaultWidth: restingSidebarWidthFor,
+    minimumWidth: () => CHAT_SIDEBAR_MIN_WIDTH,
+    maximumWidth: (viewportWidth) =>
+      Math.min(
+        CHAT_SIDEBAR_MAX_WIDTH,
+        Math.round(viewportWidth * CHAT_SIDEBAR_MAX_VIEWPORT_SHARE),
+      ),
+    onCommit: onChatSidebarWidthChange,
+  });
+  const hasChatSidebarWidth =
+    isChatSidebarResizable &&
+    (chatSidebarResize.isCustomized || chatSidebarResize.isResizing);
 
   useEffect(() => {
     const compact = window.matchMedia("(max-width: 780px)");
@@ -2328,11 +2485,16 @@ export function AppChrome({
           : ""
       } ${isIdeSurface ? "is-workspace-chrome-active" : ""} ${
         isSidebarHidden ? "is-sidebar-hidden" : ""
-      } ${isIdeSidebarResizing ? "is-ide-sidebar-resizing" : ""} ${isCompactNavigationOpen ? "is-compact-navigation-open" : ""}`}
+      } ${isIdeSidebarResizing ? "is-ide-sidebar-resizing" : ""} ${
+        isChatSidebarResizable && chatSidebarResize.isResizing
+          ? "is-sidebar-resizing"
+          : ""
+      } ${hasChatSidebarWidth ? "has-chat-sidebar-width" : ""} ${isCompactNavigationOpen ? "is-compact-navigation-open" : ""}`}
       data-workspace-activity-rail={isIdeSurface ? "visible" : "hidden"}
       style={
         {
           "--gyro-ide-sidebar-width": `${ideSidebarWidth}px`,
+          "--gyro-chat-sidebar-width": `${chatSidebarResize.width}px`,
         } as CSSProperties
       }
       ref={appShellRef}
@@ -2809,6 +2971,14 @@ export function AppChrome({
               role="separator"
               tabIndex={0}
               title="Resize Workspace sidebar"
+            />
+          ) : null}
+          {isChatSidebarResizable && !isCompactNavigationOpen ? (
+            <div
+              {...chatSidebarResize.handleProps}
+              aria-label="Resize sidebar"
+              aria-description="Drag to resize. Use the Left and Right arrow keys to adjust, Home and End for limits. Double-click to reset."
+              className="gyro-ide-sidebar-resizer is-chat-sidebar-resizer"
             />
           ) : null}
         </aside>
@@ -5285,6 +5455,10 @@ export function ChatSurface({
   const composerProviderUsage = contextModel.providerId
     ? providerUsageByProvider?.[contextModel.providerId]
     : undefined;
+  const composerQuotaNotice = useMemo(
+    () => providerQuotaNotice(transcriptEvents, contextModel.providerId),
+    [transcriptEvents, contextModel.providerId],
+  );
   const composerLedger = contextModel.providerId
     ? providerLedgerById?.[contextModel.providerId]
     : undefined;
@@ -5380,6 +5554,111 @@ export function ChatSurface({
   );
   // Browser connectivity belongs to the surface; history turns share it.
   const isOnline = useNetworkOnline();
+  // Per-turn props are built once per input change, not per render, so the
+  // memoized ChatTurn skips every turn a streamed delta did not touch.
+  // Parents pass inline handlers, so read the latest ones through a ref and
+  // keep one actions object for the life of the surface. A changing object
+  // would re-render every memoized transcript turn on each streamed delta.
+  const artifactHandlers = useRef({
+    handleArtifactPrompt,
+    onBrowserNavigate,
+    onBrowserOpenExternal,
+    onComposerAction,
+    onOpenToolPanel,
+    onSelectChatPanel,
+    openCanvas,
+  });
+  artifactHandlers.current = {
+    handleArtifactPrompt,
+    onBrowserNavigate,
+    onBrowserOpenExternal,
+    onComposerAction,
+    onOpenToolPanel,
+    onSelectChatPanel,
+    openCanvas,
+  };
+  const transcriptArtifactActions = useMemo<ChatArtifactActions>(() => {
+    const latest = () => artifactHandlers.current;
+    return {
+      onOpenCanvas: (...args: Parameters<typeof openCanvas>) =>
+        latest().openCanvas(...args),
+      onOpenPreview: (url) => {
+        const { onSelectChatPanel, onBrowserNavigate } = latest();
+        onSelectChatPanel?.("browser");
+        if (url && /^https?:\/\//i.test(url)) onBrowserNavigate?.(url);
+      },
+      onOpenFiles: () => {
+        const { onSelectChatPanel, onComposerAction } = latest();
+        if (onSelectChatPanel) onSelectChatPanel("files");
+        else onComposerAction?.("open-files");
+      },
+      // Artifact actions belong beside their owning conversation.
+      onOpenTool: (tab) => {
+        const { onSelectChatPanel, onOpenToolPanel } = latest();
+        if ((tab === "browser" || tab === "terminal") && onSelectChatPanel) {
+          onSelectChatPanel(tab);
+          return;
+        }
+        if (tab === "diff" && onSelectChatPanel) {
+          onSelectChatPanel("review");
+          return;
+        }
+        onOpenToolPanel?.(tab);
+      },
+      onOpenExternalPreview: () => latest().onBrowserOpenExternal?.(),
+      onSendPrompt: (...args: Parameters<typeof handleArtifactPrompt>) =>
+        latest().handleArtifactPrompt(...args),
+    };
+  }, []);
+  const keepAlivesByTurn = useMemo(() => {
+    const byTurn = new Map<string, KeepAliveWatch[]>();
+    for (const watch of keepAlives) {
+      if (!watch.turnId) continue;
+      const list = byTurn.get(watch.turnId);
+      if (list) list.push(watch);
+      else byTurn.set(watch.turnId, [watch]);
+    }
+    return byTurn;
+  }, [keepAlives]);
+  const latestCaptureSrc = browserPreview?.latestCapture?.src;
+  const latestCapturePath = browserPreview?.latestCapture?.path;
+  const hasLatestCapture = Boolean(browserPreview?.latestCapture);
+  const transcriptPreviewCapture = useMemo(
+    () =>
+      hasLatestCapture
+        ? { src: latestCaptureSrc, path: latestCapturePath }
+        : undefined,
+    [hasLatestCapture, latestCapturePath, latestCaptureSrc],
+  );
+  // One review object per turn, rebuilt only when review state changes.
+  const fileReviewByTurn = useMemo(
+    () => new Map<string, ChatTurnFileReview>(),
+    [
+      fileReviewPendingTurnIds,
+      fileReviewSummaries,
+      onFileReviewAsk,
+      onFileReviewKeep,
+    ],
+  );
+  const fileReviewForTurn = (
+    turnId: string,
+  ): ChatTurnFileReview | undefined => {
+    if (!isFileReviewEnabled) return undefined;
+    let review = fileReviewByTurn.get(turnId);
+    if (!review) {
+      review = {
+        summaries: fileReviewSummaries?.[turnId],
+        isSummarizing: fileReviewPendingTurnIds?.includes(turnId) ?? false,
+        onKeep: onFileReviewKeep
+          ? (path, contentHash) =>
+              onFileReviewKeep({ turnId, path, contentHash })
+          : undefined,
+        onAsk: onFileReviewAsk,
+      };
+      fileReviewByTurn.set(turnId, review);
+    }
+    return review;
+  };
   const transcriptContent = useMemo(
     () => (
       <>
@@ -5403,62 +5682,15 @@ export function ChatSurface({
             <ChatTurn
               isOnline={isOnline}
               subagents={subagents}
-              artifactActions={{
-                onOpenCanvas: openCanvas,
-                onOpenPreview: (url) => {
-                  onSelectChatPanel?.("browser");
-                  if (url && /^https?:\/\//i.test(url))
-                    onBrowserNavigate?.(url);
-                },
-                onOpenFiles: () =>
-                  onSelectChatPanel
-                    ? onSelectChatPanel("files")
-                    : onComposerAction?.("open-files"),
-                // Artifact actions belong beside their owning conversation.
-                onOpenTool: (tab) => {
-                  if (
-                    (tab === "browser" || tab === "terminal") &&
-                    onSelectChatPanel
-                  ) {
-                    onSelectChatPanel(tab);
-                    return;
-                  }
-                  if (tab === "diff" && onSelectChatPanel) {
-                    onSelectChatPanel("review");
-                    return;
-                  }
-                  onOpenToolPanel?.(tab);
-                },
-                onOpenExternalPreview: () => onBrowserOpenExternal?.(),
-                onSendPrompt: handleArtifactPrompt,
-              }}
+              artifactActions={transcriptArtifactActions}
               isActive={turn.id === activeTurnId}
-              keepAlives={keepAlives.filter(
-                (watch) => watch.turnId === turn.id,
-              )}
+              keepAlives={keepAlivesByTurn.get(turn.id) ?? NO_KEEP_ALIVES}
               liveChangesTarget={liveChangesTarget}
               onOpenBrowserUrl={onBrowserNavigate}
               onOpenKeepAlive={onOpenKeepAlive}
               onRelaunchKeepAlive={onRelaunchKeepAlive}
               onStopKeepAlive={onStopKeepAlive}
-              fileReview={
-                isFileReviewEnabled
-                  ? {
-                      summaries: fileReviewSummaries?.[turn.id],
-                      isSummarizing:
-                        fileReviewPendingTurnIds?.includes(turn.id) ?? false,
-                      onKeep: onFileReviewKeep
-                        ? (path, contentHash) =>
-                            onFileReviewKeep({
-                              turnId: turn.id,
-                              path,
-                              contentHash,
-                            })
-                        : undefined,
-                      onAsk: onFileReviewAsk,
-                    }
-                  : undefined
-              }
+              fileReview={fileReviewForTurn(turn.id)}
               key={turn.id}
               onLoadChangeDiff={onLoadChangeDiff}
               onOpenChanges={(path, files) => {
@@ -5490,14 +5722,7 @@ export function ChatSurface({
               isPlanInPanel={activeRailPanel === "plan"}
               onOpenPlanPanel={onTogglePlanPanel}
               plan={sessionPlan}
-              previewCapture={
-                browserPreview?.latestCapture
-                  ? {
-                      src: browserPreview.latestCapture.src,
-                      path: browserPreview.latestCapture.path,
-                    }
-                  : undefined
-              }
+              previewCapture={transcriptPreviewCapture}
               sourceControl={sourceControl}
               sourceControlBaseline={turnSourceControlBaselines?.[turn.id]}
               turn={turn}
@@ -5538,8 +5763,10 @@ export function ChatSurface({
       railDiffTools?.onSelectFile,
       handlePlanDecision,
       handleArtifactPrompt,
-      browserPreview?.latestCapture?.path,
-      browserPreview?.latestCapture?.src,
+      transcriptArtifactActions,
+      transcriptPreviewCapture,
+      keepAlivesByTurn,
+      fileReviewByTurn,
       sourceControl,
       turnSourceControlBaselines,
       activeTurnId,
@@ -5962,6 +6189,7 @@ export function ChatSurface({
             providerLedger={composerLedger}
             dailyPaceWarning={dailyPaceWarning}
             limitWindows={composerLimits}
+            quotaNotice={composerQuotaNotice}
             canCompactContext={canCompactContext}
             savedProjects={savedProjects}
             shellReady={shellReady}
@@ -6278,6 +6506,7 @@ export function ChatSurface({
             providerLedger={composerLedger}
             dailyPaceWarning={dailyPaceWarning}
             limitWindows={composerLimits}
+            quotaNotice={composerQuotaNotice}
             canCompactContext={canCompactContext}
             savedProjects={savedProjects}
             shellReady={shellReady}
@@ -7720,6 +7949,7 @@ function ChatCompanionDock({
   }, [isVisible, selectedTab?.key, tabs.length]);
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       const surface =
         sharedHost?.frameRef.current ?? dockRef.current?.parentElement;
       if (!isVisible || !surface || !surface.contains(document.activeElement))
@@ -9653,6 +9883,11 @@ function WorkspaceSettingsEditor({
           <Settings size={13} /> Workspace
         </span>
         <h1 id="gyro-workspace-settings-title">
+          {view === "editor" ? (
+            <FileText aria-hidden="true" size={18} />
+          ) : (
+            <Blocks aria-hidden="true" size={18} />
+          )}
           {view === "editor" ? "Workspace" : "Tools"}
         </h1>
         <p>
@@ -11439,6 +11674,8 @@ export type ChatRailTerminalTools = Omit<
 >;
 
 type TerminalPanelProps = {
+  /** Full CLI workspace uses sidebar sessions and draggable pane headers. */
+  sessionNavigation?: boolean;
   panelActions?: ReactNode;
   onSelectPanel?: (tab: WorkbenchPaneTab) => void;
   onShowToolLauncher?: () => void;
@@ -11841,6 +12078,7 @@ function TerminalActionsMenu({
 }
 
 export function TerminalPanel({
+  sessionNavigation = false,
   panelActions,
   onSelectPanel,
   profiles,
@@ -11951,6 +12189,32 @@ export function TerminalPanel({
     finishTerminalDrag();
   };
   const [draggedPaneId, setDraggedPaneId] = useState<string | undefined>();
+  const sessionGridRef = useRef<HTMLDivElement>(null);
+  const [sessionDrop, setSessionDrop] = useState<{ targetId: string; edge: TerminalDropEdge }>();
+  useEffect(() => {
+    if (!sessionNavigation) return;
+    const unsubscribe = subscribeTerminalSessionDrag((drag) => {
+      setDraggedPaneId(drag?.paneId);
+      setSessionDrop(drag?.over);
+    });
+    window.addEventListener("dragend", finishTerminalSessionDrag);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("dragend", finishTerminalSessionDrag);
+    };
+  }, [sessionNavigation]);
+  useEffect(() => {
+    if (!sessionNavigation) return;
+    return subscribeTerminalSessionDrop((sourceId, target) => {
+      if (!sessionGridRef.current?.contains(target.element) ||
+          !panes.some((pane) => pane.id === sourceId)) return;
+      const next = placeTerminalTab(
+        { ...splitLayout, ids: visibleIds }, target.targetId, sourceId, target.edge,
+      );
+      setSplitLayout(next);
+      if (next.ids.includes(sourceId)) onSelectTerminalPane?.(sourceId);
+    });
+  }, [sessionNavigation, terminalPanes, activePaneId, splitLayout, visibleIds.join("|"), onSelectTerminalPane]);
   useEffect(() => {
     if (!draggedPaneId) return;
     const cancel = () => {
@@ -11973,11 +12237,11 @@ export function TerminalPanel({
   };
   return (
     <div
-      className={["gyro-terminal-workspace", hasPanes ? "" : "is-empty"]
+      className={["gyro-terminal-workspace", sessionNavigation ? "is-session-workspace" : "", hasPanes ? "" : "is-empty"]
         .filter(Boolean)
         .join(" ")}
     >
-      <div
+      {!sessionNavigation && <div
         className={
           hasPanes ? "gyro-terminal-toolbar" : "gyro-terminal-toolbar is-empty"
         }
@@ -12188,8 +12452,20 @@ export function TerminalPanel({
           />
         ) : null}
         {panelActions}
-      </div>
+      </div>}
       <div
+        ref={sessionGridRef}
+        onDragOver={sessionNavigation ? (event) => {
+          if (!draggedPaneId) return;
+          event.preventDefault();
+          hoverTerminalSessionDrag(event.clientX, event.clientY);
+        } : undefined}
+        onDrop={sessionNavigation ? (event) => {
+          if (!draggedPaneId) return;
+          event.preventDefault();
+          event.stopPropagation();
+          dropTerminalSessionDrag(event.clientX, event.clientY);
+        } : undefined}
         className="gyro-terminal-grid"
         data-terminal-count={visibleIds.length}
         data-terminal-axis={splitLayout.axis}
@@ -12200,6 +12476,28 @@ export function TerminalPanel({
         {panes.length > 0 ? (
           panes.map((pane) => (
             <TerminalPaneView
+              sessionNavigation={sessionNavigation}
+              sessionDropEdge={sessionDrop?.targetId === pane.id && draggedPaneId !== pane.id ? sessionDrop.edge : undefined}
+              headerActions={sessionNavigation ? (
+                <>
+                  <button className="gyro-terminal-session-action" aria-label="New terminal" title="New terminal" onClick={() => onAddTerminalPane?.(launchOptions)} type="button"><Plus size={14} /></button>
+                  <TerminalActionsMenu
+                    paneId={pane.id}
+                    onRename={onRenameTerminalPane}
+                    onRestart={onRestartTerminalPane}
+                    onClose={onCloseTerminalPane}
+                    extraActions={[
+                      { label: "Focus terminal", icon: Maximize2, onClick: () => {
+                        setSplitLayout({ ids: [pane.id], axis: "horizontal" });
+                        onSelectTerminalPane?.(pane.id);
+                      }},
+                      { label: "Stop terminal", icon: Square, disabled: pane.status !== "running" && pane.status !== "waiting", onClick: () => onKillTerminalPane?.(pane.id) },
+                      { label: "Review changes", icon: GitPullRequest, onClick: () => onReviewTerminalChanges?.() },
+                      { label: "Open commands", icon: Command, onClick: () => onOpenCommandPalette?.() },
+                    ]}
+                  />
+                </>
+              ) : undefined}
               hidden={!visibleIds.includes(pane.id)}
               placementStyle={{
                 gridColumn:
@@ -12331,7 +12629,7 @@ export function TerminalPanel({
             </nav>
           </section>
         )}
-        {draggedPaneId && panes.length > 1 ? (
+        {!sessionNavigation && draggedPaneId && panes.length > 1 ? (
           <div
             className="gyro-terminal-drop-zones"
             aria-label="Place terminal in split view"
@@ -12429,6 +12727,7 @@ function WorkbenchPaneTabs({
 }
 
 function WorkbenchPaneContent({
+  terminalSessionNavigation = false,
   terminalPanelActions,
   onShowToolLauncher,
   isToolLauncherOpen,
@@ -12492,6 +12791,7 @@ function WorkbenchPaneContent({
   onSelectOutputChannel,
   onRunTestTask,
 }: {
+  terminalSessionNavigation?: boolean;
   terminalPanelActions?: ReactNode;
   onShowToolLauncher?: () => void;
   isToolLauncherOpen?: boolean;
@@ -12667,6 +12967,7 @@ function WorkbenchPaneContent({
 
   return (
     <TerminalPanel
+      sessionNavigation={terminalSessionNavigation}
       panelActions={terminalPanelActions}
       onShowToolLauncher={onShowToolLauncher}
       isToolLauncherOpen={isToolLauncherOpen}
@@ -13267,6 +13568,7 @@ export function WorkspaceToolPanel({
         </div>
       ) : null}
       <WorkbenchPaneContent
+        terminalSessionNavigation={isPrimary}
         onShowToolLauncher={!isPrimary ? toggleLauncher : undefined}
         isToolLauncherOpen={isLauncherOpen}
         terminalPanelActions={compactTerminal ? panelControls : undefined}
@@ -15442,7 +15744,8 @@ function WebBrowserPreviewSurface({
   // Only surfaces covering the page require hiding the native child.
   const companionMoving = useContext(CompanionMotionContext);
   const hostShouldHide =
-    companionMoving || overlayOccluded || showingCapture || isBlank;
+    companionMoving || overlayOccluded || showingCapture || isBlank ||
+    Boolean(preview.navigationError);
 
   useLayoutEffect(() => {
     if (!useNativeHost || !onHostBoundsChange) {
@@ -15757,6 +16060,7 @@ function WebBrowserPreviewSurface({
                     isLoading={isLoading}
                     isOccluded={overlayOccluded}
                     isUnreachable={preview.status === "verification-failed"}
+                    navigationError={preview.navigationError}
                     onNavigate={onNavigate}
                     onOpenExternal={onOpenExternal}
                     onReload={reloadFrame}
@@ -15785,6 +16089,7 @@ function WebBrowserPreviewSurface({
                   isLoading={isLoading}
                   isOccluded={overlayOccluded}
                   isUnreachable={preview.status === "verification-failed"}
+                  navigationError={preview.navigationError}
                   onNavigate={onNavigate}
                   onOpenExternal={onOpenExternal}
                   onReload={reloadFrame}
@@ -15930,6 +16235,7 @@ function BrowserFramePlaceholder({
   isLoading,
   isOccluded,
   isUnreachable,
+  navigationError,
   onNavigate,
   onOpenExternal,
   onReload,
@@ -15941,6 +16247,7 @@ function BrowserFramePlaceholder({
   isLoading: boolean;
   isOccluded: boolean;
   isUnreachable: boolean;
+  navigationError?: BrowserPreview["navigationError"];
   onNavigate?: (url: string) => void;
   onOpenExternal?: () => void;
   onReload?: () => void;
@@ -15952,7 +16259,7 @@ function BrowserFramePlaceholder({
     : isLoading
       ? "Loading preview"
       : isUnreachable
-        ? "Can't reach this page"
+        ? navigationError?.kind === "cancelled" ? "Navigation cancelled" : "Can't reach this page"
         : "No live preview yet";
   const detail = isOccluded
     ? "Close the overlay to show the native browser surface again."
@@ -15961,9 +16268,9 @@ function BrowserFramePlaceholder({
         ? `Connecting to ${hostLabel}…`
         : "Connecting…"
       : isUnreachable
-        ? isLoopbackBrowserPreviewUrl(suggestedUrl)
+        ? navigationError?.message ?? (isLoopbackBrowserPreviewUrl(suggestedUrl)
           ? `Nothing is responding at ${hostLabel || "this address"}. Start the app, then try again.`
-          : "Check the address or your connection, then try again."
+          : "Check the address or your connection, then try again.")
         : hasUrl
           ? "Point the browser at a running app, or open this URL externally."
           : "Enter a URL above to preview a running app or website.";
@@ -19596,6 +19903,27 @@ function useLimitClock(enabled: boolean) {
   return now;
 }
 
+/**
+ * Say how old a reading the provider could not refresh is.
+ *
+ * "Last known usage" read as current while the stored figure was days old,
+ * so a 39% week sat beside an account that had since spent 92%.
+ */
+function staleUsageLabel(fetchedAt: string | undefined, now: number) {
+  const fetchedMs = fetchedAt ? Date.parse(fetchedAt) : NaN;
+  if (!Number.isFinite(fetchedMs)) return "Last known usage · retrying";
+  const minutes = Math.max(0, Math.floor((now - fetchedMs) / 60_000));
+  const age =
+    minutes < 1
+      ? "just now"
+      : minutes < 60
+        ? `${minutes} min ago`
+        : minutes < 48 * 60
+          ? `${Math.floor(minutes / 60)} hr ago`
+          : `${Math.floor(minutes / (24 * 60))} days ago`;
+  return `Reading from ${age} · retrying`;
+}
+
 /** Plan limits turn at 80% and 95%. Context uses the same bands. */
 function contextMeterSeverity(
   usage: { contextWindowTokens: number; percent: number } | undefined,
@@ -19998,15 +20326,10 @@ function branchPopoverItems({
         ? `Branch from ${branchCatalog.current}`
         : "Branch from the current commit"),
   };
-  // One line per branch: what each row does lives in its tooltip, and the
-  // current branch leads the list so it never scrolls out of view.
-  const branchItems = [...branchCatalog.branches]
-    .sort(
-      (a, b) =>
-        Number(b === branchCatalog.current) -
-        Number(a === branchCatalog.current),
-    )
-    .map((branch): ComposerPopoverItem => {
+  // Keep the current branch visible, then order by commit time. Recency is
+  // local Git data, independent of a branch's name or release version.
+  const branchItems = recentBranches(branchCatalog).map(
+    ({ name: branch, latest, committedAt }): ComposerPopoverItem => {
       const inWorktree =
         branch !== branchCatalog.current &&
         Boolean(
@@ -20017,7 +20340,11 @@ function branchPopoverItems({
       return {
         action: `select-branch:${encodeURIComponent(branch)}`,
         active: branch === branchCatalog.current,
-        badge: inWorktree ? "worktree" : undefined,
+        badge:
+          [latest ? "Latest commit" : "", inWorktree ? "worktree" : ""]
+            .filter(Boolean)
+            .join(" · ") || undefined,
+        detail: branchCommitDetail(committedAt),
         disabled: isDisabled,
         icon: GitBranch,
         kind: "branch",
@@ -20033,7 +20360,8 @@ function branchPopoverItems({
               ? "Checked out in a linked worktree"
               : "Switch branch; keep compatible local changes"),
       };
-    });
+    },
+  );
   return [
     ...branchItems,
     createBranchItem,
@@ -20766,6 +21094,7 @@ function Composer({
   providerLedger,
   dailyPaceWarning = true,
   limitWindows = [],
+  quotaNotice,
   canCompactContext = false,
   onComposerAction,
   onCancelGoalComposer,
@@ -20826,6 +21155,7 @@ function Composer({
   providerLedger?: ProviderLedgerSummary;
   dailyPaceWarning?: boolean;
   limitWindows?: ComposerLimitWindow[];
+  quotaNotice?: string;
   /** This chat has a provider-backed context that can be compacted manually. */
   canCompactContext?: boolean;
   onComposerAction?: (action: string) => void;
@@ -20903,12 +21233,20 @@ function Composer({
   /** Caret the user last placed. Unset means dictation appends. */
   const dictationCaretChoiceRef = useRef<number | null>(null);
   const dictationSessionRef = useRef<AbortController | null>(null);
-  /** Pending settle timer: a stop shows the processing ring, then clears. */
+  /** Safety deadline only; normal completion clears as soon as final text arrives. */
   const dictationSettleRef = useRef<number | null>(null);
   const [dictationPhase, setDictationPhase] = useState<
-    "idle" | "listening" | "processing"
+    "idle" | "starting" | "listening" | "processing"
   >("idle");
   const [dictationNotice, setDictationNotice] = useState("");
+  const dictationStatus =
+    dictationPhase === "starting"
+      ? "Starting microphone…"
+      : dictationPhase === "listening"
+        ? "Listening… Click the microphone to finish."
+        : dictationPhase === "processing"
+          ? "Finishing dictation…"
+          : dictationNotice;
   const releaseDictation = useCallback(
     (restoreBase: boolean) => {
       const anchor = dictationAnchorRef.current;
@@ -20940,27 +21278,23 @@ function Composer({
    * processing ring, and clear the badge once the session settles.
    */
   const settleDictation = useCallback(() => {
-    const session = dictationSessionRef.current;
-    setDictationPhase("processing");
-    dictation?.stop();
-    if (dictationSettleRef.current !== null) {
-      window.clearTimeout(dictationSettleRef.current);
+    if (!dictation?.finish) {
+      releaseDictation(false);
+      return;
     }
-    // A late final still lands in the draft, so hold the session open briefly.
+    setDictationPhase("processing");
+    // Set the deadline first: controllers may finalize synchronously.
     dictationSettleRef.current = window.setTimeout(() => {
-      dictationSettleRef.current = null;
-      session?.abort();
-      dictationSessionRef.current = null;
-      dictationAnchorRef.current = null;
-      dictationCaretRef.current = null;
-      setDictationPhase("idle");
-    }, 900);
-  }, [dictation]);
+      releaseDictation(false);
+    }, 2000);
+    dictation.finish();
+  }, [dictation, releaseDictation]);
   const toggleDictation = useCallback(() => {
     if (!dictation) return;
     if (dictationPhase === "processing") return;
     if (dictationAnchorRef.current) {
-      settleDictation();
+      if (dictationPhase === "starting") releaseDictation(false);
+      else settleDictation();
       return;
     }
     const textarea = composerTextareaRef.current;
@@ -20971,7 +21305,7 @@ function Composer({
     const session = new AbortController();
     dictationSessionRef.current = session;
     setDictationNotice("");
-    setDictationPhase("listening");
+    setDictationPhase("starting");
     textarea?.focus({ preventScroll: true });
     const limit = isGoalComposerActive ? 1000 : maxDraftLength;
     const applyUtterance = (utterance: string) => {
@@ -20985,10 +21319,19 @@ function Composer({
     };
     dictation.start({
       signal: session.signal,
-      onPartial: applyUtterance,
+      onStart: () => {
+        if (!session.signal.aborted) setDictationPhase("listening");
+      },
+      onPartial: (utterance) => {
+        if (session.signal.aborted) return;
+        setDictationPhase((phase) =>
+          phase === "starting" ? "listening" : phase,
+        );
+        applyUtterance(utterance);
+      },
       onFinal: (utterance) => {
         if (session.signal.aborted) return;
-        applyUtterance(utterance);
+        if (utterance.trim()) applyUtterance(utterance);
         if (dictationSettleRef.current !== null) {
           window.clearTimeout(dictationSettleRef.current);
           dictationSettleRef.current = null;
@@ -21000,19 +21343,8 @@ function Composer({
       },
       onError: (message) => {
         if (session.signal.aborted) return;
-        session.abort();
-        dictationSessionRef.current = null;
-        const anchor = dictationAnchorRef.current;
-        dictationAnchorRef.current = null;
-        if (anchor && anchor.base !== dictationAppliedRef.current) {
-          dictationAppliedRef.current = anchor.base;
-          dictationCaretRef.current = anchor.caret;
-          dictationCaretChoiceRef.current = anchor.caret;
-          onDraftChange(anchor.base);
-        }
+        releaseDictation(false);
         setDictationNotice(message);
-        setDictationPhase("idle");
-        dictation.stop();
       },
     });
   }, [
@@ -21022,6 +21354,7 @@ function Composer({
     maxDraftLength,
     onDraftChange,
     settleDictation,
+    releaseDictation,
   ]);
   useEffect(() => {
     return () => {
@@ -22864,8 +23197,11 @@ function Composer({
                   <header className="gyro-composer-limit-title">
                     <span>Plan usage</span>
                   </header>
+                  {quotaNotice ? <small role="status">{quotaNotice}</small> : null}
                   {providerUsage?.stale ? (
-                    <small>Last known usage · retrying</small>
+                    <small title={providerUsage.error}>
+                      {staleUsageLabel(providerUsage.fetchedAt, Date.now())}
+                    </small>
                   ) : null}
                   {limitWindows.length > 0 ? (
                     limitWindows.map((window) => (
@@ -23035,18 +23371,28 @@ function Composer({
         {dictation ? (
           <button
             aria-label={
-              dictationPhase === "listening"
-                ? "Stop dictation"
-                : dictationPhase === "processing"
-                  ? "Transcribing your words"
-                  : "Dictate"
+              dictationPhase === "starting"
+                ? "Cancel microphone start"
+                : dictationPhase === "listening"
+                  ? "Stop dictation"
+                  : dictationPhase === "processing"
+                    ? "Finishing dictation"
+                    : "Dictate"
             }
-            aria-pressed={dictationPhase === "listening"}
+            aria-pressed={
+              dictationPhase === "starting" || dictationPhase === "listening"
+            }
+            aria-busy={
+              dictationPhase === "starting" || dictationPhase === "processing"
+            }
+            disabled={dictationPhase === "processing"}
             className={[
               "gyro-composer-tool",
               "gyro-dictation-button",
               dictationPhase === "listening" ? "is-listening" : "",
-              dictationPhase === "processing" ? "is-processing" : "",
+              dictationPhase === "processing" || dictationPhase === "starting"
+                ? "is-processing"
+                : "",
             ]
               .filter(Boolean)
               .join(" ")}
@@ -23056,11 +23402,13 @@ function Composer({
               toggleDictation();
             }}
             title={
-              dictationPhase === "listening"
-                ? "Stop dictation"
-                : dictationPhase === "processing"
-                  ? "Transcribing your words"
-                  : "Dictate"
+              dictationPhase === "starting"
+                ? "Cancel microphone start"
+                : dictationPhase === "listening"
+                  ? "Stop dictation"
+                  : dictationPhase === "processing"
+                    ? "Finishing dictation"
+                    : "Dictate"
             }
             type="button"
           >
@@ -23200,9 +23548,9 @@ function Composer({
           )}
         </button>
       </div>
-      {dictation && dictationNotice ? (
-        <p className="gyro-dictation-status" role="status">
-          {dictationNotice}
+      {dictation && dictationStatus ? (
+        <p className="gyro-dictation-status" role="status" aria-live="polite">
+          {dictationStatus}
         </p>
       ) : null}
       {shouldShowContextRow ? (
@@ -24112,7 +24460,18 @@ function turnKeyFromEvent(event: SessionEvent) {
   );
 }
 
-function ChatTurn({
+/** Present only in "Ask first"; absent means the plain summary card. */
+type ChatTurnFileReview = {
+  summaries?: FileReviewSummary[];
+  isSummarizing?: boolean;
+  onKeep?: (path: string, contentHash?: string) => void;
+  onAsk?: (path: string) => void;
+};
+const NO_KEEP_ALIVES: KeepAliveWatch[] = [];
+// A streamed delta changes one turn; every other turn keeps its props and is
+// skipped, instead of re-rendering the whole transcript per token.
+const ChatTurn = memoWithStableCallbacks(ChatTurnView);
+function ChatTurnView({
   artifactActions,
   subagents,
   fileReview,
@@ -24143,13 +24502,7 @@ function ChatTurn({
 }: {
   artifactActions?: ChatArtifactActions;
   subagents?: SubagentSurfaceState;
-  /** Present only in "Ask first"; absent means the plain summary card. */
-  fileReview?: {
-    summaries?: FileReviewSummary[];
-    isSummarizing?: boolean;
-    onKeep?: (path: string, contentHash?: string) => void;
-    onAsk?: (path: string) => void;
-  };
+  fileReview?: ChatTurnFileReview;
   isActive: boolean;
   keepAlives?: KeepAliveWatch[];
   onOpenKeepAlive?: (paneId: string) => void;
@@ -24227,6 +24580,7 @@ function ChatTurn({
               error: providerStatus.error,
               recoveryKind: providerStatus.recoveryKind,
               recoveryMessage: providerStatus.recoveryMessage,
+              retryNotBefore: providerStatus.retryNotBefore,
               at: turn.statusEvent?.createdAt,
               quietForSeconds: runQuietSeconds(turn.statusEvent),
             }
@@ -24235,7 +24589,7 @@ function ChatTurn({
         // otherwise transport loss uses the existing reconnect beat.
         retry: nativeRetry
           ? {
-              reason: "Model is temporarily busy",
+              reason: nativeRetry.recoveryKind === "rate-limit" ? "Provider rate limit reached" : "Waiting for the provider",
               attempt: nativeRetry.attempt,
             }
           : !isOnline
@@ -26224,9 +26578,12 @@ function providerStatusFromEvent(event: SessionEvent) {
           retryAt: nativeRetryAt,
           attempt: numberFromEventPayload(payload, "retryAttempt"),
           maxAttempts: numberFromEventPayload(payload, "retryMaxAttempts"),
+          recoveryKind: stringFromEventPayload(payload, "recoveryKind"),
         }
       : undefined,
     error: stringFromEventPayload(payload, "error"),
+    retryNotBefore: Number.isFinite(Date.parse(stringFromEventPayload(payload, "retryNotBefore") ?? ""))
+      ? Date.parse(stringFromEventPayload(payload, "retryNotBefore")!) : undefined,
     modelLabel: stringFromEventPayload(payload, "modelLabel"),
     providerId: stringFromEventPayload(payload, "providerId"),
     providerLabel:
@@ -26301,7 +26658,10 @@ function isHiddenTranscriptEvent(event: SessionEvent) {
     event.kind === "system-event" &&
     (payloadKind === "workspace-context" ||
       payloadKind === "provider-context-usage" ||
-      payloadKind === "provider-turn-tokens")
+      payloadKind === "provider-turn-tokens" ||
+      // Per-turn accounting read by the efficiency panel; it has no message
+      // and would otherwise print as an empty "system event" row.
+      payloadKind === "efficiency-receipt")
   ) {
     return true;
   }
@@ -26626,6 +26986,9 @@ function ToolDetailFact({ label, value }: { label: string; value: string }) {
 type TerminalStatus = "restored" | "running" | "waiting" | "done" | "failed";
 
 function TerminalPaneView({
+  sessionNavigation = false,
+  sessionDropEdge,
+  headerActions,
   pane,
   hidden,
   placementStyle,
@@ -26642,6 +27005,9 @@ function TerminalPaneView({
   onSelect,
   renderBody,
 }: {
+  sessionNavigation?: boolean;
+  sessionDropEdge?: TerminalDropEdge;
+  headerActions?: ReactNode;
   hidden?: boolean;
   placementStyle?: CSSProperties;
   title: string;
@@ -26719,8 +27085,10 @@ function TerminalPaneView({
     <section
       ref={paneRef}
       id={`terminal-panel-${pane.id}`}
-      role="tabpanel"
-      aria-labelledby={`terminal-tab-${pane.id}`}
+      role={sessionNavigation ? "region" : "tabpanel"}
+      aria-label={sessionNavigation ? (pane.taskTitle ?? title) : undefined}
+      aria-labelledby={sessionNavigation ? undefined : `terminal-tab-${pane.id}`}
+      data-terminal-session-pane={sessionNavigation ? pane.id : undefined}
       data-terminal-hidden={hidden ? "true" : undefined}
       style={placementStyle}
       className={className}
@@ -26735,7 +27103,20 @@ function TerminalPaneView({
       onClick={onSelect}
     >
       <header
-        title={`${title} · ${activity} · ${contextLabel || workspaceMode}`}
+        draggable={sessionNavigation || undefined}
+        tabIndex={sessionNavigation ? 0 : undefined}
+        aria-label={sessionNavigation ? `Move ${pane.taskTitle ?? title}` : undefined}
+        aria-keyshortcuts={sessionNavigation ? "Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown" : undefined}
+        onKeyDown={sessionNavigation ? (event) => {
+          if (event.target === event.currentTarget) placeTerminalSessionByKeyboard(event.nativeEvent, pane.id);
+        } : undefined}
+        onPointerDown={sessionNavigation ? (event) => {
+          if ((event.target as HTMLElement).closest("button")) return;
+          startTerminalSessionPointerDrag(event.nativeEvent, event.currentTarget, pane.id);
+        } : undefined}
+        onDragStart={sessionNavigation ? (event) => beginTerminalSessionDrag(event.dataTransfer, pane.id) : undefined}
+        onDragEnd={sessionNavigation ? finishTerminalSessionDrag : undefined}
+        title={`${pane.taskTitle ?? title} · ${activity} · ${contextLabel || workspaceMode}${sessionNavigation ? " · Drag to split; Alt+arrow to place" : ""}`}
       >
         <button
           onClick={(event) => event.stopPropagation()}
@@ -26755,13 +27136,13 @@ function TerminalPaneView({
         </button>
         <div className="gyro-terminal-pane-title">
           <Terminal aria-hidden="true" size={14} />
-          <strong>{title}</strong>
+          <strong>{pane.taskTitle ?? title}</strong>
           {status === "restored" || status === "failed" || pane.attention ? (
             <span className="gyro-terminal-pane-state">
               {status === "restored" ? "Stopped" : activity}
             </span>
           ) : null}
-          {onClose ? (
+          {(!sessionNavigation && onClose) ? (
             <button
               aria-label={`Close ${title}`}
               className="gyro-terminal-pane-close"
@@ -26778,8 +27159,15 @@ function TerminalPaneView({
             </button>
           ) : null}
         </div>
+        {sessionNavigation ? (
+          <div className="gyro-terminal-session-actions" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+            {headerActions}
+            {onRemoveFromSplit ? <button className="gyro-terminal-session-action" aria-label={`Remove ${title} from split`} title="Remove from split (keep running)" onClick={(event) => { event.stopPropagation(); onRemoveFromSplit(); }} type="button"><X size={14} /></button> : null}
+          </div>
+        ) : null}
       </header>
-      {onClose ? (
+      {sessionNavigation && sessionDropEdge ? <div className={`gyro-terminal-session-drop is-${sessionDropEdge}`} aria-hidden="true"><span>Split {sessionDropEdge === "top" ? "above" : sessionDropEdge === "bottom" ? "below" : sessionDropEdge}</span></div> : null}
+      {!sessionNavigation && onClose ? (
         <div
           className={`gyro-terminal-corner ${closeMenuOpen ? "is-open" : ""}`}
           ref={closeMenuRef}

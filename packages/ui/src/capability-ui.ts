@@ -75,6 +75,7 @@ export const CAPABILITY_UI = {
   "workspace-read-editor": { label: "Read editor", row: "read" },
   "workspace-diagnostics": { label: "Workspace diagnostics", row: "tool" },
   "workspace-git-status": { label: "Git status", row: "tool" },
+  "workspace-git-branches": { label: "Git branches", row: "tool" },
   "workspace-diff": { label: "Workspace diff", row: "tool" },
   "workspace-git-log": { label: "Git log", row: "tool" },
   "workspace-git-show": { label: "Git show", row: "tool" },

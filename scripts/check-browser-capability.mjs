@@ -87,7 +87,7 @@ const BROWSER_TOOLS = [
     id: "BrowserViewport",
     tool: "gyro_browser_set_viewport",
     class: "BrowserInspect",
-    required: ["mode"],
+    required: [],
   },
   {
     id: "BrowserNavigate",

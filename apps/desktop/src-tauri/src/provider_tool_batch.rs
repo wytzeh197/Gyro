@@ -517,21 +517,39 @@ const SPILL_TEXT_FIELDS: &[&str] = &["content", "stdout", "stderr", "output", "t
 /// Replace oversized string fields with a head/tail preview and a spill:// address.
 /// A failed persist keeps the original text. Errors and image bytes are not passed here.
 pub(super) fn spill_result_data(capability: &str, tool: &str, data: &mut serde_json::Value) {
+    let window = super::efficiency::config().fresh_read_window(capability);
+    spill_result_data_within(capability, tool, data, window);
+}
+
+/// [`spill_result_data`] with the fresh-read window already resolved.
+fn spill_result_data_within(
+    capability: &str,
+    tool: &str,
+    data: &mut serde_json::Value,
+    window: Option<usize>,
+) {
+    use gyro_core::efficiency::spill;
     let Some(object) = data.as_object() else {
         return;
     };
+    let min_bytes = window.map_or(spill::SPILL_MIN_BYTES, |bytes| {
+        bytes.clamp(spill::FRESH_READ_MIN_BYTES, spill::FRESH_READ_MAX_BYTES) + 1
+    });
     let pending: Vec<(String, String)> = SPILL_TEXT_FIELDS
         .iter()
         .filter_map(|field| {
             let text = object.get(*field).and_then(serde_json::Value::as_str)?;
-            if text.len() < gyro_core::efficiency::spill::SPILL_MIN_BYTES {
+            if text.len() < min_bytes {
                 return None;
             }
             Some(((*field).to_string(), text.to_string()))
         })
         .collect();
     for (field, text) in pending {
-        let preview = gyro_core::efficiency::spill::preview(capability, tool, &text);
+        let preview = match window {
+            Some(bytes) => spill::preview_within(capability, tool, &text, bytes),
+            None => spill::preview(capability, tool, &text),
+        };
         if preview.address.is_empty() {
             continue;
         }
@@ -1344,6 +1362,68 @@ mod tests {
         }
         assert!(payload["result"].get("callId").is_none());
         assert!(compact.len() + 100 < serde_json::to_string(&response).unwrap().len());
+    }
+
+    #[test]
+    fn fresh_reads_stay_whole_within_their_window_and_other_tools_keep_the_default() {
+        use gyro_core::efficiency::spill;
+        let code = "fn line() {}\n".repeat(500); // 6.5KB
+        let mut fresh = serde_json::json!({"content": code});
+        spill_result_data_within(
+            "workspace.read",
+            "gyro_workspace_read",
+            &mut fresh,
+            Some(8 * 1024),
+        );
+        assert_eq!(
+            fresh["content"], code,
+            "an 8KB window keeps a 6.5KB read whole"
+        );
+
+        let mut narrow = serde_json::json!({"content": code});
+        spill_result_data_within("workspace.read", "gyro_workspace_read", &mut narrow, None);
+        assert!(narrow["content"].as_str().unwrap().contains("spill://"));
+
+        let long = "fn line() {}\n".repeat(2_000); // 26KB
+        let mut capped = serde_json::json!({"content": long});
+        spill_result_data_within(
+            "workspace.read",
+            "gyro_workspace_read",
+            &mut capped,
+            Some(8 * 1024),
+        );
+        let kept = capped["content"].as_str().unwrap();
+        assert!(
+            kept.contains("spill://") && kept.len() <= 8 * 1024,
+            "{}",
+            kept.len()
+        );
+        assert!(kept.len() > spill::SPILL_MIN_BYTES * 3);
+
+        // The window is clamped, so a tiny or huge setting stays bounded.
+        let mut clamped = serde_json::json!({"content": long});
+        spill_result_data_within(
+            "workspace.read",
+            "gyro_workspace_read",
+            &mut clamped,
+            Some(1 << 30),
+        );
+        assert!(clamped["content"].as_str().unwrap().len() <= spill::FRESH_READ_MAX_BYTES);
+
+        let config = gyro_core::efficiency::Config {
+            fresh_read_inline_bytes: 8 * 1024,
+            ..Default::default()
+        };
+        assert_eq!(
+            config.fresh_read_window("workspace.read_range"),
+            Some(8 * 1024)
+        );
+        assert_eq!(config.fresh_read_window("terminal.read"), None);
+        assert_eq!(config.fresh_read_window("workspace.search"), None);
+        assert_eq!(
+            gyro_core::efficiency::Config::default().fresh_read_window("workspace.read"),
+            None
+        );
     }
 
     #[test]

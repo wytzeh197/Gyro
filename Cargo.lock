@@ -1709,7 +1709,7 @@ dependencies = [
 
 [[package]]
 name = "gyro-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1727,7 +1727,7 @@ dependencies = [
 
 [[package]]
 name = "gyro-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1735,6 +1735,7 @@ dependencies = [
  "chrono-tz",
  "diffy",
  "dirs 5.0.1",
+ "dom_query",
  "keyring",
  "libc",
  "rand 0.8.6",
@@ -1755,7 +1756,7 @@ dependencies = [
 
 [[package]]
 name = "gyro-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

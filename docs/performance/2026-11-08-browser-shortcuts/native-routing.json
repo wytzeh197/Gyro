@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "checks": [
+    "native Search calls the existing handler",
+    "native Search uses the latest handler",
+    "unknown keys ignored",
+    "disposed listener ignored"
+  ]
+}

@@ -26,7 +26,8 @@ pub(super) fn run_workspace_rg_search_scan(
     run_scoped_workspace_rg_search(root, ".", query, globs, max_results, use_regex)
 }
 
-/// `directory` is workspace-relative. `.` searches the root. Callers confine it first.
+/// `directory` is an exact workspace-relative file or directory. `.` searches
+/// the root. Callers confine it first.
 pub(super) fn run_scoped_workspace_rg_search(
     root: &Path,
     directory: &str,
@@ -35,6 +36,14 @@ pub(super) fn run_scoped_workspace_rg_search(
     max_results: usize,
     use_regex: bool,
 ) -> anyhow::Result<WorkspaceSearchScan> {
+    // Ripgrep ignores --glob for an explicit file operand. Refuse this
+    // ambiguous combination instead of silently dropping the caller's filters.
+    if root.join(directory).is_file() && globs.is_some_and(|globs| !globs.is_empty()) {
+        anyhow::bail!(
+            "A file path already selects exactly one file. Remove globs to search that file, \
+             or set path to its parent directory to apply globs. Correct the arguments before retrying"
+        );
+    }
     let mut command = command_with_gui_path("rg");
     command
         .current_dir(root)
@@ -90,7 +99,20 @@ pub(super) fn run_scoped_workspace_rg_search(
     // An invalid regex, malformed glob, or permission error is not a successful
     // empty search merely because ripgrep emitted a begin/summary record.
     if output.exit_code().is_some() || results.is_empty() {
-        return Err(bounded_command_error("workspace search failed", &output));
+        let error = bounded_command_error("workspace search failed", &output);
+        return Err(if output.stderr.contains("regex parse error") {
+            error.context(
+                "Invalid workspace search regex. Escape regex metacharacters when searching \
+                 literal code, for example \\( for a parenthesis. Correct query before retrying",
+            )
+        } else if output.stderr.contains("error parsing glob") {
+            error.context(
+                "Invalid workspace search glob. Use filename patterns such as *.rs or \
+                 !*.test.ts in globs. Correct globs before retrying",
+            )
+        } else {
+            error
+        });
     }
     Ok(WorkspaceSearchScan {
         results,
@@ -98,13 +120,38 @@ pub(super) fn run_scoped_workspace_rg_search(
     })
 }
 
-/// Resolve a workspace-relative search directory. Absolute paths, `..`, and
-/// links whose target leaves the workspace are refused.
-pub(super) fn confine_search_directory(root: &Path, path: &str) -> anyhow::Result<String> {
-    let relative = gyro_core::normalize_capability_relative_path(path)?;
+/// Resolve an exact search scope without broadening a failed request.
+/// Files and directories are accepted; globs belong in the separate filter.
+pub(super) fn confine_search_path(root: &Path, path: &str) -> anyhow::Result<String> {
+    let path = path.trim().replace('\\', "/");
+    let relative = if path.is_empty()
+        || Path::new(&path)
+            .components()
+            .all(|part| part == std::path::Component::CurDir)
+    {
+        ".".to_string()
+    } else {
+        gyro_core::normalize_capability_relative_path(&path).context(
+            "Search path must be workspace-relative; omit path to search the workspace root",
+        )?
+    };
     let resolved = gyro_core::security::assert_path_inside_workspace(root, Path::new(&relative))?;
-    if !resolved.is_dir() {
-        anyhow::bail!("Workspace search path must be an existing directory");
+    if !resolved.is_dir() && !resolved.is_file() {
+        anyhow::bail!(
+            "Workspace search path {relative:?} must be an existing file or directory. \
+             Omit path to search the workspace root; put filename patterns in globs, \
+             for example {{\"query\":\"needle\",\"globs\":[\"**/*.rs\"]}}. \
+             Correct the path before retrying."
+        );
+    }
+    // An explicit file operand makes ripgrep search ignored files too. Check
+    // both the supplied name and the resolved target before reading any bytes.
+    let canonical_root = root.canonicalize()?;
+    let resolved_relative = resolved.strip_prefix(&canonical_root)?;
+    if gyro_core::capability_path_is_sensitive(&relative)
+        || gyro_core::capability_path_is_sensitive(&resolved_relative.to_string_lossy())
+    {
+        anyhow::bail!("Workspace search path is sensitive and cannot be searched");
     }
     Ok(relative)
 }
@@ -827,6 +874,136 @@ mod tests {
     }
 
     #[test]
+    fn search_scope_accepts_root_spellings() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::write(workspace.path().join("hit.txt"), "needle\n").unwrap();
+        for path in ["", " ", ".", "./", "././"] {
+            let scope = confine_search_path(workspace.path(), path).unwrap();
+            assert_eq!(scope, ".");
+            let scan =
+                run_scoped_workspace_rg_search(workspace.path(), &scope, "needle", None, 10, true)
+                    .unwrap();
+            assert_eq!(scan.results.len(), 1, "path: {path:?}");
+            assert!(!scan.incomplete);
+        }
+    }
+
+    #[test]
+    fn search_scope_accepts_one_file_without_searching_siblings() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::create_dir(workspace.path().join("src")).unwrap();
+        fs::write(workspace.path().join("src/target file.ts"), "beginDrag\n").unwrap();
+        fs::write(workspace.path().join("src/sibling.ts"), "beginDrag\n").unwrap();
+        let scope = confine_search_path(workspace.path(), "./src/target file.ts").unwrap();
+        let scan = run_scoped_workspace_rg_search(
+            workspace.path(),
+            &scope,
+            "pointerDrag|useChatPointer|begin.*Drag",
+            None,
+            10,
+            true,
+        )
+        .unwrap();
+        assert_eq!(scan.results.len(), 1);
+        assert_eq!(scan.results[0].path, "src/target file.ts");
+        assert_eq!(scan.results[0].line_number, 1);
+        assert!(!scan.incomplete);
+    }
+
+    #[test]
+    fn file_search_never_silently_ignores_glob_filters() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::write(workspace.path().join("hit.ts"), "needle\n").unwrap();
+        let globs = vec!["!*.ts".to_string()];
+        let error = run_scoped_workspace_rg_search(
+            workspace.path(),
+            "hit.ts",
+            "needle",
+            Some(&globs),
+            10,
+            true,
+        )
+        .err()
+        .unwrap();
+        assert!(error.to_string().contains("Remove globs"));
+        let scan = run_scoped_workspace_rg_search(
+            workspace.path(),
+            "hit.ts",
+            "needle",
+            Some(&Vec::new()),
+            10,
+            true,
+        )
+        .unwrap();
+        assert_eq!(scan.results.len(), 1);
+    }
+
+    #[test]
+    fn search_scope_errors_explain_recovery_without_broadening() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::create_dir(workspace.path().join("src")).unwrap();
+        for path in ["missing.ts", "src/*.ts"] {
+            let error = confine_search_path(workspace.path(), path)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(path));
+            assert!(error.contains("existing file or directory"));
+            assert!(error.contains("globs"));
+            assert!(error.contains("Correct the path before retrying"));
+        }
+    }
+
+    #[test]
+    fn search_scope_rejects_sensitive_files_and_aliases() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::write(workspace.path().join(".env"), "PRIVATE_FIXTURE=needle\n").unwrap();
+        assert!(confine_search_path(workspace.path(), ".env").is_err());
+        std::os::unix::fs::symlink(".env", workspace.path().join("alias.txt")).unwrap();
+        let error = confine_search_path(workspace.path(), "alias.txt").unwrap_err();
+        assert!(error.to_string().contains("sensitive"));
+    }
+
+    #[test]
+    fn search_errors_preserve_details_and_explain_argument_repairs() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::write(workspace.path().join("hit.txt"), "needle\n").unwrap();
+        let regex_error =
+            run_scoped_workspace_rg_search(workspace.path(), ".", "(", None, 10, true)
+                .err()
+                .unwrap();
+        let message = format!("{regex_error:#}");
+        assert!(
+            message.contains("Correct query before retrying"),
+            "{message}"
+        );
+        assert!(message.contains("regex parse error"), "{message}");
+        let globs = vec!["[".to_string()];
+        let glob_error =
+            run_scoped_workspace_rg_search(workspace.path(), ".", "needle", Some(&globs), 10, true)
+                .err()
+                .unwrap();
+        let message = format!("{glob_error:#}");
+        assert!(
+            message.contains("Correct globs before retrying"),
+            "{message}"
+        );
+        assert!(message.contains("error parsing glob"), "{message}");
+    }
+
+    #[test]
+    fn model_search_schema_explains_file_scope_and_root() {
+        let schema = provider_tool_batch::compact_parameter_schema(
+            &desktop_capability_tool_schema(CapabilityId::WorkspaceSearch),
+        );
+        let description = schema["properties"]["path"]["description"]
+            .as_str()
+            .unwrap();
+        assert!(description.contains("file or directory"));
+        assert!(description.contains("omit for the root"));
+        assert!(description.contains("globs"));
+    }
+
+    #[test]
     fn scoped_search_skips_sibling_directories() {
         let workspace = tempfile::tempdir().unwrap();
         let src = workspace.path().join("src");
@@ -835,7 +1012,7 @@ mod tests {
         fs::create_dir(&other).unwrap();
         fs::write(src.join("hit.txt"), "needle\n").unwrap();
         fs::write(other.join("hit.txt"), "needle\n").unwrap();
-        let directory = confine_search_directory(workspace.path(), "src").unwrap();
+        let directory = confine_search_path(workspace.path(), "src").unwrap();
         let results =
             run_scoped_workspace_rg_search(workspace.path(), &directory, "needle", None, 10, true)
                 .unwrap();
@@ -847,12 +1024,18 @@ mod tests {
     fn search_directory_refuses_escape_and_outbound_links() {
         let workspace = tempfile::tempdir().unwrap();
         fs::create_dir(workspace.path().join("src")).unwrap();
-        assert!(confine_search_directory(workspace.path(), "../outside").is_err());
-        assert!(confine_search_directory(workspace.path(), "/tmp").is_err());
+        assert!(confine_search_path(workspace.path(), "../outside").is_err());
+        assert!(confine_search_path(workspace.path(), "/tmp").is_err());
 
         let outside = tempfile::tempdir().unwrap();
         fs::write(outside.path().join("secret.txt"), "needle\n").unwrap();
         std::os::unix::fs::symlink(outside.path(), workspace.path().join("link")).unwrap();
-        assert!(confine_search_directory(workspace.path(), "link").is_err());
+        assert!(confine_search_path(workspace.path(), "link").is_err());
+        std::os::unix::fs::symlink(
+            outside.path().join("secret.txt"),
+            workspace.path().join("file-link"),
+        )
+        .unwrap();
+        assert!(confine_search_path(workspace.path(), "file-link").is_err());
     }
 }

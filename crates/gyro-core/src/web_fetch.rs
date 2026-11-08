@@ -5,6 +5,9 @@
 //! model can read a URL without a webview, and it is deliberately narrow — GET
 //! only, text-ish content types only, a hard byte ceiling, secret redaction,
 //! and a bounded redirect chain whose final URL is always reported.
+#[path = "web_fetch_document.rs"]
+pub mod document;
+
 use crate::security::redact_secrets;
 use anyhow::{anyhow, Result};
 use std::io::Read;
@@ -68,7 +71,7 @@ pub fn fetch_text(url: &Url, max_bytes: usize) -> Result<WebFetchPage> {
         if next_url.origin() != url.origin() {
             return Err(anyhow!(
                 "web fetch redirect leaves the approved origin; request {} separately",
-                next_url.origin().ascii_serialization()
+                redact_secrets(next_url.as_str())
             ));
         }
         current_url = next_url;
@@ -274,10 +277,37 @@ mod tests {
             .to_string();
         server.join().unwrap();
         assert!(error.contains("leaves the approved origin"), "{error}");
+        assert!(
+            error.contains(&destination),
+            "destination path must be available for a separately approved request: {error}"
+        );
         assert_eq!(
             target.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock
         );
+    }
+
+    #[test]
+    fn cross_origin_redirect_handoff_redacts_query_secrets() {
+        let destination = [
+            "https://vendor.example/new-release?api",
+            "_key=",
+            "private-value-1234567890",
+        ]
+        .concat();
+        let response = format!(
+            "HTTP/1.1 302 Found\r\nLocation: {destination}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        let (url, server) = serve_once(response.into_bytes());
+        let error = fetch_text(&url, MAX_WEB_FETCH_BYTES)
+            .unwrap_err()
+            .to_string();
+        server.join().unwrap();
+        assert!(
+            error.contains("https://vendor.example/new-release"),
+            "{error}"
+        );
+        assert!(!error.contains("private-value-1234567890"), "{error}");
     }
 
     #[test]

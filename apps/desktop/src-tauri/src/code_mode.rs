@@ -134,6 +134,9 @@ pub(super) fn cancelled() -> bool {
             .is_some_and(|group| group.stopped.load(Ordering::Acquire))
     })
 }
+pub(super) fn cancellation_flag() -> Option<Arc<AtomicBool>> {
+    GROUP.with(|slot| slot.borrow().as_ref().map(|group| group.stopped.clone()))
+}
 pub(super) fn annotate(call_id: Uuid, payload: &mut Value) {
     GROUP.with(|slot| {
         if let Some(group) = slot.borrow().as_ref() {
@@ -310,17 +313,14 @@ pub(super) fn execute(
                         allowed(id),
                         "Tool is outside the Code Mode inspection allowlist"
                     );
+                    // Keep each observation bounded even when a script requests the hard ceiling.
+                    let budget =
+                        workspace_result_byte_limit(&input)?.min(DEFAULT_WORKSPACE_RESULT_BYTES);
+                    input["maxBytes"] = json!(budget);
                     Ok(id)
                 });
             let response = match validated {
                 Ok(id) => {
-                    // Keep each observation bounded even when a script requests the hard ceiling.
-                    let budget = input
-                        .get("maxBytes")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(16384)
-                        .min(16384);
-                    input["maxBytes"] = json!(budget);
                     let mut context = parent_context.clone();
                     context.call_id = call_id;
                     app.state::<ProviderCapabilityBroker>().invoke(
@@ -752,5 +752,24 @@ mod tests {
         let mut outside = json!({});
         annotate(Uuid::new_v4(), &mut outside);
         assert!(outside.get("groupId").is_none());
+    }
+
+    #[test]
+    fn captured_workflow_cancellation_remains_bound_to_its_owner() {
+        let group = Group {
+            id: Uuid::new_v4(),
+            label: "Inspect".into(),
+            source: "return 1".into(),
+            outcome: Arc::new(Mutex::new(None)),
+            stopped: Arc::new(AtomicBool::new(false)),
+        };
+        let scope = enter(group.clone());
+        let flag = cancellation_flag().unwrap();
+        drop(scope);
+        assert!(cancellation_flag().is_none());
+        group.stopped.store(true, Ordering::Release);
+        assert!(std::thread::spawn(move || flag.load(Ordering::Acquire))
+            .join()
+            .unwrap());
     }
 }

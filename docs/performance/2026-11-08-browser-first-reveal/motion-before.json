@@ -1,0 +1,71 @@
+{
+  "passed": false,
+  "checks": [
+    {
+      "name": "ordinary opening reaches its measured width and releases the native host",
+      "passed": true
+    },
+    {
+      "name": "detached portal measures after its parent reveals it",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: must not animate toward zero width\n\n1 !== 0\n"
+    },
+    {
+      "name": "hidden rail measures after its parent reveals it",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: must not animate toward zero width\n\n1 !== 0\n"
+    },
+    {
+      "name": "a portal that remains hidden does not retain a zero-width animation",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n1 !== 0\n"
+    },
+    {
+      "name": "a missed animation completion releases the native host within 300ms",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\ntrue !== false\n"
+    },
+    {
+      "name": "a stalled animation frame cannot hold the native host indefinitely",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\ntrue !== false\n"
+    },
+    {
+      "name": "external animation cancellation releases the native host",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\ntrue !== false\n"
+    },
+    {
+      "name": "a closing animation with no completion still removes the retained panel once",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n0 !== 1\n"
+    },
+    {
+      "name": "unmount cancels pending work and ignores a queued completion",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n1 !== 0\n"
+    },
+    {
+      "name": "a resized animation ignores its predecessor's queued callback and deadline",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\nfalse !== true\n"
+    },
+    {
+      "name": "reduced motion opens without an animation",
+      "passed": true
+    },
+    {
+      "name": "switching to reduced motion settles even while portal layout is pending",
+      "passed": true
+    },
+    {
+      "name": "active pointer resizing settles without adding another animation",
+      "passed": true
+    },
+    {
+      "name": "reopening before close completes does not run a stale exit",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n1 !== 0\n"
+    }
+  ]
+}

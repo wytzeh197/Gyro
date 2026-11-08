@@ -1,0 +1,20 @@
+{
+  "root": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-OTFWF8",
+  "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-OTFWF8/data",
+  "frontend": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-OTFWF8/frontend",
+  "build": "passed",
+  "native": "failed",
+  "binary": "/Users/wytze/Gyro/target/debug/gyro-browser-events-smoke",
+  "visualReviewApp": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-OTFWF8/Gyro Browser Review.app",
+  "nativeExecutable": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-OTFWF8/Gyro Browser Review.app/Contents/MacOS/gyro-browser-events-smoke",
+  "error": "AssertionError [ERR_ASSERTION]: Error: native screenshot asset did not render in the production capture view\n\nfalse !== true\n",
+  "pageRequests": 1,
+  "requestsByLabel": {
+    "Original": 1
+  },
+  "queuedCancelledRequests": 0,
+  "heldImageRequests": 0,
+  "releasedImageRequests": 0,
+  "heldDocumentRequests": 0,
+  "releasedDocumentRequests": 0
+}

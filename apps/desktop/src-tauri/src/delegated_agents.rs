@@ -1185,6 +1185,7 @@ fn restore_entry(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
     };
     app.state::<AgentManager>()
         .entries
@@ -2409,6 +2410,7 @@ mod tests {
             session_id: child.id.to_string(),
             turn_id: None,
             provider_id: "openai".into(),
+            provider_kind: None,
             workspace: temp.path().into(),
             workspace_key: policy.workspace_key.clone(),
             workspace_identity_revision: 1,

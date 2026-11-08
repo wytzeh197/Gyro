@@ -5,6 +5,28 @@ not fill a chat's context in one call. Bounds should be visible to the model,
 and collections that have more results provide a way to continue reading.
 The existing workspace and approval policies apply to every page.
 
+`maxBytes` is an optional observation-size hint: it defaults to 16 KiB, and
+integer values are clamped to 1–128 KiB. An explicit `null` uses the default.
+This applies to direct provider calls, API/Ollama validation, and Code Mode
+(which further caps each observation at 16 KiB). Malformed types still return
+correction guidance. Result truncation and continuation cursors still apply.
+
+## Generated images
+
+OpenAI chats enable Codex's native image-generation tool in Normal mode.
+Generation still requires a Codex version, model, and account that expose that
+tool; selecting a model with image input support does not establish generation
+support. Plan and Council mode disable image generation.
+
+Gyro handles `imageGeneration` events for the active thread and turn. Completed
+PNG, JPEG, and WebP results are copied into the chat's private attachment
+storage, then linked into the saved reply using the existing image preview.
+This also works when Codex returns an image without accompanying text, and
+keeps previews available after Codex removes its own output file. Image bytes
+are excluded from the transcript and activity rows. The existing 10 MB image
+limit and per-session attachment quotas apply. Provider failures and usage
+limits are shown in the reply instead of being presented as successful images.
+
 ## Workspace discovery
 
 `gyro_workspace_list` accepts an optional workspace-relative directory `path`,
@@ -15,9 +37,19 @@ The page is shortened further when needed to fit the tool result budget. As
 with other paged observations, repeat from offset zero if the tree changes.
 The Workspace explorer still uses its complete tree listing.
 
-`gyro_workspace_search` always interprets its query as a ripgrep regular
-expression. An invalid expression or ripgrep failure is reported as an error;
-it never silently retries as a literal search or drops requested globs.
+`gyro_workspace_search` accepts an existing workspace-relative file or directory
+as `path`. Omit `path`, pass an empty string, or use `.` to search the root.
+A file path searches only that file; omit `globs` for this case because ripgrep
+ignores glob filters on explicit files. To apply `globs`, use a directory or
+omit `path`. Put filename patterns in `globs`, for
+example `{"query":"begin.*Drag","path":"src","globs":["*.tsx"]}`.
+A missing path returns correction guidance and never expands to a root search.
+Workspace boundaries and sensitive-path protections also apply to file targets.
+
+The query is always a ripgrep regular expression. Invalid expressions and globs
+return correction guidance alongside the underlying error; escape regex
+metacharacters when searching literal code. Search never silently retries as
+literal text or drops requested globs.
 Large match sets are shortened to fit the result budget, and the summary says
 when to narrow the query or globs for the remaining matches.
 
@@ -54,6 +86,122 @@ four at a time, with results returned in call order. Writes, commands, editor
 reads, and browser actions are sequential barriers. Each call still enters the
 capability broker for policy, scope, approval, and cancellation checks. Reads
 remain observations of live disk state, not an atomic workspace snapshot.
+
+OpenAI-compatible streams can split a function name as well as its arguments;
+Gyro reassembles both. A response containing an unnamed tool, duplicate call
+IDs, or an ID that changes within one indexed call fails before any tools from
+that response are dispatched. Previously completed rounds stay completed.
+
+## Browser observations and element references
+
+`gyro_browser_find` uses associated form labels and `aria-labelledby` text in
+addition to the existing names. This is a bounded DOM observation, not the
+browser's complete accessibility tree.
+
+Element references remain usable across page and subtree reads while their
+elements stay connected and their references remain in the 4,096-entry cache.
+Each document has its own reference prefix. After navigation, removal, or cache
+eviction, use `gyro_browser_find` to observe a fresh reference.
+
+Page reads mark `truncated` when character, text, depth, breadth, or node-scan
+limits omit content. A read processes up to 5,000 nodes, including hidden nodes.
+Use a targeted subtree reference or `find` to continue inspecting a large page.
+An incomplete observation is not evidence that the omitted content is absent.
+
+Disabled clicks and disabled/read-only form writes fail instead of reporting
+success. Selecting an unavailable option leaves the current selection intact
+and returns an error.
+
+Model-owned browser callback waits observe the owning run's Stop signal and
+workflow cancellation. Each callback retains its eight-second limit; callbacks
+within one browser tool also share a fifteen-second waiting budget. Work that
+is still queued on the native main thread checks cancellation and expiry before
+dispatch. A cancelled wait returns a cancelled tool result instead of waiting
+for the original callback timeout. Manual browser calls do not inherit a stopped
+model run's cancellation state. Already dispatched WebKit or mouse actions are
+not rolled back; re-observe the page before retrying an uncertain action.
+
+Navigation in an existing browser (navigate, reload and open/reuse) validates
+the resource and current navigation reservation on the native main thread before
+dispatching. A cancelled or superseded queued request cannot navigate later.
+Viewport layout and scroll-preservation waits share the same cancellation and
+deadline budget; queued viewport changes also validate their resource before
+changing native layout. Cancelling before dispatch restores a known previous
+document/token. An unbound older pending request is reported as requiring recovery
+instead of being restored to an indefinite loading state.
+
+On macOS, the browser keeps its requested integer CSS viewport inside a separate
+native container that fits the visible panel. This avoids fractional frame
+rounding and automatic titlebar insets changing the page's layout dimensions.
+Native pointer conversion and PNG capture use that same CSS coordinate space.
+Closing either a chat browser or a private Check browser detaches the container.
+The native fixture, pixel comparisons and hardware limits are recorded in
+[`2026-11-07-browser-viewport-geometry`](performance/2026-11-07-browser-viewport-geometry/README.md).
+
+The desktop browser also works before a chat's first message. Its workbench
+owner is accepted only by the desktop IPC command; model tools still require a
+durable chat UUID and derive subagent visibility from the stored relationship.
+Workbench native labels hash the complete owner key so spaces and punctuation
+in project paths cannot invalidate or merge labels. Screenshots from these
+pre-chat browsers use the existing `new` attachment namespace and remain in
+their owning draft. Native App evidence is in
+[`2026-11-07-browser-full-shell`](performance/2026-11-07-browser-full-shell/README.md).
+
+Closing a companion Browser resolves the current pane's chat record. Pane keys
+stay stable when a draft becomes a chat or its session is replaced; decoding an
+old key can target the wrong browser. A removed pane cannot close the active
+chat's browser. Transition regressions and native two-chat companion evidence
+are recorded in
+[`2026-11-08-browser-chat-isolation`](performance/2026-11-08-browser-chat-isolation/README.md).
+
+Each model browser tool stays bound to one browser resource instance. Closing
+and reopening a chat's browser invalidates the previous instance's queued tools,
+state updates, captures, and console/network callbacks. Re-observe the new
+browser before retrying; a chat ID alone does not identify a browser instance.
+
+Gyro's open, navigate, reload and macOS history requests also invalidate the
+previous committed document. Until the next document commits, DOM tools,
+pointer actions and screenshots reject the request rather than returning or
+acting on the old page. Once the new document is interactive, its DOM remains
+usable while images and other resources load. The native evaluator tags its
+results with navigation identity; observation assembly and capture registration
+check that identity again. Same-URL reloads invalidate old work too. If an action
+was already dispatched when its document changed, it may have run: observe the
+current page before retrying it.
+
+On macOS, main-frame provisional-load observation applies that boundary to
+navigation started by links, forms and page scripts too. Prevented navigation,
+same-document routes/fragments and iframe loads retain the parent document's
+references. The observer forwards the existing WebKit navigation delegate's
+handlers and is detached when its browser closes.
+
+Failed or cancelled macOS loads stop the loading state and report a navigation
+error to the panel and browser tools. The old native page stays hidden behind
+the existing recovery controls. Try again requests the failed destination;
+it does not reload the previous document left in WebKit after a provisional
+failure. Back can explicitly recover that previous document. A failure after
+commit still requires native history navigation rather than restoring a
+partial page as successful. Native navigation tokens reject late failure,
+commit and finish callbacks from a superseded load, including same-URL reloads.
+
+The desktop checks native open/load/failure/title/viewport notifications against a fresh
+snapshot with the same chat and resource IDs before updating the browser panel.
+It uses that snapshot's values. A user close or newer open discards older UI
+results and errors, including viewport changes and screenshot completion.
+Creation and closure stay ordered per chat; stuck reads or history requests do
+not hold up Close or a replacement browser's updates. Bursts of queued events
+of the same kind retain the latest observation.
+
+## Edit proposal outcomes
+
+`gyro_workspace_edit` and `gyro_workspace_propose_edit` return `applied` and
+`approvalRequired` alongside the durable proposal `status` and `proposalId`.
+A completed tool response can mean that a proposal was created; only
+`applied: true` confirms that its content was written to disk. A pending proposal
+has `applied: false`, `approvalRequired: true`, and a `nextStep` explaining that
+the file on disk remains unchanged. Keep its ID, continue independent work, and
+wait for review before verifying that edit. Repeating the same edit creates
+another proposal rather than applying the pending one.
 
 ## Code formatting
 

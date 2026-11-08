@@ -1,0 +1,20 @@
+[
+  {
+    "option": 1,
+    "slug": "plain-log",
+    "source": "/Users/wytze/.codex/generated_images/01a1b6ae-222e-75b2-9119-bd0288ecde20/exec-2ddd3c2b-97c5-4c0e-96f4-6ab9bec61a4d.png",
+    "path": "/Users/wytze/Gyro/docs/design/working-states-2026-11-07/minimal-three/option-1.png"
+  },
+  {
+    "option": 2,
+    "slug": "fine-rail",
+    "source": "/Users/wytze/.codex/generated_images/01a1b6ae-222e-75b2-9119-bd0288ecde20/exec-04bdef6a-e7d1-49cf-987b-fbd61068d261.png",
+    "path": "/Users/wytze/Gyro/docs/design/working-states-2026-11-07/minimal-three/option-2.png"
+  },
+  {
+    "option": 3,
+    "slug": "current-action",
+    "source": "/Users/wytze/.codex/generated_images/01a1b6ae-222e-75b2-9119-bd0288ecde20/exec-c8655fbf-3fa6-4a40-8ecd-1ef05f966f54.png",
+    "path": "/Users/wytze/Gyro/docs/design/working-states-2026-11-07/minimal-three/option-3.png"
+  }
+]

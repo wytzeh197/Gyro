@@ -1,0 +1,115 @@
+{
+  "scripted": true,
+  "endpoint": "http://127.0.0.1:54330/v1",
+  "code": 0,
+  "requests": [
+    {
+      "index": 0,
+      "at": 1794147924223,
+      "toolResults": 0,
+      "actions": [
+        "gyro_browser_open"
+      ],
+      "final": null,
+      "reviewWaitMs": 0
+    },
+    {
+      "index": 1,
+      "at": 1794147925036,
+      "toolResults": 1,
+      "actions": [
+        "gyro_browser_set_viewport"
+      ],
+      "final": null,
+      "reviewWaitMs": 0
+    },
+    {
+      "index": 2,
+      "at": 1794147925182,
+      "toolResults": 2,
+      "actions": [
+        "gyro_browser_screenshot"
+      ],
+      "final": null,
+      "reviewWaitMs": 0
+    },
+    {
+      "index": 3,
+      "at": 1794147933071,
+      "toolResults": 3,
+      "actions": [],
+      "final": "BROWSER_OK",
+      "reviewWaitMs": 0
+    },
+    {
+      "index": 4,
+      "at": 1794147934585,
+      "toolResults": 0,
+      "actions": [
+        "gyro_workspace_read",
+        "gyro_workspace_read"
+      ],
+      "final": null,
+      "reviewWaitMs": 0
+    },
+    {
+      "index": 5,
+      "at": 1794147934710,
+      "toolResults": 2,
+      "actions": [],
+      "final": "SCRIPTED_CONTEXT_HERON: heron.",
+      "reviewWaitMs": 0
+    },
+    {
+      "index": 6,
+      "at": 1794147934854,
+      "toolResults": 0,
+      "actions": [
+        "gyro_browser_open"
+      ],
+      "final": null,
+      "reviewWaitMs": 0
+    },
+    {
+      "index": 7,
+      "at": 1794147935177,
+      "toolResults": 1,
+      "actions": [
+        "gyro_browser_set_viewport"
+      ],
+      "final": null,
+      "reviewWaitMs": 0
+    },
+    {
+      "index": 8,
+      "at": 1794147935354,
+      "toolResults": 2,
+      "actions": [
+        "gyro_browser_screenshot"
+      ],
+      "final": null,
+      "reviewWaitMs": 0
+    },
+    {
+      "index": 9,
+      "at": 1794147940520,
+      "toolResults": 3,
+      "actions": [],
+      "final": "BROWSER_OK",
+      "reviewWaitMs": 0
+    }
+  ],
+  "pageRequests": [
+    {
+      "startedAt": 1794147927598,
+      "delayMs": 4000,
+      "respondedAt": 1794147931620
+    },
+    {
+      "startedAt": 1794147935834,
+      "delayMs": 4000,
+      "respondedAt": 1794147939896
+    }
+  ],
+  "errors": []
+}

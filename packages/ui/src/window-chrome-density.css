@@ -1,0 +1,163 @@
+/* One compact window row. The inset chat canvas and window navigation end at
+   the same baseline; controls keep their existing sizes and drag regions. */
+:root {
+  --gyro-window-header-height: 40px;
+  --gyro-window-header-control-inset: 6px;
+}
+
+:root[data-theme]
+  .gyro-app-shell
+  :is(.gyro-chat-surface, .gyro-chat-companion, .gyro-chat-companion-host) {
+  --gyro-chat-header-height: calc(
+    var(--gyro-window-header-height) - var(--gyro-chat-rim, 0px)
+  );
+}
+
+/* Override the older hidden-sidebar minimum as well as the grid row. */
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  .gyro-chat-surface.is-thread
+  > .gyro-chat-thread-topbar {
+  height: var(--gyro-chat-header-height);
+  min-height: var(--gyro-chat-header-height);
+}
+
+:root[data-theme]
+  .gyro-app-shell
+  .gyro-sidebar-persistent-header
+  > .gyro-sidebar-windowbar,
+:root[data-theme] .gyro-app-shell .gyro-sidebar-windowbar.is-settings {
+  height: var(--gyro-window-header-height);
+  min-height: var(--gyro-window-header-height);
+  align-items: center;
+  padding-top: var(--gyro-window-header-control-inset);
+  padding-bottom: 0;
+}
+
+/* Match the inset title's center, without changing the protected left inset. */
+:root[data-theme] .gyro-app-shell > .gyro-sidebar-restore-cluster {
+  height: var(--gyro-window-header-height);
+  min-height: 0;
+  top: 0;
+  align-items: center;
+  padding-top: var(--gyro-window-header-control-inset);
+  padding-bottom: 0;
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  > .gyro-sidebar-restore-cluster {
+  top: var(--gyro-chat-rim);
+  height: var(
+    --gyro-chat-header-height,
+    calc(var(--gyro-window-header-height) - var(--gyro-chat-rim))
+  );
+  padding-top: 0;
+}
+
+/* Workspace's exposed editor strip and rail share the same window baseline. */
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  > .gyro-sidebar::before {
+  height: var(--gyro-window-header-height);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  > .gyro-sidebar::after {
+  top: var(--gyro-window-header-height);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  .gyro-workspace-activity-rail::after {
+  top: calc(
+    var(--gyro-window-header-height) + var(--gyro-workspace-panel-radius)
+  );
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
+  > .gyro-workspace-activity-rail::after {
+  top: var(--gyro-window-header-height);
+}
+
+:root[data-theme] .gyro-app-shell .gyro-workspace-activity-rail-drag {
+  flex-basis: var(--gyro-window-header-height);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
+  .gyro-workspace-route.is-code {
+  --gyro-ide-tab-height: var(--gyro-window-header-height);
+}
+
+/* The 24px visual tile sits inside the existing 28px click target. Content-box
+   clipping gives the tile a smaller nested radius without adding a wrapper. */
+:root[data-theme] .gyro-app-shell.is-thread-layout .gyro-chat-thread-topbar {
+  padding-right: var(--gyro-space-standard);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  .gyro-chat-thread-topbar
+  :is(.gyro-thread-topbar-actions, .gyro-chat-surface-controls) {
+  align-items: center;
+  gap: var(--gyro-space-compact);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  .gyro-chat-thread-topbar
+  .gyro-thread-topbar-actions
+  .gyro-chat-surface-button {
+  width: var(--gyro-chat-header-control-size);
+  height: var(--gyro-chat-header-control-size);
+  min-width: var(--gyro-chat-header-control-size);
+  min-height: var(--gyro-chat-header-control-size);
+  padding: calc(var(--gyro-space-compact) / 2);
+  border: 0;
+  border-radius: var(--gyro-radius-md);
+  background: transparent;
+  background-clip: content-box;
+  box-shadow: none;
+  color: var(--gyro-muted);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  .gyro-chat-thread-topbar
+  .gyro-thread-topbar-actions
+  .gyro-chat-surface-button
+  > svg {
+  width: calc(var(--gyro-icon-standard) * var(--gyro-ui-scale, 1));
+  height: calc(var(--gyro-icon-standard) * var(--gyro-ui-scale, 1));
+  stroke-width: 1.6;
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  .gyro-chat-thread-topbar
+  .gyro-thread-topbar-actions
+  .gyro-chat-surface-button:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  color: var(--gyro-text);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  .gyro-chat-thread-topbar
+  .gyro-thread-topbar-actions
+  .gyro-chat-surface-button.is-active {
+  background-color: color-mix(in srgb, var(--gyro-accent) 10%, transparent);
+  color: var(--gyro-accent);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  .gyro-chat-thread-topbar
+  .gyro-thread-topbar-actions
+  .gyro-chat-surface-button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}

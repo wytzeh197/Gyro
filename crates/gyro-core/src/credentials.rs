@@ -168,11 +168,16 @@ pub fn apply_stored_provider_api_key(command: &mut Command, provider_id: &str) {
 /// Actual provider launches must retain credential-access failures rather than
 /// silently falling through to a different CLI account or authentication method.
 pub fn try_apply_stored_provider_api_key(command: &mut Command, provider_id: &str) -> Result<()> {
+    // The built-in OpenAI runner is the Codex CLI connection. Merely having a
+    // saved API key must never switch that connection to separately billed API
+    // access. Do not even read the key store on this path.
+    if provider_id == "openai" {
+        return apply_selected_provider_api_key(command, provider_id, Ok(None));
+    }
     apply_selected_provider_api_key(
         command,
         provider_id,
         try_stored_provider_api_key_env(provider_id),
-        provider_api_key_env_name(provider_id).is_some_and(|name| std::env::var_os(name).is_some()),
     )
 }
 
@@ -180,22 +185,16 @@ fn apply_selected_provider_api_key(
     command: &mut Command,
     provider_id: &str,
     stored: Result<Option<(OsString, OsString)>>,
-    has_environment_key: bool,
 ) -> Result<()> {
+    if provider_id == "openai" {
+        command.env_remove("OPENAI_API_KEY");
+        command.env_remove("OPENAI_BASE_URL");
+        command.args(["-c", "model_provider=\"openai\""]);
+        return Ok(());
+    }
     let stored = stored?;
-    let has_key = stored.is_some() || has_environment_key;
     if let Some((name, value)) = stored {
         command.env(name, value);
-    }
-    // Explicitly select environment authentication for this process, without
-    // replacing the user's existing Codex login or persisting the key there.
-    if provider_id == "openai" && has_key {
-        command.args([
-            "-c",
-            "model_providers.openai.env_key=\"OPENAI_API_KEY\"",
-            "-c",
-            "model_providers.openai.requires_openai_auth=false",
-        ]);
     }
     Ok(())
 }
@@ -522,52 +521,53 @@ mod tests {
     }
 
     #[test]
-    fn codex_authentication_uses_the_same_credential_selection_as_injection() {
+    fn codex_cli_auth_never_switches_to_saved_or_inherited_api_keys() {
+        for stored in [
+            Ok(None),
+            Ok(Some(("OPENAI_API_KEY".into(), "fixture-key".into()))),
+            Err(anyhow::anyhow!("API key store is unavailable")),
+        ] {
+            let mut command = Command::new("codex");
+            command.env("OPENAI_API_KEY", "previously-injected-key");
+            command.env("OPENAI_BASE_URL", "https://api.example.test/v1");
+            apply_selected_provider_api_key(&mut command, "openai", stored).unwrap();
+            assert_eq!(
+                command.get_args().collect::<Vec<_>>(),
+                ["-c", "model_provider=\"openai\""]
+            );
+            for name in ["OPENAI_API_KEY", "OPENAI_BASE_URL"] {
+                assert!(command
+                    .get_envs()
+                    .any(|(key, value)| key == name && value.is_none()));
+            }
+        }
+        // The production entry point also bypasses the saved-key reader.
         let mut command = Command::new("codex");
-        apply_selected_provider_api_key(&mut command, "openai", Ok(None), false).unwrap();
-        assert_eq!(
-            command.get_args().count(),
-            0,
-            "subscription login stays selected without a key"
-        );
+        try_apply_stored_provider_api_key(&mut command, "openai").unwrap();
+        assert!(command
+            .get_args()
+            .any(|arg| arg == "model_provider=\"openai\""));
+    }
+
+    #[test]
+    fn other_cli_provider_keys_still_inject_and_propagate_store_errors() {
+        let mut command = Command::new("claude");
         apply_selected_provider_api_key(
             &mut command,
-            "openai",
-            Ok(Some(("OPENAI_API_KEY".into(), "fixture-key".into()))),
-            true,
+            "anthropic",
+            Ok(Some(("ANTHROPIC_API_KEY".into(), "fixture-key".into()))),
         )
         .unwrap();
         assert!(command
-            .get_args()
-            .any(|arg| arg == "model_providers.openai.requires_openai_auth=false"));
-        assert!(command
             .get_envs()
-            .any(|(name, value)| name == "OPENAI_API_KEY"
+            .any(|(name, value)| name == "ANTHROPIC_API_KEY"
                 && value == Some(std::ffi::OsStr::new("fixture-key"))));
-        let mut command = Command::new("codex");
-        apply_selected_provider_api_key(&mut command, "openai", Ok(None), true).unwrap();
-        assert!(command
-            .get_args()
-            .any(|arg| arg == "model_providers.openai.requires_openai_auth=false"));
-        assert_eq!(
-            command.get_envs().count(),
-            0,
-            "inherited key is not replaced"
-        );
-        let mut command = Command::new("codex");
-        let result = apply_selected_provider_api_key(
-            &mut command,
-            "openai",
-            Err(anyhow::anyhow!("fixture Keychain access denied")),
-            false,
-        );
-        assert!(result.is_err());
-        assert_eq!(command.get_envs().count(), 0);
-        assert_eq!(
-            command.get_args().count(),
-            0,
-            "a credential failure cannot change authentication arguments"
-        );
+        assert!(apply_selected_provider_api_key(
+            &mut Command::new("claude"),
+            "anthropic",
+            Err(anyhow::anyhow!("fixture store unavailable")),
+        )
+        .is_err());
     }
     #[test]
     fn api_key_support_covers_new_presets_and_custom_providers() {

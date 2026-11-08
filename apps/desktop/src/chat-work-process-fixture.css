@@ -1,0 +1,37 @@
+body {
+  margin: 0;
+  background: var(--gyro-pane);
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-sans);
+}
+.work-process-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-standard);
+  padding: var(--gyro-space-panel);
+}
+.work-process-controls button {
+  padding: var(--gyro-space-compact) var(--gyro-space-standard);
+  font: var(--gyro-font-support)/1.5 var(--gyro-font-sans);
+}
+.gyro-chat-surface.work-process-fixture {
+  display: block;
+  height: auto;
+  min-height: 0;
+  width: min(
+    var(--gyro-chat-content-width),
+    calc(100% - 2 * var(--gyro-space-panel))
+  );
+  margin: var(--gyro-space-section) auto;
+  padding: var(--gyro-space-panel) 0;
+}
+.work-process-fixture .gyro-run-header-actions {
+  margin-left: auto;
+}
+.work-process-fixture .gyro-run-header-actions button {
+  display: grid;
+  place-items: center;
+  min-width: var(--gyro-control-standard);
+  padding: 0 var(--gyro-space-standard);
+  height: var(--gyro-control-standard);
+}

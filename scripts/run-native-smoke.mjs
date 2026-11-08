@@ -5,6 +5,8 @@
 // (GYRO_LSP_SMOKE=1), and fails unless both harnesses write an ok report.
 // Both harnesses are #[cfg(debug_assertions)]-only in lib.rs, so the report
 // files double as proof that the env-gated paths still exist and run.
+// OS mouse acceptance requires an unlocked interactive desktop. A locked Mac
+// fails the production foreground guard; do not disable it to make smoke pass.
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -42,6 +44,7 @@ function resolveAppBinary() {
 const appPath = resolveAppBinary();
 const skipBrowser = process.env.GYRO_NATIVE_SMOKE_SKIP_BROWSER === "1";
 const skipLsp = process.env.GYRO_NATIVE_SMOKE_SKIP_LSP === "1";
+const keepData = process.env.GYRO_NATIVE_SMOKE_KEEP_DATA === "1";
 
 if (!existsSync(appPath)) {
   console.error(
@@ -68,6 +71,7 @@ await new Promise((resolve, reject) => {
 });
 const fixtureUrl = `http://127.0.0.1:${server.address().port}/browser-observation.html`;
 const dataDir = await mkdtemp(join(tmpdir(), "gyro-native-smoke-"));
+if (keepData) console.log(`Native smoke evidence: ${dataDir}`);
 
 async function runSmoke({ name, report, timeoutMs, env }) {
   console.log(`\n== ${name} smoke ==`);
@@ -86,6 +90,10 @@ async function runSmoke({ name, report, timeoutMs, env }) {
     });
   });
   const reportPath = join(dataDir, report);
+  if (code !== 0 || signal) {
+    console.error(`${name} smoke exited unsuccessfully (exit ${code}, signal ${signal})`);
+    return false;
+  }
   if (!existsSync(reportPath)) {
     console.error(
       `${name} smoke wrote no ${report} (exit ${code}, signal ${signal}); a release build compiles the GYRO_* harnesses out`,
@@ -133,9 +141,14 @@ try {
   }
 } finally {
   server.close();
-  await rm(dataDir, { recursive: true, force: true });
+  if (!keepData) await rm(dataDir, { recursive: true, force: true });
 }
 if (!ok) process.exit(1);
 console.log(
-  "\nNative smoke passed: browser fixture and language server both reported ok.",
+  `\nNative smoke passed: ${
+    [
+      ...(!skipBrowser ? ["browser fixture"] : []),
+      ...(!skipLsp ? ["language server"] : []),
+    ].join(" and ") || "no suites selected"
+  }.`,
 );

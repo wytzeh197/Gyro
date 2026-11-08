@@ -54,7 +54,7 @@ export function selectQueuedMessageDelivery<T extends QueuedMessageDelivery>(
   const candidates = Object.entries(queues)
     .map(([sessionId, messages]) => ({
       sessionId,
-      message: messages.find((message) => message.status !== "failed"),
+      message: messages[0]?.status === "failed" ? undefined : messages[0],
     }))
     .filter(
       (candidate): candidate is { sessionId: string; message: T } =>
