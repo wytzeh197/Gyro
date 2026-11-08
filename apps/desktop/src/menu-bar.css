@@ -97,7 +97,7 @@
   --menu-border: rgba(255, 255, 255, 0.11);
   --menu-rule: rgba(255, 255, 255, 0.075);
   --menu-copy: #f4f4f5;
-  --menu-muted: #a1a1a6;
+  --menu-muted: #b4b4b9;
   --menu-hover: rgba(255, 255, 255, 0.065);
   --menu-pressed: rgba(255, 255, 255, 0.095);
   --menu-neutral: #77818c;
@@ -130,7 +130,7 @@
   --menu-border: rgba(20, 27, 34, 0.13);
   --menu-rule: rgba(20, 27, 34, 0.085);
   --menu-copy: #171b20;
-  --menu-muted: #67717d;
+  --menu-muted: #535b66;
   --menu-hover: rgba(24, 30, 37, 0.06);
   --menu-pressed: rgba(24, 30, 37, 0.09);
   --menu-neutral: #8a929b;

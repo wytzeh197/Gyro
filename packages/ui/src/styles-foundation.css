@@ -35,9 +35,9 @@
   --gyro-border: color-mix(in srgb, white 9%, transparent);
   --gyro-border-soft: color-mix(in srgb, white 5.5%, transparent);
   --gyro-border-strong: color-mix(in srgb, white 30%, transparent);
-  --gyro-text: #ededed;
-  --gyro-muted: #b5b5b5;
-  --gyro-faint: #a0a0a0;
+  --gyro-text: #f6f6f7;
+  --gyro-muted: #c6c6ca;
+  --gyro-faint: #aaaaaf;
   --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 86%, white 14%);
   --gyro-accent-strong: color-mix(
     in srgb,
@@ -61,7 +61,7 @@
   --gyro-effort-max: #bc83ff;
   --gyro-danger: #ff8995;
   --gyro-success: #5ed8a4;
-  --gyro-sidebar-text: #d5d5d5;
+  --gyro-sidebar-text: #e2e2e4;
   --gyro-hover-text: #fafafa;
   --gyro-topbar: var(--gyro-app);
   --gyro-topbar-border: var(--gyro-border-soft);
@@ -76,7 +76,7 @@
   --gyro-user-bubble: var(--gyro-surface-soft);
   --gyro-user-bubble-text: var(--gyro-text);
   --gyro-code-bg: #141414;
-  --gyro-code-text: #dedede;
+  --gyro-code-text: #e6e6e8;
   --gyro-segment-bg: var(--gyro-sidebar);
   --gyro-segment-active: #2e2e2e;
   --gyro-segment-active-text: var(--gyro-text);
@@ -860,11 +860,11 @@
   --gyro-border: color-mix(in srgb, black 10%, transparent);
   --gyro-border-soft: color-mix(in srgb, black 6%, transparent);
   --gyro-border-strong: color-mix(in srgb, black 42%, transparent);
-  --gyro-text: #252525;
-  --gyro-muted: #626262;
+  --gyro-text: #0e0e11;
+  --gyro-muted: #3d3d44;
   /* Lighter than muted so meta text keeps a step of hierarchy, while staying
-     above 4.5:1 on the app canvas. */
-  --gyro-faint: #707070;
+     above 7:1 on the app canvas. */
+  --gyro-faint: #55555d;
   --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 82%, #10203b 18%);
   --gyro-accent-strong: color-mix(
     in srgb,
@@ -900,7 +900,7 @@
     var(--gyro-muted) 60%,
     transparent
   );
-  --gyro-sidebar-text: #434343;
+  --gyro-sidebar-text: #26262b;
   --gyro-hover-text: #191919;
   --gyro-topbar: var(--gyro-pane);
   --gyro-topbar-border: var(--gyro-border);
@@ -915,7 +915,7 @@
   --gyro-user-bubble: var(--gyro-surface-soft);
   --gyro-user-bubble-text: var(--gyro-text);
   --gyro-code-bg: #f5f5f5;
-  --gyro-code-text: #2c2c2c;
+  --gyro-code-text: #18181c;
   --gyro-segment-bg: #e5e5e5;
   --gyro-segment-active: var(--gyro-surface);
   --gyro-segment-active-text: var(--gyro-text);
