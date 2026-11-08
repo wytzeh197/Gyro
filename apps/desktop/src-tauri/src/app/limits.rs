@@ -15,7 +15,6 @@ pub(crate) const MAX_CONCURRENT_SCHEDULED_RUNS: usize = 2;
 // widening what a session row holds.
 pub(crate) const MAX_LIVE_RESPONSE_CHARS: usize = 256_000;
 pub(crate) const MAX_PROVIDER_STDOUT_FRAME_BYTES: usize = 48 * 1024 * 1024;
-pub(crate) const MAX_CHAT_RESPONSE_BYTES: usize = MAX_CHAT_RESPONSE_CHARS * 4 + 4;
 pub(crate) const MAX_CHAT_IMAGES: usize = 10;
 // Screen recordings routinely exceed 50 MB; videos reach providers as file
 // references, so the cap only bounds local copies.
@@ -47,19 +46,6 @@ pub(crate) const MAX_IDE_PROTOCOL_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 /// Program output a DAP request keeps while it waits for its response. Events
 /// never count toward MAX_IDE_PROTOCOL_MESSAGES_PER_RESPONSE; time bounds the rest.
 pub(crate) const MAX_DAP_OUTPUT_EVENT_BYTES: usize = 4 * 1024 * 1024;
-// Codex app-server can legitimately return a multi-megabyte JSONL frame (for
-// example, a completed item with rich tool output). Keep this aligned with the
-// bounded queue budget: the aggregate protocol budget below still bounds a
-// noisy or malicious child process.
-pub(crate) const MAX_CODEX_APP_SERVER_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
-// Preserve the former 64 MiB maximum of queued protocol frames even though an
-// individual frame can now hold a large resumed thread or tool result.
-pub(crate) const CODEX_APP_SERVER_CHANNEL_CAPACITY: usize = 4;
-pub(crate) const MAX_CODEX_APP_SERVER_ACTIVITIES: usize = 256;
-pub(crate) const MAX_CODEX_APP_SERVER_PATCHES: usize = 64;
-pub(crate) const MAX_CODEX_APP_SERVER_PATCH_BYTES: usize = 256 * 1024;
-pub(crate) const MAX_CODEX_APP_SERVER_PROTOCOL_MESSAGES: usize = 50_000;
-pub(crate) const MAX_CODEX_APP_SERVER_PROTOCOL_BYTES: usize = 128 * 1024 * 1024;
 pub(crate) const MAX_DESKTOP_IPC_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const MAX_PERMISSION_MCP_MESSAGE_BYTES: usize = 1024 * 1024;
 pub(crate) const DESKTOP_IPC_WORKER_COUNT: usize = 16;
@@ -101,7 +87,6 @@ pub(crate) const WORKSPACE_CHANGED_EVENT: &str = "gyro://workspace-changed";
 /// event above carries the resulting tree; this one tells open editors which
 /// path became which, which a tree snapshot cannot reconstruct.
 pub(crate) const WORKSPACE_PATHS_CHANGED_EVENT: &str = "gyro://workspace-paths-changed";
-pub(crate) const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
 /// How often a live run reminds the desktop it is still working when the CLI is
 /// quiet (long tools, thinking). The chat idle watchdog is five minutes; this
 /// stays well under that so a silent but healthy process never looks finished.
@@ -117,3 +102,12 @@ pub(crate) use gyro_core::provider_runtime::limits::{
 pub(crate) use gyro_core::provider_runtime::limits::MAX_CHAT_MESSAGE_CHARS;
 
 pub(crate) use gyro_core::provider_runtime::limits::MAX_CHAT_IMAGE_BYTES;
+
+pub(crate) use gyro_core::provider_runtime::limits::{
+    MAX_CHAT_RESPONSE_BYTES, MAX_CODEX_APP_SERVER_ACTIVITIES, MAX_CODEX_APP_SERVER_PATCHES,
+    MAX_CODEX_APP_SERVER_PATCH_BYTES, MAX_CODEX_APP_SERVER_PROTOCOL_BYTES,
+    MAX_CODEX_APP_SERVER_PROTOCOL_MESSAGES, PROVIDER_STREAM_FLUSH_INTERVAL,
+};
+
+#[cfg(test)]
+pub(crate) use gyro_core::provider_runtime::limits::MAX_CODEX_APP_SERVER_MESSAGE_BYTES;

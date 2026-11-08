@@ -10,9 +10,7 @@ use crate::{
 use gyro_core::{
     augmented_gui_path, is_openai_compatible_provider, provider_descriptor, ProviderExecutionKind,
 };
-use std::process::{Child, Command};
-#[cfg(unix)]
-use std::time::Duration;
+use std::process::Command;
 pub(crate) fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescriptor {
     let Some(descriptor) = provider_descriptor(provider_id) else {
         // A provider Gyro does not ship. An endpoint the user defined runs over
@@ -134,86 +132,6 @@ pub(crate) fn command_for_provider(command: &str, provider_id: &str) -> anyhow::
     Ok(process)
 }
 
-pub(crate) struct ProviderProcessGuard {
-    pub(crate) child: gyro_core::process_guard::GuardedChild,
-}
-
-impl ProviderProcessGuard {
-    /// Registered so quitting Gyro tears the group down: it runs in its own
-    /// process group and gets no SIGHUP from the app exiting.
-    pub(crate) fn new(child: gyro_core::process_guard::GuardedChild) -> Self {
-        gyro_core::register_process_group(child.id());
-        Self { child }
-    }
-}
-
-impl std::ops::Deref for ProviderProcessGuard {
-    type Target = Child;
-
-    fn deref(&self) -> &Self::Target {
-        &self.child
-    }
-}
-
-impl std::ops::DerefMut for ProviderProcessGuard {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.child
-    }
-}
-
-impl Drop for ProviderProcessGuard {
-    fn drop(&mut self) {
-        terminate_provider_process_group(&mut self.child);
-        gyro_core::unregister_process_group(self.child.id());
-    }
-}
-
-#[cfg(unix)]
-pub(crate) fn configure_provider_process_group(command: &mut Command) {
-    use std::os::unix::process::CommandExt;
-
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setpgid(0, 0) == 0 {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
-            }
-        });
-    }
-}
-
-#[cfg(not(unix))]
-pub(crate) fn configure_provider_process_group(_command: &mut Command) {}
-
-#[cfg(unix)]
-pub(crate) fn terminate_provider_process_group(child: &mut Child) {
-    let process_group = -(child.id() as i32);
-    unsafe {
-        libc::kill(process_group, libc::SIGTERM);
-    }
-    for _ in 0..10 {
-        let _ = child.try_wait();
-        let group_exists = unsafe { libc::kill(process_group, 0) } == 0
-            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
-        if !group_exists {
-            let _ = child.wait();
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    unsafe {
-        libc::kill(process_group, libc::SIGKILL);
-    }
-    let _ = child.wait();
-}
-
-#[cfg(not(unix))]
-pub(crate) fn terminate_provider_process_group(child: &mut Child) {
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
 pub(crate) use gyro_core::provider_runtime::support::{
     provider_error_sentence, provider_output_summary, provider_stream_failure_detail,
 };
@@ -231,3 +149,7 @@ pub(crate) fn build_grok_acp_program_args(
         crate::model_catalog::catalog_reasoning_efforts("xai", model_id).as_deref(),
     )
 }
+
+pub(crate) use gyro_core::provider_runtime::support::{
+    configure_provider_process_group, ProviderProcessGuard,
+};

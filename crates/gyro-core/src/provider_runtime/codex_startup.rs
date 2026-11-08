@@ -1,13 +1,13 @@
 //! Startup acknowledgements have a shorter deadline than model/tool execution.
 
-use crate::providers::codex_app_server::receive_codex_app_server_response_until;
+use super::codex_client::receive_codex_app_server_response_until;
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 
-pub(super) fn receive(
+pub(crate) fn receive(
     messages: &mpsc::Receiver<Result<serde_json::Value, String>>,
     request_id: u64,
     run_deadline: Instant,

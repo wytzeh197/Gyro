@@ -9,7 +9,14 @@ use super::{
 };
 use crate::{GyroConfig, GyroPaths, WORKSPACE_UNAVAILABLE_MESSAGE};
 use base64::Engine;
-use std::{collections::HashMap, path::PathBuf};
+#[cfg(unix)]
+use std::time::Duration;
+use std::{
+    collections::HashMap,
+    fs,
+    path::PathBuf,
+    process::{Child, Command},
+};
 pub fn provider_output_summary(
     runner: &str,
     status_label: &str,
@@ -272,5 +279,93 @@ pub fn sanitize_provider_approval_details(value: serde_json::Value) -> serde_jso
                 .collect(),
         ),
         value => value,
+    }
+}
+
+pub struct ProviderProcessGuard {
+    pub child: crate::process_guard::GuardedChild,
+}
+
+impl ProviderProcessGuard {
+    /// Registered so quitting Gyro tears the group down: it runs in its own
+    /// process group and gets no SIGHUP from the app exiting.
+    pub fn new(child: crate::process_guard::GuardedChild) -> Self {
+        crate::register_process_group(child.id());
+        Self { child }
+    }
+}
+
+impl std::ops::Deref for ProviderProcessGuard {
+    type Target = Child;
+
+    fn deref(&self) -> &Self::Target {
+        &self.child
+    }
+}
+
+impl std::ops::DerefMut for ProviderProcessGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.child
+    }
+}
+
+impl Drop for ProviderProcessGuard {
+    fn drop(&mut self) {
+        terminate_provider_process_group(&mut self.child);
+        crate::unregister_process_group(self.child.id());
+    }
+}
+
+#[cfg(unix)]
+pub fn configure_provider_process_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setpgid(0, 0) == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
+}
+
+#[cfg(not(unix))]
+pub fn configure_provider_process_group(_command: &mut Command) {}
+
+#[cfg(unix)]
+pub fn terminate_provider_process_group(child: &mut Child) {
+    let process_group = -(child.id() as i32);
+    unsafe {
+        libc::kill(process_group, libc::SIGTERM);
+    }
+    for _ in 0..10 {
+        let _ = child.try_wait();
+        let group_exists = unsafe { libc::kill(process_group, 0) } == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+        if !group_exists {
+            let _ = child.wait();
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    unsafe {
+        libc::kill(process_group, libc::SIGKILL);
+    }
+    let _ = child.wait();
+}
+
+#[cfg(not(unix))]
+pub fn terminate_provider_process_group(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+/// Deletes a temporary file when dropped.
+pub struct TempFileGuard(pub PathBuf);
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
     }
 }

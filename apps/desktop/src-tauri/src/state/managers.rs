@@ -15,8 +15,7 @@ use gyro_core::{
 };
 use std::{
     collections::HashMap,
-    fs,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex, OnceLock, Weak,
@@ -182,15 +181,6 @@ impl Drop for BrowserPreviewAdmission {
     }
 }
 
-/// Deletes a temporary file when dropped.
-pub(crate) struct TempFileGuard(pub(crate) PathBuf);
-
-impl Drop for TempFileGuard {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
-
 pub(crate) struct HiddenWebviewGuard(pub(crate) tauri::WebviewWindow);
 
 impl std::ops::Deref for HiddenWebviewGuard {
@@ -206,3 +196,5 @@ impl Drop for HiddenWebviewGuard {
         let _ = self.0.close();
     }
 }
+
+pub(crate) use gyro_core::provider_runtime::support::TempFileGuard;
