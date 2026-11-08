@@ -1,17 +1,13 @@
 use crate::{
     project_import_continuation,
     providers::{
-        binding::local_conversation_history_for_request,
         chat_types::{ChatMode, ProviderChatRequest},
         cli_args::{audit_provider_chat_args, provider_chat_cwd},
-        events::emit_provider_activity_event,
         process::{command_for_provider, provider_output_summary, provider_stream_failure_detail},
         prompt::{provider_context_message_for_turn, PromptTurn},
+        runner::{emit_provider_activity_event, RunnerHost},
         stdout::{provider_activities_for_response, recover_streamed_provider_answer},
-        streaming::{
-            run_streaming_command, PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS,
-            PROVIDER_CHAT_MAX_RUNTIME_SECS,
-        },
+        streaming::{PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS, PROVIDER_CHAT_MAX_RUNTIME_SECS},
         types::{ProviderActivity, ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput},
     },
     reply_segments::StreamedText,
@@ -35,7 +31,7 @@ pub(crate) const ANTIGRAVITY_CURSOR_KIND: &str = "antigravity-conversation";
 /// rather than a per-call dialog. That is why the provider descriptor reports
 /// no approval support.
 pub(crate) fn run_antigravity_chat(
-    app: &tauri::AppHandle,
+    host: &dyn RunnerHost,
     request: &ProviderChatRequest,
     resume_cursor: Option<&ProviderResumeCursor>,
     attempt: &mut ProviderRunAttempt,
@@ -45,7 +41,7 @@ pub(crate) fn run_antigravity_chat(
     let history = if can_resume {
         None
     } else {
-        local_conversation_history_for_request(request)
+        host.conversation_history(request)
     };
     let prompt = provider_context_message_for_turn(
         request,
@@ -78,7 +74,7 @@ pub(crate) fn run_antigravity_chat(
             note: None,
             status: "completed".into(),
         };
-        emit_provider_activity_event(app, request, &activity, None);
+        emit_provider_activity_event(host, request, &activity, None);
     }
     let conversation_id = resume_cursor.and_then(|cursor| {
         (cursor.kind == ANTIGRAVITY_CURSOR_KIND).then_some(cursor.session_id.as_str())
@@ -100,30 +96,30 @@ pub(crate) fn run_antigravity_chat(
     process.args(args);
 
     let mut observed_session_id = None;
-    let output = run_streaming_command(
-        process,
-        None,
-        Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
-        Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
-        app,
-        request,
-        &mut observed_session_id,
-    )
-    .map_err(|error| {
-        // Only a missing binary earns the install instructions; every other
-        // failure already says what went wrong.
-        let detail = error.to_string();
-        if detail.contains("No such file") || detail.contains("not found") {
-            anyhow::anyhow!(
-                "{}",
-                gyro_core::install_hint("antigravity").unwrap_or_else(|| {
-                    "The Antigravity CLI (`agy`) is not installed.".to_string()
-                })
-            )
-        } else {
-            error
-        }
-    });
+    let output = host
+        .stream_command(
+            process,
+            None,
+            Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
+            Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
+            request,
+            &mut observed_session_id,
+        )
+        .map_err(|error| {
+            // Only a missing binary earns the install instructions; every other
+            // failure already says what went wrong.
+            let detail = error.to_string();
+            if detail.contains("No such file") || detail.contains("not found") {
+                anyhow::anyhow!(
+                    "{}",
+                    gyro_core::install_hint("antigravity").unwrap_or_else(|| {
+                        "The Antigravity CLI (`agy`) is not installed.".to_string()
+                    })
+                )
+            } else {
+                error
+            }
+        });
 
     // Recorded before any failure propagates: a stopped or failed turn still
     // leaves a conversation the next message can continue.

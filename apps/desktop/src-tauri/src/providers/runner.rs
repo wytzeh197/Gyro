@@ -97,6 +97,15 @@ pub(crate) trait RunnerHost: Send + Sync {
         transaction: Option<gyro_core::PreparedProviderMutationTransaction>,
     ) -> anyhow::Result<crate::state::provider_run::ProviderApprovalDecision>;
     fn stop_message(&self, session_id: &str) -> String;
+    fn stream_command(
+        &self,
+        command: std::process::Command,
+        stdin_file: Option<&std::path::Path>,
+        max_runtime: std::time::Duration,
+        inactivity_timeout: std::time::Duration,
+        request: &ProviderChatRequest,
+        observed_session_id: &mut Option<String>,
+    ) -> anyhow::Result<super::streaming::StreamingCommandOutput>;
 
     fn run_legacy(
         &self,

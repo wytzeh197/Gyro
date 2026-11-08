@@ -160,6 +160,26 @@ impl RunnerHost for TauriRunnerHost {
         super::streaming::provider_stop_message(&self.app, session_id)
     }
 
+    fn stream_command(
+        &self,
+        command: std::process::Command,
+        stdin_file: Option<&std::path::Path>,
+        max_runtime: std::time::Duration,
+        inactivity_timeout: std::time::Duration,
+        request: &ProviderChatRequest,
+        observed_session_id: &mut Option<String>,
+    ) -> anyhow::Result<super::streaming::StreamingCommandOutput> {
+        super::streaming::run_streaming_command(
+            command,
+            stdin_file,
+            max_runtime,
+            inactivity_timeout,
+            &self.app,
+            request,
+            observed_session_id,
+        )
+    }
+
     fn run_legacy(
         &self,
         kind: ProviderAdapterKind,
@@ -176,7 +196,7 @@ impl RunnerHost for TauriRunnerHost {
             }
             ProviderAdapterKind::KimiAcp => run_kimi_acp_chat(self, request, resume, attempt),
             ProviderAdapterKind::AntigravityCli => {
-                run_antigravity_chat(&self.app, request, resume, attempt)
+                run_antigravity_chat(self, request, resume, attempt)
             }
             ProviderAdapterKind::Ollama => crate::ollama_runner::run_ollama_chat(self, request),
             ProviderAdapterKind::OpenAiCompatible => {

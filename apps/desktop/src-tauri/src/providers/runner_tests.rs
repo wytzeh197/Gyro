@@ -64,6 +64,17 @@ impl RunnerHost for RecordingHost {
     fn stop_message(&self, _: &str) -> String {
         unreachable!("unused fixture service")
     }
+    fn stream_command(
+        &self,
+        _: std::process::Command,
+        _: Option<&std::path::Path>,
+        _: std::time::Duration,
+        _: std::time::Duration,
+        _: &ProviderChatRequest,
+        _: &mut Option<String>,
+    ) -> anyhow::Result<super::super::streaming::StreamingCommandOutput> {
+        unreachable!("unused fixture service")
+    }
     fn run_legacy(
         &self,
         kind: ProviderAdapterKind,
