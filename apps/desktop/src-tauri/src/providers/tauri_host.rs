@@ -186,6 +186,20 @@ impl RunnerHost for TauriRunnerHost {
         crate::capabilities::bridge::desktop_claude_permission_mcp_config(request, &nonce, &context)
     }
 
+    fn codex_mcp_args(&self, request: &ProviderChatRequest) -> anyhow::Result<Vec<String>> {
+        crate::capabilities::bridge::codex_capability_mcp_config_args(&self.app, request)
+    }
+    fn is_cancelled(&self, session_id: &str) -> bool {
+        super::streaming::provider_chat_cancelled(&self.app, session_id)
+    }
+    fn request_native_approval(
+        &self,
+        request: &ProviderChatRequest,
+        kind: &str,
+        details: serde_json::Value,
+    ) -> anyhow::Result<crate::state::provider_run::ProviderApprovalDecision> {
+        super::approvals::wait_for_provider_approval(&self.app, request, kind, details)
+    }
     fn run_legacy(
         &self,
         kind: ProviderAdapterKind,
@@ -195,7 +209,7 @@ impl RunnerHost for TauriRunnerHost {
     ) -> anyhow::Result<ProviderRunnerOutput> {
         match kind {
             ProviderAdapterKind::OpenAiCodex => {
-                run_openai_codex_chat(&self.app, request, resume, attempt)
+                run_openai_codex_chat(self, request, resume, attempt)
             }
             ProviderAdapterKind::AnthropicClaude => {
                 run_anthropic_claude_chat(self, request, resume, attempt)

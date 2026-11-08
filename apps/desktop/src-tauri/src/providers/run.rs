@@ -888,35 +888,38 @@ pub(crate) fn compact_provider_chat_blocking(
         context_compaction::codex_context_compaction_activity(&activity_params, "running");
     emit_provider_activity_event(&app, &request, &running, Some(0));
 
-    let (completed, context_usage) =
-        match run_openai_codex_context_compaction(&app, &request, &resume_cursor) {
-            Ok(usage) => (
-                context_compaction::codex_context_compaction_activity(&activity_params, "done"),
-                provider_context_usage_with_window(
-                    usage,
-                    &request.provider_id,
-                    request.model_id.as_deref(),
-                ),
+    let (completed, context_usage) = match run_openai_codex_context_compaction(
+        &super::tauri_host::TauriRunnerHost::new(&app),
+        &request,
+        &resume_cursor,
+    ) {
+        Ok(usage) => (
+            context_compaction::codex_context_compaction_activity(&activity_params, "done"),
+            provider_context_usage_with_window(
+                usage,
+                &request.provider_id,
+                request.model_id.as_deref(),
             ),
-            Err(error) => {
-                let error = gyro_core::security::redact_secrets(&error.to_string());
-                let failed = ProviderActivity {
-                    id: running.id,
-                    kind: "context".into(),
-                    label: "Context compaction failed".into(),
-                    detail: Some(error.clone()),
-                    file_counts: None,
-                    note: None,
-                    status: "failed".into(),
-                };
-                emit_provider_activity_event(&app, &request, &failed, Some(0));
-                let _ = store.append_system_events_with_turn_id(
-                    session_uuid,
-                    vec![provider_activity_event_entry(&request, run_id, 0, &failed)],
-                );
-                return Err(error);
-            }
-        };
+        ),
+        Err(error) => {
+            let error = gyro_core::security::redact_secrets(&error.to_string());
+            let failed = ProviderActivity {
+                id: running.id,
+                kind: "context".into(),
+                label: "Context compaction failed".into(),
+                detail: Some(error.clone()),
+                file_counts: None,
+                note: None,
+                status: "failed".into(),
+            };
+            emit_provider_activity_event(&app, &request, &failed, Some(0));
+            let _ = store.append_system_events_with_turn_id(
+                session_uuid,
+                vec![provider_activity_event_entry(&request, run_id, 0, &failed)],
+            );
+            return Err(error);
+        }
+    };
     emit_provider_activity_event(&app, &request, &completed, Some(0));
     let mut entry = provider_activity_event_entry(&request, run_id, 0, &completed);
     if let Some(payload) = entry.1.as_object_mut() {

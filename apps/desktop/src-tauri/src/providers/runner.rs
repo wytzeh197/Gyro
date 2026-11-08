@@ -107,7 +107,14 @@ pub(crate) trait RunnerHost: Send + Sync {
         observed_session_id: &mut Option<String>,
     ) -> anyhow::Result<super::streaming::StreamingCommandOutput>;
     fn claude_mcp_config(&self, request: &ProviderChatRequest) -> anyhow::Result<String>;
-
+    fn codex_mcp_args(&self, request: &ProviderChatRequest) -> anyhow::Result<Vec<String>>;
+    fn is_cancelled(&self, session_id: &str) -> bool;
+    fn request_native_approval(
+        &self,
+        request: &ProviderChatRequest,
+        kind: &str,
+        details: serde_json::Value,
+    ) -> anyhow::Result<crate::state::provider_run::ProviderApprovalDecision>;
     fn run_legacy(
         &self,
         kind: ProviderAdapterKind,
@@ -204,6 +211,30 @@ pub(crate) fn execute_capabilities(
     calls: &[(CapabilityId, serde_json::Value)],
 ) -> anyhow::Result<Vec<CapabilityResponse>> {
     host.execute_capabilities(session_id, calls)
+}
+
+pub(crate) fn observe_codex_turn_usage(
+    host: &dyn RunnerHost,
+    request: &ProviderChatRequest,
+    billed: &mut crate::provider_accounting::CodexTurnUsage,
+    params: &serde_json::Value,
+    thread: &str,
+    turn: Option<&str>,
+) -> Option<ProviderContextUsage> {
+    if !crate::provider_accounting::codex_usage_matches(params, thread, turn) {
+        return None;
+    }
+    if let Some(tokens) = billed.observe(params) {
+        gyro_core::provider_observation::native_usage(tokens);
+        emit_turn_tokens(
+            host,
+            request,
+            crate::provider_accounting::provider_turn_tokens(request, None),
+        );
+    }
+    let usage = crate::provider_context::provider_context_usage_from_app_server(params)?;
+    emit_provider_context_usage(host, request, &usage);
+    Some(usage)
 }
 
 pub(crate) trait ProviderRunner: Send + Sync {

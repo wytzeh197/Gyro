@@ -1,7 +1,7 @@
 use crate::{
     app::limits::PROVIDER_CHAT_EVENT,
     delegated_agents, efficiency, provider_context,
-    provider_context::{provider_context_usage_from_app_server, ProviderContextUsage},
+    provider_context::ProviderContextUsage,
     provider_spend_guard,
     providers::{
         chat_types::ProviderChatRequest,
@@ -447,26 +447,6 @@ fn emit_tokens(app: &tauri::AppHandle, request: &ProviderChatRequest, emission: 
             "turnTokens": tokens,
         }),
     );
-}
-
-pub(super) fn observe_codex_turn_usage(
-    app: &tauri::AppHandle,
-    request: &ProviderChatRequest,
-    billed: &mut CodexTurnUsage,
-    params: &serde_json::Value,
-    thread: &str,
-    turn: Option<&str>,
-) -> Option<ProviderContextUsage> {
-    if !codex_usage_matches(params, thread, turn) {
-        return None;
-    }
-    if let Some(tokens) = billed.observe(params) {
-        gyro_core::provider_observation::native_usage(tokens);
-        emit_turn_tokens(app, request, provider_turn_tokens(request, None));
-    }
-    let usage = provider_context_usage_from_app_server(params)?;
-    emit_provider_context_usage(app, request, &usage);
-    Some(usage)
 }
 
 /// One turn's billed tokens, or the same clearly marked estimate the ledger

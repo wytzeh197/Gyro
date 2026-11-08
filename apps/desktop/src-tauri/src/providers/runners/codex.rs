@@ -8,14 +8,12 @@ use crate::{
             PROVIDER_STREAM_FLUSH_INTERVAL,
         },
     },
-    capabilities::bridge::codex_capability_mcp_config_args,
     codex_images, codex_turn_completion, context_compaction, file_patch_counts,
     project_import_continuation, provider_accounting,
     provider_context::{provider_context_usage_from_app_server, ProviderContextUsage},
     provider_reliability,
     providers::{
-        approvals::wait_for_provider_approval,
-        binding::{local_conversation_history_for_request, provider_approval_instructions},
+        binding::provider_approval_instructions,
         chat_types::{ChatMode, ProviderChatRequest},
         cli_args::{
             audit_provider_chat_args, codex_chat_args, codex_model_arg, codex_reasoning_effort_arg,
@@ -25,25 +23,23 @@ use crate::{
             codex_app_server_result, receive_codex_turn_response, spawn_codex_app_server_reader,
             write_codex_app_server_message,
         },
-        events::{emit_provider_activity_event, emit_provider_context_usage},
-        markers::publish_streamed_session_title,
         process::{
             command_for_provider, configure_provider_process_group, provider_output_summary,
             provider_stream_failure_detail, ProviderProcessGuard,
         },
         prompt::{openai_codex_chat_prompt, provider_context_message_for_turn, PromptTurn},
+        runner::{
+            self, emit_provider_activity_event, emit_provider_context_usage,
+            publish_streamed_session_title, RunnerHost,
+        },
         stdout::{provider_activities_for_response, recover_streamed_provider_answer},
         streaming::{
-            provider_chat_cancelled, provider_run_failure, provider_stop_message,
-            run_streaming_command, spawn_provider_chat_heartbeat,
-            PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS, PROVIDER_CHAT_MAX_RUNTIME_SECS,
+            provider_run_failure, PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS,
+            PROVIDER_CHAT_MAX_RUNTIME_SECS,
         },
         types::{ProviderActivity, ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput},
     },
-    state::{
-        managers::{ProviderCancellationManager, TempFileGuard},
-        provider_run::ProviderApprovalDecision,
-    },
+    state::{managers::TempFileGuard, provider_run::ProviderApprovalDecision},
     text::{push_bounded, sanitize_provider_chat_response, truncate_chars},
     turn_timing,
 };
@@ -58,10 +54,9 @@ use std::{
     sync::{atomic::AtomicBool, mpsc, Arc},
     time::{Duration, Instant},
 };
-use tauri::Manager;
 use uuid::Uuid;
 pub(crate) fn run_openai_codex_chat(
-    app: &tauri::AppHandle,
+    host: &dyn RunnerHost,
     request: &ProviderChatRequest,
     resume_cursor: Option<&ProviderResumeCursor>,
     attempt: &mut ProviderRunAttempt,
@@ -84,7 +79,7 @@ pub(crate) fn run_openai_codex_chat(
         || request.require_file_edit_approval
         || !request.full_access
     {
-        return run_openai_codex_app_server_chat(app, request, resume_cursor, attempt);
+        return run_openai_codex_app_server_chat(host, request, resume_cursor, attempt);
     }
     let output_path =
         std::env::temp_dir().join(format!("gyro-codex-response-{}.txt", Uuid::new_v4()));
@@ -95,7 +90,7 @@ pub(crate) fn run_openai_codex_chat(
     let history = if can_resume {
         None
     } else {
-        local_conversation_history_for_request(request)
+        host.conversation_history(request)
     };
     let contextual_message = provider_context_message_for_turn(
         request,
@@ -141,16 +136,15 @@ pub(crate) fn run_openai_codex_chat(
         &prompt,
     );
     audit_provider_chat_args(&request.provider_id, &args)?;
-    process.args(codex_capability_mcp_config_args(app, request)?);
+    process.args(host.codex_mcp_args(request)?);
     process.args(args);
 
     let mut observed_session_id = None;
-    let output = run_streaming_command(
+    let output = host.stream_command(
         process,
         None,
         Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
         Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
-        app,
         request,
         &mut observed_session_id,
     );
@@ -303,7 +297,7 @@ pub(crate) fn read_bounded_optional_text_file(
 }
 
 pub(crate) fn run_openai_codex_app_server_chat(
-    app: &tauri::AppHandle,
+    host: &dyn RunnerHost,
     request: &ProviderChatRequest,
     resume_cursor: Option<&ProviderResumeCursor>,
     attempt: &mut ProviderRunAttempt,
@@ -313,7 +307,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
     let history = if can_resume {
         None
     } else {
-        local_conversation_history_for_request(request)
+        host.conversation_history(request)
     };
     // Approval policy rides in developerInstructions on thread start/resume.
     let contextual_message = provider_context_message_for_turn(
@@ -333,7 +327,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
         can_resume,
     );
     let mut process = command_for_provider("codex", "openai")?;
-    let capability_args = codex_capability_mcp_config_args(app, request)?;
+    let capability_args = host.codex_mcp_args(request)?;
     project_import_continuation::apply_data_home(&mut process, request)?;
     let speed_config = load_config_blocking().map_err(anyhow::Error::msg)?;
     process.args(gyro_core::fast_mode::cli_args(
@@ -356,22 +350,9 @@ pub(crate) fn run_openai_codex_app_server_chat(
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
     timing::mark(TimingStage::ProcessSpawned);
     let mut child = ProviderProcessGuard::new(child);
-    let cancellation = app
-        .state::<ProviderCancellationManager>()
-        .flags
-        .lock()
-        .ok()
-        .and_then(|flags| flags.get(&request.session_id).cloned())
-        .map(|control| control.cancellation.clone())
-        .unwrap_or_default();
+    let cancellation = host.cancellation(&request.session_id).unwrap_or_default();
     let heartbeat_stop = Arc::new(AtomicBool::new(false));
-    let heartbeat = spawn_provider_chat_heartbeat(
-        app.clone(),
-        request.clone(),
-        cancellation,
-        heartbeat_stop.clone(),
-        None,
-    );
+    let heartbeat = host.start_heartbeat(request.clone(), cancellation, heartbeat_stop.clone());
     let mut billed = provider_accounting::CodexTurnUsage::new(can_resume);
     let mut provider_completed = false;
     let mut result = (|| -> anyhow::Result<ProviderRunnerOutput> {
@@ -402,7 +383,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
             }),
         )
         .map_err(anyhow::Error::msg)?;
-        let initialize = receive_codex_turn_response(app, request, &messages, 1, deadline)?;
+        let initialize = receive_codex_turn_response(host, request, &messages, 1, deadline)?;
         codex_app_server_result(&initialize).map_err(anyhow::Error::msg)?;
         write_codex_app_server_message(&mut stdin, &serde_json::json!({ "method": "initialized" }))
             .map_err(anyhow::Error::msg)?;
@@ -451,7 +432,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
             })
         };
         write_codex_app_server_message(&mut stdin, &thread_request).map_err(anyhow::Error::msg)?;
-        let thread_response = receive_codex_turn_response(app, request, &messages, 2, deadline)?;
+        let thread_response = receive_codex_turn_response(host, request, &messages, 2, deadline)?;
         let thread_result =
             codex_app_server_result(&thread_response).map_err(anyhow::Error::msg)?;
         let thread_id = thread_result
@@ -528,8 +509,8 @@ pub(crate) fn run_openai_codex_app_server_chat(
         let mut protocol_messages = 0usize;
         let mut protocol_bytes = 0usize;
         loop {
-            if provider_chat_cancelled(app, &request.session_id) {
-                anyhow::bail!("{}", provider_stop_message(app, &request.session_id));
+            if host.is_cancelled(&request.session_id) {
+                anyhow::bail!("{}", host.stop_message(&request.session_id));
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -543,7 +524,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
                 Ok(message) => message.map_err(anyhow::Error::msg)?,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     flush_codex_app_server_commentary(
-                        app,
+                        host,
                         request,
                         &mut commentary_stream,
                         &activities,
@@ -566,7 +547,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
             if let Some(method) = method.filter(|_| message.get("id").is_some()) {
                 let params = message.get("params").cloned().unwrap_or_default();
                 handle_codex_app_server_request(
-                    app, request, &mut stdin, &message, method, &params, &patches,
+                    host, request, &mut stdin, &message, method, &params, &patches,
                 )?;
                 continue;
             }
@@ -579,8 +560,8 @@ pub(crate) fn run_openai_codex_app_server_chat(
                 billed.bind_turn(provider_turn_id.as_deref());
                 turn_started = true;
                 if let Some(params) = pending_usage.take() {
-                    context_usage = provider_accounting::observe_codex_turn_usage(
-                        app,
+                    context_usage = runner::observe_codex_turn_usage(
+                        host,
                         request,
                         &mut billed,
                         &params,
@@ -602,8 +583,8 @@ pub(crate) fn run_openai_codex_app_server_chat(
                             pending_usage = Some(params);
                         }
                     } else {
-                        context_usage = provider_accounting::observe_codex_turn_usage(
-                            app,
+                        context_usage = runner::observe_codex_turn_usage(
+                            host,
                             request,
                             &mut billed,
                             &params,
@@ -617,7 +598,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
                     let activity =
                         context_compaction::codex_context_compaction_activity(&params, "done");
                     record_codex_app_server_activity(
-                        app,
+                        host,
                         request,
                         &mut activities,
                         &mut completed_activity_ids,
@@ -635,14 +616,14 @@ pub(crate) fn run_openai_codex_app_server_chat(
                             );
                             response_text_truncated = pushed.truncated;
                         }
-                        publish_streamed_session_title(app, request, &response_text, false);
+                        publish_streamed_session_title(host, request, &response_text, false);
                         commentary_stream.push_delta(
                             &mut activities,
                             params.get("itemId").and_then(serde_json::Value::as_str),
                             delta,
                         );
                         flush_codex_app_server_commentary(
-                            app,
+                            host,
                             request,
                             &mut commentary_stream,
                             &activities,
@@ -673,7 +654,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
                                 ) =>
                             {
                                 emit_provider_activity_event(
-                                    app,
+                                    host,
                                     request,
                                     &codex_images::GeneratedImages::started(item),
                                     None,
@@ -694,7 +675,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
                                 }
                             }
                             Some("contextCompaction") => emit_provider_activity_event(
-                                app,
+                                host,
                                 request,
                                 &context_compaction::codex_context_compaction_activity(
                                     &params, "running",
@@ -723,7 +704,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
                                     &request.session_id,
                                 ) {
                                     record_codex_app_server_activity(
-                                        app,
+                                        host,
                                         request,
                                         &mut activities,
                                         &mut completed_activity_ids,
@@ -734,7 +715,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
                             Some("agentMessage") => {
                                 let text = item.get("text").and_then(serde_json::Value::as_str);
                                 if let Some(text) = text {
-                                    publish_streamed_session_title(app, request, text, true);
+                                    publish_streamed_session_title(host, request, text, true);
                                     completed_message =
                                         truncate_chars(text, MAX_CHAT_RESPONSE_CHARS);
                                 }
@@ -744,7 +725,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
                                     text,
                                 );
                                 flush_codex_app_server_commentary(
-                                    app,
+                                    host,
                                     request,
                                     &mut commentary_stream,
                                     &activities,
@@ -755,7 +736,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
                             Some("commandExecution") => {
                                 let activity = codex_item_activity(item, "command", "Ran command");
                                 record_codex_app_server_activity(
-                                    app,
+                                    host,
                                     request,
                                     &mut activities,
                                     &mut completed_activity_ids,
@@ -769,7 +750,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
                                     .and_then(|item_id| patches.get(item_id));
                                 for activity in codex_file_change_activities(item, patch) {
                                     record_codex_app_server_activity(
-                                        app,
+                                        host,
                                         request,
                                         &mut activities,
                                         &mut completed_activity_ids,
@@ -780,7 +761,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
                             Some("reasoning") => {
                                 if let Some(activity) = codex_reasoning_activity(item) {
                                     record_codex_app_server_activity(
-                                        app,
+                                        host,
                                         request,
                                         &mut activities,
                                         &mut completed_activity_ids,
@@ -794,7 +775,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
                                         &params, "done",
                                     );
                                 record_codex_app_server_activity(
-                                    app,
+                                    host,
                                     request,
                                     &mut activities,
                                     &mut completed_activity_ids,
@@ -819,7 +800,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
                     };
                     commentary_stream.complete_message(&mut activities, None, None);
                     flush_codex_app_server_commentary(
-                        app,
+                        host,
                         request,
                         &mut commentary_stream,
                         &activities,
@@ -882,12 +863,12 @@ pub(crate) fn run_openai_codex_app_server_chat(
         if let Ok(output) = &mut result {
             output.accounted_usage = Some(tokens);
         }
-        provider_accounting::emit_turn_tokens(app, request, tokens);
+        runner::emit_turn_tokens(host, request, tokens);
     }
     if result.is_err() && !provider_completed {
         if let Some(tokens) = billed.interrupt() {
             gyro_core::provider_observation::native_usage(tokens);
-            provider_accounting::emit_turn_tokens(app, request, tokens);
+            runner::emit_turn_tokens(host, request, tokens);
         }
     }
     result
@@ -897,7 +878,7 @@ pub(crate) fn run_openai_codex_app_server_chat(
 /// thread. A new app-server process is intentional: normal chat turns use the
 /// same short-lived connection and resume the durable Codex thread each time.
 pub(crate) fn run_openai_codex_context_compaction(
-    app: &tauri::AppHandle,
+    host: &dyn RunnerHost,
     request: &ProviderChatRequest,
     resume_cursor: &ProviderResumeCursor,
 ) -> anyhow::Result<Option<ProviderContextUsage>> {
@@ -942,7 +923,7 @@ pub(crate) fn run_openai_codex_context_compaction(
             }),
         )
         .map_err(anyhow::Error::msg)?;
-        let initialize = receive_codex_turn_response(app, request, &messages, 1, deadline)?;
+        let initialize = receive_codex_turn_response(host, request, &messages, 1, deadline)?;
         codex_app_server_result(&initialize).map_err(anyhow::Error::msg)?;
         write_codex_app_server_message(&mut stdin, &serde_json::json!({ "method": "initialized" }))
             .map_err(anyhow::Error::msg)?;
@@ -975,7 +956,7 @@ pub(crate) fn run_openai_codex_context_compaction(
             }),
         )
         .map_err(anyhow::Error::msg)?;
-        let thread_response = receive_codex_turn_response(app, request, &messages, 2, deadline)?;
+        let thread_response = receive_codex_turn_response(host, request, &messages, 2, deadline)?;
         let thread_result =
             codex_app_server_result(&thread_response).map_err(anyhow::Error::msg)?;
         let thread_id = thread_result
@@ -1002,8 +983,8 @@ pub(crate) fn run_openai_codex_context_compaction(
         let mut protocol_messages = 0usize;
         let mut protocol_bytes = 0usize;
         loop {
-            if provider_chat_cancelled(app, &request.session_id) {
-                anyhow::bail!("{}", provider_stop_message(app, &request.session_id));
+            if host.is_cancelled(&request.session_id) {
+                anyhow::bail!("{}", host.stop_message(&request.session_id));
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -1036,7 +1017,7 @@ pub(crate) fn run_openai_codex_context_compaction(
             match method {
                 Some("thread/tokenUsage/updated") => {
                     if let Some(usage) = provider_context_usage_from_app_server(&params) {
-                        emit_provider_context_usage(app, request, &usage);
+                        emit_provider_context_usage(host, request, &usage);
                         context_usage = Some(usage);
                     }
                 }
@@ -1058,7 +1039,7 @@ pub(crate) fn run_openai_codex_context_compaction(
                         }
                     }
                 }
-                // Older app-server versions complete the compact operation as
+                // Older host-server versions complete the compact operation as
                 // a turn. The response confirms it is this request, so accept
                 // a successful terminal turn only after that acknowledgement.
                 Some("turn/completed") if request_confirmed => {
@@ -1094,7 +1075,7 @@ pub(crate) fn run_openai_codex_context_compaction(
             {
                 let params = message.get("params").cloned().unwrap_or_default();
                 if let Some(usage) = provider_context_usage_from_app_server(&params) {
-                    emit_provider_context_usage(app, request, &usage);
+                    emit_provider_context_usage(host, request, &usage);
                     context_usage = Some(usage);
                 }
             }
@@ -1268,14 +1249,14 @@ impl CodexAppServerCommentaryStream {
 }
 
 pub(crate) fn flush_codex_app_server_commentary(
-    app: &tauri::AppHandle,
+    host: &dyn RunnerHost,
     request: &ProviderChatRequest,
     commentary_stream: &mut CodexAppServerCommentaryStream,
     activities: &[ProviderActivity],
     force: bool,
 ) {
     if let Some((activity, sequence)) = commentary_stream.take_snapshot(activities, force) {
-        emit_provider_activity_event(app, request, &activity, Some(sequence));
+        emit_provider_activity_event(host, request, &activity, Some(sequence));
     }
 }
 
@@ -1421,7 +1402,7 @@ pub(crate) fn reasoning_summary_headline(text: &str) -> Option<String> {
 }
 
 pub(crate) fn record_codex_app_server_activity(
-    app: &tauri::AppHandle,
+    host: &dyn RunnerHost,
     request: &ProviderChatRequest,
     activities: &mut Vec<ProviderActivity>,
     completed_activity_ids: &mut HashSet<String>,
@@ -1432,12 +1413,12 @@ pub(crate) fn record_codex_app_server_activity(
     {
         return;
     }
-    emit_provider_activity_event(app, request, &activity, Some(activities.len() as u64));
+    emit_provider_activity_event(host, request, &activity, Some(activities.len() as u64));
     activities.push(activity);
 }
 
 pub(crate) fn handle_codex_app_server_request(
-    app: &tauri::AppHandle,
+    host: &dyn RunnerHost,
     request: &ProviderChatRequest,
     stdin: &mut ChildStdin,
     message: &serde_json::Value,
@@ -1452,7 +1433,7 @@ pub(crate) fn handle_codex_app_server_request(
     let (decision, response) = match method {
         "item/commandExecution/requestApproval" => {
             let decision = if request.require_command_approval {
-                wait_for_provider_approval(app, request, "command", params.clone())?
+                host.request_native_approval(request, "command", params.clone())?
             } else {
                 ProviderApprovalDecision::Approve
             };
@@ -1467,7 +1448,7 @@ pub(crate) fn handle_codex_app_server_request(
                 }
             }
             let decision = if request.require_file_edit_approval {
-                wait_for_provider_approval(app, request, "file-change", details)?
+                host.request_native_approval(request, "file-change", details)?
             } else {
                 ProviderApprovalDecision::Approve
             };
@@ -1475,7 +1456,7 @@ pub(crate) fn handle_codex_app_server_request(
             (decision, serde_json::json!({ "decision": response }))
         }
         "item/permissions/requestApproval" => {
-            let decision = wait_for_provider_approval(app, request, "permissions", params.clone())?;
+            let decision = host.request_native_approval(request, "permissions", params.clone())?;
             let response = if decision != ProviderApprovalDecision::Reject {
                 serde_json::json!({
                     "permissions": params.get("permissions").cloned().unwrap_or_default(),

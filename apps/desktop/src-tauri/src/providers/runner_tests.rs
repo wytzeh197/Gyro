@@ -78,6 +78,20 @@ impl RunnerHost for RecordingHost {
     fn claude_mcp_config(&self, _: &ProviderChatRequest) -> anyhow::Result<String> {
         unreachable!("unused fixture service")
     }
+    fn codex_mcp_args(&self, _: &ProviderChatRequest) -> anyhow::Result<Vec<String>> {
+        unreachable!("unused fixture service")
+    }
+    fn is_cancelled(&self, _: &str) -> bool {
+        unreachable!("unused fixture service")
+    }
+    fn request_native_approval(
+        &self,
+        _: &ProviderChatRequest,
+        _: &str,
+        _: serde_json::Value,
+    ) -> anyhow::Result<crate::state::provider_run::ProviderApprovalDecision> {
+        unreachable!("unused fixture service")
+    }
     fn run_legacy(
         &self,
         kind: ProviderAdapterKind,

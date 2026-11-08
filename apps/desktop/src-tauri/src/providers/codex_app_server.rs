@@ -1,10 +1,7 @@
 use crate::{
     app::limits::{CODEX_APP_SERVER_CHANNEL_CAPACITY, MAX_CODEX_APP_SERVER_MESSAGE_BYTES},
     codex_startup,
-    providers::{
-        chat_types::ProviderChatRequest,
-        streaming::{provider_chat_cancelled, provider_stop_message},
-    },
+    providers::{chat_types::ProviderChatRequest, runner::RunnerHost},
     stores::to_string,
 };
 use std::{
@@ -197,16 +194,16 @@ pub(crate) fn receive_codex_app_server_response_until(
 }
 
 pub(crate) fn receive_codex_turn_response(
-    app: &tauri::AppHandle,
+    host: &dyn RunnerHost,
     request: &ProviderChatRequest,
     messages: &mpsc::Receiver<Result<serde_json::Value, String>>,
     request_id: u64,
     deadline: Instant,
 ) -> anyhow::Result<serde_json::Value> {
-    let cancelled = || provider_chat_cancelled(app, &request.session_id);
+    let cancelled = || host.is_cancelled(&request.session_id);
     codex_startup::receive(messages, request_id, deadline, cancelled).map_err(|error| {
-        match provider_chat_cancelled(app, &request.session_id) {
-            true => anyhow::anyhow!("{}", provider_stop_message(app, &request.session_id)),
+        match host.is_cancelled(&request.session_id) {
+            true => anyhow::anyhow!("{}", host.stop_message(&request.session_id)),
             false => anyhow::Error::msg(error),
         }
     })
