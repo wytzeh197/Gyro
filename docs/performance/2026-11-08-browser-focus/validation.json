@@ -1,0 +1,31 @@
+{
+  "head": "1d0b7e1321790246390b9ad64d78f73813a37ab6",
+  "os": "",
+  "scale": 1.0,
+  "sourceHashesAtEnd": {
+    "apps/desktop/src/App.tsx": "9b75b8c0e7823e7f7d62ebd0c86efca184ab4a3d19ee363637f9b2d0acd4e00a",
+    "apps/desktop/src-tauri/src/session_browser.rs": "2f6c91d940d1e863f96e6bf1cc60caa36bf811b98bf6df6b24893dfac82ba642",
+    "apps/desktop/src-tauri/src/browser_viewport.rs": "6dbc32991374369e4b241a3d4703bf5dc11cb3cc4eedec6d601a89c6a62e3095",
+    "apps/desktop/src-tauri/src/browser_viewport_native.rs": "a10fc94b8026d923f263a2fffe8d58ff3b5cbca41a0dba318d3856f7fdc08148",
+    "scripts/check-browser-interaction.mjs": "bfc0a4e611a6f4987536935f5e40b11f7bd71d5c609d4d941e1510fde804462c",
+    "package.json": "d7f5d43fea8e431eacf913d4f0eee4f69a738b27ab5ad007b2675887ffac882e",
+    "Cargo.lock": "e00ddd671f957eabad737b1b2b7ab998cddb9fbf5b5ad8cc7464a700b35febc8",
+    "apps/desktop/src-tauri/tauri.conf.json": "0d20aee8cfc34681002669c645766b2ea756110f26fc848f2ca761d2566c0e79"
+  },
+  "nativeSelection": "passed twice after selecting Beta",
+  "nativeTyping": "Alpha focused",
+  "javascriptErrors": [],
+  "routingChecks": 8,
+  "rustBrowserChecks": 59,
+  "paidProviderCalls": 0,
+  "fullReliabilitySuiteRun": false,
+  "goalComplete": false,
+  "remaining": [
+    "Native-page keyboard shortcuts and advertised Cmd+T",
+    "Maximized/restored native layout",
+    "Native close lifecycle after observer change",
+    "Retina and older WebKit",
+    "Native draft/provider flow",
+    "Live GPT/Grok quality and speed validation"
+  ]
+}

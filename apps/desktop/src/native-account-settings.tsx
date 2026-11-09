@@ -8,6 +8,7 @@ import {
 } from "@gyro-dev/ui";
 import {
   CloudConnectionSettings,
+  planNames,
   type BillingActions,
   type BillingSnapshot,
 } from "../../../packages/ui/src/billing-settings";
@@ -29,6 +30,10 @@ export function AccountNavigation({
       account.snapshot.status,
     ),
   );
+  // Signed in, the rail names the account the way the Account page does:
+  // the verified address, its initial, and the plan when there is one.
+  const email = signedIn ? account.snapshot.accountEmail?.trim() : undefined;
+  const plan = account.snapshot.plan;
   return (
     <div className="gyro-account-navigation">
       <button
@@ -38,15 +43,17 @@ export function AccountNavigation({
         onClick={() => onSelect("account")}
       >
         <span className="gyro-account-profile-avatar" aria-hidden="true">
-          <UserRoundIcon size={15} />
+          {email ? email.slice(0, 1).toUpperCase() : <UserRoundIcon size={15} />}
         </span>
         <span className="gyro-account-navigation-text">
-          <strong>Gyro Account</strong>
+          <strong title={email}>{email || "Gyro Account"}</strong>
           <small>
             {account.snapshot.availability === "coming-soon"
               ? "Coming soon"
               : signedIn
-                ? "Signed in"
+                ? plan
+                  ? planNames[plan]
+                  : "Signed in"
                 : "Optional"}
           </small>
         </span>
@@ -76,23 +83,18 @@ export function AccountSettings({ account }: { account: Account }) {
         snapshot={account.snapshot}
         actions={account.actions}
       />
-      {account.snapshot.status === "unavailable" && (
+      {/* In the coming-soon release the status notice above already says
+          this; repeating it as a card made the page say it three times. */}
+      {account.snapshot.status === "unavailable" &&
+        account.snapshot.availability !== "coming-soon" && (
         <SettingsGroup
           id="account-availability"
           label="Availability"
           defaultOpen
         >
           <SettingsRow
-            label={
-              account.snapshot.availability === "coming-soon"
-                ? "Account and Cloud are coming soon"
-                : "Cloud is not configured in this build"
-            }
-            detail={
-              account.snapshot.availability === "coming-soon"
-                ? "These optional services are disabled for this release. The local app and your own providers remain available."
-                : "Local work remains available. A production Cloud connection needs the published service configuration."
-            }
+            label="Cloud is not configured in this build"
+            detail="Local work remains available. A production Cloud connection needs the published service configuration."
           />
         </SettingsGroup>
       )}

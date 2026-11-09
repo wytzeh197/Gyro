@@ -1,0 +1,29 @@
+{
+  "nativeSequencePassed": true,
+  "scriptedProvider": true,
+  "paidProviderCalls": 0,
+  "turnConditions": 2,
+  "pageDelayMs": 4000,
+  "screenshotRequestedBeforeResponseMs": [
+    6438,
+    4542
+  ],
+  "pngWidth": 1440,
+  "pngHeight": 960,
+  "rustBrowserTestsPassed": 62,
+  "rustBrowserTestsFailed": 0,
+  "sourceChecks": [
+    "browser capability",
+    "browser viewport",
+    "browser navigation and session isolation"
+  ],
+  "installedAppUpdated": false,
+  "limitations": [
+    "Scripted transport validates integration, not GPT/Grok model quality or production provider latency.",
+    "The broader README/code/no-tool runtime matrix is not accepted; its earlier run exposed a terminal-wait harness mistake and subsequently timed out.",
+    "No Retina, older WebKit, or release build acceptance is claimed."
+  ],
+  "debugExecutableSha256AfterRun": "bf960d2e03024b432244cbb48560ae1f5945731f5c3020a329b0b49b16384acf",
+  "coreCapabilityTestsPassed": 15,
+  "coreCapabilityTestsFailed": 0
+}

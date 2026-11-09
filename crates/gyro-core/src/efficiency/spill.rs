@@ -103,8 +103,41 @@ fn ceil_bound(text: &str, mut index: usize) -> usize {
 /// Replace the middle of `text` with a pointer that names its exact size and address. The head and
 /// tail are preserved on UTF-8 boundaries so the preview never splits a multi-byte character.
 pub fn preview(capability: &str, tool: &str, text: &str) -> Preview {
+    preview_with(
+        capability,
+        tool,
+        text,
+        SPILL_MIN_BYTES,
+        SPILL_HEAD_BYTES,
+        SPILL_TAIL_BYTES,
+    )
+}
+
+/// Smallest and largest inline window a fresh read may be given.
+pub const FRESH_READ_MIN_BYTES: usize = 4 * 1024;
+pub const FRESH_READ_MAX_BYTES: usize = 16 * 1024;
+
+/// Like [`preview`], but text up to `inline_bytes` stays whole and a longer
+/// text keeps two thirds of that window as head and one third as tail. The
+/// window is clamped to [`FRESH_READ_MIN_BYTES`]..=[`FRESH_READ_MAX_BYTES`].
+pub fn preview_within(capability: &str, tool: &str, text: &str, inline_bytes: usize) -> Preview {
+    let window = inline_bytes.clamp(FRESH_READ_MIN_BYTES, FRESH_READ_MAX_BYTES);
+    // The marker line costs ~120 bytes, so the kept text plus marker fits the window.
+    let kept = window - 200;
+    let head = kept * 2 / 3;
+    preview_with(capability, tool, text, window + 1, head, kept - head)
+}
+
+fn preview_with(
+    capability: &str,
+    tool: &str,
+    text: &str,
+    min_bytes: usize,
+    head_bytes: usize,
+    tail_bytes: usize,
+) -> Preview {
     let original = text.len();
-    if original < SPILL_MIN_BYTES {
+    if original < min_bytes {
         return Preview {
             text: text.to_owned(),
             address: String::new(),
@@ -112,8 +145,8 @@ pub fn preview(capability: &str, tool: &str, text: &str) -> Preview {
             kept_bytes: original,
         };
     }
-    let head = floor_bound(text, SPILL_HEAD_BYTES);
-    let tail = ceil_bound(text, original - SPILL_TAIL_BYTES);
+    let head = floor_bound(text, head_bytes);
+    let tail = ceil_bound(text, original - tail_bytes);
     let address = address(capability, tool, text);
     if tail <= head {
         return Preview {

@@ -1,0 +1,25 @@
+{
+  "sessions": 2,
+  "seededIds": {
+    "Browser review Alpha": "eeb8cdbd-3ff0-423c-a183-6d95f459b4cd",
+    "Browser review Beta": "fa7321a2-3b6a-45fa-8496-ba3c2f9397c5"
+  },
+  "providerRows": {
+    "provider_session_bindings": 0,
+    "session_turn_messages": 0,
+    "session_turn_status": 0,
+    "usage_turn_links": 0,
+    "efficiency_task_turns": 0
+  },
+  "capture": "/private/tmp/gyro-shell-SkrXCx/data/browser-captures/browser-preview-20261108T102602340Z-addabc5e-0d92-4dbc-9637-645b0736deb4.png",
+  "alphaPreparedImages": 0,
+  "betaPreparedImages": 1,
+  "captureDimensions": [
+    1280,
+    800
+  ],
+  "preparedPixelsIdentical": true,
+  "comparison": "All RGBA pixel bytes, including RGB channels and alpha",
+  "capturePixelSha256": "aeaf2434ec1fb32b3bf212cf079bdfdc609c24b1197ae98437ccd6d6747d0d66",
+  "preparedPixelSha256": "aeaf2434ec1fb32b3bf212cf079bdfdc609c24b1197ae98437ccd6d6747d0d66"
+}

@@ -1,4 +1,5 @@
-use super::{open_store, parse_uuid, SessionEvent, SessionEventKind};
+use crate::stores::{open_store, parse_uuid};
+use gyro_core::{SessionEvent, SessionEventKind};
 
 /// Turns kept at full length before the transcript starts clipping harder.
 ///
@@ -417,7 +418,7 @@ const SIDE_CHAT_CONTEXT_CHARS: usize = 16_000;
 /// chat up to that moment. Anything else gets the whole tapered chat: a fresh
 /// provider session, or a side chat that now sits beside a different chat.
 pub(super) fn side_chat_context_section(
-    request: &super::ProviderChatRequest,
+    request: &crate::providers::chat_types::ProviderChatRequest,
     resumed: bool,
 ) -> Option<String> {
     let context = request.side_chat_context.as_ref()?;
@@ -760,12 +761,14 @@ mod tests {
     fn side_chat_request_accepts_what_the_desktop_sends() {
         let parent = Uuid::new_v4().to_string();
         let parse = |context: serde_json::Value| {
-            serde_json::from_value::<crate::ProviderChatRequest>(serde_json::json!({
-                "sessionId": Uuid::new_v4().to_string(),
-                "providerId": "anthropic",
-                "message": "What does this mean?",
-                "sideChatContext": context,
-            }))
+            serde_json::from_value::<crate::providers::chat_types::ProviderChatRequest>(
+                serde_json::json!({
+                    "sessionId": Uuid::new_v4().to_string(),
+                    "providerId": "anthropic",
+                    "message": "What does this mean?",
+                    "sideChatContext": context,
+                }),
+            )
             .unwrap()
             .side_chat_context
             .unwrap()

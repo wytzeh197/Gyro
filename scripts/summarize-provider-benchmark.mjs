@@ -1,6 +1,10 @@
 import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { execFileSync } from "node:child_process";
+import {
+  benchmarkStoreDirectory,
+  readBenchmarkLayout,
+} from "./provider-benchmark-layout.mjs";
 
 const [input, output] = process.argv.slice(2);
 if (!input || !output)
@@ -9,6 +13,10 @@ if (!input || !output)
   );
 const root = resolve(input),
   destination = resolve(output);
+const dataDirectory = benchmarkStoreDirectory(
+  root,
+  await readBenchmarkLayout(root),
+);
 const names = (await readdir(root))
   .filter((name) => /^benchmark-[a-z0-9-]+\.json$/.test(name))
   .sort();
@@ -41,7 +49,7 @@ const records = raw
         : {}),
     };
   });
-const timingPath = join(root, "logs", "timings");
+const timingPath = join(dataDirectory, "logs", "timings");
 const traces = await Promise.all(
   (await readdir(timingPath))
     .filter((n) => n.startsWith("backend-"))
@@ -102,13 +110,26 @@ function stages(trace) {
   }
   const protocolIntervals = intervals.filter(([, , broker]) => !broker);
   const brokerIntervals = intervals.filter(([, , broker]) => broker);
+  // Native CLI generations do not enter Gyro's HTTP request collector. Its
+  // default zero is missing measurement, not evidence of zero provider calls.
+  const requests = trace.providerRequests?.requests;
+  const nativeModelCalls =
+    trace.providerRequests?.usageObservations
+      ?.filter(
+        (observation) =>
+          observation.contract === "grok-prompt" &&
+          Number.isSafeInteger(observation.modelCalls) &&
+          observation.modelCalls >= 0,
+      )
+      .at(-1)?.modelCalls ?? null;
   return {
     workspaceMs: span("workspace-start", "workspace-ready"),
     processSpawnMs: span("process-start", "process-spawned"),
     protocolReadinessMs: span("process-spawned", "protocol-ready"),
     firstActivityMs: first("first-activity"),
     firstTokenMs: first("first-token"),
-    requestCount: trace.providerRequests?.requests ?? null,
+    requestCount: requests > 0 ? requests : null,
+    nativeModelCalls,
     observedUsage: trace.providerRequests?.tokens ?? null,
     unmeasuredContent: trace.providerRequests?.unmeasuredContent ?? null,
     toolDurationsMs: (protocolIntervals.length
@@ -170,7 +191,7 @@ for (const r of records) {
   let events = [];
   if (r.sessionId) {
     const text = await readFile(
-      join(root, "sessions", `${r.sessionId}.jsonl`),
+      join(dataDirectory, "sessions", `${r.sessionId}.jsonl`),
       "utf8",
     ).catch(() => "");
     events = text
@@ -362,6 +383,7 @@ await writeFile(
       fixture: "meridian-v1",
       build: "debug",
       frontendMeasured: false,
+      fixtureReviewMode: spec?.reviewFixtureEdits ? "task-paths" : "none",
       expectedSlots: spec
         ? spec.providers.length * (spec.tasks?.length ?? 3) * 2 * spec.trials
         : null,

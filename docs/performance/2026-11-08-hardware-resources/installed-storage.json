@@ -1,0 +1,42 @@
+{
+  "collectedAt": "2026-11-08T19:18:10.245552+00:00",
+  "allocatedKiBByDu": 1399136,
+  "topLevelFiles": [
+    {
+      "name": "gyro.sqlite3",
+      "logicalBytes": 1242570752,
+      "allocatedBytes": 1242570752
+    },
+    {
+      "name": "gyro.sqlite3-wal",
+      "logicalBytes": 10633752,
+      "allocatedBytes": 10637312
+    },
+    {
+      "name": "gyro.sqlite3.backup-20260711-232251",
+      "logicalBytes": 40960,
+      "allocatedBytes": 40960
+    },
+    {
+      "name": "gyro.sqlite3-shm",
+      "logicalBytes": 32768,
+      "allocatedBytes": 32768
+    },
+    {
+      "name": ".DS_Store",
+      "logicalBytes": 8196,
+      "allocatedBytes": 12288
+    },
+    {
+      "name": "model-catalog.json",
+      "logicalBytes": 10380,
+      "allocatedBytes": 12288
+    }
+  ],
+  "sqlite": {
+    "page_size": 4096,
+    "page_count": 303362,
+    "freelist_count": 214
+  },
+  "note": "Read-only aggregate storage metadata from the active user store; no transcript contents read and no data removed."
+}

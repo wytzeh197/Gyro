@@ -14,9 +14,11 @@
 
 use crate::menu_bar::{DesktopNotificationPreferences, MenuBarController, MenuBarOutcome};
 use crate::{
-    automation_notification_content, restore_main_window, Automation, ProviderApprovalContext,
-    ProviderApprovalNotificationOpen, PROVIDER_APPROVAL_NOTIFICATION_OPEN_EVENT,
+    app::{limits::PROVIDER_APPROVAL_NOTIFICATION_OPEN_EVENT, shutdown::restore_main_window},
+    automation::commands::automation_notification_content,
+    state::provider_run::{ProviderApprovalContext, ProviderApprovalNotificationOpen},
 };
+use gyro_core::Automation;
 use tauri::{Emitter, Manager};
 #[cfg(not(target_os = "macos"))]
 use tauri_plugin_notification::NotificationExt;
@@ -488,6 +490,10 @@ mod tests {
             detail: "/private/workspace/secret.txt".into(),
             status: status.into(),
             finished_at: "2026-09-28T10:00:00Z".into(),
+            provider_id: None,
+            provider_label: None,
+            model_id: None,
+            model_label: None,
         }
     }
 

@@ -67,6 +67,8 @@ export function applyNativeProviderRetryStatus(
       retryAttempt: waiting ? stream.retryAttempt : undefined,
       retryMaxAttempts: waiting ? stream.retryMaxAttempts : undefined,
       recoveryKind: waiting ? stream.recoveryKind : undefined,
+      recoveryOwner: "backend",
+      recovery: stream.recovery,
       recoveryMessage: undefined,
       error: waiting ? stream.error : undefined,
     },

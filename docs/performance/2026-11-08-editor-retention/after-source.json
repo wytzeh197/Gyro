@@ -1,0 +1,18 @@
+{
+  "head": "55191294bee88b1d07fb9a827ae11a600b616180",
+  "sourceSha256": {
+    "packages/ui/src/workbench-state.ts": "c86eb2fc3d8c0c3b49834d4d612f75265aba76f6000e06e0f12b3f1ad0e5c3e0",
+    "apps/desktop/src/editor/workspace-code-editor.tsx": "3d3697a42a4b4650380956c6ff394ffc49e6685abe4712438a75d742689f4e0c",
+    "apps/desktop/src/App.tsx": "9ba5bd804bac88c848d5d92081c846a0cc0f5cef0baceedd693b9463c4cb8e43",
+    "apps/desktop/src/monaco-editor.ts": "39764b3f2ab469e34af0e9e3e221269e7f6fc7eaba3e50747308c90b35c9fa39",
+    "apps/desktop/src/editor/model-retirement.ts": "beb3c73bae2bf867f23304cb187140aa16e045f5f88e42e8ffa77990c304467b",
+    "apps/desktop/src/editor/use-editor-model-lifecycle.ts": "b8282365592703e772cb2ff84a1007bbcad3ec8689a5cda605b06013f08806ae",
+    "apps/desktop/src/editor-resource-fixture.tsx": "81ccdeb2dd1ddc92ecc4fd5911c74be9605874f860b51d4d2a7cb84b5ffc8503",
+    "scripts/check-editor-resource-browser.mjs": "5406b62ef345a89db0b13f4a04e6a705f8225e39dd45201b5fc77fad09bb30a0",
+    "scripts/check-editor-resource-lifecycle.mjs": "dcd0558ecef88066ff3eb1570284b909db57f612632afa59361e439a78a7b025",
+    "scripts/run-workspace-navigation-browser.mjs": "ee2b86db02da4e21f6388bc0eae87c56c4e6f536c7bca08a227ce9e3df0e76d2",
+    "package.json": "969bcfed08fc82621e0c44a3c14c69e50a29a6a7b721b56f387975498349c0e0",
+    "scripts/verification-map.json": "403f9b365975b4151ae588ab0a27b4a926202f4570a56271bdacc52a45378b72"
+  },
+  "note": "Final editor-retention implementation in a shared dirty checkout. Raw before/after heap runs used the development fixture; frozen run uses a separately bundled fixture."
+}

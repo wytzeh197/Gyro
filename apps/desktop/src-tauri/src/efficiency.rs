@@ -1,10 +1,42 @@
 //! Desktop integration for local, inspectable efficiency policies.
-use super::*;
+use crate::{
+    app::{config::load_config_blocking, limits::MAX_WORKSPACE_FILE_EDIT_BYTES},
+    capabilities::bridge::active_provider_capability_context,
+    capability_output_budget,
+    capability_workspace_helpers::workspace_result_bytes_schema,
+    ide::task_discovery::content_hash,
+    model_catalog,
+    providers::{
+        chat_types::ProviderChatRequest, events::emit_provider_activity_event,
+        types::ProviderActivity,
+    },
+    state::{
+        managers::{with_ide_evidence, CapabilityIdeEvidenceManager, ProviderCancellationManager},
+        provider_run::{
+            stop_provider_run, BoundProviderCapabilityContext, ProviderRunControl,
+            ProviderStopReason,
+        },
+    },
+    stores::{open_store, parse_uuid, to_string},
+    workspace_capability_list,
+};
 use gyro_core::efficiency::{
     checkpoint::{AgentNotes, FileEvidence, TaskCheckpoint},
     progress::Decision,
 };
+use gyro_core::{
+    timing, CapabilityId, CapabilityRequest, CapabilityResourceRef, CapabilityResponse, GyroConfig,
+    GyroPaths, SessionEvent, SessionEventKind, SessionStore,
+};
 use serde_json::{json, Value};
+use std::{
+    collections::HashSet,
+    fs,
+    path::Path,
+    sync::{Arc, Mutex},
+};
+use tauri::Manager;
+use uuid::Uuid;
 static ROUTE_LOCK: Mutex<()> = Mutex::new(());
 
 thread_local! { static PROMPT_SECTIONS: std::cell::RefCell<Option<(String,String)>> = const {std::cell::RefCell::new(None)}; }
@@ -37,11 +69,6 @@ pub(super) fn record_prompt_sections(stable: &[String], tail: &[String], message
     });
 }
 
-pub(super) fn config() -> gyro_core::efficiency::Config {
-    load_config_blocking()
-        .map(|c| c.efficiency)
-        .unwrap_or_default()
-}
 #[tauri::command]
 pub async fn set_efficiency_config(
     value: gyro_core::efficiency::Config,
@@ -571,7 +598,9 @@ pub(super) fn observe(
     response: &mut CapabilityResponse,
 ) {
     let cfg = config();
-    if !cfg.policies() || response.result.is_none() {
+    let checkpoints = cfg.policies() && (cfg.task_state || cfg.repository_retrieval);
+    let progress = cfg.progress_active();
+    if !(checkpoints || progress) || response.result.is_none() {
         return;
     }
     let Ok(bound) = active_provider_capability_context(app, &request.context.session_id) else {
@@ -583,7 +612,7 @@ pub(super) fn observe(
         .lock()
         .ok()
         .and_then(|f| f.get(&bound.session_id).cloned());
-    if cfg.task_state || cfg.repository_retrieval {
+    if checkpoints {
         let _measure = timing::EfficiencyTimer::start(timing::EfficiencyComponent::Checkpoint);
         if let Some(result) = response.result.as_ref() {
             if let Ok(store) = open_store() {
@@ -664,7 +693,7 @@ pub(super) fn observe(
             }
         }
     }
-    if !cfg.progress_detection {
+    if !progress {
         return;
     }
     let _measure = timing::EfficiencyTimer::start(timing::EfficiencyComponent::Progress);
@@ -777,3 +806,5 @@ pub(super) fn observe(
         }
     }
 }
+
+pub(crate) use gyro_core::provider_runtime::support::efficiency_config as config;

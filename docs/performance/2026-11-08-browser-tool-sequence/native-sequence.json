@@ -1,0 +1,45 @@
+{
+  "build": "debug",
+  "elapsedMs": 18854,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": true,
+      "effort": "",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [],
+      "model": "scripted-runtime",
+      "outcome": "completed",
+      "provider": "local-runtime-fixture",
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "ceee6f72-0c08-4d12-b4a3-42e8d7716400",
+      "task": "browser",
+      "trial": 1,
+      "turnId": "dac1b9bd-28ef-471c-b23e-3c12e4c6dcd2",
+      "wallMs": 9940.595916999999
+    },
+    {
+      "correct": true,
+      "effort": "",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [],
+      "model": "scripted-runtime",
+      "outcome": "completed",
+      "provider": "local-runtime-fixture",
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": true,
+      "retryCount": 0,
+      "sessionId": "ff791925-a752-424a-8200-666d872ab385",
+      "task": "browser",
+      "trial": 1,
+      "turnId": "cb0f8d7d-ec07-46e5-b7ae-1d772a4a11bb",
+      "wallMs": 5904.134958000001
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

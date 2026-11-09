@@ -1,0 +1,149 @@
+{
+  "result": "pass",
+  "captures": [
+    {
+      "name": "light-idle",
+      "metrics": {
+        "x": 217,
+        "y": 12,
+        "width": 12,
+        "height": 876,
+        "gripHeight": "36px",
+        "gripWidth": "3px",
+        "opacity": "0",
+        "color": "rgba(19, 19, 22, 0.4)",
+        "seam": "color(srgb 0.0745098 0.0745098 0.0862745 / 0.15)",
+        "sidebar": 224,
+        "value": 224,
+        "title": null,
+        "description": "Drag to resize. Use the Left and Right arrow keys to adjust, Home and End for limits. Double-click to reset."
+      }
+    },
+    {
+      "name": "light-hover",
+      "metrics": {
+        "x": 217,
+        "y": 12,
+        "width": 12,
+        "height": 876,
+        "gripHeight": "36px",
+        "gripWidth": "3px",
+        "opacity": "1",
+        "color": "rgba(19, 19, 22, 0.4)",
+        "seam": "color(srgb 0.0745098 0.0745098 0.0862745 / 0.15)",
+        "sidebar": 224,
+        "value": 224,
+        "title": null,
+        "description": "Drag to resize. Use the Left and Right arrow keys to adjust, Home and End for limits. Double-click to reset."
+      }
+    },
+    {
+      "name": "light-drag",
+      "metrics": {
+        "x": 289,
+        "y": 12,
+        "width": 12,
+        "height": 876,
+        "gripHeight": "36px",
+        "gripWidth": "3px",
+        "opacity": "1",
+        "color": "rgb(99, 99, 107)",
+        "seam": "color(srgb 0.0745098 0.0745098 0.0862745 / 0.15)",
+        "sidebar": 296,
+        "value": 224,
+        "title": null,
+        "description": "Drag to resize. Use the Left and Right arrow keys to adjust, Home and End for limits. Double-click to reset."
+      }
+    },
+    {
+      "name": "light-focus",
+      "metrics": {
+        "x": 305,
+        "y": 12,
+        "width": 12,
+        "height": 876,
+        "gripHeight": "36px",
+        "gripWidth": "3px",
+        "opacity": "1",
+        "color": "rgb(7, 102, 196)",
+        "seam": "color(srgb 0.0745098 0.0745098 0.0862745 / 0.15)",
+        "sidebar": 312,
+        "value": 312,
+        "title": null,
+        "description": "Drag to resize. Use the Left and Right arrow keys to adjust, Home and End for limits. Double-click to reset."
+      }
+    },
+    {
+      "name": "dark-idle",
+      "metrics": {
+        "x": 217,
+        "y": 12,
+        "width": 12,
+        "height": 876,
+        "gripHeight": "36px",
+        "gripWidth": "3px",
+        "opacity": "0",
+        "color": "color(srgb 1 1 1 / 0.3)",
+        "seam": "color(srgb 1 1 1 / 0.09)",
+        "sidebar": 224,
+        "value": 224,
+        "title": null,
+        "description": "Drag to resize. Use the Left and Right arrow keys to adjust, Home and End for limits. Double-click to reset."
+      }
+    },
+    {
+      "name": "dark-hover",
+      "metrics": {
+        "x": 217,
+        "y": 12,
+        "width": 12,
+        "height": 876,
+        "gripHeight": "36px",
+        "gripWidth": "3px",
+        "opacity": "1",
+        "color": "color(srgb 1 1 1 / 0.3)",
+        "seam": "color(srgb 1 1 1 / 0.09)",
+        "sidebar": 224,
+        "value": 224,
+        "title": null,
+        "description": "Drag to resize. Use the Left and Right arrow keys to adjust, Home and End for limits. Double-click to reset."
+      }
+    },
+    {
+      "name": "dark-drag",
+      "metrics": {
+        "x": 289,
+        "y": 12,
+        "width": 12,
+        "height": 876,
+        "gripHeight": "36px",
+        "gripWidth": "3px",
+        "opacity": "1",
+        "color": "rgb(154, 154, 158)",
+        "seam": "color(srgb 1 1 1 / 0.09)",
+        "sidebar": 296,
+        "value": 224,
+        "title": null,
+        "description": "Drag to resize. Use the Left and Right arrow keys to adjust, Home and End for limits. Double-click to reset."
+      }
+    },
+    {
+      "name": "dark-focus",
+      "metrics": {
+        "x": 305,
+        "y": 12,
+        "width": 12,
+        "height": 876,
+        "gripHeight": "36px",
+        "gripWidth": "3px",
+        "opacity": "1",
+        "color": "rgb(91, 170, 249)",
+        "seam": "color(srgb 1 1 1 / 0.09)",
+        "sidebar": 312,
+        "value": 312,
+        "title": null,
+        "description": "Drag to resize. Use the Left and Right arrow keys to adjust, Home and End for limits. Double-click to reset."
+      }
+    }
+  ]
+}

@@ -3,25 +3,12 @@ use serde_json::{json, Value};
 
 pub const GUIDE: &str = include_str!("../../../../docs/product-knowledge/browser.md");
 pub const VERSION: &str = "gyro.product-knowledge.browser.v1";
-pub const SIDE_PANEL_GUIDE: &str = include_str!("../../../../docs/product-knowledge/side-panel.md");
 // Older provider threads may retain instructions to reveal component previews.
 // Refresh just this rule on resumed turns without resending the full guide.
 pub const RESUMED_REVEAL_GUIDANCE: &str = "Browser checks, interactions, and screenshots work while hidden. Keep them in the background, including component previews and dev servers. Set reveal: true only when the user explicitly asks to see the page or a required manual handoff needs it. This replaces earlier instructions to reveal visual previews.";
 
 /// Two sentences for an ordinary turn. The side-panel guide stays off this path.
 pub const ORDINARY_SURFACE_HINT: &str = "For reading or summarizing a link, prefer gyro_web_fetch; GYRO_ARTIFACTS exists for Canvas. Browser checks, interactions, and screenshots stay hidden; set reveal: true only when the user explicitly asks to see the page or a required manual handoff needs it.";
-
-/// Browse, Canvas, a URL, or a UI preview. A bare "preview" does not qualify.
-pub fn needs_surface_guide(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("canvas")
-        || lower.contains("gyro_artifacts")
-        || lower.contains("http://")
-        || lower.contains("https://")
-        || lower.contains("ui preview")
-        || lower.contains("component preview")
-        || lower.contains("dev server")
-}
 
 pub fn contract(tools: bool, images: bool, mode: &str) -> Value {
     browser_contract(tools, images, mode, true)
@@ -37,7 +24,7 @@ pub fn prompt_contract(tools: bool, images: bool, mode: &str) -> Value {
 fn browser_contract(tools: bool, images: bool, mode: &str, definitions: bool) -> Value {
     let tools = tools && mode != "council";
     let commands: Vec<Value> = if tools {
-        super::CAPABILITY_DESCRIPTORS
+        gyro_core::CAPABILITY_DESCRIPTORS
             .iter()
             .filter(|item| item.id.provider_tool_name().starts_with("gyro_browser_"))
             .map(|item| {
@@ -45,7 +32,7 @@ fn browser_contract(tools: bool, images: bool, mode: &str, definitions: bool) ->
                     json!({
                         "name": item.id.provider_tool_name(),
                         "description": item.description,
-                        "inputSchema": super::desktop_capability_tool_schema(item.id),
+                        "inputSchema": crate::capabilities::mcp_server::desktop_capability_tool_schema(item.id),
                     })
                 } else {
                     json!({ "name": item.id.provider_tool_name() })
@@ -60,7 +47,7 @@ fn browser_contract(tools: bool, images: bool, mode: &str, definitions: bool) ->
         "capabilities": {"toolCalls": tools, "imageInput": images},
         "runMode": mode,
         "authorization": "Current broker policy; declarations do not grant permission.",
-        "observationSchema": super::BROWSER_OBSERVATION_SCHEMA_V1,
+        "observationSchema": crate::browser::types::BROWSER_OBSERVATION_SCHEMA_V1,
         "imageEvidence": "Image bytes must be delivered; a file path is insufficient.",
         "commands": commands,
         "workflow": if tools { json!([
@@ -97,6 +84,13 @@ mod tests {
         assert!(!ordinary.contains(SIDE_PANEL_GUIDE));
         assert!(!needs_surface_guide("preview the diff"));
         assert!(needs_surface_guide("open https://example.com"));
+        assert!(needs_surface_guide(
+            "Research whether a new model was released"
+        ));
+        assert!(needs_surface_guide(
+            "Run a web search for model announcements"
+        ));
+        assert!(!needs_surface_guide("Refactor the serializer"));
         assert!(needs_surface_guide(
             "check the component preview and dev server"
         ));
@@ -226,3 +220,5 @@ mod tests {
         }
     }
 }
+
+pub(crate) use gyro_core::provider_runtime::prompts::{needs_surface_guide, SIDE_PANEL_GUIDE};

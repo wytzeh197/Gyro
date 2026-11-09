@@ -34,7 +34,10 @@ for (const [providerId, outcome] of [
     finish = { resolve, reject };
   });
   const context = {
+    attachmentTarget: undefined,
+    sessions: [{ id: "chat", providerId }],
     activeSessionId: "chat",
+    visibleChatSessionIdsRef: { current: new Set(["chat"]) },
     activeSession: { providerId },
     sendingSessionIdsRef: { current: busy },
     notify() {},

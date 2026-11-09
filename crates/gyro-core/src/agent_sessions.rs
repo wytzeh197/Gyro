@@ -1425,6 +1425,8 @@ fn tokens_match(expected: &str, presented: &str) -> bool {
 
 pub struct AgentSessionListener {
     shutdown: Arc<AtomicBool>,
+    #[cfg(unix)]
+    wake: std::os::unix::net::UnixStream,
     thread: Option<JoinHandle<()>>,
     url: String,
 }
@@ -1437,6 +1439,9 @@ impl AgentSessionListener {
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
             .context("bind the agent session listener")?;
         listener.set_nonblocking(true)?;
+        #[cfg(unix)]
+        let (wake, wake_reader) = std::os::unix::net::UnixStream::pair()
+            .context("create the agent listener shutdown signal")?;
         let address = listener.local_addr()?;
         let url = format!("http://{address}/mcp");
         let endpoint = EndpointFile {
@@ -1452,10 +1457,17 @@ impl AgentSessionListener {
         let paths = paths.clone();
         let thread = thread::Builder::new()
             .name("gyro-agent-mcp".into())
-            .spawn(move || accept_loop(listener, flag, paths))
+            .spawn(move || {
+                #[cfg(unix)]
+                accept_loop(listener, flag, paths, wake_reader);
+                #[cfg(not(unix))]
+                accept_loop(listener, flag, paths);
+            })
             .context("start the agent session listener")?;
         Ok(Self {
             shutdown,
+            #[cfg(unix)]
+            wake,
             thread: Some(thread),
             url,
         })
@@ -1468,7 +1480,11 @@ impl AgentSessionListener {
 
 impl Drop for AgentSessionListener {
     fn drop(&mut self) {
-        self.shutdown.store(true, Ordering::Relaxed);
+        self.shutdown.store(true, Ordering::Release);
+        // Wake the blocking wait without a periodic timeout or a synthetic
+        // client connection. No accepted request is needed to shut down.
+        #[cfg(unix)]
+        let _ = self.wake.shutdown(std::net::Shutdown::Both);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -1506,9 +1522,71 @@ impl Drop for InflightGuard {
     }
 }
 
-fn accept_loop(listener: TcpListener, shutdown: Arc<AtomicBool>, paths: GyroPaths) {
+#[cfg(unix)]
+fn wait_for_agent_connection(
+    listener: &TcpListener,
+    wake: &std::os::unix::net::UnixStream,
+) -> std::io::Result<bool> {
+    use std::os::fd::AsRawFd;
+    let mut descriptors = [
+        libc::pollfd {
+            fd: listener.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: wake.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
+    loop {
+        // Both descriptors remain owned for the entire call. A client or the
+        // dedicated shutdown socket wakes this thread; idle costs no timer.
+        let result = unsafe { libc::poll(descriptors.as_mut_ptr(), 2, -1) };
+        if result < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        if descriptors[1].revents != 0 {
+            return Ok(false);
+        }
+        if descriptors[0].revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "agent listener is unavailable",
+            ));
+        }
+        if descriptors[0].revents & libc::POLLIN != 0 {
+            return Ok(true);
+        }
+    }
+}
+
+fn accept_loop(
+    listener: TcpListener,
+    shutdown: Arc<AtomicBool>,
+    paths: GyroPaths,
+    #[cfg(unix)] wake: std::os::unix::net::UnixStream,
+) {
     let inflight = Arc::new(AtomicUsize::new(0));
-    while !shutdown.load(Ordering::Relaxed) {
+    while !shutdown.load(Ordering::Acquire) {
+        #[cfg(unix)]
+        match wait_for_agent_connection(&listener, &wake) {
+            Ok(false) => break,
+            Ok(true) => {
+                if shutdown.load(Ordering::Acquire) {
+                    break;
+                }
+            }
+            Err(_) => {
+                thread::sleep(Duration::from_millis(50));
+                continue;
+            }
+        }
         match listener.accept() {
             Ok((mut stream, peer)) => {
                 let _ = stream.set_nonblocking(false);
@@ -1538,6 +1616,7 @@ fn accept_loop(listener: TcpListener, shutdown: Arc<AtomicBool>, paths: GyroPath
                 if error.kind() == std::io::ErrorKind::WouldBlock
                     || error.kind() == std::io::ErrorKind::Interrupted =>
             {
+                #[cfg(not(unix))]
                 thread::sleep(Duration::from_millis(20));
             }
             Err(_) => {
@@ -2779,6 +2858,59 @@ mod tests {
         assert!(summary.chars().count() <= MAX_SUMMARY_CHARS);
         assert!(!summary.contains(&secret));
         assert!(summary.contains("[REDACTED]"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn idle_listener_waits_for_a_client_or_shutdown_without_polling_timeouts() {
+        use std::sync::mpsc;
+        for shutdown in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let address = listener.local_addr().unwrap();
+            let (wake, reader) = std::os::unix::net::UnixStream::pair().unwrap();
+            let (entered, ready) = mpsc::channel();
+            let (done, result) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                entered.send(()).unwrap();
+                done.send(wait_for_agent_connection(&listener, &reader))
+                    .unwrap();
+            });
+            ready.recv_timeout(Duration::from_secs(4)).unwrap();
+            assert!(matches!(
+                result.recv_timeout(Duration::from_millis(100)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ));
+            let _client = if shutdown {
+                wake.shutdown(std::net::Shutdown::Both).unwrap();
+                None
+            } else {
+                Some(TcpStream::connect(address).unwrap())
+            };
+            assert_eq!(
+                result
+                    .recv_timeout(Duration::from_secs(4))
+                    .unwrap()
+                    .unwrap(),
+                !shutdown
+            );
+            worker.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn dropping_an_idle_agent_listener_joins_without_a_client() {
+        let (_temp, store, _workspace) = fixture();
+        let listener = AgentSessionListener::start(store.paths()).unwrap();
+        let (done, result) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            drop(listener);
+            done.send(()).unwrap();
+        });
+        result
+            .recv_timeout(Duration::from_secs(4))
+            .expect("idle listener did not stop");
+        worker.join().unwrap();
     }
 
     #[test]

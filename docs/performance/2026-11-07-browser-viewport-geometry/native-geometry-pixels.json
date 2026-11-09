@@ -1,0 +1,310 @@
+{
+  "passed": true,
+  "nativePassed": true,
+  "cases": [
+    {
+      "case": "background",
+      "passed": true,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": true,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerCentreMatchesDom": true,
+        "markerEdgesWithinOneBackingPixel": true
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-VWyXyO/data/geometry-background.png",
+      "size": [
+        1280,
+        800
+      ],
+      "markerPixels": [
+        80,
+        120,
+        92,
+        132
+      ],
+      "expectedMarkerPixels": [
+        80.0,
+        120.0,
+        92.0,
+        132.0
+      ],
+      "rasterEdgeToleranceCss": 1,
+      "markerCentre": [
+        86,
+        126
+      ],
+      "markerCentreColour": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "case": "initial-background",
+      "passed": true,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": true,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerCentreMatchesDom": true,
+        "markerEdgesWithinOneBackingPixel": true
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-VWyXyO/data/geometry-initial-background.png",
+      "size": [
+        1280,
+        800
+      ],
+      "markerPixels": [
+        80,
+        120,
+        92,
+        132
+      ],
+      "expectedMarkerPixels": [
+        80.0,
+        120.0,
+        92.0,
+        132.0
+      ],
+      "rasterEdgeToleranceCss": 1,
+      "markerCentre": [
+        86,
+        126
+      ],
+      "markerCentreColour": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "case": "desktop-narrow",
+      "passed": true,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": true,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerCentreMatchesDom": true,
+        "markerEdgesWithinOneBackingPixel": true
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-VWyXyO/data/geometry-desktop-narrow.png",
+      "size": [
+        1280,
+        800
+      ],
+      "markerPixels": [
+        80,
+        120,
+        92,
+        132
+      ],
+      "expectedMarkerPixels": [
+        80.0,
+        120.0,
+        92.0,
+        132.0
+      ],
+      "rasterEdgeToleranceCss": 1,
+      "markerCentre": [
+        86,
+        126
+      ],
+      "markerCentreColour": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "case": "desktop-fractional",
+      "passed": true,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": true,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerCentreMatchesDom": true,
+        "markerEdgesWithinOneBackingPixel": true
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-VWyXyO/data/geometry-desktop-fractional.png",
+      "size": [
+        1280,
+        800
+      ],
+      "markerPixels": [
+        80,
+        120,
+        92,
+        132
+      ],
+      "expectedMarkerPixels": [
+        80.0,
+        120.0,
+        92.0,
+        132.0
+      ],
+      "rasterEdgeToleranceCss": 1,
+      "markerCentre": [
+        86,
+        126
+      ],
+      "markerCentreColour": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "case": "mobile-fractional",
+      "passed": true,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": true,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerCentreMatchesDom": true,
+        "markerEdgesWithinOneBackingPixel": true
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-VWyXyO/data/geometry-mobile-fractional.png",
+      "size": [
+        390,
+        844
+      ],
+      "markerPixels": [
+        80,
+        120,
+        92,
+        132
+      ],
+      "expectedMarkerPixels": [
+        80.0,
+        120.0,
+        92.0,
+        132.0
+      ],
+      "rasterEdgeToleranceCss": 1,
+      "markerCentre": [
+        86,
+        126
+      ],
+      "markerCentreColour": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "case": "tablet-fractional",
+      "passed": true,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": true,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerCentreMatchesDom": true,
+        "markerEdgesWithinOneBackingPixel": true
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-VWyXyO/data/geometry-tablet-fractional.png",
+      "size": [
+        768,
+        1024
+      ],
+      "markerPixels": [
+        80,
+        120,
+        92,
+        132
+      ],
+      "expectedMarkerPixels": [
+        80.0,
+        120.0,
+        92.0,
+        132.0
+      ],
+      "rasterEdgeToleranceCss": 1,
+      "markerCentre": [
+        86,
+        126
+      ],
+      "markerCentreColour": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "case": "custom-fractional",
+      "passed": true,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": true,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerCentreMatchesDom": true,
+        "markerEdgesWithinOneBackingPixel": true
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-VWyXyO/data/geometry-custom-fractional.png",
+      "size": [
+        1920,
+        1080
+      ],
+      "markerPixels": [
+        80,
+        120,
+        92,
+        132
+      ],
+      "expectedMarkerPixels": [
+        80.0,
+        120.0,
+        92.0,
+        132.0
+      ],
+      "rasterEdgeToleranceCss": 1,
+      "markerCentre": [
+        86,
+        126
+      ],
+      "markerCentreColour": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "case": "responsive",
+      "passed": true,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": true,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerCentreMatchesDom": true,
+        "markerEdgesWithinOneBackingPixel": true
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-VWyXyO/data/geometry-responsive.png",
+      "size": [
+        536,
+        418
+      ],
+      "markerPixels": [
+        80,
+        120,
+        92,
+        132
+      ],
+      "expectedMarkerPixels": [
+        80.0,
+        120.0,
+        92.0,
+        132.0
+      ],
+      "rasterEdgeToleranceCss": 1,
+      "markerCentre": [
+        86,
+        126
+      ],
+      "markerCentreColour": [
+        255,
+        0,
+        255
+      ]
+    }
+  ]
+}

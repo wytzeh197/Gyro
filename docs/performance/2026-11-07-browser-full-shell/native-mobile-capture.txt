@@ -1,0 +1,95 @@
+Window: "Gyro", App: Gyro Browser Shell Review.
+0 standard window Gyro, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: Gyro, URL: tauri://localhost
+			3 container Workspace views
+				4 toggle button Explorer, Value: on
+				5 toggle button Search, Value: off
+				6 toggle button Source Control, Value: off
+				7 toggle button Run and Test, Value: off
+				8 toggle button AI, Value: off
+				9 toggle button Settings, Value: off
+			10 container
+				11 container Window navigation
+					12 button Hide sidebar
+					13 container Primary surfaces
+						14 toggle button Sessions, Value: off
+						15 toggle button Workspace, Value: on
+				16 text Explorer
+				17 button Add folder to workspace
+				18 button New file
+				19 button New folder
+				20 button (disabled) Rename selected path
+				21 button (disabled) Delete selected path
+				22 button Refresh workspace files
+				23 outline (selectable) Workspace files
+					24 row (selectable, expanded) Folder /private/tmp/gyro-shell-gQy1Wx/workspace, Help: /private/tmp/gyro-shell-gQy1Wx/workspace, Value: workspace, Secondary Actions: Collapse
+					25 row (selectable) File /private/tmp/gyro-shell-gQy1Wx/workspace/README.md, Help: /private/tmp/gyro-shell-gQy1Wx/workspace/README.md, Value: README.md
+				26 splitter Resize Workspace sidebar, Value: 224
+			27 container
+				28 container Claude Code 2.1.318 → 2.1.319 is available
+					29 container
+						30 text Claude Code 2.1.318 → 2.1.319 is available
+					31 button Update
+					32 button Dismiss CLI update notice
+				33 container Workspace
+					34 container
+						35 text Restricted Mode Tasks, terminals, language servers, and debug adapters are paused for this folder.
+						36 button Trust workspace
+					37 container Editor group Main
+						38 button (disabled) No file selected
+						39 container Code editor
+				40 container Workspace tools
+					41 button Resize tool panel. Drag up to enlarge, double-click to maximize., Help: Drag to resize · Double-click to maximize
+					42 tab group (selectable) Workbench panes
+						43 tab (selected) Browser
+						44 button (collapsed) Add drawer tab, Secondary Actions: Expand
+					45 button Maximize tool panel, Help: Maximize panel
+					46 button Close tool panel, Help: Close
+					47 container App preview and inspection
+						48 pop up button Preview target, Value: Web preview
+						49 button Refresh targets, Help: Discover windows and Simulator devices
+						50 button Capture
+						51 summary Runtime availability (1), Value: off
+							52 text Runtime availability (
+							53 text 1
+							54 text )
+						55 container Navigation
+							56 button (disabled) Back
+							57 button (disabled) Forward
+							58 button (disabled) Reload
+						59 container
+							60 text field (settable) Browser URL, Value: http://127.0.0.1:56199/browser-observation.html, Placeholder: https://example.com
+							61 text capture
+						62 container Browser actions
+							63 container Preview mode
+							64 container Browser viewport
+								65 toggle button Automatic viewport, Help: Automatic: Desktop fit for local previews, Responsive for websites, Value: off
+								66 toggle button Responsive, Value: off
+								67 toggle button Desktop fit, Value: off
+								68 toggle button Tablet, Value: off
+								69 toggle button Mobile, Value: on
+							70 button Capture browser screenshot, Help: Capture screenshot
+							71 button Open in system browser
+						72 image Browser capture of 127.0.0.1:56199/browser-observation.html
+						73 text 390  ×  844  · 127.0.0.1:56199/browser-observation.html  · 10:48 AM
+						74 button Back to live
+						75 button Reveal file
+						76 text Capture · 127.0.0.1:56199/browser-observation.html · Mobile
+						77 button Viewing capture, Help: Show live preview
+						78 button (disabled, collapsed) HTTP check only, Secondary Actions: Expand
+				79 container Workspace status
+					80 pop up button No repository, Help: could not inspect Git status exited with Some(128): fatal: not a git repository (or any of the parent directories): .git
+					81 toggle button Hide the workspace panel, Help: Hide panel (⌘J), Value: on
+	82 close button
+	83 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	84 minimize button
+85 menu bar
+	86 Gyro Browser Shell Review
+	87 File
+	88 Edit
+	89 View
+	90 Window
+	91 Help
+
+The focused UI element is 27 container

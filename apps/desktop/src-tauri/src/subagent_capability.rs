@@ -1,6 +1,30 @@
 //! Compatibility wrapper for bounded research and child run controls.
-use super::*;
+use crate::{
+    app::limits::MAX_CONCURRENT_PROVIDER_RUNS,
+    capabilities::access::capability_argument_string,
+    capability_output_budget,
+    capability_workspace_helpers::{workspace_result_byte_limit, workspace_result_bytes_schema},
+    delegated_agents,
+    state::{
+        managers::ProviderCancellationManager,
+        provider_run::{BoundProviderCapabilityContext, ProviderRunControl},
+    },
+    stores::open_store,
+};
+use gyro_core::{
+    CancellationToken, CapabilityId, CapabilityRequest, CapabilityResourceRef, SessionEventKind,
+};
 use serde_json::{json, Value};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+use tauri::Manager;
+use uuid::Uuid;
 
 const SUBAGENT_SCHEMA: &str = "gyro.subagent.v1";
 const MAX_QUESTION_CHARS: usize = 4_000;

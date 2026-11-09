@@ -1,6 +1,14 @@
 //! A bounded, scoped view of the Workspace tree for model calls.
-use super::*;
+use crate::{
+    capability_workspace_helpers::workspace_result_byte_limit,
+    ide::debug::redact_json_strings,
+    workspace::{
+        files::assert_workspace_path, tree::list_workspace_tree_blocking, types::WorkspaceFile,
+    },
+};
+use gyro_core::CapabilityResourceRef;
 use serde_json::{json, Value};
+use std::path::Path;
 
 const DEFAULT_PAGE_LIMIT: usize = 100;
 const MAX_PAGE_LIMIT: usize = 200;
@@ -187,6 +195,7 @@ fn page_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn model_list_pages_and_scopes_without_losing_entries() {

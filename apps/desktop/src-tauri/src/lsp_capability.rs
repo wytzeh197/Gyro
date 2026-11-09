@@ -5,10 +5,20 @@
 //! opened. It starts (or reuses) the workspace's language server through
 //! `language_server.rs`, opens the document on the Rust side, and reports
 //! `indexing` instead of a bogus "not found" while a cold server warms up.
-use super::*;
-use crate::language_server::{LanguageServerManager, LspFileOutcome, LspFileRequest};
+use crate::ide::language_server::{LanguageServerManager, LspFileOutcome, LspFileRequest};
+use crate::{
+    app::limits::MAX_WORKSPACE_FILE_EDIT_BYTES,
+    capabilities::access::{capability_argument_string, capability_positive_position},
+    capability_output_budget,
+    capability_workspace_helpers::{workspace_result_byte_limit, workspace_result_bytes_schema},
+    state::provider_run::BoundProviderCapabilityContext,
+    workspace::files::read_workspace_file_with_limit,
+};
+use gyro_core::{CapabilityId, CapabilityRequest, CapabilityResourceRef};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use tauri::Manager;
 
 const CODE_OBSERVATION_SCHEMA: &str = "gyro.code-observation.v1";
 const MAX_CODE_LOCATIONS: usize = 50;
@@ -363,6 +373,14 @@ fn source_line<'a>(
     cache: &'a mut HashMap<String, Option<String>>,
 ) -> Option<&'a str> {
     let relative = file.strip_prefix(workspace).ok()?.to_str()?;
+    // A definition/reference can resolve into a different, sensitive file.
+    // Admission authorized the input path, not an implicit read of that target.
+    // Check the canonical target too so an ordinary symlink cannot bypass this.
+    if crate::capabilities::access::capability_path_is_sensitive_in_workspace(workspace, relative)
+        .unwrap_or(true)
+    {
+        return None;
+    }
     // Read original text before response redaction so replaced secret strings
     // cannot shift positions. Reuse this bounded read for columns and previews;
     // never read outside the workspace, including through symlinks.
@@ -886,6 +904,38 @@ mod tests {
         assert_eq!(scalar_column("é💡x", 4), Some(3));
         assert_eq!(scalar_column("é💡x", 5), Some(4));
         assert_eq!(scalar_column("é💡x", 3), None);
+    }
+
+    #[test]
+    fn navigation_omits_sensitive_target_content_and_symlink_aliases() {
+        let (_directory, workspace, file) =
+            test_source("secrets.json", "{\"value\":\"synthetic-private-value\"}");
+        let mut targets = vec![file.clone()];
+        #[cfg(unix)]
+        {
+            let alias = workspace.join("ordinary.json");
+            std::os::unix::fs::symlink(&file, &alias).unwrap();
+            targets.push(alias);
+        }
+        for target in targets {
+            let (entries, total) = location_entries(
+                &workspace,
+                &json!([{
+                    "uri": url::Url::from_file_path(&target).unwrap().as_str(),
+                    "range": { "start": { "line": 0, "character": 1 } },
+                }]),
+                CodePage {
+                    offset: 0,
+                    limit: 20,
+                },
+            );
+            assert_eq!(total, 1);
+            assert!(entries[0].get("preview").is_none());
+            assert!(entries[0]["column"].is_null());
+            assert!(!serde_json::to_string(&entries)
+                .unwrap()
+                .contains("synthetic-private-value"));
+        }
     }
 
     #[test]

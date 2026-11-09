@@ -1,0 +1,54 @@
+{
+  "build": "debug",
+  "elapsedMs": 91872,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [],
+      "model": "claude-sonnet-5",
+      "outcome": "completed",
+      "provider": "anthropic",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "4c9ab8f5-e3b4-49b3-9df4-c7925e174af5",
+      "task": "follow-up",
+      "trial": 1,
+      "turnId": "68ff9a66-cf67-42ed-a622-15de641b5792",
+      "wallMs": 15361.434625
+    },
+    {
+      "correct": false,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "approve-fixture-edit",
+          "path": "README.md",
+          "proposalId": "76b0825f-a414-4253-82ba-faae02635acd",
+          "status": "applied"
+        }
+      ],
+      "model": "claude-sonnet-5",
+      "outcome": "completed",
+      "provider": "anthropic",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": true,
+      "resumedRequested": true,
+      "retryCount": 0,
+      "sessionId": "11f1d44a-a72a-4346-94fb-d474ef3c3013",
+      "task": "follow-up",
+      "trial": 1,
+      "turnId": "17694137-1a1b-4832-9f86-ff960b803902",
+      "wallMs": 67751.65825000001
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

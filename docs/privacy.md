@@ -5,13 +5,16 @@ Gyro is local-first and does not require a Gyro account.
 ## Local data
 
 - Sessions, workspace settings, logs, and app state are stored on the Mac.
-- Provider credentials are stored through macOS Keychain when available.
+- Provider CLI logins stay in provider-owned storage. API keys saved in Gyro
+  are stored in `secrets.json` under the local Gyro data directory, with a 0700
+  directory and 0600 file on macOS. These keys are not encrypted at rest.
+  Optional Cloud refresh tokens use a separate macOS Keychain store.
 - Gyro metadata is not written into user repositories unless the user chooses
   an action that does so.
 
 ## Gyro Cloud staging
 
-Gyro Cloud requires sign-in when enabled and uploads chats you choose to back up. Your name, email, and password go to the account service when you sign up; Gyro does not keep your password on the device. The app compresses and encrypts chat text and titles before transfer. The service stores account and transfer metadata, including backup sizes and upload times. Your recovery code unlocks chats on another device. Removing a cloud copy leaves the local original and any downloaded history on the device.
+Cloud is not enabled in the public v0.1.1 release. In staging builds where it is enabled, Gyro Cloud requires sign-in and uploads chats you choose to back up. Your name, email, and password go to the account service when you sign up; Gyro does not keep your password on the device. The app compresses and encrypts chat text and titles before transfer. The service stores account and transfer metadata, including backup sizes and upload times. Your recovery code unlocks chats on another device. Removing a cloud copy leaves the local original and any downloaded history on the device.
 
 ## Model providers
 

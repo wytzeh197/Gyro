@@ -1,0 +1,170 @@
+vite v6.4.3 building for production...
+
+(!) outDir /tmp/gyro-menu-bar-verified-dist is not inside project root and will not be emptied.
+Use --emptyOutDir to override.
+
+transforming...
+✓ 3015 modules transformed.
+rendering chunks...
+computing gzip size...
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/vue-interpolations.tmLanguage-CjotDxBc.json               0.36 kB │ gzip:   0.24 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/jsdoc-typescript.tmLanguage-P4wt-SQa.json                 0.37 kB │ gzip:   0.25 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/jsdoc-javascript.tmLanguage-DSRWTngP.json                 0.38 kB │ gzip:   0.25 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/vue-directives.tmLanguage-1vDlC96P.json                   0.39 kB │ gzip:   0.26 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/vue-leading-operator.tmLanguage-DQHVMGJn.json             0.44 kB │ gzip:   0.29 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/vue-style-variable.tmLanguage-vRdlI_3U.json               1.07 kB │ gzip:   0.43 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/third-party/textmate/licenses/vue-language-tools.MIT.txt         1.08 kB │ gzip:   0.65 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/third-party/textmate/licenses/vscode-textmate.MIT.txt            1.08 kB │ gzip:   0.65 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/third-party/textmate/licenses/astro-vscode.MIT.txt               1.09 kB │ gzip:   0.66 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/third-party/textmate/licenses/vscode.MIT.txt                     1.09 kB │ gzip:   0.66 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/third-party/textmate/licenses/vscode-oniguruma.MIT.txt           1.10 kB │ gzip:   0.66 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/third-party/textmate/licenses/svelte-language-tools.MIT.txt      1.13 kB │ gzip:   0.68 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/index.html                                                       1.38 kB │ gzip:   0.67 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/html-derivative.tmLanguage-B6YjgurB.json                  1.40 kB │ gzip:   0.70 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/svelte-pug-dotblock.tmLanguage-BgiXLd2E.json              1.52 kB │ gzip:   0.35 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/third-party/textmate/licenses/vscode-oniguruma.NOTICES.txt       2.27 kB │ gzip:   1.12 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/third-party/textmate/licenses/atom-language-sass.MIT.txt         2.38 kB │ gzip:   0.79 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/third-party/textmate/README.md                                   4.54 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/json.tmLanguage-CVeRIxw1.json                             5.08 kB │ gzip:   1.33 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/antigravity-icon-TC2DVLcA.svg                             5.30 kB │ gzip:   1.45 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/jsonc.tmLanguage-DT09MsGT.json                            5.35 kB │ gzip:   1.33 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/svelte-pug-tags.tmLanguage-CCj4rlXX.json                  6.02 kB │ gzip:   0.73 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/sassdoc.tmLanguage-DZLVpi6F.json                          8.66 kB │ gzip:   1.89 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/postcss.tmLanguage-DHr6Ttf0.json                          9.21 kB │ gzip:   2.07 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/svelte-pug.tmLanguage-Bjipwxfk.json                      11.41 kB │ gzip:   1.15 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/pug.tmLanguage-D_GbAP_D.json                             20.37 kB │ gzip:   3.31 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/sass.tmLanguage-CetXYqJs.json                            26.69 kB │ gzip:   2.85 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/svelte.tmLanguage-B84HdQIO.json                          32.25 kB │ gzip:   3.57 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/vue.tmLanguage-Dahw6NN8.json                             33.12 kB │ gzip:   2.91 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/astro.tmLanguage-gauIp5UE.json                           40.01 kB │ gzip:   8.06 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/scss.tmLanguage-CHiN_40s.json                            41.80 kB │ gzip:   5.35 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/third-party/textmate/manifest.json                              47.15 kB │ gzip:   6.12 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/markdown.tmLanguage-B0Z3OZNf.json                        79.88 kB │ gzip:   6.46 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/codicon-DCmgc-ay.ttf                                     80.34 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/css.tmLanguage-C1pUcy86.json                             81.15 kB │ gzip:  16.93 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/html.tmLanguage-BxRR6_eb.json                            84.42 kB │ gzip:  13.30 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/less.tmLanguage-DXi6rAD7.json                           144.35 kB │ gzip:  18.14 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/third-party/textmate/licenses/vscode.ThirdPartyNotices.txt     179.76 kB │ gzip:  25.39 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/javascript.tmLanguage-BiEFqwPc.json                     227.25 kB │ gzip:  19.57 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/typescriptreact.tmLanguage-ywFP-GTc.json                227.98 kB │ gzip:  19.57 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/javascriptreact.tmLanguage-UW_rxjUv.json                230.26 kB │ gzip:  19.66 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/typescript.tmLanguage-c2W_TGwc.json                     231.56 kB │ gzip:  19.09 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/editor.worker-BCzxt1at.js                               232.35 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/json.worker-B7c_PmGb.js                                 364.77 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/onig-CwjCXqnP.wasm                                      473.15 kB │ gzip: 151.69 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/subagent-mark-B8b5Hkw8.png                              661.40 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/html.worker-CKrFyw_2.js                                 674.50 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/css.worker-DaIe3gwK.js                                1,011.91 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/ts.worker-BhkL8olL.js                                 6,023.47 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/installed-update-DTSLMm9h.css                             4.35 kB │ gzip:   1.16 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/index-BdwWg36F.css                                        6.55 kB │ gzip:   1.66 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/menu-bar-CSfarmwz.css                                     8.78 kB │ gzip:   2.23 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/App-B5mX3Br_.css                                         19.06 kB │ gzip:   4.65 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/editor-D6kYW_CN.css                                     133.00 kB │ gzip:  21.06 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/workspace-rename-CAvJbhzb.css                           181.71 kB │ gzip:  25.02 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/styles-entry-BofdFeVO.css                               978.72 kB │ gzip: 137.91 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/tauri-runtime-BiL95_F8.js                                 0.06 kB │ gzip:   0.08 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/index-B2oz4rcC.js                                         1.08 kB │ gzip:   0.51 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/azcli-BaLxmfj-.js                                         1.09 kB │ gzip:   0.46 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/javascript--TkqV5px.js                                    1.22 kB │ gzip:   0.64 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/dictation-access-B6IfsadU.js                              1.23 kB │ gzip:   0.65 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/ini-Drc7WvVn.js                                           1.35 kB │ gzip:   0.67 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/csp-5Rap-vPy.js                                           1.67 kB │ gzip:   0.67 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/addon-fit-l46NOgO7.js                                     1.81 kB │ gzip:   0.84 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/pla-B03wrqEc.js                                           1.93 kB │ gzip:   0.79 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/scheme-Bio4gycK.js                                        2.01 kB │ gzip:   0.95 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/flow9-i9-g7ZhI.js                                         2.06 kB │ gzip:   0.98 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/sb-CDntyWJ8.js                                            2.08 kB │ gzip:   0.96 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/bat-CFOPXBzS.js                                           2.09 kB │ gzip:   1.00 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/dockerfile-Zznr-cwX.js                                    2.12 kB │ gzip:   0.81 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/pascaligo-Bc-ZgV77.js                                     2.25 kB │ gzip:   1.05 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/lua-nf6ki56Z.js                                           2.37 kB │ gzip:   1.06 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/cameligo-BFG1Mk7z.js                                      2.43 kB │ gzip:   1.10 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/graphql-Cg7bfA9N.js                                       2.51 kB │ gzip:   1.16 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/objective-c-B5zXfXm9.js                                   2.65 kB │ gzip:   1.19 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/lexon-YWi4-JPR.js                                         2.68 kB │ gzip:   1.07 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/xml-Ba05XvCf.js                                           2.71 kB │ gzip:   1.12 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/bicep-BfEKNvv3.js                                         2.78 kB │ gzip:   1.10 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/sparql-DHaeiCBh.js                                        2.80 kB │ gzip:   1.30 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/custom-grammars-C8nvJUjZ.js                               2.81 kB │ gzip:   1.31 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/mips-B_c3zf-v.js                                          2.83 kB │ gzip:   1.21 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/go-Cphgjts3.js                                            2.90 kB │ gzip:   1.28 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/sophia-C5WLch3f.js                                        3.01 kB │ gzip:   1.34 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/typespec-D-MeaMDU.js                                      3.04 kB │ gzip:   1.23 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/m3-Cpb6xl2v.js                                            3.06 kB │ gzip:   1.44 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/fsharp-CzKuDChf.js                                        3.23 kB │ gzip:   1.45 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/pascal-CXOwvkN_.js                                        3.24 kB │ gzip:   1.53 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/shell-CX-rkNHf.js                                         3.32 kB │ gzip:   1.34 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/r-CdQndTaG.js                                             3.38 kB │ gzip:   1.42 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/qsharp-DXyYeYxl.js                                        3.44 kB │ gzip:   1.55 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/java-B_fMsGYe.js                                          3.47 kB │ gzip:   1.53 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/powershell-Dd3NCNK9.js                                    3.52 kB │ gzip:   1.51 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/cypher-DrQuvNYM.js                                        3.63 kB │ gzip:   1.56 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/kotlin-BSkB5QuD.js                                        3.69 kB │ gzip:   1.61 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/redis-CVwtpugi.js                                         3.80 kB │ gzip:   1.62 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/tcl-DnHyzjbg.js                                           3.82 kB │ gzip:   1.50 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/coffee-CDGzqUPQ.js                                        3.84 kB │ gzip:   1.45 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/hcl-0cvrggvQ.js                                           3.84 kB │ gzip:   1.62 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/markdown-DSZPf7rp.js                                      4.03 kB │ gzip:   1.52 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/restructuredtext-DfzH4Xui.js                              4.14 kB │ gzip:   1.50 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/less-BsTHnhdd.js                                          4.14 kB │ gzip:   1.55 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/apex-DyP6w7ZV.js                                          4.20 kB │ gzip:   1.90 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/liquid-BxtQLocI.js                                        4.25 kB │ gzip:   1.81 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/yaml-pGHbSagy.js                                          4.31 kB │ gzip:   1.67 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/rust-D5C2fndG.js                                          4.41 kB │ gzip:   1.95 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/python-CZDAzTwC.js                                        4.49 kB │ gzip:   1.85 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/dart-CFKIUWau.js                                          4.50 kB │ gzip:   1.78 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/css-D3h14YRZ.js                                           4.76 kB │ gzip:   1.52 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/csharp-dUCx_-0o.js                                        4.77 kB │ gzip:   1.86 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/pug-BaJupSGV.js                                           5.07 kB │ gzip:   1.78 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/mdx-YCUygvV8.js                                           5.16 kB │ gzip:   1.60 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/msdax-rUNN04Wq.js                                         5.16 kB │ gzip:   2.09 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/html-COT3YKtb.js                                          5.31 kB │ gzip:   1.55 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/swift-DwJ7jVG9.js                                         5.42 kB │ gzip:   2.20 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/cpp-CLLBncYj.js                                           5.55 kB │ gzip:   2.22 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/ecl-Ce3n6wWz.js                                           5.59 kB │ gzip:   2.38 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/typescript-Bqzeg0Hy.js                                    5.70 kB │ gzip:   2.31 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/vb-DgyLZaXg.js                                            6.04 kB │ gzip:   2.19 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/source-control-diff-editor-jYfULZX_.js                    6.17 kB │ gzip:   2.66 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/twig-CPajHgWi.js                                          6.22 kB │ gzip:   1.66 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/scss-4Ik7cdeQ.js                                          6.66 kB │ gzip:   1.89 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/handlebars-BX7QFIiB.js                                    7.07 kB │ gzip:   1.76 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/julia-Bqgm2twL.js                                         7.40 kB │ gzip:   2.77 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/scala-BoFRg7Ot.js                                         7.56 kB │ gzip:   2.22 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/wgsl-BIv9DU6q.js                                          7.59 kB │ gzip:   2.90 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/st-pnP8ivHi.js                                            7.65 kB │ gzip:   2.38 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/systemverilog-B9Xyijhd.js                                 7.85 kB │ gzip:   2.88 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/MenuBarPopover-JNGyQzRe.js                                7.86 kB │ gzip:   2.79 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/postiats-BKlk5iyT.js                                      8.10 kB │ gzip:   2.55 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/php-CpIb_Oan.js                                           8.27 kB │ gzip:   2.20 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/perl-CwNk8-XU.js                                          8.50 kB │ gzip:   3.24 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/ruby-Cp1zYvxS.js                                          8.75 kB │ gzip:   2.70 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/razor-CmwPvFSc.js                                         9.07 kB │ gzip:   2.44 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/protobuf-COyEY5Pt.js                                      9.29 kB │ gzip:   2.20 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/clojure-DTECt2xU.js                                       9.89 kB │ gzip:   3.74 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/elixir-deUWdS0T.js                                       10.50 kB │ gzip:   2.65 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/sql-CCSDG5nI.js                                          10.54 kB │ gzip:   3.98 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/mysql-DDwshQtU.js                                        11.52 kB │ gzip:   4.19 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/redshift-25W9uPmb.js                                     12.05 kB │ gzip:   4.46 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/monaco-editor-DXuEN_jW.js                                13.21 kB │ gzip:   4.61 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/pgsql-tGk8EFnU.js                                        13.71 kB │ gzip:   4.63 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/abap-BrgZPUOV.js                                         14.41 kB │ gzip:   5.47 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/freemarker2-Bs2HltG6.js                                  16.39 kB │ gzip:   4.28 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/powerquery-Bhzvs7bI.js                                   17.19 kB │ gzip:   5.00 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/solidity-Tw7wswEv.js                                     18.84 kB │ gzip:   4.58 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/tsMode-B2wzOFzr.js                                       22.89 kB │ gzip:   6.53 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/cssMode-BoxxGMth.js                                      32.40 kB │ gzip:   8.78 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/htmlMode-DlTjlTgk.js                                     32.95 kB │ gzip:   8.90 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/jsonMode-B-Vdz6kV.js                                     41.81 kB │ gzip:  12.09 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/textmate-syntax-C0OAIYRm.js                             124.08 kB │ gzip:  33.38 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/index-BHeqFO2Y.js                                       152.97 kB │ gzip:  49.71 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/xterm-Chbp5cM8.js                                       291.26 kB │ gzip:  72.20 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/App-Bg9xUxPS.js                                         516.44 kB │ gzip: 159.55 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/workspace-rename-CKEiit01.js                          1,117.92 kB │ gzip: 325.08 kB
+../../../../../tmp/gyro-menu-bar-verified-dist/assets/editor.main-C8kZoumb.js                               3,331.07 kB │ gzip: 855.19 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 1m 46s

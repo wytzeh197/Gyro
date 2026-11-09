@@ -218,3 +218,114 @@
     opacity: 1;
   }
 }
+
+/* CLI sessions follow chat: sidebar navigation and one draggable header per pane. */
+:root[data-theme] .gyro-terminal-workspace.is-session-workspace,
+:root[data-theme] .gyro-terminal-workspace.is-session-workspace:not(.is-empty) {
+  grid-template-rows: minmax(0, 1fr);
+}
+:root[data-theme] .gyro-terminal-workspace.is-session-workspace .gyro-terminal-grid[data-terminal-count] > .gyro-terminal-pane {
+  position: relative;
+  grid-template-rows: var(--gyro-tool-header-height) minmax(0, 1fr);
+}
+:root[data-theme] .gyro-terminal-workspace.is-session-workspace .gyro-terminal-grid[data-terminal-count] > .gyro-terminal-pane > header {
+  display: flex;
+  gap: var(--gyro-space-standard);
+  padding: 0 var(--gyro-space-comfortable);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  background: var(--gyro-pane);
+  cursor: grab;
+}
+:root[data-theme] .gyro-terminal-workspace.is-session-workspace .gyro-terminal-drag-handle {
+  display: none;
+}
+:root[data-theme] .gyro-terminal-workspace.is-session-workspace .gyro-terminal-pane > header .gyro-terminal-pane-title {
+  flex: 1;
+  padding: 0;
+  background: transparent;
+  min-width: 0;
+}
+:root[data-theme] .gyro-terminal-session-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-compact);
+  flex-shrink: 0;
+}
+:root[data-theme] .gyro-terminal-session-action,
+:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions > button {
+  display: grid;
+  place-items: center;
+  width: var(--gyro-control-height);
+  height: var(--gyro-control-height);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gyro-muted);
+  border-radius: var(--gyro-radius-sm);
+}
+:root[data-theme] .gyro-terminal-session-action:hover,
+:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions > button:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+:root[data-theme] .gyro-terminal-session-action:focus-visible,
+:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions > button:focus-visible,
+:root[data-theme] .is-session-workspace .gyro-terminal-pane > header:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions-menu > button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--gyro-space-standard);
+  width: 100%;
+  min-width: 0;
+  height: var(--gyro-control-height);
+  padding: 0 var(--gyro-space-standard);
+  border: 0;
+  border-radius: var(--gyro-radius-xs);
+  background: transparent;
+  box-shadow: none;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: var(--gyro-font-micro);
+  text-align: left;
+  white-space: nowrap;
+}
+:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions-menu > button:is(:hover, :focus-visible):not(:disabled) {
+  background: var(--gyro-control-hover);
+}
+:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions-menu > button:disabled {
+  opacity: 0.4;
+}
+:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions-menu > button > svg {
+  flex-shrink: 0;
+  color: var(--gyro-muted);
+}
+:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions-menu > button.is-danger,
+:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions-menu > button.is-danger > svg {
+  color: var(--gyro-danger);
+}
+:root[data-theme] .gyro-terminal-session-drop {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  border: 1px solid var(--gyro-accent);
+  background: color-mix(in srgb, var(--gyro-accent) 14%, transparent);
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+}
+:root[data-theme] .gyro-terminal-session-drop.is-left { right: 50%; }
+:root[data-theme] .gyro-terminal-session-drop.is-right { left: 50%; }
+:root[data-theme] .gyro-terminal-session-drop.is-top { bottom: 50%; }
+:root[data-theme] .gyro-terminal-session-drop.is-bottom { top: 50%; }
+:root[data-theme] .gyro-cli-sidebar-select[draggable] { cursor: grab; }
+:root.gyro-terminal-session-dragging,
+:root.gyro-terminal-session-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}

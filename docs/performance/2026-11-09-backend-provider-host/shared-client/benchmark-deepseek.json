@@ -1,0 +1,81 @@
+{
+  "build": "debug",
+  "elapsedMs": 32294,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "compactBeforeResume": false,
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "approve-fixture-edit",
+          "path": "src/clamp.mjs",
+          "proposalId": "63ccf714-b969-4d94-a5c3-473db9e5922d",
+          "status": "applied"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "clamp.test.mjs",
+          "proposalId": "1f300987-71e7-43f3-965f-008d589e1a18",
+          "status": "applied"
+        }
+      ],
+      "model": "deepseek-flash",
+      "outcome": "completed",
+      "provider": "deepseek",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "102ee130-6377-4de3-bff8-097211ad0ab9",
+      "task": "code",
+      "trial": 1,
+      "turnId": "6006329e-0617-4e7b-9be3-a6b737a912ce",
+      "wallMs": 17780.026958000002
+    },
+    {
+      "compactBeforeResume": false,
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "skip",
+          "path": ".gyro/memory.md",
+          "proposalId": "989e8237-df14-4cb2-8924-fe280de388ac",
+          "status": "out-of-scope"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "src/clamp.mjs",
+          "proposalId": "e6505f20-eeea-4500-a8b5-b946dba9b606",
+          "status": "applied"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "clamp.test.mjs",
+          "proposalId": "73835ef3-6a59-4565-8f5e-2712000e3723",
+          "status": "applied"
+        }
+      ],
+      "model": "deepseek-flash",
+      "outcome": "completed",
+      "provider": "deepseek",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": true,
+      "retryCount": 0,
+      "sessionId": "ab12e618-6c2d-4e7b-acfc-c7ac458f98e1",
+      "task": "code",
+      "trial": 1,
+      "turnId": "b1350075-9d07-4b44-92bc-e0dda02ed2c2",
+      "wallMs": 8455.30175
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

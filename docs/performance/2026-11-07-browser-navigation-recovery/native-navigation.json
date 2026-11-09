@@ -1,0 +1,657 @@
+{
+  "checks": [
+    {
+      "name": "cycle 1: previous document read is rejected before response headers",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: previous document click is rejected before response headers",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: rejected click leaves the actual old document unchanged",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: old tool result cannot overwrite the requested native URL",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: native screenshot cannot return previous-document pixels",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: background pointer cannot act on the previous document",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: current interactive document remains usable while an image is held",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: old document reference is rejected after commit",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: a fresh reference changes the current interactive document",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: background pointer can act on the committed interactive document",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: previous document read is rejected before response headers",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: previous document click is rejected before response headers",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: rejected click leaves the actual old document unchanged",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: old tool result cannot overwrite the requested native URL",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: native screenshot cannot return previous-document pixels",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: background pointer cannot act on the previous document",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: current interactive document remains usable while an image is held",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: old document reference is rejected after commit",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: a fresh reference changes the current interactive document",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: background pointer can act on the committed interactive document",
+      "passed": true
+    },
+    {
+      "name": "native Back reaches the actual previous document",
+      "passed": true
+    },
+    {
+      "name": "native Forward reaches the actual next document",
+      "passed": true
+    },
+    {
+      "name": "unavailable history fails without invalidating the current document",
+      "passed": true
+    },
+    {
+      "name": "native browser closes after both navigation cycles",
+      "passed": true
+    },
+    {
+      "name": "eight immediate initial documents remain usable after native creation",
+      "passed": true
+    },
+    {
+      "name": "page link: old reads fail while response headers are held",
+      "passed": true
+    },
+    {
+      "name": "page link: old clicks fail while response headers are held",
+      "passed": true
+    },
+    {
+      "name": "page link: actual old document stays unchanged",
+      "passed": true
+    },
+    {
+      "name": "page link: screenshot cannot return old pixels",
+      "passed": true
+    },
+    {
+      "name": "page link: pointer cannot act on old document",
+      "passed": true
+    },
+    {
+      "name": "page link: native state records the pending main document",
+      "passed": true
+    },
+    {
+      "name": "page link: committed interactive document accepts fresh work",
+      "passed": true
+    },
+    {
+      "name": "page form: old reads fail while response headers are held",
+      "passed": true
+    },
+    {
+      "name": "page form: old clicks fail while response headers are held",
+      "passed": true
+    },
+    {
+      "name": "page form: actual old document stays unchanged",
+      "passed": true
+    },
+    {
+      "name": "page form: screenshot cannot return old pixels",
+      "passed": true
+    },
+    {
+      "name": "page form: pointer cannot act on old document",
+      "passed": true
+    },
+    {
+      "name": "page form: native state records the pending main document",
+      "passed": true
+    },
+    {
+      "name": "page form: committed interactive document accepts fresh work",
+      "passed": true
+    },
+    {
+      "name": "page script: old reads fail while response headers are held",
+      "passed": true
+    },
+    {
+      "name": "page script: old clicks fail while response headers are held",
+      "passed": true
+    },
+    {
+      "name": "page script: actual old document stays unchanged",
+      "passed": true
+    },
+    {
+      "name": "page script: screenshot cannot return old pixels",
+      "passed": true
+    },
+    {
+      "name": "page script: pointer cannot act on old document",
+      "passed": true
+    },
+    {
+      "name": "page script: native state records the pending main document",
+      "passed": true
+    },
+    {
+      "name": "page script: committed interactive document accepts fresh work",
+      "passed": true
+    },
+    {
+      "name": "prevented link leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "SPA route leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "fragment leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "iframe leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "blocked credential URL leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "connection failure stops loading",
+      "passed": true
+    },
+    {
+      "name": "connection failure reports an explicit recovery error",
+      "passed": true
+    },
+    {
+      "name": "connection failure cannot expose the old document",
+      "passed": true
+    },
+    {
+      "name": "Back recovers the actual previous document after provisional failure",
+      "passed": true
+    },
+    {
+      "name": "a failed initial document settles without a previously committed page",
+      "passed": true
+    },
+    {
+      "name": "Back on a failed initial document reports unavailable history",
+      "passed": true
+    },
+    {
+      "name": "a second failure settles independently",
+      "passed": true
+    },
+    {
+      "name": "Retry loads the failed URL instead of reloading the old page",
+      "passed": true
+    },
+    {
+      "name": "native cancellation stops loading with an explicit cancelled state",
+      "passed": true
+    },
+    {
+      "name": "native cancellation keeps old DOM unavailable until explicit recovery",
+      "passed": true
+    },
+    {
+      "name": "Back recovers after native cancellation",
+      "passed": true
+    },
+    {
+      "name": "superseding a held load leaves its replacement ready without cancellation errors",
+      "passed": true
+    },
+    {
+      "name": "navigation observer restores and releases every installed delegate",
+      "passed": true
+    }
+  ],
+  "engine": "native-WKWebView",
+  "error": null,
+  "nativeBuild": "debug-embedded-tauri-production-handlers",
+  "nativeOsInputTested": false,
+  "observations": [
+    {
+      "after": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Original"
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Original"
+      },
+      "clickResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "cycle": 1,
+      "interactiveState": "interactive",
+      "newRef": "ref_g3a188j5ol7_20",
+      "readResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "snapshotAfterOldRead": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-7134801a4e3f4988a5d1f3368d6a9339",
+        "loading": true,
+        "navigationError": null,
+        "navigationId": 2,
+        "resourceId": "433c5f0a-909c-48b8-a3c1-5e1a35c8ef65",
+        "sessionId": "7134801a-4e3f-4988-a5d1-f3368d6a9339",
+        "title": "",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-bHhWQN/workspaces/first"
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 2",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Provisional"
+      },
+      "before": {
+        "clicks": "Clicks: 2",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Provisional"
+      },
+      "clickResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "cycle": 2,
+      "interactiveState": "interactive",
+      "newRef": "ref_j6wk0sp413i_20",
+      "readResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "snapshotAfterOldRead": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-7134801a4e3f4988a5d1f3368d6a9339",
+        "loading": true,
+        "navigationError": null,
+        "navigationId": 3,
+        "resourceId": "433c5f0a-909c-48b8-a3c1-5e1a35c8ef65",
+        "sessionId": "7134801a-4e3f-4988-a5d1-f3368d6a9339",
+        "title": "",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-bHhWQN/workspaces/first"
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Original"
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Original"
+      },
+      "clickResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "pageNavigation": "link",
+      "pending": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-7134801a4e3f4988a5d1f3368d6a9339",
+        "loading": true,
+        "navigationError": null,
+        "navigationId": 2,
+        "resourceId": "f9a65adf-88a6-4e92-b3ad-773b74cbb19f",
+        "sessionId": "7134801a-4e3f-4988-a5d1-f3368d6a9339",
+        "title": "",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-bHhWQN/workspaces/first"
+      },
+      "readResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "triggerResult": {
+        "Ok": {
+          "name": "Open next page",
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "ref": "ref_to3skixbnm_4"
+        }
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Original"
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Original"
+      },
+      "clickResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "pageNavigation": "form",
+      "pending": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-7134801a4e3f4988a5d1f3368d6a9339",
+        "loading": true,
+        "navigationError": null,
+        "navigationId": 2,
+        "resourceId": "cd7c7fba-3c83-44ab-ae84-47124c6e663e",
+        "sessionId": "7134801a-4e3f-4988-a5d1-f3368d6a9339",
+        "title": "",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-bHhWQN/workspaces/first"
+      },
+      "readResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "triggerResult": {
+        "Ok": {
+          "name": "Submit next page",
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "ref": "ref_790smfgicf2_6"
+        }
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Original"
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Original"
+      },
+      "clickResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "pageNavigation": "script",
+      "pending": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-7134801a4e3f4988a5d1f3368d6a9339",
+        "loading": true,
+        "navigationError": null,
+        "navigationId": 2,
+        "resourceId": "10bd50f4-a89d-4cf1-beb5-e9e0cca9672d",
+        "sessionId": "7134801a-4e3f-4988-a5d1-f3368d6a9339",
+        "title": "",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-bHhWQN/workspaces/first"
+      },
+      "readResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "triggerResult": {
+        "Ok": {
+          "name": "Script navigation",
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "ref": "ref_djo4czv098v_7"
+        }
+      }
+    },
+    {
+      "failure": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-7134801a4e3f4988a5d1f3368d6a9339",
+        "loading": false,
+        "navigationError": {
+          "code": -1005,
+          "kind": "failed",
+          "message": "The page could not load. Check the address or connection, then try again."
+        },
+        "navigationId": 2,
+        "resourceId": "edc4ba4b-0069-472f-bc70-785b25b0b575",
+        "sessionId": "7134801a-4e3f-4988-a5d1-f3368d6a9339",
+        "title": "",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Failure",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-bHhWQN/workspaces/first"
+      },
+      "readResult": {
+        "Err": "browser navigation failed: The page could not load. Check the address or connection, then try again."
+      },
+      "wireState": {
+        "failedDocumentRequests": 3,
+        "heldDocuments": 0,
+        "heldFrames": 0,
+        "heldImages": 0
+      }
+    },
+    {
+      "initialFailure": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-7134801a4e3f4988a5d1f3368d6a9339",
+        "loading": false,
+        "navigationError": {
+          "code": -1005,
+          "kind": "failed",
+          "message": "The page could not load. Check the address or connection, then try again."
+        },
+        "navigationId": 1,
+        "resourceId": "3a3c876e-d285-4125-9bf5-a890f68275fd",
+        "sessionId": "7134801a-4e3f-4988-a5d1-f3368d6a9339",
+        "title": "",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Failure",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-bHhWQN/workspaces/first"
+      }
+    },
+    {
+      "cancelled": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-7134801a4e3f4988a5d1f3368d6a9339",
+        "loading": false,
+        "navigationError": {
+          "code": -999,
+          "kind": "cancelled",
+          "message": "Navigation was cancelled. Try again or go back."
+        },
+        "navigationId": 6,
+        "resourceId": "3a3c876e-d285-4125-9bf5-a890f68275fd",
+        "sessionId": "7134801a-4e3f-4988-a5d1-f3368d6a9339",
+        "title": "",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-bHhWQN/workspaces/first"
+      },
+      "replacement": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-7134801a4e3f4988a5d1f3368d6a9339",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 9,
+        "resourceId": "3a3c876e-d285-4125-9bf5-a890f68275fd",
+        "sessionId": "7134801a-4e3f-4988-a5d1-f3368d6a9339",
+        "title": "Gyro Fixture Second",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Second",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-bHhWQN/workspaces/first"
+      },
+      "retried": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-7134801a4e3f4988a5d1f3368d6a9339",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 4,
+        "resourceId": "3a3c876e-d285-4125-9bf5-a890f68275fd",
+        "sessionId": "7134801a-4e3f-4988-a5d1-f3368d6a9339",
+        "title": "Gyro Fixture Failure",
+        "url": "http://127.0.0.1:62598/browser-observation.html?label=Failure",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-bHhWQN/workspaces/first"
+      }
+    },
+    {
+      "delegateLifecycle": {
+        "detached": 15,
+        "dropped": 15,
+        "forwardedCallbacks": 57,
+        "installed": 15
+      }
+    }
+  ],
+  "passed": true
+}

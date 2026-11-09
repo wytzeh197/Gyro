@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main, v0.1.0]
+    branches: [main, v0.1.0, Heads/v0.1.1]
 
 jobs:
   node:
@@ -27,6 +27,7 @@ jobs:
       # Drives the Canvas preview in a headless Chromium against the dev
       # server; scripts/run-canvas-preview-browser.mjs boots Vite itself.
       - run: pnpm test:canvas-browser
+      - run: pnpm test:activity-composer-browser
       - run: pnpm release:check
         # Source validation checks the intended signed preview notes. The tagged
         # release job resolves the actual signing mode and verifies the artifacts.

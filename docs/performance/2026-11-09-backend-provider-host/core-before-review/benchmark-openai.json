@@ -1,0 +1,73 @@
+{
+  "build": "debug",
+  "elapsedMs": 70802,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "approve-fixture-edit",
+          "path": "src/clamp.mjs",
+          "proposalId": "341cfb6b-1465-4ffa-9b9d-fff9219d0ca8",
+          "status": "applied"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "clamp.test.mjs",
+          "proposalId": "6acd6c7c-4388-4f37-83b1-3c7ee2f768d7",
+          "status": "applied"
+        }
+      ],
+      "model": "gpt-5.6-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "8fe6898b-1268-4888-88e6-f0a4caaf511b",
+      "task": "code",
+      "trial": 1,
+      "turnId": "3fa4c5e7-07df-4f5d-a7af-604e34a14b3f",
+      "wallMs": 21003.960666000003
+    },
+    {
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "approve-fixture-edit",
+          "path": "src/clamp.mjs",
+          "proposalId": "6e533e42-0fdb-4892-abb8-dffec80559f6",
+          "status": "applied"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "clamp.test.mjs",
+          "proposalId": "e1aa3f21-f9c2-4d41-965f-a6baf743df50",
+          "status": "applied"
+        }
+      ],
+      "model": "gpt-5.6-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": true,
+      "resumedRequested": true,
+      "retryCount": 0,
+      "sessionId": "ad839b65-49d2-45f2-bed0-c02307a90042",
+      "task": "code",
+      "trial": 1,
+      "turnId": "1e6ef7e4-3131-46ba-a682-282d636288e6",
+      "wallMs": 30164.256458
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

@@ -1,0 +1,33 @@
+{
+  "head": "1d0b7e1321790246390b9ad64d78f73813a37ab6",
+  "os": "26.2",
+  "scale": 1.0,
+  "sourceHashesAtEnd": {
+    "apps/desktop/src/App.tsx": "4bd8590a8d251f7350dd1cc9d65aa3724ac281f5f31992b2fd64e8218c1068da",
+    "packages/ui/src/surfaces.tsx": "31431a8144e42117a197d0423e48c4f2e29f76a134fc130202680fed12013e85",
+    "apps/desktop/src-tauri/src/desktop_shortcuts.rs": "8b95c6f06ef46b6b2a82313361f42401e14e73fa1fbdd4973b1798b5356a8fb7",
+    "apps/desktop/src-tauri/src/lib.rs": "8be7d23b3307af71ae23b35e83eae02201febeab8bbd0e871e056e196c832aed",
+    "scripts/check-chat-browser-shortcut.mjs": "dfd47c42d46f93116c8916b5fd0d3232e62bf0f05f9cfb0793fc726cf9dd460b",
+    "scripts/check-native-shortcut-routing.mjs": "c73eecc877b338a9468cfa29afba4d5b98cdb804c13d4a899881fbfb362349f9",
+    "package.json": "2364e05e74edc017c9ea983d18c159f4e47f0e33cb3d9aeb4224d3a61f0811b1",
+    "Cargo.lock": "e00ddd671f957eabad737b1b2b7ab998cddb9fbf5b5ad8cc7464a700b35febc8",
+    "apps/desktop/src-tauri/tauri.conf.json": "0d20aee8cfc34681002669c645766b2ea756110f26fc848f2ca761d2566c0e79"
+  },
+  "rootShortcutChecks": 10,
+  "baselineChecksFailed": 5,
+  "nativeBridgeChecks": 4,
+  "nativeClosedChatCmdT": "passed",
+  "nativeCloseReopen": "passed",
+  "nativePageCmdKSearchTypingRestore": "passed",
+  "javascriptErrors": [],
+  "paidProviderCalls": 0,
+  "fullReliabilitySuiteRun": false,
+  "goalComplete": false,
+  "remaining": [
+    "Other companion bindings/native-page shortcut matrix",
+    "Maximized/restored layouts",
+    "Retina and older WebKit",
+    "Native draft/provider flow",
+    "Live GPT/Grok quality and speed validation"
+  ]
+}

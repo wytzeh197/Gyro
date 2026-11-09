@@ -1,6 +1,6 @@
 # Install Gyro on macOS
 
-Gyro is a public Alpha for macOS 14 or newer. Download it from the
+Gyro runs on macOS 14 or newer. Download it from the
 [Gyro download site](https://usegyro.io/). GitHub
 [Releases](https://github.com/wytzeh197/Gyro/releases/latest) is the source of
 the binaries and the fallback if the site cannot load release information.
@@ -21,12 +21,15 @@ signal. Always confirm the selection yourself before downloading.
 
 1. Download the matching DMG.
 2. Open the DMG and drag **Gyro.app** to the **Applications** shortcut.
-3. Open **Applications** in Finder and try to open **Gyro**. macOS will block
-   the first launch because this Alpha has no Apple Developer ID signature or
-   notarization. Dismiss the warning.
-4. Open **System Settings → Privacy & Security** and scroll to **Security**.
-5. Select **Open Anyway** beside the Gyro message, authenticate if prompted,
-   then confirm **Open**.
+3. Open **Gyro** from **Applications**. Stable releases beginning with v0.1.0
+   are Developer ID signed and notarized by Apple. Confirm **Open** if macOS
+   asks about an app downloaded from the internet.
+
+### Older ad-hoc Alpha builds
+
+Only for an older release explicitly labeled ad-hoc: dismiss the initial
+blocked-launch warning, open **System Settings → Privacy & Security**, and
+select **Open Anyway** beside Gyro, then confirm **Open**.
 
 The **Open Anyway** button is available for about an hour after the blocked
 launch attempt. Once confirmed, macOS records Gyro as an exception and normal
@@ -41,11 +44,11 @@ An organization may prevent **Open Anyway** on a managed Mac. Gyro cannot and
 will not override that policy; ask the device administrator before installing
 it.
 
-## What “unsigned Alpha” means
+## Signing and updates
 
-Release app bundles use an ad-hoc code signature so macOS can verify their
-internal structure. They are not signed with an Apple-issued Developer ID and
-are not notarized by Apple, which is why the first-launch warning appears.
+Stable app bundles and DMGs are Developer ID signed and notarized by Apple.
+Older ad-hoc Alpha builds have an internal code signature without Apple trust;
+their release notes identify that signing status.
 
 Tauri updater archives have a separate Gyro updater signature. That signature
 lets an installed Gyro verify updates published by the project, but it does not
@@ -67,8 +70,8 @@ an issue if it does not match.
 
 ## Update or roll back
 
-Gyro can offer a project-signed update after a verified non-prerelease Alpha is
-published. You can also replace Gyro.app with the matching DMG from the
+Gyro offers signed updates from published non-prerelease releases. You can
+also replace Gyro.app with the matching DMG from the
 [latest release](https://github.com/wytzeh197/Gyro/releases/latest).
 
 To roll back:
@@ -81,7 +84,8 @@ To roll back:
    steps again if macOS asks.
 
 Read that release's compatibility notes before opening existing data with an
-older Alpha.
+older version. When first replacing an ad-hoc build with a Developer ID build,
+macOS may require Accessibility permission again and a one-time Keychain prompt.
 
 ## Uninstall
 

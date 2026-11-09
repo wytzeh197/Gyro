@@ -1,5 +1,10 @@
 //! Model-facing observations retain full backing data and return bounded pages.
-use super::*;
+use crate::{
+    capability_workspace_helpers::{workspace_result_byte_limit, workspace_result_bytes_schema},
+    ide::debug::redact_json_strings,
+    terminal_wait,
+};
+use gyro_core::CapabilityId;
 use serde_json::{json, Value};
 
 #[derive(Clone, Copy)]
@@ -245,6 +250,7 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
             "program": { "type": "string", "description": "Executable name or path only, such as \"npm\" or \"cargo\". It runs directly without a shell, so put arguments in args. For pipes, redirects, or && use program \"sh\" with args [\"-c\", \"...\"]." },
             "args": { "type": "array", "items": { "type": "string" }, "description": "Arguments passed to program, one per element, such as [\"run\", \"dev\"]." },
             "cwd": { "type": "string", "description": "Workspace-relative working directory. Defaults to the workspace root." },
+            "yieldTimeMs": { "type": "integer", "minimum": 0, "maximum": terminal_wait::MAX_INITIAL_WAIT_MS, "default": terminal_wait::DEFAULT_INITIAL_WAIT_MS, "description": "Wait briefly for a quick command to finish and return its exit code and output in this call. Use 0 for a server or watcher. A still-running command keeps running; use gyro_terminal_wait for finite commands." },
             "maxBytes": workspace_result_bytes_schema()
         }),
         CapabilityId::TerminalWait => json!({
@@ -352,6 +358,9 @@ pub(super) fn browser_page_result(mut data: Value, max_bytes: usize) -> anyhow::
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        capability_workspace_helpers::DEFAULT_WORKSPACE_RESULT_BYTES, terminal_capability,
+    };
 
     #[test]
     fn explicit_git_status_limit_and_invalid_page_limits_are_honored() {

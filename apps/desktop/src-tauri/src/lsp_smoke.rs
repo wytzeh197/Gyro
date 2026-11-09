@@ -5,7 +5,7 @@
 //! manager the capabilities use, waits out a cold index, and asserts a known
 //! definition, a known reference set, and a document-symbol list. It writes
 //! `lsp-smoke.json` to the data directory and exits non-zero on failure.
-use crate::language_server::{
+use crate::ide::language_server::{
     language_server_for_path, LanguageServerManager, LspFileOutcome, LspFileRequest,
 };
 use serde_json::{json, Value};
@@ -128,7 +128,7 @@ fn probe(
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let (language_id, command) = language_server_for_path(&canonical)
         .ok_or_else(|| format!("no language server for {relative}"))?;
-    if !crate::language_server::language_server_command_is_allowed(language_id, command) {
+    if !crate::ide::language_server::language_server_command_is_allowed(language_id, command) {
         return Err(format!(
             "{language_id} is not on the language-server allowlist"
         ));

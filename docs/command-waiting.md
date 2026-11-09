@@ -4,6 +4,15 @@ Models can keep working through long-running builds and CI checks using
 `gyro_terminal_wait`. No additional user message is needed between the command
 finishing and the model receiving its result.
 
+`gyro_terminal_open` waits up to one second by default. Quick commands can
+return `data.completed: true`, `data.exitCode`, and their bounded final output
+in the opening call, avoiding another model round just to collect the result.
+Check the exit code, including failures, before continuing. If
+`data.completed` is false, the same command is still running and finite work
+can be awaited with `gyro_terminal_wait`. Set `yieldTimeMs: 0` for dev servers
+or watchers that should return immediately. The initial wait accepts 0–1000ms,
+is cancellable, and never restarts or kills a command when its time expires.
+
 For example: “Prepare the release, wait for both Intel and Apple Silicon builds,
 and continue once they pass.” The model can start a finite command with
 `gyro_terminal_open`, or a discovered task with `background: true`, then wait on
@@ -46,6 +55,8 @@ services — are not waited on. Gyro watches them under the final message and
 relaunches the same command if they exit without the user or model stopping
 them. See `docs/process-keep-alive.md`.
 
-Validation: 23 desktop terminal tests (including five new wait tests), ten core
-capability tests, the provider manifest check, the chat activity check, and
-desktop TypeScript checking passed. No real release was published for testing.
+Validation (2026-11-06): 1,957 Rust workspace tests passed, with 16 ignored.
+The local ten-command fixture returned complete results after the initial wait
+in all ten cases; all immediate snapshots were still running. Median wait was
+206ms. This verifies local command collection, not live provider latency.
+No live subscription benchmark or release was performed.

@@ -1,0 +1,29 @@
+{
+  "root": "/private/tmp/gyro-shell-gQy1Wx",
+  "data": "/private/tmp/gyro-shell-gQy1Wx/data",
+  "workspace": "/private/tmp/gyro-shell-gQy1Wx/workspace",
+  "frontend": "/private/tmp/gyro-shell-gQy1Wx/frontend",
+  "identifier": "dev.gyro.browser-shell-review.gyro-shell-gQy1Wx",
+  "mode": "normal-app-manual-review",
+  "build": "passed",
+  "uiVerdict": "unverified",
+  "binary": "/Users/wytze/Gyro/target/debug/gyro-browser-shell-review",
+  "executableSha256": "9b94e73d00f228ff3961f61fe54f70a731e065989f13beb7383a32fbe6bce113",
+  "app": "/private/tmp/gyro-shell-gQy1Wx/Gyro Browser Shell Review.app",
+  "fixtureUrl": "http://127.0.0.1:56199/browser-observation.html",
+  "native": {
+    "status": "exited",
+    "pid": 37589,
+    "startedAt": "2026-11-08T09:36:45.298Z",
+    "code": null,
+    "signal": "SIGTERM",
+    "exitedAt": "2026-11-08T09:50:06.793Z"
+  },
+  "requests": [
+    {
+      "page": "Original",
+      "at": "2026-11-08T09:46:33.559Z"
+    }
+  ],
+  "executableUnchanged": true
+}

@@ -1,0 +1,14 @@
+{
+  "root": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-dBWHRu",
+  "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-dBWHRu/data",
+  "frontend": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-dBWHRu/frontend",
+  "build": "passed",
+  "native": "failed",
+  "binary": "/Users/wytze/Gyro/target/debug/gyro-browser-events-smoke",
+  "error": "AssertionError [ERR_ASSERTION]: timed out waiting on channel\n\nfalse !== true\n",
+  "pageRequests": 27,
+  "heldImageRequests": 5,
+  "releasedImageRequests": 5,
+  "heldDocumentRequests": 7,
+  "releasedDocumentRequests": 5
+}

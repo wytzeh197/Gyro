@@ -1,5 +1,5 @@
 //! Parse each tree path once, rather than on both sides of every comparison.
-use super::WorkspaceFile;
+use crate::workspace::types::WorkspaceFile;
 use std::{ffi::OsString, path::Path};
 
 pub(super) fn sort(entries: &mut [WorkspaceFile]) {
@@ -37,7 +37,7 @@ mod tests {
                 } else {
                     name.into()
                 };
-                entries.push(super::super::WorkspaceFile {
+                entries.push(crate::workspace::types::WorkspaceFile {
                     path: path.clone(),
                     kind: if directory { "directory" } else { "file" }.into(),
                     depth: 1,
@@ -45,7 +45,7 @@ mod tests {
                 if directory {
                     for child in ["file.rs", "deep", "deep/leaf.rs", "a file"] {
                         let path = format!("{path}/{child}");
-                        entries.push(super::super::WorkspaceFile {
+                        entries.push(crate::workspace::types::WorkspaceFile {
                             depth: Path::new(&path).components().count(),
                             path,
                             kind: if child == "deep" { "directory" } else { "file" }.into(),
@@ -59,7 +59,7 @@ mod tests {
             let mut actual = entries.clone();
             actual.rotate_left(offset);
             let mut expected = actual.clone();
-            expected.sort_by(super::super::compare_workspace_tree_entries);
+            expected.sort_by(crate::workspace::tree::compare_workspace_tree_entries);
             sort(&mut actual);
             assert_eq!(
                 serde_json::to_value(actual).unwrap(),
@@ -78,7 +78,7 @@ mod tests {
         std::fs::write(temp.path().join("src/nested/é.rs"), "fixture").unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(outside.path(), temp.path().join("linked")).unwrap();
-        let snapshot = super::super::scan_workspace_tree(temp.path(), 8).unwrap();
+        let snapshot = crate::workspace::tree::scan_workspace_tree(temp.path(), 8).unwrap();
         assert!(
             !snapshot
                 .files
@@ -96,7 +96,7 @@ mod tests {
             .iter()
             .any(|entry| entry.path == "linked" && entry.kind == "file"));
         let mut expected = snapshot.files.clone();
-        expected.sort_by(super::super::compare_workspace_tree_entries);
+        expected.sort_by(crate::workspace::tree::compare_workspace_tree_entries);
         assert_eq!(
             serde_json::to_value(snapshot.files).unwrap(),
             serde_json::to_value(expected).unwrap()

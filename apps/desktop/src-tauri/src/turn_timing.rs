@@ -1,5 +1,13 @@
-use super::*;
-
+use crate::{
+    providers::{
+        chat_types::{ProviderChatRequest, ProviderChatResponse},
+        retry::is_provider_cancellation,
+        run::run_provider_chat_blocking_in_lease,
+        session_lifecycle::ProviderSessionLease,
+    },
+    stores::parse_uuid,
+};
+use gyro_core::{timing, UsageOrigin};
 // Keep the scope on the blocking worker: it must not leak across async tasks.
 pub(super) fn run_timed_provider_chat(
     app: tauri::AppHandle,
@@ -68,25 +76,4 @@ pub(super) async fn record_surface_timing(value: timing::UiTiming) -> Result<(),
         .await
         .map_err(|_| "surface timing worker failed".to_string())?
         .map_err(|_| "could not save local surface timing measurement".into())
-}
-
-pub(super) fn protocol_item(item: &serde_json::Value, status: &str) {
-    let status = if status == "done"
-        && (item.get("error").is_some_and(|value| !value.is_null())
-            || item.get("status").and_then(serde_json::Value::as_str) == Some("failed")
-            || item
-                .get("exitCode")
-                .and_then(serde_json::Value::as_i64)
-                .is_some_and(|code| code != 0))
-    {
-        "failed"
-    } else {
-        status
-    };
-    if let (Some(id), Some(kind)) = (
-        item.get("id").and_then(serde_json::Value::as_str),
-        item.get("type").and_then(serde_json::Value::as_str),
-    ) {
-        timing::protocol_item(id, kind, status);
-    }
 }

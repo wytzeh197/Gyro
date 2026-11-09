@@ -4,12 +4,23 @@
 //! the only place that starts the provider. When the Mac is paired, the same
 //! loop pulls relay tasks before it claims local work.
 
-use super::*;
+use crate::{
+    model_catalog,
+    providers::{
+        chat_types::{ChatMode, ProviderChatRequest},
+        process::provider_adapter_for,
+        run::run_provider_chat_blocking,
+        runner::runner_for,
+    },
+    state::provider_run::{stop_provider_run, ProviderStopReason},
+    stores::to_string,
+};
 use gyro_core::agent_sessions::{
     agent_session_run_policy, AgentSessionRow, AgentSessionState, AgentSessionStore, ChoiceCatalog,
     ModelChoices, ProviderChoices,
 };
 use gyro_core::{provider_is_executable_for, GyroConfig};
+use gyro_core::{GyroPaths, UsageOrigin};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -172,9 +183,7 @@ fn execute(app: &tauri::AppHandle, paths: &GyroPaths, row: &AgentSessionRow) {
         .iter()
         .find(|provider| provider.id == row.provider_id)
         .is_some_and(provider_is_executable_for);
-    if !executable
-        || provider_adapter_for(&row.provider_id).kind == ProviderAdapterKind::ReadinessOnly
-    {
+    if !executable || !runner_for(provider_adapter_for(&row.provider_id).kind).is_executable() {
         finish(Err(format!(
             "provider {} cannot run a session",
             row.provider_id
@@ -203,6 +212,7 @@ fn execute(app: &tauri::AppHandle, paths: &GyroPaths, row: &AgentSessionRow) {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
     };
     match run_provider_chat_blocking(app.clone(), request, UsageOrigin::AgentSession) {
         Ok(response) => finish(Ok(response.assistant_event.message)),

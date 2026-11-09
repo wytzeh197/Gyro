@@ -25,9 +25,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "targetId"
-        ],
+        "required": ["targetId"],
         "type": "object"
       },
       "name": "gyro_browser_select_target"
@@ -57,11 +55,7 @@
             "type": "number"
           }
         },
-        "required": [
-          "captureId",
-          "x",
-          "y"
-        ],
+        "required": ["captureId", "x", "y"],
         "type": "object"
       },
       "name": "gyro_browser_preview_click"
@@ -80,9 +74,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "url"
-        ],
+        "required": ["url"],
         "type": "object"
       },
       "name": "gyro_browser_open"
@@ -113,12 +105,7 @@
         "additionalProperties": false,
         "properties": {
           "device": {
-            "enum": [
-              "responsive",
-              "desktop",
-              "tablet",
-              "mobile"
-            ],
+            "enum": ["responsive", "desktop", "tablet", "mobile"],
             "type": "string"
           }
         },
@@ -139,13 +126,8 @@
             "type": "integer"
           },
           "mode": {
-            "enum": [
-              "auto",
-              "responsive",
-              "desktop",
-              "tablet",
-              "mobile"
-            ],
+            "description": "Defaults to auto. Explicit width or height with auto/responsive selects a fixed desktop viewport.",
+            "enum": ["auto", "responsive", "desktop", "tablet", "mobile"],
             "type": "string"
           },
           "width": {
@@ -155,9 +137,7 @@
             "type": "integer"
           }
         },
-        "required": [
-          "mode"
-        ],
+        "required": [],
         "type": "object"
       },
       "name": "gyro_browser_set_viewport"
@@ -176,9 +156,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "url"
-        ],
+        "required": ["url"],
         "type": "object"
       },
       "name": "gyro_browser_navigate"
@@ -213,9 +191,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "ref"
-        ],
+        "required": ["ref"],
         "type": "object"
       },
       "name": "gyro_browser_click"
@@ -226,12 +202,7 @@
         "additionalProperties": false,
         "properties": {
           "action": {
-            "enum": [
-              "hover",
-              "click",
-              "secondary-click",
-              "drag"
-            ],
+            "enum": ["hover", "click", "secondary-click", "drag"],
             "type": "string"
           },
           "captureId": {
@@ -255,12 +226,7 @@
             "type": "number"
           }
         },
-        "required": [
-          "action",
-          "captureId",
-          "x",
-          "y"
-        ],
+        "required": ["action", "captureId", "x", "y"],
         "type": "object"
       },
       "name": "gyro_browser_mouse"
@@ -281,9 +247,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "text"
-        ],
+        "required": ["text"],
         "type": "object"
       },
       "name": "gyro_browser_type"
@@ -320,10 +284,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "ref",
-          "value"
-        ],
+        "required": ["ref", "value"],
         "type": "object"
       },
       "name": "gyro_browser_form_input"
@@ -335,7 +296,7 @@
         "properties": {
           "maxBytes": {
             "default": 16384,
-            "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed.",
+            "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed. Integer values are clamped to the supported range; null uses the default.",
             "maximum": 131072,
             "minimum": 1024,
             "type": "integer"
@@ -374,7 +335,7 @@
           },
           "maxBytes": {
             "default": 16384,
-            "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed.",
+            "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed. Integer values are clamped to the supported range; null uses the default.",
             "maximum": 131072,
             "minimum": 1024,
             "type": "integer"
@@ -408,7 +369,7 @@
           },
           "maxBytes": {
             "default": 16384,
-            "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed.",
+            "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed. Integer values are clamped to the supported range; null uses the default.",
             "maximum": 131072,
             "minimum": 1024,
             "type": "integer"
@@ -436,7 +397,7 @@
           },
           "maxBytes": {
             "default": 16384,
-            "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed.",
+            "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed. Integer values are clamped to the supported range; null uses the default.",
             "maximum": 131072,
             "minimum": 1024,
             "type": "integer"

@@ -1,0 +1,60 @@
+{
+  "schema": "gyro.local-validation.v1",
+  "date": "2026-11-07",
+  "head": "1d0b7e1321790246390b9ad64d78f73813a37ab6",
+  "workspace": "dirty; unrelated work preserved",
+  "providerCallsThisPass": 0,
+  "rustTests": {
+    "session_browser": 20,
+    "performance_benchmark": 15,
+    "failed": 0
+  },
+  "native": {
+    "ok": true,
+    "steps": 20,
+    "source": "/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-native-smoke-wgIkCF",
+    "osMouse": "explicitly-skipped",
+    "lsp": "explicitly-skipped",
+    "accessibilityPermissionProbed": false
+  },
+  "build": {
+    "command": "cargo build --locked -p gyro-desktop",
+    "ok": true,
+    "existingWarnings": true
+  },
+  "scriptChecks": [
+    "browser-capability",
+    "browser-pointer-feedback",
+    "browser-observation-cost",
+    "subagent-browsers",
+    "browser-navigation",
+    "browser-viewport",
+    "provider-capability-manifest",
+    "provider-benchmark-summary",
+    "benchmark-runner-syntax"
+  ],
+  "nextProbe": {
+    "status": "prepared-not-run",
+    "spec": "../benchmark-gpt-grok-reviewed-2026-11-07.json",
+    "additionalUsageAuthorization": "required"
+  },
+  "limitations": [
+    "single local native run",
+    "not a provider latency measurement",
+    "frontend event filtering not changed",
+    "already-dispatched native effects cannot be undone",
+    "live provider continuation after fixture review unverified"
+  ],
+  "sourceSha256": {
+    "apps/desktop/src-tauri/src/browser_operation.rs": "b7be4340ef545af0389d88f12d3022f6589b3b496af10cc23e4a2b8e1a3b706f",
+    "apps/desktop/src-tauri/src/session_browser.rs": "19846d4a7cf7d26b7d03200bef934a2ba5413c9a0c83564f9ec0d23d2eaf3d95",
+    "apps/desktop/src-tauri/src/browser_smoke.rs": "3498764164d360075a34686ef8c8f1d3b35e45da61c8ae1f733d7ccc23b4e0e5",
+    "apps/desktop/src-tauri/src/performance_benchmark.rs": "f284d76375f0075d1ccca17cbb1759e24a450a3484d90e837be0b92c8100d37a",
+    "apps/desktop/src-tauri/src/benchmark_fixture_review.rs": "9f7c05af25de2917fa82bf5e08954602ef55716509db2609ce0b756ffa1358e5",
+    "scripts/benchmark-providers.mjs": "e2f33e20cbe6b4137e75b9938a5250018ff67fffdcbef6c53e176414baf4889f",
+    "scripts/check-provider-benchmark-summary.mjs": "053f30b84c6379b4d98867d3f1683eba81c128bc8b1d0fbcdffd3ea7eb9b030d",
+    "scripts/check-subagent-browsers.mjs": "8f27b985984ff6129d51ee07929d0422b9a9ff8cac13edeef7cdfa027427cef2",
+    "scripts/summarize-provider-benchmark.mjs": "dc1c3160616917b14ff601222ccdc2abef4d5dd15d5c2196fd068837f0b11f0d",
+    "scripts/run-native-smoke.mjs": "99eabab8240ee4988fda79c0bbd4b22338578b6515049976365ebdb5e9e315f5"
+  }
+}

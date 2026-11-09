@@ -1,0 +1,9 @@
+Workbench smoke viewports: 860x620 compact, 1280x720, 1440x900, 1728x1117
+
+Gyro workbench smoke checks failed: 3 new failure(s).
+
+- The run rail should render above the final response.
+- A completed workspace turn should retain its final response above the change summary, except when the plan lives in the right panel.
+- Plan mode should ask one question at a time, land the plan as a card in the transcript, keep the model and effort chips above the implement decision, and put that decision where the composer sits.
+
+These are not in scripts/workbench-smoke-baseline.json, so they are new since it was recorded.

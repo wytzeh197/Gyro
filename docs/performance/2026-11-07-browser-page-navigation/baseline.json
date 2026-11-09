@@ -1,0 +1,1348 @@
+{
+  "checks": [
+    {
+      "name": "cycle 1: previous document read is rejected before response headers",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: previous document click is rejected before response headers",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: rejected click leaves the actual old document unchanged",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: old tool result cannot overwrite the requested native URL",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: native screenshot cannot return previous-document pixels",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: background pointer cannot act on the previous document",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: current interactive document remains usable while an image is held",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: old document reference is rejected after commit",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: a fresh reference changes the current interactive document",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: background pointer can act on the committed interactive document",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: previous document read is rejected before response headers",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: previous document click is rejected before response headers",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: rejected click leaves the actual old document unchanged",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: old tool result cannot overwrite the requested native URL",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: native screenshot cannot return previous-document pixels",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: background pointer cannot act on the previous document",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: current interactive document remains usable while an image is held",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: old document reference is rejected after commit",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: a fresh reference changes the current interactive document",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: background pointer can act on the committed interactive document",
+      "passed": true
+    },
+    {
+      "name": "native Back reaches the actual previous document",
+      "passed": true
+    },
+    {
+      "name": "native Forward reaches the actual next document",
+      "passed": true
+    },
+    {
+      "name": "unavailable history fails without invalidating the current document",
+      "passed": true
+    },
+    {
+      "name": "native browser closes after both navigation cycles",
+      "passed": true
+    },
+    {
+      "name": "eight immediate initial documents remain usable after native creation",
+      "passed": true
+    },
+    {
+      "name": "page link: old reads fail while response headers are held",
+      "passed": false
+    },
+    {
+      "name": "page link: old clicks fail while response headers are held",
+      "passed": false
+    },
+    {
+      "name": "page link: actual old document stays unchanged",
+      "passed": false
+    },
+    {
+      "name": "page link: screenshot cannot return old pixels",
+      "passed": false
+    },
+    {
+      "name": "page link: pointer cannot act on old document",
+      "passed": false
+    },
+    {
+      "name": "page link: native state records the pending main document",
+      "passed": false
+    },
+    {
+      "name": "page link: committed interactive document accepts fresh work",
+      "passed": true
+    },
+    {
+      "name": "page form: old reads fail while response headers are held",
+      "passed": false
+    },
+    {
+      "name": "page form: old clicks fail while response headers are held",
+      "passed": false
+    },
+    {
+      "name": "page form: actual old document stays unchanged",
+      "passed": false
+    },
+    {
+      "name": "page form: screenshot cannot return old pixels",
+      "passed": false
+    },
+    {
+      "name": "page form: pointer cannot act on old document",
+      "passed": false
+    },
+    {
+      "name": "page form: native state records the pending main document",
+      "passed": false
+    },
+    {
+      "name": "page form: committed interactive document accepts fresh work",
+      "passed": true
+    },
+    {
+      "name": "page script: old reads fail while response headers are held",
+      "passed": false
+    },
+    {
+      "name": "page script: old clicks fail while response headers are held",
+      "passed": false
+    },
+    {
+      "name": "page script: actual old document stays unchanged",
+      "passed": false
+    },
+    {
+      "name": "page script: screenshot cannot return old pixels",
+      "passed": false
+    },
+    {
+      "name": "page script: pointer cannot act on old document",
+      "passed": false
+    },
+    {
+      "name": "page script: native state records the pending main document",
+      "passed": false
+    },
+    {
+      "name": "page script: committed interactive document accepts fresh work",
+      "passed": true
+    },
+    {
+      "name": "prevented link leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "SPA route leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "fragment leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "iframe leaves the parent document usable with its existing references",
+      "passed": true
+    },
+    {
+      "name": "blocked credential URL leaves the parent document usable with its existing references",
+      "passed": true
+    }
+  ],
+  "engine": "native-WKWebView",
+  "error": null,
+  "nativeBuild": "debug-embedded-tauri-production-handlers",
+  "nativeOsInputTested": false,
+  "observations": [
+    {
+      "after": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Original"
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Original"
+      },
+      "clickResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "cycle": 1,
+      "interactiveState": "interactive",
+      "newRef": "ref_fz7egvszxu_20",
+      "readResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "snapshotAfterOldRead": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-df0b90896e49433ab561ac4e7bf92745",
+        "loading": true,
+        "navigationId": 2,
+        "resourceId": "77219d1f-b05d-42de-ab55-fc7e5e562295",
+        "sessionId": "df0b9089-6e49-433a-b561-ac4e7bf92745",
+        "title": "",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-JqFYbS/workspaces/first"
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 2",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Provisional"
+      },
+      "before": {
+        "clicks": "Clicks: 2",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Provisional"
+      },
+      "clickResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "cycle": 2,
+      "interactiveState": "interactive",
+      "newRef": "ref_kmhpsmifk2_20",
+      "readResult": {
+        "Err": "browser navigation is waiting for the new document; wait and observe the current page before interacting"
+      },
+      "snapshotAfterOldRead": {
+        "backgroundOnly": false,
+        "documentCommitted": false,
+        "label": "session-browser-df0b90896e49433ab561ac4e7bf92745",
+        "loading": true,
+        "navigationId": 3,
+        "resourceId": "77219d1f-b05d-42de-ab55-fc7e5e562295",
+        "sessionId": "df0b9089-6e49-433a-b561-ac4e7bf92745",
+        "title": "",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-JqFYbS/workspaces/first"
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 2",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Original"
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Original"
+      },
+      "clickResult": {
+        "Ok": {
+          "name": "Change visible state",
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "ref": "ref_x0b39y0erbc_20"
+        }
+      },
+      "pageNavigation": "link",
+      "pending": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-df0b90896e49433ab561ac4e7bf92745",
+        "loading": false,
+        "navigationId": 1,
+        "resourceId": "d476fd4e-6aa3-46ba-b27d-301e205d4f4c",
+        "sessionId": "df0b9089-6e49-433a-b561-ac4e7bf92745",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-JqFYbS/workspaces/first"
+      },
+      "readResult": {
+        "Ok": {
+          "framing": "OBSERVED_PAGE_CONTENT_UNTRUSTED",
+          "history": {
+            "length": 1
+          },
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "readyState": "complete",
+          "title": "Gyro Fixture Original",
+          "titleTruncated": false,
+          "tree": {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "href": "?label=Provisional",
+                        "name": "Open next page",
+                        "ref": "ref_x0b39y0erbc_4",
+                        "role": "link",
+                        "tag": "a"
+                      },
+                      {
+                        "children": [],
+                        "name": "Submit next page",
+                        "ref": "ref_x0b39y0erbc_5",
+                        "role": "form",
+                        "tag": "form"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Script navigation",
+                        "ref": "ref_x0b39y0erbc_7",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "href": "?label=Provisional",
+                        "name": "Prevented link",
+                        "ref": "ref_x0b39y0erbc_8",
+                        "role": "link",
+                        "tag": "a"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Same-document route",
+                        "ref": "ref_x0b39y0erbc_9",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "href": "#current",
+                        "name": "Same-document fragment",
+                        "ref": "ref_x0b39y0erbc_10",
+                        "role": "link",
+                        "tag": "a"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Load frame",
+                        "ref": "ref_x0b39y0erbc_11",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "href": "http://fixture:fixture@127.0.0.1:60372/browser-observation.html?label=BlockedCredentials",
+                        "name": "Blocked credential URL",
+                        "ref": "ref_x0b39y0erbc_12",
+                        "role": "link",
+                        "tag": "a"
+                      },
+                      {
+                        "children": [],
+                        "name": "Initial",
+                        "ref": "ref_x0b39y0erbc_13",
+                        "role": "output",
+                        "tag": "output"
+                      }
+                    ],
+                    "ref": "ref_x0b39y0erbc_3",
+                    "role": "navigation",
+                    "tag": "nav"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "name": "Deterministic loopback page for Gyro Browser acceptance.",
+                        "ref": "ref_x0b39y0erbc_15",
+                        "role": "p",
+                        "tag": "p"
+                      },
+                      {
+                        "children": [],
+                        "name": "Browser observation ready",
+                        "ref": "ref_x0b39y0erbc_16",
+                        "role": "heading",
+                        "tag": "h1"
+                      },
+                      {
+                        "children": [],
+                        "name": "Viewport:",
+                        "ref": "ref_x0b39y0erbc_17",
+                        "role": "p",
+                        "tag": "p"
+                      }
+                    ],
+                    "ref": "ref_x0b39y0erbc_14",
+                    "role": "banner",
+                    "tag": "header"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "name": "State-changing control",
+                        "ref": "ref_x0b39y0erbc_19",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Change visible state",
+                        "ref": "ref_x0b39y0erbc_20",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "name": "State: initial",
+                        "ref": "ref_x0b39y0erbc_21",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [],
+                        "name": "Clicks: 0",
+                        "ref": "ref_x0b39y0erbc_22",
+                        "role": "output",
+                        "tag": "output"
+                      }
+                    ],
+                    "name": "State-changing control",
+                    "ref": "ref_x0b39y0erbc_18",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "name": "Mouse interaction",
+                        "ref": "ref_x0b39y0erbc_24",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Hover target",
+                        "ref": "ref_x0b39y0erbc_25",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "name": "Hover: initial",
+                        "ref": "ref_x0b39y0erbc_26",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [],
+                        "name": "Canvas target",
+                        "ref": "ref_x0b39y0erbc_27",
+                        "role": "canvas",
+                        "tag": "canvas"
+                      },
+                      {
+                        "children": [],
+                        "name": "Canvas: initial",
+                        "ref": "ref_x0b39y0erbc_28",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [],
+                        "name": "Drag Drop",
+                        "ref": "ref_x0b39y0erbc_29",
+                        "role": "div",
+                        "tag": "div"
+                      },
+                      {
+                        "children": [],
+                        "name": "Drag: initial",
+                        "ref": "ref_x0b39y0erbc_32",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [],
+                        "name": "Context: initial",
+                        "ref": "ref_x0b39y0erbc_33",
+                        "role": "output",
+                        "tag": "output"
+                      }
+                    ],
+                    "name": "Mouse interaction",
+                    "ref": "ref_x0b39y0erbc_23",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "name": "Form controls",
+                        "ref": "ref_x0b39y0erbc_35",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "children": [],
+                        "name": "Project name Kind: site; enabled: false Save project Form: untouched",
+                        "ref": "ref_x0b39y0erbc_36",
+                        "role": "form",
+                        "tag": "form"
+                      },
+                      {
+                        "children": [],
+                        "name": "Blocked credential field",
+                        "ref": "ref_x0b39y0erbc_44",
+                        "role": "label",
+                        "tag": "label"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "password",
+                        "name": "Blocked credential field",
+                        "ref": "ref_x0b39y0erbc_45",
+                        "role": "textbox",
+                        "tag": "input",
+                        "value": "[redacted-credential]"
+                      }
+                    ],
+                    "name": "Form controls",
+                    "ref": "ref_x0b39y0erbc_34",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "ref": "ref_x0b39y0erbc_46",
+                    "role": "div",
+                    "tag": "div"
+                  }
+                ],
+                "ref": "ref_x0b39y0erbc_2",
+                "role": "main",
+                "tag": "main"
+              }
+            ],
+            "ref": "ref_x0b39y0erbc_1",
+            "role": "body",
+            "tag": "body"
+          },
+          "truncated": true,
+          "url": "http://127.0.0.1:60372/browser-observation.html?label=Original",
+          "viewport": {
+            "deviceScaleFactor": 1,
+            "height": 768,
+            "scrollX": 0,
+            "scrollY": 0,
+            "width": 1280
+          }
+        }
+      },
+      "triggerResult": {
+        "Ok": {
+          "name": "Open next page",
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "ref": "ref_x0b39y0erbc_4"
+        }
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 2",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Original"
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Original"
+      },
+      "clickResult": {
+        "Ok": {
+          "name": "Change visible state",
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "ref": "ref_wja1gvvi6js_20"
+        }
+      },
+      "pageNavigation": "form",
+      "pending": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-df0b90896e49433ab561ac4e7bf92745",
+        "loading": false,
+        "navigationId": 1,
+        "resourceId": "f5dc04c2-b4d0-4f22-a8b3-75cbcf6a9d85",
+        "sessionId": "df0b9089-6e49-433a-b561-ac4e7bf92745",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-JqFYbS/workspaces/first"
+      },
+      "readResult": {
+        "Ok": {
+          "framing": "OBSERVED_PAGE_CONTENT_UNTRUSTED",
+          "history": {
+            "length": 1
+          },
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "readyState": "complete",
+          "title": "Gyro Fixture Original",
+          "titleTruncated": false,
+          "tree": {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "href": "?label=Provisional",
+                        "name": "Open next page",
+                        "ref": "ref_wja1gvvi6js_4",
+                        "role": "link",
+                        "tag": "a"
+                      },
+                      {
+                        "children": [],
+                        "name": "Submit next page",
+                        "ref": "ref_wja1gvvi6js_5",
+                        "role": "form",
+                        "tag": "form"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Script navigation",
+                        "ref": "ref_wja1gvvi6js_7",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "href": "?label=Provisional",
+                        "name": "Prevented link",
+                        "ref": "ref_wja1gvvi6js_8",
+                        "role": "link",
+                        "tag": "a"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Same-document route",
+                        "ref": "ref_wja1gvvi6js_9",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "href": "#current",
+                        "name": "Same-document fragment",
+                        "ref": "ref_wja1gvvi6js_10",
+                        "role": "link",
+                        "tag": "a"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Load frame",
+                        "ref": "ref_wja1gvvi6js_11",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "href": "http://fixture:fixture@127.0.0.1:60372/browser-observation.html?label=BlockedCredentials",
+                        "name": "Blocked credential URL",
+                        "ref": "ref_wja1gvvi6js_12",
+                        "role": "link",
+                        "tag": "a"
+                      },
+                      {
+                        "children": [],
+                        "name": "Initial",
+                        "ref": "ref_wja1gvvi6js_13",
+                        "role": "output",
+                        "tag": "output"
+                      }
+                    ],
+                    "ref": "ref_wja1gvvi6js_3",
+                    "role": "navigation",
+                    "tag": "nav"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "name": "Deterministic loopback page for Gyro Browser acceptance.",
+                        "ref": "ref_wja1gvvi6js_15",
+                        "role": "p",
+                        "tag": "p"
+                      },
+                      {
+                        "children": [],
+                        "name": "Browser observation ready",
+                        "ref": "ref_wja1gvvi6js_16",
+                        "role": "heading",
+                        "tag": "h1"
+                      },
+                      {
+                        "children": [],
+                        "name": "Viewport:",
+                        "ref": "ref_wja1gvvi6js_17",
+                        "role": "p",
+                        "tag": "p"
+                      }
+                    ],
+                    "ref": "ref_wja1gvvi6js_14",
+                    "role": "banner",
+                    "tag": "header"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "name": "State-changing control",
+                        "ref": "ref_wja1gvvi6js_19",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Change visible state",
+                        "ref": "ref_wja1gvvi6js_20",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "name": "State: initial",
+                        "ref": "ref_wja1gvvi6js_21",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [],
+                        "name": "Clicks: 0",
+                        "ref": "ref_wja1gvvi6js_22",
+                        "role": "output",
+                        "tag": "output"
+                      }
+                    ],
+                    "name": "State-changing control",
+                    "ref": "ref_wja1gvvi6js_18",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "name": "Mouse interaction",
+                        "ref": "ref_wja1gvvi6js_24",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Hover target",
+                        "ref": "ref_wja1gvvi6js_25",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "name": "Hover: initial",
+                        "ref": "ref_wja1gvvi6js_26",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [],
+                        "name": "Canvas target",
+                        "ref": "ref_wja1gvvi6js_27",
+                        "role": "canvas",
+                        "tag": "canvas"
+                      },
+                      {
+                        "children": [],
+                        "name": "Canvas: initial",
+                        "ref": "ref_wja1gvvi6js_28",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [],
+                        "name": "Drag Drop",
+                        "ref": "ref_wja1gvvi6js_29",
+                        "role": "div",
+                        "tag": "div"
+                      },
+                      {
+                        "children": [],
+                        "name": "Drag: initial",
+                        "ref": "ref_wja1gvvi6js_32",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [],
+                        "name": "Context: initial",
+                        "ref": "ref_wja1gvvi6js_33",
+                        "role": "output",
+                        "tag": "output"
+                      }
+                    ],
+                    "name": "Mouse interaction",
+                    "ref": "ref_wja1gvvi6js_23",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "name": "Form controls",
+                        "ref": "ref_wja1gvvi6js_35",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "children": [],
+                        "name": "Project name Kind: site; enabled: false Save project Form: untouched",
+                        "ref": "ref_wja1gvvi6js_36",
+                        "role": "form",
+                        "tag": "form"
+                      },
+                      {
+                        "children": [],
+                        "name": "Blocked credential field",
+                        "ref": "ref_wja1gvvi6js_44",
+                        "role": "label",
+                        "tag": "label"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "password",
+                        "name": "Blocked credential field",
+                        "ref": "ref_wja1gvvi6js_45",
+                        "role": "textbox",
+                        "tag": "input",
+                        "value": "[redacted-credential]"
+                      }
+                    ],
+                    "name": "Form controls",
+                    "ref": "ref_wja1gvvi6js_34",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "ref": "ref_wja1gvvi6js_46",
+                    "role": "div",
+                    "tag": "div"
+                  }
+                ],
+                "ref": "ref_wja1gvvi6js_2",
+                "role": "main",
+                "tag": "main"
+              }
+            ],
+            "ref": "ref_wja1gvvi6js_1",
+            "role": "body",
+            "tag": "body"
+          },
+          "truncated": true,
+          "url": "http://127.0.0.1:60372/browser-observation.html?label=Original",
+          "viewport": {
+            "deviceScaleFactor": 1,
+            "height": 768,
+            "scrollX": 0,
+            "scrollY": 0,
+            "width": 1280
+          }
+        }
+      },
+      "triggerResult": {
+        "Ok": {
+          "name": "Submit next page",
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "ref": "ref_wja1gvvi6js_6"
+        }
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 2",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Original"
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "navigationMarker": "Initial",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Original"
+      },
+      "clickResult": {
+        "Ok": {
+          "name": "Change visible state",
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "ref": "ref_ixoymcvovo_20"
+        }
+      },
+      "pageNavigation": "script",
+      "pending": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-df0b90896e49433ab561ac4e7bf92745",
+        "loading": false,
+        "navigationId": 1,
+        "resourceId": "f6b818fd-fed8-47d2-affc-6a40dd903836",
+        "sessionId": "df0b9089-6e49-433a-b561-ac4e7bf92745",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:60372/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-JqFYbS/workspaces/first"
+      },
+      "readResult": {
+        "Ok": {
+          "framing": "OBSERVED_PAGE_CONTENT_UNTRUSTED",
+          "history": {
+            "length": 1
+          },
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "readyState": "complete",
+          "title": "Gyro Fixture Original",
+          "titleTruncated": false,
+          "tree": {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "href": "?label=Provisional",
+                        "name": "Open next page",
+                        "ref": "ref_ixoymcvovo_4",
+                        "role": "link",
+                        "tag": "a"
+                      },
+                      {
+                        "children": [],
+                        "name": "Submit next page",
+                        "ref": "ref_ixoymcvovo_5",
+                        "role": "form",
+                        "tag": "form"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Script navigation",
+                        "ref": "ref_ixoymcvovo_7",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "href": "?label=Provisional",
+                        "name": "Prevented link",
+                        "ref": "ref_ixoymcvovo_8",
+                        "role": "link",
+                        "tag": "a"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Same-document route",
+                        "ref": "ref_ixoymcvovo_9",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "href": "#current",
+                        "name": "Same-document fragment",
+                        "ref": "ref_ixoymcvovo_10",
+                        "role": "link",
+                        "tag": "a"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Load frame",
+                        "ref": "ref_ixoymcvovo_11",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "href": "http://fixture:fixture@127.0.0.1:60372/browser-observation.html?label=BlockedCredentials",
+                        "name": "Blocked credential URL",
+                        "ref": "ref_ixoymcvovo_12",
+                        "role": "link",
+                        "tag": "a"
+                      },
+                      {
+                        "children": [],
+                        "name": "Initial",
+                        "ref": "ref_ixoymcvovo_13",
+                        "role": "output",
+                        "tag": "output"
+                      }
+                    ],
+                    "ref": "ref_ixoymcvovo_3",
+                    "role": "navigation",
+                    "tag": "nav"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "name": "Deterministic loopback page for Gyro Browser acceptance.",
+                        "ref": "ref_ixoymcvovo_15",
+                        "role": "p",
+                        "tag": "p"
+                      },
+                      {
+                        "children": [],
+                        "name": "Browser observation ready",
+                        "ref": "ref_ixoymcvovo_16",
+                        "role": "heading",
+                        "tag": "h1"
+                      },
+                      {
+                        "children": [],
+                        "name": "Viewport:",
+                        "ref": "ref_ixoymcvovo_17",
+                        "role": "p",
+                        "tag": "p"
+                      }
+                    ],
+                    "ref": "ref_ixoymcvovo_14",
+                    "role": "banner",
+                    "tag": "header"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "name": "State-changing control",
+                        "ref": "ref_ixoymcvovo_19",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Change visible state",
+                        "ref": "ref_ixoymcvovo_20",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "name": "State: initial",
+                        "ref": "ref_ixoymcvovo_21",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [],
+                        "name": "Clicks: 0",
+                        "ref": "ref_ixoymcvovo_22",
+                        "role": "output",
+                        "tag": "output"
+                      }
+                    ],
+                    "name": "State-changing control",
+                    "ref": "ref_ixoymcvovo_18",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "name": "Mouse interaction",
+                        "ref": "ref_ixoymcvovo_24",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "button",
+                        "name": "Hover target",
+                        "ref": "ref_ixoymcvovo_25",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "children": [],
+                        "name": "Hover: initial",
+                        "ref": "ref_ixoymcvovo_26",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [],
+                        "name": "Canvas target",
+                        "ref": "ref_ixoymcvovo_27",
+                        "role": "canvas",
+                        "tag": "canvas"
+                      },
+                      {
+                        "children": [],
+                        "name": "Canvas: initial",
+                        "ref": "ref_ixoymcvovo_28",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [],
+                        "name": "Drag Drop",
+                        "ref": "ref_ixoymcvovo_29",
+                        "role": "div",
+                        "tag": "div"
+                      },
+                      {
+                        "children": [],
+                        "name": "Drag: initial",
+                        "ref": "ref_ixoymcvovo_32",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [],
+                        "name": "Context: initial",
+                        "ref": "ref_ixoymcvovo_33",
+                        "role": "output",
+                        "tag": "output"
+                      }
+                    ],
+                    "name": "Mouse interaction",
+                    "ref": "ref_ixoymcvovo_23",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "name": "Form controls",
+                        "ref": "ref_ixoymcvovo_35",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "children": [],
+                        "name": "Project name Kind: site; enabled: false Save project Form: untouched",
+                        "ref": "ref_ixoymcvovo_36",
+                        "role": "form",
+                        "tag": "form"
+                      },
+                      {
+                        "children": [],
+                        "name": "Blocked credential field",
+                        "ref": "ref_ixoymcvovo_44",
+                        "role": "label",
+                        "tag": "label"
+                      },
+                      {
+                        "children": [],
+                        "inputType": "password",
+                        "name": "Blocked credential field",
+                        "ref": "ref_ixoymcvovo_45",
+                        "role": "textbox",
+                        "tag": "input",
+                        "value": "[redacted-credential]"
+                      }
+                    ],
+                    "name": "Form controls",
+                    "ref": "ref_ixoymcvovo_34",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "ref": "ref_ixoymcvovo_46",
+                    "role": "div",
+                    "tag": "div"
+                  }
+                ],
+                "ref": "ref_ixoymcvovo_2",
+                "role": "main",
+                "tag": "main"
+              }
+            ],
+            "ref": "ref_ixoymcvovo_1",
+            "role": "body",
+            "tag": "body"
+          },
+          "truncated": true,
+          "url": "http://127.0.0.1:60372/browser-observation.html?label=Original",
+          "viewport": {
+            "deviceScaleFactor": 1,
+            "height": 768,
+            "scrollX": 0,
+            "scrollY": 0,
+            "width": 1280
+          }
+        }
+      },
+      "triggerResult": {
+        "Ok": {
+          "name": "Script navigation",
+          "navigation": {
+            "documentCommitted": true,
+            "id": 1,
+            "loading": false
+          },
+          "ok": true,
+          "ref": "ref_ixoymcvovo_7"
+        }
+      }
+    }
+  ],
+  "passed": false
+}

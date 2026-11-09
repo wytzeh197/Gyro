@@ -1,0 +1,31 @@
+{
+  "pid": 61839,
+  "files": [
+    "gyro-brow 61839 wytze  txt       REG               1,17     32768            88135767 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3-shm",
+    "gyro-brow 61839 wytze  txt       REG               1,17    323584            88135764 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3",
+    "gyro-brow 61839 wytze    6u      REG               1,17    323584            88135764 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3",
+    "gyro-brow 61839 wytze    7u      REG               1,17    568592            88135766 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3-wal",
+    "gyro-brow 61839 wytze    8u      REG               1,17     32768            88135767 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3-shm",
+    "gyro-brow 61839 wytze   13u     unix 0xd18dd70f753e91fa       0t0                     /private/tmp/gyro-shell-nLMuhJ/data/gyro.sock",
+    "gyro-brow 61839 wytze   14u      REG               1,17    323584            88135764 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3",
+    "gyro-brow 61839 wytze   15u      REG               1,17    568592            88135766 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3-wal",
+    "gyro-brow 61839 wytze   22u      REG               1,17    323584            88135764 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3",
+    "gyro-brow 61839 wytze   27u      REG               1,17    568592            88135766 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3-wal",
+    "gyro-brow 61839 wytze   28u      REG               1,17    323584            88135764 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3",
+    "gyro-brow 61839 wytze   29u      REG               1,17    568592            88135766 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3-wal",
+    "gyro-brow 61839 wytze   31u      REG               1,17    323584            88135764 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3",
+    "gyro-brow 61839 wytze   32u      REG               1,17    568592            88135766 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3-wal",
+    "gyro-brow 61839 wytze   33u      REG               1,17    323584            88135764 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3",
+    "gyro-brow 61839 wytze   34u      REG               1,17    568592            88135766 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3-wal",
+    "gyro-brow 61839 wytze   35u      REG               1,17    323584            88135764 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3",
+    "gyro-brow 61839 wytze   36u      REG               1,17    568592            88135766 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3-wal",
+    "gyro-brow 61839 wytze   37u      REG               1,17    323584            88135764 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3",
+    "gyro-brow 61839 wytze   38u      REG               1,17    568592            88135766 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3-wal",
+    "gyro-brow 61839 wytze   39u      REG               1,17    323584            88135764 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3",
+    "gyro-brow 61839 wytze   40u      REG               1,17    568592            88135766 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3-wal",
+    "gyro-brow 61839 wytze   41u      REG               1,17    323584            88135764 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3",
+    "gyro-brow 61839 wytze   42u      REG               1,17    568592            88135766 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3-wal",
+    "gyro-brow 61839 wytze   43u      REG               1,17    323584            88135764 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3",
+    "gyro-brow 61839 wytze   44u      REG               1,17    568592            88135766 /private/tmp/gyro-shell-nLMuhJ/data/gyro.sqlite3-wal"
+  ]
+}

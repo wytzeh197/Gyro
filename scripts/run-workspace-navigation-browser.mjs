@@ -9,12 +9,21 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const desktop = join(root, "apps/desktop");
+const resources = process.argv.includes("--resources");
+const entry = resources
+  ? "editor-resource-fixture.html"
+  : "workspace-navigation-fixture.html";
+const check = resources
+  ? "check-editor-resource-browser.mjs"
+  : "check-workspace-navigation-browser.mjs";
 const require = createRequire(join(desktop, "package.json"));
 const vite = join(dirname(require.resolve("vite/package.json")), "bin/vite.js");
 const temporary = await mkdtemp(join(tmpdir(), "gyro-workspace-fixture-"));
 const dist = join(temporary, "dist");
 const config = join(temporary, "vite.config.mjs");
-const port = Number(process.env.GYRO_FIXTURE_PORT ?? "1422");
+const port = Number(
+  process.env.GYRO_FIXTURE_PORT ?? (resources ? "1462" : "1422"),
+);
 const origin = `http://127.0.0.1:${port}`;
 await writeFile(
   config,
@@ -22,12 +31,15 @@ await writeFile(
     root: desktop,
     logLevel: "warn",
     esbuild: { jsx: "automatic" },
-    define: { "import.meta.env.DEV": "true", "process.env.NODE_ENV": '"development"' },
+    define: {
+      "import.meta.env.DEV": "true",
+      "process.env.NODE_ENV": '"development"',
+    },
     build: {
       outDir: dist,
       emptyOutDir: true,
       rollupOptions: {
-        input: join(desktop, "workspace-navigation-fixture.html"),
+        input: join(desktop, entry),
       },
     },
   })};`,
@@ -44,12 +56,11 @@ const run = (program, args, options = {}) =>
   });
 let server;
 try {
-  const built = await run(process.execPath, [
-    vite,
-    "build",
-    "--config",
-    config,
-  ], { env: { ...process.env, NODE_ENV: "development" } });
+  const built = await run(
+    process.execPath,
+    [vite, "build", "--config", config],
+    { env: { ...process.env, NODE_ENV: "development" } },
+  );
   if (built) throw Error(`Fixture build failed (${built}).`);
   server = spawn(
     process.execPath,
@@ -71,7 +82,7 @@ try {
     if (server.exitCode !== null)
       throw Error("Fixture preview server exited before starting.");
     try {
-      if ((await fetch(`${origin}/workspace-navigation-fixture.html`)).ok) {
+      if ((await fetch(`${origin}/${entry}`)).ok) {
         ready = true;
         break;
       }
@@ -79,11 +90,9 @@ try {
     await new Promise((resolvePause) => setTimeout(resolvePause, 100));
   }
   if (!ready) throw Error("Fixture preview server did not start.");
-  const checked = await run(
-    process.execPath,
-    [join(root, "scripts/check-workspace-navigation-browser.mjs")],
-    { env: { ...process.env, GYRO_TEST_ORIGIN: origin } },
-  );
+  const checked = await run(process.execPath, [join(root, "scripts", check)], {
+    env: { ...process.env, GYRO_TEST_ORIGIN: origin },
+  });
   process.exitCode = checked;
 } finally {
   if (server && server.exitCode === null) {

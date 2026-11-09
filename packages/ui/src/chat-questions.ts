@@ -10,6 +10,15 @@ export type ChatQuestion = {
 };
 export type ChatQuestionRequest = { id: string; questions: ChatQuestion[] };
 
+export const CHAT_QUESTION_REVEAL_EVENT = "gyro-reveal-chat-question";
+
+/** Called after navigation so a dismissed question can be answered again. */
+export function revealChatQuestion(sessionId: string) {
+  window.dispatchEvent(
+    new CustomEvent(CHAT_QUESTION_REVEAL_EVENT, { detail: { sessionId } }),
+  );
+}
+
 /** The answer is undefined when the user skipped that question. */
 export type ChatQuestionAnswer = { question: string; answer?: string };
 

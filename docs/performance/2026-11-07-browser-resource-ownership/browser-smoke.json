@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "steps": [
+    "Auto local Desktop fit 1280x800 in 480x300; full-resolution PNG 1280x800",
+    "DOM click beyond panel width; state and scroll preserved through resize; native OS mouse SKIPPED",
+    "Responsive override persists through navigation; Auto restores Desktop fit",
+    "custom desktop 1920x1080, tablet 768x1024, mobile 390x844 native viewports",
+    "open/read",
+    "Stop releases a queued browser call and suppresses its late click",
+    "close/reopen rejects a stale model operation before its click",
+    "label lookup/subtree reference preservation/invalid select rejection",
+    "AI cursor visible after click; capture hide/restore",
+    "repeat read/find/click exactly once/read changed state",
+    "SKIPPED native OS mouse: GYRO_BROWSER_SMOKE_SKIP_MOUSE=1",
+    "type/submit/read saved value",
+    "click/type/formInput name their elements; highlight captured",
+    "credential and stale-ref rejection",
+    "select/checkbox/scroll/status",
+    "native screenshot 1280x800",
+    "console/network without bridge recursion",
+    "navigate/back/forward/reload/title",
+    "close",
+    "background open/read/find/click/read/capture at 1280x800, screenshot 1280x800"
+  ]
+}

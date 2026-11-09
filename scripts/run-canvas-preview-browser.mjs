@@ -9,6 +9,13 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const origin = process.env.GYRO_TEST_ORIGIN || "http://127.0.0.1:1420";
+const activityComposer = process.argv.includes("--activity-composer");
+const fixture = activityComposer
+  ? "goal-composer-fixture.html"
+  : "canvas-fixture.html";
+const guard = activityComposer
+  ? "scripts/check-activity-composer-browser.mjs"
+  : "scripts/check-canvas-preview-browser.mjs";
 
 const browserPath = [
   process.env.GYRO_CAPTURE_BROWSER,
@@ -28,7 +35,7 @@ console.log(`Canvas browser: ${browserPath}`);
 
 const reachable = async () => {
   try {
-    return (await fetch(`${origin}/canvas-fixture.html`)).ok;
+    return (await fetch(`${origin}/${fixture}`)).ok;
   } catch {
     return false;
   }
@@ -53,25 +60,21 @@ if (!(await reachable())) {
   if (!ready) {
     devServer.kill("SIGTERM");
     console.error(
-      `The dev server never served ${origin}/canvas-fixture.html; start 'pnpm desktop:dev' or set GYRO_TEST_ORIGIN.`,
+      `The dev server never served ${origin}/${fixture}; start 'pnpm desktop:dev' or set GYRO_TEST_ORIGIN.`,
     );
     process.exit(1);
   }
 }
 
-const check = spawn(
-  process.execPath,
-  ["scripts/check-canvas-preview-browser.mjs"],
-  {
-    cwd: repoRoot,
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      GYRO_TEST_ORIGIN: origin,
-      GYRO_CAPTURE_BROWSER: browserPath,
-    },
+const check = spawn(process.execPath, [guard], {
+  cwd: repoRoot,
+  stdio: "inherit",
+  env: {
+    ...process.env,
+    GYRO_TEST_ORIGIN: origin,
+    GYRO_CAPTURE_BROWSER: browserPath,
   },
-);
+});
 const exitCode = await new Promise((resolve) => check.once("exit", resolve));
 devServer?.kill("SIGTERM");
 process.exit(exitCode ?? 1);

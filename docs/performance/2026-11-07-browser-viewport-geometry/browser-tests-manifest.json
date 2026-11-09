@@ -1,0 +1,18 @@
+{
+  "root": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-viewport-geometry-unit-f87vf5v1",
+  "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-viewport-geometry-unit-f87vf5v1/data",
+  "command": [
+    "cargo",
+    "test",
+    "--offline",
+    "--locked",
+    "-p",
+    "gyro-desktop",
+    "--lib",
+    "browser",
+    "--",
+    "--nocapture"
+  ],
+  "exitCode": 0,
+  "remainingAttachmentFixtureDirectories": 0
+}

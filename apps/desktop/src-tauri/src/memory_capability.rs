@@ -10,9 +10,26 @@
 //! The `.gyro` directory itself is app-owned state, created eagerly the way
 //! session events are; the memory file never bypasses review. Plan mode is
 //! refused, because writing memory is writing.
-use super::*;
 use crate::workspace_edit_capability::{assert_no_unsaved_editor_changes, emit_proposal_events};
+use crate::{
+    app::config::load_config_blocking,
+    capabilities::access::{capability_argument_string, capability_full_access_enabled},
+    capability_output_budget,
+    capability_workspace_helpers::{workspace_result_byte_limit, workspace_result_bytes_schema},
+    delegated_agents,
+    ide::task_discovery::content_hash,
+    state::provider_run::BoundProviderCapabilityContext,
+    stores::open_store,
+    workspace::{
+        files::read_bounded_regular_file,
+        paths::create_workspace_path_impl,
+        types::{FileMutationProposalRequest, WorkspacePathCreateRequest},
+    },
+    workspace_mutations,
+};
+use gyro_core::{CapabilityId, CapabilityRequest, CapabilityResourceRef, CapabilityRunMode};
 use serde_json::{json, Value};
+use std::path::Path;
 
 const MEMORY_SCHEMA: &str = "gyro.memory.v1";
 const MEMORY_PATH: &str = ".gyro/memory.md";
@@ -318,6 +335,7 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability_workspace_helpers::DEFAULT_WORKSPACE_RESULT_BYTES;
 
     #[test]
     fn memory_raw_and_entry_pages_are_not_duplicated_or_lost() {

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { WrapText } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
 import { diffHunks, type DiffHunk } from "./file-review.ts";
 
 const HUNKS_PER_PAGE = 8;
@@ -9,12 +10,18 @@ const HUNKS_PER_PAGE = 8;
  * inspectable instead of painting a blank Monaco pane.
  */
 export function PlainDiffView({
+  actions,
   diff,
+  lead,
   notice,
   onRetry,
   onOpenFile,
 }: {
+  /** Controls a host would otherwise stack in a row of its own. */
+  actions?: ReactNode;
   diff: string;
+  /** Names the comparison ahead of the section count, e.g. "Recorded turn". */
+  lead?: ReactNode;
   notice?: string;
   onRetry?: () => void;
   onOpenFile?: () => void;
@@ -47,17 +54,26 @@ export function PlainDiffView({
         </div>
       ) : null}
       <div className="gyro-plain-diff-toolbar">
-        <span>
-          {hunks.length} changed section{hunks.length === 1 ? "" : "s"}
+        <span className="gyro-plain-diff-summary">
+          {lead ? (
+            <>
+              <strong>{lead}</strong>
+              {" · "}
+            </>
+          ) : null}
+          {hunks.length} section{hunks.length === 1 ? "" : "s"}
           {pageCount > 1 ? ` · ${safePage + 1} of ${pageCount}` : ""}
         </span>
+        {actions}
         <button
-          className="gyro-review-wrap-toggle"
+          aria-label="Wrap lines"
           aria-pressed={wrapLines}
+          className="gyro-review-wrap-toggle"
           onClick={() => setWrapLines((value) => !value)}
+          title={wrapLines ? "Wrapping long lines" : "Wrap long lines"}
           type="button"
         >
-          Wrap lines
+          <WrapText aria-hidden="true" size={14} />
         </button>
         {pageCount > 1 ? (
           <span className="gyro-plain-diff-pager">

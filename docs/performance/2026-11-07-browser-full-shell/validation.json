@@ -1,0 +1,97 @@
+{
+  "updatedAt": "2026-11-08T09:54:11.272287+00:00",
+  "head": "1d0b7e1321790246390b9ad64d78f73813a37ab6",
+  "manualNativeReview": "manual-native-review.json",
+  "nativeBinarySha256": "9b94e73d00f228ff3961f61fe54f70a731e065989f13beb7383a32fbe6bce113",
+  "nativeBinaryUnchanged": true,
+  "draftCallbackChecks": 4,
+  "negativeControlFailures": 3,
+  "rustBrowserTests": 59,
+  "regressionScripts": [
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-draft.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-event-routing.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-navigation.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-viewport.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-host-bounds.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-pointer-feedback.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-reveal.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-observation-cost.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-subagent-browsers.mjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "node",
+        "scripts/check-browser-agent-runtime.mjs"
+      ],
+      "exitCode": 0,
+      "evidence": "browser-agent-runtime-retry.log"
+    }
+  ],
+  "desktopTypeScript": "passed",
+  "guardedIsolation": {
+    "missingMarkerRefusesLaunch": true,
+    "nativeRelaunchUsesTemporaryDatabase": true
+  },
+  "initialIsolationFailure": "isolation-incident.json",
+  "goalComplete": false,
+  "remaining": [
+    "companion and multi-chat split native acceptance",
+    "native folderless and path-with-spaces acceptance",
+    "Retina/window transitions and older WebKit compatibility",
+    "native notification permission-probe rejection",
+    "live provider benchmarks pending additional authorized budget"
+  ]
+}

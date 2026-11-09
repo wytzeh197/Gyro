@@ -1,5 +1,6 @@
 //! Opt-in stage timings against disposable local fixtures, never user files.
-use super::*;
+use crate::{ide::task_discovery::content_hash, workspace::tree::scan_workspace_tree};
+use std::{fs, time::Instant};
 
 #[test]
 #[ignore = "explicit local performance measurement"]

@@ -1,0 +1,28 @@
+{
+  "root": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-mbRE3z",
+  "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-mbRE3z/data",
+  "frontend": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-mbRE3z/frontend",
+  "build": "passed",
+  "native": "passed",
+  "binary": "/Users/wytze/Gyro/target/debug/gyro-browser-events-smoke",
+  "visualReviewApp": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-mbRE3z/Gyro Browser Review.app",
+  "nativeExecutable": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-mbRE3z/Gyro Browser Review.app/Contents/MacOS/gyro-browser-events-smoke",
+  "checks": 55,
+  "pageRequests": 9,
+  "requestsByLabel": {
+    "Original": 2,
+    "Pending": 1,
+    "Release": 1,
+    "Failure": 4,
+    "RetryRelease": 1,
+    "Replacement": 1,
+    "Second": 1,
+    "Final": 1
+  },
+  "queuedCancelledRequests": 0,
+  "heldImageRequests": 1,
+  "releasedImageRequests": 1,
+  "heldDocumentRequests": 0,
+  "releasedDocumentRequests": 0,
+  "report": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-mbRE3z/data/browser-frontend.json"
+}

@@ -2,7 +2,7 @@
 
 import { readRepoSource } from "./read-repo-source.mjs";
 import { sourceIncludes } from "./source-includes.mjs";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { formatCompactTokenCount } from "../packages/ui/src/token-count.ts";
 import { workspaceEditorOptions } from "../apps/desktop/src/editor-presentation.ts";
 import { completionMenuGeometry } from "../packages/ui/src/composer-completion-geometry.ts";
@@ -163,6 +163,41 @@ function expect(condition, message) {
 function readRepoFile(path) {
   return readRepoSource(resolve(repoRoot, path), "utf8");
 }
+
+// Runtime domains moved out of lib.rs. Inspect their actual source while
+// excluding test modules, so a test's expected text cannot satisfy a guard.
+function readRuntimeDomain(directory) {
+  return readdirSync(resolve(repoRoot, directory), { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() ||
+        (entry.name.endsWith(".rs") &&
+          entry.name !== "tests.rs" &&
+          !entry.name.endsWith("_tests.rs")),
+    )
+    .map((entry) =>
+      entry.isDirectory()
+        ? readRuntimeDomain(`${directory}/${entry.name}`)
+        : readFileSync(resolve(repoRoot, directory, entry.name), "utf8"),
+    )
+    .join("\n");
+}
+const extractedNativeSource = [
+  "app",
+  "automation",
+  "browser",
+  "capabilities",
+  "git",
+  "ide",
+  "providers",
+  "sessions",
+  "state",
+  "workspace",
+  "terminal",
+  "usage",
+]
+  .map((domain) => readRuntimeDomain(`apps/desktop/src-tauri/src/${domain}`))
+  .join("\n");
 
 // Some docs are deliberately kept out of the repo. Their checks still run for
 // the working copies that have them, and skip everywhere else rather than
@@ -545,6 +580,17 @@ expect(
     !isTransientWorkspacePath("/Users/example/Project"),
   "Chat send requires a connected provider; a project is optional.",
 );
+expect(
+  !isUserSelectedWorkspacePath(
+    "/Users/dev/Documents/gyro-luna-benchmark-2026-11-04",
+  ) &&
+    !isUserSelectedWorkspacePath("/private/tmp/gyro-live-provider-20260713") &&
+    !isUserSelectedWorkspacePath("/Users/dev/gyro-session-1783969000000") &&
+    isUserSelectedWorkspacePath("/projects/gyro-cloud") &&
+    isUserSelectedWorkspacePath("/Users/dev/Gyro") &&
+    isUserSelectedWorkspacePath("/Users/dev/Documents/notes-2026-11-04"),
+  "Generated Gyro scratch folders are not projects, including hyphenated dates.",
+);
 
 const appSource = [
   readRepoFile("apps/desktop/src/provider-login-profile.ts"),
@@ -673,8 +719,10 @@ const menuBarRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/menu_bar.rs",
 );
 const desktopRustSource = [
+  extractedNativeSource,
+  readRuntimeDomain("crates/gyro-core/src/provider_runtime"),
   readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
-  readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/git/status_cache.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
   readRepoFile("crates/gyro-core/src/provider_permissions.rs"),
 ].join("\n");
@@ -683,18 +731,20 @@ expect(
   // them; the point of the check is that the two still agree, so it asserts
   // the tokens and the Rust constants rather than literals in each rule.
   // Everything on the surface is border-box, so these are the whole row.
-  menuBarStyleSource.includes("--menu-header: 52px") &&
-    menuBarStyleSource.includes("--menu-row: 44px") &&
+  menuBarStyleSource.includes("--menu-header: 44px") &&
+    menuBarStyleSource.includes("--menu-row: 52px") &&
     menuBarStyleSource.includes("--menu-approval: 92px") &&
+    menuBarStyleSource.includes("--menu-question: 100px") &&
     menuBarStyleSource.includes("--menu-footer: 40px") &&
     menuBarStyleSource.includes("--menu-gutter-top: 8px") &&
     menuBarStyleSource.includes("--menu-gutter-bottom: 24px") &&
     cssRules(menuBarStyleSource, ".gyro-menu-bar-approval").some((rule) =>
       rule.includes("height: var(--menu-approval)"),
     ) &&
-    menuBarRustSource.includes("const MENU_BAR_HEADER_HEIGHT: f64 = 52.0") &&
-    menuBarRustSource.includes("const MENU_BAR_ROW_HEIGHT: f64 = 44.0") &&
+    menuBarRustSource.includes("const MENU_BAR_HEADER_HEIGHT: f64 = 44.0") &&
+    menuBarRustSource.includes("const MENU_BAR_ROW_HEIGHT: f64 = 52.0") &&
     menuBarRustSource.includes("const MENU_BAR_APPROVAL_HEIGHT: f64 = 92.0") &&
+    menuBarRustSource.includes("const MENU_BAR_QUESTION_HEIGHT: f64 = 100.0") &&
     menuBarRustSource.includes("const MENU_BAR_FOOTER_HEIGHT: f64 = 40.0") &&
     menuBarRustSource.includes("const MENU_BAR_GUTTER_TOP: f64 = 8.0") &&
     menuBarRustSource.includes("const MENU_BAR_GUTTER_BOTTOM: f64 = 24.0") &&
@@ -1119,10 +1169,10 @@ expect(
   "Chat turns should build one flat run model, with file edits inline rather than hoisted into a completion-only summary.",
 );
 const chatTurnSource = surfaceSource.slice(
-  surfaceSource.indexOf("function ChatTurn({"),
+  surfaceSource.indexOf("function ChatTurnView({"),
   surfaceSource.indexOf(
     "function formatMessageTime(",
-    surfaceSource.indexOf("function ChatTurn({"),
+    surfaceSource.indexOf("function ChatTurnView({"),
   ),
 );
 expect(
@@ -1284,15 +1334,20 @@ const coreSessionsSource = readRepoFile("crates/gyro-core/src/sessions.rs");
 const kimiAcpSource = readRepoFile("crates/gyro-core/src/kimi_acp.rs");
 // Extracted domains are read alongside the shell: these checks assert on the
 // source that holds the code, not on where it used to live.
+const providerTestsSource = readRepoFile(
+  "apps/desktop/src-tauri/src/providers/tests.rs",
+);
 const tauriSource = [
+  extractedNativeSource,
+  readRuntimeDomain("crates/gyro-core/src/provider_runtime"),
   readRepoFile("apps/desktop/src-tauri/src/lib.rs"),
   readRepoFile("apps/desktop/src-tauri/src/desktop_notifications.rs"),
-  readRepoFile("apps/desktop/src-tauri/src/automation_scheduler.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/automation/scheduler.rs"),
   readRepoFile("apps/desktop/src-tauri/src/browser_pointer.rs"),
   readRepoFile("apps/desktop/src-tauri/src/browser_smoke.rs"),
   readRepoFile("apps/desktop/src-tauri/src/context_compaction.rs"),
-  readRepoFile("apps/desktop/src-tauri/src/git_status_cache.rs"),
-  readRepoFile("apps/desktop/src-tauri/src/language_server.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/git/status_cache.rs"),
+  readRepoFile("apps/desktop/src-tauri/src/ide/language_server.rs"),
   readRepoFile("apps/desktop/src-tauri/src/terminal_process.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_activity.rs"),
   readRepoFile("apps/desktop/src-tauri/src/provider_context.rs"),
@@ -1306,7 +1361,7 @@ const tauriSource = [
   readRepoFile("apps/desktop/src-tauri/src/workspace_capability_list.rs"),
 ].join("\n");
 const languageServerRustSource = readRepoFile(
-  "apps/desktop/src-tauri/src/language_server.rs",
+  "apps/desktop/src-tauri/src/ide/language_server.rs",
 );
 const turnTimingRustSource = readRepoFile(
   "apps/desktop/src-tauri/src/turn_timing.rs",
@@ -4717,15 +4772,22 @@ expect(
     /queuedChatDispatchMessageIdsRef\.current\.set\([\s\S]*?setChatMessageQueues\([\s\S]*?item\.id !== nextMessage\.id[\s\S]*?void sendDraft\(nextMessage\.message/.test(
       appSource,
     ) &&
-    sourceIncludes(appSource, ".then((accepted) =>") &&
-    sourceIncludes(appSource, "if (!accepted)") &&
+    sourceIncludes(appSource, ".then((outcome) =>") &&
+    sourceIncludes(
+      appSource,
+      "const disposition = queuedDeliveryDisposition(outcome)",
+    ) &&
+    sourceIncludes(appSource, 'if (disposition === "settled") return') &&
     sourceIncludes(appSource, "queuedChatDispatchMessageIdsRef") &&
     sourceIncludes(appSource, "persistedChatTurnIdsRef") &&
     sourceIncludes(appSource, "didDeliverProviderResponse") &&
-    sourceIncludes(appSource, "deliveryAttempts < 2") &&
-    sourceIncludes(appSource, 'status: shouldRetry ? "waiting" : "failed"') &&
-    sourceIncludes(appSource, "Date.now() + 1_500") &&
-    sourceIncludes(appSource, "Queued delivery failed") &&
+    sourceIncludes(appSource, "retryAt: undefined, status: disposition") &&
+    sourceIncludes(appSource, 'status: "failed", retryAt: undefined') &&
+    sourceIncludes(appSource, "Queued message not sent") &&
+    sourceIncludes(
+      readRepoFile("apps/desktop/src/chat-send-outcome.ts"),
+      'if (outcome.persisted || ["completed", "cancelled"].includes(outcome.kind))',
+    ) &&
     sourceIncludes(surfaceSource, 'message.hasFailed ? "Retry" : "Steer"') &&
     styleSource.includes(".gyro-chat-message-queue article.is-failed") &&
     sourceIncludes(appSource, "sessionModel: { ...sessionModel }") &&
@@ -4860,7 +4922,7 @@ expect(
     sourceIncludes(tauriSource, "value.char_indices().nth(max_chars)") &&
     sourceIncludes(tauriSource, "assistant_text_truncated") &&
     sourceIncludes(
-      tauriSource,
+      providerTestsSource,
       "streaming_state_stops_emitting_after_response_cap",
     ) &&
     sourceIncludes(tauriSource, "run_anthropic_claude_chat") &&
@@ -4918,7 +4980,7 @@ expect(
     coreExecutionSource.includes("finite_stdin_delivers_large_input_and_eof") &&
     sourceIncludes(tauriSource, "sanitize_provider_text_delta") &&
     sourceIncludes(tauriSource, "extract_codex_agent_message_text") &&
-    sourceIncludes(tauriSource, '"item.completed"') &&
+    sourceIncludes(coreProviderStreamSource, '"item.completed"') &&
     sourceIncludes(tauriSource, "PROVIDER_CHAT_MAX_RUNTIME_SECS") &&
     sourceIncludes(tauriSource, "PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS") &&
     // Chat provider CLIs do not kill quiet tools for stdout silence.
@@ -5046,9 +5108,13 @@ expect(
 expect(
   appSource.includes('"New chat"') &&
     appSource.includes("normalizeSessionTitleInput") &&
-    appSource.includes(
-      "updateSessionTitle(targetSessionId, provisionalTitle",
+    !appSource.includes(
+      "void updateSessionTitle(targetSessionId, provisionalTitle",
     ) &&
+    tauriSource.includes("begin_session_title") &&
+    tauriSource.includes("pending_session_title") &&
+    tauriSource.includes("apply_session_title") &&
+    tauriSource.includes("session_title_stream::repair_missing") &&
     styleSource.includes(".gyro-session-row.is-active .gyro-session-actions") &&
     styleSource.includes(
       ".gyro-session-row.is-active .gyro-sidebar-thread-main",
@@ -5309,7 +5375,7 @@ expect(
     appSource.includes("write_terminal_input") &&
     appSource.includes("resize_terminal_pane") &&
     tauriSource.includes(
-      "#[derive(Clone, Default)]\nstruct TerminalProcessManager",
+      "#[derive(Clone, Default)]\npub(crate) struct TerminalProcessManager",
     ) &&
     tauriSource.includes("async fn create_terminal_pane") &&
     tauriSource.includes("terminal create worker failed") &&
@@ -5515,7 +5581,7 @@ expect(
     desktopRustSource.includes("apply_macos_traffic_light_position(&window)") &&
     desktopRustSource.includes("apply_macos_traffic_light_position(&main)") &&
     readRepoFile("apps/desktop/src-tauri/src/session_browser.rs").includes(
-      "crate::apply_macos_traffic_light_position(&main)",
+      "window_controls::apply_macos_traffic_light_position(&main)",
     ) &&
     surfaceSource.includes("New Chat") &&
     surfaceSource.includes('label="Primary surfaces"') &&
@@ -5538,8 +5604,12 @@ expect(
     surfaceSource.includes('label="Sessions"') &&
     surfaceSource.includes('label="Workspace"') &&
     !surfaceSource.includes('label="IDE"') &&
-    surfaceSource.indexOf('label="Primary surfaces"') <
-      surfaceSource.indexOf('className="gyro-sidebar-actions"') &&
+    readRepoFile("packages/ui/src/workspace-sidebar.tsx").indexOf(
+      "<PrimarySurfaceSwitch",
+    ) <
+      readRepoFile("packages/ui/src/workspace-sidebar.tsx").indexOf(
+        'className="gyro-sidebar-actions"',
+      ) &&
     surfaceSource.includes("gyro-sidebar-project-chat-list") &&
     surfaceSource.includes("gyro-sidebar-small-title") &&
     surfaceSource.includes("collapsedProjectIds") &&
@@ -5847,9 +5917,8 @@ expect(
     ) &&
     chatSidebarSource.includes("projectGroups.map") &&
     chatSidebarSource.includes("SIDEBAR_INITIAL_PROJECT_SESSION_COUNT") &&
-    surfaceSource.includes("const primaryGyroProjectPath = [") &&
-    surfaceSource.includes("projectGroupKey(path, primaryGyroProjectPath)") &&
-    surfaceSource.includes('projectSidebarName(normalizedPath) === "Gyro"') &&
+    surfaceSource.includes("const groupKeyForPath = projectGroupKey") &&
+    surfaceSource.includes('return normalizeSidebarPath(path) || "gyro"') &&
     chatSidebarSource.includes(
       "const activeProjectSession = project.items.find",
     ) &&
@@ -6987,7 +7056,7 @@ expect(
     tauriSource.includes(
       "parsed_response.is_none() && output.parsed_stream_json",
     ) &&
-    tauriSource.includes("gyro_core::stream_contract_failure") &&
+    tauriSource.includes("crate::stream_contract_failure") &&
     coreProviderContractSource.includes("STREAM_CONTRACT_MARKER"),
   "A provider stream Gyro cannot read should be reported as version drift instead of answering with the raw transcript.",
 );
@@ -7309,7 +7378,7 @@ expect(
     tauriSource.includes("fn provider_tool_activity_note") &&
     tauriSource.includes("fn extract_provider_activities") &&
     tauriSource.includes('"note": activity.note') &&
-    tauriSource.includes(
+    providerTestsSource.includes(
       "tool_use_activities_carry_specifics_not_just_the_tool_name",
     ) &&
     typeSource.includes("activityNote?: string | null") &&
@@ -7675,7 +7744,7 @@ expect(
     compactAction.indexOf('"append_user_message"') <
       compactAction.indexOf('"compact_provider_chat"') &&
     compactAction.includes(
-      "sessionId: activeSessionId, turnId: compactionTurnId",
+      "sessionId: compactSessionId, turnId: compactionTurnId",
     ) &&
     desktopRustSource.includes(
       "compact_provider_chat_blocking(worker_app, worker_session_id, run_id)",
@@ -7683,12 +7752,14 @@ expect(
   "Standalone compaction should persist a user message before running and associate compaction activity with that same turn.",
 );
 expect(
-  compactAction.includes("sendingSessionIdsRef.current.has(activeSessionId)") &&
-    compactAction.indexOf("setSessionSending(activeSessionId, true)") <
+  compactAction.includes(
+    "sendingSessionIdsRef.current.has(compactSessionId)",
+  ) &&
+    compactAction.indexOf("setSessionSending(compactSessionId, true)") <
       compactAction.indexOf('invoke<SessionEvent>("append_user_message"') &&
     compactAction.includes('settleCompaction("done")') &&
     compactAction.includes('"cancelled" : "failed"') &&
-    compactAction.includes("setSessionSending(activeSessionId, false)"),
+    compactAction.includes("setSessionSending(compactSessionId, false)"),
   "Compaction must claim the send slot synchronously, show its outcome, and release the slot on every outcome so later messages queue instead of colliding.",
 );
 expect(
@@ -8080,7 +8151,9 @@ expect(
     surfaceSource.includes('aria-label="Source control message"') &&
     surfaceSource.includes('aria-label="Debug adapter command"') &&
     scmFileActionsSource.includes("Discard all local changes in") &&
-    surfaceSource.includes("task.id === test.id") &&
+    surfaceSource.includes(
+      "ide?.taskDefinitions.find((item) => item.id === test.id)",
+    ) &&
     appSource.includes("const createWorkspacePath = useCallback") &&
     appSource.includes("const renameWorkspacePath = useCallback") &&
     appSource.includes("const deleteWorkspacePath = useCallback") &&
@@ -8362,19 +8435,19 @@ expect(
     styleSource.includes(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
-    styleSource.includes("--gyro-radius-md: 6px") &&
+    styleSource.includes("--gyro-radius-md: 8px") &&
     styleSource.includes(
       "--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))",
     ) &&
-    styleSource.includes("--gyro-app: #181818") &&
-    styleSource.includes("--gyro-pane: #1c1c1c") &&
+    styleSource.includes("--gyro-app: #141415") &&
+    styleSource.includes("--gyro-pane: #141415") &&
     styleSource.includes("--gyro-hero-composer: var(--gyro-surface)") &&
     styleSource.includes("--gyro-user-main: #0874df") &&
     styleSource.includes("--gyro-user-secondary: #8b6fcb") &&
     styleSource.includes("var(--gyro-user-main) 86%") &&
     styleSource.includes(':root[data-theme="light"]') &&
-    styleSource.includes("--gyro-app: #f7f7f7") &&
-    styleSource.includes("--gyro-sidebar: #ffffff") &&
+    styleSource.includes("--gyro-app: #fbfbfb") &&
+    styleSource.includes("--gyro-sidebar: #f3f3f4") &&
     styleSource.includes("--gyro-premium-hairline: rgba(32, 32, 32, 0.1)") &&
     styleSource.includes("var(--gyro-user-main) 82%") &&
     styleSource.includes("--gyro-secondary-accent") &&

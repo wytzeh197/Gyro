@@ -6,8 +6,23 @@
 //! panes, `stop` on the stuck pane, model terminal waits, or the quit drain.
 //! Spawning (which can run `git` to resolve the working directory) and
 //! terminating also happen outside the map lock.
-use super::*;
 
+use crate::{
+    app::limits::{MAX_TERMINAL_OUTPUT_BYTES, MAX_TERMINAL_PROCESSES},
+    command_execution::{apply_terminal_credential_policy, run_bounded_command},
+    diagnostics::export::{terminal_command_path, user_home_directory},
+    git::commands::git_command,
+    terminal::types::{TerminalPaneRequest, TerminalPaneSnapshot, TerminalProcessManager},
+};
+use gyro_core::augmented_gui_path;
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use std::{
+    collections::{HashMap, VecDeque},
+    io::{BufReader, Read, Write},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 pub(crate) struct TerminalProcess {
     request: TerminalPaneRequest,
     working_directory: Option<PathBuf>,
@@ -657,6 +672,7 @@ fn terminal_output_text(output: &VecDeque<u8>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{fs, sync::mpsc, time::Instant};
 
     #[test]
     fn imported_provider_login_receives_its_resolved_home_without_shell_interpolation() {

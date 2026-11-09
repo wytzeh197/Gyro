@@ -45,7 +45,7 @@ pub fn request_quit(app: &tauri::AppHandle) {
 fn show_confirmation(app: &tauri::AppHandle) {
     let reveal = || -> anyhow::Result<()> {
         #[cfg(target_os = "macos")]
-        crate::restore_main_window(app)?;
+        crate::app::shutdown::restore_main_window(app)?;
         #[cfg(not(target_os = "macos"))]
         if let Some(window) = app.get_webview_window("main") {
             window.unminimize()?;

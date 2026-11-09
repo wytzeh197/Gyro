@@ -1,0 +1,38 @@
+{
+  "build": "debug",
+  "elapsedMs": 128007,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": false,
+      "effort": "low",
+      "failureClass": "provider-failed",
+      "failureDetail": "Sign in to Antigravity: run `agy` once in a terminal and finish the Google sign-in",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [],
+      "model": "antigravity-default",
+      "outcome": "failed",
+      "provider": "antigravity",
+      "resumedRequested": false,
+      "sessionId": "b7567a00-fe80-45bf-9ee0-972858a27222",
+      "task": "follow-up",
+      "trial": 1,
+      "turnId": "7ce1f59d-3031-402e-8ab3-0e306b14bab4",
+      "wallMs": 64165.654125
+    },
+    {
+      "effort": "low",
+      "failureClass": "provider-failed",
+      "failureDetail": "Sign in to Antigravity: run `agy` once in a terminal and finish the Google sign-in",
+      "fixtureReviewMode": "task-paths",
+      "model": "antigravity-default",
+      "outcome": "setup-failed",
+      "provider": "antigravity",
+      "resumedRequested": true,
+      "task": "follow-up",
+      "trial": 1
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

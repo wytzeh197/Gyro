@@ -1,7 +1,42 @@
 //! Gyro-owned asynchronous delegation. Provider threads never own child lifetime.
-use super::*;
+use crate::{
+    agent_reports,
+    app::limits::PROVIDER_CAPABILITY_EVENT,
+    capabilities::{
+        access::{capability_argument_string, narrower_capability_access},
+        bridge::active_provider_capability_context,
+    },
+    capability_workspace_helpers::workspace_result_bytes_schema,
+    efficiency, provider_reliability,
+    providers::{
+        chat_types::{ChatMode, ProviderChatRequest, ProviderChatResponse},
+        markers::GYRO_AGENT_UPDATE_MARKER,
+        run::run_provider_chat_blocking,
+        streaming::{provider_chat_cancelled, provider_stop_message},
+    },
+    session_browser,
+    state::{
+        managers::ProviderCancellationManager,
+        provider_run::{BoundProviderCapabilityContext, PROVIDER_INTERRUPTED_MARKER},
+    },
+    stores::{open_store, to_string},
+    subagent_capability,
+};
 use chrono::Utc;
+use gyro_core::{
+    CapabilityAccess, CapabilityId, CapabilityPolicySnapshot, CapabilityRequest,
+    CapabilityResourceRef, CapabilityRunMode, CreateSessionContext, GyroConfig, Session,
+    SessionEvent, SessionEventKind, SessionOrigin, SessionStore, UsageOrigin, UsageTokens,
+};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::{
+    collections::HashMap,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
+use tauri::{Emitter, Manager};
+use uuid::Uuid;
 
 const EVENT: &str = "gyro://subagent-event";
 const MAX_TASK_CHARS: usize = 16_000;
@@ -923,13 +958,6 @@ pub(super) fn restrict_request(app: &tauri::AppHandle, request: &mut ProviderCha
     }
 }
 
-pub(super) fn delegation_tool(id: CapabilityId) -> bool {
-    matches!(
-        id,
-        CapabilityId::AgentSpawn | CapabilityId::AgentSend | CapabilityId::ResearchRun
-    )
-}
-
 /// Auto approval includes delegation, while explicit project denials and the
 /// run-mode ceiling remain in force. Child authority is inherited separately.
 pub(super) fn permission_access(
@@ -1185,6 +1213,7 @@ fn restore_entry(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        internal_purpose: None,
     };
     app.state::<AgentManager>()
         .entries
@@ -1607,6 +1636,20 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        browser_knowledge,
+        providers::{
+            binding::capability_run_mode_for_chat,
+            chat_types::SessionGoalContext,
+            prompt::{provider_context_message_for_turn, user_requests_gyro_browser, PromptTurn},
+            runners::codex::codex_app_server_policy,
+        },
+        state::provider_run::{PROVIDER_CUT_OFF_NOTICE, PROVIDER_TOOL_BUDGET_NOTICE},
+    };
+    use gyro_core::{
+        CapabilityClass, GyroPaths, ProjectCapabilityPolicy, WorkspaceContextSnapshot,
+    };
+    use std::path::Path;
 
     #[test]
     fn reasoning_effort_does_not_authorize_delegation() {
@@ -2409,6 +2452,7 @@ mod tests {
             session_id: child.id.to_string(),
             turn_id: None,
             provider_id: "openai".into(),
+            provider_kind: None,
             workspace: temp.path().into(),
             workspace_key: policy.workspace_key.clone(),
             workspace_identity_revision: 1,
@@ -2475,3 +2519,5 @@ mod tests {
         }
     }
 }
+
+pub(crate) use gyro_core::provider_runtime::catalog::delegation_tool;

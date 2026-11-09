@@ -58,7 +58,10 @@ assert.ok(
 );
 
 parseModelCatalog(
-  readFileSync(new URL("../catalog/model-catalog.json", import.meta.url), "utf8"),
+  readFileSync(
+    new URL("../catalog/model-catalog.json", import.meta.url),
+    "utf8",
+  ),
 );
 for (const raw of [
   "broken",
@@ -415,7 +418,10 @@ assert.throws(() =>
 // anchor is otherwise silent: the document is valid and the model never shows.
 {
   const published = parseModelCatalog(
-    readFileSync(new URL("../catalog/model-catalog.json", import.meta.url), "utf8"),
+    readFileSync(
+      new URL("../catalog/model-catalog.json", import.meta.url),
+      "utf8",
+    ),
   );
   const bundledIds = new Map(
     providerCatalog.map((p) => [p.id, p.models.map((m) => m.id)]),
@@ -564,7 +570,10 @@ assert.throws(() =>
     "October 14 retirement must not remove October 13 access",
   );
   const native = readRepoSource(
-    new URL("../apps/desktop/src-tauri/src/lib.rs", import.meta.url),
+    new URL(
+      "../apps/desktop/src-tauri/src/providers/retry.rs",
+      import.meta.url,
+    ),
     "utf8",
   );
   assert.match(
@@ -799,7 +808,7 @@ assert.equal(
     {
       name: "Claude Opus 5",
       rows: [
-        ["anthropic", "claude-opus-5", "cli", 200_000],
+        ["anthropic", "claude-opus-5", "cli", 1_000_000],
         ["openrouter", "anthropic/claude-opus-5", "api", 1_000_000],
       ],
     },

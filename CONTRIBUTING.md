@@ -19,7 +19,7 @@ privately using the [Security Policy](SECURITY.md).
 ## Development Setup
 
 Gyro development currently requires macOS 14+, Node.js 22+, pnpm 11+, Rust
-1.78+, Git, and the Xcode command line tools.
+1.90+, Git, and the Xcode command line tools.
 
 ```bash
 git clone https://github.com/wytzeh197/Gyro.git

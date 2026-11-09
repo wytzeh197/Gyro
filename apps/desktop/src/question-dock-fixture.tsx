@@ -8,6 +8,7 @@ import {
   ChatSurface,
   applyAppearancePreferences,
   providersForConfig,
+  revealChatQuestion,
   type GyroConfig,
   type SessionEvent,
 } from "@gyro-dev/ui";
@@ -69,6 +70,12 @@ function Fixture() {
   const [draft, setDraft] = useState("");
   return (
     <div className="gyro-workspace-route is-thread">
+      <button
+        style={{ position: "fixed", top: 12, right: 16, zIndex: 1000 }}
+        onClick={() => revealChatQuestion(sessionId)}
+      >
+        Simulate Reply in chat
+      </button>
       <section className="gyro-workspace-primary" aria-label="Question card">
         <ChatSurface
           config={config}

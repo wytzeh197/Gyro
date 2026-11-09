@@ -1,0 +1,7 @@
+{
+  "rootPid": 80487,
+  "rootExitVerified": true,
+  "observedOwnedProcessesAfterExit": [],
+  "readErrors": [],
+  "note": "Empty-store debug fixture after quitting; not a provider-turn cancellation test."
+}

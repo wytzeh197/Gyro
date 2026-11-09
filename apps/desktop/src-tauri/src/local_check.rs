@@ -1,7 +1,17 @@
 //! Human-reviewed local checks. No provider/tool route can approve a plan.
-use super::*;
+use crate::{
+    diagnostics::export::user_home_directory,
+    session_browser,
+    stores::{open_store, parse_uuid, to_string},
+};
+use anyhow::Context;
 use gyro_core::local_check::{self as engine, CheckDraft, CheckPlan, CheckReport};
+use gyro_core::{CancellationToken, GyroPaths};
+use serde::Deserialize;
 use std::time::Instant;
+use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex, time::Duration};
+use tauri::Manager;
+use uuid::Uuid;
 
 // Freshness reads also persist the sticky stale flag. Serialize these with
 // deletion so an in-flight refresh cannot recreate a deleted report.

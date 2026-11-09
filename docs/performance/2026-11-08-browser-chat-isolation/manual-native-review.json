@@ -1,0 +1,34 @@
+{
+  "method": "Native CUA controls and read-only Web Inspector in guarded normal App",
+  "scope": "synthetic durable Alpha and Beta conversations; no provider turns",
+  "ownershipAfterViewportRecovery": "passed",
+  "firstCompanionReveal": "failed: invisible panel and 1% scale until viewport resize",
+  "simultaneousSplitLayout": "unverified; sidebar excludes transient workspace chats",
+  "observed": [
+    "Beta URL Second, Clicks: 2",
+    "Beta screenshot in Beta composer",
+    "Alpha URL Original, no Beta attachment",
+    "Alpha Clicks: 1 remained after closing Beta Browser",
+    "Only one network request per fixture document across switches"
+  ],
+  "console": [
+    "Notification permission probe rejection absent after macOS plugin registration fix",
+    "Unhandled window.start_dragging permission rejection after title-region click"
+  ],
+  "artifacts": [
+    "alpha-companion.png",
+    "alpha-companion.txt",
+    "beta-capture.png",
+    "beta-capture.txt",
+    "alpha-after-beta-close.png",
+    "alpha-after-beta-close.txt",
+    "native-store-audit.json"
+  ],
+  "remaining": [
+    "Reproduce and fix initial companion reveal without relying on viewport resize",
+    "Review main-window start-dragging capability",
+    "Provide a supported visible fixture project or restored multi-pane layout for simultaneous split acceptance",
+    "Native draft migration/provider flow still needs acceptance",
+    "Retina, older WebKit and live provider benchmark acceptance pending"
+  ]
+}

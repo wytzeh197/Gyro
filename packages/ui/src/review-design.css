@@ -312,3 +312,21 @@
   outline: 2px solid var(--gyro-focus-ring);
   outline-offset: -2px;
 }
+
+/* One toolbar row: what is compared and how much, then its controls. */
+.gyro-plain-diff-toolbar > .gyro-plain-diff-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-plain-diff-toolbar > .gyro-plain-diff-summary > strong {
+  color: var(--gyro-text);
+  font-weight: 500;
+}
+.gyro-plain-diff-toolbar > .gyro-recorded-diff-controls {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+}

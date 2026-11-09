@@ -1,0 +1,120 @@
+/* The new-session entry stays centered in its chat canvas. Give the writing
+   area room, separate the model/effort/voice controls, and keep project context
+   subordinate. Active chats and tiled composers retain their compact layout. */
+:root[data-theme]
+  .gyro-chat-surface.is-empty:not(.is-tiled)
+  > .gyro-chat-start:not(.is-mission) {
+  --gyro-composer-width: 800px;
+  align-items: center;
+  justify-content: center;
+}
+
+:root[data-theme]
+  .gyro-chat-surface.is-empty:not(.is-tiled)
+  > .gyro-chat-start:not(.is-mission)
+  > .gyro-brand-logo {
+  width: calc(var(--gyro-space-panel) * 2);
+  height: calc(var(--gyro-space-panel) * 2);
+  margin: 0 auto var(--gyro-space-section);
+}
+
+:root[data-theme]
+  .gyro-chat-surface.is-empty:not(.is-tiled)
+  > .gyro-chat-start:not(.is-mission)
+  > h1 {
+  text-align: center;
+}
+
+:root[data-theme]
+  .gyro-chat-surface.is-empty:not(.is-tiled)
+  > .gyro-chat-start:not(.is-mission)
+  > .gyro-composer-shell.is-hero.has-provider:not(.is-provider-collapsed) {
+  border-radius: var(--gyro-chat-composer-radius, var(--gyro-radius-composer));
+  box-shadow: none;
+  margin-top: calc(var(--gyro-space-comfortable) * 2);
+}
+
+:root[data-theme]
+  .gyro-chat-surface.is-empty:not(.is-tiled)
+  > .gyro-chat-start:not(.is-mission)
+  > .gyro-composer-shell.is-hero.has-provider:not(
+    .is-provider-collapsed
+  ):focus-within {
+  box-shadow: none;
+}
+
+:root[data-theme]
+  .gyro-chat-surface.is-empty:not(.is-tiled)
+  > .gyro-chat-start:not(.is-mission)
+  > .gyro-composer-shell.is-hero.has-provider:not(.is-provider-collapsed)
+  > textarea {
+  min-height: calc(var(--gyro-space-panel) * 4);
+  padding: var(--gyro-space-panel) var(--gyro-space-panel)
+    var(--gyro-space-standard);
+}
+
+:root[data-theme]
+  .gyro-chat-surface.is-empty:not(.is-tiled)
+  > .gyro-chat-start:not(.is-mission)
+  > .gyro-composer-shell.is-hero.has-provider:not(.is-provider-collapsed)
+  > .gyro-composer-bar {
+  align-items: center;
+  column-gap: var(--gyro-space-comfortable);
+  min-height: calc(
+    var(--gyro-composer-action-size) + var(--gyro-space-comfortable)
+  );
+  padding: 0 var(--gyro-space-comfortable) var(--gyro-space-comfortable);
+}
+
+:root[data-theme]
+  .gyro-chat-surface.is-empty:not(.is-tiled)
+  > .gyro-chat-start:not(.is-mission)
+  > .gyro-composer-shell.is-hero.has-provider:not(.is-provider-collapsed)
+  > .gyro-composer-context-row {
+  justify-content: center;
+  column-gap: var(--gyro-space-standard);
+  margin-inline: 0;
+  padding-inline: var(--gyro-space-standard);
+  top: calc(100% + var(--gyro-space-standard));
+}
+
+/* These separators belong to the spacious start composer only. Its existing
+   container queries still collapse labels and gaps inside narrow chat panes. */
+@container (min-width: 621px) {
+  :root[data-theme]
+    .gyro-chat-surface.is-empty:not(.is-tiled)
+    > .gyro-chat-start:not(.is-mission)
+    > .gyro-composer-shell
+    > .gyro-composer-bar
+    > :is(.gyro-composer-control-effort, .gyro-dictation-button) {
+    position: relative;
+    margin-left: var(--gyro-space-compact);
+  }
+
+  :root[data-theme]
+    .gyro-chat-surface.is-empty:not(.is-tiled)
+    > .gyro-chat-start:not(.is-mission)
+    > .gyro-composer-shell
+    > .gyro-composer-bar
+    > :is(.gyro-composer-control-effort, .gyro-dictation-button)::before {
+    content: "";
+    position: absolute;
+    left: calc(-1 * var(--gyro-space-standard));
+    top: 25%;
+    height: 50%;
+    width: 1px;
+    background: var(--gyro-border-strong);
+    pointer-events: none;
+  }
+}
+
+@container (max-width: 620px) {
+  :root[data-theme]
+    .gyro-chat-surface.is-empty:not(.is-tiled)
+    > .gyro-chat-start:not(.is-mission)
+    > .gyro-composer-shell.is-hero.has-provider:not(.is-provider-collapsed)
+    > .gyro-composer-bar {
+    column-gap: var(--gyro-space-compact);
+    padding-inline: var(--gyro-space-standard);
+  }
+}

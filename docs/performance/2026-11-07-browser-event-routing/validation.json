@@ -1,0 +1,61 @@
+{
+  "schema": "gyro.local-validation.v1",
+  "generatedAt": "2026-11-07T17:35:40.787012+00:00",
+  "head": "1d0b7e1321790246390b9ad64d78f73813a37ab6",
+  "workspace": "dirty; unrelated changes preserved",
+  "providerCalls": 0,
+  "runtimeCases": 16,
+  "transport": "controlled React lifecycle and Tauri transport; production hooks, App screenshot callback and reducer",
+  "baseline": {
+    "source": "HEAD hooks",
+    "exitCode": 1,
+    "result": "expected stale-event failure"
+  },
+  "prototypeRegression": {
+    "result": "reproduced stuck observation delaying Close, then corrected",
+    "finalUnresolvedObservationAndCommandCasesPass": true
+  },
+  "measurements": {
+    "titleBurst": {
+      "inputEvents": 1000,
+      "nativeSnapshotReads": 1,
+      "dispatchedWorkbenchActions": 1
+    }
+  },
+  "checks": {
+    "desktopTypecheck": "passed",
+    "desktopViteBuild": "passed",
+    "formatChangedModules": "passed",
+    "targetedDiffWhitespace": "passed",
+    "browserReveal": "passed",
+    "browserNavigation": "passed",
+    "browserViewport": "passed",
+    "browserHostVisibility": "passed",
+    "browserHostBounds": "passed",
+    "browserCapability": "passed",
+    "subagentBrowsers": "passed",
+    "browserObservationCost": "passed",
+    "surfaceBoundaries": "passed",
+    "chatCompanion": "passed",
+    "chatPaneClose": "passed",
+    "chatCloseTarget": "passed",
+    "chatSidePanel": "passed"
+  },
+  "buildWarnings": [
+    "existing Vite chunk-size warnings"
+  ],
+  "nativeFrontendAcceptance": "not run",
+  "renderedAppearanceAndKeyboard": "not run",
+  "fullRepositorySuite": "not run",
+  "providerBenchmark": "additional usage question pending; no new calls",
+  "sourceSha256": {
+    "apps/desktop/src/App.tsx": "f4d243cdfa4fa35498e06eb03e21581d2431b80bc97f927923b83549347f8482",
+    "apps/desktop/src/session-browser-queue.ts": "71f4a0509f3dd0a38fad15b07b7e30bf6f476df06235e56d3a3184307b3125ab",
+    "apps/desktop/src/session-browser-native.ts": "ae57e75845fe5494941ae12cfd4da4f769532f4185daaa95d063b5dd89871aa5",
+    "apps/desktop/src/model-browser-reveal.ts": "b11fb2ea9ce2efa3d0cb7e243651c5d6b6cdd3ae603dae8f0448e5782dbfe56f",
+    "apps/desktop/src/use-session-browser-events.ts": "8575c0bfba0a9daf5f97f5a15bc68b9067cbe9ccc570f8992316ee7ccc5e0a4c",
+    "scripts/check-browser-event-routing.mjs": "e367d7f18bc6fc0a89e31ceab3bf00632e45176df5c37ec9b4c673188158429b",
+    "scripts/check-browser-reveal.mjs": "7699328013e5ddf60fdcc5ed28f79304e8224b2f8fa72dfcb8e3d9d8a0104f79",
+    "package.json": "abc22c43e01a5cef44ec129d1f863966cc84b729830816f334dc0fc19a799b6c"
+  }
+}

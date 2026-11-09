@@ -1,0 +1,1093 @@
+{
+  "schema": "gyro.editor-resource-lifecycle.v1",
+  "phase": "after",
+  "evidence": "Actual production reducer and Monaco pane in isolated Chromium; generated 1024-line text files; renderer heap only, not native WebKit footprint",
+  "browserVersion": {
+    "protocolVersion": "1.3",
+    "product": "Chrome/157.0.8103.39",
+    "revision": "@d5f73ccfbb8887db2367b182fa86df82c6b705c",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36",
+    "jsVersion": "15.7.112.23"
+  },
+  "previews": 72,
+  "qualityChecks": [
+    "pinned unsaved text and undo",
+    "shared split ownership and final close",
+    "closed-preview cursor and scroll on reopen",
+    "100 rapid previews during lazy mount"
+  ],
+  "samples": [
+    {
+      "label": "warm empty",
+      "tabs": 0,
+      "buffers": 0,
+      "bufferCharacters": 0,
+      "models": 0,
+      "modelCharacters": 0,
+      "editorCount": 0,
+      "heap": {
+        "usedSize": 11376696,
+        "totalSize": 12533760,
+        "embedderHeapUsedSize": 3064040,
+        "backingStorageSize": 4379531
+      },
+      "dom": {
+        "documents": 2,
+        "nodes": 832,
+        "jsEventListeners": 155
+      }
+    },
+    {
+      "label": "after 24 previews",
+      "tabs": 1,
+      "buffers": 1,
+      "bufferCharacters": 129962,
+      "models": 1,
+      "modelCharacters": 129962,
+      "editorCount": 1,
+      "heap": {
+        "usedSize": 14778552,
+        "totalSize": 16367616,
+        "embedderHeapUsedSize": 3529360,
+        "backingStorageSize": 4427130
+      },
+      "dom": {
+        "documents": 2,
+        "nodes": 630,
+        "jsEventListeners": 325
+      }
+    },
+    {
+      "label": "after 48 previews",
+      "tabs": 1,
+      "buffers": 1,
+      "bufferCharacters": 129962,
+      "models": 1,
+      "modelCharacters": 129962,
+      "editorCount": 1,
+      "heap": {
+        "usedSize": 14941620,
+        "totalSize": 16367616,
+        "embedderHeapUsedSize": 3530624,
+        "backingStorageSize": 4428066
+      },
+      "dom": {
+        "documents": 2,
+        "nodes": 630,
+        "jsEventListeners": 325
+      }
+    },
+    {
+      "label": "after 72 previews",
+      "tabs": 1,
+      "buffers": 1,
+      "bufferCharacters": 129962,
+      "models": 1,
+      "modelCharacters": 129962,
+      "editorCount": 1,
+      "heap": {
+        "usedSize": 15063944,
+        "totalSize": 16629760,
+        "embedderHeapUsedSize": 3532136,
+        "backingStorageSize": 4429002
+      },
+      "dom": {
+        "documents": 2,
+        "nodes": 630,
+        "jsEventListeners": 325
+      }
+    },
+    {
+      "label": "closed final preview",
+      "tabs": 0,
+      "buffers": 0,
+      "bufferCharacters": 0,
+      "models": 0,
+      "modelCharacters": 0,
+      "editorCount": 0,
+      "heap": {
+        "usedSize": 13891956,
+        "totalSize": 15581184,
+        "embedderHeapUsedSize": 2923224,
+        "backingStorageSize": 4380108
+      },
+      "dom": {
+        "documents": 2,
+        "nodes": 44,
+        "jsEventListeners": 155
+      }
+    }
+  ],
+  "errors": [
+    {
+      "exceptionId": 1,
+      "text": "Uncaught (in promise)",
+      "lineNumber": 613,
+      "columnNumber": 160139,
+      "scriptId": "9",
+      "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "cancel",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 160139
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 160269
+          },
+          {
+            "functionName": "Zi",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 1628
+          },
+          {
+            "functionName": "clear",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2136
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2046
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1353,
+            "columnNumber": 102384
+          },
+          {
+            "functionName": "",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1353,
+            "columnNumber": 102866
+          },
+          {
+            "functionName": "_deliver",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 3082
+          },
+          {
+            "functionName": "_deliverQueue",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 3173
+          },
+          {
+            "functionName": "fire",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 3557
+          },
+          {
+            "functionName": "setModel",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1259,
+            "columnNumber": 679
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:1462/assets/monaco-editor-D_B-iRik.js",
+            "lineNumber": 11,
+            "columnNumber": 6399
+          },
+          {
+            "functionName": "Qg",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 161,
+            "columnNumber": 23123
+          },
+          {
+            "functionName": "LLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 13141
+          },
+          {
+            "functionName": "kLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 12887
+          },
+          {
+            "functionName": "xLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 12793
+          },
+          {
+            "functionName": "SLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 12669
+          },
+          {
+            "functionName": "lNe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 25155
+          },
+          {
+            "functionName": "uf",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 24808
+          },
+          {
+            "functionName": "",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 23899
+          },
+          {
+            "functionName": "qe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 62,
+            "columnNumber": 2140
+          },
+          {
+            "functionName": "Ge",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 62,
+            "columnNumber": 1900
+          },
+          {
+            "functionName": "Hs",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 62,
+            "columnNumber": 3717
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "od",
+        "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160140)\n    at Sc.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160270)\n    at Zi (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:1629)\n    at RO.clear (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2137)\n    at RO.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2047)\n    at vp.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:102385)\n    at I6.value (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:102867)\n    at ne._deliver (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:3083)\n    at ne._deliverQueue (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:3174)\n    at ne.fire (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:3558)",
+        "objectId": "8307626566448834343.2.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160140)\n    at Sc.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160270)\n    at Zi (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:1629)\n    at RO.clear (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2137)\n    at RO.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2047)\n    at vp.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:102385)\n    at I6.value (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:102867)\n    at ne._deliver (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:3083)\n    at ne._deliverQueue (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:3174)\n    at ne.fire (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:3558)",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "name",
+              "type": "string",
+              "value": "Canceled"
+            },
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "Canceled: Canceled\n    at Sc.cancel (http://127.0.…ets/editor-resource-fixture-CpxG3YBE.js:614:3558)"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Canceled"
+            }
+          ]
+        }
+      },
+      "executionContextId": 2
+    },
+    {
+      "exceptionId": 2,
+      "text": "Uncaught (in promise)",
+      "lineNumber": 613,
+      "columnNumber": 160139,
+      "scriptId": "9",
+      "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "cancel",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 160139
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 160269
+          },
+          {
+            "functionName": "Zi",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 1628
+          },
+          {
+            "functionName": "clear",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2136
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2046
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1353,
+            "columnNumber": 102384
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1353,
+            "columnNumber": 103314
+          },
+          {
+            "functionName": "Zi",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 1628
+          },
+          {
+            "functionName": "clearAndDisposeAll",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 3579
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 3513
+          },
+          {
+            "functionName": "Zi",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 1628
+          },
+          {
+            "functionName": "clear",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2136
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2046
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2707
+          },
+          {
+            "functionName": "Zi",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 1628
+          },
+          {
+            "functionName": "clear",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2136
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2046
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2707
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1257,
+            "columnNumber": 16720
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1261,
+            "columnNumber": 98120
+          },
+          {
+            "functionName": "Le",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:1462/assets/monaco-editor-D_B-iRik.js",
+            "lineNumber": 11,
+            "columnNumber": 8225
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:1462/assets/monaco-editor-D_B-iRik.js",
+            "lineNumber": 11,
+            "columnNumber": 6187
+          },
+          {
+            "functionName": "OT",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 161,
+            "columnNumber": 20984
+          },
+          {
+            "functionName": "Nd",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 161,
+            "columnNumber": 22832
+          },
+          {
+            "functionName": "MLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 14157
+          },
+          {
+            "functionName": "TLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 13867
+          },
+          {
+            "functionName": "DLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 13337
+          },
+          {
+            "functionName": "NLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 13182
+          },
+          {
+            "functionName": "lNe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 25140
+          },
+          {
+            "functionName": "uf",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 24808
+          },
+          {
+            "functionName": "",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 23899
+          },
+          {
+            "functionName": "qe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 62,
+            "columnNumber": 2140
+          },
+          {
+            "functionName": "Ge",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 62,
+            "columnNumber": 1900
+          },
+          {
+            "functionName": "Hs",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 62,
+            "columnNumber": 3717
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "od",
+        "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160140)\n    at Sc.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160270)\n    at Zi (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:1629)\n    at RO.clear (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2137)\n    at RO.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2047)\n    at vp.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:102385)\n    at qv.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:103315)\n    at Zi (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:1629)\n    at iK.clearAndDisposeAll (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:3580)\n    at iK.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:3514)",
+        "objectId": "8307626566448834343.2.2",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160140)\n    at Sc.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160270)\n    at Zi (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:1629)\n    at RO.clear (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2137)\n    at RO.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2047)\n    at vp.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:102385)\n    at qv.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:103315)\n    at Zi (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:1629)\n    at iK.clearAndDisposeAll (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:3580)\n    at iK.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:3514)",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "name",
+              "type": "string",
+              "value": "Canceled"
+            },
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "Canceled: Canceled\n    at Sc.cancel (http://127.0.…ets/editor-resource-fixture-CpxG3YBE.js:612:3514)"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Canceled"
+            }
+          ]
+        }
+      },
+      "executionContextId": 2
+    },
+    {
+      "exceptionId": 3,
+      "text": "Uncaught (in promise)",
+      "lineNumber": 613,
+      "columnNumber": 160139,
+      "scriptId": "9",
+      "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "cancel",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 160139
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 160269
+          },
+          {
+            "functionName": "Zi",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 1628
+          },
+          {
+            "functionName": "clear",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2136
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2046
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1353,
+            "columnNumber": 102384
+          },
+          {
+            "functionName": "",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1353,
+            "columnNumber": 102866
+          },
+          {
+            "functionName": "_deliver",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 3082
+          },
+          {
+            "functionName": "_deliverQueue",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 3173
+          },
+          {
+            "functionName": "fire",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 3557
+          },
+          {
+            "functionName": "setModel",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1259,
+            "columnNumber": 679
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:1462/assets/monaco-editor-D_B-iRik.js",
+            "lineNumber": 11,
+            "columnNumber": 6399
+          },
+          {
+            "functionName": "Qg",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 161,
+            "columnNumber": 23123
+          },
+          {
+            "functionName": "LLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 13141
+          },
+          {
+            "functionName": "kLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 12887
+          },
+          {
+            "functionName": "xLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 12793
+          },
+          {
+            "functionName": "SLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 12669
+          },
+          {
+            "functionName": "lNe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 25155
+          },
+          {
+            "functionName": "uf",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 24808
+          },
+          {
+            "functionName": "",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 23899
+          },
+          {
+            "functionName": "qe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 62,
+            "columnNumber": 2140
+          },
+          {
+            "functionName": "Ge",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 62,
+            "columnNumber": 1900
+          },
+          {
+            "functionName": "Hs",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 62,
+            "columnNumber": 3717
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "od",
+        "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160140)\n    at Sc.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160270)\n    at Zi (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:1629)\n    at RO.clear (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2137)\n    at RO.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2047)\n    at vp.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:102385)\n    at I6.value (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:102867)\n    at ne._deliver (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:3083)\n    at ne._deliverQueue (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:3174)\n    at ne.fire (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:3558)",
+        "objectId": "8307626566448834343.2.3",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160140)\n    at Sc.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160270)\n    at Zi (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:1629)\n    at RO.clear (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2137)\n    at RO.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2047)\n    at vp.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:102385)\n    at I6.value (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:102867)\n    at ne._deliver (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:3083)\n    at ne._deliverQueue (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:3174)\n    at ne.fire (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:3558)",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "name",
+              "type": "string",
+              "value": "Canceled"
+            },
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "Canceled: Canceled\n    at Sc.cancel (http://127.0.…ets/editor-resource-fixture-CpxG3YBE.js:614:3558)"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Canceled"
+            }
+          ]
+        }
+      },
+      "executionContextId": 2
+    },
+    {
+      "exceptionId": 4,
+      "text": "Uncaught (in promise)",
+      "lineNumber": 613,
+      "columnNumber": 160139,
+      "scriptId": "9",
+      "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "cancel",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 160139
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 613,
+            "columnNumber": 160269
+          },
+          {
+            "functionName": "Zi",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 1628
+          },
+          {
+            "functionName": "clear",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2136
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2046
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1353,
+            "columnNumber": 102384
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1353,
+            "columnNumber": 103314
+          },
+          {
+            "functionName": "Zi",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 1628
+          },
+          {
+            "functionName": "clearAndDisposeAll",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 3579
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 3513
+          },
+          {
+            "functionName": "Zi",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 1628
+          },
+          {
+            "functionName": "clear",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2136
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2046
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2707
+          },
+          {
+            "functionName": "Zi",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 1628
+          },
+          {
+            "functionName": "clear",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2136
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2046
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 611,
+            "columnNumber": 2707
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1257,
+            "columnNumber": 16720
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 1261,
+            "columnNumber": 98120
+          },
+          {
+            "functionName": "Le",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:1462/assets/monaco-editor-D_B-iRik.js",
+            "lineNumber": 11,
+            "columnNumber": 8225
+          },
+          {
+            "functionName": "",
+            "scriptId": "12",
+            "url": "http://127.0.0.1:1462/assets/monaco-editor-D_B-iRik.js",
+            "lineNumber": 11,
+            "columnNumber": 6187
+          },
+          {
+            "functionName": "OT",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 161,
+            "columnNumber": 20984
+          },
+          {
+            "functionName": "Nd",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 161,
+            "columnNumber": 22832
+          },
+          {
+            "functionName": "MLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 14157
+          },
+          {
+            "functionName": "TLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 13867
+          },
+          {
+            "functionName": "DLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 13337
+          },
+          {
+            "functionName": "NLe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 13182
+          },
+          {
+            "functionName": "lNe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 25140
+          },
+          {
+            "functionName": "uf",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 24808
+          },
+          {
+            "functionName": "",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 174,
+            "columnNumber": 23899
+          },
+          {
+            "functionName": "qe",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 62,
+            "columnNumber": 2140
+          },
+          {
+            "functionName": "Ge",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 62,
+            "columnNumber": 1900
+          },
+          {
+            "functionName": "Hs",
+            "scriptId": "9",
+            "url": "http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js",
+            "lineNumber": 62,
+            "columnNumber": 3717
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "od",
+        "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160140)\n    at Sc.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160270)\n    at Zi (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:1629)\n    at RO.clear (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2137)\n    at RO.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2047)\n    at vp.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:102385)\n    at qv.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:103315)\n    at Zi (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:1629)\n    at iK.clearAndDisposeAll (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:3580)\n    at iK.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:3514)",
+        "objectId": "8307626566448834343.2.4",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "Canceled: Canceled\n    at Sc.cancel (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160140)\n    at Sc.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:614:160270)\n    at Zi (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:1629)\n    at RO.clear (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2137)\n    at RO.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:2047)\n    at vp.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:102385)\n    at qv.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:1354:103315)\n    at Zi (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:1629)\n    at iK.clearAndDisposeAll (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:3580)\n    at iK.dispose (http://127.0.0.1:1462/assets/editor-resource-fixture-CpxG3YBE.js:612:3514)",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "name",
+              "type": "string",
+              "value": "Canceled"
+            },
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "Canceled: Canceled\n    at Sc.cancel (http://127.0.…ets/editor-resource-fixture-CpxG3YBE.js:612:3514)"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Canceled"
+            }
+          ]
+        }
+      },
+      "executionContextId": 2
+    }
+  ]
+}

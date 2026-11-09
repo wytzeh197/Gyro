@@ -1,0 +1,20 @@
+{
+  "mode": "manual native CUA review of normal App startup",
+  "passed": [
+    "Project draft preview opened before any provider message",
+    "Native page showed Shell Original ready",
+    "Native Change visible state click produced State: changed and Clicks: 1",
+    "Mobile switch reported 390 by 844 and page compact layout",
+    "Native PNG preview decoded at 390 by 844",
+    "Sessions composer showed the captured PNG attachment before any first message",
+    "Opening an empty browser preview no longer emitted an invalid-address notification"
+  ],
+  "providerCallsDispatchedByThisReview": 0,
+  "limits": [
+    "Folderless draft covered by callback and Rust ownership tests; no native folderless URL flow claimed",
+    "Project path with spaces covered by label/ownership and attachment callback tests, not native dialog acceptance",
+    "Companion and multi-chat split remain unverified",
+    "Native notification permission probe produced an unhandled rejection; recorded for follow-up"
+  ],
+  "temporaryDatabase": "/private/tmp/gyro-shell-gQy1Wx/data/gyro.sqlite3"
+}

@@ -5,8 +5,21 @@
 //! provider value and decides what a person is shown, so the shell keeps
 //! delegating instead of growing.
 
-use crate::*;
-
+use crate::{
+    file_patch_counts, provider_tool_batch,
+    providers::{
+        markers::strip_hidden_control_markers,
+        stdout::{
+            command_activity_label, extract_codex_agent_message_text, humanize_activity_name,
+            json_object_string, json_string_or_joined, provider_activity_path,
+            provider_tool_activity_note,
+        },
+        types::ProviderActivity,
+    },
+    text::sanitize_provider_text_delta,
+};
+use std::path::Path;
+use uuid::Uuid;
 /// The context window a provider's model exposes, in tokens.
 ///
 /// Providers that report their own window win; this table is what answers for

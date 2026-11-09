@@ -1,0 +1,45 @@
+{
+  "build": "debug",
+  "elapsedMs": 368428,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": false,
+      "effort": "low",
+      "failureClass": "timeout-or-cancelled",
+      "failureDetail": "chat cancelled by user",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [],
+      "model": "claude-sonnet-5",
+      "outcome": "failed",
+      "provider": "anthropic",
+      "requireFileEditApproval": true,
+      "resumedRequested": false,
+      "sessionId": "100b5201-adab-4333-be37-29848821d70e",
+      "task": "code",
+      "trial": 1,
+      "turnId": "2af69790-8ab9-47ff-98c6-3f638a806048",
+      "wallMs": 180340.77758300002
+    },
+    {
+      "correct": false,
+      "effort": "low",
+      "failureClass": "timeout-or-cancelled",
+      "failureDetail": "chat cancelled by user",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [],
+      "model": "claude-sonnet-5",
+      "outcome": "failed",
+      "provider": "anthropic",
+      "requireFileEditApproval": true,
+      "resumedRequested": true,
+      "sessionId": "5e0898fb-f7fd-40b0-af86-c34f7002b68b",
+      "task": "code",
+      "trial": 1,
+      "turnId": "cd211dba-6665-4f94-897c-6e9329347734",
+      "wallMs": 180347.89216699998
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

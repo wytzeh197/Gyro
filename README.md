@@ -20,11 +20,9 @@ session with you.
 [![Watch the Gyro launch film](docs/media/launch/gyro-launch-poster.png)](docs/media/launch/gyro-launch-film.mp4)
 
 > [!IMPORTANT]
-> Public alpha for macOS. Not recommended for production. Alpha app bundles use
-> an ad-hoc signature and are not Apple-signed or notarized, so macOS requires a
-> one-time **Open Anyway** confirmation. Follow the
-> [macOS installation guide](docs/install-macos.md). Do not disable Gatekeeper
-> or remove quarantine globally.
+> Gyro is an early release for macOS 14+. Stable app bundles and DMGs are
+> Developer ID signed and notarized by Apple. Follow the
+> [macOS installation guide](docs/install-macos.md).
 
 <p align="center">
   <img src="docs/screenshots/readme/chat-workflow.webp" alt="An active Gyro agent session showing the task, reviewed workspace actions, commands, edited files, and final result" width="100%">
@@ -73,7 +71,7 @@ session with you.
   are reported per session, and usage limits can pause work that would run past
   them; estimates are not hard spend ceilings.
 - **Local-first trust.** Sessions, config, worktrees, and usage stay on your
-  Mac; provider keys live in the macOS Keychain; logs are redacted; app
+  Mac; saved API keys stay in a private local file; logs are redacted; app
   telemetry is off by default.
 
 ## Providers
@@ -88,7 +86,7 @@ session with you.
   Gyro tools where the model supports them. See [Local models](docs/local-models.md).
 - **API keys.** DeepSeek, Mistral, and OpenRouter ship as presets, and any
   OpenAI-compatible endpoint can be added as a custom provider, including local
-  servers on loopback. Keys are stored in the Keychain and sent only to the
+  servers on loopback. Saved keys are stored in a private local file and sent only to the
   endpoint you configured. Models that support images can read chat attachments
   (PNG, JPEG, GIF, WebP). See [API-key providers](docs/api-key-providers.md).
 
@@ -114,26 +112,23 @@ Keep the app and CLI on the same version for session handoff.
 
 ## Status
 
-Gyro is working toward **v0.1.0**, its first non-alpha release. Before it
-ships, the macOS app will move from ad-hoc signing to Developer ID signing
-with Apple notarization, and the clean-machine path—install, connect a
-provider, first reply, approved edit, restart and resume—must pass on fresh
-Apple Silicon and Intel Macs. Progress and scope are tracked in the
-[roadmap](docs/roadmap.md); every alpha is listed in the
+The current release is **v0.1.1**. Gyro runs locally without a Gyro account;
+Account, Plan & billing, and Cloud remain coming soon. Progress and scope are
+tracked in the [roadmap](docs/roadmap.md), with released changes in the
 [changelog](https://usegyro.io/changelog/).
 
-Known limits in the current alpha:
+Known limits:
 
-- App bundles are ad-hoc signed; first launch needs **Open Anyway**.
+- Provider access requires your own CLI login, subscription, API key, or local model.
 - Cursor and OpenCode are experimental and not approval-safe adapters.
 - Notebook and binary file edits are refused rather than applied.
-- API-key providers run in the app; the CLI chat loop does not execute them
-  yet.
+- Saved API keys are stored in `secrets.json` with private file permissions,
+  without encryption at rest. Provider CLI logins stay in provider-owned storage.
 - Keep the app and CLI on the same version when handing sessions between them.
 
 ## Build from source
 
-Requires macOS 14+, Node.js 22+, pnpm 11+, Rust 1.78+, and Xcode CLT.
+Requires macOS 14+, Node.js 22+, pnpm 11+, Rust 1.90+, and Xcode CLT.
 
 ```bash
 git clone https://github.com/wytzeh197/Gyro.git

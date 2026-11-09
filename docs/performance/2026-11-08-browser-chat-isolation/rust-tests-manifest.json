@@ -1,0 +1,38 @@
+{
+  "root": "/private/tmp/gyro-chat-browser-tests-zzwopy7y",
+  "data": "/private/tmp/gyro-chat-browser-tests-zzwopy7y/data",
+  "results": [
+    {
+      "name": "notifications",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "gyro-desktop",
+        "--lib",
+        "desktop_notifications",
+        "--",
+        "--nocapture"
+      ],
+      "exitCode": 0
+    },
+    {
+      "name": "browser",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "gyro-desktop",
+        "--lib",
+        "browser",
+        "--",
+        "--nocapture"
+      ],
+      "exitCode": 0
+    }
+  ]
+}

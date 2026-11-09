@@ -1,0 +1,91 @@
+{
+  "root": "/private/tmp/gyro-shell-nLMuhJ",
+  "data": "/private/tmp/gyro-shell-nLMuhJ/data",
+  "workspace": "/private/tmp/gyro-shell-nLMuhJ/workspace",
+  "frontend": "/private/tmp/gyro-shell-nLMuhJ/frontend",
+  "identifier": "dev.gyro.browser-shell-review.gyro-shell-nLMuhJ",
+  "mode": "normal-app-manual-review",
+  "build": "passed",
+  "uiVerdict": "unverified",
+  "binary": "/Users/wytze/Gyro/target/debug/gyro-browser-shell-review",
+  "executableSha256": "9807004792c670260f4b56280f61db7c7bd4b402a9070beb653d3ed2f326ba0e",
+  "app": "/private/tmp/gyro-shell-nLMuhJ/Gyro Browser Shell Review.app",
+  "seededChats": [
+    {
+      "id": "d1336838-e3ee-4ea4-8158-1fccc69cb05d",
+      "title": "Browser review Alpha",
+      "workspacePath": "/private/tmp/gyro-shell-nLMuhJ/workspace",
+      "workspaceIdentity": {
+        "schema": "gyro.workspace.v2",
+        "revision": 1,
+        "roots": [
+          {
+            "id": "root-401aa800b58de5cd",
+            "path": "/private/tmp/gyro-shell-nLMuhJ/workspace"
+          }
+        ],
+        "activeRootId": "root-401aa800b58de5cd"
+      },
+      "origin": "desktop",
+      "workspaceMode": "local",
+      "branch": "main",
+      "worktreeName": null,
+      "providerId": null,
+      "providerLabel": null,
+      "modelId": null,
+      "modelLabel": null,
+      "reasoningEffort": null,
+      "summary": null,
+      "summaryUpdatedAt": null,
+      "createdAt": "2026-11-08T10:48:58.607238Z",
+      "updatedAt": "2026-11-08T10:48:58.608695Z",
+      "eventsPath": "/private/tmp/gyro-shell-nLMuhJ/data/sessions/d1336838-e3ee-4ea4-8158-1fccc69cb05d.jsonl"
+    },
+    {
+      "id": "aa75e76d-03f2-418e-a14c-a782fcc255d4",
+      "title": "Browser review Beta",
+      "workspacePath": "/private/tmp/gyro-shell-nLMuhJ/workspace",
+      "workspaceIdentity": {
+        "schema": "gyro.workspace.v2",
+        "revision": 1,
+        "roots": [
+          {
+            "id": "root-401aa800b58de5cd",
+            "path": "/private/tmp/gyro-shell-nLMuhJ/workspace"
+          }
+        ],
+        "activeRootId": "root-401aa800b58de5cd"
+      },
+      "origin": "desktop",
+      "workspaceMode": "local",
+      "branch": "main",
+      "worktreeName": null,
+      "providerId": null,
+      "providerLabel": null,
+      "modelId": null,
+      "modelLabel": null,
+      "reasoningEffort": null,
+      "summary": null,
+      "summaryUpdatedAt": null,
+      "createdAt": "2026-11-08T10:48:58.711437Z",
+      "updatedAt": "2026-11-08T10:48:58.712427Z",
+      "eventsPath": "/private/tmp/gyro-shell-nLMuhJ/data/sessions/aa75e76d-03f2-418e-a14c-a782fcc255d4.jsonl"
+    }
+  ],
+  "fixtureUrl": "http://127.0.0.1:50262/browser-observation.html",
+  "native": {
+    "status": "exited",
+    "pid": 61839,
+    "startedAt": "2026-11-08T11:16:44.642Z",
+    "code": null,
+    "signal": "SIGTERM",
+    "exitedAt": "2026-11-08T11:21:16.479Z"
+  },
+  "requests": [
+    {
+      "page": "Original",
+      "at": "2026-11-08T11:19:03.924Z"
+    }
+  ],
+  "executableUnchanged": true
+}

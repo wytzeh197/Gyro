@@ -1,0 +1,255 @@
+{
+  "root": "/private/tmp/gyro-split-core-cli-host-defaults-riz0o7i5",
+  "pid": 25920,
+  "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+  "pidExecutableVerified": true,
+  "frontendMeasured": false,
+  "privateGyroStore": true,
+  "providers": {
+    "openai": {
+      "build": "debug",
+      "elapsedMs": 57230,
+      "fixture": "meridian-v1",
+      "frontendMeasured": false,
+      "records": [
+        {
+          "compactBeforeResume": false,
+          "correct": true,
+          "effort": "low",
+          "fixtureReviewMode": "task-paths",
+          "fixtureReviews": [
+            {
+              "decision": "approve-fixture-edit",
+              "path": "src/clamp.mjs",
+              "proposalId": "b6462ffa-d8fc-46c0-b53b-9a8f18fa2164",
+              "status": "applied"
+            },
+            {
+              "decision": "approve-fixture-edit",
+              "path": "clamp.test.mjs",
+              "proposalId": "7edbb95e-3dbb-4cfb-b720-4252186a6c23",
+              "status": "applied"
+            }
+          ],
+          "model": "gpt-5.6-sol",
+          "outcome": "completed",
+          "provider": "openai",
+          "requireFileEditApproval": true,
+          "responsePresent": true,
+          "resumedActual": false,
+          "resumedRequested": false,
+          "retryCount": 0,
+          "sessionId": "3452d775-3572-4d84-87a9-2e828165073f",
+          "task": "code",
+          "trial": 1,
+          "turnId": "dd63422c-318f-4847-8943-6d9341d25a8d",
+          "wallMs": 24025.861708
+        },
+        {
+          "compactBeforeResume": false,
+          "correct": true,
+          "effort": "low",
+          "fixtureReviewMode": "task-paths",
+          "fixtureReviews": [
+            {
+              "decision": "approve-fixture-edit",
+              "path": "clamp.test.mjs",
+              "proposalId": "e961f2cc-8781-4160-8245-3706caa46b85",
+              "status": "applied"
+            },
+            {
+              "decision": "approve-fixture-edit",
+              "path": "src/clamp.mjs",
+              "proposalId": "a38084e9-a9f7-4333-a9aa-ec50c4fb7088",
+              "status": "applied"
+            }
+          ],
+          "model": "gpt-5.6-sol",
+          "outcome": "completed",
+          "provider": "openai",
+          "requireFileEditApproval": true,
+          "responsePresent": true,
+          "resumedActual": true,
+          "resumedRequested": true,
+          "retryCount": 0,
+          "sessionId": "cf2a65b1-f91f-49b1-8501-50061fd1134e",
+          "task": "code",
+          "trial": 1,
+          "turnId": "54572174-517f-4341-acc5-ce1bedb7bdd9",
+          "wallMs": 20586.215
+        }
+      ],
+      "schema": "gyro.benchmark.v1"
+    },
+    "anthropic": {
+      "build": "debug",
+      "elapsedMs": 53536,
+      "fixture": "meridian-v1",
+      "frontendMeasured": false,
+      "records": [
+        {
+          "compactBeforeResume": false,
+          "correct": true,
+          "effort": "low",
+          "fixtureReviewMode": "task-paths",
+          "fixtureReviews": [
+            {
+              "approvalId": "4affd447-2630-490d-986a-da420cc67827",
+              "decision": "approve-provider-fixture-edit",
+              "paths": [
+                "src/clamp.mjs"
+              ],
+              "status": "applied"
+            },
+            {
+              "approvalId": "eea840a7-0d5f-4a1a-9be2-a52c6b913b3d",
+              "decision": "approve-provider-fixture-edit",
+              "paths": [
+                "clamp.test.mjs"
+              ],
+              "status": "applied"
+            }
+          ],
+          "model": "claude-sonnet-5",
+          "outcome": "completed",
+          "provider": "anthropic",
+          "requireFileEditApproval": true,
+          "responsePresent": true,
+          "resumedActual": false,
+          "resumedRequested": false,
+          "retryCount": 0,
+          "sessionId": "6fa726d9-6190-40e4-8be5-0cc0cd3ac64e",
+          "task": "code",
+          "trial": 1,
+          "turnId": "bc8f74d5-c309-4ae3-a985-d8af2239aa85",
+          "wallMs": 24230.414917000002
+        },
+        {
+          "compactBeforeResume": false,
+          "correct": true,
+          "effort": "low",
+          "fixtureReviewMode": "task-paths",
+          "fixtureReviews": [
+            {
+              "approvalId": "191d1b25-c0b3-4057-b256-790ab93c4423",
+              "decision": "approve-provider-fixture-edit",
+              "paths": [
+                "src/clamp.mjs"
+              ],
+              "status": "applied"
+            },
+            {
+              "approvalId": "0e289611-376f-4359-a0a7-967d4be2a247",
+              "decision": "approve-provider-fixture-edit",
+              "paths": [
+                "clamp.test.mjs"
+              ],
+              "status": "applied"
+            }
+          ],
+          "model": "claude-sonnet-5",
+          "outcome": "completed",
+          "provider": "anthropic",
+          "requireFileEditApproval": true,
+          "responsePresent": true,
+          "resumedActual": true,
+          "resumedRequested": true,
+          "retryCount": 0,
+          "sessionId": "185766e5-83c5-4497-9608-95e8b1b0ec5a",
+          "task": "code",
+          "trial": 1,
+          "turnId": "89670d8e-bd6b-4cef-85a2-cbf081de687b",
+          "wallMs": 19766.467959
+        }
+      ],
+      "schema": "gyro.benchmark.v1"
+    },
+    "deepseek": {
+      "build": "debug",
+      "elapsedMs": 39362,
+      "fixture": "meridian-v1",
+      "frontendMeasured": false,
+      "records": [
+        {
+          "compactBeforeResume": false,
+          "correct": false,
+          "effort": "low",
+          "fixtureReviewMode": "task-paths",
+          "fixtureReviews": [
+            {
+              "decision": "approve-fixture-edit",
+              "path": "src/clamp.mjs",
+              "proposalId": "9a429b43-9018-4f9c-a4c1-fe098c5d44a3",
+              "status": "applied"
+            },
+            {
+              "decision": "skip",
+              "path": "src/clamp.test.mjs",
+              "proposalId": "5f8e99a6-2841-45d2-a5ef-0177547414fa",
+              "status": "out-of-scope"
+            }
+          ],
+          "model": "deepseek-flash",
+          "outcome": "completed",
+          "provider": "deepseek",
+          "requireFileEditApproval": true,
+          "responsePresent": true,
+          "resumedActual": false,
+          "resumedRequested": false,
+          "retryCount": 0,
+          "sessionId": "31d79856-0982-4cd7-9268-e3984cdd04b3",
+          "task": "code",
+          "trial": 1,
+          "turnId": "ea6cff18-a6de-4dd2-ad33-a1036f73d077",
+          "wallMs": 14600.968042
+        },
+        {
+          "compactBeforeResume": false,
+          "correct": true,
+          "effort": "low",
+          "fixtureReviewMode": "task-paths",
+          "fixtureReviews": [
+            {
+              "decision": "skip",
+              "path": ".gyro/memory.md",
+              "proposalId": "dd10c0c1-7cf3-4682-acc8-110a81a1de13",
+              "status": "out-of-scope"
+            },
+            {
+              "decision": "approve-fixture-edit",
+              "path": "src/clamp.mjs",
+              "proposalId": "f9574225-4703-4755-8f91-0b6d14acd620",
+              "status": "applied"
+            },
+            {
+              "decision": "approve-fixture-edit",
+              "path": "clamp.test.mjs",
+              "proposalId": "13ca6ebb-22db-4e59-ada8-fca38010b9bf",
+              "status": "applied"
+            },
+            {
+              "approvalId": "4e03e43f-5dec-45fd-abf3-4ba66fe3d299",
+              "capabilityId": "workspace-diff",
+              "decision": "allow-fixture-inspection",
+              "status": "allowed-once"
+            }
+          ],
+          "model": "deepseek-flash",
+          "outcome": "completed",
+          "provider": "deepseek",
+          "requireFileEditApproval": true,
+          "responsePresent": true,
+          "resumedActual": false,
+          "resumedRequested": true,
+          "retryCount": 0,
+          "sessionId": "fb2864a4-da5b-4948-b039-75903efcee26",
+          "task": "code",
+          "trial": 1,
+          "turnId": "4ad4cb53-4d14-49a9-9341-dce0415aebeb",
+          "wallMs": 16625.485125
+        }
+      ],
+      "schema": "gyro.benchmark.v1"
+    }
+  }
+}

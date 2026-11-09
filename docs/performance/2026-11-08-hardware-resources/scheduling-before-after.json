@@ -1,0 +1,21 @@
+{
+  "schema": "gyro.resource-scheduling.v1",
+  "evidence": "Actual hook execution with controlled clocks and stub native transports; not a native CPU or RAM measurement",
+  "baseline": "35ef4814b13c1f9dfa2b9a0b93d0d25d2760dd68",
+  "before": {
+    "configCalls": 20,
+    "cachedReadingStateChanges": 2,
+    "unfocusedCalls": 60,
+    "collapsedExplorerTimers": 1,
+    "emptyEditorTimers": 1,
+    "slowLanguagePollRequests": 120
+  },
+  "after": {
+    "configCalls": 1,
+    "cachedReadingStateChanges": 0,
+    "unfocusedCalls": 0,
+    "collapsedExplorerTimers": 0,
+    "emptyEditorTimers": 0,
+    "slowLanguagePollRequests": 2
+  }
+}

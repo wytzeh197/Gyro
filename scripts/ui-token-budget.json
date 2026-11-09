@@ -1,13 +1,13 @@
 {
-  "important": 313,
+  "important": 311,
   "lightThemeSelectors": 317,
-  "hexLiterals": 514,
-  "rgbLiterals": 268,
-  "tokenLiteralFallbacks": 31,
+  "hexLiterals": 509,
+  "rgbLiterals": 265,
+  "tokenLiteralFallbacks": 30,
   "pillRadiusLiterals": 0,
-  "fontSizeValues": 30,
+  "fontSizeValues": 18,
   "fontWeightValues": 6,
-  "radiusValues": 39,
-  "zIndexValues": 49,
-  "letterSpacingValues": 27
+  "radiusValues": 33,
+  "zIndexValues": 45,
+  "letterSpacingValues": 26
 }

@@ -1,6 +1,6 @@
 {
   "name": "@gyro-dev/desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gyro macOS desktop app.",
   "license": "Apache-2.0",
@@ -34,6 +34,6 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react-swc": "^3.11.0",
-    "vite": "^6.0.7"
+    "vite": "^6.4.5"
   }
 }

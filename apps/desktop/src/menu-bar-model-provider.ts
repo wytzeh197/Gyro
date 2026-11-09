@@ -1,7 +1,13 @@
 import type { MenuBarJob } from "@gyro-dev/ui";
 
 export type MenuBarModelProvider =
-  "anthropic" | "antigravity" | "gemini" | "kimi" | "openai" | "xai" | "unknown";
+  | "anthropic"
+  | "antigravity"
+  | "gemini"
+  | "kimi"
+  | "openai"
+  | "xai"
+  | "unknown";
 
 const PROVIDER_ALIASES: Array<[MenuBarModelProvider, readonly RegExp[]]> = [
   ["antigravity", [/\bantigravity\b/]],
@@ -12,7 +18,12 @@ const PROVIDER_ALIASES: Array<[MenuBarModelProvider, readonly RegExp[]]> = [
   ["gemini", [/\bgemini\b/, /google ai/]],
 ];
 
-export function menuBarModelProvider(job: MenuBarJob): MenuBarModelProvider {
+export function menuBarModelProvider(
+  job: Pick<
+    MenuBarJob,
+    "providerId" | "providerLabel" | "modelId" | "modelLabel"
+  >,
+): MenuBarModelProvider {
   const providerId = job.providerId?.trim().toLowerCase();
   const exact = PROVIDER_ALIASES.find(([provider]) => provider === providerId);
   if (exact) return exact[0];

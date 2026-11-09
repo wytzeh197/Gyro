@@ -1,0 +1,20 @@
+{
+  "css": "menu-bar-CSfarmwz.css",
+  "tokens": {
+    "header": [
+      " 44px"
+    ],
+    "row": [
+      " 52px"
+    ],
+    "question": [
+      " 100px"
+    ],
+    "brand-text": [
+      " 16px"
+    ],
+    "text-lg": [
+      " 14px"
+    ]
+  }
+}

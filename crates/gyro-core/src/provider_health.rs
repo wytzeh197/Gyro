@@ -304,18 +304,9 @@ impl ProviderHealthService {
         request: ProviderHealthRequest,
         data_home: Option<&Path>,
     ) -> Result<ProviderHealthCheck> {
-        if should_skip_codex_login_for_external_env(
-            request.base_url.as_deref(),
-            request.api_key_ref.as_deref(),
-        ) || provider_has_api_key("openai")
-        {
-            return Ok(env_provider_health(
-                "openai",
-                request.api_key_ref.as_deref(),
-                &["OPENAI_API_KEY"],
-            ));
-        }
-
+        // This connection runs Codex with its CLI sign-in. A saved API key is
+        // not proof that the selected CLI connection is authenticated.
+        let _ = request;
         self.cli_check(
             &CliProbe {
                 provider_id: "openai",
@@ -941,7 +932,13 @@ fn command_output_with_limits_scoped(
             Some(OsString::from(crate::cli_path::augmented_gui_path())),
         ));
     }
-    if let Some((name, value)) = try_stored_provider_api_key_env(provider_id)
+    if provider_id == "openai" {
+        // Match the Codex launcher: a subscription health check must not read
+        // or inherit an unrelated API key.
+        for name in ["OPENAI_API_KEY", "OPENAI_BASE_URL"] {
+            request.env.push((OsString::from(name), None));
+        }
+    } else if let Some((name, value)) = try_stored_provider_api_key_env(provider_id)
         .map_err(|error| CommandOutputError::Unavailable(error.to_string()))?
     {
         request.env.push((name, Some(value)));

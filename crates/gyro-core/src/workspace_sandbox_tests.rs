@@ -195,6 +195,23 @@ mod native {
     }
 
     #[test]
+    fn blocks_postgres_password_file_and_its_workspace_alias() {
+        let fixture = Fixture::new();
+        let password_file = fixture.home.join(".pgpass");
+        fs::write(
+            &password_file,
+            "localhost:5432:fixture:fixture:synthetic-password",
+        )
+        .unwrap();
+        let alias = fixture.workspace.join("ordinary.txt");
+        symlink(&password_file, &alias).unwrap();
+        let sandbox = fixture.prepare();
+        for path in [&password_file, &alias] {
+            denied(&fixture.shell(&sandbox, "cat \"$1\"", &[path]));
+        }
+    }
+
+    #[test]
     fn denies_other_commands_scratch_and_plaintext_git_and_cargo_credentials() {
         let fixture = Fixture::new();
         fs::write(fixture.home.join(".git-credentials"), "fixture-git-token").unwrap();

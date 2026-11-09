@@ -1,0 +1,10 @@
+2026-11-07 — clean proposed commit applied to ebe4ae5f439d4fd0f6a8893f31c96e25be4e966c
+
+Desktop TypeScript: passed (tsc --noEmit with candidate UI source paths)
+Menu bar state checks passed.
+Chat question detection checks passed.
+Sidebar question checks passed: session scope, streaming, answers, stale turns, and imported history.
+Workbench smoke viewports: 860x620 compact, 1280x720, 1440x900, 1728x1117
+Gyro workbench smoke checks passed.
+
+Seven native menu tests also passed in the working checkout after the provider identity changes.

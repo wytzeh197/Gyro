@@ -1,0 +1,7 @@
+{
+  "collectedAt": "2026-11-08T19:30:20.275576+00:00",
+  "rootPid": 11418,
+  "observedOwnedProcessesAfterQuit": [],
+  "readErrors": [],
+  "note": "After the verified event-driven empty-store debug fixture; no provider turn was started."
+}

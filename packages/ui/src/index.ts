@@ -24,6 +24,10 @@ export {
 export { SettingsGroup, SettingsMore, SettingsRow } from "./settings-controls";
 export {
   Check as CheckIcon,
+  ArrowRight as ArrowRightIcon,
+  ChevronRight as ChevronRightIcon,
+  Settings as SettingsIcon,
+  Square as SquareIcon,
   Cloud as CloudIcon,
   Copy as CopyIcon,
   Eye as EyeIcon,
@@ -456,11 +460,13 @@ export type {
   TerminalFailureSource,
   TerminalFileReference,
 } from "./terminal-failure";
-export { environmentActions } from "./environment-actions";
+export { environmentActions, environmentFocus } from "./environment-actions";
 export type {
   EnvironmentAction,
   EnvironmentActionId,
   EnvironmentActionIntent,
+  EnvironmentFocus,
+  EnvironmentFocusState,
 } from "./environment-actions";
 export {
   CLEAN_MACHINE_PRIMARY_PROVIDERS,
@@ -696,6 +702,7 @@ export {
 export {
   formatChatAnswers,
   latestChatQuestions,
+  revealChatQuestion,
   parseChatAnswers,
   parseChatQuestions,
   questionsFromPayload,
@@ -705,7 +712,8 @@ export type {
   ChatQuestionAnswer,
   ChatQuestionRequest,
 } from "./chat-questions";
-export { ChatQuestionPopup } from "./chat-question-popup";
+export { ChatQuestionPopup, InlineMarkdown } from "./chat-question-popup";
+export { ProviderLogo } from "./workspace-sidebar";
 export {
   ChatTaskSuggestions,
   ChatTaskSuggestionsContext,
@@ -837,6 +845,8 @@ export type {
 export {
   sessionApprovalCounts,
   sessionQuestionCounts,
+  pendingSessionQuestions,
+  pendingSessionApprovals,
 } from "./session-approvals";
 
 export {

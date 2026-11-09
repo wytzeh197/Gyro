@@ -1,7 +1,11 @@
 //! Small, versioned model reports; full child conversations remain durable.
-use super::*;
-use delegated_agents::AgentSnapshot;
+use crate::delegated_agents::AgentSnapshot;
+use crate::{
+    capability_workspace_helpers::workspace_result_byte_limit, ide::debug::redact_json_strings,
+    subagent_capability,
+};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 pub(super) struct Options {
     max_bytes: usize,
@@ -66,6 +70,7 @@ pub(super) fn render(snapshots: &[AgentSnapshot], options: &Options) -> anyhow::
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability_workspace_helpers::DEFAULT_WORKSPACE_RESULT_BYTES;
 
     fn snapshot() -> AgentSnapshot {
         serde_json::from_value(json!({

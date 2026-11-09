@@ -1,5 +1,9 @@
 import { createMonacoTheme } from "./editor/monaco-theme";
 import { canonicalFileUri } from "./editor/document-uri";
+import {
+  createModelRetirement,
+  installModelRetirement,
+} from "./editor/model-retirement";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import CssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
@@ -37,6 +41,26 @@ type MonacoWorkerEnvironment = typeof globalThis & {
 };
 
 loader.config({ monaco });
+
+installModelRetirement(
+  createModelRetirement({
+    find: (uri) => monaco.editor.getModel(monaco.Uri.parse(uri)) ?? undefined,
+    owners: (model) =>
+      [
+        ...new Set([
+          ...monaco.editor.getEditors(),
+          ...monaco.editor
+            .getDiffEditors()
+            .flatMap((editor) => [
+              editor.getOriginalEditor(),
+              editor.getModifiedEditor(),
+            ]),
+        ]),
+      ].filter((editor) => editor.getModel() === model),
+    schedule: (callback) => setTimeout(callback, 0),
+    cancel: (timer) => clearTimeout(timer),
+  }),
+);
 
 // TSX files are opened under the `typescript` language id. Without JSX in the
 // compiler options the tokenizer treats tags as comparisons and the file loses

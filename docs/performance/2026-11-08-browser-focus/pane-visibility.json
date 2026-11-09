@@ -1,0 +1,25 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "isFocused": false,
+      "browserOverlayOccluded": false,
+      "passed": true
+    },
+    {
+      "isFocused": false,
+      "browserOverlayOccluded": true,
+      "passed": true
+    },
+    {
+      "isFocused": true,
+      "browserOverlayOccluded": false,
+      "passed": true
+    },
+    {
+      "isFocused": true,
+      "browserOverlayOccluded": true,
+      "passed": true
+    }
+  ]
+}

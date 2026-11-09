@@ -117,7 +117,7 @@ assert.deepEqual(
 missed.cleanup();
 
 const parent = functions.get("ChatSurface").getText(tree),
-  turn = functions.get("ChatTurn").getText(tree);
+  turn = functions.get("ChatTurnView").getText(tree);
 assert.equal((parent.match(/useNetworkOnline\(\)/g) ?? []).length, 1);
 assert.ok(
   !turn.includes("useNetworkOnline("),

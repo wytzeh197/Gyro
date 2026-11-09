@@ -1,0 +1,75 @@
+{
+  "build": "debug",
+  "elapsedMs": 56718,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "compactBeforeResume": false,
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "approve-fixture-edit",
+          "path": "src/clamp.mjs",
+          "proposalId": "20f35621-10ad-4f82-a1a3-cd09a888b845",
+          "status": "applied"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "clamp.test.mjs",
+          "proposalId": "abbd0807-8276-4e22-a70c-94cf6a08f13a",
+          "status": "applied"
+        }
+      ],
+      "model": "gpt-5.6-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "8b39a850-c49e-4e17-a0b7-83603c7d3857",
+      "task": "code",
+      "trial": 1,
+      "turnId": "09bea657-c226-4ffa-8b77-42e113343f9d",
+      "wallMs": 21484.202542
+    },
+    {
+      "compactBeforeResume": false,
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "approve-fixture-edit",
+          "path": "src/clamp.mjs",
+          "proposalId": "67d0a432-30df-431a-a74b-009a24746a98",
+          "status": "applied"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "clamp.test.mjs",
+          "proposalId": "4fe54230-2de0-4178-8a77-e5a0edb37b23",
+          "status": "applied"
+        }
+      ],
+      "model": "gpt-5.6-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": true,
+      "resumedRequested": true,
+      "retryCount": 0,
+      "sessionId": "69cd99c4-adbf-48db-82bd-6ced613bb691",
+      "task": "code",
+      "trial": 1,
+      "turnId": "f4cacb30-fc1e-4dd9-983a-f772650fbca6",
+      "wallMs": 17562.130084
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

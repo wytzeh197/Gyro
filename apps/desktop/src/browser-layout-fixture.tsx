@@ -20,7 +20,9 @@ function Fixture() {
     if (bounds === null) setHiddenReports((count) => count + 1);
   }, []);
   const [narrow, setNarrow] = useState(false);
-  const [captureVisible, setCaptureVisible] = useState(false);
+  const captureFixture = new URLSearchParams(location.search).get("capture");
+  const [captureVisible, setCaptureVisible] = useState(Boolean(captureFixture));
+  const [captureUnavailable, setCaptureUnavailable] = useState(captureFixture === "missing");
   const [feedback, setFeedback] = useState<BrowserFeedback | null>(null);
   const mockImage = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640"><rect width="960" height="640" fill="#f4f6fa"/><rect x="48" y="44" width="864" height="552" rx="18" fill="white" stroke="#d7dce5"/><rect x="84" y="90" width="300" height="26" rx="6" fill="#c8d8ee"/><rect x="84" y="148" width="640" height="18" rx="4" fill="#e1e8f0"/><rect x="84" y="184" width="520" height="18" rx="4" fill="#e1e8f0"/><rect x="84" y="258" width="220" height="180" rx="12" fill="#a5c9e9"/><rect x="330" y="258" width="220" height="180" rx="12" fill="#d4bded"/><rect x="576" y="258" width="220" height="180" rx="12" fill="#a9dfc5"/><text x="84" y="520" font-family="sans-serif" font-size="24" fill="#384a63">Select a region to leave feedback</text></svg>')}`;
   const browserPreview: BrowserPreview | undefined = captureVisible
@@ -41,7 +43,7 @@ function Fixture() {
           height: 640,
           createdAt: "2026-09-25T12:00:00Z",
           sourceUrl: "https://example.test/captured",
-          src: mockImage,
+          src: captureUnavailable ? "/__unavailable_browser_capture__.png" : mockImage,
         },
         status: "ready",
         verificationMessage: "Ready",
@@ -145,6 +147,10 @@ function Fixture() {
           onDeviceChange={(mode) => setDevice(mode === "auto" ? "desktop" : mode)}
           onScreenshot={(action, note) => {
             if (action === "feedback" && note) setFeedback(note);
+            if (action === "capture") {
+              setCaptureUnavailable(false);
+              setCaptureVisible(true);
+            }
           }}
           onStopAgent={() => setActive(false)}
         />

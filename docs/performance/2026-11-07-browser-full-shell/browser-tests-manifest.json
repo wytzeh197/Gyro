@@ -1,0 +1,17 @@
+{
+  "root": "/private/tmp/gyro-shell-browser-unit-ft0umnmj",
+  "data": "/private/tmp/gyro-shell-browser-unit-ft0umnmj/data",
+  "command": [
+    "cargo",
+    "test",
+    "--offline",
+    "--locked",
+    "-p",
+    "gyro-desktop",
+    "--lib",
+    "browser",
+    "--",
+    "--nocapture"
+  ],
+  "exitCode": 0
+}

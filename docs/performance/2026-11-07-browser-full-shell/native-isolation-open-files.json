@@ -1,0 +1,10 @@
+{
+  "pid": 37589,
+  "files": [
+    "/private/tmp/gyro-shell-gQy1Wx/data/gyro.sock",
+    "/private/tmp/gyro-shell-gQy1Wx/data/gyro.sqlite3",
+    "/private/tmp/gyro-shell-gQy1Wx/data/gyro.sqlite3-shm",
+    "/private/tmp/gyro-shell-gQy1Wx/data/gyro.sqlite3-wal"
+  ],
+  "passed": true
+}

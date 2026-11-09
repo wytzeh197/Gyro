@@ -1,3 +1,88 @@
+# Account, Cloud and Plan & billing design upgrade
+
+**final result: passed**
+
+- Account (`native-account-settings.tsx`): in the coming-soon release the page said "coming soon" three times (status notice, an Availability card and a row). The Availability card now renders only for a non-coming-soon unavailable build, with one plain row ("Cloud is not configured in this build").
+- Gyro account card (`billing-settings.tsx`): the action band renders only when it holds an action (Restore when signed out, Sign out when signed in), so no empty strip sits under the rows.
+- Status notice (`settings-disclosure.css`): it now uses the disclosure cards' inset (`--gyro-disclosure-inline`), edge (`--gyro-border-soft`) and radius (`--gyro-radius-lg`), with a 14px semibold title, so it lines up with the card titles below it. The open-card heading rule gets a `:root` prefix so compact density no longer undoes it.
+- Plan & billing: the disabled plan buttons read "Coming soon" on one line instead of wrapping "Subscribe to Gyro Plus · Coming soon"; the full name is kept in `aria-label`. The nav icon is now CreditCard (it was Gauge, which Usage also uses).
+- Cloud (`cloud-settings.tsx`): the disabled "Coming soon" control sits in its row as the row's control, instead of floating below the card.
+- Checks: `tsc --noEmit` (desktop) and the Vite build pass; `check-workbench-ui.mjs`, `check-appearance-persistence.mjs` and `check-cloud-settings-render.mjs` (25/25) pass. The cloud check now finds the coming-soon buttons by `aria-label` and asserts the Account page says "coming soon" exactly once.
+- Tokens only, no new components; no primary button on these pages in this release (all hosted actions are disabled).
+- Evidence: `artifacts/screenshots/gyro-brand-pass/account-polish-{account,cloud,plan}-{dark,light}.png`; before: `account-polish-before-*.png`.
+- Not covered: signed-in and live-subscription states (not reachable in this release's capture scene), the real Tauri window, compact density.
+
+---
+
+# Settings and Workspace design polish
+
+**final result: passed**
+
+- Workspace and Tools settings headers now show their nav icon (FileText / Blocks), like every other settings page (`surfaces.tsx`).
+- Open disclosure cards (`settings-disclosure.css`): the open heading drops its 64px collapsed min-height and keeps only compact bottom padding, so the title sits directly above its first row instead of floating in a band. Collapsed cards are unchanged.
+- Workspace settings fields (`settings-design.css`): inputs and selects use `--gyro-border` instead of `--gyro-border-soft`, so they read as controls in dark; row descriptions no longer get a doubled top margin under their titles.
+- Checks: Vite build passes; `check-workbench-ui.mjs` passes with no failures; `check-appearance-persistence.mjs` passes. Tokens only, no new components or values.
+- Evidence: `artifacts/screenshots/gyro-brand-pass/settings-polish-{workspace,tools,data,chat}-{dark,light}.png`; before: `settings-polish-workspace-dark-before.png`.
+- Workspace view reviewed and left as is: the SCM Commit button is already the single accent action; "Staged Changes" vs "Uncommitted changes" casing differs but is pinned by the workbench check (VS Code wording). The sidebar is wider for Source Control (404px) than Search (284px); not changed.
+- Not covered: the real Tauri window; compact density was not recaptured.
+
+---
+
+# Dark and light theme polish
+
+**final result: passed**
+
+- Light tokens (`styles-foundation.css`) lost their navy/lavender cast and now use one neutral zinc scale: app `#fbfbfb`, sidebar `#f3f3f4`, sidebar-soft `#e8e8ea`, pane `#fdfdfd`, soft `#f2f2f3`; text `#131316` / `#4b4b52` / `#63636b`; borders and shadows use `19 19 22` instead of `16 20 42`. The window tint (`window-material.css`) matches at `#f3f3f4`.
+- Disabled send (`brand.css`): one quiet neutral in every composer through `--gyro-send-disabled-bg/-text` (dark `#2c2c2f`/`#7a7a80`, light `#e6e6e8`/`#9d9da4`). In dark, the start screen used to show a bright white send button while the draft was empty.
+- Sidebar "Ready" pill (`styles.css`): thin success ring with a muted label instead of a heavy dark ring.
+- Checks: Vite build passes. `check-workbench-ui.mjs` shows the same 5 pre-existing behavioural failures; light token pins updated to `#fbfbfb` / `#f3f3f4`.
+- Evidence: `artifacts/screenshots/gyro-brand-pass/polish-{welcome,active-chat,appearance}-light.png`, `polish-send-dark.png`, `polish-ready-light.png`.
+- Not changed: tour spotlight padding (pinned at 6px by the tour check); the light provider-collapsed disabled send keeps its own rule. Not covered: the real Tauri window.
+
+---
+
+# Neutral dark surfaces and a quieter beam
+
+**final result: passed**
+
+- User feedback: the purple tint felt off, and the start-screen beam was too much.
+- Dark tokens (`styles-foundation.css`) went from violet to neutral graphite: app/pane `#141415`, sidebar/surface `#1c1c1e`, sidebar-soft `#262628`, raised `#242426`, soft `#1f1f21`, control/segment hover `#2a2a2d`, code `#0f0f10`. Text greys lost their pink cast (`#f4f4f5` / `#b6b6b9` / `#9a9a9e`); ink buttons are `#fafafa` on `#111113`. Shadows are plain black.
+- Beam (`brand.css`): dark is now a coral-only glint (no indigo or magenta) at 0.16 strength (was 0.42); light is 0.24 (was 0.5); height is `min(56%, 520px)` (was `min(72%, 660px)`). It still shows only on the empty start screen.
+- Workbench token pin updated to `#141415`.
+- Evidence: `artifacts/screenshots/gyro-brand-pass/welcome-dark-neutral.png` and `active-chat-dark-neutral.png` (previous vs now); light start screen in `artifacts/screenshots/gyro-quality-after/welcome-desktop-light.png`.
+- Not covered: the real Tauri window. Light surfaces keep their slight cool cast (`#fbfbfd` / `#f2f2f6`).
+
+---
+
+# Appearance settings scope row spacing
+
+**final result: passed**
+
+- Issue (user screenshot): "Applies across Gyro" sat directly on the Theme card's top edge, while "Changes apply immediately" floated higher on the right, out of line with it.
+- Cause: a later rule in `settings-design.css` collapsed `.gyro-appearance-scope` to zero height and absolutely positioned the save status 24px above it.
+- Fix: the scope is a normal fixed-height row (20px × UI scale, not sticky), with label and status on one baseline and 8px × UI scale below it before the first group. Status text changes still never move the page.
+- Evidence: `artifacts/screenshots/gyro-brand-pass/appearance-scope-fix-dark.png`; light checked from `artifacts/screenshots/gyro-quality-after/appearance-desktop-light.png`. Measured in the capture harness: label and status both 111–129px, Theme card starts at 139px.
+- Not covered: the real Tauri window; the narrow (≤440px container) stacked layout was not recaptured.
+
+---
+
+# usegyro.io brand pass: fonts, ink buttons, beam start screen
+
+**final result: passed, with follow-ups noted**
+
+- Reference: the live website source in `~/gyro-website/site` (not the stale `site/dist`).
+- Fonts: Geist and Geist Mono bundled in `packages/ui/src/assets/fonts` (SIL OFL 1.1, credited in `ATTRIBUTIONS.md`) and set as the sans, display and mono tokens.
+- Tokens (`styles-foundation.css`): violet-tinted ink surfaces in dark (app/pane `#131118`, sidebar `#1c1a22`), cool off-white in light (app `#fbfbfd`, sidebar `#f2f2f6`, text `#10142a`); black/white main buttons; 8px medium radius; new cobalt and coral attention tokens. Waiting status now reads coral. The saved user accent default `#0874df` is unchanged.
+- Brand layer (`brand.css`, imported last): beam light behind the empty start screen only, larger 30px Geist heading, ink send button and first-run tour button, cobalt selection.
+- Evidence: before/after pairs in `artifacts/screenshots/gyro-brand-pass/` (welcome, active chat, appearance; light and dark; 1440 × 900).
+- Checks: desktop Vite build passed and bundles both fonts; appearance persistence check passed. Workbench smoke check: the token-pin expectation was updated to the new values and passes. Five other workbench expectations (run rail, completed turn order, shared shell, plan mode, IDE controls) fail against the baseline; they cover layout and behaviour code this pass did not touch.
+- Not covered: the selected-diff scene (capture fails with `missing:sync.js`, as before this pass); the real Tauri window with native vibrancy.
+- Sidebar fix: the light grey came from the thread/workspace/settings surround mix in `chat-shell-design.css` (sidebar 90% + text). It is now 96%, so the surround renders about `#e9e9ee` instead of `#dcdce2`. Dark stays at 97%.
+- Ink button fix: the runtime accent (`appearanceAccentProperties` in `appearance.ts`) rewrites `--gyro-primary-bg/-hover/-text`, so the send and tour buttons were still showing the accent colour. `brand.css` now has separate `--gyro-ink-bg/-hover/-text` tokens that the accent does not touch (light `#000`/`#2b2b2f`/`#fff`, dark `#fbf8f6`/`#e6e6ea`/`#0e0b14`). Checked in the tour fixture: the Next button measured `rgb(0,0,0)` on white in light and `rgb(251,248,246)` on `rgb(14,11,20)` in dark; an enabled send button measured ink in dark. Other primary buttons still follow the user's accent.
+- Follow-ups: cobalt as the default accent is a separate decision.
+
+---
+
 # Provider copy and setup-card follow-up
 
 - Requested connected-state result verified in `docs/provider-settings/minimal-copy.jpg`: short page description, CLI accounts heading with count, no subscription paragraph, Accounts & models heading without setup instructions, and zero connection-method cards in the rendered DOM.
@@ -214,3 +299,26 @@ final result: passed
 - Type checks, production build, relevant UI guards and native delegation/policy tests passed. Live provider spawning was not exercised; the installed app bundle remains unchanged.
 
 Sub-agent composer refinement: strip/composer edges match at regular and narrow widths; the strip's bottom divider is removed. Evidence: `docs/design/subagents/composer-aligned.png`. Workbench/token checks passed.
+
+---
+
+# Minimal working process — November 7, 2026
+
+**final result: passed**
+
+- Scope: selected option 3 with expandable completed work and model progress text between command groups. Existing narration/approval boundaries are preserved; running and failed calls remain visible.
+- Scoped report: [Working-process QA](docs/design/working-states-2026-11-07/implementation/design-qa.md). Selected visual truth, normalized combined comparison, dark/light captures, keyboard/state verification and provider/native limits are recorded there.
+- Evidence: `docs/design/working-states-2026-11-07/implementation/comparison.jpg`; clean component view: `implemented-component.jpg` in the same directory. Source: 1448 × 1086; implementation: 532 × 720 at density 1, component compared at 500px width.
+- UI/desktop TypeScript, focused chat run/timeline/hardening checks, frontend production build and scoped whitespace checks passed. Broad workbench/token guards have failures in their unchanged plan/layout/style inputs; no unrelated files or budgets were changed to suppress them.
+- Browser fixture uses the real parser and production component with sample events. Native/live-provider acceptance and installed-app update were not performed.
+
+
+---
+
+# Gyro Native compact menu bar — 2026-11-07
+
+**final result: passed** (scoped visual/component review; native delivery unverified)
+
+Implemented the selected option 1 and Reply in chat using the actual menu component and existing native approval-notification path. Full evidence, normalized side-by-side and focused comparisons, interaction checks, native tests, and limits are in [the menu bar review](docs/design/menu-bar-concepts-2026-11-07/implementation/design-qa.md). The approved per-chat AI logos and finished-result identity are covered by [the provider-logo review](docs/design/menu-bar-concepts-2026-11-07/implementation/provider-logos/design-qa.md). Browser preview: `http://127.0.0.1:1420/menu-bar-fixture.html`.
+
+The isolated production build and current component/type checks pass. Desktop TypeScript, menu/question checks and broad workbench smoke also pass on the clean proposed commit; unrelated dirty layout changes are excluded. Live macOS notification delivery, native tray/window interaction and live-provider resumption were not exercised, and the installed app was not replaced.

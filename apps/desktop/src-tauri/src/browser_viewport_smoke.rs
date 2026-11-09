@@ -125,6 +125,7 @@ pub fn run(
             status["viewport"].clone(),
         )?;
     if mouse_enabled {
+        super::prepare_mouse(app)?;
         browser_pointer::execute(
             app,
             session,

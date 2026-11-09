@@ -1,29 +1,21 @@
 //! Run-owned cleanup survives early returns, worker panics, and dropped IPC callers.
-use super::*;
 
-pub(super) struct ProviderHeartbeat {
-    stop: Arc<AtomicBool>,
-    worker: Option<std::thread::JoinHandle<()>>,
-}
-
-impl ProviderHeartbeat {
-    pub(super) fn new(stop: Arc<AtomicBool>, worker: std::thread::JoinHandle<()>) -> Self {
-        Self {
-            stop,
-            worker: Some(worker),
-        }
-    }
-}
-
-impl Drop for ProviderHeartbeat {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(worker) = self.worker.take() {
-            worker.thread().unpark();
-            let _ = worker.join();
-        }
-    }
-}
+pub(crate) use crate::providers::runner::ProviderHeartbeat;
+use crate::{
+    app::limits::MAX_CONCURRENT_PROVIDER_RUNS,
+    goal_runner,
+    providers::{chat_types::ProviderChatRequest, events::append_provider_status_event},
+    state::{managers::ProviderCancellationManager, provider_run::ProviderRunControl},
+};
+use gyro_core::{HarnessRunStatus, SessionStore};
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+use tauri::Manager;
+use uuid::Uuid;
 
 /// The blocking worker owns admission, not the future awaiting its result.
 /// Dropping an IPC caller must neither leak its slot nor release it while the
@@ -143,7 +135,7 @@ impl Drop for ProviderTurnFinalizer<'_> {
             .latest_provider_status_for_turn(self.session_id, self.run_id)
             .ok()
             .flatten()
-            .is_some_and(|status| status != "running")
+            .is_some_and(|status| !matches!(status.as_str(), "running" | "waiting" | "queued"))
         {
             return;
         }
@@ -168,6 +160,11 @@ impl Drop for ProviderTurnFinalizer<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::{
+        events::provider_turn_has_unfinished_attempt, session_lifecycle::ProviderSessionLease,
+    };
+    use gyro_core::{GyroPaths, SessionEventKind};
+    use std::time::Duration;
 
     fn setup() -> (
         tempfile::TempDir,
@@ -188,6 +185,31 @@ mod tests {
         }))
         .unwrap();
         (temp, store, request, session.id, run)
+    }
+
+    #[test]
+    fn abandoned_retry_wait_is_closed_as_a_failure() {
+        let (_temp, store, request, session, run) = setup();
+        store.append_event_with_turn_id(session, SessionEventKind::SystemEvent, "Waiting for provider",
+            serde_json::json!({"kind":"provider-status", "status":"waiting", "nativeRetry":true}), Some(run)).unwrap();
+        assert!(provider_turn_has_unfinished_attempt(&store, session, run).unwrap());
+        {
+            let _finalizer = ProviderTurnFinalizer::new(
+                &store,
+                &request,
+                session,
+                run,
+                Uuid::new_v4(),
+                |status, _| assert_eq!(status, HarnessRunStatus::Failed),
+            );
+        }
+        assert_eq!(
+            store
+                .latest_provider_status_for_turn(session, run)
+                .unwrap()
+                .as_deref(),
+            Some("failed")
+        );
     }
 
     #[test]

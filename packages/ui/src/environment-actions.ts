@@ -274,3 +274,108 @@ export function middleTruncate(value: string, max: number) {
   const head = Math.ceil(keep / 2);
   return `${value.slice(0, head)}…${value.slice(value.length - (keep - head))}`;
 }
+
+/**
+ * What the Environment card leads with right now.
+ *
+ * The card used to list the same sections in the same order whatever the chat
+ * was doing, so a running plan sat under the working tree and the one action
+ * that mattered after a turn read the same as the one that did not. The focus
+ * picks what is on top and which action, if any, is the obvious next step.
+ */
+export type EnvironmentFocus =
+  | "working"
+  | "commit"
+  | "push"
+  | "pull-request"
+  | "idle";
+
+export type EnvironmentFocusState = {
+  focus: EnvironmentFocus;
+  /** The action drawn as the next step; none while the chat is still working. */
+  primaryAction?: EnvironmentActionId;
+  /** A few words for the card's header: where things stand at a glance. */
+  status?: string;
+};
+
+export function environmentFocus({
+  canRunGitActions = true,
+  isRunning = false,
+  planCurrent,
+  planDone = 0,
+  planSteps = 0,
+  sourceControl,
+  workingSubagents = 0,
+}: {
+  /** False when no git handler is wired, so git-backed rows cannot run. */
+  canRunGitActions?: boolean;
+  isRunning?: boolean;
+  /** The 1-based number of the step being worked on, if one is. */
+  planCurrent?: number;
+  planDone?: number;
+  planSteps?: number;
+  sourceControl?: SourceControlState;
+  workingSubagents?: number;
+}): EnvironmentFocusState {
+  // Work in flight outranks the repository: committing half a turn is the
+  // mistake to avoid, so no action is promoted until it settles. A plan step
+  // left marked in progress by a stopped turn is not work in flight.
+  if (isRunning || workingSubagents > 0) {
+    return {
+      focus: "working",
+      status:
+        isRunning && planCurrent
+          ? `Step ${planCurrent} of ${planSteps}`
+          : workingSubagents > 0
+            ? `${plural(workingSubagents, "agent")} working`
+            : "Working",
+    };
+  }
+  // Only a row that can actually run is worth promoting; a disabled
+  // "next step" would point at a dead end.
+  const [commit, pullRequest] = environmentActions(sourceControl).map(
+    (action) =>
+      action.enabled &&
+      (action.intent?.kind === "review" || canRunGitActions)
+        ? action
+        : undefined,
+  );
+  // A status read still landing must not promote anything.
+  if (sourceControl?.available && sourceControl.detailsLoaded !== false) {
+    if (commit?.enabled && commit.intent?.kind === "review") {
+      return {
+        focus: "commit",
+        primaryAction: "commit-or-push",
+        status: "Ready to commit",
+      };
+    }
+    if (commit?.enabled) {
+      return {
+        focus: "push",
+        primaryAction: "commit-or-push",
+        status: sourceControl.upstream ? "Ready to push" : "Not published",
+      };
+    }
+    // Only a branch that differs from main has anything to propose; on main
+    // itself the row stays available but is not the next step.
+    const branchDiff = sourceControl.comparedToMain;
+    if (
+      pullRequest?.enabled &&
+      branchDiff &&
+      branchDiff.additions + branchDiff.deletions > 0
+    ) {
+      return {
+        focus: "pull-request",
+        primaryAction: "create-pull-request",
+        status: "Ready for review",
+      };
+    }
+  }
+  return {
+    focus: "idle",
+    status:
+      planSteps > 0 && planDone < planSteps
+        ? `${plural(planSteps - planDone, "step")} left`
+        : undefined,
+  };
+}

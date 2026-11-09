@@ -1,0 +1,19 @@
+{
+  "date": "2026-11-07",
+  "sourceCommit": "ebe4ae5f439d4fd0f6a8893f31c96e25be4e966c",
+  "workingTree": "local changes present",
+  "build": "debug",
+  "binarySha256AtStart": "844878cffec044b2992dfcfa32f73c3cd1c0c1a318d6a264078ed6b812a284b9",
+  "binarySha256AtEnd": "844878cffec044b2992dfcfa32f73c3cd1c0c1a318d6a264078ed6b812a284b9",
+  "dataRoot": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-benchmark-S7Y6p8",
+  "spec": "../benchmark-gpt-grok-2026-11-07.json",
+  "actualUserTurns": { "openai": 5, "xai": 6 },
+  "plannedMaximumUserTurnsPerProvider": 6,
+  "cancellationDeadlineSecondsPerTurn": 60,
+  "nativeCleanupIncludedInWallTime": true,
+  "fixtureEditsApproved": false,
+  "postRepairModelCalls": 0,
+  "frontendMeasured": false,
+  "hardwareLoadControlled": false,
+  "fullVerifiedTaskCompletions": 0
+}

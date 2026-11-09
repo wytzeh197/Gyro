@@ -7,9 +7,28 @@
 //! as Ask: Full Access in a normal run applies the change immediately, and any
 //! other posture asks the user first. Plan and Council never reach the
 //! filesystem, because their policy denies the class outright.
-use super::*;
 use crate::workspace_edit_capability::assert_no_unsaved_editor_changes;
+use crate::{
+    capabilities::access::capability_argument_string,
+    state::provider_run::BoundProviderCapabilityContext,
+    workspace::{
+        files::assert_workspace_entry,
+        paths::{
+            absolute_workspace_path, apply_path_history_action, create_workspace_path_impl,
+            delete_workspace_path_impl, duplicate_workspace_path_impl, emit_workspace_path_change,
+            path_history_change, rename_workspace_path_impl, same_workspace_folder,
+            WorkspacePathChange,
+        },
+        types::{
+            WorkspacePathCreateRequest, WorkspacePathDeleteRequest, WorkspacePathDuplicateRequest,
+            WorkspacePathRenameRequest,
+        },
+    },
+    workspace_path_history,
+};
+use gyro_core::{CapabilityId, CapabilityRequest, CapabilityResourceRef};
 use serde_json::{json, Value};
+use std::{fs, path::Path};
 
 const WORKSPACE_PATH_SCHEMA: &str = "gyro.workspace-path.v1";
 

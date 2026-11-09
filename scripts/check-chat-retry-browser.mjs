@@ -35,8 +35,8 @@ const errors = [];
 const snapshots = [];
 const pause = (ms = 100) =>
   new Promise((resolvePause) => setTimeout(resolvePause, ms));
-async function until(check, description) {
-  const deadline = Date.now() + 15_000;
+async function until(check, description, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       const result = await check();
@@ -47,12 +47,16 @@ async function until(check, description) {
   throw Error(`Timed out: ${description}`);
 }
 try {
-  const page = await until(async () => {
-    const pages = await (
-      await fetch(`http://127.0.0.1:${port}/json/list`)
-    ).json();
-    return pages.find((page) => page.type === "page");
-  }, "browser startup");
+  const page = await until(
+    async () => {
+      const pages = await (
+        await fetch(`http://127.0.0.1:${port}/json/list`)
+      ).json();
+      return pages.find((page) => page.type === "page");
+    },
+    "browser startup",
+    60_000,
+  );
   ws = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((resolveOpen, reject) => {
     ws.onopen = resolveOpen;
@@ -213,12 +217,16 @@ try {
   await inspectLayout("scheduled-light");
   await screenshotPreview("preview-light.png");
   await pause(2_200);
-  const remaining = await evaluate(countdown);
-  assert.match(
-    remaining,
-    /Retrying in 2[78]s/,
-    "countdown follows actual elapsed seconds",
+  const reading = await evaluate(`(()=>{
+    const deadline=${state}.pending['fixture-failed-status'].retryAt;
+    return {text:${countdown},expected:Math.max(0,Math.ceil((deadline-Date.now())/1000))};
+  })()`);
+  const seconds = Number(/Retrying in (\d+)s/.exec(reading.text)?.[1]);
+  assert.ok(
+    Number.isFinite(seconds) && Math.abs(seconds - reading.expected) <= 1,
+    "countdown follows its actual deadline",
   );
+  assert.ok(seconds < 30, "the countdown advances after elapsed time");
   assert.equal(
     await evaluate(`${state}.pending['fixture-failed-status'].retryAt`),
     deadlineBefore,
@@ -457,8 +465,8 @@ try {
   );
   assert.match(
     await evaluate(`${problem}.textContent`),
-    /Recorded work and active tasks are preserved.*Retry 1 of 3/s,
-    "continuation explains preserved work and bounded attempts",
+    /Waiting for the provider before continuing.*Retry 1 of 3/s,
+    "continuation explains the wait and bounded attempts without claiming task liveness",
   );
   assert.match(
     await evaluate(`document.querySelector('.gyro-run-rail').textContent`),
@@ -545,7 +553,9 @@ try {
     "native continuation starts once",
   );
   assert.equal(
-    await evaluate(`document.querySelector('.gyro-run').classList.contains('is-live')`),
+    await evaluate(
+      `document.querySelector('.gyro-run').classList.contains('is-live')`,
+    ),
     true,
     "resumed turn returns to working",
   );
@@ -575,6 +585,13 @@ try {
   await until(
     () => evaluate(`${state}.state==='native-done'`),
     "native continued turn completes",
+  );
+  await until(
+    () =>
+      evaluate(
+        `document.querySelector('.gyro-chat-surface').textContent.includes('The existing turn finished successfully')`,
+      ),
+    "completed response reaches the transcript",
   );
   assert.match(
     await evaluate(`document.querySelector('.gyro-chat-surface').textContent`),
@@ -622,6 +639,79 @@ try {
     /pnpm test/,
     "manual continuation retains original tools",
   );
+  await load({
+    theme: "dark",
+    state: "native-wait",
+    failure: "rate-limit",
+    seconds: "30",
+  });
+  assert.match(
+    await evaluate(`${problem}.textContent`),
+    /Provider rate limit reached.*Retrying in/,
+  );
+  assert.deepEqual(
+    await evaluate(
+      `[...document.querySelectorAll('.gyro-run-problem-actions button')].map(button=>button.textContent.trim())`,
+    ),
+    ["Cancel"],
+  );
+  await inspectLayout("rate-limit-wait-dark");
+  await load({
+    theme: "light",
+    state: "native-cooldown",
+    failure: "rate-limit",
+    tools: "failed",
+    seconds: "60",
+  });
+  assert.equal(
+    await evaluate(
+      `document.querySelector('.gyro-run-problem-actions button').disabled`,
+    ),
+    true,
+    "manual Retry cannot bypass the known provider reset",
+  );
+  assert.match(
+    await evaluate(`document.querySelector('.gyro-run-rail').textContent`),
+    /Search failed.*pointerDrag/s,
+  );
+  assert.doesNotMatch(
+    await evaluate(`document.querySelector('.gyro-run-rail').textContent`),
+    /Searched for Workspace search path/,
+  );
+  await evaluate(
+    `document.querySelector('.gyro-run-error-details summary').click();document.querySelectorAll('.gyro-import-tool-details').forEach(details=>details.open=true)`,
+  );
+  await call("Emulation.setDeviceMetricsOverride", {width:1440,height:1200,deviceScaleFactor:1,mobile:false});
+  await evaluate(`document.querySelector('.gyro-chat-surface').parentElement.style.height='1000px'; document.querySelectorAll('.gyro-chat-surface *').forEach(element=>{if(element.scrollHeight>element.clientHeight) element.scrollTop=0})`);
+  assert.match(
+    await evaluate(`document.querySelector('.gyro-run-rail').textContent`),
+    /No such file or directory/,
+  );
+  await inspectLayout("rate-limit-cooldown-tool-errors-light");
+  await load({ theme: "dark", state: "native-unavailable" });
+  assert.equal(
+    await evaluate(
+      `document.querySelectorAll('.gyro-run-problem-actions button').length`,
+    ),
+    0,
+    "lost continuation cannot silently launch a fresh task",
+  );
+  await inspectLayout("continuation-unavailable-dark");
+  await load({
+    theme: "light",
+    state: "native-exhausted",
+    failure: "rate-limit",
+  });
+  assert.match(
+    await evaluate(`${problem}.textContent`),
+    /Automatic retries exhausted/,
+  );
+  assert.equal(
+    await evaluate(countdown),
+    undefined,
+    "exhausted rate-limit recovery has no second retry timer",
+  );
+  await inspectLayout("rate-limit-exhausted-light");
   await writeFile(
     join(artifactDirectory, "browser-qa.json"),
     JSON.stringify({ snapshots, errors }, null, 2),

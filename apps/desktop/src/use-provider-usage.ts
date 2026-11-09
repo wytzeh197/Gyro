@@ -38,6 +38,11 @@ export function useProviderUsage(options: {
   // A fresh read asked for while another is in flight runs once that one
   // lands: the earlier request may predate the spend it was asked to show.
   const providerUsageFreshQueuedRef = useRef(new Set<ProviderId>());
+  // Context metadata and preferences replace config objects without changing
+  // which accounts need checking. Those renders must not restart the poll and
+  // launch another immediate CLI/network check.
+  const usageProviderKey = backgroundUsageProviderIds.join("\n");
+  const ledgerProviderKey = backgroundLedgerProviderIds.join("\n");
   const refreshProviderUsage = useCallback(
     async (
       providerId: ProviderId,
@@ -50,16 +55,19 @@ export function useProviderUsage(options: {
       }
       const request = (providerUsageRequestRef.current[providerId] ?? 0) + 1;
       providerUsageRequestRef.current[providerId] = request;
-      setProviderUsageByProvider((current) => ({
-        ...current,
-        [providerId]: {
-          providerId,
-          status: current[providerId]?.windows.length ? "available" : "loading",
-          windows: current[providerId]?.windows ?? [],
-          fetchedAt: current[providerId]?.fetchedAt,
-          stale: current[providerId]?.stale,
-        },
-      }));
+      setProviderUsageByProvider((current) => {
+        if (current[providerId]?.windows.length) return current;
+        return {
+          ...current,
+          [providerId]: {
+            providerId,
+            status: "loading",
+            windows: current[providerId]?.windows ?? [],
+            fetchedAt: current[providerId]?.fetchedAt,
+            stale: current[providerId]?.stale,
+          },
+        };
+      });
 
       if (!providerSupportsUsage(providerId)) {
         setProviderUsageByProvider((current) => ({
@@ -95,10 +103,12 @@ export function useProviderUsage(options: {
           { providerId, fresh },
         );
         if (request !== providerUsageRequestRef.current[providerId]) return;
-        setProviderUsageByProvider((current) => ({
-          ...current,
-          [providerId]: providerUsageFromSnapshot(snapshot, current[providerId]),
-        }));
+        setProviderUsageByProvider((current) => {
+          const next = providerUsageFromSnapshot(snapshot, current[providerId]);
+          return next === current[providerId]
+            ? current
+            : { ...current, [providerId]: next };
+        });
       } catch (error) {
         if (request !== providerUsageRequestRef.current[providerId]) return;
         const detail = String(error);
@@ -156,21 +166,30 @@ export function useProviderUsage(options: {
   }, []);
 
   useEffect(() => {
+    const usageProviderIds = usageProviderKey
+      ? usageProviderKey.split("\n") as ProviderId[] : [];
+    const ledgerProviderIds = ledgerProviderKey
+      ? ledgerProviderKey.split("\n") as ProviderId[] : [];
     if (
-      backgroundUsageProviderIds.length === 0 &&
-      backgroundLedgerProviderIds.length === 0
+      usageProviderIds.length === 0 &&
+      ledgerProviderIds.length === 0
     ) {
       return undefined;
     }
     const refreshInBackground = () => {
-      // Background polling should not wake provider CLIs in a hidden window
-      // or retry the network while offline. Focus/online events catch up.
-      if (document.visibilityState !== "visible" || navigator.onLine === false)
+      // Optional account checks can start heavyweight CLIs. Explicit reads,
+      // live turn updates and post-turn refreshes still run independently;
+      // periodic checks catch up as soon as the user returns to this window.
+      if (
+        document.visibilityState !== "visible" ||
+        !document.hasFocus() ||
+        navigator.onLine === false
+      )
         return;
-      for (const providerId of backgroundUsageProviderIds) {
+      for (const providerId of usageProviderIds) {
         void refreshProviderUsage(providerId);
       }
-      for (const providerId of backgroundLedgerProviderIds) {
+      for (const providerId of ledgerProviderIds) {
         void refreshProviderLedger(providerId);
       }
     };
@@ -194,8 +213,8 @@ export function useProviderUsage(options: {
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [
-    backgroundLedgerProviderIds,
-    backgroundUsageProviderIds,
+    ledgerProviderKey,
+    usageProviderKey,
     refreshProviderLedger,
     refreshProviderUsage,
   ]);

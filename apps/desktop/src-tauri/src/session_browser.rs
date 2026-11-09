@@ -9,12 +9,21 @@ use crate::browser_viewport::{self, BrowserViewportRequest, BrowserViewportState
 use gyro_core::security::redact_secrets;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Runtime, WebviewUrl};
 use uuid::Uuid;
+
+#[cfg(target_os = "macos")]
+#[path = "browser_navigation_observer.rs"]
+mod navigation_observer;
+#[path = "browser_operation.rs"]
+mod operation;
+pub(crate) use operation::PendingCall;
+pub(crate) use operation::{begin_model_operation, bind_model_resource, operation_was_cancelled};
 
 const MAX_CONSOLE_ENTRIES: usize = 100;
 const MAX_NETWORK_ENTRIES: usize = 100;
@@ -73,10 +82,23 @@ pub struct SessionBrowserSnapshot {
     pub resource_id: String,
     pub url: String,
     pub title: String,
+    pub loading: bool,
+    pub navigation_id: u64,
+    pub document_committed: bool,
+    #[serde(default)]
+    pub navigation_error: Option<BrowserNavigationError>,
     pub visible: bool,
     pub background_only: bool,
     pub label: String,
     pub viewport: BrowserViewportState,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserNavigationError {
+    pub kind: String,
+    pub message: String,
+    pub code: isize,
 }
 
 #[derive(Clone, Debug)]
@@ -128,6 +150,13 @@ struct SessionBrowserSlot {
     bridge_nonce: String,
     url: String,
     title: String,
+    loading: bool,
+    navigation_id: u64,
+    document_committed: bool,
+    navigation_error: Option<BrowserNavigationError>,
+    native_navigation_token: Option<usize>,
+    committed_url: Option<String>,
+    failed_provisional: bool,
     visible: bool,
     background_only: bool,
     host_bounds: SessionBrowserBounds,
@@ -145,7 +174,448 @@ pub struct SessionBrowserManager {
     layout: Mutex<()>,
 }
 
+#[derive(Clone)]
+pub(crate) struct BrowserLease {
+    session_id: String,
+    resource_id: String,
+}
+impl BrowserLease {
+    fn from_snapshot(snapshot: &SessionBrowserSnapshot) -> Self {
+        Self {
+            session_id: snapshot.session_id.clone(),
+            resource_id: snapshot.resource_id.clone(),
+        }
+    }
+    pub(crate) fn validate(&self, manager: &SessionBrowserManager) -> Result<(), String> {
+        manager.with_resource_mut(self, |_| ())
+    }
+    #[cfg(target_os = "macos")]
+    pub(crate) fn emit_user_interaction<R: Runtime>(&self, app: &AppHandle<R>) {
+        if app
+            .state::<SessionBrowserManager>()
+            .get_snapshot(&self.session_id)
+            .ok()
+            .flatten()
+            .is_some_and(|snapshot| {
+                snapshot.resource_id == self.resource_id
+                    && snapshot.visible
+                    && !snapshot.background_only
+            })
+        {
+            let _ = app.emit(
+                "session-browser-interaction",
+                serde_json::json!({
+                    "sessionId": self.session_id, "resourceId": self.resource_id,
+                }),
+            );
+        }
+    }
+}
+
+struct BrowserNavigationRequest {
+    resource: BrowserLease,
+    navigation_id: u64,
+    previous: SessionBrowserSnapshot,
+    previous_token: Option<usize>,
+}
+
+#[derive(Clone)]
+struct BrowserDocumentLease {
+    resource: BrowserLease,
+    navigation_id: u64,
+}
+impl BrowserDocumentLease {
+    fn validate(&self, manager: &SessionBrowserManager) -> Result<(), String> {
+        manager.with_document_mut(self, |_| ())
+    }
+}
+
 impl SessionBrowserManager {
+    #[cfg(all(debug_assertions, feature = "native-browser-events-smoke"))]
+    pub(crate) fn fixture_layout_is_busy(&self) -> bool {
+        self.layout.try_lock().is_err()
+    }
+    #[cfg(target_os = "macos")]
+    fn native_navigation_event(
+        &self,
+        lease: &BrowserLease,
+        token: usize,
+        event: &navigation_observer::NavigationEvent,
+        url: Option<&str>,
+    ) -> Result<Option<(&'static str, u64)>, String> {
+        use navigation_observer::NavigationEvent;
+        self.with_resource_mut(lease, |slot| {
+            if matches!(event, NavigationEvent::Started) {
+                if slot.document_committed || slot.navigation_error.is_some() {
+                    slot.navigation_id += 1;
+                }
+                slot.native_navigation_token = Some(token);
+                slot.document_committed = false;
+                slot.loading = true;
+                slot.navigation_error = None;
+                slot.title.clear();
+                slot.pointer_reference = None;
+                if let Some(url) = url.filter(|url| parse_navigable_url(url).is_ok()) {
+                    slot.url = url.to_string();
+                }
+                return Some(("loading", slot.navigation_id));
+            }
+            // Explicit requests clear this token before dispatch. An old
+            // cancellation, commit or finish cannot settle their replacement.
+            // Initial creation may attach after didStart but before commit.
+            if slot.native_navigation_token != Some(token) {
+                if slot.navigation_id != 1 || slot.native_navigation_token.is_some()
+                    || slot.navigation_error.is_some() {
+                    return None;
+                }
+                slot.native_navigation_token = Some(token);
+            }
+            match event {
+                NavigationEvent::Committed | NavigationEvent::Finished => {
+                    let Some(url) = url.filter(|url| parse_navigable_url(url).is_ok()) else {return None;};
+                    slot.url = url.to_string();
+                    slot.committed_url = Some(url.to_string());
+                    slot.document_committed = true;
+                    slot.loading = matches!(event, NavigationEvent::Committed);
+                    if slot.loading {
+                        slot.title.clear();
+                        slot.pointer_reference = None;
+                    }
+                    Some((if slot.loading {"loading"} else {"loaded"}, slot.navigation_id))
+                }
+                NavigationEvent::Failed {cancelled,code,provisional} => {
+                    slot.loading = false;
+                    slot.document_committed = false;
+                    slot.native_navigation_token = None;
+                    slot.pointer_reference = None;
+                    slot.failed_provisional = *provisional;
+                    slot.navigation_error = Some(BrowserNavigationError {
+                        kind:if *cancelled {"cancelled"} else {"failed"}.into(),
+                        message:if *cancelled {"Navigation was cancelled. Try again or go back."} else {"The page could not load. Check the address or connection, then try again."}.into(),
+                        code:*code,
+                    });
+                    Some(("failed",slot.navigation_id))
+                }
+                NavigationEvent::Started => unreachable!(),
+            }
+        })
+    }
+
+    fn recover_provisional_document(
+        &self,
+        lease: &BrowserLease,
+        expected: u64,
+    ) -> Result<bool, String> {
+        self.with_resource_mut(lease, |slot| {
+            if slot.navigation_id != expected {
+                return Err("browser navigation changed before recovery".into());
+            }
+            if slot.document_committed
+                || (slot.navigation_error.is_some() && !slot.failed_provisional)
+            {
+                return Ok(false);
+            }
+            let Some(url) = slot.committed_url.clone() else {
+                return Ok(false);
+            };
+            slot.navigation_id += 1;
+            slot.loading = false;
+            slot.document_committed = true;
+            slot.navigation_error = None;
+            slot.native_navigation_token = None;
+            slot.url = url;
+            slot.title.clear();
+            slot.pointer_reference = None;
+            Ok(true)
+        })?
+    }
+    #[cfg(test)]
+    fn start_native_navigation(
+        &self,
+        lease: &BrowserLease,
+        url: Option<&str>,
+    ) -> Result<(), String> {
+        self.with_resource_mut(lease, |slot| {
+            // Explicit requests already invalidated their document. A link,
+            // form or page script reaches this point through WebKit instead.
+            if slot.document_committed {
+                slot.navigation_id += 1;
+            }
+            slot.document_committed = false;
+            slot.loading = true;
+            slot.navigation_error = None;
+            slot.title.clear();
+            slot.pointer_reference = None;
+            if let Some(url) = url.filter(|url| parse_navigable_url(url).is_ok()) {
+                slot.url = url.to_string();
+            }
+        })
+    }
+    fn reserve_navigation(
+        &self,
+        lease: &BrowserLease,
+        url: Option<&str>,
+    ) -> Result<BrowserNavigationRequest, String> {
+        self.with_resource_mut(lease, |slot| {
+            let previous = Self::snapshot_locked(slot);
+            let previous_token = slot.native_navigation_token;
+            slot.navigation_id += 1;
+            slot.loading = true;
+            slot.document_committed = false;
+            slot.navigation_error = None;
+            slot.native_navigation_token = None;
+            slot.title.clear();
+            slot.pointer_reference = None;
+            if let Some(url) = url {
+                slot.url = url.to_string();
+            }
+            BrowserNavigationRequest {
+                resource: lease.clone(),
+                navigation_id: slot.navigation_id,
+                previous,
+                previous_token,
+            }
+        })
+    }
+
+    fn start_navigation(&self, lease: &BrowserLease, url: Option<&str>) -> Result<u64, String> {
+        self.reserve_navigation(lease, url)
+            .map(|request| request.navigation_id)
+    }
+
+    fn restore_undispatched_navigation(&self, request: &BrowserNavigationRequest, cancelled: bool) {
+        let _ = self.with_resource_mut(&request.resource, |slot| {
+            if slot.navigation_id != request.navigation_id {
+                return;
+            }
+            if request.previous.document_committed
+                || request.previous_token.is_some()
+                || request.previous.navigation_error.is_some()
+            {
+                slot.loading = request.previous.loading;
+                slot.document_committed = request.previous.document_committed;
+                slot.navigation_error = request.previous.navigation_error.clone();
+                slot.native_navigation_token = request.previous_token;
+                slot.title = request.previous.title.clone();
+                slot.url = request.previous.url.clone();
+            } else {
+                // An earlier queued request may also have been superseded.
+                // Do not restore an unbound pending state as if it will run.
+                slot.loading = false;
+                slot.document_committed = false;
+                slot.native_navigation_token = None;
+                slot.failed_provisional = true;
+                slot.navigation_error = Some(BrowserNavigationError {
+                    kind: if cancelled { "cancelled" } else { "failed" }.into(),
+                    message: "Navigation did not start. Try again or go back.".into(),
+                    code: 0,
+                });
+            }
+        });
+    }
+    #[cfg(any(test, not(target_os = "macos")))]
+    fn commit_navigation(&self, lease: &BrowserLease, url: &str) -> Result<u64, String> {
+        self.with_resource_mut(lease, |slot| {
+            // Wry's macOS Started event is WKWebView didCommitNavigation.
+            // A page/link navigation may have no earlier explicit request.
+            if slot.document_committed {
+                slot.navigation_id += 1;
+            }
+            slot.document_committed = true;
+            slot.navigation_error = None;
+            slot.committed_url = Some(url.to_string());
+            slot.loading = true;
+            slot.url = url.to_string();
+            slot.title.clear();
+            slot.pointer_reference = None;
+            slot.navigation_id
+        })
+    }
+
+    #[cfg(any(test, not(target_os = "macos")))]
+    fn finish_navigation(&self, lease: &BrowserLease, url: &str) -> Result<u64, String> {
+        self.with_resource_mut(lease, |slot| {
+            slot.url = url.to_string();
+            slot.loading = false;
+            slot.document_committed = true;
+            slot.committed_url = Some(url.to_string());
+            slot.navigation_id
+        })
+    }
+
+    fn navigation_is_finished(&self, lease: &BrowserLease, navigation_id: u64) -> bool {
+        self.with_resource_mut(lease, |slot| {
+            slot.navigation_id == navigation_id && !slot.loading
+        })
+        .unwrap_or(false)
+    }
+
+    fn restore_navigation(
+        &self,
+        lease: &BrowserLease,
+        navigation_id: u64,
+        previous: &SessionBrowserSnapshot,
+    ) {
+        let _ = self.with_resource_mut(lease, |slot| {
+            // A failed request must not undo a native callback/newer request.
+            if slot.navigation_id == navigation_id {
+                slot.loading = previous.loading;
+                slot.document_committed = previous.document_committed;
+                slot.navigation_error = previous.navigation_error.clone();
+                slot.title = previous.title.clone();
+                slot.url = previous.url.clone();
+            }
+        });
+    }
+
+    fn with_document_mut<R>(
+        &self,
+        lease: &BrowserDocumentLease,
+        f: impl FnOnce(&mut SessionBrowserSlot) -> R,
+    ) -> Result<R, String> {
+        self.with_resource_mut(&lease.resource, |slot| {
+            if slot.navigation_id != lease.navigation_id || !slot.document_committed || slot.navigation_error.is_some() {
+                return Err("browser document changed while the action was waiting; an already dispatched action may have run, so observe the current page before retrying".into());
+            }
+            Ok(f(slot))
+        })?
+    }
+
+    fn capture_document(
+        &self,
+        session_id: &str,
+    ) -> Result<(BrowserDocumentLease, SessionBrowserSnapshot), String> {
+        let (resource, snapshot) = self.capture_resource(session_id)?;
+        if let Some(error) = &snapshot.navigation_error {
+            return Err(format!(
+                "browser navigation {}: {}",
+                error.kind, error.message
+            ));
+        }
+        if !snapshot.document_committed {
+            return Err("browser navigation is waiting for the new document; wait and observe the current page before interacting".into());
+        }
+        Ok((
+            BrowserDocumentLease {
+                resource,
+                navigation_id: snapshot.navigation_id,
+            },
+            snapshot,
+        ))
+    }
+
+    fn wait_for_document(&self, session_id: &str) -> Result<SessionBrowserSnapshot, String> {
+        let (resource, initial) = self.capture_resource(session_id)?;
+        let pending = PendingCall::new(
+            AGENT_CALL_TIMEOUT,
+            "browser navigation did not commit before the screenshot deadline",
+        )?;
+        let guard = pending.guard();
+        loop {
+            guard.check()?;
+            resource.validate(self)?;
+            let current = self
+                .get_snapshot(session_id)?
+                .ok_or("browser closed while waiting for its document")?;
+            if current.navigation_id != initial.navigation_id {
+                return Err(
+                    "browser navigation changed while waiting for the screenshot document".into(),
+                );
+            }
+            if let Some(error) = &current.navigation_error {
+                return Err(format!(
+                    "browser navigation {}: {}",
+                    error.kind, error.message
+                ));
+            }
+            if current.document_committed {
+                return Ok(current);
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    fn reconcile_initial_document(
+        &self,
+        lease: &BrowserDocumentLease,
+        observed: &Value,
+    ) -> Result<bool, String> {
+        self.with_resource_mut(&lease.resource, |slot| {
+            if slot.document_committed
+                || slot.navigation_error.is_some()
+                || slot.navigation_id != lease.navigation_id
+            {
+                return false;
+            }
+            let Some(url) = observed.get("url").and_then(Value::as_str) else {
+                return false;
+            };
+            if observed.get("installed") != Some(&Value::Bool(true))
+                || !parse_navigable_url(url)
+                    .is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
+            {
+                return false;
+            }
+            slot.document_committed = true;
+            slot.committed_url = Some(sanitize_text(url));
+            slot.loading = observed.get("readyState").and_then(Value::as_str) != Some("complete");
+            slot.url = sanitize_text(url);
+            slot.title = observed
+                .get("title")
+                .and_then(Value::as_str)
+                .map(sanitize_text)
+                .unwrap_or_default();
+            true
+        })
+    }
+
+    fn with_resource_mut<R>(
+        &self,
+        lease: &BrowserLease,
+        f: impl FnOnce(&mut SessionBrowserSlot) -> R,
+    ) -> Result<R, String> {
+        self.with_slot_mut(&lease.session_id, |slot| {
+            if slot.resource_id != lease.resource_id {
+                return Err("browser resource changed while the action was waiting; observe the current browser again".into());
+            }
+            Ok(f(slot))
+        })?
+    }
+
+    fn update_resource_state(
+        &self,
+        lease: &BrowserLease,
+        url: Option<&str>,
+        title: Option<&str>,
+    ) -> Result<(), String> {
+        self.with_resource_mut(lease, |slot| {
+            if !slot.document_committed {
+                return Err("browser document has not committed".to_string());
+            }
+            if let Some(url) = url {
+                if slot.url != url {
+                    slot.pointer_reference = None;
+                }
+                slot.url = url.to_string();
+                slot.committed_url = Some(url.to_string());
+            }
+            if let Some(title) = title {
+                slot.title = sanitize_text(title);
+            }
+            Ok(())
+        })?
+    }
+
+    fn capture_resource(
+        &self,
+        session_id: &str,
+    ) -> Result<(BrowserLease, SessionBrowserSnapshot), String> {
+        let snapshot = self
+            .get_snapshot(session_id)?
+            .ok_or("this chat has no open browser")?;
+        bind_model_resource(&snapshot.resource_id)?;
+        Ok((BrowserLease::from_snapshot(&snapshot), snapshot))
+    }
     fn with_slot_mut<R>(
         &self,
         session_id: &str,
@@ -158,6 +628,7 @@ impl SessionBrowserManager {
         let slot = guard
             .get_mut(session_id)
             .ok_or_else(|| "this chat has no open browser".to_string())?;
+        bind_model_resource(&slot.resource_id)?;
         Ok(f(slot))
     }
 
@@ -168,6 +639,10 @@ impl SessionBrowserManager {
             resource_id: slot.resource_id.clone(),
             url: slot.url.clone(),
             title: slot.title.clone(),
+            loading: slot.loading,
+            navigation_id: slot.navigation_id,
+            document_committed: slot.document_committed,
+            navigation_error: slot.navigation_error.clone(),
             visible: slot.visible,
             background_only: slot.background_only,
             label: slot.webview_label.clone(),
@@ -228,6 +703,28 @@ impl SessionBrowserManager {
         })
     }
 
+    pub fn remember_pointer_capture_at_navigation(
+        &self,
+        session_id: &str,
+        navigation_id: u64,
+        capture_id: String,
+        url: String,
+        viewport: Value,
+    ) -> Result<(), String> {
+        let (lease, _) = self.capture_document(session_id)?;
+        if lease.navigation_id != navigation_id {
+            return Err("browser changed during capture; take a new screenshot".into());
+        }
+        self.with_document_mut(&lease, |slot| {
+            slot.pointer_reference = Some(BrowserPointerReference {
+                capture_id,
+                url,
+                viewport,
+                created_at: Instant::now(),
+            });
+        })
+    }
+
     pub fn pointer_reference(
         &self,
         session_id: &str,
@@ -257,22 +754,22 @@ impl SessionBrowserManager {
         })
     }
 
-    fn push_console(&self, session_id: &str, entry: BrowserConsoleEntry) {
-        let _ = self.with_slot_mut(session_id, |slot| {
+    fn push_console(&self, lease: &BrowserLease, entry: BrowserConsoleEntry) -> Result<(), String> {
+        self.with_resource_mut(lease, |slot| {
             if slot.console.len() >= MAX_CONSOLE_ENTRIES {
                 slot.console.pop_front();
             }
             slot.console.push_back(entry);
-        });
+        })
     }
 
-    fn push_network(&self, session_id: &str, entry: BrowserNetworkEntry) {
-        let _ = self.with_slot_mut(session_id, |slot| {
+    fn push_network(&self, lease: &BrowserLease, entry: BrowserNetworkEntry) -> Result<(), String> {
+        self.with_resource_mut(lease, |slot| {
             if slot.network.len() >= MAX_NETWORK_ENTRIES {
                 slot.network.pop_front();
             }
             slot.network.push_back(entry);
-        });
+        })
     }
 
     fn webview_label_for(&self, session_id: &str) -> Result<String, String> {
@@ -377,10 +874,46 @@ fn session_browser_is_background_only(
     session_id: &str,
 ) -> Result<bool, String> {
     let session = store
-        .get_session(super::parse_uuid(session_id)?)
-        .map_err(super::to_string)?
+        .get_session(crate::stores::parse_uuid(session_id)?)
+        .map_err(crate::stores::to_string)?
         .ok_or_else(|| "browser chat no longer exists".to_string())?;
     Ok(session.parent_session_id.is_some())
+}
+
+/// Only the desktop IPC command accepts pre-chat workbench owners. Model tools
+/// still enter through open_session_browser and require a durable chat UUID.
+fn is_workbench_browser_request(request: &SessionBrowserOpenRequest) -> Result<bool, String> {
+    if request.session_id == "workbench" {
+        return request
+            .workspace_key
+            .is_empty()
+            .then_some(true)
+            .ok_or_else(|| "folderless browser ownership does not match its workspace".into());
+    }
+    let Some(workspace) = request.session_id.strip_prefix("workbench:") else {
+        return Ok(false);
+    };
+    if workspace.is_empty()
+        || workspace.len() > 4096
+        || workspace != request.workspace_key
+        || !std::path::Path::new(workspace).is_absolute()
+    {
+        return Err("workbench browser ownership does not match its workspace".into());
+    }
+    Ok(true)
+}
+
+fn browser_webview_label(owner: &str) -> String {
+    if owner == "workbench" || owner.starts_with("workbench:") {
+        // Paths can contain spaces, punctuation and Unicode. Native labels
+        // must remain bounded and must not merge paths that differ by '-'.
+        format!(
+            "session-browser-workbench-{:x}",
+            Sha256::digest(owner.as_bytes())
+        )
+    } else {
+        format!("session-browser-{}", owner.replace('-', ""))
+    }
 }
 
 pub fn is_background_browser<R: Runtime>(app: &AppHandle<R>, session_id: &str) -> bool {
@@ -467,6 +1000,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
   const consoleBuf = [];
   const networkBuf = [];
   let refCounter = 0;
+  const refPrefix = "ref_" + Math.random().toString(36).slice(2) + "_";
   const refMap = new Map();
 
   const textOf = (value) => {{
@@ -622,23 +1156,25 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     return tag;
   }};
 
-  const nameOf = (el) => {{
-    const labelled = el.getAttribute("aria-label")
+  const nameOf = (el, includeContents = true) => {{
+    const labelledBy = (el.getAttribute("aria-labelledby") || "").trim().split(/\s+/)
+      .map(id => document.getElementById(id))
+      .filter(Boolean)
+      .map(label => label.textContent || "").join(" ").trim();
+    const labelled = labelledBy || el.getAttribute("aria-label")
+      || (el.labels ? Array.from(el.labels, label => label.textContent || "").join(" ") : "")
       || el.getAttribute("alt")
       || el.getAttribute("title")
       || el.getAttribute("placeholder")
       || "";
-    if (labelled) return labelled.trim().slice(0, 120);
+    if (labelled) return labelled.replace(/\s+/g, " ").trim().slice(0, 120);
+    if (!includeContents) return "";
     const text = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
     return text.slice(0, 120);
   }};
 
-  // What the person watching would call the element an action touched. Form
-  // controls are usually named by a <label for>, which nameOf does not read.
   const targetName = (el) => {{
-    const label = el.getAttribute("aria-label")
-      || (el.labels && el.labels.length ? el.labels[0].innerText : "");
-    return (label || nameOf(el) || el.getAttribute("name") || "")
+    return (nameOf(el) || el.getAttribute("name") || "")
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, 80);
@@ -656,15 +1192,20 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
 
   const assignRef = (el) => {{
     if (!el) return null;
-    if (el.__gyroRef) {{
-      refMap.set(el.__gyroRef, el);
-      return el.__gyroRef;
+    if (!el.__gyroRef || !el.__gyroRef.startsWith(refPrefix)) {{
+      refCounter += 1;
+      el.__gyroRef = refPrefix + refCounter;
     }}
-    refCounter += 1;
-    const ref = "ref_" + refCounter;
-    el.__gyroRef = ref;
+    const ref = el.__gyroRef;
+    refMap.delete(ref);
     refMap.set(ref, el);
+    // Bound retained DOM nodes on long-lived pages; recently observed refs survive.
+    if (refMap.size > 4096) refMap.delete(refMap.keys().next().value);
     return ref;
+  }};
+
+  const pruneRefs = () => {{
+    for (const [ref, el] of refMap) if (!el.isConnected) refMap.delete(ref);
   }};
 
   const resolveRef = (ref) => {{
@@ -692,10 +1233,13 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
 
   const serializeTree = (root, depth, maxDepth, budget) => {{
     if (!root || depth > maxDepth || budget.left <= 0) return null;
+    budget.visited = (budget.visited || 0) + 1;
+    if (budget.visited > 5000) {{ budget.truncated = true; budget.exhausted = true; return null; }}
     if (root.nodeType === 3) {{
       const text = (root.textContent || "").replace(/\s+/g, " ").trim();
       if (!text) return null;
       budget.left -= text.length;
+      if (text.length > 200) budget.truncated = true;
       return {{ type: "text", text: text.slice(0, 200) }};
     }}
     if (root.nodeType !== 1) return null;
@@ -704,10 +1248,13 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     const tag = el.tagName.toLowerCase();
     if (tag === "script" || tag === "style" || tag === "noscript" || tag === "svg") return null;
     const ref = assignRef(el);
+    const expandedWrapper = depth < maxDepth && el.childNodes.length > 0
+      && ["body", "div", "section", "main", "article", "nav", "header", "footer", "aside"].includes(tag);
     const node = {{
       ref,
       role: roleOf(el),
-      name: nameOf(el),
+      // Do not traverse a whole subtree for a wrapper name we would then discard.
+      name: nameOf(el, !expandedWrapper),
       tag,
       children: [],
     }};
@@ -718,17 +1265,22 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     }}
     // Retain the existing traversal budget: deduplication must not hide more of the page.
     budget.left -= 64;
-    if (depth >= maxDepth) return node;
+    if (depth >= maxDepth) {{
+      if (el.childNodes.length) budget.truncated = true;
+      return node;
+    }}
     const children = el.childNodes;
-    for (let i = 0; i < children.length && budget.left > 0 && node.children.length < 40; i++) {{
+    let i = 0;
+    for (; i < children.length && budget.left > 0 && !budget.exhausted && node.children.length < 40; i++) {{
       const child = serializeTree(children[i], depth + 1, maxDepth, budget);
       if (child) node.children.push(child);
     }}
+    if (i < children.length) budget.truncated = true;
     if (node.children.length === 0) delete node.children;
     // Expanded layout wrappers repeat all descendant text as their name.
     // Keep labels and leaf summaries, but send that prose only once.
-    if (node.children && ["body", "div", "section", "main", "article", "nav", "header", "footer", "aside"].includes(tag)
-        && !el.getAttribute("aria-label") && !el.getAttribute("title")) delete node.name;
+    if (node.children && expandedWrapper
+        && !el.getAttribute("aria-label") && !el.getAttribute("aria-labelledby") && !el.getAttribute("title")) delete node.name;
     if (node.children && node.children.length === 1 && node.children[0].type === "text"
         && node.children[0].text === node.name) delete node.children;
     if (!node.name) delete node.name;
@@ -756,7 +1308,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     if (isCredentialField(el)) {{
       return {{ ok: false, error: "credential fields are not writable by the model" }};
     }}
-    if (el.disabled || el.readOnly ||
+    if (el.matches(":disabled") || el.readOnly || el.getAttribute("aria-disabled") === "true" ||
         !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable)) {{
       return {{ ok: false, error: "target is not an editable text field" }};
     }}
@@ -810,7 +1362,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     readPage(options) {{
       const root = options && options.ref ? resolveRef(options.ref) : (document.body || document.documentElement);
       if (!root) return {{ ok: false, error: "element ref is stale; use find to locate it again" }};
-      refMap.clear();
+      pruneRefs();
       const maxDepth = Math.min(8, Math.max(1, (options && options.maxDepth) || 4));
       const maxChars = Math.min({MAX_TREE_CHARS}, Math.max(1024, (options && options.maxChars) || 6000));
       const budget = {{ left: maxChars }};
@@ -819,7 +1371,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         ok: true,
         framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED",
         tree,
-        truncated: budget.left <= 0,
+        truncated: budget.left <= 0 || !!budget.truncated,
       }}, pageState());
     }},
     // Local Check reads only the explicitly reviewed visible text/count/height.
@@ -858,6 +1410,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       return Object.assign({{ok:true, values}},pageState());
     }},
     find(options) {{
+      pruneRefs();
       const query = ((options && options.query) || "").trim();
       const selector = ((options && options.selector) || "").trim();
       const results = [];
@@ -929,6 +1482,9 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         click(options) {{
       const el = resolveRef(options && options.ref);
       if (!el) return {{ ok: false, error: "unknown or stale ref" }};
+      if (!isVisible(el) || el.matches(":disabled") || el.getAttribute("aria-disabled") === "true") {{
+        return {{ ok: false, error: "target is hidden or disabled" }};
+      }}
       clickEl(el, options);
       return {{ ok: true, ref: options.ref, name: targetName(el) }};
     }},
@@ -942,6 +1498,9 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     formInput(options) {{
       const el = resolveRef(options && options.ref);
       if (!el) return {{ ok: false, error: "unknown or stale ref" }};
+      if (el.matches(":disabled") || el.readOnly || el.getAttribute("aria-disabled") === "true") {{
+        return {{ ok: false, error: "target is disabled or read-only" }};
+      }}
       if (isCredentialField(el)) {{
         return {{ ok: false, error: "credential fields are not writable by the model" }};
       }}
@@ -949,6 +1508,10 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       flashTarget(el, options);
       const value = String((options && options.value) ?? "");
       if (el.tagName.toLowerCase() === "select") {{
+        const option = Array.from(el.options).find(option => option.value === value);
+        if (!option || option.disabled || (option.parentElement.tagName === "OPTGROUP" && option.parentElement.disabled)) {{
+          return {{ ok: false, error: "select option is unavailable" }};
+        }}
         el.value = value;
         dispatch(el, "input");
         dispatch(el, "change");
@@ -1055,7 +1618,7 @@ fn handle_bridge_body<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<(),
         .and_then(Value::as_str)
         .ok_or_else(|| "bridge nonce missing".to_string())?;
     let manager = app.state::<SessionBrowserManager>();
-    let session_id = {
+    let lease = {
         let guard = manager
             .inner
             .lock()
@@ -1063,9 +1626,13 @@ fn handle_bridge_body<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<(),
         guard
             .values()
             .find(|slot| slot.bridge_nonce == nonce)
-            .map(|slot| slot.session_id.clone())
+            .map(|slot| BrowserLease {
+                session_id: slot.session_id.clone(),
+                resource_id: slot.resource_id.clone(),
+            })
             .ok_or_else(|| "unknown bridge nonce".to_string())?
     };
+    let session_id = lease.session_id.clone();
 
     let kind = value.get("kind").and_then(Value::as_str).unwrap_or("");
     match kind {
@@ -1077,7 +1644,7 @@ fn handle_bridge_body<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<(),
                     .unwrap_or("")
                     .to_string();
                 manager.push_console(
-                    &session_id,
+                    &lease,
                     BrowserConsoleEntry {
                         kind: entry
                             .get("kind")
@@ -1092,13 +1659,13 @@ fn handle_bridge_body<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<(),
                         line: entry.get("line").and_then(Value::as_i64),
                         column: entry.get("column").and_then(Value::as_i64),
                     },
-                );
+                )?;
             }
         }
         "network" => {
             if let Some(entry) = value.get("entry") {
                 manager.push_network(
-                    &session_id,
+                    &lease,
                     BrowserNetworkEntry {
                         method: entry
                             .get("method")
@@ -1113,25 +1680,27 @@ fn handle_bridge_body<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<(),
                             .and_then(Value::as_str)
                             .map(|value| value.to_string()),
                     },
-                );
+                )?;
             }
         }
         "title" => {
-            if let Some(title) = value.get("title").and_then(Value::as_str) {
-                let _ = manager.set_title(&session_id, &sanitize_text(title));
-            }
-            if let Some(url) = value.get("url").and_then(Value::as_str) {
-                let _ = manager.set_url(&session_id, url);
-            }
+            manager.update_resource_state(
+                &lease,
+                value.get("url").and_then(Value::as_str),
+                value.get("title").and_then(Value::as_str),
+            )?;
         }
         _ => {}
     }
     // Console and network entries are read on demand from the buffers above;
     // broadcasting each one only wakes every window for nothing.
-    if !matches!(kind, "console" | "network") && !is_background_browser(app, &session_id) {
+    if !matches!(kind, "console" | "network")
+        && lease.validate(&manager).is_ok()
+        && !is_background_browser(app, &session_id)
+    {
         let _ = app.emit(
             "session-browser-event",
-            serde_json::json!({ "sessionId": session_id, "kind": kind }),
+            serde_json::json!({ "sessionId": session_id, "resourceId":lease.resource_id, "kind": kind }),
         );
     }
     Ok(())
@@ -1148,6 +1717,16 @@ fn apply_session_browser_layout<R: Runtime>(
     host: Option<SessionBrowserBounds>,
     request: Option<BrowserViewportRequest>,
 ) -> Result<SessionBrowserSnapshot, String> {
+    apply_session_browser_layout_for(app, session_id, host, request, None)
+}
+
+fn apply_session_browser_layout_for<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    host: Option<SessionBrowserBounds>,
+    request: Option<BrowserViewportRequest>,
+    expected: Option<&BrowserLease>,
+) -> Result<SessionBrowserSnapshot, String> {
     let manager = app.state::<SessionBrowserManager>();
     // Serialize load events, model choices, and UI resize reports so an older
     // layout cannot overwrite a newer request after its native apply completes.
@@ -1155,21 +1734,29 @@ fn apply_session_browser_layout<R: Runtime>(
         .layout
         .lock()
         .map_err(|_| "browser layout is unavailable")?;
-    let (label, host, request, url, previous) = manager.with_slot_mut(session_id, |slot| {
-        (
-            slot.webview_label.clone(),
-            host.unwrap_or_else(|| slot.host_bounds.clone()),
-            request.unwrap_or(slot.viewport_request),
-            slot.url.clone(),
-            slot.viewport,
-        )
-    })?;
+    let (lease, label, host, request, url, previous) =
+        manager.with_slot_mut(session_id, |slot| {
+            if expected.is_some_and(|lease| lease.resource_id != slot.resource_id) {
+                return Err("browser resource changed before layout".to_string());
+            }
+            Ok((
+                BrowserLease {
+                    session_id: session_id.into(),
+                    resource_id: slot.resource_id.clone(),
+                },
+                slot.webview_label.clone(),
+                host.unwrap_or_else(|| slot.host_bounds.clone()),
+                request.unwrap_or(slot.viewport_request),
+                slot.url.clone(),
+                slot.viewport,
+            ))
+        })??;
     let geometry = browser_viewport::geometry(request, &url, &host)?;
     let webview = app
         .get_webview(&label)
         .ok_or("browser webview is not available")?;
-    browser_viewport::apply(&webview, &geometry, Some(previous))?;
-    let changed = manager.with_slot_mut(session_id, |slot| {
+    browser_viewport::apply(&webview, &geometry, Some(previous), Some(lease.clone()))?;
+    let changed = manager.with_resource_mut(&lease, |slot| {
         let changed = slot.viewport != geometry.state;
         if slot.viewport.width != geometry.state.width
             || slot.viewport.height != geometry.state.height
@@ -1184,11 +1771,14 @@ fn apply_session_browser_layout<R: Runtime>(
     let snapshot = manager
         .get_snapshot(session_id)?
         .ok_or("browser disappeared during resize")?;
+    if snapshot.resource_id != lease.resource_id {
+        return Err("browser resource changed during layout".into());
+    }
     if changed && !snapshot.background_only {
         let _ = app.emit(
             "session-browser-event",
             serde_json::json!({
-                "sessionId":session_id,"kind":"viewport","viewport":snapshot.viewport,
+                "sessionId":session_id,"resourceId":snapshot.resource_id,"kind":"viewport","viewport":snapshot.viewport,
             }),
         );
     }
@@ -1200,6 +1790,7 @@ pub fn set_session_browser_viewport<R: Runtime>(
     session_id: &str,
     request: BrowserViewportRequest,
 ) -> Result<SessionBrowserSnapshot, String> {
+    let request = request.normalized();
     request.validate()?;
     apply_session_browser_layout(app, session_id, None, Some(request))
 }
@@ -1210,7 +1801,7 @@ pub fn open_session_browser<R: Runtime>(
 ) -> Result<SessionBrowserSnapshot, String> {
     // Ownership comes from the durable chat relationship, never a tool/UI
     // argument. A restored agent gets the same private browser on follow-up.
-    let store = super::open_store()?;
+    let store = crate::stores::open_store()?;
     let background_only = session_browser_is_background_only(&store, &request.session_id)?;
     drop(store);
     if background_only {
@@ -1255,8 +1846,8 @@ pub(crate) fn open_check_browser<R: Runtime>(
         Some(url.origin().ascii_serialization()),
     );
     if let Err(error) = opened {
-        if let Some(view) = app.get_webview(&format!("session-browser-{}", id.replace('-', ""))) {
-            let _ = view.close();
+        if let Some(view) = app.get_webview(&browser_webview_label(&id)) {
+            let _ = close_browser_webview(&view);
         }
         return Err(error);
     }
@@ -1267,8 +1858,7 @@ pub(crate) fn close_check_browser<R: Runtime>(app: &AppHandle<R>, id: &str) -> R
     let manager = app.state::<SessionBrowserManager>();
     let label = manager.webview_label_for(id)?;
     if let Some(view) = app.get_webview(&label) {
-        view.close()
-            .map_err(|e| format!("could not close Check browser: {e}"))?;
+        close_browser_webview(&view).map_err(|e| format!("could not close Check browser: {e}"))?;
     }
     manager.remove_slot(id)?;
     Ok(())
@@ -1307,11 +1897,21 @@ fn open_browser_resource<R: Runtime>(
         }
         let label = manager.webview_label_for(&request.session_id)?;
         if let Some(webview) = app.get_webview(&label) {
-            webview
-                .navigate(url.clone())
-                .map_err(|error| format!("could not navigate browser: {error}"))?;
-            manager.set_url(&request.session_id, url.as_str())?;
-            apply_session_browser_layout(app, &request.session_id, request.bounds.clone(), None)?;
+            let lease = BrowserLease::from_snapshot(&existing);
+            let navigation = manager.reserve_navigation(&lease, Some(url.as_str()))?;
+            dispatch_browser_navigation(
+                app,
+                &webview,
+                &navigation,
+                BrowserNavigationCommand::Navigate(url.clone()),
+            )?;
+            apply_session_browser_layout_for(
+                app,
+                &request.session_id,
+                request.bounds.clone(),
+                None,
+                Some(&lease),
+            )?;
             let visible =
                 browser_visibility(background_only, request.visible.unwrap_or(existing.visible));
             let was_visible = existing.visible;
@@ -1320,7 +1920,6 @@ fn open_browser_resource<R: Runtime>(
             } else {
                 let _ = webview.hide();
             }
-            manager.set_url(&request.session_id, url.as_str())?;
             manager.set_visible_flag(&request.session_id, visible)?;
             if visibility_moves_keyboard_focus(was_visible, visible) {
                 restore_main_webview_focus(app);
@@ -1335,19 +1934,28 @@ fn open_browser_resource<R: Runtime>(
     let session_id = request.session_id.clone();
     let resource_id = Uuid::new_v4().to_string();
     let bridge_nonce = Uuid::new_v4().to_string();
-    let webview_label = format!("session-browser-{}", session_id.replace('-', ""));
+    let webview_label = browser_webview_label(&session_id);
     let script = agent_initialization_script(&bridge_nonce);
 
     // Close any stale webview with the same label.
     if let Some(existing) = app.get_webview(&webview_label) {
-        let _ = existing.close();
+        let _ = close_browser_webview(&existing);
     }
 
     let window = get_main_window(app)?;
     let session_for_title = session_id.clone();
     let app_for_title = app.clone();
+    #[cfg(not(target_os = "macos"))]
     let session_for_load = session_id.clone();
+    #[cfg(not(target_os = "macos"))]
     let app_for_load = app.clone();
+    let resource_for_load = BrowserLease {
+        session_id: session_id.clone(),
+        resource_id: resource_id.clone(),
+    };
+    let resource_for_title = resource_for_load.clone();
+    #[cfg(target_os = "macos")]
+    let resource_for_observer = resource_for_load.clone();
     // A model opens the browser with no bounds, because nothing is on screen
     // for it. It still needs a real viewport: the page runs at the child's
     // size, so a 1x1 child reported window.innerWidth 1, collapsed every
@@ -1381,24 +1989,55 @@ fn open_browser_resource<R: Runtime>(
         .on_navigation(move |candidate| {
             resource_navigation_allowed(candidate, fixed_origin.as_deref())
         })
-        .on_page_load(move |_webview, payload| {
-            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+        .on_page_load(move |_webview, _payload| {
+            #[cfg(not(target_os = "macos"))]
+            let payload = _payload;
+            #[cfg(not(target_os = "macos"))]
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                let manager = app_for_load.state::<SessionBrowserManager>();
+                if manager
+                    .commit_navigation(&resource_for_load, payload.url().as_str())
+                    .is_ok()
+                    && !background_only
+                {
+                    let _ = app_for_load.emit("session-browser-event", serde_json::json!({
+                        "sessionId": session_for_load, "resourceId": resource_for_load.resource_id,
+                        "kind": "loading",
+                    }));
+                }
+            } else if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
                 let app = app_for_load.clone();
                 let session_id = session_for_load.clone();
                 let url = payload.url().as_str().to_string();
-                let _ = app
+                let Ok(navigation_id) = app
                     .state::<SessionBrowserManager>()
-                    .set_url(&session_id, &url);
+                    .finish_navigation(&resource_for_load, &url)
+                else {
+                    return;
+                };
                 // Native layout work waits for the main thread; never block the
                 // WebKit load callback itself. Redirects re-resolve Auto mode.
+                let lease = resource_for_load.clone();
                 std::thread::spawn(move || {
-                    let snapshot = apply_session_browser_layout(&app, &session_id, None, None);
-                    if !background_only {
+                    let Ok(snapshot) = apply_session_browser_layout_for(
+                        &app,
+                        &session_id,
+                        None,
+                        None,
+                        Some(&lease),
+                    ) else {
+                        return;
+                    };
+                    if !background_only
+                        && app
+                            .state::<SessionBrowserManager>()
+                            .navigation_is_finished(&lease, navigation_id)
+                    {
                         let _ = app.emit(
                             "session-browser-event",
                             serde_json::json!({
                                 "sessionId": session_id, "kind": "loaded", "url": url,
-                                "viewport": snapshot.ok().map(|snapshot| snapshot.viewport),
+                                "resourceId": lease.resource_id, "viewport": snapshot.viewport,
                             }),
                         );
                     }
@@ -1407,13 +2046,19 @@ fn open_browser_resource<R: Runtime>(
         })
         .on_document_title_changed(move |_webview, title| {
             let manager = app_for_title.state::<SessionBrowserManager>();
-            let _ = manager.set_title(&session_for_title, &sanitize_text(&title));
+            if manager
+                .update_resource_state(&resource_for_title, None, Some(&title))
+                .is_err()
+            {
+                return;
+            }
             if !background_only {
                 let _ = app_for_title.emit(
                     "session-browser-event",
                     serde_json::json!({
                         "sessionId": session_for_title,
                         "kind": "title",
+                        "resourceId": resource_for_title.resource_id,
                         "title": sanitize_text(&title),
                     }),
                 );
@@ -1438,13 +2083,57 @@ fn open_browser_resource<R: Runtime>(
         )
         .map_err(|error| format!("could not create session browser webview: {error}"))?;
 
-    browser_viewport::apply(&webview, &geometry, None)?;
+    #[cfg(target_os = "macos")]
+    {
+        let app = app.clone();
+        let lease = resource_for_observer;
+        let pending = PendingCall::new(
+            AGENT_CALL_TIMEOUT,
+            "browser navigation observer installation timed out",
+        )?;
+        let dispatch = pending.guard();
+        let (sender, receiver) = mpsc::channel();
+        webview.with_webview(move |platform| unsafe {
+            use objc2_web_kit::WKWebView;
+            let result = dispatch.check().and_then(|_| navigation_observer::attach(
+                &*platform.inner().cast::<WKWebView>(),
+                Box::new(move |view, token, event| {
+                    let url=view.URL().and_then(|url|url.absoluteString()).map(|url|url.to_string());
+                    let manager=app.state::<SessionBrowserManager>();
+                    let Ok(Some((kind,navigation_id)))=manager.native_navigation_event(&lease,token,&event,url.as_deref()) else {return false;};
+                    if kind=="loaded" {
+                        let app=app.clone();
+                        let lease=lease.clone();
+                        std::thread::spawn(move || {
+                            let Ok(snapshot)=apply_session_browser_layout_for(&app,&lease.session_id,None,None,Some(&lease)) else {return;};
+                            if !background_only && app.state::<SessionBrowserManager>().navigation_is_finished(&lease,navigation_id) {
+                                let _=app.emit("session-browser-event",serde_json::json!({"sessionId":lease.session_id,"resourceId":lease.resource_id,"kind":"loaded","viewport":snapshot.viewport}));
+                            }
+                        });
+                    } else if !background_only {
+                        let _=app.emit("session-browser-event",serde_json::json!({"sessionId":lease.session_id,"resourceId":lease.resource_id,"kind":kind}));
+                    }
+                    true
+                }),
+            ));
+            let _=sender.send(result);
+        }).map_err(|error|format!("could not queue browser navigation observer: {error}"))?;
+        if let Err(error) = pending.wait(receiver).and_then(|result| result) {
+            let _ = close_browser_webview(&webview);
+            return Err(error);
+        }
+    }
+
+    if let Err(error) = browser_viewport::apply(&webview, &geometry, None, None) {
+        let _ = close_browser_webview(&webview);
+        return Err(error);
+    }
 
     // Child webviews are the unstable-path trigger that leaves native window
     // controls at (0, 0). Re-apply the overlay inset on the parent window.
     #[cfg(target_os = "macos")]
     if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        crate::apply_macos_traffic_light_position(&main);
+        crate::window_controls::apply_macos_traffic_light_position(&main);
     }
 
     if !visible {
@@ -1475,6 +2164,13 @@ fn open_browser_resource<R: Runtime>(
             bridge_nonce,
             url: url.to_string(),
             title: String::new(),
+            loading: true,
+            navigation_id: 1,
+            document_committed: false,
+            navigation_error: None,
+            native_navigation_token: None,
+            committed_url: None,
+            failed_provisional: false,
             visible,
             background_only,
             host_bounds: bounds,
@@ -1490,6 +2186,29 @@ fn open_browser_resource<R: Runtime>(
         .get(&session_id)
         .map(SessionBrowserManager::snapshot_locked)
         .expect("just inserted");
+    drop(guard);
+    // A very fast first page may commit before add_child/layout return and the
+    // slot exists. Reconcile once without delaying Open or trusting about:blank.
+    let probe_lease = BrowserDocumentLease {
+        resource: BrowserLease::from_snapshot(&snapshot),
+        navigation_id: snapshot.navigation_id,
+    };
+    let probe_app = app.clone();
+    let _ = webview.eval_with_callback("({installed:!!window.__gyroBrowserAgent,url:location.href,title:document.title,readyState:document.readyState})",move|encoded| {
+        let Ok(observed) = serde_json::from_str::<Value>(&encoded) else {return;};
+        let manager = probe_app.state::<SessionBrowserManager>();
+        if manager.reconcile_initial_document(&probe_lease,&observed) != Ok(true) {return;}
+        let app = probe_app.clone();
+        let lease = probe_lease.clone();
+        std::thread::spawn(move|| {
+            if lease.validate(&app.state::<SessionBrowserManager>()).is_err() {return;}
+            let session = &lease.resource.session_id;
+            let Ok(snapshot) = apply_session_browser_layout_for(&app,session,None,None,Some(&lease.resource)) else {return;};
+            if lease.validate(&app.state::<SessionBrowserManager>()).is_ok() && !snapshot.background_only {
+                let _ = app.emit("session-browser-event",serde_json::json!({"sessionId":session,"resourceId":snapshot.resource_id,"kind":if snapshot.loading {"loading"} else {"loaded"}}));
+            }
+        });
+    });
     Ok(snapshot)
 }
 
@@ -1537,6 +2256,66 @@ pub fn set_session_browser_visible<R: Runtime>(
     Ok(())
 }
 
+enum BrowserNavigationCommand {
+    Navigate(url::Url),
+    Reload,
+}
+
+fn dispatch_browser_navigation<R: Runtime>(
+    app: &AppHandle<R>,
+    webview: &tauri::Webview<R>,
+    request: &BrowserNavigationRequest,
+    command: BrowserNavigationCommand,
+) -> Result<(), String> {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    let dispatched = Arc::new(AtomicBool::new(false));
+    let did_dispatch = dispatched.clone();
+    let result = (|| {
+        let pending =
+            PendingCall::new(AGENT_CALL_TIMEOUT, "browser navigation dispatch timed out")?;
+        let dispatch = pending.guard();
+        let action_view = webview.clone();
+        let action_app = app.clone();
+        let lease = request.resource.clone();
+        let navigation_id = request.navigation_id;
+        let (send, receive) = mpsc::channel();
+        webview
+            .with_webview(move |_| {
+                let result = (|| {
+                    dispatch.check()?;
+                    action_app.state::<SessionBrowserManager>().with_resource_mut(&lease, |slot| {
+                        if slot.navigation_id == navigation_id {
+                            Ok(())
+                        } else {
+                            Err("browser navigation changed before dispatch; observe the current page before retrying".to_string())
+                        }
+                    })??;
+                    dispatch.check()?;
+                    did_dispatch.store(true, Ordering::Release);
+                    // Tauri executes these synchronously on its main thread.
+                    match command {
+                        BrowserNavigationCommand::Navigate(url) => action_view.navigate(url),
+                        BrowserNavigationCommand::Reload => action_view.reload(),
+                    }
+                    .map_err(|error| format!("could not dispatch browser navigation: {error}"))
+                })();
+                let _ = send.send(result);
+            })
+            .map_err(|error| format!("could not queue browser navigation: {error}"))?;
+        pending.wait(receive)?
+    })();
+    if let Err(error) = &result {
+        if !dispatched.load(Ordering::Acquire) {
+            app.state::<SessionBrowserManager>()
+                .restore_undispatched_navigation(request, operation_was_cancelled(error));
+        }
+    }
+    result
+}
+
 pub fn navigate_session_browser<R: Runtime>(
     app: &AppHandle<R>,
     session_id: &str,
@@ -1548,11 +2327,18 @@ pub fn navigate_session_browser<R: Runtime>(
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "browser webview is not available".to_string())?;
-    webview
-        .navigate(url.clone())
-        .map_err(|error| format!("could not navigate browser: {error}"))?;
-    manager.set_url(session_id, url.as_str())?;
-    apply_session_browser_layout(app, session_id, None, None)?;
+    let previous = manager
+        .get_snapshot(session_id)?
+        .ok_or("this chat has no open browser")?;
+    let lease = BrowserLease::from_snapshot(&previous);
+    let request = manager.reserve_navigation(&lease, Some(url.as_str()))?;
+    dispatch_browser_navigation(
+        app,
+        &webview,
+        &request,
+        BrowserNavigationCommand::Navigate(url.clone()),
+    )?;
+    apply_session_browser_layout_for(app, session_id, None, None, Some(&lease))?;
     let _ = manager.approve_origin(session_id, &url.origin().ascii_serialization());
     manager
         .get_snapshot(session_id)?
@@ -1568,9 +2354,17 @@ pub fn reload_session_browser<R: Runtime>(
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "browser webview is not available".to_string())?;
-    webview
-        .reload()
-        .map_err(|error| format!("could not reload browser: {error}"))?;
+    let previous = manager
+        .get_snapshot(session_id)?
+        .ok_or("this chat has no open browser")?;
+    // A provisional failure leaves WKWebView on the previous document.
+    // Reloading that view would silently reload the wrong URL.
+    if previous.navigation_error.is_some() {
+        return navigate_session_browser(app, session_id, &previous.url);
+    }
+    let lease = BrowserLease::from_snapshot(&previous);
+    let request = manager.reserve_navigation(&lease, None)?;
+    dispatch_browser_navigation(app, &webview, &request, BrowserNavigationCommand::Reload)?;
     manager
         .get_snapshot(session_id)?
         .ok_or_else(|| "browser disappeared during reload".to_string())
@@ -1591,11 +2385,66 @@ pub fn history_session_browser<R: Runtime>(
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "browser webview is not available".to_string())?;
-    webview
-        .eval(format!("window.history.go({delta});"))
-        .map_err(|error| format!("could not move browser history: {error}"))?;
-    // Best-effort URL refresh after history navigation.
-    let _ = call_agent(app, session_id, "status", serde_json::json!({}));
+    let (resource, previous) = manager.capture_resource(session_id)?;
+    let lease = BrowserDocumentLease {
+        resource,
+        navigation_id: previous.navigation_id,
+    };
+    #[cfg(target_os = "macos")]
+    {
+        let pending = PendingCall::new(AGENT_CALL_TIMEOUT, "browser history action timed out")?;
+        let dispatch = pending.guard();
+        let history_app = app.clone();
+        let (sender, receiver) = mpsc::channel();
+        webview
+            .with_webview(move |platform| unsafe {
+                use objc2_web_kit::WKWebView;
+                let manager = history_app.state::<SessionBrowserManager>();
+                let result = (|| {
+                    dispatch.check()?;
+                    manager.with_resource_mut(&lease.resource, |slot| {
+                        if slot.navigation_id==lease.navigation_id {Ok(())} else {Err("browser navigation changed before history action".to_string())}
+                    })??;
+                    let view: &WKWebView = &*platform.inner().cast();
+                    if delta < 0 && manager.recover_provisional_document(&lease.resource,lease.navigation_id)? {
+                        // Invalidate the failed/pending callback token first.
+                        // Stopping WebKit can synchronously emit cancellation.
+                        view.stopLoading();
+                        let _=history_app.emit("session-browser-event",serde_json::json!({"sessionId":lease.resource.session_id,"resourceId":lease.resource.resource_id,"kind":"loaded"}));
+                        return Ok(());
+                    }
+                    if !(if delta < 0 {
+                        view.canGoBack()
+                    } else {
+                        view.canGoForward()
+                    }) {
+                        return Err("browser has no page in that history direction".to_string());
+                    }
+                    let navigation_id = manager.start_navigation(&lease.resource, None)?;
+                    let navigation = if delta < 0 {
+                        view.goBack()
+                    } else {
+                        view.goForward()
+                    };
+                    if navigation.is_none() {
+                        manager.restore_navigation(&lease.resource, navigation_id, &previous);
+                        return Err("browser did not start the history navigation".to_string());
+                    }
+                    Ok(())
+                })();
+                let _ = sender.send(result);
+            })
+            .map_err(|error| format!("could not queue browser history: {error}"))?;
+        pending.wait(receiver)??;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let navigation_id = manager.start_navigation(&lease.resource, None)?;
+        if let Err(error) = webview.eval(format!("window.history.go({delta});")) {
+            manager.restore_navigation(&lease.resource, navigation_id, &previous);
+            return Err(format!("could not move browser history: {error}"));
+        }
+    }
     manager
         .get_snapshot(session_id)?
         .ok_or_else(|| "browser disappeared during history navigation".to_string())
@@ -1608,10 +2457,34 @@ pub fn close_session_browser<R: Runtime>(
     let manager = app.state::<SessionBrowserManager>();
     if let Some(slot) = manager.remove_slot(session_id)? {
         if let Some(webview) = app.get_webview(&slot.webview_label) {
-            let _ = webview.close();
+            let _ = close_browser_webview(&webview);
         }
     }
     Ok(())
+}
+
+fn close_browser_webview<R: Runtime>(webview: &tauri::Webview<R>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let detached = webview
+        .with_webview(|platform| unsafe {
+            let view = &*platform.inner().cast::<objc2_web_kit::WKWebView>();
+            navigation_observer::detach(view);
+            browser_viewport::detach_native_container(view);
+        })
+        .map_err(|error| format!("could not detach native browser resources: {error}"));
+    let closed = webview.close().map_err(|error| error.to_string());
+    #[cfg(target_os = "macos")]
+    detached?;
+    closed
+}
+
+#[cfg(all(
+    target_os = "macos",
+    debug_assertions,
+    feature = "native-browser-events-smoke"
+))]
+pub(crate) fn navigation_observer_counts() -> Value {
+    navigation_observer::counts()
 }
 
 pub fn call_agent<R: Runtime>(
@@ -1621,7 +2494,19 @@ pub fn call_agent<R: Runtime>(
     args: Value,
 ) -> Result<Value, String> {
     let manager = app.state::<SessionBrowserManager>();
-    let label = manager.webview_label_for(session_id)?;
+    let (lease, snapshot) = manager.capture_document(session_id)?;
+    call_agent_for(app, lease, snapshot, method, args)
+}
+
+fn call_agent_for<R: Runtime>(
+    app: &AppHandle<R>,
+    lease: BrowserDocumentLease,
+    snapshot: SessionBrowserSnapshot,
+    method: &str,
+    args: Value,
+) -> Result<Value, String> {
+    let manager = app.state::<SessionBrowserManager>();
+    let label = snapshot.label.clone();
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "browser webview is not available".to_string())?;
@@ -1643,15 +2528,29 @@ pub fn call_agent<R: Runtime>(
   }}
 }})();"#
     );
+    let pending = PendingCall::new(AGENT_CALL_TIMEOUT, "browser agent call timed out")?;
+    let dispatch = pending.guard();
     let (sender, receiver) = mpsc::channel();
+    let evaluator = webview.clone();
+    let dispatch_app = app.clone();
+    let dispatch_lease = lease.clone();
     webview
-        .eval_with_callback(script, move |result| {
-            let _ = sender.send(result);
+        .run_on_main_thread(move || {
+            if let Err(error) = dispatch.check().and_then(|_| {
+                dispatch_lease.validate(&dispatch_app.state::<SessionBrowserManager>())
+            }) {
+                let _ = sender.send(Err(error));
+                return;
+            }
+            let callback_sender = sender.clone();
+            if let Err(error) = evaluator.eval_with_callback(script, move |result| {
+                let _ = callback_sender.send(Ok(result));
+            }) {
+                let _ = sender.send(Err(format!("could not run browser agent: {error}")));
+            }
         })
-        .map_err(|error| format!("could not run browser agent: {error}"))?;
-    let encoded = receiver
-        .recv_timeout(AGENT_CALL_TIMEOUT)
-        .map_err(|_| "browser agent call timed out".to_string());
+        .map_err(|error| format!("could not queue browser agent: {error}"))?;
+    let encoded = pending.wait(receiver).and_then(|result| result);
     reclaim_stranded_keyboard(app);
     let encoded = encoded?;
     let response: Value = serde_json::from_str(&encoded)
@@ -1671,13 +2570,24 @@ pub fn call_agent<R: Runtime>(
                 .unwrap_or("browser action failed"),
         ));
     }
-    if let Some(url) = value.get("url").and_then(Value::as_str) {
-        manager.set_url(session_id, url)?;
+    let mut value = sanitize_agent_result(method, value)?;
+    let navigation = manager.with_document_mut(&lease, |slot| {
+        if let Some(url) = value.get("url").and_then(Value::as_str) {
+            if slot.url != url {
+                slot.pointer_reference = None;
+            }
+            slot.url = url.to_string();
+            slot.committed_url = Some(url.to_string());
+        }
+        if let Some(title) = value.get("title").and_then(Value::as_str) {
+            slot.title = title.to_string();
+        }
+        serde_json::json!({"id":slot.navigation_id,"loading":slot.loading,"documentCommitted":true})
+    })?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert("navigation".into(), navigation);
     }
-    if let Some(title) = value.get("title").and_then(Value::as_str) {
-        manager.set_title(session_id, &sanitize_text(title))?;
-    }
-    sanitize_agent_result(method, value)
+    Ok(value)
 }
 
 pub fn mouse_session_browser<R: Runtime>(
@@ -1696,13 +2606,12 @@ pub fn mouse_session_browser<R: Runtime>(
         return Err("unsupported browser pointer action".into());
     }
     let manager = app.state::<SessionBrowserManager>();
-    let snapshot = manager
-        .get_snapshot(session_id)?
-        .ok_or_else(|| "this chat has no open browser".to_string())?;
+    let (lease, snapshot) = manager.capture_document(session_id)?;
     if snapshot.background_only || !snapshot.visible {
-        return call_agent(
+        return call_agent_for(
             app,
-            session_id,
+            lease,
+            snapshot,
             "backgroundPointer",
             serde_json::json!({
                 "action": action, "x": x, "y": y, "toX": to_x, "toY": to_y,
@@ -1718,6 +2627,9 @@ pub fn mouse_session_browser<R: Runtime>(
     #[cfg(target_os = "macos")]
     {
         let action = action.to_string();
+        let pending = PendingCall::new(AGENT_CALL_TIMEOUT, "browser mouse action timed out")?;
+        let dispatch = pending.guard();
+        let dispatch_app = app.clone();
         let (sender, receiver) = mpsc::channel();
         webview
             .with_webview(move |platform| unsafe {
@@ -1729,6 +2641,8 @@ pub fn mouse_session_browser<R: Runtime>(
                 use objc2_web_kit::WKWebView;
 
                 let result = (|| -> Result<(), String> {
+                    dispatch.check()?;
+                    lease.validate(&dispatch_app.state::<SessionBrowserManager>())?;
                     let webview: &WKWebView = &*platform.inner().cast();
                     let view: &NSView = webview;
                     let window = view
@@ -1819,9 +2733,7 @@ pub fn mouse_session_browser<R: Runtime>(
                 let _ = sender.send(result);
             })
             .map_err(|error| format!("could not send browser mouse event: {error}"))?;
-        receiver
-            .recv_timeout(AGENT_CALL_TIMEOUT)
-            .map_err(|_| "browser mouse action timed out".to_string())?
+        pending.wait(receiver)?
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -1829,6 +2741,23 @@ pub fn mouse_session_browser<R: Runtime>(
         let _ = (webview, action, x, y, to_x, to_y);
         Err("browser mouse actions are currently available on macOS only".into())
     }
+}
+
+/// Decoration cleanup must remain possible after Stop without extending the
+/// cancelled model's wait or dispatching another page action.
+pub(crate) fn restore_pointer_feedback<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+) -> Result<(), String> {
+    let label = app
+        .state::<SessionBrowserManager>()
+        .webview_label_for(session_id)?;
+    let webview = app
+        .get_webview(&label)
+        .ok_or("browser webview is not available")?;
+    webview
+        .eval("window.__gyroBrowserAgent?.restorePointer();")
+        .map_err(|error| format!("could not restore browser pointer feedback: {error}"))
 }
 
 fn sanitize_agent_result(method: &str, value: Value) -> Result<Value, String> {
@@ -1864,21 +2793,40 @@ fn sanitize_agent_result(method: &str, value: Value) -> Result<Value, String> {
     Ok(sanitized)
 }
 
+pub(crate) fn wait_for_screenshot_document<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+) -> Result<SessionBrowserSnapshot, String> {
+    app.state::<SessionBrowserManager>()
+        .wait_for_document(session_id)
+}
+
 pub fn capture_session_browser_png<R: Runtime>(
     app: &AppHandle<R>,
     session_id: &str,
 ) -> Result<SessionBrowserCapture, String> {
     let manager = app.state::<SessionBrowserManager>();
-    let label = manager.webview_label_for(session_id)?;
+    let (lease, snapshot) = manager.capture_document(session_id)?;
+    let label = snapshot.label.clone();
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "browser webview is not available".to_string())?;
 
     #[cfg(target_os = "macos")]
     {
+        let pending = PendingCall::new(AGENT_CALL_TIMEOUT, "native browser screenshot timed out")?;
+        let dispatch = pending.guard();
+        let dispatch_app = app.clone();
         let (sender, receiver) = mpsc::channel();
         webview
             .with_webview(move |platform| unsafe {
+                if let Err(error) = dispatch
+                    .check()
+                    .and_then(|_| lease.validate(&dispatch_app.state::<SessionBrowserManager>()))
+                {
+                    let _ = sender.send(Err(error));
+                    return;
+                }
                 use block2::RcBlock;
                 use objc2::runtime::AnyObject;
                 use objc2_app_kit::{
@@ -1890,6 +2838,8 @@ pub fn capture_session_browser_png<R: Runtime>(
                 let view: &WKWebView = &*platform.inner().cast();
                 let completion = RcBlock::new(move |image: *mut NSImage, _error: *mut NSError| {
                     let snapshot = (|| {
+                        dispatch.check()?;
+                        lease.validate(&dispatch_app.state::<SessionBrowserManager>())?;
                         let image = image.as_ref().ok_or_else(|| {
                             "native browser snapshot returned no image".to_string()
                         })?;
@@ -1932,11 +2882,19 @@ pub fn capture_session_browser_png<R: Runtime>(
             })
             .map_err(|error| format!("could not request native browser snapshot: {error}"))?;
 
-        let capture = receiver
-            .recv_timeout(Duration::from_secs(8))
-            .map_err(|_| "native browser screenshot timed out".to_string())
-            .and_then(|capture| capture);
+        let capture = pending.wait(receiver).and_then(|capture| capture);
         reclaim_stranded_keyboard(app);
+        // The callback checks ownership before encoding; check once more before
+        // handing image evidence to the caller.
+        if capture.is_ok() {
+            manager.with_document_mut(
+                &BrowserDocumentLease {
+                    resource: BrowserLease::from_snapshot(&snapshot),
+                    navigation_id: snapshot.navigation_id,
+                },
+                |_| (),
+            )?;
+        }
         capture
     }
 
@@ -1954,20 +2912,21 @@ pub async fn session_browser_open(
     app: AppHandle,
     mut request: SessionBrowserOpenRequest,
 ) -> Result<SessionBrowserSnapshot, String> {
-    if request.workspace_key.is_empty() {
+    let workbench_owner = is_workbench_browser_request(&request)?;
+    if request.workspace_key.is_empty() && !workbench_owner {
         // Resolve the chat's workspace on a blocking worker: this is a SQLite
         // open plus a read, and it used to hold an async-runtime thread while
         // every other IPC call queued. Creating the webview stays on this task
         // so Tauri keeps its own main-thread hop.
         let session_id = request.session_id.clone();
         request.workspace_key = tauri::async_runtime::spawn_blocking(move || {
-            let store = super::open_store()?;
+            let store = crate::stores::open_store()?;
             let session = store
-                .get_session(super::parse_uuid(&session_id)?)
-                .map_err(super::to_string)?
+                .get_session(crate::stores::parse_uuid(&session_id)?)
+                .map_err(crate::stores::to_string)?
                 .ok_or_else(|| "browser chat no longer exists".to_string())?;
             Ok::<String, String>(
-                super::session_execution_workspace(&session, store.paths())?
+                crate::providers::binding::session_execution_workspace(&session, store.paths())?
                     .display()
                     .to_string(),
             )
@@ -1975,7 +2934,11 @@ pub async fn session_browser_open(
         .await
         .map_err(|error| format!("browser workspace worker failed: {error}"))??;
     }
-    open_session_browser(&app, request)
+    if workbench_owner {
+        open_browser_resource(&app, request, false, None)
+    } else {
+        open_session_browser(&app, request)
+    }
 }
 
 #[tauri::command]
@@ -2067,321 +3030,5 @@ pub(crate) fn browser_action_target(result: &gyro_core::CapabilityResult) -> Opt
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_browser_visibility_change_gives_the_keyboard_back_to_the_chat() {
-        // Showing or hiding the child webview moves first responder in the
-        // window, so the app webview has to reclaim it or keystrokes stop
-        // reaching the chat the user is typing in.
-        assert!(visibility_moves_keyboard_focus(false, true));
-        assert!(visibility_moves_keyboard_focus(true, false));
-        // Re-sending the state the browser is already in must leave typing alone.
-        assert!(!visibility_moves_keyboard_focus(true, true));
-        assert!(!visibility_moves_keyboard_focus(false, false));
-    }
-
-    fn browser_slot(session_id: &str, background_only: bool) -> SessionBrowserSlot {
-        SessionBrowserSlot {
-            session_id: session_id.into(),
-            workspace_key: "shared-workspace".into(),
-            resource_id: Uuid::new_v4().to_string(),
-            webview_label: format!("session-browser-{session_id}"),
-            bridge_nonce: Uuid::new_v4().to_string(),
-            url: "https://example.com/".into(),
-            title: String::new(),
-            visible: false,
-            background_only,
-            host_bounds: BACKGROUND_BROWSER_BOUNDS.clone(),
-            viewport_request: BrowserViewportRequest::default(),
-            viewport: browser_viewport::geometry(
-                BrowserViewportRequest::default(),
-                "https://example.com/",
-                &BACKGROUND_BROWSER_BOUNDS,
-            )
-            .unwrap()
-            .state,
-            approved_origins: HashSet::new(),
-            pointer_reference: None,
-            console: VecDeque::new(),
-            network: VecDeque::new(),
-        }
-    }
-
-    #[test]
-    fn restored_subagents_get_private_browsers_from_durable_ownership() {
-        use gyro_core::{CreateSessionContext, GyroPaths, SessionOrigin, SessionStore};
-        let temp = tempfile::tempdir().unwrap();
-        let paths = GyroPaths::from_base_dir(temp.path().join("store"));
-        let store = SessionStore::open(paths.clone()).unwrap();
-        let parent = store
-            .create_session(temp.path(), SessionOrigin::Desktop, "Parent")
-            .unwrap();
-        let child = store
-            .create_subagent_session(
-                temp.path(),
-                SessionOrigin::Desktop,
-                "Research",
-                CreateSessionContext::default(),
-                parent.id,
-            )
-            .unwrap();
-        drop(store);
-        let store = SessionStore::open(paths).unwrap();
-        assert!(!session_browser_is_background_only(&store, &parent.id.to_string()).unwrap());
-        assert!(session_browser_is_background_only(&store, &child.id.to_string()).unwrap());
-        assert!(session_browser_is_background_only(&store, &Uuid::new_v4().to_string()).is_err());
-    }
-
-    #[test]
-    fn agent_browser_cannot_be_revealed_but_parent_browser_can() {
-        let manager = SessionBrowserManager::default();
-        for (id, private) in [("parent", false), ("agent", true)] {
-            manager
-                .inner
-                .lock()
-                .unwrap()
-                .insert(id.into(), browser_slot(id, private));
-            manager.set_visible_flag(id, true).unwrap();
-            let snapshot = manager.get_snapshot(id).unwrap().unwrap();
-            assert_eq!(snapshot.visible, !private);
-            assert_eq!(snapshot.background_only, private);
-            manager.set_visible_flag(id, false).unwrap();
-            manager.set_visible_flag(id, true).unwrap();
-            assert_eq!(manager.get_snapshot(id).unwrap().unwrap().visible, !private);
-        }
-        assert_eq!(AGENT_BROWSER_BOUNDS.width, 1280.0);
-        assert_eq!(AGENT_BROWSER_BOUNDS.height, 800.0);
-        assert!(AGENT_BROWSER_BOUNDS.x + AGENT_BROWSER_BOUNDS.width < 0.0);
-    }
-
-    #[test]
-    fn agent_browsers_keep_resources_page_state_and_grants_independent() {
-        let manager = SessionBrowserManager::default();
-        for (id, private) in [("parent", false), ("agent-a", true), ("agent-b", true)] {
-            manager
-                .inner
-                .lock()
-                .unwrap()
-                .insert(id.into(), browser_slot(id, private));
-        }
-        manager
-            .set_url("agent-a", "https://example.com/research")
-            .unwrap();
-        manager.set_title("agent-a", "Research").unwrap();
-        manager
-            .approve_origin("agent-a", "https://example.com")
-            .unwrap();
-        manager.push_console(
-            "agent-a",
-            BrowserConsoleEntry {
-                kind: "log".into(),
-                message: "ready".into(),
-                source: None,
-                line: None,
-                column: None,
-            },
-        );
-        manager
-            .remember_pointer_capture(
-                "agent-a",
-                "capture-a".into(),
-                "https://example.com/research".into(),
-                serde_json::json!({}),
-            )
-            .unwrap();
-        let a = manager
-            .require_owned("agent-a", "shared-workspace")
-            .unwrap();
-        for id in ["parent", "agent-b"] {
-            let other = manager.require_owned(id, "shared-workspace").unwrap();
-            assert_ne!(a.resource_id, other.resource_id);
-            assert_ne!(a.label, other.label);
-            assert_eq!(other.url, "https://example.com/");
-            assert!(other.title.is_empty());
-            assert!(!manager
-                .is_origin_approved(id, "https://example.com")
-                .unwrap());
-            assert!(manager.console_entries(id, 10).unwrap().is_empty());
-            assert!(manager.pointer_reference(id, "capture-a").is_err());
-        }
-        assert_eq!(manager.console_entries("agent-a", 10).unwrap().len(), 1);
-        assert!(manager.pointer_reference("agent-a", "capture-a").is_ok());
-        assert!(manager.require_owned("agent-a", "other-workspace").is_err());
-        manager.remove_slot("agent-a").unwrap();
-        assert!(manager.get_snapshot("agent-a").unwrap().is_none());
-        assert!(manager.get_snapshot("agent-b").unwrap().is_some());
-        assert!(manager.get_snapshot("parent").unwrap().is_some());
-    }
-
-    #[test]
-    fn navigable_urls_accept_public_https_and_reject_credentials() {
-        assert!(browser_url_is_navigable(
-            &url::Url::parse("https://example.com/path").unwrap()
-        ));
-        assert!(browser_url_is_navigable(
-            &url::Url::parse("http://127.0.0.1:3000").unwrap()
-        ));
-        assert!(!browser_url_is_navigable(
-            &url::Url::parse("https://user:pass@example.com").unwrap()
-        ));
-        assert!(!browser_url_is_navigable(
-            &url::Url::parse("file:///tmp/x").unwrap()
-        ));
-        assert!(!browser_url_is_loopback(
-            &url::Url::parse("https://example.com").unwrap()
-        ));
-        assert!(browser_url_is_loopback(
-            &url::Url::parse("http://localhost:5173").unwrap()
-        ));
-    }
-
-    #[test]
-    fn agent_script_installs_bridge_and_tools() {
-        let script = agent_initialization_script("test-nonce");
-        assert!(script.contains("gyro-bridge://call"));
-        assert!(script.contains("__gyroBrowserAgent"));
-        assert!(script.contains("readPage"));
-        assert!(script.contains("credential fields"));
-        assert!(script.contains("OBSERVED_PAGE_CONTENT_UNTRUSTED"));
-    }
-
-    #[test]
-    fn reviewed_check_viewport_overrides_loopback_auto_without_changing_normal_browsers() {
-        let bounds = SessionBrowserBounds {
-            x: -1441.0,
-            y: 0.0,
-            width: 1440.0,
-            height: 1080.0,
-        };
-        let request = resource_viewport_request(true, &bounds);
-        let layout = browser_viewport::geometry(request, "http://127.0.0.1:4319", &bounds).unwrap();
-        assert_eq!((layout.state.width, layout.state.height), (1440.0, 1080.0));
-        assert_eq!(layout.state.display_scale, 1.0);
-        assert!(layout.frame.x + layout.frame.width < 0.0);
-        let ordinary = resource_viewport_request(false, &bounds);
-        assert!(ordinary.width.is_none() && ordinary.height.is_none());
-        let layout =
-            browser_viewport::geometry(ordinary, "http://127.0.0.1:4319", &bounds).unwrap();
-        assert_eq!((layout.state.width, layout.state.height), (1280.0, 800.0));
-    }
-
-    #[test]
-    fn browser_paging_script_is_valid_javascript() {
-        let script = agent_initialization_script("test-nonce");
-        let mut command = crate::command_with_gui_path("node");
-        command
-            .args(["-e", "new Function(process.env.GYRO_BROWSER_TEST_SCRIPT)"])
-            .env("GYRO_BROWSER_TEST_SCRIPT", script);
-        let output = command
-            .output()
-            .expect("Node is required by the desktop frontend tests");
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    #[test]
-    fn a_check_resource_never_navigates_to_an_unreviewed_origin_or_file() {
-        let origin = Some("http://127.0.0.1:4317");
-        assert!(resource_navigation_allowed(
-            &url::Url::parse("http://127.0.0.1:4317/todos").unwrap(),
-            origin
-        ));
-        for denied in [
-            "http://127.0.0.1:4318/",
-            "http://localhost:4317/",
-            "https://example.com/",
-            "file:///tmp/private",
-            "javascript:alert(1)",
-            "http://user:pass@127.0.0.1:4317/",
-        ] {
-            assert!(!resource_navigation_allowed(
-                &url::Url::parse(denied).unwrap(),
-                origin
-            ));
-        }
-        assert!(resource_navigation_allowed(
-            &url::Url::parse("https://example.com/").unwrap(),
-            None
-        ));
-    }
-
-    #[test]
-    fn check_must_not_pass_when_redaction_replaces_the_observed_value() {
-        use gyro_core::local_check::{self as check, browser::BrowserDriver, CheckStatus};
-        // Synthetic token, not a credential. The requirement is that the page
-        // displays a redacted label. A page exposing this value must not pass
-        // merely because Gyro's transport redacts it after the observation.
-        let token = "sk-abcdefghijklmnopqrstuvwxyz123456";
-        struct Driver {
-            text: String,
-        }
-        impl BrowserDriver for Driver {
-            fn call(&mut self, method: &str, _args: Value) -> anyhow::Result<Value> {
-                let value = match method {
-                    "status" => {
-                        serde_json::json!({"url":"http://127.0.0.1:4317/","readyState":"complete"})
-                    }
-                    "find" => serde_json::json!({"results":[{"ref":"1"}],"hasMore":false}),
-                    "checkRead" => {
-                        serde_json::json!({"ok":true,"url":"http://127.0.0.1:4317/","readyState":"complete","values":{"text":self.text}})
-                    }
-                    _ => unreachable!(),
-                };
-                sanitize_agent_result(method, value).map_err(anyhow::Error::msg)
-            }
-        }
-        let plan: check::CheckPlan = serde_json::from_value(serde_json::json!({
-            "id":Uuid::new_v4(),"createdAt":"2026-10-30T00:00:00Z","workspaceRevision":1,
-            "draft":{"sessionId":Uuid::new_v4(),"previewUrl":"http://127.0.0.1:4317","command":"","dataChanges":"Synthetic observation only","files":["page.html"],
-            "criteria":[{"id":"redacted-label","requirement":"The page displays a redacted label","scope":"browser","expected":{"text":"[REDACTED]"}}],
-            "browser":{"readySelector":"body","steps":[{"action":"observe","criterionId":"redacted-label","waitMs":0,"reads":[{"key":"text","selector":"#label","kind":"text"}]}]}},
-            "snapshot":{"workspace":"/tmp","gitHead":null,"files":[]}
-        })).unwrap();
-        for (text, expected) in [
-            (token, CheckStatus::NotChecked),
-            ("[REDACTED]", CheckStatus::Passed),
-            ("ordinary visible text", CheckStatus::Failed),
-        ] {
-            let mut driver = Driver { text: text.into() };
-            let output = check::browser::run(&plan, &mut driver, Default::default()).unwrap();
-            let report = check::report_from_output(plan.clone(), output);
-            assert_eq!(report.results[0].status, expected);
-            if expected == CheckStatus::NotChecked {
-                assert!(report.results[0].actual.is_none());
-                assert!(report.results[0].reason.contains("privacy filtering"));
-            }
-            assert!(!serde_json::to_string(&report).unwrap().contains(token));
-        }
-    }
-
-    #[test]
-    fn check_reads_require_unchanged_values_without_disabling_browser_redaction() {
-        let token = "sk-abcdefghijklmnopqrstuvwxyz123456";
-        for values in [
-            serde_json::json!({"text": " padded "}),
-            serde_json::json!({"text": "x".repeat(MAX_ENTRY_CHARS + 1)}),
-            serde_json::json!({"texts": [token]}),
-        ] {
-            let error = sanitize_agent_result("checkRead", serde_json::json!({"values":values}))
-                .unwrap_err();
-            assert!(error.contains("privacy filtering"));
-            assert!(!error.contains(token));
-        }
-        let values = serde_json::json!({"text":"[REDACTED]","texts":["okay"],"items":0});
-        let result = sanitize_agent_result(
-            "checkRead",
-            serde_json::json!({"values":values,"title":token}),
-        )
-        .unwrap();
-        assert_eq!(result["values"], values);
-        assert_eq!(result["title"], "[REDACTED]");
-        // Ordinary browser tooling retains its existing privacy filtering.
-        let ordinary =
-            sanitize_agent_result("readPage", serde_json::json!({"tree":token})).unwrap();
-        assert_eq!(ordinary["tree"], "[REDACTED]");
-    }
-}
+#[path = "browser/session_tests.rs"]
+mod tests;

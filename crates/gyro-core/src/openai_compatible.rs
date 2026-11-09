@@ -1044,6 +1044,10 @@ impl ChatAccumulator {
             for call in message.tool_calls.iter().filter(|_| keep_tool_calls) {
                 let slot = self.slot_for(call)?;
                 if let Some(id) = call.id.as_deref().filter(|id| !id.trim().is_empty()) {
+                    anyhow::ensure!(
+                        slot.id.as_deref().map_or(true, |previous| previous == id),
+                        "provider changed a tool call identity; no tool calls were executed"
+                    );
                     slot.id = Some(id.to_string());
                 }
                 if let Some(function) = &call.function {
@@ -1052,7 +1056,11 @@ impl ChatAccumulator {
                         .as_deref()
                         .filter(|name| !name.trim().is_empty())
                     {
-                        slot.name = name.to_string();
+                        // Function names can be streamed in fragments too.
+                        // Some compatible gateways repeat the complete name.
+                        if slot.name != name {
+                            slot.name.push_str(name);
+                        }
                     }
                     if let Some(arguments) = &function.arguments {
                         slot.arguments.push_str(arguments);
@@ -1114,10 +1122,18 @@ impl ChatAccumulator {
 
     fn tool_calls(self) -> Result<Vec<OpenAiCompatToolCall>> {
         let mut tool_calls = Vec::new();
+        let mut ids = BTreeSet::new();
         for call in self.tool_calls {
             let name = call.name.trim().to_string();
-            if name.is_empty() {
-                continue;
+            anyhow::ensure!(
+                !name.is_empty(),
+                "provider returned an unnamed tool call; no tool calls were executed"
+            );
+            if let Some(id) = call.id.as_deref().filter(|id| !id.trim().is_empty()) {
+                anyhow::ensure!(
+                    ids.insert(id.to_string()),
+                    "provider reused a tool call identity; no tool calls were executed"
+                );
             }
             tool_calls.push(OpenAiCompatToolCall {
                 id: call.id.filter(|id| !id.trim().is_empty()),
@@ -3212,6 +3228,77 @@ mod tests {
             endpoint_child(&endpoint, MODELS_PATH).unwrap().as_str(),
             "https://gateway.example.com/openai/models?api-version=2024-10-21"
         );
+    }
+
+    #[test]
+    fn streamed_tool_names_reassemble_and_repeated_names_remain_compatible() {
+        let mut state = ChatAccumulator::default();
+        for (name, arguments) in [
+            ("gyro_workspace_", "{\"path\":"),
+            ("read", "\"README.md\"}"),
+        ] {
+            state
+                .apply(
+                    serde_json::from_value(serde_json::json!({
+                        "choices":[{"delta":{"tool_calls":[{"index":0,"id":"read",
+                            "function":{"name":name,"arguments":arguments}}]}}]
+                    }))
+                    .unwrap(),
+                    &mut |_| {},
+                )
+                .unwrap();
+        }
+        let calls = state.tool_calls().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "gyro_workspace_read");
+        assert_eq!(calls[0].arguments, serde_json::json!({"path":"README.md"}));
+        let mut state = ChatAccumulator::default();
+        for _ in 0..2 {
+            state
+                .apply(
+                    serde_json::from_value(serde_json::json!({
+                        "choices":[{"delta":{"tool_calls":[{"index":0,"id":"read",
+                            "function":{"name":"gyro_workspace_read","arguments":""}}]}}]
+                    }))
+                    .unwrap(),
+                    &mut |_| {},
+                )
+                .unwrap();
+        }
+        assert_eq!(state.tool_calls().unwrap()[0].name, "gyro_workspace_read");
+    }
+
+    #[test]
+    fn incomplete_or_conflicting_tool_identity_rejects_the_whole_response() {
+        for calls in [
+            serde_json::json!([
+                {"index":0,"id":"valid","function":{"name":"read_file","arguments":"{}"}},
+                {"index":1,"id":"missing-name","function":{"arguments":"{}"}}
+            ]),
+            serde_json::json!([
+                {"index":0,"id":"same","function":{"name":"read_file","arguments":"{}"}},
+                {"index":1,"id":"same","function":{"name":"write_file","arguments":"{}"}}
+            ]),
+            serde_json::json!([
+                {"index":0,"id":"first","function":{"name":"read_file","arguments":"{}"}},
+                {"index":0,"id":"changed","function":{"arguments":""}}
+            ]),
+        ] {
+            let mut state = ChatAccumulator::default();
+            let result = state
+                .apply(
+                    serde_json::from_value(serde_json::json!({
+                        "choices":[{"delta":{"tool_calls":calls}}]
+                    }))
+                    .unwrap(),
+                    &mut |_| {},
+                )
+                .and_then(|_| state.tool_calls());
+            assert!(
+                result.is_err(),
+                "ambiguous or incomplete tool batches must not run"
+            );
+        }
     }
 
     #[test]

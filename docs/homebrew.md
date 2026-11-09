@@ -21,8 +21,8 @@ gyro doctor --json
 
 Use the direct DMG from the
 [download site](https://usegyro.io/) to install Gyro.app. There is
-no app Cask while the public Alpha lacks Apple Developer ID signing and
-notarization. A Cask must not disable or bypass Gatekeeper, so the old universal
+no app Cask in the current distribution. Stable DMGs are Developer ID signed
+and notarized. A Cask must not disable or bypass Gatekeeper; the old universal
 DMG Cask template has been removed.
 
 ## Release automation

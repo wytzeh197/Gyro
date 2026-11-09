@@ -123,6 +123,7 @@ impl MacKeychain {
         let session = |refresh: &str| Session {
             project_ref: store.project_ref.clone(),
             account_id: account,
+            email: "fixture@example.com".into(),
             access_token: "fixture-access-never-persist".into(),
             refresh_token: refresh.into(),
             expires_at: chrono::Utc::now() + chrono::Duration::hours(1),

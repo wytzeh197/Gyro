@@ -1,0 +1,89 @@
+{
+  "build": "debug",
+  "elapsedMs": 41076,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "compactBeforeResume": false,
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "approvalId": "2a2895f8-f071-4140-976e-d8f189326a5b",
+          "decision": "approve-provider-fixture-edit",
+          "paths": [
+            "src/clamp.mjs"
+          ],
+          "status": "applied"
+        },
+        {
+          "approvalId": "7d529e23-db9a-434f-a64d-a05097d6416c",
+          "decision": "approve-provider-fixture-edit",
+          "paths": [
+            "clamp.test.mjs"
+          ],
+          "status": "applied"
+        }
+      ],
+      "model": "claude-sonnet-5",
+      "outcome": "completed",
+      "provider": "anthropic",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "c30c3a4c-bbb6-4e87-b122-48e13545ba73",
+      "task": "code",
+      "trial": 1,
+      "turnId": "a03d325a-8dff-44a0-9a5c-83ef617ba225",
+      "wallMs": 16425.793083999997
+    },
+    {
+      "compactBeforeResume": false,
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "approvalId": "f5c9c6cb-25d8-4421-8432-6bf388dff88f",
+          "decision": "approve-provider-fixture-edit",
+          "paths": [
+            "src/clamp.mjs"
+          ],
+          "status": "applied"
+        },
+        {
+          "approvalId": "8519bedd-fa75-4253-84fa-779219e52bd9",
+          "decision": "approve-provider-fixture-edit",
+          "paths": [
+            "clamp.test.mjs"
+          ],
+          "status": "applied"
+        },
+        {
+          "approvalId": "5907f918-0a5e-4c01-add8-ff9490b760b0",
+          "capabilityId": "workspace-diff",
+          "decision": "allow-fixture-inspection",
+          "status": "allowed-once"
+        }
+      ],
+      "model": "claude-sonnet-5",
+      "outcome": "completed",
+      "provider": "anthropic",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": true,
+      "resumedRequested": true,
+      "retryCount": 0,
+      "sessionId": "58b321b7-6b8d-4303-b5a9-1cc19caec906",
+      "task": "code",
+      "trial": 1,
+      "turnId": "665ad712-33fe-4582-b983-95c637c4f4ca",
+      "wallMs": 17565.957208
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

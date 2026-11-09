@@ -15,10 +15,20 @@ const capabilities = readFileSync(
   join(root, "crates/gyro-core/src/capabilities.rs"),
   "utf8",
 );
-const lib = readRepoSource(
-  join(root, "apps/desktop/src-tauri/src/lib.rs"),
-  "utf8",
-);
+const lib = [
+  "lib.rs",
+  "app/setup.rs",
+  "capabilities/execute.rs",
+  "capabilities/mcp_server.rs",
+  "capabilities/access.rs",
+  "browser/types.rs",
+  "browser/preview.rs",
+  "providers/prompt.rs",
+]
+  .map((path) =>
+    readRepoSource(join(root, "apps/desktop/src-tauri/src", path), "utf8"),
+  )
+  .join("\n");
 const sessionBrowser = readFileSync(
   join(root, "apps/desktop/src-tauri/src/session_browser.rs"),
   "utf8",
@@ -87,7 +97,7 @@ const BROWSER_TOOLS = [
     id: "BrowserViewport",
     tool: "gyro_browser_set_viewport",
     class: "BrowserInspect",
-    required: ["mode"],
+    required: [],
   },
   {
     id: "BrowserNavigate",
@@ -295,7 +305,17 @@ assert.match(lib, /gyro\.browser-observation\.v1/);
 assert.match(lib, /struct BrowserObservation/);
 assert.match(lib, /screenshot_model_visible: false/);
 assert.match(lib, /fn browser_observation\(/);
-assert.match(lib, /fn user_requests_gyro_browser\(/);
+assert.match(
+  lib,
+  /use gyro_core::provider_runtime::prompts::user_requests_gyro_browser/,
+);
+assert.match(
+  readFileSync(
+    join(root, "crates/gyro-core/src/provider_runtime/prompts.rs"),
+    "utf8",
+  ),
+  /fn user_requests_gyro_browser\(/,
+);
 assert.match(lib, /browser_knowledge::context/);
 assert.match(
   readFileSync(join(root, "docs/product-knowledge/browser.md"), "utf8"),

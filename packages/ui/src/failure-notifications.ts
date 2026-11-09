@@ -27,12 +27,13 @@ export function addNotification(
 ): Notification[] {
   return [
     notification,
-    ...notifications.filter(
-      (existing) =>
-        existing.read ||
-        existing.kind !== notification.kind ||
-        existing.title !== notification.title ||
-        existing.detail !== notification.detail,
+    ...notifications.filter((existing) =>
+      notification.correlationKey
+        ? existing.correlationKey !== notification.correlationKey
+        : existing.read ||
+          existing.kind !== notification.kind ||
+          existing.title !== notification.title ||
+          existing.detail !== notification.detail,
     ),
   ].slice(0, MAX_STORED_NOTIFICATIONS);
 }

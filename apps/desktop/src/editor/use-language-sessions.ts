@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { editorFilePolicy, isWorkspaceTrusted, resolveLanguage, workspaceRootForPath, type EditorBuffer, type LanguageServerState } from "@gyro-dev/ui";
 import { isTauriRuntime } from "../tauri-runtime";
@@ -45,19 +45,17 @@ export function useLanguageSessions(options: {
     if (!language.lsp || policy.binary || policy.limited || path.startsWith("gyro-diff:")) return;
     return { path, root, content: buffer.content, languageId: language.lsp.languageId ?? language.id, command: language.lsp.command };
   }, []);
-  useEffect(() => {
-    const documents = Object.keys(options.buffers).flatMap(path => {
+  const documents = useMemo(() => Object.keys(options.buffers).flatMap(path => {
       const document = documentFor(path);
       return document ? [document] : [];
-    });
+    }), [options.buffers, options.roots, options.languageOverrides, options.trust, documentFor]);
+  useEffect(() => {
     void getManager().reconcile(documents);
-  }, [options.buffers, options.roots, options.languageOverrides, options.trust, documentFor, getManager]);
+  }, [documents, getManager]);
   useEffect(() => {
     const sessionManager = getManager();
     const generation = ++lifetime.current;
-    const interval = window.setInterval(() => { if (document.visibilityState !== "hidden") void sessionManager.poll(); }, 1000);
     return () => {
-      window.clearInterval(interval);
       // StrictMode immediately re-runs this effect. Keep its shared native
       // session alive when that replacement setup claims the same manager.
       queueMicrotask(() => {
@@ -67,6 +65,22 @@ export function useLanguageSessions(options: {
       });
     };
   }, [getManager]);
+  // No one-second timer on the idle composer or after the last eligible buffer
+  // closes. The manager lifetime is separate so stopping a timer never tears
+  // down a still-needed language server.
+  const hasLanguageDocuments = documents.length > 0;
+  useEffect(() => {
+    if (!hasLanguageDocuments) return;
+    const poll = () => {
+      if (document.visibilityState !== "hidden") void getManager().poll();
+    };
+    const interval = window.setInterval(poll, 1000);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", poll);
+    };
+  }, [getManager, hasLanguageDocuments]);
   const request = useCallback(async (path: string, method: string, params: Record<string, unknown>) => {
     const document = documentFor(path);
     if (!document) throw new Error("A ready language server in a trusted workspace is required.");

@@ -172,6 +172,19 @@ const partial = turnTokensFromValue({
 });
 assert.equal(turnTokensLabel(partial), "≥1,540 tokens");
 assert.match(turnTokensDetail(partial), /verified starting count/);
+assert.equal(
+  turnTokensLabel(
+    turnTokensFromValue({
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      measured: false,
+      accounting: metadata("partial", { reason: "missing-baseline" }),
+    }),
+  ),
+  "Usage unavailable",
+  "A lower bound of zero is never shown as ≥0 tokens",
+);
 const estimated = turnTokensFromValue({
   inputTokens: 100,
   outputTokens: 25,
