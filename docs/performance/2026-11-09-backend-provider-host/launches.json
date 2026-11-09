@@ -47,5 +47,26 @@
     "pid": 85667,
     "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
     "frontendMeasured": false
+  },
+  {
+    "cohort": "shared-client",
+    "temporaryRoot": "/private/tmp/gyro-split-core-client-h6zlu6z3",
+    "pid": 1733,
+    "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+    "frontendMeasured": false
+  },
+  {
+    "cohort": "shared-client-compaction",
+    "temporaryRoot": "/private/tmp/gyro-split-core-compaction-6_ha1kf8",
+    "pid": 4465,
+    "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+    "frontendMeasured": false
+  },
+  {
+    "cohort": "shared-client-claude-retry",
+    "temporaryRoot": "/private/tmp/gyro-split-core-claude-retry-73tf78uk",
+    "pid": 6319,
+    "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+    "frontendMeasured": false
   }
 ]

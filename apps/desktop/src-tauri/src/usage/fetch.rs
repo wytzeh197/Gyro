@@ -19,6 +19,7 @@ use crate::{
     },
     usage_poll,
 };
+use gyro_core::provider_runtime::codex_client::{CodexClient, CodexClientOptions};
 #[cfg(target_os = "macos")]
 use gyro_core::{CancellationToken, ExecutionTermination};
 use gyro_core::{SessionStore, UsageTotals};
@@ -776,24 +777,13 @@ pub(crate) fn warn_unrecorded_rate_limits(error: &str) {
 pub(crate) fn fetch_codex_provider_usage(
     provider_id: &str,
 ) -> Result<ProviderUsageSnapshot, String> {
-    let mut process = command_for_provider("codex", "openai").map_err(to_string)?;
-    process
-        .args(["app-server", "--stdio"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = gyro_core::process_guard::spawn_service(&mut process)
+    let process = command_for_provider("codex", "openai").map_err(to_string)?;
+    let mut options = CodexClientOptions::desktop();
+    options.service = true;
+    let mut child = CodexClient::spawn(process, options)
         .map_err(|error| format!("could not start the Codex usage service: {error}"))?;
     let result = (|| {
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "Codex usage service input is unavailable".to_string())?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "Codex usage service output is unavailable".to_string())?;
-        let messages = spawn_codex_app_server_reader(stdout, child.stderr.take());
+        let (mut stdin, messages) = child.take_io()?;
         let deadline = Instant::now() + CODEX_USAGE_TIMEOUT;
 
         write_codex_app_server_message(
@@ -837,8 +827,7 @@ pub(crate) fn fetch_codex_provider_usage(
             fetched_at: chrono::Utc::now().to_rfc3339(),
         })
     })();
-    let _ = child.kill();
-    let _ = child.wait();
+    drop(child);
     result
 }
 

@@ -1,8 +1,8 @@
 use crate::provider_runtime::{
     accounting,
     codex_client::{
-        codex_app_server_result, receive_codex_turn_response, spawn_codex_app_server_reader,
-        write_codex_app_server_message,
+        codex_app_server_result, receive_codex_turn_response, write_codex_app_server_message,
+        CodexClient, CodexClientOptions,
     },
     codex_turn_completion, file_patch_counts,
     host::{
@@ -21,12 +21,11 @@ use crate::provider_runtime::{
     },
     prompts::{openai_codex_chat_prompt, provider_approval_instructions},
     support::{
-        audit_provider_chat_args, codex_context_compaction_activity,
-        configure_provider_process_group, generated_image_event_matches, image_generation_activity,
-        is_model_capacity_error, load_config_blocking, protocol_item,
+        audit_provider_chat_args, codex_context_compaction_activity, generated_image_event_matches,
+        image_generation_activity, is_model_capacity_error, load_config_blocking, protocol_item,
         provider_activities_for_response, provider_chat_cwd, provider_output_summary,
         provider_run_failure, provider_stream_failure_detail, recover_streamed_provider_answer,
-        ProviderProcessGuard, TempFileGuard,
+        TempFileGuard,
     },
     text::{push_bounded, sanitize_provider_chat_response, truncate_chars},
     types::{
@@ -41,7 +40,7 @@ use std::{
     fs,
     io::Read,
     path::Path,
-    process::{ChildStdin, Stdio},
+    process::ChildStdin,
     sync::{atomic::AtomicBool, mpsc, Arc},
     time::{Duration, Instant},
 };
@@ -345,32 +344,18 @@ pub fn run_openai_codex_app_server_chat(
         .current_dir(&cwd)
         .args(capability_args)
         .args(["-c", "features.multi_agent=false"])
-        .args(["-c", codex_image_config_arg(&request.mode)])
-        .args(["app-server", "--stdio"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    configure_provider_process_group(&mut process);
+        .args(["-c", codex_image_config_arg(&request.mode)]);
     timing::mark(TimingStage::ProcessStart);
-    let child = crate::process_guard::spawn_guarded(&mut process)
+    let mut child = CodexClient::spawn(process, CodexClientOptions::desktop())
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
     timing::mark(TimingStage::ProcessSpawned);
-    let mut child = ProviderProcessGuard::new(child);
     let cancellation = host.cancellation(&request.session_id).unwrap_or_default();
     let heartbeat_stop = Arc::new(AtomicBool::new(false));
     let heartbeat = host.start_heartbeat(request.clone(), cancellation, heartbeat_stop.clone());
     let mut billed = accounting::CodexTurnUsage::new(can_resume);
     let mut provider_completed = false;
     let mut result = (|| -> anyhow::Result<ProviderRunnerOutput> {
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("Codex app server input is unavailable"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("Codex app server output is unavailable"))?;
-        let messages = spawn_codex_app_server_reader(stdout, child.stderr.take());
+        let (mut stdin, messages) = child.take_io().map_err(anyhow::Error::msg)?;
         let deadline = Instant::now() + Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS);
 
         write_codex_app_server_message(
@@ -897,26 +882,11 @@ pub fn run_openai_codex_context_compaction(
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
     let mut process = host.provider_command("codex", "openai")?;
     host.apply_session_environment(&mut process, request)?;
-    process
-        .current_dir(&cwd)
-        .args(["app-server", "--stdio"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    configure_provider_process_group(&mut process);
-    let child = crate::process_guard::spawn_guarded(&mut process)
+    process.current_dir(&cwd);
+    let mut child = CodexClient::spawn(process, CodexClientOptions::desktop())
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
-    let mut child = ProviderProcessGuard::new(child);
     let result = (|| -> anyhow::Result<Option<ProviderContextUsage>> {
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("Codex app server input is unavailable"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("Codex app server output is unavailable"))?;
-        let messages = spawn_codex_app_server_reader(stdout, child.stderr.take());
+        let (mut stdin, messages) = child.take_io().map_err(anyhow::Error::msg)?;
         let deadline = Instant::now() + Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS);
 
         write_codex_app_server_message(

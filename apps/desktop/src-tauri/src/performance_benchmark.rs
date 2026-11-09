@@ -5,7 +5,7 @@ use crate::{
     provider_reliability::is_transient_provider_error,
     providers::{
         chat_types::{ProviderChatRequest, ProviderChatResponse},
-        commands::run_provider_chat,
+        commands::{compact_provider_chat, run_provider_chat},
         retry::is_provider_cancellation,
         session_lifecycle::reconcile_interrupted_provider_turns,
     },
@@ -51,6 +51,8 @@ struct Spec {
     review_fixture_edits: bool,
     #[serde(default)]
     require_file_edit_approval: bool,
+    #[serde(default)]
+    compact_before_resume: bool,
     #[serde(default)]
     local_fixture_endpoint: Option<String>,
 }
@@ -109,6 +111,10 @@ pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>>
         {
             return Err("local provider fixture requires its explicit loopback-only runner".into());
         }
+    }
+    if spec.compact_before_resume && (spec.providers.len() != 1 || spec.providers[0].id != "openai")
+    {
+        return Err("native compaction acceptance requires the isolated Codex cohort".into());
     }
     if spec.require_file_edit_approval && !spec.review_fixture_edits {
         return Err("edit approval acceptance requires the scoped fixture reviewer".into());
@@ -219,6 +225,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>>
                                 tasks,
                                 review_fixture_edits: spec.review_fixture_edits,
                                 require_file_edit_approval: spec.require_file_edit_approval,
+                                compact_before_resume: spec.compact_before_resume,
                                 local_fixture_endpoint,
                             },
                         )
@@ -336,6 +343,13 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
         }),
         "cannot resume a checkpoint with a different edit approval posture"
     );
+    anyhow::ensure!(
+        records.iter().all(
+            |record| record["compactBeforeResume"].as_bool().unwrap_or(false)
+                == spec.compact_before_resume
+        ),
+        "cannot resume a checkpoint with a different compaction posture"
+    );
     for provider in spec.providers {
         let mut unavailable: Option<String> = None;
         for task in &tasks {
@@ -365,7 +379,7 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                     } else {
                         workspace
                     };
-                    let mut record = json!({"provider":provider.id,"model":provider.model,"effort":provider.effort,"task":task,"resumedRequested":resumed,"trial":trial,"fixtureReviewMode":if spec.review_fixture_edits {"task-paths"} else {"none"}, "requireFileEditApproval":spec.require_file_edit_approval});
+                    let mut record = json!({"provider":provider.id,"model":provider.model,"effort":provider.effort,"task":task,"resumedRequested":resumed,"trial":trial,"fixtureReviewMode":if spec.review_fixture_edits {"task-paths"} else {"none"}, "requireFileEditApproval":spec.require_file_edit_approval,"compactBeforeResume":spec.compact_before_resume});
                     if let Some(reason) = &unavailable {
                         record["outcome"] = "unavailable".into();
                         record["failureClass"] = reason.clone().into();
@@ -404,7 +418,7 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                             None,
                             selected_effort(&provider).map(str::to_owned),
                         )?;
-                        let bootstrap = if resumed {
+                        let mut bootstrap = if resumed {
                             let prompt = if task == "no-tool" {
                                 "Remember the exact test keyword GYRO_OK for my next request. Reply exactly MEMORIZED. Do not use any tools."
                             } else {
@@ -422,6 +436,27 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                         } else {
                             None
                         };
+                        if spec.compact_before_resume
+                            && bootstrap.as_ref().is_some_and(Result::is_ok)
+                        {
+                            let compaction_turn = Uuid::new_v4();
+                            match compact_fixture(
+                                app,
+                                session.id,
+                                compaction_turn,
+                                spec.timeout_seconds,
+                            ) {
+                                Ok(events) => {
+                                    record["compactionOutcome"] = "completed".into();
+                                    record["compactionTurnId"] = compaction_turn.to_string().into();
+                                    record["compactionActivityEvents"] = events.into();
+                                }
+                                Err(error) => {
+                                    record["compactionOutcome"] = "failed".into();
+                                    bootstrap = Some(Err(error));
+                                }
+                            }
+                        }
                         if let Some(Err(error)) = bootstrap.as_ref() {
                             let class = failure_class(error);
                             record["outcome"] = "setup-failed".into();
@@ -1043,4 +1078,32 @@ mod tests {
             serde_json::to_string(&results).unwrap()
         );
     }
+}
+
+/// Call the real manual command between fixture turns, with the same bounded
+/// cancellation route as chat acceptance. It operates only in the debug harness.
+fn compact_fixture(
+    app: &tauri::AppHandle,
+    session: Uuid,
+    turn: Uuid,
+    timeout: u64,
+) -> Result<usize, String> {
+    let watcher = app.clone();
+    let (done, completion) = mpsc::channel();
+    let watchdog = std::thread::spawn(move || {
+        if matches!(
+            completion.recv_timeout(Duration::from_secs(timeout)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ) {
+            stop_provider_run(&watcher, &session.to_string(), ProviderStopReason::User);
+        }
+    });
+    let result = tauri::async_runtime::block_on(compact_provider_chat(
+        app.clone(),
+        session.to_string(),
+        Some(turn.to_string()),
+    ));
+    let _ = done.send(());
+    let _ = watchdog.join();
+    result.map(|response| response.activity_events.len())
 }

@@ -1,19 +1,17 @@
 use anyhow::{anyhow, Context, Result};
+use gyro_core::provider_runtime::codex_client::{CodexClient, CodexClientOptions};
 use gyro_core::CancellationToken;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(test)]
+use std::io::BufReader;
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::process::{ChildStdin, Command};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, Instant};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
-const MAX_STDERR_BYTES: u64 = 64 * 1024;
-const MAX_APP_SERVER_FRAME_BYTES: usize = 1024 * 1024;
-const APP_SERVER_CHANNEL_CAPACITY: usize = 64;
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 const MAX_PROTOCOL_ACTIVITY_MESSAGES: usize = 100_000;
 const MAX_FILE_CHANGE_ENTRIES: usize = 64;
@@ -197,33 +195,11 @@ where
     gyro_core::try_apply_stored_provider_api_key(&mut command, "openai")?;
     command
         .args(&request.program_args)
-        .args(["app-server", "--stdio"])
-        .current_dir(&request.workspace)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    configure_process_group(&mut command);
-    let child = gyro_core::process_guard::spawn_guarded(&mut command)
+        .current_dir(&request.workspace);
+    let mut child = CodexClient::spawn(command, CodexClientOptions::cli())
         .with_context(|| format!("start {} app-server", request.program))?;
-    let mut child = ChildGuard::new(child);
-    let mut stdin = child
-        .child_mut()
-        .stdin
-        .take()
-        .context("Codex app-server input was unavailable")?;
-    let stdout = child
-        .child_mut()
-        .stdout
-        .take()
-        .context("Codex app-server output was unavailable")?;
-    let stderr = child
-        .child_mut()
-        .stderr
-        .take()
-        .context("Codex app-server error output was unavailable")?;
-    let messages = spawn_message_reader(stdout);
-    let stderr_output = Arc::new(Mutex::new(String::new()));
-    spawn_stderr_reader(stderr, Arc::clone(&stderr_output));
+    let (mut stdin, messages) = child.take_io().map_err(anyhow::Error::msg)?;
+    let stderr_output = child.stderr_output.clone();
 
     write_message(
         &mut stdin,
@@ -646,78 +622,6 @@ fn protocol_result(message: &Value) -> Result<&Value> {
         .ok_or_else(|| anyhow!("Codex app-server response did not include a result"))
 }
 
-fn write_message(stdin: &mut ChildStdin, message: &Value) -> Result<()> {
-    let payload = serde_json::to_vec(message)?;
-    if payload.len() > MAX_APP_SERVER_FRAME_BYTES {
-        return Err(anyhow!(
-            "Codex app-server request exceeded the {MAX_APP_SERVER_FRAME_BYTES}-byte frame limit"
-        ));
-    }
-    stdin.write_all(&payload)?;
-    stdin.write_all(b"\n")?;
-    stdin.flush()?;
-    Ok(())
-}
-
-fn spawn_message_reader(stdout: ChildStdout) -> Receiver<std::result::Result<Value, String>> {
-    let (sender, receiver) = mpsc::sync_channel(APP_SERVER_CHANNEL_CAPACITY);
-    thread::spawn(move || {
-        let mut reader = BufReader::new(stdout);
-        loop {
-            let message = match read_bounded_protocol_frame(&mut reader, MAX_APP_SERVER_FRAME_BYTES)
-            {
-                Ok(Some(frame)) => serde_json::from_slice(&frame)
-                    .map_err(|error| format!("Codex app-server returned invalid JSON: {error}")),
-                Ok(None) => Err("Codex app-server closed its output stream".into()),
-                Err(error) => Err(error),
-            };
-            let stop = message.is_err();
-            if sender.send(message).is_err() || stop {
-                break;
-            }
-        }
-    });
-    receiver
-}
-
-fn read_bounded_protocol_frame<R: BufRead>(
-    reader: &mut R,
-    max_bytes: usize,
-) -> std::result::Result<Option<Vec<u8>>, String> {
-    let mut frame = Vec::with_capacity(max_bytes.min(8 * 1024));
-    loop {
-        let available = reader
-            .fill_buf()
-            .map_err(|error| format!("could not read Codex app-server protocol data: {error}"))?;
-        if available.is_empty() {
-            return if frame.is_empty() {
-                Ok(None)
-            } else {
-                Err("Codex app-server closed with an unterminated protocol frame".into())
-            };
-        }
-        let newline = available.iter().position(|byte| *byte == b'\n');
-        let payload_len = newline.unwrap_or(available.len());
-        if frame
-            .len()
-            .checked_add(payload_len)
-            .map_or(true, |length| length > max_bytes)
-        {
-            return Err(format!(
-                "Codex app-server frame exceeded the {max_bytes}-byte limit"
-            ));
-        }
-        frame.extend_from_slice(&available[..payload_len]);
-        reader.consume(payload_len + usize::from(newline.is_some()));
-        if newline.is_some() {
-            if frame.last() == Some(&b'\r') {
-                frame.pop();
-            }
-            return Ok(Some(frame));
-        }
-    }
-}
-
 fn push_bounded_text(target: &mut String, text: &str, max_bytes: usize) -> Result<()> {
     if target
         .len()
@@ -730,16 +634,6 @@ fn push_bounded_text(target: &mut String, text: &str, max_bytes: usize) -> Resul
     }
     target.push_str(text);
     Ok(())
-}
-
-fn spawn_stderr_reader(stderr: impl Read + Send + 'static, output: Arc<Mutex<String>>) {
-    thread::spawn(move || {
-        let mut bounded = String::new();
-        let _ = stderr.take(MAX_STDERR_BYTES).read_to_string(&mut bounded);
-        if let Ok(mut output) = output.lock() {
-            *output = bounded;
-        }
-    });
 }
 
 fn failed_outcome(
@@ -765,72 +659,6 @@ fn failed_outcome(
 
 fn elapsed_ms(started_at: Instant) -> u64 {
     started_at.elapsed().as_millis().min(u64::MAX as u128) as u64
-}
-
-struct ChildGuard {
-    child: gyro_core::process_guard::GuardedChild,
-}
-
-impl ChildGuard {
-    fn new(child: gyro_core::process_guard::GuardedChild) -> Self {
-        Self { child }
-    }
-
-    fn child_mut(&mut self) -> &mut Child {
-        &mut self.child
-    }
-}
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        terminate_process_group(&mut self.child);
-    }
-}
-
-#[cfg(unix)]
-fn configure_process_group(command: &mut Command) {
-    use std::os::unix::process::CommandExt;
-
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setpgid(0, 0) == 0 {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
-            }
-        });
-    }
-}
-
-#[cfg(not(unix))]
-fn configure_process_group(_command: &mut Command) {}
-
-#[cfg(unix)]
-fn terminate_process_group(child: &mut Child) {
-    let process_group = -(child.id() as i32);
-    unsafe {
-        libc::kill(process_group, libc::SIGTERM);
-    }
-    for _ in 0..10 {
-        let _ = child.try_wait();
-        let group_exists = unsafe { libc::kill(process_group, 0) } == 0
-            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
-        if !group_exists {
-            let _ = child.wait();
-            return;
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    unsafe {
-        libc::kill(process_group, libc::SIGKILL);
-    }
-    let _ = child.wait();
-}
-
-#[cfg(not(unix))]
-fn terminate_process_group(child: &mut Child) {
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 #[cfg(all(test, unix))]
@@ -1084,4 +912,24 @@ case "$decision" in *'"decision":"cancel"'*) exit 0 ;; *) exit 25 ;; esac
             CodexAppServerOutcome::ApprovalRejected { .. }
         ));
     }
+}
+
+fn write_message(stdin: &mut ChildStdin, message: &Value) -> Result<()> {
+    gyro_core::provider_runtime::codex_client::write_message(
+        stdin,
+        message,
+        CodexClientOptions::cli(),
+    )
+    .map_err(anyhow::Error::msg)
+}
+#[cfg(test)]
+fn read_bounded_protocol_frame<R: std::io::BufRead>(
+    reader: &mut R,
+    max_bytes: usize,
+) -> std::result::Result<Option<Vec<u8>>, String> {
+    gyro_core::provider_runtime::codex_client::read_protocol_frame(
+        reader,
+        max_bytes,
+        gyro_core::provider_runtime::codex_client::CodexWireFormat::Cli,
+    )
 }
