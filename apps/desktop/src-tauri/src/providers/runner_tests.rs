@@ -7,6 +7,29 @@ impl RunnerHost for RecordingHost {
     fn tool_catalog(&self) -> &dyn gyro_core::provider_runtime::catalog::ToolCatalog {
         unreachable!("unused fixture service")
     }
+    fn context_sections(&self, _: &ProviderChatRequest, _: bool, _: bool) -> (String, String) {
+        unreachable!("unused fixture service")
+    }
+    fn model_context_window(&self, _: &str, _: Option<&str>) -> Option<u64> {
+        unreachable!("unused fixture service")
+    }
+    fn allow_delegation(&self, _: &ProviderChatRequest) -> bool {
+        unreachable!("unused fixture service")
+    }
+    fn expand_browser_images(
+        &self,
+        _: &ProviderChatRequest,
+        _: bool,
+    ) -> anyhow::Result<ProviderChatRequest> {
+        unreachable!("unused fixture service")
+    }
+    fn browser_result_image(
+        &self,
+        _: &gyro_core::GyroPaths,
+        _: &gyro_core::CapabilityResponse,
+    ) -> anyhow::Result<Option<String>> {
+        unreachable!("unused fixture service")
+    }
     fn provider_command(&self, _: &str, _: &str) -> anyhow::Result<std::process::Command> {
         unreachable!("unused fixture service")
     }

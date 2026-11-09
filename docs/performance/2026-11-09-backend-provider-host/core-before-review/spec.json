@@ -1,0 +1,1 @@
+{"providers": [{"id": "openai", "model": "gpt-5.6-sol", "effort": "low"}, {"id": "anthropic", "model": "claude-sonnet-5", "effort": "low"}, {"id": "deepseek", "model": "deepseek-flash", "effort": "low"}], "trials": 1, "timeoutSeconds": 180, "tasks": ["code"], "reviewFixtureEdits": true, "requireFileEditApproval": true}

@@ -4,7 +4,7 @@
 //! build their own prompts and already tell the model what it is; Ollama and the
 //! OpenAI-compatible endpoints are the ones Gyro writes the system message for.
 
-use crate::providers::chat_types::ProviderChatRequest;
+use super::types::ProviderChatRequest;
 /// The sentence a Gyro-driven runner opens its system prompt with.
 ///
 /// Neither an OpenAI-compatible endpoint nor Ollama tells a model what it is:
@@ -16,7 +16,7 @@ use crate::providers::chat_types::ProviderChatRequest;
 ///
 /// Both names come from the same request the composer chip and the usage ledger
 /// read, so the model's answer matches the chip the user is looking at.
-pub(super) fn provider_model_identity(request: &ProviderChatRequest, transport: &str) -> String {
+pub fn provider_model_identity(request: &ProviderChatRequest, transport: &str) -> String {
     let model_id = request
         .model_id
         .as_deref()
@@ -49,8 +49,8 @@ pub(super) fn provider_model_identity(request: &ProviderChatRequest, transport: 
 
 #[cfg(test)]
 mod tests {
+    use super::super::types::ChatMode;
     use super::*;
-    use crate::providers::chat_types::ChatMode;
 
     fn request(
         provider: Option<&str>,

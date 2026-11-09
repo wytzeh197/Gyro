@@ -20,3 +20,8 @@ pub mod catalog;
 pub mod reliability;
 
 pub mod tool_batch;
+
+pub mod context;
+pub mod identity;
+
+pub mod registry;

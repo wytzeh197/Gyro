@@ -729,3 +729,12 @@ pub fn read_on_worker<T>(invoke: impl FnOnce() -> anyhow::Result<T>) -> anyhow::
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(invoke))
         .unwrap_or_else(|_| Err(anyhow::anyhow!("Gyro tool worker failed")))
 }
+
+pub fn mark_browser_image_attached(response: &mut CapabilityResponse) {
+    if let Some(result) = response.result.as_mut() {
+        result.data["evidence"]["screenshotModelVisible"] = serde_json::json!(true);
+        result.data["evidence"]["visualNote"] = serde_json::json!(
+            "PNG image content is attached. Visual inspection requires an image-capable model and client."
+        );
+    }
+}

@@ -214,3 +214,119 @@ pub fn provider_approval_instructions(request: &ProviderChatRequest) -> Vec<&'st
     }
     instructions
 }
+
+/// Recognize an explicit request for Gyro's app-owned browser without treating
+/// ordinary implementation discussion about browser code as a live browse.
+pub fn user_requests_gyro_browser(message: &str) -> bool {
+    let lowercase = message.to_lowercase();
+    let normalized = message
+        .chars()
+        .flat_map(char::to_lowercase)
+        .map(|character| {
+            if character.is_alphanumeric() {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let names_gyro_browser = [
+        "gyro browser",
+        "gyro s browser",
+        "in app browser",
+        "embedded browser",
+        "browser rail",
+    ]
+    .iter()
+    .any(|phrase| normalized.contains(phrase));
+    let names_web_surface = ["website", "web page", "webpage", "site"]
+        .iter()
+        .any(|phrase| normalized.contains(phrase));
+    let names_web_address = lowercase.contains("http://")
+        || lowercase.contains("https://")
+        || lowercase.split_whitespace().any(|token| {
+            let candidate = token
+                .trim_matches(|character: char| {
+                    !character.is_ascii_alphanumeric()
+                        && !matches!(character, '.' | '-' | ':' | '/' | '?' | '#' | '=')
+                })
+                .trim_end_matches(['.', ',', ';', ':']);
+            let host = candidate
+                .split_once("://")
+                .map(|(_, rest)| rest)
+                .unwrap_or(candidate)
+                .split(['/', '?', '#'])
+                .next()
+                .unwrap_or_default()
+                .split(':')
+                .next()
+                .unwrap_or_default();
+            let Some((_, suffix)) = host.rsplit_once('.') else {
+                return false;
+            };
+            suffix.len() >= 2
+                && suffix
+                    .chars()
+                    .all(|character| character.is_ascii_alphabetic())
+                && !matches!(suffix, "rs" | "js" | "ts" | "tsx" | "jsx" | "json" | "md")
+        });
+    if !names_gyro_browser && !names_web_surface && !names_web_address {
+        return false;
+    }
+    if [
+        "do not use",
+        "don t use",
+        "dont use",
+        "do not open",
+        "don t open",
+        "dont open",
+        "without using",
+    ]
+    .iter()
+    .any(|phrase| normalized.contains(phrase))
+    {
+        return false;
+    }
+
+    [
+        "use ", "open ", "check ", "inspect ", "look ", "browse ", "visit ", "view ", "preview ",
+        "test ", "verify ", "show ",
+    ]
+    .iter()
+    .any(|action| normalized.starts_with(action) || normalized.contains(&format!(" {action}")))
+}
+
+pub fn sanitize_session_title_candidate(title: &str) -> Option<String> {
+    let title = title
+        .replace('\0', "")
+        .chars()
+        .map(|ch| {
+            if matches!(
+                ch,
+                '`' | '*' | '_' | '#' | '[' | ']' | '(' | ')' | '{' | '}' | '<' | '>' | '|' | '\\'
+            ) {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_matches(|char: char| char.is_ascii_punctuation() || char.is_whitespace())
+        .to_string();
+    if title.is_empty() {
+        return None;
+    }
+    let chars = title.chars().collect::<Vec<_>>();
+    if chars.len() > 80 {
+        return Some(chars.into_iter().take(77).collect::<String>() + "...");
+    }
+    Some(title)
+}
+
+pub const GYRO_SESSION_TITLE_MARKER: &str = "GYRO_SESSION_TITLE:";

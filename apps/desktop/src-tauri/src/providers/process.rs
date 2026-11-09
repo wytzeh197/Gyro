@@ -81,8 +81,6 @@ pub(crate) fn command_for_provider(command: &str, provider_id: &str) -> anyhow::
     Ok(process)
 }
 
-pub(crate) use gyro_core::provider_runtime::support::provider_output_summary;
-
 #[cfg(test)]
 pub(crate) fn build_grok_acp_program_args(
     model_id: Option<&str>,

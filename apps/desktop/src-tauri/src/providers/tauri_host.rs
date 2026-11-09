@@ -36,6 +36,42 @@ impl RunnerHost for TauriRunnerHost {
     fn tool_catalog(&self) -> &dyn gyro_core::provider_runtime::catalog::ToolCatalog {
         &super::catalog::DESKTOP_TOOL_CATALOG
     }
+    fn context_sections(
+        &self,
+        request: &ProviderChatRequest,
+        tools: bool,
+        images: bool,
+    ) -> (String, String) {
+        crate::efficiency::capture_prompt(|| {
+            super::prompt::provider_context_message_with_capabilities(
+                request,
+                self.conversation_history(request).as_deref(),
+                tools,
+                images,
+            )
+        })
+    }
+    fn model_context_window(&self, provider: &str, model: Option<&str>) -> Option<u64> {
+        crate::provider_context::provider_model_context_window(provider, model)
+    }
+    fn allow_delegation(&self, request: &ProviderChatRequest) -> bool {
+        crate::delegated_agents::request_allows_delegation(request)
+            && crate::delegated_agents::can_delegate(&request.session_id)
+    }
+    fn expand_browser_images(
+        &self,
+        request: &ProviderChatRequest,
+        supports_images: bool,
+    ) -> anyhow::Result<ProviderChatRequest> {
+        super::retry::with_browser_attachment_images(request, supports_images)
+    }
+    fn browser_result_image(
+        &self,
+        paths: &gyro_core::GyroPaths,
+        response: &CapabilityResponse,
+    ) -> anyhow::Result<Option<String>> {
+        crate::capabilities::mcp_server::browser_result_image(paths, response)
+    }
     fn provider_command(
         &self,
         program: &str,

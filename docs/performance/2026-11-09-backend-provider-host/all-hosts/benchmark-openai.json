@@ -1,0 +1,54 @@
+{
+  "build": "debug",
+  "elapsedMs": 73723,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [],
+      "model": "gpt-5.6-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "ac9804ac-df3b-4377-ba11-feec7eac3c1c",
+      "task": "follow-up",
+      "trial": 1,
+      "turnId": "af70933b-af00-4ce7-97d6-58461a18a20f",
+      "wallMs": 38472.28324999999
+    },
+    {
+      "correct": false,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "approve-fixture-edit",
+          "path": "README.md",
+          "proposalId": "4012b7d3-5fec-47c3-8272-4dc2c5903cc6",
+          "status": "applied"
+        }
+      ],
+      "model": "gpt-5.6-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": true,
+      "resumedRequested": true,
+      "retryCount": 0,
+      "sessionId": "e27d5cd1-51ec-4406-9eda-424a085638e2",
+      "task": "follow-up",
+      "trial": 1,
+      "turnId": "3827b419-ad5e-43b2-99bc-52f8a86b0ffe",
+      "wallMs": 23925.783709
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

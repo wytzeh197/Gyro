@@ -500,14 +500,7 @@ pub(crate) fn browser_result_image(
     ))
 }
 
-pub(crate) fn mark_browser_image_attached(response: &mut CapabilityResponse) {
-    if let Some(result) = response.result.as_mut() {
-        result.data["evidence"]["screenshotModelVisible"] = serde_json::json!(true);
-        result.data["evidence"]["visualNote"] = serde_json::json!(
-            "PNG image content is attached. Visual inspection requires an image-capable model and client."
-        );
-    }
-}
+pub(crate) use gyro_core::provider_runtime::tool_batch::mark_browser_image_attached;
 
 pub(crate) fn capability_mcp_response(
     paths: &GyroPaths,

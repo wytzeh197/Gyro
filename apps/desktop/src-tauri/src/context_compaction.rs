@@ -7,7 +7,7 @@
 //! a person touches: the stored share the Settings surface shows, and the rows
 //! that say a compaction happened without anyone pressing anything.
 
-use crate::{providers::types::ProviderActivity, stores::to_string};
+use crate::stores::to_string;
 use gyro_core::{GyroConfig, GyroPaths};
 use std::collections::HashSet;
 use std::sync::Mutex;
@@ -53,32 +53,6 @@ pub(super) fn summary_stream_muted(session_id: &str) -> bool {
         .ok()
         .and_then(|sessions| sessions.as_ref().map(|set| set.contains(session_id)))
         .unwrap_or(false)
-}
-
-/// The activity row for one automatic compaction inside a tool loop.
-///
-/// Its id deliberately does not start with `context-compaction-`: that prefix
-/// marks the manual `/compact`, and the composer meter starts its estimate over
-/// on one, which an in-flight rewrite must not do -- the chat's stored history
-/// is untouched, so every earlier reading still measures it.
-pub(super) fn activity(
-    index: usize,
-    compaction: &crate::provider_context::ContextCompaction,
-) -> ProviderActivity {
-    ProviderActivity {
-        id: format!("context-auto-compaction-{index}"),
-        kind: "context".into(),
-        label: "Auto-compacted context".into(),
-        detail: Some(format!(
-            "The last request filled {}% of the window, so {} older tool exchanges, about {} tokens, were replaced for the rest of this turn.",
-            compaction.percent,
-            compaction.exchanges,
-            crate::provider_context::estimated_tokens(compaction.characters)
-        )),
-        file_counts: None,
-        note: None,
-        status: "done".into(),
-    }
 }
 
 /// What a manual `/compact` on a provider without a resumable compacted

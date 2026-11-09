@@ -1,5 +1,6 @@
 #![deny(clippy::wildcard_imports)]
-pub(crate) mod antigravity;
+#[cfg(test)]
 pub(crate) mod claude;
+#[cfg(test)]
 pub(crate) mod codex;
 pub(crate) mod kimi_acp;

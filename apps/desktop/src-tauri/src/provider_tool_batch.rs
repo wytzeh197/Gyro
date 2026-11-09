@@ -9,12 +9,15 @@ pub(crate) use gyro_core::provider_runtime::tool_batch::{
     advertised_description, compact_parameter_schema, independent_read, inline_tool_schema,
     spill_result_data_within, BATCH_GUIDANCE, RETAINED_CATALOG,
 };
-pub(crate) use gyro_core::provider_runtime::tool_batch::{
+#[cfg(test)]
+use gyro_core::provider_runtime::tool_batch::{
     append_ordered_tool_messages, apply_batch_guidance, apply_compact_guidance,
-    catalog_discovery_failed, check_native_tool_recovery, compact_cli_catalog_active,
-    full_catalog_config, model_response_text, observe_response, observe_tool, ordered,
-    restore_catalog_guidance, spill_result_data, CatalogMemory, BASELINE_GUIDANCE,
-    COMPACT_CATALOG_ENV, COMPACT_GUIDANCE, COMPACT_INVOKE, FULL_CATALOG_FALLBACK_NOTICE,
+    catalog_discovery_failed, check_native_tool_recovery, full_catalog_config, model_response_text,
+    observe_tool, restore_catalog_guidance, CatalogMemory,
+};
+pub(crate) use gyro_core::provider_runtime::tool_batch::{
+    compact_cli_catalog_active, observe_response, ordered, spill_result_data, BASELINE_GUIDANCE,
+    COMPACT_CATALOG_ENV, COMPACT_GUIDANCE, COMPACT_INVOKE,
 };
 use gyro_core::{CapabilityId, CapabilityResponse, CapabilityRunMode};
 #[cfg(test)]
@@ -32,6 +35,7 @@ pub(crate) fn model_tools(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn model_tools_for(
     mode: CapabilityRunMode,
     allow_delegation: bool,
@@ -75,6 +79,7 @@ pub(crate) fn resolve_tool_call(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn prepare_routed_tool_call(
     messages: &mut Vec<serde_json::Value>,
     name: &str,

@@ -3,10 +3,11 @@ use crate::providers::retry::is_provider_cancellation;
 #[cfg(test)]
 use gyro_core::provider_runtime::reliability::TOOL_BUDGET_CHECKPOINT;
 pub(crate) use gyro_core::provider_runtime::reliability::{
-    configured_tool_rounds, is_rate_limit_error, is_tool_budget_notice,
-    is_transient_provider_error, openai_tools_for_round, provider_failure_recovery,
-    readable_provider_error, tools_for_round,
+    is_rate_limit_error, is_tool_budget_notice, is_transient_provider_error,
+    provider_failure_recovery, readable_provider_error,
 };
+#[cfg(test)]
+use gyro_core::provider_runtime::reliability::{openai_tools_for_round, tools_for_round};
 pub(crate) use gyro_core::provider_runtime::support::is_model_capacity_error;
 use gyro_core::CapabilityId;
 pub(crate) fn validate_tool_call(

@@ -506,3 +506,11 @@ pub fn is_stale_resume_sentence(sentence: &str) -> bool {
         || normalized.contains("no conversation");
     resume_identity && missing_identity
 }
+
+pub fn capability_run_mode_for_chat(mode: super::types::ChatMode) -> crate::CapabilityRunMode {
+    match mode {
+        super::types::ChatMode::Plan => crate::CapabilityRunMode::Plan,
+        super::types::ChatMode::Council => crate::CapabilityRunMode::Council,
+        super::types::ChatMode::Normal => crate::CapabilityRunMode::Normal,
+    }
+}

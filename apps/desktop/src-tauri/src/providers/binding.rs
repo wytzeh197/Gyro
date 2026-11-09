@@ -11,7 +11,7 @@ use crate::{
     context_compaction,
     conversation_history::acp_conversation_history_text_for_session,
     delegated_agents,
-    providers::chat_types::{isolated_internal_purpose, ChatMode, ProviderChatRequest},
+    providers::chat_types::{isolated_internal_purpose, ProviderChatRequest},
     sessions::attachments::{hash_file_streaming, validate_attachment_name},
     state::{
         managers::{CapabilityIdeEvidenceManager, ProviderCancellationManager},
@@ -116,13 +116,7 @@ pub(crate) fn bind_provider_chat_request(
     Ok(())
 }
 
-pub(crate) fn capability_run_mode_for_chat(mode: ChatMode) -> CapabilityRunMode {
-    match mode {
-        ChatMode::Plan => CapabilityRunMode::Plan,
-        ChatMode::Council => CapabilityRunMode::Council,
-        ChatMode::Normal => CapabilityRunMode::Normal,
-    }
-}
+pub(crate) use gyro_core::provider_runtime::support::capability_run_mode_for_chat;
 
 pub(crate) fn advertised_mcp_capability_tools(mode: CapabilityRunMode) -> String {
     advertised_capability_descriptors(mode)

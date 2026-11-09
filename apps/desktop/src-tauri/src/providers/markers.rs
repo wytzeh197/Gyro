@@ -377,7 +377,7 @@ pub(crate) struct StrippedControlMarkers {
     pub(crate) artifacts: Vec<serde_json::Value>,
 }
 
-pub(crate) const GYRO_SESSION_TITLE_MARKER: &str = "GYRO_SESSION_TITLE:";
+pub(crate) use gyro_core::provider_runtime::prompts::GYRO_SESSION_TITLE_MARKER;
 pub(crate) const GYRO_PLAN_UPDATE_MARKER: &str = "GYRO_PLAN_UPDATE:";
 pub(crate) const GYRO_GOAL_UPDATE_MARKER: &str = "GYRO_GOAL_UPDATE:";
 pub(crate) const GYRO_AGENT_UPDATE_MARKER: &str = "GYRO_AGENT_UPDATE:";
@@ -657,35 +657,7 @@ pub(crate) fn repair_glued_assistant_blocks(text: &str) -> String {
     out
 }
 
-pub(crate) fn sanitize_session_title_candidate(title: &str) -> Option<String> {
-    let title = title
-        .replace('\0', "")
-        .chars()
-        .map(|ch| {
-            if matches!(
-                ch,
-                '`' | '*' | '_' | '#' | '[' | ']' | '(' | ')' | '{' | '}' | '<' | '>' | '|' | '\\'
-            ) {
-                ' '
-            } else {
-                ch
-            }
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim_matches(|char: char| char.is_ascii_punctuation() || char.is_whitespace())
-        .to_string();
-    if title.is_empty() {
-        return None;
-    }
-    let chars = title.chars().collect::<Vec<_>>();
-    if chars.len() > 80 {
-        return Some(chars.into_iter().take(77).collect::<String>() + "...");
-    }
-    Some(title)
-}
+pub(crate) use gyro_core::provider_runtime::prompts::sanitize_session_title_candidate;
 
 pub(crate) fn derive_session_summary(response: &str) -> Option<String> {
     const MAX_SUMMARY_CHARS: usize = 420;

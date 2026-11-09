@@ -1,0 +1,54 @@
+{
+  "build": "debug",
+  "elapsedMs": 68430,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [],
+      "model": "deepseek-flash",
+      "outcome": "completed",
+      "provider": "deepseek",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "c178122b-ab93-4bbd-98b1-e0e24b220b7d",
+      "task": "follow-up",
+      "trial": 1,
+      "turnId": "c87bcd4a-e8f3-4701-87fc-b8284e50bfc3",
+      "wallMs": 44737.643459
+    },
+    {
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "skip",
+          "path": ".gyro/memory.md",
+          "proposalId": "8ac4ea7d-cd09-4c36-acce-4e9442be79cd",
+          "status": "out-of-scope"
+        }
+      ],
+      "model": "deepseek-flash",
+      "outcome": "completed",
+      "provider": "deepseek",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": true,
+      "retryCount": 0,
+      "sessionId": "c48c8c51-00b8-4291-bf61-c96abd4caef1",
+      "task": "follow-up",
+      "trial": 1,
+      "turnId": "16f67b18-bc6c-49a6-a243-e71cba943f87",
+      "wallMs": 18632.957791999997
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

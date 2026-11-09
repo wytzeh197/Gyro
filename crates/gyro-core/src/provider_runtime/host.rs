@@ -63,6 +63,24 @@ impl Drop for ProviderHeartbeat {
 
 pub trait RunnerHost: Send + Sync {
     fn tool_catalog(&self) -> &dyn super::catalog::ToolCatalog;
+    fn context_sections(
+        &self,
+        request: &ProviderChatRequest,
+        tools: bool,
+        images: bool,
+    ) -> (String, String);
+    fn model_context_window(&self, provider: &str, model: Option<&str>) -> Option<u64>;
+    fn allow_delegation(&self, request: &ProviderChatRequest) -> bool;
+    fn expand_browser_images(
+        &self,
+        request: &ProviderChatRequest,
+        supports_images: bool,
+    ) -> anyhow::Result<ProviderChatRequest>;
+    fn browser_result_image(
+        &self,
+        paths: &crate::GyroPaths,
+        response: &CapabilityResponse,
+    ) -> anyhow::Result<Option<String>>;
     fn provider_command(
         &self,
         program: &str,

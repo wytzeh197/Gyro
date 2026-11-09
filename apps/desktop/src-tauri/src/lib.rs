@@ -99,7 +99,6 @@ mod lsp_smoke;
 mod memory_capability;
 mod menu_bar;
 mod provider_context;
-mod provider_identity;
 mod provider_timeline;
 mod quit_confirmation;
 mod reply_segments;
