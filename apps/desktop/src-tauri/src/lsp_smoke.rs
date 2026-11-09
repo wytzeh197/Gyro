@@ -57,6 +57,7 @@ fn run(root: &Path) -> Result<Vec<String>, String> {
         &root,
         &setup_path,
         LspFileRequest::Definition { line, column },
+        "language_server.rs",
         deadline,
     )?;
     if !definition.to_string().contains("language_server.rs") {
@@ -80,6 +81,7 @@ fn run(root: &Path) -> Result<Vec<String>, String> {
             column,
             include_declaration: true,
         },
+        "workspace_capability_read.rs",
         deadline,
     )?;
     let references_text = references.to_string();
@@ -99,6 +101,7 @@ fn run(root: &Path) -> Result<Vec<String>, String> {
         &root,
         &capability_path,
         LspFileRequest::DocumentSymbol,
+        "execute",
         deadline,
     )?;
     if !symbols.to_string().contains("execute") {
@@ -119,6 +122,7 @@ fn probe(
     root: &Path,
     file: &Path,
     request: LspFileRequest,
+    expected: &str,
     deadline: Instant,
 ) -> Result<Value, String> {
     let relative = file
@@ -147,7 +151,21 @@ fn probe(
                 }
                 std::thread::sleep(Duration::from_millis(retry_after_ms.min(2_000)));
             }
-            LspFileOutcome::Result(result) => return Ok(result),
+            LspFileOutcome::Result(result) => {
+                // Resolving one file does not mean rust-analyzer has indexed
+                // every module. These probes name known production symbols,
+                // so wait for this query's expected answer, not merely the
+                // server's first nonempty response to an earlier query.
+                if result.to_string().contains(expected) {
+                    return Ok(result);
+                }
+                if Instant::now() >= deadline {
+                    return Err(format!(
+                        "{relative}: expected {expected} before the smoke deadline; last result: {result}"
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(1_000));
+            }
         }
     }
 }
