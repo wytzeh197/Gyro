@@ -886,5 +886,3 @@ mod tool_message_tests {
             .contains(&screenshot_call.to_string()));
     }
 }
-
-pub(crate) use gyro_core::provider_runtime::catalog::validate_compatibility_schema_value;

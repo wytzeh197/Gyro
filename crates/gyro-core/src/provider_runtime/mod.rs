@@ -18,3 +18,5 @@ pub mod types;
 pub mod catalog;
 
 pub mod reliability;
+
+pub mod tool_batch;
