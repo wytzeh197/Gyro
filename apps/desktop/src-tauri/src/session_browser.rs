@@ -2626,12 +2626,18 @@ pub fn mouse_session_browser<R: Runtime>(
 
     #[cfg(target_os = "macos")]
     {
-        let action = action.to_string();
-        let pending = PendingCall::new(AGENT_CALL_TIMEOUT, "browser mouse action timed out")?;
-        let dispatch = pending.guard();
-        let dispatch_app = app.clone();
-        let (sender, receiver) = mpsc::channel();
-        webview
+        // Mouse moves posted in one main-thread turn can be coalesced by
+        // AppKit. Let the departure reach WebKit before entering the target,
+        // including when the system cursor already rests over that target.
+        let phases = if action == "hover" { 2 } else { 1 };
+        for phase in 0..phases {
+            let action = action.to_string();
+            let lease = lease.clone();
+            let pending = PendingCall::new(AGENT_CALL_TIMEOUT, "browser mouse action timed out")?;
+            let dispatch = pending.guard();
+            let dispatch_app = app.clone();
+            let (sender, receiver) = mpsc::channel();
+            webview
             .with_webview(move |platform| unsafe {
                 use objc2_app_kit::{NSApplication, NSScreen, NSView};
                 use objc2_core_graphics::{
@@ -2689,7 +2695,7 @@ pub fn mouse_session_browser<R: Runtime>(
                     #[cfg(debug_assertions)]
                     if std::env::var_os("GYRO_BROWSER_SMOKE_URL").is_some() {
                         eprintln!(
-                            "Native browser mouse: action={action}, css=({x},{y}), zoom={}, view={bounds:?}, window={:?}, start={start:?}, screen={:?}, screen_height={screen_height}",
+                            "Native browser mouse: action={action}, phase={phase}, css=({x},{y}), zoom={}, view={bounds:?}, window={:?}, start={start:?}, screen={:?}, screen_height={screen_height}",
                             webview.pageZoom(), window.frame(), window.convertPointToScreen(start),
                         );
                     }
@@ -2704,11 +2710,10 @@ pub fn mouse_session_browser<R: Runtime>(
                         CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
                         Ok(())
                     };
-                    if action == "hover" {
+                    if action == "hover" && phase == 0 {
                         let outside = point(1.0, 1.0)?;
-                        if (outside.x - start.x).abs() > 2.0 || (outside.y - start.y).abs() > 2.0 {
-                            send(CGEventType::MouseMoved, outside, CGMouseButton::Left)?;
-                        }
+                        send(CGEventType::MouseMoved, outside, CGMouseButton::Left)?;
+                        return Ok(());
                     }
                     send(CGEventType::MouseMoved, start, CGMouseButton::Left)?;
                     match action.as_str() {
@@ -2740,7 +2745,12 @@ pub fn mouse_session_browser<R: Runtime>(
                 let _ = sender.send(result);
             })
             .map_err(|error| format!("could not send browser mouse event: {error}"))?;
-        pending.wait(receiver)?
+            pending.wait(receiver)??;
+            if phase + 1 < phases {
+                std::thread::sleep(Duration::from_millis(30));
+            }
+        }
+        Ok(())
     }
 
     #[cfg(not(target_os = "macos"))]
