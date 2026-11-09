@@ -1,13 +1,22 @@
 //! Opt-in reviewer for disposable benchmark fixtures. Never used by chat commands.
+use crate::{
+    capabilities::types::{CapabilityApprovalDecisionRequest, ProviderApprovalDecisionRequest},
+    state::{
+        managers::{ProviderApprovalManager, ProviderCapabilityApprovalManager},
+        provider_run::PendingProviderApproval,
+    },
+};
 use gyro_core::{
-    decide_mutation_proposal_with_cancellation, MutationDecision, MutationProposal,
-    MutationProposalOperation, MutationProposalStatus, SessionStore,
+    decide_mutation_proposal_with_cancellation, CapabilityApprovalDecision, CapabilityId,
+    MutationDecision, MutationProposal, MutationProposalOperation, MutationProposalStatus,
+    SessionEvent, SessionEventKind, SessionStore,
 };
 use serde_json::{json, Value};
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
 };
+use tauri::Manager;
 use uuid::Uuid;
 
 pub(super) struct FixtureReviewer {
@@ -84,6 +93,174 @@ impl FixtureReviewer {
             && self.allowed.contains(&proposal.path.as_str())
     }
 
+    fn review_count(&self) -> usize {
+        self.audit
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry["decision"].as_str(),
+                    Some(
+                        "approve-fixture-edit"
+                            | "approve-provider-fixture-edit"
+                            | "allow-fixture-inspection"
+                    )
+                )
+            })
+            .count()
+    }
+
+    fn native_update_paths(&self, pending: &PendingProviderApproval) -> Option<Vec<String>> {
+        if !self.require_file_edit_approval
+            || pending.session_id != self.session
+            || pending.turn_id != Some(self.turn)
+            || pending.payload["approvalType"] != "file-change"
+        {
+            return None;
+        }
+        let transaction = pending.file_transaction.as_ref()?;
+        if transaction.workspace_path() != self.workspace {
+            return None;
+        }
+        let paths = transaction.existing_file_updates()?.collect::<Vec<_>>();
+        if paths.iter().any(|path| !self.allowed.contains(path)) {
+            return None;
+        }
+        Some(paths.into_iter().map(str::to_owned).collect())
+    }
+
+    fn inspection(&self, event: &SessionEvent) -> Option<(Uuid, CapabilityId)> {
+        if !self.require_file_edit_approval
+            || event.session_id != self.session
+            || event.turn_id != Some(self.turn)
+            || event.kind != SessionEventKind::ApprovalRequested
+            || event.payload["kind"] != "capability-approval"
+            || event.payload["schema"] != gyro_core::CAPABILITY_SCHEMA_V1
+            || event.payload["status"] != "waiting"
+            || event.payload["scopeKind"] != "call"
+        {
+            return None;
+        }
+        let capability: CapabilityId =
+            serde_json::from_value(event.payload["capabilityId"].clone()).ok()?;
+        if !matches!(
+            capability,
+            CapabilityId::WorkspaceDiff | CapabilityId::WorkspaceGitStatus
+        ) {
+            return None;
+        }
+        let prefix = format!("{}:", capability.as_str());
+        let fingerprint = event.payload["scopeValue"]
+            .as_str()?
+            .strip_prefix(&prefix)?;
+        if fingerprint.len() != 64 || !fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        let id = event.payload["approvalId"].as_str()?.parse().ok()?;
+        Some((id, capability))
+    }
+
+    /// Resolve only opted-in fixture updates and two read-only inspections.
+    /// Production chat commands never construct this temporary-root reviewer.
+    pub(super) fn poll_approvals(
+        &mut self,
+        app: &tauri::AppHandle,
+        store: &SessionStore,
+        stopped: impl Fn() -> bool,
+    ) -> anyhow::Result<()> {
+        if !self.require_file_edit_approval || stopped() {
+            return Ok(());
+        }
+        let updates = {
+            let manager = app.state::<ProviderApprovalManager>();
+            let pending = manager
+                .pending
+                .lock()
+                .map_err(|_| anyhow::anyhow!("fixture approval state unavailable"))?;
+            pending
+                .values()
+                .filter(|pending| {
+                    pending.session_id == self.session && pending.turn_id == Some(self.turn)
+                })
+                .map(|pending| (pending.approval_id, self.native_update_paths(pending)))
+                .collect::<Vec<_>>()
+        };
+        for (id, paths) in updates {
+            if stopped() {
+                return Ok(());
+            }
+            if !self.seen.insert(id) {
+                continue;
+            }
+            let Some(paths) = paths else {
+                self.audit
+                    .push(json!({"approvalId":id,"decision":"skip","status":"out-of-scope"}));
+                continue;
+            };
+            if self.review_count() >= 32 {
+                self.audit
+                    .push(json!({"approvalId":id,"decision":"skip","status":"review-limit"}));
+                continue;
+            }
+            let result = crate::providers::approvals::resolve_provider_approval_blocking(
+                app.clone(),
+                ProviderApprovalDecisionRequest {
+                    approval_id: id.to_string(),
+                    decision: "approve".into(),
+                },
+            );
+            self.audit.push(json!({"approvalId":id,"paths":paths,"decision":"approve-provider-fixture-edit","status":if result.is_ok() {"applied"} else {"core-rejected"}}));
+        }
+        if stopped() {
+            return Ok(());
+        }
+        let waiting = {
+            let manager = app.state::<ProviderCapabilityApprovalManager>();
+            let pending = manager
+                .pending
+                .lock()
+                .map_err(|_| anyhow::anyhow!("fixture capability approval state unavailable"))?;
+            pending
+                .iter()
+                .filter(|(_, approval)| {
+                    approval.session_id == self.session && approval.turn_id == Some(self.turn)
+                })
+                .map(|(id, _)| id.clone())
+                .collect::<HashSet<_>>()
+        };
+        if waiting.is_empty() {
+            return Ok(());
+        }
+        for event in store.read_recent_events(self.session, 128)? {
+            if stopped() {
+                break;
+            }
+            let Some((id, capability)) = self.inspection(&event) else {
+                continue;
+            };
+            if !waiting.contains(&id.to_string()) || !self.seen.insert(id) {
+                continue;
+            }
+            if self.review_count() >= 32 {
+                self.audit
+                    .push(json!({"approvalId":id,"decision":"skip","status":"review-limit"}));
+                continue;
+            }
+            let result = tauri::async_runtime::block_on(
+                crate::capabilities::execute::resolve_capability_approval(
+                    CapabilityApprovalDecisionRequest {
+                        approval_id: id.to_string(),
+                        session_id: self.session.to_string(),
+                        turn_id: Some(self.turn.to_string()),
+                        decision: CapabilityApprovalDecision::AllowOnce,
+                    },
+                    app.state::<ProviderCapabilityApprovalManager>(),
+                ),
+            );
+            self.audit.push(json!({"approvalId":id,"capabilityId":capability,"decision":"allow-fixture-inspection","status":if result.is_ok() {"allowed-once"} else {"core-rejected"}}));
+        }
+        Ok(())
+    }
+
     pub(super) fn poll(
         &mut self,
         store: &SessionStore,
@@ -101,13 +278,7 @@ impl FixtureReviewer {
             }
             let status = if !self.eligible(&proposal) {
                 "out-of-scope"
-            } else if self
-                .audit
-                .iter()
-                .filter(|entry| entry["decision"] == "approve-fixture-edit")
-                .count()
-                >= 32
-            {
+            } else if self.review_count() >= 32 {
                 "review-limit"
             } else {
                 let result = decide_mutation_proposal_with_cancellation(
@@ -345,5 +516,130 @@ mod tests {
             MutationProposalStatus::Failed
         );
         assert_eq!(fs::read(&outside).unwrap(), original);
+    }
+    #[test]
+    fn native_fixture_updates_require_opt_in_owner_turn_and_existing_task_files() {
+        let (_temporary, workspace, store, session, turn) = setup();
+        let root = workspace.parent().unwrap().parent().unwrap();
+        let mut reviewer =
+            FixtureReviewer::new(&store, root, &workspace, session, turn, "readme").unwrap();
+        let transaction = |path: &str| {
+            gyro_core::prepare_provider_text_replacement_transaction(
+                &workspace,
+                &workspace.join(path),
+                "fixture replacement\n",
+            )
+            .unwrap()
+        };
+        let (sender, _) = std::sync::mpsc::channel();
+        let mut pending = PendingProviderApproval {
+            sender,
+            approval_id: Uuid::new_v4(),
+            session_id: session,
+            turn_id: Some(turn),
+            payload: json!({"approvalType":"file-change"}),
+            file_transaction: Some(transaction("README.md")),
+        };
+        assert!(reviewer.native_update_paths(&pending).is_none());
+        reviewer.require_file_edit_approval = true;
+        assert_eq!(
+            reviewer.native_update_paths(&pending),
+            Some(vec!["README.md".to_string()])
+        );
+        pending.turn_id = Some(Uuid::new_v4());
+        assert!(reviewer.native_update_paths(&pending).is_none());
+        pending.turn_id = Some(turn);
+        pending.session_id = Uuid::new_v4();
+        assert!(reviewer.native_update_paths(&pending).is_none());
+        pending.session_id = session;
+        pending.payload["approvalType"] = "command".into();
+        assert!(reviewer.native_update_paths(&pending).is_none());
+        pending.payload["approvalType"] = "file-change".into();
+        pending.file_transaction = Some(transaction("src/clamp.mjs"));
+        assert!(reviewer.native_update_paths(&pending).is_none());
+        pending.file_transaction = Some(transaction("new.txt"));
+        assert!(reviewer.native_update_paths(&pending).is_none());
+        pending.file_transaction = Some(
+            gyro_core::prepare_provider_mutation_transaction(
+                &workspace,
+                &[gyro_core::ProviderFileChange {
+                    path: "README.md".into(),
+                    kind: gyro_core::ProviderFileChangeKind {
+                        change_type: "delete".into(),
+                        move_path: None,
+                    },
+                    diff: String::new(),
+                }],
+            )
+            .unwrap(),
+        );
+        assert!(reviewer.native_update_paths(&pending).is_none());
+        let (_, details) = gyro_core::mutations::prepare_provider_text_replacement_review(
+            &workspace,
+            &workspace.join("README.md"),
+            "changed\n",
+        )
+        .unwrap();
+        let mut changes: Vec<gyro_core::ProviderFileChange> =
+            serde_json::from_value(details["patch"]["changes"].clone()).unwrap();
+        changes[0].kind.move_path = Some("moved.md".into());
+        pending.file_transaction =
+            Some(gyro_core::prepare_provider_mutation_transaction(&workspace, &changes).unwrap());
+        assert!(reviewer.native_update_paths(&pending).is_none());
+        let other = tempfile::tempdir().unwrap();
+        let other_root = other.path().canonicalize().unwrap();
+        fs::write(other_root.join("README.md"), "other workspace\n").unwrap();
+        pending.file_transaction = Some(
+            gyro_core::prepare_provider_text_replacement_transaction(
+                &other_root,
+                &other_root.join("README.md"),
+                "changed\n",
+            )
+            .unwrap(),
+        );
+        assert!(reviewer.native_update_paths(&pending).is_none());
+        pending.file_transaction = None;
+        assert!(reviewer.native_update_paths(&pending).is_none());
+    }
+
+    #[test]
+    fn fixture_inspections_are_read_only_single_call_and_turn_bound() {
+        let (_temporary, workspace, store, session, turn) = setup();
+        let root = workspace.parent().unwrap().parent().unwrap();
+        let mut reviewer =
+            FixtureReviewer::new(&store, root, &workspace, session, turn, "code").unwrap();
+        let id = Uuid::new_v4();
+        let mut event = store.append_event_with_turn_id(session, SessionEventKind::ApprovalRequested, "fixture inspection", json!({"schema":gyro_core::CAPABILITY_SCHEMA_V1,"kind":"capability-approval","approvalId":id,"status":"waiting","capabilityId":CapabilityId::WorkspaceDiff,"scopeKind":"call","scopeValue":format!("workspace.diff:{}", "a".repeat(64))}), Some(turn)).unwrap();
+        assert!(reviewer.inspection(&event).is_none());
+        reviewer.require_file_edit_approval = true;
+        assert_eq!(
+            reviewer.inspection(&event),
+            Some((id, CapabilityId::WorkspaceDiff))
+        );
+        event.turn_id = Some(Uuid::new_v4());
+        assert!(reviewer.inspection(&event).is_none());
+        event.turn_id = Some(turn);
+        event.session_id = Uuid::new_v4();
+        assert!(reviewer.inspection(&event).is_none());
+        event.session_id = session;
+        event.payload["capabilityId"] =
+            serde_json::to_value(CapabilityId::WorkspaceRunTask).unwrap();
+        assert!(reviewer.inspection(&event).is_none());
+        event.payload["capabilityId"] = serde_json::to_value(CapabilityId::WorkspaceDiff).unwrap();
+        event.payload["scopeKind"] = "workspace".into();
+        assert!(reviewer.inspection(&event).is_none());
+        event.payload["scopeKind"] = "call".into();
+        event.payload["scopeValue"] = "workspace.diff:bad".into();
+        assert!(reviewer.inspection(&event).is_none());
+        event.payload["scopeValue"] = format!("workspace.diff:{}", "a".repeat(64)).into();
+        event.payload["status"] = "approved".into();
+        assert!(reviewer.inspection(&event).is_none());
+        reviewer.audit = (0..31)
+            .map(|_| json!({"decision":"approve-fixture-edit"}))
+            .collect();
+        reviewer
+            .audit
+            .push(json!({"decision":"allow-fixture-inspection"}));
+        assert_eq!(reviewer.review_count(), 32);
     }
 }

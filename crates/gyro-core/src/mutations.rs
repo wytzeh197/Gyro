@@ -79,6 +79,30 @@ pub struct PreparedProviderMutationTransaction {
     changes: Vec<PreparedProviderMutation>,
 }
 
+impl PreparedProviderMutationTransaction {
+    pub fn workspace_path(&self) -> &Path {
+        &self.workspace_path
+    }
+
+    /// Paths are exposed only for a nonempty set of existing-file updates.
+    /// Creates, deletes and moves cannot be mistaken for in-place updates.
+    pub fn existing_file_updates(&self) -> Option<impl ExactSizeIterator<Item = &str> + '_> {
+        if self.changes.is_empty()
+            || self
+                .changes
+                .iter()
+                .any(|change| change.expected_hash.is_none() || change.desired_content.is_none())
+        {
+            return None;
+        }
+        Some(
+            self.changes
+                .iter()
+                .map(|change| change.relative_path.as_str()),
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 struct PreparedProviderMutation {
     relative_path: String,

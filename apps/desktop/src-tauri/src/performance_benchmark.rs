@@ -692,12 +692,14 @@ fn turn_with_reviewer(
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
             if let (Some(reviewer), Some(store)) = (&mut reviewer, &review_store) {
+                let stopped = || {
+                    watcher_finished.load(Ordering::Acquire)
+                        || Instant::now() >= deadline
+                        || !fixture_turn_active(&watcher_app, session, turn_id)
+                };
                 if reviewer
-                    .poll(store, || {
-                        watcher_finished.load(Ordering::Acquire)
-                            || Instant::now() >= deadline
-                            || !fixture_turn_active(&watcher_app, session, turn_id)
-                    })
+                    .poll(store, stopped)
+                    .and_then(|_| reviewer.poll_approvals(&watcher_app, store, stopped))
                     .is_err()
                 {
                     reviewer
