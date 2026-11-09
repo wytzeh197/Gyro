@@ -63,20 +63,56 @@ impl Plan {
 /// rewrites an early message changes this key, which is exactly the churn
 /// [`Plan::wants_stable_prefix`] exists to warn about.
 pub fn openai_prefix_key(payload: &Value) -> String {
-    let stable = payload["messages"]
-        .as_array()
-        .map(|m| {
-            m.iter()
-                .filter(|v| matches!(v["role"].as_str(), Some("system" | "developer")))
-                .cloned()
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let prefix = json!({"instructions":stable,"tools":payload["tools"]});
-    format!(
-        "gyro:{:x}",
-        Sha256::digest(serde_json::to_vec(&prefix).unwrap_or_default())
-    )
+    // `finalize()` is the same `GenericArray` `Sha256::digest` returns, so `{:x}`
+    // stays the lowercase hex this route has always sent.
+    let mut hasher = Sha256::new();
+    let digest = if write_openai_prefix(&mut hasher, payload) {
+        hasher.finalize()
+    } else {
+        Sha256::digest([])
+    };
+    format!("gyro:{:x}", digest)
+}
+
+/// SHA-256 input for [`openai_prefix_key`]: compact JSON
+/// `{"instructions":[system and developer messages],"tools":...}`.
+///
+/// This runs on every cacheable OpenAI request. The instructions and tool schema
+/// were cloned into a `Value` and then copied again by `serde_json::to_vec`, only
+/// to be hashed. The writer emits those same bytes straight into SHA-256. A failed
+/// write hashes nothing, matching the previous `unwrap_or_default` fallback.
+
+fn write_openai_prefix(out: &mut impl std::io::Write, payload: &Value) -> bool {
+    if out.write_all(br#"{"instructions":["#).is_err() {
+        return false;
+    }
+    if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
+        let mut wrote = false;
+        for message in messages {
+            if !matches!(
+                message.get("role").and_then(Value::as_str),
+                Some("system" | "developer")
+            ) {
+                continue;
+            }
+            if wrote && out.write_all(b",").is_err() {
+                return false;
+            }
+            if serde_json::to_writer(&mut *out, message).is_err() {
+                return false;
+            }
+            wrote = true;
+        }
+    }
+    if out.write_all(br#"],"tools":"#).is_err() {
+        return false;
+    }
+    // A missing `tools` field indexes as JSON null, which is what the old
+    // `payload["tools"]` expression put in the hashed object.
+    if serde_json::to_writer(&mut *out, payload.get("tools").unwrap_or(&Value::Null)).is_err() {
+        return false;
+    }
+    out.write_all(b"}").is_ok()
 }
 
 /// `prompt_cache_options` for a model that accepts them, or `None` for one that does not.
@@ -442,5 +478,80 @@ mod tests {
         assert_eq!(off.breakpoints, 0);
         assert!(disabled["system"].is_string());
         assert!(disabled["tools"][0].get("cache_control").is_none());
+    }
+
+    /// The fleet's cache key is this digest. Streaming the JSON must not move a byte.
+    #[test]
+    fn openai_prefix_key_matches_the_buffered_json_digest() {
+        let developer = format!("{}界", "line\n".repeat(512));
+        let cases = vec![
+            json!({}),
+            json!({"messages": []}),
+            json!({"messages": [{"role": "user", "content": "turn"}]}),
+            json!({"tools": null}),
+            json!({
+                "messages": [
+                    {"role": "system", "content": "stable 界"},
+                    {"role": "developer", "content": developer},
+                    {"role": "user", "content": "ignored"},
+                    {"role": "assistant", "content": [{"type": "text", "text": "ignored"}]}
+                ],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "gyro_workspace_read",
+                        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}
+                    }
+                }]
+            }),
+            json!({
+                "messages": [
+                    {"role": "user", "content": "first"},
+                    {"role": "system", "content": [{"type": "text", "text": "rules"}]},
+                    {"role": "developer", "content": "also"}
+                ]
+            }),
+        ];
+        for payload in cases {
+            let stable = payload["messages"]
+                .as_array()
+                .map(|messages| {
+                    messages
+                        .iter()
+                        .filter(|message| {
+                            matches!(message["role"].as_str(), Some("system" | "developer"))
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let prefix = json!({"instructions": stable, "tools": payload["tools"]});
+            let expected = format!(
+                "gyro:{:x}",
+                Sha256::digest(serde_json::to_vec(&prefix).unwrap())
+            );
+            assert_eq!(openai_prefix_key(&payload), expected);
+            assert_ne!(
+                openai_prefix_key(&payload),
+                format!("gyro:{:x}", Sha256::digest([]))
+            );
+        }
+    }
+
+    #[test]
+    fn openai_prefix_write_reports_a_failed_writer() {
+        struct FailWriter;
+        impl std::io::Write for FailWriter {
+            fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("fail"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        assert!(!write_openai_prefix(
+            &mut FailWriter,
+            &json!({"messages": [{"role": "system", "content": "stable"}]})
+        ));
     }
 }
