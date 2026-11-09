@@ -2626,24 +2626,18 @@ pub fn mouse_session_browser<R: Runtime>(
 
     #[cfg(target_os = "macos")]
     {
-        // Mouse moves posted in one main-thread turn can be coalesced by
-        // AppKit. Let the departure reach WebKit before entering the target,
-        // including when the system cursor already rests over that target.
-        let phases = if action == "hover" { 2 } else { 1 };
-        for phase in 0..phases {
-            let action = action.to_string();
-            let lease = lease.clone();
-            let pending = PendingCall::new(AGENT_CALL_TIMEOUT, "browser mouse action timed out")?;
-            let dispatch = pending.guard();
-            let dispatch_app = app.clone();
-            let (sender, receiver) = mpsc::channel();
-            webview
+        let action = action.to_string();
+        let pending = PendingCall::new(AGENT_CALL_TIMEOUT, "browser mouse action timed out")?;
+        let dispatch = pending.guard();
+        let dispatch_app = app.clone();
+        let (sender, receiver) = mpsc::channel();
+        webview
             .with_webview(move |platform| unsafe {
-                use objc2_app_kit::{NSApplication, NSScreen, NSView};
+                use objc2_app_kit::{NSApplication, NSEvent, NSEventModifierFlags, NSEventType, NSScreen, NSView};
                 use objc2_core_graphics::{
                     CGEvent, CGEventTapLocation, CGEventType, CGMouseButton,
                 };
-                use objc2_foundation::NSPoint;
+                use objc2_foundation::{NSPoint, NSProcessInfo};
                 use objc2_web_kit::WKWebView;
 
                 let result = (|| -> Result<(), String> {
@@ -2658,7 +2652,7 @@ pub fn mouse_session_browser<R: Runtime>(
                     let mtm = objc2::MainThreadMarker::new()
                         .ok_or_else(|| "browser mouse action left the main thread".to_string())?;
                     let native_app = NSApplication::sharedApplication(mtm);
-                    if !native_app.isActive() || !window.isKeyWindow() {
+                    if !native_app.isActive() || !window.isKeyWindow() || view.isHiddenOrHasHiddenAncestor() {
                         return Err("Bring Gyro and this chat's Browser to the foreground before using the mouse".into());
                     }
                     window.setAcceptsMouseMovedEvents(true);
@@ -2695,7 +2689,7 @@ pub fn mouse_session_browser<R: Runtime>(
                     #[cfg(debug_assertions)]
                     if std::env::var_os("GYRO_BROWSER_SMOKE_URL").is_some() {
                         eprintln!(
-                            "Native browser mouse: action={action}, phase={phase}, css=({x},{y}), zoom={}, view={bounds:?}, window={:?}, start={start:?}, screen={:?}, screen_height={screen_height}",
+                            "Native browser mouse: action={action}, css=({x},{y}), zoom={}, view={bounds:?}, window={:?}, start={start:?}, screen={:?}, screen_height={screen_height}",
                             webview.pageZoom(), window.frame(), window.convertPointToScreen(start),
                         );
                     }
@@ -2710,10 +2704,31 @@ pub fn mouse_session_browser<R: Runtime>(
                         CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
                         Ok(())
                     };
-                    if action == "hover" && phase == 0 {
-                        let outside = point(1.0, 1.0)?;
-                        send(CGEventType::MouseMoved, outside, CGMouseButton::Left)?;
-                        return Ok(());
+                    if action == "hover" {
+                        // WebKit routes movement through a tracking-area owner,
+                        // which need not be the WKWebView responder itself.
+                        // Deliver there without taking the chat's keyboard focus.
+                        let event = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+                            NSEventType::MouseMoved,
+                            start,
+                            NSEventModifierFlags::empty(),
+                            NSProcessInfo::processInfo().systemUptime(),
+                            window.windowNumber(),
+                            None, 0, 0, 0.0,
+                        ).ok_or("could not create native browser hover event")?;
+                        for area in view.trackingAreas().iter() {
+                            if !area.options().contains(objc2_app_kit::NSTrackingAreaOptions::MouseMoved) {
+                                continue;
+                            }
+                            if let Some(owner) = area.owner() {
+                                let responds: objc2::runtime::Bool = objc2::msg_send![&*owner, respondsToSelector: objc2::sel!(mouseMoved:)];
+                                if responds.as_bool() {
+                                    let _: () = objc2::msg_send![&*owner, mouseMoved: &*event];
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        return Err("native browser hover tracking is unavailable".into());
                     }
                     send(CGEventType::MouseMoved, start, CGMouseButton::Left)?;
                     match action.as_str() {
@@ -2745,12 +2760,7 @@ pub fn mouse_session_browser<R: Runtime>(
                 let _ = sender.send(result);
             })
             .map_err(|error| format!("could not send browser mouse event: {error}"))?;
-            pending.wait(receiver)??;
-            if phase + 1 < phases {
-                std::thread::sleep(Duration::from_millis(30));
-            }
-        }
-        Ok(())
+        pending.wait(receiver)?
     }
 
     #[cfg(not(target_os = "macos"))]

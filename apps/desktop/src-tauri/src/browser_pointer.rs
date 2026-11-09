@@ -137,7 +137,7 @@ pub(super) fn execute<R: Runtime>(
             "toX": to_x,
             "toY": to_y,
             "target": target,
-            "inputMode": if background_only { "page-events" } else { "native-mouse" },
+            "inputMode": if background_only { "page-events" } else if action == "hover" { "native-webview" } else { "native-mouse" },
             "verification": if background_only {
                 "Re-observe the result. Background input cannot provide trusted OS events, native menus, HTML drag-and-drop, or CSS hover state."
             } else { "Re-observe the page before claiming the outcome." }
