@@ -15,6 +15,26 @@ pub(super) fn workspace_result_bytes_schema() -> serde_json::Value {
     })
 }
 
+/// An existence hint only: never read or substitute another file, follow a
+/// symlink, enumerate the workspace, or broaden a failed read's authority.
+pub(super) fn workspace_path_recovery(workspace: &Path, path: &str) -> String {
+    let mut guidance = String::from("Resolve paths from the selected workspace root, not the last file's directory. Preserve the exact path in the user's request; a bare filename names a root file. Call gyro_workspace_list with path \".\" to locate existing files. Do not create a file merely because this read failed.");
+    if let Some(name) = Path::new(path).file_name().and_then(|name| name.to_str()) {
+        if path != name && !gyro_core::capability_path_is_sensitive(name) {
+            let root_file = workspace.join(name);
+            if root_file
+                .symlink_metadata()
+                .is_ok_and(|metadata| metadata.file_type().is_file())
+                && gyro_core::security::assert_path_inside_workspace(workspace, Path::new(name))
+                    .is_ok()
+            {
+                guidance.push_str(&format!(" Existing file with this name at the workspace root: {name:?}. Read that exact path if it is the file requested; no alternate file was read by this failed call."));
+            }
+        }
+    }
+    guidance
+}
+
 pub(super) fn redact_workspace_capability_result(
     id: CapabilityId,
     mut data: serde_json::Value,

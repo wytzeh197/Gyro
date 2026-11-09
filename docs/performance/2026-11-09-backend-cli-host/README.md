@@ -99,8 +99,10 @@ was not measured.
 
 **Code and automated validation are complete.** The available live CLI providers
 (Codex, Claude and DeepSeek) passed all four checks. Kimi, Antigravity and Ollama
-are excluded as unavailable, rather than left as setup blockers. Strict desktop
-task reliability remains partial. This checkpoint does not claim live coverage
+are excluded as unavailable, rather than left as setup blockers. The specific
+desktop DeepSeek wrong-path failure was subsequently fixed and passed four strict
+cases; see [follow-up evidence](../2026-11-09-deepseek-path-recovery/README.md).
+This checkpoint does not claim live coverage
 of unavailable providers, installed-app or clean-machine acceptance.
 
 Artifacts: [terminal records](terminal-acceptance.json),

@@ -1,5 +1,11 @@
 # Provider host extraction: native acceptance evidence
 
+> DeepSeek follow-up, 2026-11-09: the wrong-path creation failure is fixed with
+> explicit creation intent and concrete workspace-path feedback. Final unchanged
+> strict code cases passed 4/4 with correct paths. A separate pending memory
+> proposal during read-only setup was not applied and remains recorded.
+> [Evidence and retained earlier failures](../2026-11-09-deepseek-path-recovery/README.md).
+
 > Scope correction, 2026-11-09: Wytze confirmed that Kimi/Antigravity access and
 > a downloaded Ollama model are unavailable, and budget/disk space rule out adding
 > them for this work. Those providers are excluded from the current live acceptance

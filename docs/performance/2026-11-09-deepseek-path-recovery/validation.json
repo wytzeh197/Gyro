@@ -1,0 +1,18 @@
+{
+  "schema": "gyro.deepseek-path-recovery-validation.v1",
+  "commands": {
+    "cargo check -p gyro-desktop --all-targets --locked": "passed; 0 errors and 0 new warnings against original warning keys",
+    "cargo test -p gyro-desktop --locked -- --test-threads=4": "passed; 997 unit tests, 12 ignored; binary/doc targets passed",
+    "cargo build -p gyro-desktop --locked": "passed",
+    "cargo fmt -p gyro-desktop --check": "passed",
+    "node scripts/check-architecture-boundaries.mjs": "passed",
+    "git diff --check": "passed"
+  },
+  "newRegressions": [
+    "missing normal/ranged reads preserve exact root paths without rebasing or creating files",
+    "permission/content/confinement errors keep their original classification",
+    "path hints exclude sensitive root candidates and symlink targets",
+    "missing-file proposals require explicit creation intent; validation itself never writes"
+  ],
+  "sourceOnly": "Desktop effects, prompts and tool schema; core/CLI source unchanged. Unrelated concurrent UI changes excluded."
+}

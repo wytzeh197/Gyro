@@ -327,10 +327,32 @@ pub(super) fn held_editor_text(buffer: &Value) -> anyhow::Result<HeldEditorText<
     );
 }
 
+/// Keep missing-path recovery separate from permission, confinement and content
+/// failures. Never retry under another directory or turn a failed read into a
+/// create: the next model call must choose and authorize the correct path.
+fn missing_path_guidance(workspace: &str, path: &str, error: anyhow::Error) -> anyhow::Error {
+    if error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    }) {
+        error.context(format!(
+            "Workspace file {path:?} was not found. {}",
+            crate::capability_workspace_helpers::workspace_path_recovery(
+                Path::new(workspace),
+                path
+            )
+        ))
+    } else {
+        error
+    }
+}
+
 fn read_disk_file_data(workspace: &str, path: &str) -> anyhow::Result<Value> {
     // Guarded edits accept a complete-file hash. Reading through the edit
     // limit avoids advertising a preview hash as the hash of a larger file.
-    let file = read_workspace_file_with_limit(workspace, path, MAX_WORKSPACE_FILE_EDIT_BYTES)?;
+    let file = read_workspace_file_with_limit(workspace, path, MAX_WORKSPACE_FILE_EDIT_BYTES)
+        .map_err(|error| missing_path_guidance(workspace, path, error))?;
     let candidate =
         gyro_core::security::assert_path_inside_workspace(Path::new(workspace), Path::new(path))?;
     let modified_at = candidate
@@ -354,7 +376,8 @@ fn read_range_source(workspace: &str, path: &str) -> anyhow::Result<WorkspaceFil
         workspace,
         path,
         MAX_WORKSPACE_SEARCH_FALLBACK_BYTES as usize,
-    )?;
+    )
+    .map_err(|error| missing_path_guidance(workspace, path, error))?;
     if file.truncated {
         anyhow::bail!("File exceeds the workspace range scan limit; use a targeted terminal read");
     }
@@ -539,6 +562,75 @@ mod tests {
         ide::task_discovery::content_hash,
     };
     use std::fs;
+
+    #[test]
+    fn missing_reads_keep_exact_root_paths_and_never_rebase_or_create() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("src")).unwrap();
+        fs::write(root.path().join("clamp.test.mjs"), "original root test\n").unwrap();
+        let workspace = root.path().to_str().unwrap();
+        for error in [
+            read_disk_file_data(workspace, "src/clamp.test.mjs").unwrap_err(),
+            read_range_source(workspace, "src/clamp.test.mjs").unwrap_err(),
+        ] {
+            assert!(error.chain().any(|cause| cause
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)));
+            let message = error.to_string();
+            assert!(message.contains("selected workspace root"));
+            assert!(message.contains("bare filename names a root file"));
+            assert!(message.contains("Do not create"));
+            assert!(message.contains(
+                "Existing file with this name at the workspace root: \"clamp.test.mjs\""
+            ));
+        }
+        assert!(!root.path().join("src/clamp.test.mjs").exists());
+        assert_eq!(
+            read_disk_file_data(workspace, "clamp.test.mjs").unwrap()["content"],
+            "original root test\n"
+        );
+        assert_eq!(
+            read_range_source(workspace, "clamp.test.mjs")
+                .unwrap()
+                .content,
+            "original root test\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recovery_hints_do_not_follow_symlinks_or_disclose_sensitive_candidates() {
+        let root = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        fs::write(other.path().join("secret.txt"), "outside").unwrap();
+        std::os::unix::fs::symlink(
+            other.path().join("secret.txt"),
+            root.path().join("alias.txt"),
+        )
+        .unwrap();
+        fs::write(root.path().join(".env"), "private").unwrap();
+        for path in ["src/alias.txt", "src/.env", "src/absent.txt"] {
+            let hint =
+                crate::capability_workspace_helpers::workspace_path_recovery(root.path(), path);
+            assert!(!hint.contains("Existing file"), "{hint}");
+            assert!(!hint.contains("outside") && !hint.contains("private"));
+        }
+    }
+
+    #[test]
+    fn missing_path_recovery_does_not_reclassify_permission_or_content_failures() {
+        for error in [
+            anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            anyhow::anyhow!("binary workspace files cannot be previewed"),
+            anyhow::anyhow!("workspace path escapes its root"),
+        ] {
+            let original = error.to_string();
+            assert_eq!(
+                missing_path_guidance("/unavailable-test-workspace", "file.txt", error).to_string(),
+                original
+            );
+        }
+    }
 
     #[test]
     fn held_editor_text_accepts_only_complete_live_buffers() {

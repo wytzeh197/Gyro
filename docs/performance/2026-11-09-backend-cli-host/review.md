@@ -25,7 +25,8 @@ on 2026-11-09 that Kimi/Antigravity access and a downloaded Ollama model are
 unavailable, with no budget or disk space to add them. These providers are outside
 the current acceptance scope; no purchase, setup or download is required. Earlier
 failed probes remain historical evidence, not setup blockers. The desktop recheck
-passed Codex/Claude; DeepSeek's fresh wrong-path failure is retained. No live
+passed Codex/Claude; DeepSeek's fresh wrong-path failure is retained alongside its
+[subsequent fix and 4/4 strict validation](../2026-11-09-deepseek-path-recovery/README.md). No live
 coverage of unavailable providers, installed-app/frontend or clean-machine
 acceptance is claimed. No new dependencies or crate were introduced.
 

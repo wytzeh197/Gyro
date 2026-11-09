@@ -5,7 +5,9 @@ Acceptance is scoped to the available Codex, Claude and DeepSeek setup.
 Kimi, Antigravity and Ollama are unavailable and excluded from this run, as
 confirmed by Wytze on 2026-11-09. Budget and disk space rule out subscriptions
 or model downloads for this work. Historical probes remain evidence only.
-Strict desktop task reliability and broader native acceptance remain partial.
+The specific DeepSeek wrong-path failure was fixed in a follow-up; see the
+[DeepSeek validation](../2026-11-09-deepseek-path-recovery/README.md). Broader
+installed-app/frontend acceptance remains unverified.
 No remote push, remote PR, new crate, model download or installed-app replacement
 was performed.
 
@@ -109,8 +111,12 @@ Unavailable providers — excluded from the current acceptance scope:
 
 Remaining limitations for the available setup:
 
-- Strict desktop model/task reliability remains partial because out-of-scope
-  proposals were correctly blocked. No approval allowlist or verifier was relaxed.
+- The recorded DeepSeek wrong-path failure is superseded by the
+  [path-recovery fix](../2026-11-09-deepseek-path-recovery/README.md): final strict
+  desktop code cases passed 4/4 with the correct file paths. One pending memory
+  proposal during read-only setup remains a separate model-scope limitation; it
+  was never applied.
+  Earlier failures remain evidence; no approval allowlist or verifier was relaxed.
 - Native harnesses use isolated stores/workspaces and verified debug PIDs. They
   do not establish frontend/window, installed-app, clean-machine or Linux
   acceptance. Non-macOS platform gates were reviewed; no absent target was installed.
