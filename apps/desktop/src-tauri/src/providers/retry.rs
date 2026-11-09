@@ -18,7 +18,7 @@ use crate::{
         tauri_host::TauriRunnerHost,
         types::{ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput},
     },
-    state::{managers::ProviderCancellationManager, provider_run::PROVIDER_STOP_MARKER},
+    state::managers::ProviderCancellationManager,
     stores::parse_uuid,
     usage::guard::{session_context_signal, usage_guard_block, UsageContext},
 };
@@ -356,10 +356,6 @@ pub(crate) fn run_provider_chat_with_retry_inner(
     result
 }
 
-pub(crate) fn is_provider_cancellation(error: &str) -> bool {
-    error.contains(PROVIDER_STOP_MARKER)
-}
-
 /// Wait out a retry delay in short steps, returning the stop message if the
 /// run is stopped meanwhile so a stopped turn never starts another attempt.
 pub(crate) fn wait_before_provider_retry(
@@ -491,3 +487,5 @@ pub(crate) fn run_provider_chat_once(
         attempt,
     )
 }
+
+pub(crate) use gyro_core::provider_runtime::reliability::is_provider_cancellation;

@@ -16,3 +16,5 @@ pub mod text;
 pub mod types;
 
 pub mod catalog;
+
+pub mod reliability;

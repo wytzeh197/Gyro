@@ -26,10 +26,6 @@ use std::time::Duration;
 use tauri::Emitter;
 use uuid::Uuid;
 pub(crate) const CAPACITY_RETRY_DELAY: Duration = Duration::from_secs(30);
-pub(crate) const CAPACITY_RETRY_EXHAUSTED: &str =
-    "The model is still busy after three automatic attempts.";
-pub(crate) const RETRY_EXHAUSTED: &str = "Automatic retries exhausted.";
-pub(crate) const CONTINUATION_UNAVAILABLE: &str = "Saved provider continuation is unavailable.";
 thread_local! {
     static RECOVERY_KIND: std::cell::RefCell<String> = std::cell::RefCell::new("network".into());
     static CYCLE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
@@ -1247,3 +1243,7 @@ mod tests {
         }
     }
 }
+
+pub(crate) use gyro_core::provider_runtime::reliability::{
+    CAPACITY_RETRY_EXHAUSTED, CONTINUATION_UNAVAILABLE, RETRY_EXHAUSTED,
+};

@@ -160,16 +160,6 @@ impl Default for ProviderRunControl {
     }
 }
 
-/// The sentence a turn is closed with when Gyro exited while it was running.
-///
-/// Written by startup reconciliation rather than by the run itself, which by
-/// definition never got to report anything. It doubles as the classifier for
-/// the matching recovery hint, so it is matched exactly instead of by keyword:
-/// the words in it ("running", "closed") are ordinary enough to appear in a
-/// provider's own failure text.
-pub(crate) const PROVIDER_INTERRUPTED_MARKER: &str =
-    "Gyro closed while this turn was running, so it never finished.";
-
 /// The notice attached to a turn that stopped at its tool-round budget.
 ///
 /// The turn itself succeeded -- the model's checkpoint is the reply -- so this
@@ -259,3 +249,5 @@ pub(crate) fn stop_provider_run(
 pub(crate) use gyro_core::provider_runtime::types::ProviderApprovalDecision;
 
 pub(crate) use gyro_core::provider_runtime::limits::{PROVIDER_STALL_MARKER, PROVIDER_STOP_MARKER};
+
+pub(crate) use gyro_core::provider_runtime::limits::PROVIDER_INTERRUPTED_MARKER;

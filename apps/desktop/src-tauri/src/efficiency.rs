@@ -69,11 +69,6 @@ pub(super) fn record_prompt_sections(stable: &[String], tail: &[String], message
     });
 }
 
-pub(super) fn config() -> gyro_core::efficiency::Config {
-    load_config_blocking()
-        .map(|c| c.efficiency)
-        .unwrap_or_default()
-}
 #[tauri::command]
 pub async fn set_efficiency_config(
     value: gyro_core::efficiency::Config,
@@ -811,3 +806,5 @@ pub(super) fn observe(
         }
     }
 }
+
+pub(crate) use gyro_core::provider_runtime::support::efficiency_config as config;

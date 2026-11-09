@@ -958,13 +958,6 @@ pub(super) fn restrict_request(app: &tauri::AppHandle, request: &mut ProviderCha
     }
 }
 
-pub(super) fn delegation_tool(id: CapabilityId) -> bool {
-    matches!(
-        id,
-        CapabilityId::AgentSpawn | CapabilityId::AgentSend | CapabilityId::ResearchRun
-    )
-}
-
 /// Auto approval includes delegation, while explicit project denials and the
 /// run-mode ceiling remain in force. Child authority is inherited separately.
 pub(super) fn permission_access(
@@ -2526,3 +2519,5 @@ mod tests {
         }
     }
 }
+
+pub(crate) use gyro_core::provider_runtime::catalog::delegation_tool;

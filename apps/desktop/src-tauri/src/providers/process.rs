@@ -50,57 +50,6 @@ pub(crate) fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescript
     }
 }
 
-/// Whether an error means the stored provider cursor is dead.
-///
-/// A true stale-resume error is one short sentence from the CLI. A failed
-/// stream-json run, however, arrives here as its entire transcript: every frame
-/// carries a session id, which is one half of the test below, and any tool that
-/// touched a missing path contributes "no such file", which is the other. Read
-/// together across thousands of unrelated characters they looked exactly like a
-/// dead cursor, so an ordinary failure cleared the binding and the conversation
-/// it pointed at could no longer be resumed.
-///
-/// Classifying sentence by sentence is what keeps the two halves from meeting.
-pub(crate) fn is_stale_resume_error(error: &str) -> bool {
-    error
-        .lines()
-        .filter_map(provider_error_sentence)
-        .any(|sentence| is_stale_resume_sentence(&sentence))
-}
-
-pub(crate) fn is_stale_resume_sentence(sentence: &str) -> bool {
-    // Long enough for any CLI's error sentence, short enough that a pasted
-    // transcript or a file dump cannot qualify as one.
-    const MAX_RESUME_ERROR_SENTENCE_CHARS: usize = 400;
-    if sentence.chars().count() > MAX_RESUME_ERROR_SENTENCE_CHARS {
-        return false;
-    }
-    let normalized = sentence.to_ascii_lowercase();
-    // Grok ACP returns bare "Method not found" when session/resume is not
-    // implemented — treat that as a dead cursor so Retry starts clean.
-    if normalized.contains("method not found")
-        || normalized.contains("method_not_found")
-        || normalized.contains("-32601")
-    {
-        return true;
-    }
-    let resume_identity = normalized.contains("resume")
-        || normalized.contains("session")
-        || normalized.contains("thread");
-    let missing_identity = normalized.contains("not found")
-        || normalized.contains("no such")
-        || normalized.contains("unknown")
-        || normalized.contains("missing")
-        || normalized.contains("expired")
-        || normalized.contains("could not resume")
-        // Claude Code's own wording for a session id it cannot load: "No
-        // conversation found with session ID: <id>". It reads as a match for
-        // "found" rather than "not found", so without this the cursor was
-        // never cleared and every retry failed the same way.
-        || normalized.contains("no conversation");
-    resume_identity && missing_identity
-}
-
 /// Recent user/assistant turns for agents that cannot reopen a provider session.
 pub(crate) fn acp_conversation_history_text(
     _app: &tauri::AppHandle,
@@ -132,9 +81,7 @@ pub(crate) fn command_for_provider(command: &str, provider_id: &str) -> anyhow::
     Ok(process)
 }
 
-pub(crate) use gyro_core::provider_runtime::support::{
-    provider_error_sentence, provider_output_summary,
-};
+pub(crate) use gyro_core::provider_runtime::support::provider_output_summary;
 
 #[cfg(test)]
 pub(crate) fn build_grok_acp_program_args(
@@ -152,3 +99,5 @@ pub(crate) fn build_grok_acp_program_args(
 
 #[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::support::provider_stream_failure_detail;
+
+pub(crate) use gyro_core::provider_runtime::support::is_stale_resume_error;

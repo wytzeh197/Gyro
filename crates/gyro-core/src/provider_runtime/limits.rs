@@ -44,3 +44,13 @@ pub const MAX_CODEX_APP_SERVER_PROTOCOL_MESSAGES: usize = 50_000;
 pub const MAX_CODEX_APP_SERVER_PROTOCOL_BYTES: usize = 128 * 1024 * 1024;
 
 pub const PROVIDER_STREAM_FLUSH_INTERVAL: Duration = Duration::from_millis(80);
+
+/// The sentence a turn is closed with when Gyro exited while it was running.
+///
+/// Written by startup reconciliation rather than by the run itself, which by
+/// definition never got to report anything. It doubles as the classifier for
+/// the matching recovery hint, so it is matched exactly instead of by keyword:
+/// the words in it ("running", "closed") are ordinary enough to appear in a
+/// provider's own failure text.
+pub const PROVIDER_INTERRUPTED_MARKER: &str =
+    "Gyro closed while this turn was running, so it never finished.";
