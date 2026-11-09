@@ -2686,6 +2686,13 @@ pub fn mouse_session_browser<R: Runtime>(
                         .ok_or_else(|| "main display is unavailable".to_string())?;
                     let screen_height =
                         main_screen.frame().origin.y + main_screen.frame().size.height;
+                    #[cfg(debug_assertions)]
+                    if std::env::var_os("GYRO_BROWSER_SMOKE_URL").is_some() {
+                        eprintln!(
+                            "Native browser mouse: action={action}, css=({x},{y}), zoom={}, view={bounds:?}, window={:?}, start={start:?}, screen={:?}, screen_height={screen_height}",
+                            webview.pageZoom(), window.frame(), window.convertPointToScreen(start),
+                        );
+                    }
                     let send = |kind: CGEventType,
                                 location: NSPoint,
                                 button: CGMouseButton|

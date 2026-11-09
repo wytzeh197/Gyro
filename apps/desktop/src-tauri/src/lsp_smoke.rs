@@ -47,16 +47,15 @@ fn run(root: &Path) -> Result<Vec<String>, String> {
     let deadline = Instant::now() + Duration::from_secs(600);
     let mut steps = Vec::new();
 
-    // A cross-file definition: a use site in lib.rs must resolve into the
-    // extracted language-server module.
-    let lib_path = root.join("apps/desktop/src-tauri/src/lib.rs");
-    let lib_text = std::fs::read_to_string(&lib_path).map_err(|error| error.to_string())?;
-    let (line, column) = find_position(&lib_text, "LanguageServerManager::default()")
-        .ok_or("the definition probe needle is missing from lib.rs")?;
+    // Probe the production setup call after the desktop domain extraction.
+    let setup_path = root.join("apps/desktop/src-tauri/src/app/setup.rs");
+    let setup_text = std::fs::read_to_string(&setup_path).map_err(|error| error.to_string())?;
+    let (line, column) = find_position(&setup_text, "LanguageServerManager::default()")
+        .ok_or("the definition probe needle is missing from app/setup.rs")?;
     let definition = probe(
         &manager,
         &root,
-        &lib_path,
+        &setup_path,
         LspFileRequest::Definition { line, column },
         deadline,
     )?;
@@ -68,12 +67,14 @@ fn run(root: &Path) -> Result<Vec<String>, String> {
     steps.push("definition: LanguageServerManager resolves to language_server.rs".into());
 
     // References of a function must include its call sites in another module.
-    let (line, column) = find_position(&lib_text, "capability_argument_string<'a>(")
-        .ok_or("the references probe needle is missing from lib.rs")?;
+    let access_path = root.join("apps/desktop/src-tauri/src/capabilities/access.rs");
+    let access_text = std::fs::read_to_string(&access_path).map_err(|error| error.to_string())?;
+    let (line, column) = find_position(&access_text, "capability_argument_string<'a>(")
+        .ok_or("the references probe needle is missing from capabilities/access.rs")?;
     let references = probe(
         &manager,
         &root,
-        &lib_path,
+        &access_path,
         LspFileRequest::References {
             line,
             column,

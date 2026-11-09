@@ -433,7 +433,12 @@ fn run(app: &AppHandle, url: &str, output: &std::path::Path) -> Result<Vec<Strin
             return Err("stale pointer capture was accepted".into());
         }
         mouse("hover", hover_x, hover_y, hover_x, hover_y)?;
-        wait_page("Hover: open")?;
+        if let Err(error) = wait_page("Hover: open") {
+            if let Ok(capture) = capture_session_browser_png(app, session) {
+                let _ = std::fs::write(output.join("browser-smoke-hover-failure.png"), capture.png);
+            }
+            return Err(error);
+        }
         let pointer_highlight = capture_session_browser_png(app, session)?;
         std::fs::write(
             output.join("browser-smoke-mouse-highlight.png"),
