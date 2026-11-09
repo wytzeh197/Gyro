@@ -123,7 +123,7 @@ export function ProviderApiKeySection({
         <ProviderApiKeyField
           key={provider.id}
           configured={Boolean(providerApiKeyConfigured?.[provider.id])}
-          envName={providerApiKeyEnvName(provider.id)}
+          envName={provider.id === "openai" ? undefined : providerApiKeyEnvName(provider.id)}
           onClear={() => onClearProviderApiKey?.(provider.id)}
           onSave={
             onSaveProviderApiKey
@@ -131,6 +131,7 @@ export function ProviderApiKeySection({
               : undefined
           }
           saving={Boolean(savingProviderApiKeyId)}
+          notice={provider.id === "openai" ? "The Codex CLI connection uses your ChatGPT sign-in. Saving a key does not switch it to API billing." : undefined}
           action={
             canUse && onUseProvider ? (
               <button
@@ -163,6 +164,7 @@ function ProviderApiKeyField({
   onClear,
   onSave,
   saving = false,
+  notice,
 }: {
   /** The row's last action, so the band stays one line. */
   action?: ReactNode;
@@ -173,6 +175,7 @@ function ProviderApiKeyField({
   onClear?: () => void;
   onSave?: (value: string) => Promise<boolean> | undefined;
   saving?: boolean;
+  notice?: string;
 }) {
   const [draft, setDraft] = useState("");
   return (
@@ -215,6 +218,7 @@ function ProviderApiKeyField({
       </div>
       <span>
         Kept on this Mac.
+        {notice ? ` ${notice}` : null}
         {envName ? (
           <>
             {" "}

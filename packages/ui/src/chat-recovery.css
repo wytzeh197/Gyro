@@ -54,9 +54,36 @@
   white-space: nowrap;
 }
 
-.gyro-run .gyro-run-recovery .gyro-run-problem-actions button:hover {
+.gyro-run .gyro-run-recovery .gyro-run-problem-actions button:hover:not(:disabled) {
   background: var(--gyro-control-hover);
   border-color: var(--gyro-border-strong);
+}
+
+.gyro-run .gyro-run-recovery .gyro-run-problem-actions button:disabled {
+  color: var(--gyro-faint);
+  cursor: default;
+  opacity: 0.4;
+}
+
+.gyro-run-error-details {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+
+.gyro-run-error-details summary {
+  cursor: pointer;
+}
+
+.gyro-run-error-details summary:focus-visible,
+.gyro-run-error-details pre:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
+.gyro-run-error-details pre {
+  font: inherit;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .gyro-run .gyro-run-recovery .gyro-run-problem-actions button:focus-visible {

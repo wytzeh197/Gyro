@@ -1,0 +1,77 @@
+{
+  "schema": "gyro.browser-loading-validation.v1",
+  "generatedAt": "2026-11-07T19:00:52.156165+00:00",
+  "head": "1d0b7e1321790246390b9ad64d78f73813a37ab6",
+  "workspace": "dirty; unrelated changes preserved",
+  "nativeSource": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-4w5ULF",
+  "nativeChecks": 47,
+  "nativeEngine": "AppleWebKit",
+  "nativeOrigin": "tauri://localhost/browser-events-native-smoke.html",
+  "reportTransport": "native-evaluation-callback",
+  "modelTurnsDispatched": 0,
+  "isolatedStoreCounts": {
+    "provider_session_bindings": 0,
+    "session_turn_messages": 0,
+    "session_turn_status": 0,
+    "usage_turn_links": 0,
+    "efficiency_task_turns": 0
+  },
+  "heldImageRequests": 1,
+  "releasedImageRequests": 1,
+  "measurements": {
+    "closeWithHeldNativeReadMs": 6.000000000000455,
+    "imageRecovery": {
+      "feedbackBlockedUntilReady": true,
+      "freshNativeCaptureDecoded": true,
+      "missingAssetFailed": true
+    },
+    "loadingState": {
+      "actualCompletionObserved": true,
+      "pendingObserved": true,
+      "staleLoadedRejected": true
+    }
+  },
+  "scriptErrors": [],
+  "cspViolations": [],
+  "productionCspUnchanged": true,
+  "workspaceAssetAllowed": false,
+  "captureAssetsAllowed": true,
+  "checks": {
+    "eventRoutingCases": 20,
+    "nativeStateUnitTests": 15,
+    "desktopTypecheck": "passed",
+    "uiTypecheck": "passed",
+    "desktopBuild": "passed",
+    "defaultFeatureCargoCheck": "passed",
+    "browserRevealNavigationViewportHostCapabilityPointer": "passed",
+    "architectureBoundaries": "passed",
+    "normalFrontendExcludesFixture": true,
+    "normalJavaScriptFilesScanned": 104,
+    "scopedWhitespace": "passed"
+  },
+  "nativeOsInputTested": false,
+  "fullAppShellMounted": false,
+  "open": [
+    "whole App/companion/split-shell acceptance",
+    "native OS input/accessibility",
+    "provisional-document tool reads and navigation failure/cancellation coverage",
+    "live GPT/Grok task completion"
+  ],
+  "sourceSha256": {
+    "apps/desktop/src-tauri/src/session_browser.rs": "20c51bcb29d7164380de07d50d3f9273830ba7c770f885751cf252745c99196c",
+    "apps/desktop/src-tauri/src/lib.rs": "4679c64598939c46a62b495c2b2e5ddc7761845835f5dde58d7c23a22f95e74d",
+    "apps/desktop/src/App.tsx": "a31b86e148c98a792e40899059e6a4020a86f76ef3733dc0f43dd4315427faf7",
+    "apps/desktop/src/model-browser-reveal.ts": "24f5e3767d3222b40702be37cc9ae8762f599105091bc8081d83f631998d54f6",
+    "apps/desktop/src/use-session-browser-events.ts": "7ff1925261ec06f127a1722f2fad23fcb00a2d1499352e839d1c20092edaf1ad",
+    "apps/desktop/src/session-browser-queue.ts": "54fe5abbd19db5cba410574133c0d5106e9952cf2e80b86e384321b43a6ec8e2",
+    "packages/ui/src/types.ts": "2e8fef8d6fa87be9a43daf0a0d24a6d737e54cff2b5ffa31f18b29c775502c0b",
+    "packages/ui/src/workbench-state.ts": "0fd20ecec30671b68c8ecddca642a0c09f2adb4e36a9c1b6e5e9694ebf47110f",
+    "apps/desktop/src/browser-events-native-smoke.tsx": "6ab80255f52e4e602c24d1894efa9013b07b16b4379949a328310265931d7b05",
+    "apps/desktop/src-tauri/src/browser_frontend_smoke.rs": "79b7f57821507d43c42c6503ed5ad1127e07546d95f9453235df3a492ffdaa91",
+    "scripts/run-browser-events-native.mjs": "ffe6aa82dd77ab2b6beaae9b84352088e4e83e8c28475da5054f5e71c0a406e1",
+    "scripts/check-browser-event-routing.mjs": "002f64bb7b501b209b8df200d3a2b256f069177d4d46396a94e75652adbf801a",
+    "scripts/check-browser-reveal.mjs": "7a0d3b02b9ec099d936ad6d3ceba67e126802456669faa1272672799637043be",
+    "apps/desktop/src-tauri/tauri.conf.json": "0d20aee8cfc34681002669c645766b2ea756110f26fc848f2ca761d2566c0e79"
+  },
+  "binarySha256": "26f0ebcdb6594184d9c35316d7d27fb5fb4e9d282b371b3f5e1acbb6d618fc97"
+}

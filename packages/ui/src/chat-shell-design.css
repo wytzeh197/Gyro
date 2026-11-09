@@ -12,7 +12,7 @@
   .gyro-app-shell:is(.is-thread-layout, .is-workspace-chrome-active, .is-settings-layout) {
   --gyro-chat-surround: color-mix(
     in srgb,
-    var(--gyro-sidebar) 90%,
+    var(--gyro-sidebar) 96%,
     var(--gyro-text)
   );
 }
@@ -510,8 +510,14 @@
   box-shadow: 0 2px 6px var(--gyro-premium-shadow-soft);
 }
 
-/* Hidden sidebar navigation keeps its native window position. Reserve a small
-   left rim below it without moving macOS traffic lights. */
+/* Center hidden-sidebar controls on the inset chat header. Its top rim
+   moves that center down by half the rim relative to the full window row. */
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout > .gyro-sidebar-restore-cluster {
+  top: calc(var(--gyro-chat-rim) / 2);
+}
+
+/* Reserve a small left rim below navigation without moving macOS traffic lights. */
 :root[data-theme]
   .gyro-app-shell:is(.is-thread-layout, .is-settings-layout).is-sidebar-hidden
   > .gyro-main {

@@ -1,0 +1,10 @@
+{
+  "head": "ca57e94dabc0c67d9b94e1adbbffab92e0de77d5",
+  "sourceSha256": {
+    "packages/ui/src/workbench-state.ts": "d29cf63225ff7692d7556cfb1ca20d347ba12a3fb19dcd72025f328e2e46f1fd",
+    "apps/desktop/src/editor/workspace-code-editor.tsx": "3d3697a42a4b4650380956c6ff394ffc49e6685abe4712438a75d742689f4e0c",
+    "apps/desktop/src/App.tsx": "57e9c6effded381db23dd73d67d342ff93a9b9ab2d4c99af0b3f19f5821bc40c",
+    "apps/desktop/src/monaco-editor.ts": "4f671c0655354d0a5fe67acd56ec899d4250ad92931b275e0d2ea1fd97bcdda7"
+  },
+  "note": "Baseline hashes include pre-existing working changes; no production edits in this round yet."
+}

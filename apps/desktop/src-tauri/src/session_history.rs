@@ -1,7 +1,9 @@
 //! Complete display history and bounded refresh reads, including approval recovery.
-use super::{
-    mutation_approval_payload, open_store, parse_uuid, to_string, MAX_DESKTOP_SESSION_EVENTS_READ,
+use crate::{
+    app::limits::MAX_DESKTOP_SESSION_EVENTS_READ,
+    stores::{open_store, parse_uuid, to_string},
 };
+use gyro_core::mutation_approval_payload;
 use gyro_core::{SessionEvent, SessionEventKind, SessionStore};
 use serde::Serialize;
 use std::collections::HashSet;

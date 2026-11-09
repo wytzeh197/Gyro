@@ -1,6 +1,12 @@
 import type { ReactNode } from "react";
 import { ArrowLeft, Terminal, X } from "lucide-react";
 import type { TerminalPane, TerminalPaneStatus } from "./types";
+import {
+  beginTerminalSessionDrag,
+  finishTerminalSessionDrag,
+  placeTerminalSessionByKeyboard,
+  startTerminalSessionPointerDrag,
+} from "./terminal-session-drag";
 
 type SessionStatus = TerminalPaneStatus | "idle";
 const statusLabels: Record<SessionStatus, string> = {
@@ -53,8 +59,14 @@ export function CliSessionList({
             <button
               className={`gyro-cli-sidebar-select${pane.id === selectedId ? " is-active" : ""}`}
               onClick={() => onSelect?.(pane.id)}
+              draggable
+              onPointerDown={(event) => startTerminalSessionPointerDrag(event.nativeEvent, event.currentTarget, pane.id)}
+              onDragStart={(event) => beginTerminalSessionDrag(event.dataTransfer, pane.id)}
+              onDragEnd={finishTerminalSessionDrag}
+              onKeyDown={(event) => placeTerminalSessionByKeyboard(event.nativeEvent, pane.id)}
+              aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown"
               type="button"
-              title={`${title} · ${statusLabels[status]}${directory ? ` · ${directory}` : ""}`}
+              title={`${title} · ${statusLabels[status]}${directory ? ` · ${directory}` : ""} · Drag to split; Alt+arrow to place`}
               aria-current={pane.id === selectedId ? "true" : undefined}
             >
               {icon ?? <Terminal size={16} aria-hidden="true" />}

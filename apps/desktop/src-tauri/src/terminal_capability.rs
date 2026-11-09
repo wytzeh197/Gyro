@@ -1,6 +1,25 @@
 //! Model-owned terminal observations and lifecycle operations.
-use super::*;
+use crate::{
+    capabilities::access::capability_argument_string,
+    capability_output_budget,
+    capability_workspace_helpers::workspace_result_byte_limit,
+    efficiency,
+    state::{
+        managers::{
+            CapabilityIdeEvidenceManager, ProviderCancellationManager,
+            ProviderCapabilityResourceManager,
+        },
+        provider_run::BoundProviderCapabilityContext,
+    },
+    terminal::types::{TerminalPaneSnapshot, TerminalProcessManager},
+    terminal_wait,
+};
+use gyro_core::{
+    timing, CapabilityId, CapabilityRequest, CapabilityResourceRef, WorkspaceContextSnapshot,
+};
 use serde_json::{json, Value};
+use std::{collections::VecDeque, sync::Mutex, time::Duration};
+use tauri::Manager;
 
 const RETAINED_OUTPUT_COUNT: usize = 16;
 const RETAINED_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
@@ -120,6 +139,66 @@ pub(super) fn read_workspace_output(
     Ok(("Read Workspace output".into(), data, None))
 }
 
+/// Observe the exact command that was started, including its final PTY drain.
+/// Both the short initial yield and explicit waits use the same ownership and
+/// cancellation checks. No process/resource lock is held while sleeping.
+pub(super) fn wait_for_command(
+    app: &tauri::AppHandle,
+    bound: &BoundProviderCapabilityContext,
+    resource_id: &str,
+    timeout: Duration,
+) -> anyhow::Result<TerminalPaneSnapshot> {
+    let resources = app.state::<ProviderCapabilityResourceManager>();
+    let owned = resources
+        .terminals
+        .lock()
+        .map_err(|_| anyhow::anyhow!("terminal capability state is unavailable"))?
+        .get(&bound.session_id)
+        .filter(|owned| {
+            owned.resource_id == resource_id
+                && owned.workspace_key == bound.workspace_key
+                && owned.session_id == bound.session_id
+        })
+        .cloned()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "terminal resource ownership changed; do not wait on a replacement command"
+            )
+        })?;
+    let cancellation = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .map_err(|_| anyhow::anyhow!("provider run state is unavailable"))?
+        .get(&bound.session_id)
+        .filter(|control| {
+            control
+                .capability_context
+                .lock()
+                .ok()
+                .is_some_and(|context| {
+                    context
+                        .as_ref()
+                        .is_some_and(|context| context.turn_id == bound.turn_id)
+                })
+        })
+        .map(|control| control.cancellation.clone())
+        .ok_or_else(|| anyhow::anyhow!("provider run is no longer active"))?;
+    terminal_wait::wait(timeout, &cancellation, |include_output| {
+        let terminals = resources
+            .terminals
+            .lock()
+            .map_err(|_| anyhow::anyhow!("terminal capability state is unavailable"))?;
+        if !terminals.get(&bound.session_id).is_some_and(|current| {
+            current.resource_id == owned.resource_id && current.workspace_key == bound.workspace_key
+        }) {
+            anyhow::bail!("terminal resource ownership changed");
+        }
+        app.state::<TerminalProcessManager>()
+            .observe(&owned.pane_id, include_output)
+    })
+}
+
 pub(super) fn execute(
     app: &tauri::AppHandle,
     bound: &BoundProviderCapabilityContext,
@@ -153,39 +232,7 @@ pub(super) fn execute(
             );
         }
         let timeout = terminal_wait::timeout(arguments)?;
-        let cancellation = app
-            .state::<ProviderCancellationManager>()
-            .flags
-            .lock()
-            .map_err(|_| anyhow::anyhow!("provider run state is unavailable"))?
-            .get(&bound.session_id)
-            .filter(|control| {
-                control
-                    .capability_context
-                    .lock()
-                    .ok()
-                    .is_some_and(|context| {
-                        context
-                            .as_ref()
-                            .is_some_and(|context| context.turn_id == bound.turn_id)
-                    })
-            })
-            .map(|control| control.cancellation.clone())
-            .ok_or_else(|| anyhow::anyhow!("provider run is no longer active"))?;
-        terminal_wait::wait(timeout, &cancellation, |include_output| {
-            let terminals = resources
-                .terminals
-                .lock()
-                .map_err(|_| anyhow::anyhow!("terminal capability state is unavailable"))?;
-            if !terminals.get(&bound.session_id).is_some_and(|current| {
-                current.resource_id == owned.resource_id
-                    && current.workspace_key == bound.workspace_key
-            }) {
-                anyhow::bail!("terminal resource ownership changed");
-            }
-            app.state::<TerminalProcessManager>()
-                .observe(&owned.pane_id, include_output)
-        })?
+        wait_for_command(app, bound, resource_id, timeout)?
     } else if request.capability_id == CapabilityId::TerminalRead {
         app.state::<TerminalProcessManager>()
             .read(&owned.pane_id, known_revision)?

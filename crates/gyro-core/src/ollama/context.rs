@@ -46,11 +46,14 @@ pub(super) fn request_context_window(request: &OllamaToolChatRequest<'_>) -> Res
         .saturating_add(2048)
         .saturating_add((request.messages.len() as u64).saturating_mul(64))
         .saturating_add((request.tools.len() as u64).saturating_mul(32));
+    // Ollama reloads the model whenever num_ctx changes, so the allocation
+    // grows in power-of-two steps: a growing conversation reloads a handful
+    // of times instead of once per 4K of history.
     let allocation = estimate
         .max(4096)
         .max(minimum)
-        .div_ceil(4096)
-        .saturating_mul(4096);
+        .checked_next_power_of_two()
+        .unwrap_or(maximum);
     Ok(Some(allocation.min(maximum)))
 }
 
@@ -78,6 +81,12 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(larger >= 11000 && larger < 40960);
+        assert!(larger.is_power_of_two(), "{larger} is not a stable step");
+        // Growing history inside one step keeps num_ctx, so no model reload.
+        let grown = request_context_window(&request(json!({"content":"x".repeat(30000)})))
+            .unwrap()
+            .unwrap();
+        assert_eq!(grown, larger);
         assert_eq!(
             request_context_window(&request(json!({"content":"x".repeat(500000)}))).unwrap(),
             Some(40960)
@@ -97,6 +106,9 @@ mod tests {
         let mut value = request(json!({"content":"Hello"}));
         value.minimum_context_window_tokens = Some(16384);
         assert_eq!(request_context_window(&value).unwrap(), Some(16384));
+        // A minimum between steps rounds up to the next step, never down.
+        value.minimum_context_window_tokens = Some(20000);
+        assert_eq!(request_context_window(&value).unwrap(), Some(32768));
         value.minimum_context_window_tokens = Some(81920);
         assert!(request_context_window(&value).is_err());
         value.context_window_tokens = None;

@@ -5,7 +5,7 @@
 //! manager the capabilities use, waits out a cold index, and asserts a known
 //! definition, a known reference set, and a document-symbol list. It writes
 //! `lsp-smoke.json` to the data directory and exits non-zero on failure.
-use crate::language_server::{
+use crate::ide::language_server::{
     language_server_for_path, LanguageServerManager, LspFileOutcome, LspFileRequest,
 };
 use serde_json::{json, Value};
@@ -47,17 +47,17 @@ fn run(root: &Path) -> Result<Vec<String>, String> {
     let deadline = Instant::now() + Duration::from_secs(600);
     let mut steps = Vec::new();
 
-    // A cross-file definition: a use site in lib.rs must resolve into the
-    // extracted language-server module.
-    let lib_path = root.join("apps/desktop/src-tauri/src/lib.rs");
-    let lib_text = std::fs::read_to_string(&lib_path).map_err(|error| error.to_string())?;
-    let (line, column) = find_position(&lib_text, "LanguageServerManager::default()")
-        .ok_or("the definition probe needle is missing from lib.rs")?;
+    // Probe the production setup call after the desktop domain extraction.
+    let setup_path = root.join("apps/desktop/src-tauri/src/app/setup.rs");
+    let setup_text = std::fs::read_to_string(&setup_path).map_err(|error| error.to_string())?;
+    let (line, column) = find_position(&setup_text, "LanguageServerManager::default()")
+        .ok_or("the definition probe needle is missing from app/setup.rs")?;
     let definition = probe(
         &manager,
         &root,
-        &lib_path,
+        &setup_path,
         LspFileRequest::Definition { line, column },
+        "language_server.rs",
         deadline,
     )?;
     if !definition.to_string().contains("language_server.rs") {
@@ -68,17 +68,20 @@ fn run(root: &Path) -> Result<Vec<String>, String> {
     steps.push("definition: LanguageServerManager resolves to language_server.rs".into());
 
     // References of a function must include its call sites in another module.
-    let (line, column) = find_position(&lib_text, "capability_argument_string<'a>(")
-        .ok_or("the references probe needle is missing from lib.rs")?;
+    let access_path = root.join("apps/desktop/src-tauri/src/capabilities/access.rs");
+    let access_text = std::fs::read_to_string(&access_path).map_err(|error| error.to_string())?;
+    let (line, column) = find_position(&access_text, "capability_argument_string<'a>(")
+        .ok_or("the references probe needle is missing from capabilities/access.rs")?;
     let references = probe(
         &manager,
         &root,
-        &lib_path,
+        &access_path,
         LspFileRequest::References {
             line,
             column,
             include_declaration: true,
         },
+        "workspace_capability_read.rs",
         deadline,
     )?;
     let references_text = references.to_string();
@@ -98,6 +101,7 @@ fn run(root: &Path) -> Result<Vec<String>, String> {
         &root,
         &capability_path,
         LspFileRequest::DocumentSymbol,
+        "execute",
         deadline,
     )?;
     if !symbols.to_string().contains("execute") {
@@ -118,6 +122,7 @@ fn probe(
     root: &Path,
     file: &Path,
     request: LspFileRequest,
+    expected: &str,
     deadline: Instant,
 ) -> Result<Value, String> {
     let relative = file
@@ -128,7 +133,7 @@ fn probe(
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let (language_id, command) = language_server_for_path(&canonical)
         .ok_or_else(|| format!("no language server for {relative}"))?;
-    if !crate::language_server::language_server_command_is_allowed(language_id, command) {
+    if !crate::ide::language_server::language_server_command_is_allowed(language_id, command) {
         return Err(format!(
             "{language_id} is not on the language-server allowlist"
         ));
@@ -146,7 +151,21 @@ fn probe(
                 }
                 std::thread::sleep(Duration::from_millis(retry_after_ms.min(2_000)));
             }
-            LspFileOutcome::Result(result) => return Ok(result),
+            LspFileOutcome::Result(result) => {
+                // Resolving one file does not mean rust-analyzer has indexed
+                // every module. These probes name known production symbols,
+                // so wait for this query's expected answer, not merely the
+                // server's first nonempty response to an earlier query.
+                if result.to_string().contains(expected) {
+                    return Ok(result);
+                }
+                if Instant::now() >= deadline {
+                    return Err(format!(
+                        "{relative}: expected {expected} before the smoke deadline; last result: {result}"
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(1_000));
+            }
         }
     }
 }

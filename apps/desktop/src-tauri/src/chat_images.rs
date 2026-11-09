@@ -73,13 +73,14 @@ pub(super) fn read_cited_chat_image_request(
 }
 
 fn image_data_url(path: &Path) -> Result<String, String> {
-    let (bytes, _) = super::read_bounded_regular_file(
+    let (bytes, _) = crate::workspace::files::read_bounded_regular_file(
         path,
-        super::MAX_CHAT_IMAGE_BYTES as usize,
+        crate::app::limits::MAX_CHAT_IMAGE_BYTES as usize,
         "chat image preview",
     )
     .map_err(|error| error.to_string())?;
-    let (mime, _) = super::validated_chat_media_type("preview", false, &bytes)?;
+    let (mime, _) =
+        crate::sessions::attachments::validated_chat_media_type("preview", false, &bytes)?;
     Ok(format!(
         "data:{mime};base64,{}",
         base64::engine::general_purpose::STANDARD.encode(bytes)
@@ -208,13 +209,17 @@ fn accept_image(root: &Path, candidate: &Path) -> Option<PathBuf> {
         return None;
     }
     let metadata = fs::metadata(&canonical).ok()?;
-    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > super::MAX_CHAT_IMAGE_BYTES {
+    if !metadata.is_file()
+        || metadata.len() == 0
+        || metadata.len() > crate::app::limits::MAX_CHAT_IMAGE_BYTES
+    {
         return None;
     }
     let mut header = [0_u8; 16];
     let mut file = fs::File::open(&canonical).ok()?;
     let read = file.read(&mut header).ok()?;
-    super::validated_chat_media_type("cited", false, &header[..read]).ok()?;
+    crate::sessions::attachments::validated_chat_media_type("cited", false, &header[..read])
+        .ok()?;
     Some(canonical)
 }
 
@@ -353,7 +358,7 @@ mod tests {
         fs::write(&image, b"not an image").unwrap();
         assert!(image_data_url(&image).is_err());
         let file = fs::File::create(&image).unwrap();
-        file.set_len(super::super::MAX_CHAT_IMAGE_BYTES + 1)
+        file.set_len(crate::app::limits::MAX_CHAT_IMAGE_BYTES + 1)
             .unwrap();
         assert!(image_data_url(&image).is_err());
     }

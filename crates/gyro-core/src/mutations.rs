@@ -79,6 +79,30 @@ pub struct PreparedProviderMutationTransaction {
     changes: Vec<PreparedProviderMutation>,
 }
 
+impl PreparedProviderMutationTransaction {
+    pub fn workspace_path(&self) -> &Path {
+        &self.workspace_path
+    }
+
+    /// Paths are exposed only for a nonempty set of existing-file updates.
+    /// Creates, deletes and moves cannot be mistaken for in-place updates.
+    pub fn existing_file_updates(&self) -> Option<impl ExactSizeIterator<Item = &str> + '_> {
+        if self.changes.is_empty()
+            || self
+                .changes
+                .iter()
+                .any(|change| change.expected_hash.is_none() || change.desired_content.is_none())
+        {
+            return None;
+        }
+        Some(
+            self.changes
+                .iter()
+                .map(|change| change.relative_path.as_str()),
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 struct PreparedProviderMutation {
     relative_path: String,
@@ -569,7 +593,8 @@ where
     result
 }
 
-fn content_hash(bytes: &[u8]) -> String {
+/// Hash shared by observed file content and guarded mutation proposals.
+pub fn content_hash(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -1197,7 +1222,8 @@ fn read_bounded_mutation_file(path: &Path, max_bytes: usize, label: &str) -> Res
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
+        // Inspect the opened descriptor without waiting for a FIFO writer.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let mut file = options
         .open(path)
@@ -1817,6 +1843,40 @@ fn sync_provider_mutation_parents(transaction: &PreparedProviderMutationTransact
 mod tests {
     use super::*;
     use crate::{GyroPaths, SessionOrigin};
+
+    #[cfg(unix)]
+    #[test]
+    fn mutation_read_rejects_a_fifo_without_waiting_for_a_writer() {
+        use std::os::unix::{ffi::OsStrExt, fs::OpenOptionsExt};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("target.txt");
+        let name = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let (send, receive) = mpsc::channel();
+        let target = path.clone();
+        let worker = std::thread::spawn(move || {
+            let result = read_bounded_mutation_file(&target, 1024, "fixture");
+            send.send(result).unwrap();
+        });
+        let result = receive.recv_timeout(Duration::from_secs(1));
+        // Release an old blocking implementation before failing the test.
+        let release = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&path)
+            .unwrap();
+        worker.join().unwrap();
+        drop(release);
+        assert!(result
+            .unwrap()
+            .unwrap_err()
+            .to_string()
+            .contains("not a regular file"));
+    }
 
     fn proposal_store(temp: &tempfile::TempDir) -> (SessionStore, Uuid) {
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();

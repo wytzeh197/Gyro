@@ -6,11 +6,17 @@ import {
   writeFile,
   realpath,
   lstat,
+  mkdir,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import {
+  benchmarkStoreDirectory,
+  isolatedBenchmarkLayout,
+  readBenchmarkLayout,
+} from "./provider-benchmark-layout.mjs";
 
 const { values } = parseArgs({
   options: {
@@ -37,6 +43,9 @@ if (
   !Number.isInteger(spec.timeoutSeconds) ||
   spec.timeoutSeconds < 10 ||
   spec.timeoutSeconds > 300 ||
+  (spec.reviewFixtureEdits !== undefined && typeof spec.reviewFixtureEdits !== "boolean") ||
+  (spec.requireFileEditApproval !== undefined && typeof spec.requireFileEditApproval !== "boolean") ||
+  (spec.requireFileEditApproval === true && spec.reviewFixtureEdits !== true) ||
   (spec.tasks !== undefined &&
     (!Array.isArray(spec.tasks) ||
       spec.tasks.length < 1 ||
@@ -74,6 +83,8 @@ if (values.resume) {
     canonical({
       ...value,
       tasks: value.tasks ?? ["readme", "code", "follow-up"],
+      reviewFixtureEdits: value.reviewFixtureEdits ?? false,
+      requireFileEditApproval: value.requireFileEditApproval ?? false,
     });
   if (JSON.stringify(normalize(previous)) !== JSON.stringify(normalize(spec))) {
     throw new Error(
@@ -94,11 +105,35 @@ const run = (command, args, env = process.env) =>
       code === 0 ? ok() : fail(new Error(`${command}: ${signal ?? code}`)),
     );
   });
+// Preserve the original layout when resuming old evidence. New runs separate
+// the app store from fixture repositories so command confinement can run tests.
+const layout = values.resume
+  ? await readBenchmarkLayout(root)
+  : isolatedBenchmarkLayout;
+const dataDirectory = benchmarkStoreDirectory(root, layout);
+if (spec.reviewFixtureEdits && !layout) {
+  throw new Error("Fixture review requires the isolated data/workspaces layout; start a fresh run");
+}
+if (layout) {
+  if (!values.resume) {
+    await writeFile(
+      join(root, "layout.json"),
+      JSON.stringify(layout, null, 2) + "\n",
+      {
+        mode: 0o600,
+        flag: "wx",
+      },
+    );
+  }
+  await mkdir(dataDirectory, { mode: 0o700, recursive: true });
+}
 if (!values["skip-build"]) await run("cargo", ["build", "-p", "gyro-desktop"]);
 console.log(`Benchmark data and checkpoints: ${root}`);
 await run(join(repo, "target/debug/gyro-desktop"), [], {
   ...process.env,
-  GYRO_TEST_DATA_DIR: root,
+  GYRO_TEST_DATA_DIR: dataDirectory,
+  // An empty value explicitly selects the legacy layout on a legacy resume.
+  GYRO_BENCHMARK_ROOT: layout ? root : "",
   GYRO_TIMING_DIAGNOSTICS: "1",
   GYRO_PERFORMANCE_BENCHMARK: specPath,
 });

@@ -660,7 +660,7 @@ fn export(store: &SessionStore, id: Uuid) -> Result<Archive> {
                     .unwrap_or(&event.message)
                     .to_owned(),
                 MessageKind::Assistant => {
-                    super::strip_hidden_control_markers(&event.message).message
+                    crate::providers::markers::strip_hidden_control_markers(&event.message).message
                 }
                 MessageKind::User => event.message,
             };
@@ -783,7 +783,7 @@ fn upload(
     id: Uuid,
     replace: Option<String>,
 ) -> Result<serde_json::Value> {
-    let store = super::open_store().map_err(anyhow::Error::msg)?;
+    let store = crate::stores::open_store().map_err(anyhow::Error::msg)?;
     let archive = export(&store, id)?;
     drop(store);
     let plain = serde_json::to_vec(&archive)?;

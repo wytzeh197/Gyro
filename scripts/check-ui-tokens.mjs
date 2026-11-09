@@ -47,6 +47,7 @@ function styleLocation(n) {
 }
 const monaco = read("apps/desktop/src/monaco-editor.ts");
 const earlyShell = read("apps/desktop/src/early-shell.css");
+const brand = read("packages/ui/src/brand.css");
 
 expect(
   /\.gyro-chat-start:not\(\.is-mission\)\s*\{[^}]*justify-content:\s*center;/.test(
@@ -59,16 +60,24 @@ expect(
 );
 
 expect(
-  styles.includes("--gyro-font-sans: -apple-system") &&
-    /--gyro-font-display:\s*-apple-system/.test(styles) &&
+  /--gyro-font-sans:\s*"Geist", -apple-system/.test(styles) &&
+    /--gyro-font-display:\s*"Geist", -apple-system/.test(styles) &&
+    /--gyro-font-mono:\s*"Geist Mono", ui-monospace/.test(styles) &&
+    brand.includes('font-family: "Geist"') &&
+    brand.includes('font-family: "Geist Mono"') &&
+    ["geist-latin.woff2", "geist-mono-latin.woff2"].every(
+      (font) =>
+        brand.includes(`./assets/fonts/${font}`) &&
+        existsSync(resolve(repoRoot, "packages/ui/src/assets/fonts", font)),
+    ) &&
     !styles.includes('font-family: "Inter"') &&
     !styles.includes('font-family: "Inter Tight"'),
-  "App typography must use the macOS system stack, including companion layouts.",
+  "App typography must use the bundled Geist faces with system fallbacks, including companion layouts.",
 );
 expect(
   earlyShell.includes("font-family: -apple-system, BlinkMacSystemFont") &&
     !earlyShell.includes("@font-face"),
-  "First paint must use the same system typeface as the running app.",
+  "First paint must use the system fallback without waiting for a font load.",
 );
 
 expect(
@@ -118,7 +127,7 @@ const allowedGradient = [
   // Theme picker thumbnails use solid tokens to preview hierarchy; these are
   // content samples, not decorative surface washes.
   /linear-gradient\(var\(--gyro-(?:surface-raised|border-strong|theme-preview-(?:dark|light)-(?:canvas|content))\) 0 0\)/,
-  /linear-gradient\(\s*90deg,\s*var\(--gyro-theme-preview-dark-canvas\)/,  // The thread composer's scrim fades messages out above the dock; it covers
+  /linear-gradient\(\s*90deg,\s*var\(--gyro-theme-preview-dark-canvas\)/, // The thread composer's scrim fades messages out above the dock; it covers
   // content with the canvas colour rather than tinting a surface.
   /transparent 0%,\s*var\(--gyro-composer-scrim\)/,
 ];
@@ -178,7 +187,14 @@ const literalDeclarations = declarations.filter(
 const distinct = (property) =>
   new Set(
     literalDeclarations
-      .filter((declaration) => declaration.property === property)
+      // Reusing an existing semantic token is not a new literal design value.
+      // Compound values and fallbacks still count, so raw geometry cannot hide
+      // inside calc() or var(--token, 13px).
+      .filter(
+        (declaration) =>
+          declaration.property === property &&
+          !/^var\(--gyro-[a-z0-9-]+\)$/.test(declaration.value),
+      )
       .map(({ value }) => value),
   ).size;
 const count = (pattern) =>

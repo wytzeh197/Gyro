@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "cases": 21,
+  "checks": [
+    "old or untagged events cannot change a reopened browser or reveal its panel",
+    "valid loaded/title/viewport events use current native values",
+    "opening a model browser does not claim a pending page is ready",
+    "old loaded notifications cannot finish a newer navigation in the same browser",
+    "native failure and cancelled loads settle truthfully and clear after recovery",
+    "native reload clears its old capture without duplicating history or revealing a panel",
+    "a queued finished snapshot cannot undo Back before WebKit starts the history request",
+    "model reveal keeps its policy and uses current native metadata",
+    "close invalidates an in-flight loaded snapshot before dispatch",
+    "close invalidates an in-flight opened snapshot before dispatch",
+    "in-flight open, close and reopen execute in order without stale success",
+    "late failures stay with their owner and do not poison a reopen",
+    "a slow browser does not block another chat's native events",
+    "a burst of queued titles reads and dispatches only the latest snapshot",
+    "unmount suppresses a snapshot that was already requested",
+    "missing and wrong-session snapshots cannot supply an event",
+    "close and reopen do not wait for a stuck observation or ordinary command",
+    "viewport results and failures remain bound to the browser lifetime",
+    "closed browsers suppress both late screenshot results and screenshot errors",
+    "a current screenshot is displayed and attached to its owning chat",
+    "a current screenshot error remains visible"
+  ],
+  "measurements": {
+    "titleBurst": {
+      "inputEvents": 1000,
+      "nativeSnapshotReads": 1,
+      "dispatchedWorkbenchActions": 1
+    }
+  }
+}

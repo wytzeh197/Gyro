@@ -39,6 +39,7 @@ type DocumentState = {
 type ServerState = {
   session?: LanguageSession;
   promise: Promise<LanguageSession>;
+  poll?: Promise<void>;
 };
 
 /** One document stream across panes. Requests wait for pending buffer synchronization. */
@@ -269,19 +270,25 @@ export class LanguageSessions {
   }
 
   async poll() {
+    if (this.disposed) return;
     await Promise.allSettled(
-      [...this.servers.values()].map(async (entry) => {
+      [...this.servers].map(([key, entry]) => {
         if (!entry.session) return;
-        const response = await this.options.transport.send(
-          entry.session.serverId,
-          "$/gyro/poll",
-          {},
-        );
-        const document = [...this.documents.values()].find(
-          (value) => this.servers.get(this.key(value.desired)) === entry,
-        );
-        if (document)
-          this.options.onMessages(response.messages, document.desired.root);
+        // A slow server must not accumulate another native request each second.
+        // Share only unfinished polls; the next tick reads fresh diagnostics.
+        if (entry.poll) return entry.poll;
+        const serverId = entry.session.serverId;
+        entry.poll = Promise.resolve().then(async () => {
+          if (this.disposed || this.servers.get(key) !== entry) return;
+          const response = await this.options.transport.send(serverId, "$/gyro/poll", {});
+          if (this.disposed) return;
+          const document = [...this.documents.values()].find(
+            (value) => this.servers.get(this.key(value.desired)) === entry,
+          );
+          if (document)
+            this.options.onMessages(response.messages, document.desired.root);
+        }).finally(() => { entry.poll = undefined; });
+        return entry.poll;
       }),
     );
   }

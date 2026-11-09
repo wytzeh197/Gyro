@@ -1,0 +1,7 @@
+{
+  "apps/desktop/src-tauri/src/session_browser.rs": "20c51bcb29d7164380de07d50d3f9273830ba7c770f885751cf252745c99196c",
+  "apps/desktop/src/use-session-browser-events.ts": "7ff1925261ec06f127a1722f2fad23fcb00a2d1499352e839d1c20092edaf1ad",
+  "apps/desktop/src/model-browser-reveal.ts": "24f5e3767d3222b40702be37cc9ae8762f599105091bc8081d83f631998d54f6",
+  "apps/desktop/src/browser-events-native-smoke.tsx": "5b32f847788f0a60a3c58cdd4bf4d29f2db8b64e4c324c3a8a06614b332f124b",
+  "packages/ui/src/workbench-state.ts": "59748ac185cc1914ac344dc4691a1d5eb262cd6378cf84d92804f99ee7894cdf"
+}

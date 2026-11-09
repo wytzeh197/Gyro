@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 
 import vm from "node:vm";
 import ts from "typescript";
+import { chatSendAccepted } from "../apps/desktop/src/chat-send-outcome.ts";
 
 const source = readFileSync(
   new URL("../apps/desktop/src/session-context-events.ts", import.meta.url),
@@ -142,10 +143,12 @@ const busy = new Set(["chat"]);
 const pauses = [];
 const resumes = [];
 let stops = 0;
+let resumeOutcome = { kind: "completed", persisted: true };
 const goalContext = {
   activeSessionGoal: { text: "Finish verification", status: "active" },
   activeSessionId: "chat",
   isTauriRuntime: () => true,
+  chatSendAccepted,
   stoppedChatSessionsRef: { current: stopped },
   sendingSessionIdsRef: { current: busy },
   stopChatSession: () => {
@@ -156,9 +159,9 @@ const goalContext = {
     return true;
   },
   sendDraftRef: {
-    current: (message) => {
+    current: async (message) => {
       resumes.push(message);
-      return true;
+      return resumeOutcome;
     },
   },
 };
@@ -188,8 +191,14 @@ assert.equal(
   "pause",
   "an idle goal still persists its paused state",
 );
-await goalContext.change("resume");
+assert.equal(await goalContext.change("resume"), true);
 assert.ok(resumes.at(-1).includes("saved checkpoint"));
+resumeOutcome = { kind: "failed", persisted: true };
+assert.equal(
+  await goalContext.change("resume"),
+  false,
+  "a persisted failed turn is not a successful goal resume",
+);
 
 let listener;
 const sending = [];

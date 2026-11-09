@@ -1,21 +1,6 @@
 //! Where a saved reply's streamed text blocks belong on the turn timeline.
-use super::*;
 
-/// Where one streamed text block began and the tool it followed, if any.
-#[derive(Clone, Debug)]
-pub(super) struct StreamedTextBlock {
-    /// Byte offset into the raw streamed text.
-    pub(super) start: usize,
-    pub(super) after_activity_id: Option<String>,
-}
-
-/// A runner's raw streamed text and its block starts, kept so the saved reply
-/// can record where each block belongs on the timeline.
-#[derive(Clone, Debug)]
-pub(super) struct StreamedText {
-    pub(super) text: String,
-    pub(super) blocks: Vec<StreamedTextBlock>,
-}
+use crate::providers::{markers::strip_hidden_control_markers, types::ProviderActivity};
 
 /// Where each streamed text block sits in the saved reply, and which tool it
 /// followed.
@@ -149,3 +134,5 @@ mod tests {
         );
     }
 }
+
+pub(crate) use gyro_core::provider_runtime::types::{StreamedText, StreamedTextBlock};

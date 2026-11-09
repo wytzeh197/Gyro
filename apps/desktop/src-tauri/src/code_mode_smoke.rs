@@ -1,6 +1,30 @@
 //! Opt-in native broker acceptance using isolated fixtures, no provider calls.
-use super::*;
+use crate::{
+    code_mode, provider_tool_batch,
+    providers::session_lifecycle::ProviderSessionLease,
+    state::{
+        managers::{
+            ProviderCancellationManager, ProviderCapabilityApprovalManager,
+            ProviderCapabilityBroker,
+        },
+        provider_run::{BoundProviderCapabilityContext, ProviderRunControl},
+    },
+    stores::open_store,
+};
+use gyro_core::{
+    CapabilityApprovalDecision, CapabilityId, CapabilityInvocationContext,
+    CapabilityPolicySnapshot, CapabilityRequest, CapabilityRunMode, GyroConfig, GyroPaths,
+    SessionOrigin, WorkspaceContextSnapshot, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+};
 use serde_json::{json, Value};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tauri::Manager;
+use uuid::Uuid;
 
 pub(super) fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
     if std::env::var_os("GYRO_CODE_MODE_SMOKE").is_none() {
@@ -51,6 +75,7 @@ fn run(app: &tauri::AppHandle, directory: &Path) -> anyhow::Result<Value> {
         session_id: session_id.clone(),
         turn_id: Some(Uuid::new_v4().to_string()),
         provider_id: "openrouter".into(),
+        provider_kind: None,
         workspace: workspace.clone(),
         workspace_key: workspace.display().to_string(),
         workspace_identity_revision: session.workspace_identity.revision,

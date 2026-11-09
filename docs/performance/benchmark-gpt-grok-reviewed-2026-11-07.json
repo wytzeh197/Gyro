@@ -1,0 +1,10 @@
+{
+  "providers": [
+    { "id": "openai", "model": "gpt-6.1-sol", "effort": "medium" },
+    { "id": "xai", "model": "grok-4.7", "effort": "medium" }
+  ],
+  "trials": 1,
+  "timeoutSeconds": 60,
+  "tasks": ["readme", "code"],
+  "reviewFixtureEdits": true
+}

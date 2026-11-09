@@ -134,6 +134,27 @@ const sourceControl: SourceControlState = {
     },
   ],
 };
+/** ?repo=unpushed|pushed: the same branch after a commit, then after a push. */
+function fixtureRepo(state: string | null): SourceControlState {
+  if (state !== "unpushed" && state !== "pushed") return sourceControl;
+  return {
+    ...sourceControl,
+    branch: "fix/sync-retries",
+    upstream: "origin/fix/sync-retries",
+    ahead: state === "unpushed" ? 1 : 0,
+    files: [],
+    additions: 0,
+    deletions: 0,
+    comparedToMain: { additions: 36, deletions: 6, partial: false },
+    history: [
+      {
+        ...sourceControl.history![0]!,
+        subject: "Bound the sync queue retries",
+        relativeDate: "just now",
+      },
+    ],
+  };
+}
 const files: WorkspaceFile[] = [
   {
     path: `${workspace}/src`,
@@ -335,7 +356,17 @@ function initialPlan(sessionId: string): SessionPlan {
     ].map((text, index) => ({
       id: String(index),
       title: text,
-      status: index < 3 ? "complete" : "todo",
+      // ?plan=working leaves the run on step 3, the default has it settled.
+      status:
+        query.get("plan") === "working"
+          ? index < 2
+            ? "complete"
+            : index === 2
+              ? "in-progress"
+              : "todo"
+          : index < 3
+            ? "complete"
+            : "todo",
       createdAt: stamp,
       updatedAt: stamp,
     })),
@@ -720,7 +751,7 @@ function Pane({
       sourceControl={
         sampleState === "empty"
           ? { ...sourceControl, files: [], additions: 0, deletions: 0 }
-          : sourceControl
+          : fixtureRepo(query.get("repo"))
       }
       diffReview={query.get("review") === "proposed" ? diff : undefined}
       onLoadChangeDiff={async () => unified}
@@ -735,6 +766,8 @@ function Pane({
         };
       }}
       railDiffTools={{
+        // The real app runs git here; the fixture only needs the rows live.
+        onRunGitAction: () => undefined,
         onSelectFile: (path) =>
           setDiff((current) => ({ ...current, selectedPath: path })),
         onToggleDirectory: (directory) =>

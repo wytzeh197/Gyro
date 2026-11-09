@@ -140,6 +140,18 @@ assert.deepEqual(current.cloudCapabilities.managedAi, {
 });
 assert.equal(current.accountLabel, "Signed in to Gyro Cloud");
 assert.equal(current.cloudV2, true);
+// The verified address names the account only while a snapshot is shown.
+assert.equal(current.accountEmail, undefined);
+const named = { ...production, accountEmail: "ada@example.com" };
+assert.equal(cloudBillingView(named).accountEmail, "ada@example.com");
+assert.equal(
+  cloudBillingView({ ...named, state: "expired" }).accountEmail,
+  undefined,
+);
+assert.equal(
+  cloudBillingView({ ...named, contractVersion: undefined }).accountEmail,
+  undefined,
+);
 const hostedStaging = structuredClone(production);
 hostedStaging.environment = "staging";
 hostedStaging.snapshot.capabilities.managedAi = {

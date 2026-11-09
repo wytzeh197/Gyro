@@ -1,5 +1,6 @@
-use super::*;
-
+use crate::ide::debug::redact_json_strings;
+use gyro_core::{CapabilityId, WorkspaceContextSnapshot};
+use std::path::Path;
 // Keep routine model inspection small; callers can opt into the hard tool
 // ceiling when the additional context is actually needed.
 pub(super) const DEFAULT_WORKSPACE_RESULT_BYTES: usize = 16 * 1024;
@@ -10,8 +11,28 @@ pub(super) fn workspace_result_bytes_schema() -> serde_json::Value {
         "type": "integer", "minimum": MIN_WORKSPACE_RESULT_BYTES,
         "maximum": gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES,
         "default": DEFAULT_WORKSPACE_RESULT_BYTES,
-        "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed."
+        "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed. Integer values are clamped to the supported range; null uses the default."
     })
+}
+
+/// An existence hint only: never read or substitute another file, follow a
+/// symlink, enumerate the workspace, or broaden a failed read's authority.
+pub(super) fn workspace_path_recovery(workspace: &Path, path: &str) -> String {
+    let mut guidance = String::from("Resolve paths from the selected workspace root, not the last file's directory. Preserve the exact path in the user's request; a bare filename names a root file. Call gyro_workspace_list with path \".\" to locate existing files. Do not create a file merely because this read failed.");
+    if let Some(name) = Path::new(path).file_name().and_then(|name| name.to_str()) {
+        if path != name && !gyro_core::capability_path_is_sensitive(name) {
+            let root_file = workspace.join(name);
+            if root_file
+                .symlink_metadata()
+                .is_ok_and(|metadata| metadata.file_type().is_file())
+                && gyro_core::security::assert_path_inside_workspace(workspace, Path::new(name))
+                    .is_ok()
+            {
+                guidance.push_str(&format!(" Existing file with this name at the workspace root: {name:?}. Read that exact path if it is the file requested; no alternate file was read by this failed call."));
+            }
+        }
+    }
+    guidance
 }
 
 pub(super) fn redact_workspace_capability_result(
@@ -54,24 +75,25 @@ pub(super) fn redact_workspace_capability_result(
 }
 
 pub(super) fn workspace_result_byte_limit(arguments: &serde_json::Value) -> anyhow::Result<usize> {
-    let Some(value) = arguments.get("maxBytes") else {
+    let Some(value) = arguments.get("maxBytes").filter(|value| !value.is_null()) else {
         return Ok(DEFAULT_WORKSPACE_RESULT_BYTES);
     };
-    let bytes = value
-        .as_u64()
-        .filter(|bytes| {
-            (MIN_WORKSPACE_RESULT_BYTES as u64
-                ..=gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES as u64)
-                .contains(bytes)
-        })
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "capability argument `maxBytes` must be an integer between {} and {}",
-                MIN_WORKSPACE_RESULT_BYTES,
-                gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES
-            )
-        })?;
-    Ok(bytes as usize)
+    // This is an observation-size hint, not a file range or permission. Repair
+    // integer bounds here so every provider and direct broker call behaves the
+    // same way without a failed read or another model round. Keep bad types
+    // correctable rather than guessing what a string or fraction means.
+    if value.as_i64().is_some_and(|bytes| bytes < 0) {
+        return Ok(MIN_WORKSPACE_RESULT_BYTES);
+    }
+    let bytes = value.as_u64().ok_or_else(|| {
+        anyhow::anyhow!(
+            "capability argument `maxBytes` must be an integer or null; omit it to use the default"
+        )
+    })?;
+    Ok(bytes.clamp(
+        MIN_WORKSPACE_RESULT_BYTES as u64,
+        gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES as u64,
+    ) as usize)
 }
 
 /// A search or read with several roots must name one. A single root is implied.
@@ -189,22 +211,33 @@ mod tests {
     use serde_json::{json, Value};
 
     #[test]
-    fn workspace_result_budgets_are_explicit_and_validated() {
+    fn workspace_result_budgets_repair_optional_size_hints() {
         assert_eq!(workspace_result_byte_limit(&json!({})).unwrap(), 16 * 1024);
-        assert_eq!(
-            workspace_result_byte_limit(&json!({"maxBytes":1024})).unwrap(),
-            1024
-        );
-        for value in [
-            json!(0),
-            json!(1023),
-            json!(131073),
-            json!(1.5),
-            json!("4096"),
-            Value::Null,
+        for (value, expected) in [
+            (Value::Null, DEFAULT_WORKSPACE_RESULT_BYTES),
+            (json!(-1), 1024),
+            (json!(i64::MIN), 1024),
+            (json!(0), 1024),
+            (json!(1023), 1024),
+            (json!(1024), 1024),
+            (json!(4096), 4096),
+            (json!(131072), 131072),
+            (json!(131073), 131072),
+            (json!(u64::MAX), 131072),
         ] {
+            assert_eq!(
+                workspace_result_byte_limit(&json!({"maxBytes":value})).unwrap(),
+                expected,
+                "maxBytes={value}"
+            );
+        }
+        for value in [json!(1.5), json!("4096"), json!(true), json!({}), json!([])] {
             assert!(workspace_result_byte_limit(&json!({"maxBytes":value})).is_err());
         }
+    }
+
+    #[test]
+    fn multiple_workspace_roots_require_an_explicit_root() {
         assert!(root_argument_required(2, false));
         assert!(!root_argument_required(1, false));
         assert!(!root_argument_required(2, true));

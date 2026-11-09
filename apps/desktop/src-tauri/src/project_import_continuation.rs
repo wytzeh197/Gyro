@@ -1,6 +1,16 @@
 //! Imported chats retain their native conversation until the user chooses otherwise.
-use super::*;
 
+use crate::{
+    providers::{
+        chat_types::ProviderChatRequest, runners::kimi_acp::compatible_provider_session_binding,
+        types::ProviderResumeCursor,
+    },
+    stores::{open_store, parse_uuid, to_string},
+    terminal::types::TerminalPaneRequest,
+};
+use gyro_core::{ProviderSessionBinding, Session, SessionEventKind, SessionStore};
+use serde::Serialize;
+use std::{path::Path, process::Command};
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ImportedChatState {
@@ -240,6 +250,9 @@ pub(super) fn unavailable(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::retry_recovery::run_provider_chat_with_retry_using;
+    use gyro_core::{GyroPaths, SessionEvent, SessionOrigin};
+    use uuid::Uuid;
 
     #[test]
     fn imported_auth_scope_comes_from_persisted_matching_provider_metadata() {

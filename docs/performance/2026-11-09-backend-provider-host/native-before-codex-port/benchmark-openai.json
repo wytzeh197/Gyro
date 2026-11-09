@@ -1,0 +1,59 @@
+{
+  "build": "debug",
+  "elapsedMs": 102310,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": false,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "approve-fixture-edit",
+          "path": "README.md",
+          "proposalId": "e6d9752f-b64e-46b2-897f-799a28a57380",
+          "status": "applied"
+        }
+      ],
+      "model": "gpt-5.6-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "bf777b23-2cdc-4d53-9001-2b915bcb1923",
+      "task": "follow-up",
+      "trial": 1,
+      "turnId": "9a9c925c-7d84-4eef-86a6-ab9ebf8a8c64",
+      "wallMs": 47148.534542
+    },
+    {
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "approve-fixture-edit",
+          "path": "README.md",
+          "proposalId": "3aeb3e51-ab58-4164-a7c9-363fb59062c1",
+          "status": "applied"
+        }
+      ],
+      "model": "gpt-5.6-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "responsePresent": true,
+      "resumedActual": true,
+      "resumedRequested": true,
+      "retryCount": 0,
+      "sessionId": "e7e091b8-1f8f-4533-969e-ab4a0f23a4d9",
+      "task": "follow-up",
+      "trial": 1,
+      "turnId": "6e0f6654-c2d4-4a40-b57b-1553647e284f",
+      "wallMs": 39303.99075
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

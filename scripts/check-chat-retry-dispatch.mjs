@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import vm from "node:vm";
 import ts from "typescript";
+import { chatSendAccepted } from "../apps/desktop/src/chat-send-outcome.ts";
 import {
   createChatRetryDispatcher,
   isChatRetryCurrent,
@@ -315,16 +316,16 @@ for (const overrideContext of [
   { retryTurnId: "original" },
   { retryDispatchGuard: () => true },
 ]) {
-  assert.equal(
-    await vm.runInNewContext(branch, {
-      targetSessionId: "chat",
-      sendingSessionIdsRef: { current: new Set(["chat"]) },
-      overrideContext,
-      setChatMessageQueues: () =>
-        assert.fail("Retry cannot append a fresh queued user-message"),
-    }),
-    false,
-  );
+  const result = await vm.runInNewContext(branch, {
+    outcome: { kind: "not-started", persisted: false },
+    targetSessionId: "chat",
+    sendingSessionIdsRef: { current: new Set(["chat"]) },
+    overrideContext,
+    setChatMessageQueues: () =>
+      assert.fail("Retry cannot append a fresh queued user-message"),
+  });
+  assert.equal(result.kind, "not-started");
+  assert.equal(result.reason, "busy");
 }
 
 // Exercise the production replay wiring as a background failure settles.
@@ -355,6 +356,7 @@ const replayCalls = [];
 let queuedState = {},
   replayPromise;
 const backgroundContext = vm.createContext({
+  chatSendAccepted,
   userMessage: user.message,
   turnId: user.turnId,
   event: failure,
@@ -380,7 +382,7 @@ const backgroundContext = vm.createContext({
   sendDraftRef: {
     current: async (message, context) => {
       replayCalls.push({ message, context });
-      return true;
+      return { kind: "completed", persisted: true };
     },
   },
   setChatMessageQueues: (update) => {

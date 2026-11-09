@@ -66,7 +66,18 @@ export function useCompanionMotion(
       opacity: initial ? "0" : getComputedStyle(dock).opacity,
     };
     interrupted.current = undefined;
+    let completed = false;
+    let animation: Animation | undefined;
+    let frame: number | undefined;
+    let deadline: number | undefined;
     const finish = () => {
+      if (completed) return;
+      completed = true;
+      window.clearTimeout(deadline);
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      // A missed/cancelled WebKit animation callback must not retain its
+      // zero-width fill or keep the native browser hidden indefinitely.
+      animation?.cancel();
       wasMoving.current = false;
       setMoving(false);
       if (!open) onExitComplete();
@@ -78,43 +89,56 @@ export function useCompanionMotion(
 
     wasMoving.current = true;
     setMoving(true);
-    // React has already installed the target inline width. Measure it before
-    // applying the animation so percentage widths and overlay caps still work.
-    const target = open ? dock.getBoundingClientRect().width : 0;
     const computed = getComputedStyle(dock);
-    const factor = parseFloat(computed.getPropertyValue("--gyro-motion-factor")) || 1;
-    const easing = computed.getPropertyValue("--gyro-premium-ease").trim() || "ease-out";
-    const animation = dock.animate(
-      [
-        { width: `${start.width}px`, opacity: start.opacity },
-        { width: `${target}px`, opacity: open ? "1" : "0" },
-      ],
-      {
-        duration: COMPANION_MOTION_MS * factor,
-        easing,
-        fill: "both",
-      },
-    );
-    let completed = false;
-    animation.onfinish = () => {
-      completed = true;
-      if (open) animation.cancel();
-      finish();
+    const factor =
+      parseFloat(computed.getPropertyValue("--gyro-motion-factor")) || 1;
+    const easing =
+      computed.getPropertyValue("--gyro-premium-ease").trim() || "ease-out";
+    const duration = COMPANION_MOTION_MS * factor;
+    const begin = () => {
+      frame = undefined;
+      if (completed) return;
+      // The shared portal's parent layout effect attaches/reveals its rail
+      // after this child effect. Wait one frame before measuring that case.
+      const target = open ? dock.getBoundingClientRect().width : 0;
+      if (open && (!dock.isConnected || target <= 0)) {
+        finish();
+        return;
+      }
+      animation = dock.animate(
+        [
+          { width: `${start.width}px`, opacity: start.opacity },
+          { width: `${target}px`, opacity: open ? "1" : "0" },
+        ],
+        { duration, easing, fill: "both" },
+      );
+      animation.onfinish = finish;
+      animation.oncancel = finish;
     };
+    deadline = window.setTimeout(finish, duration + 100);
+    if (open && (!dock.isConnected || dock.getBoundingClientRect().width <= 0))
+      frame = requestAnimationFrame(begin);
+    else begin();
     const stopForReducedMotion = () => {
-      if (reducedMotion.matches) animation.finish();
+      if (reducedMotion.matches) finish();
     };
     reducedMotion.addEventListener("change", stopForReducedMotion);
     return () => {
       reducedMotion.removeEventListener("change", stopForReducedMotion);
-      animation.onfinish = null;
+      window.clearTimeout(deadline);
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      if (animation) {
+        animation.onfinish = null;
+        animation.oncancel = null;
+      }
       if (!completed) {
         interrupted.current = {
           width: dock.getBoundingClientRect().width,
           opacity: getComputedStyle(dock).opacity,
         };
       }
-      animation.cancel();
+      completed = true;
+      animation?.cancel();
     };
   }, [ref, open, width, isResizing, onExitComplete]);
 

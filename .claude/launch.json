@@ -33,6 +33,22 @@
         "127.0.0.1"
       ],
       "port": 1420
+    },
+    {
+      "name": "desktop-sidebar-resize",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@gyro-dev/desktop",
+        "exec",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "1450",
+        "--strictPort"
+      ],
+      "port": 1450
     }
   ]
 }

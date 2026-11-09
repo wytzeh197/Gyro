@@ -300,6 +300,8 @@ export function turnTokensLabel(tokens: TurnTokens): string {
   const state = coverage(tokens);
   const prefix =
     state === "partial" || tokens.accounting?.scope === "request" ? "≥" : "";
+  // A lower bound of zero says nothing: the provider has not reported yet.
+  if (prefix && tokens.totalTokens <= 0) return "Usage unavailable";
   return `${prefix}${formatTokenCount(tokens.totalTokens)} tokens`;
 }
 

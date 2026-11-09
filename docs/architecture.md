@@ -52,7 +52,8 @@ store.
   wait on a tool round-trip. The desktop marks a turn running before the
   workspace-context JSONL append so fsync cannot hide the first activity.
 - Git worktree creation for explicitly isolated sessions.
-- macOS Keychain access for provider keys.
+- Private local storage for saved provider API keys; a separate macOS Keychain
+  store for optional Cloud refresh tokens.
 - Local IPC payloads for CLI-to-app notifications.
 - Bounded subprocess execution, process-group cleanup, timeouts, streaming
   output, and shared cancellation tokens.
@@ -104,8 +105,8 @@ OpenCode remain experimental. Both surfaces use the shared bounded process
 runner, provider-stream parser, provider-health service, and backend-owned
 provider capability manifest. The desktop reads that manifest at startup; its
 checked-in catalog is an offline preview fallback rather than runtime truth.
-Provider credentials stay outside Gyro in provider CLIs, SDKs, environment
-variables, Keychain references, or provider-owned files; the direct-HTTP runners
+Provider CLI logins stay in provider-owned storage. Gyro-saved API keys use a
+private local `secrets.json` file; environment credentials can override them. The direct-HTTP runners
 read a key in-process for the duration of a call rather than exporting it.
 
 Ollama is the exception to the CLI/ACP adapter family: Gyro talks directly to
@@ -159,7 +160,7 @@ DeepSeek, Mistral, and OpenRouter presets, and a user can add any other endpoint
 as a `custom:<slug>` provider. All of them share one HTTPS client in `gyro-core`
 (`openai_compatible.rs`) that streams SSE deltas, accumulates tool calls which
 arrive as JSON-string fragments, and reads the streamed usage block. The key is
-read in-process from the environment or the Keychain and sent as a Bearer
+read in-process from the environment or the private local credential file and sent as a Bearer
 header; it is never injected into a child process and never placed in the URL.
 The transport rule differs from Ollama's deliberately: plain HTTP stays legal
 for loopback hosts (LM Studio, vLLM, llama.cpp), every other host must be HTTPS,
@@ -167,8 +168,7 @@ and a redirect is refused so a Bearer token cannot be walked to a host the user
 did not configure. Tool calls made through this runner cross the same capability
 broker, approval policy, and audit path as a local model's, and stream through
 the same events. These providers are experimental in this release. They run in
-the desktop app. The standalone CLI can configure them while its chat loop runs
-subprocess adapters and Ollama, not OpenAI-compatible API providers yet.
+both the desktop app and standalone CLI through the shared provider runtime.
 See `docs/api-key-providers.md`.
 
 Provider diagnostics are redacted and metadata-only: provider id, model id,
@@ -231,7 +231,9 @@ stale socket cannot be mistaken for a successful handoff.
 
 ## Security Boundaries
 
-- Provider keys live in Keychain.
+- Gyro-saved API keys live in a private local `secrets.json` file (0700 directory,
+  0600 file on macOS), without encryption at rest. Provider CLI logins remain
+  provider-owned; optional Cloud refresh tokens use macOS Keychain.
 - Logs redact common API key and token patterns.
 - File access must stay inside the selected workspace unless the user explicitly approves another path.
 - Terminal commands and file writes require approval by default.

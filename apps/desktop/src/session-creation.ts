@@ -136,6 +136,14 @@ export function createPreviewWorkspaceFileContent(
   };
 }
 
+/** Optimistic chats use this prefix until the backend assigns a UUID. */
+export const PREVIEW_SESSION_ID_PREFIX = "preview-";
+
+/** True for a local-only chat id that the backend has never persisted. */
+export function isPreviewSessionId(sessionId: string | null | undefined): boolean {
+  return Boolean(sessionId?.startsWith(PREVIEW_SESSION_ID_PREFIX));
+}
+
 export function createPreviewSession(
   layout: WorkspaceLayoutId,
   mode: WorkbenchState["workspaceMode"] = "local",
@@ -151,7 +159,7 @@ export function createPreviewSession(
   > = {},
   workspacePath = "",
   titleOverride?: string,
-  sessionId = `preview-${Date.now()}`,
+  sessionId = `${PREVIEW_SESSION_ID_PREFIX}${Date.now()}`,
 ): Session {
   const now = new Date().toISOString();
   const metadata = workspaceRunMetadata(mode, layout);

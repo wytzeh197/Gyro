@@ -1,5 +1,7 @@
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -53,6 +55,16 @@ const runtimeLabel = (target: AppPreviewTarget) =>
     : target.kind === "simulator"
       ? "iPhone Simulator"
       : "Web preview";
+
+/**
+ * Runtime controls a hosted web browser folds into its own options menu, so
+ * the web preview keeps one toolbar row instead of stacking a target row, an
+ * availability row and the address bar.
+ */
+const AppPreviewMenuContext = createContext<ReactNode>(null);
+export function useAppPreviewMenu() {
+  return useContext(AppPreviewMenuContext);
+}
 
 /** Both people and models use the same selected target and framed capture. */
 export function AppPreviewPanel({
@@ -172,53 +184,70 @@ export function AppPreviewPanel({
   const stale = Boolean(error) || age >= (capture?.expiresAfterMs ?? 0);
   const canClick =
     Boolean(capture) && !stale && !busy && capture?.interaction === "click";
+  const targetPicker = (
+    <select
+      aria-label="Preview target"
+      value={target.id}
+      disabled={busy}
+      onChange={(event) => {
+        void select(event.target.value);
+      }}
+    >
+      {!targets.some((item) => item.id === target.id) && (
+        <option value={target.id}>{target.title} · disconnected</option>
+      )}
+      {targets.map((item) => (
+        <option key={item.id} value={item.id}>
+          {runtimeLabel(item)}
+          {item.kind === "web" ? "" : ` · ${item.title}`}
+        </option>
+      ))}
+    </select>
+  );
+  const availability =
+    issues.length > 0 ? (
+      <details className="gyro-app-preview-issues">
+        <summary title="Runtimes that could not be reached">
+          {issues.length} unavailable
+        </summary>
+        <div className="gyro-app-preview-issues-list">
+          {issues.map((issue) => (
+            <p key={issue}>{issue}</p>
+          ))}
+        </div>
+      </details>
+    ) : null;
+  const controls = (
+    <>
+      {targetPicker}
+      <button
+        type="button"
+        onClick={() => void refresh()}
+        disabled={busy}
+        title="Discover windows and Simulator devices"
+      >
+        Refresh targets
+      </button>
+      <button
+        type="button"
+        onClick={() => void takeCapture()}
+        disabled={busy || !loaded}
+        title="Capture the selected runtime"
+      >
+        Capture runtime
+      </button>
+      {availability}
+    </>
+  );
+  // The web page keeps its own address bar; runtime controls ride in its menu.
+  const showsWeb = !capture && loaded && target.kind === "web";
   return (
     <section
       className="gyro-app-preview"
       aria-label="App preview and inspection"
     >
-      <div className="gyro-app-preview-toolbar">
-        <select
-          aria-label="Preview target"
-          value={target.id}
-          disabled={busy}
-          onChange={(event) => {
-            void select(event.target.value);
-          }}
-        >
-          {!targets.some((item) => item.id === target.id) && (
-            <option value={target.id}>{target.title} · disconnected</option>
-          )}
-          {targets.map((item) => (
-            <option key={item.id} value={item.id}>
-              {runtimeLabel(item)}
-              {item.kind === "web" ? "" : ` · ${item.title}`}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          disabled={busy}
-          title="Discover windows and Simulator devices"
-        >
-          Refresh targets
-        </button>
-        <button
-          type="button"
-          onClick={() => void takeCapture()}
-          disabled={busy || !loaded}
-        >
-          Capture
-        </button>
-      </div>
-      {issues.length > 0 && (
-        <details className="gyro-app-preview-issues">
-          <summary>Runtime availability ({issues.length})</summary>
-          {issues.map((issue) => (
-            <p key={issue}>{issue}</p>
-          ))}
-        </details>
+      {showsWeb ? null : (
+        <div className="gyro-app-preview-toolbar">{controls}</div>
       )}
       {error && (
         <p className="gyro-app-preview-error" role="alert">
@@ -328,7 +357,11 @@ export function AppPreviewPanel({
       ) : !loaded ? (
         <div className="gyro-app-preview-empty">Loading runtime targets…</div>
       ) : target.kind === "web" ? (
-        children
+        <AppPreviewMenuContext.Provider
+          value={<div className="gyro-app-preview-menu">{controls}</div>}
+        >
+          {children}
+        </AppPreviewMenuContext.Provider>
       ) : (
         <div className="gyro-app-preview-empty">
           <strong>{target.title}</strong>

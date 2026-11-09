@@ -29,8 +29,9 @@ release data, or other sensitive material to a model.
 
 Prefer the smallest useful context. Redact personal paths, tokens, account
 details, and private repository content from prompts, screenshots, fixtures,
-and transcripts. Provider authentication must remain in provider-owned storage
-or macOS Keychain, as described in Gyro's privacy and architecture documents.
+and transcripts. Provider CLI authentication remains in provider-owned storage. Gyro-saved API
+keys use its private local credential file; optional Cloud refresh tokens use
+macOS Keychain. See Gyro's privacy and architecture documents.
 
 ## Verification
 

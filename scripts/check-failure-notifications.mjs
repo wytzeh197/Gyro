@@ -56,3 +56,25 @@ assert.equal(bounded.length, 12);
 assert.equal(bounded[0].id, "n19");
 
 console.log("Failure notification checks passed.");
+
+const correlated = addNotification(
+  [
+    { ...note("old"), correlationKey: "turn:a" },
+    { ...note("other"), correlationKey: "turn:b" },
+  ],
+  { ...note("new"), title: "Rate limit reached", correlationKey: "turn:a" },
+);
+assert.equal(
+  addNotification([{ ...note("a"), correlationKey: "turn:a" }], {
+    ...note("a"),
+    id: "b",
+    correlationKey: "turn:b",
+  }).length,
+  2,
+  "identical errors in different chats remain independent",
+);
+assert.deepEqual(
+  ids(correlated),
+  ["new", "other"],
+  "a turn's updated failure replaces its former notice only",
+);

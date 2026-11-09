@@ -1,0 +1,75 @@
+Window: "Gyro isolated native browser check", App: Gyro Browser Review.
+0 standard window Gyro isolated native browser check, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: Gyro native browser frontend fixture, URL: tauri://localhost/browser-events-native-smoke.html
+	3 scroll area
+		4 HTML content Description: Gyro Fixture Original, URL: 127.0.0.1:52410/browser-observation.html?label=Original
+			5 container
+				6 link Open next page, Value: 127.0.0.1:52410/browser-observation.html?label=Provisional
+				7 button Submit next page
+				8 button Script navigation
+				9 link Prevented link, Value: 127.0.0.1:52410/browser-observation.html?label=Provisional
+				10 button Same-document route
+				11 link Same-document fragment, Value: 127.0.0.1:52410/browser-observation.html?label=Original#current
+				12 button Load frame
+				13 link Blocked credential URL, Value: fixture:fixture@127.0.0.1:52410/browser-observation.html?label=BlockedCredentials
+				14 container Initial
+					15 text Initial
+				16 text Deterministic loopback page for Gyro Browser acceptance.
+				17 heading Browser observation ready, Value: 1
+					18 text Browser observation ready
+				19 container
+					20 text Viewport: compact
+				21 container State-changing control
+					22 heading State-changing control, Value: 2
+						23 text State-changing control
+					24 button Change visible state
+					25 container State: initial
+						26 text State: initial
+					27 container Clicks: 0
+						28 text Clicks: 0
+				29 container Mouse interaction
+					30 heading Mouse interaction, Value: 2
+						31 text Mouse interaction
+					32 button Hover target
+					33 container Hover: initial
+						34 text Hover: initial
+					35 image Canvas target
+					36 container Canvas: initial
+						37 text Canvas: initial
+					38 button Drag handle
+					39 button Drop zone
+					40 container Drag: initial
+						41 text Drag: initial
+					42 container Context: initial
+						43 text Context: initial
+				44 container Form controls
+					45 heading Form controls, Value: 2
+						46 text Form controls
+					47 container
+						48 text Project name
+						49 text field (settable) Project name, Value: Gyro
+						50 pop up button Project kind, Value: Site
+						51 checkbox Enabled, Value: 0
+						52 container Kind: site; enabled: false
+							53 text Kind: site; enabled: false
+						54 button Save project
+						55 container Form: untouched
+							56 text Form: untouched
+					57 text Blocked credential field
+					58 secure text field (settable) Blocked credential field, Value: ••••••••••••••
+			59 button Geometry target clicked; click again to finish
+		60 scroll bar (settable, float) 0
+	61 close button
+	62 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	63 minimize button
+	64 text Gyro isolated native browser check
+65 menu bar
+	66 Gyro Browser Review
+	67 File
+	68 Edit
+	69 View
+	70 Window
+	71 Help
+
+The focused UI element is 4 HTML content Description: Gyro Fixture Original, URL: 127.0.0.1:52410/browser-observation.html?label=Original

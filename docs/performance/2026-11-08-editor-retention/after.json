@@ -1,0 +1,812 @@
+{
+  "schema": "gyro.editor-resource-lifecycle.v1",
+  "phase": "after",
+  "evidence": "Actual production reducer and Monaco pane in isolated Chromium; generated 1024-line text files; renderer heap only, not native WebKit footprint",
+  "browserVersion": {
+    "protocolVersion": "1.3",
+    "product": "Chrome/157.0.8103.39",
+    "revision": "@d5f73ccfbb8887db2367b182fa86df82c6b705c",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36",
+    "jsVersion": "15.7.112.23"
+  },
+  "previews": 72,
+  "qualityChecks": [
+    "pinned unsaved text and undo",
+    "shared split ownership and final close",
+    "closed-preview cursor and scroll on reopen",
+    "100 rapid previews during lazy mount"
+  ],
+  "samples": [
+    {
+      "label": "warm empty",
+      "tabs": 0,
+      "buffers": 0,
+      "bufferCharacters": 0,
+      "models": 0,
+      "modelCharacters": 0,
+      "editorCount": 0,
+      "heap": {
+        "usedSize": 23233128,
+        "totalSize": 24231936,
+        "embedderHeapUsedSize": 7400264,
+        "backingStorageSize": 23821029
+      },
+      "dom": {
+        "documents": 2,
+        "nodes": 1087,
+        "jsEventListeners": 158
+      }
+    },
+    {
+      "label": "after 24 previews",
+      "tabs": 1,
+      "buffers": 1,
+      "bufferCharacters": 129962,
+      "models": 1,
+      "modelCharacters": 129962,
+      "editorCount": 1,
+      "heap": {
+        "usedSize": 26621276,
+        "totalSize": 28065792,
+        "embedderHeapUsedSize": 7457280,
+        "backingStorageSize": 23869145
+      },
+      "dom": {
+        "documents": 2,
+        "nodes": 885,
+        "jsEventListeners": 328
+      }
+    },
+    {
+      "label": "after 48 previews",
+      "tabs": 1,
+      "buffers": 1,
+      "bufferCharacters": 129962,
+      "models": 1,
+      "modelCharacters": 129962,
+      "editorCount": 1,
+      "heap": {
+        "usedSize": 26755652,
+        "totalSize": 28590080,
+        "embedderHeapUsedSize": 7424592,
+        "backingStorageSize": 23869397
+      },
+      "dom": {
+        "documents": 2,
+        "nodes": 885,
+        "jsEventListeners": 328
+      }
+    },
+    {
+      "label": "after 72 previews",
+      "tabs": 1,
+      "buffers": 1,
+      "bufferCharacters": 129962,
+      "models": 1,
+      "modelCharacters": 129962,
+      "editorCount": 1,
+      "heap": {
+        "usedSize": 26881616,
+        "totalSize": 28327936,
+        "embedderHeapUsedSize": 7275568,
+        "backingStorageSize": 23870333
+      },
+      "dom": {
+        "documents": 2,
+        "nodes": 885,
+        "jsEventListeners": 328
+      }
+    },
+    {
+      "label": "closed final preview",
+      "tabs": 0,
+      "buffers": 0,
+      "bufferCharacters": 0,
+      "models": 0,
+      "modelCharacters": 0,
+      "editorCount": 0,
+      "heap": {
+        "usedSize": 25697064,
+        "totalSize": 27017216,
+        "embedderHeapUsedSize": 6661784,
+        "backingStorageSize": 23821439
+      },
+      "dom": {
+        "documents": 2,
+        "nodes": 299,
+        "jsEventListeners": 158
+      }
+    }
+  ],
+  "errors": [
+    {
+      "exceptionId": 1,
+      "text": "Uncaught (in promise)",
+      "lineNumber": 8276,
+      "columnNumber": 68,
+      "scriptId": "29",
+      "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "cancel",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 8276,
+            "columnNumber": 68
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 8286,
+            "columnNumber": 13
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1436,
+            "columnNumber": 12
+          },
+          {
+            "functionName": "clear",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1538,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1522,
+            "columnNumber": 13
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "16",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2",
+            "lineNumber": 51005,
+            "columnNumber": 18
+          },
+          {
+            "functionName": "",
+            "scriptId": "16",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2",
+            "lineNumber": 51026,
+            "columnNumber": 30
+          },
+          {
+            "functionName": "_deliver",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 2464,
+            "columnNumber": 19
+          },
+          {
+            "functionName": "_deliverQueue",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 2473,
+            "columnNumber": 15
+          },
+          {
+            "functionName": "fire",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 2494,
+            "columnNumber": 15
+          },
+          {
+            "functionName": "setModel",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 112568,
+            "columnNumber": 29
+          },
+          {
+            "functionName": "",
+            "scriptId": "342",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/@monaco-editor_react.js?v=f69767d2",
+            "lineNumber": 618,
+            "columnNumber": 176
+          },
+          {
+            "functionName": "commitHookEffectListMount",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 16962,
+            "columnNumber": 33
+          },
+          {
+            "functionName": "commitPassiveMountOnFiber",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 18205,
+            "columnNumber": 18
+          },
+          {
+            "functionName": "commitPassiveMountEffects_complete",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 18178,
+            "columnNumber": 16
+          },
+          {
+            "functionName": "commitPassiveMountEffects_begin",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 18168,
+            "columnNumber": 14
+          },
+          {
+            "functionName": "commitPassiveMountEffects",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 18158,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "flushPassiveEffectsImpl",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 19542,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "flushPassiveEffects",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 19499,
+            "columnNumber": 21
+          },
+          {
+            "functionName": "",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 19380,
+            "columnNumber": 16
+          },
+          {
+            "functionName": "workLoop",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 196,
+            "columnNumber": 41
+          },
+          {
+            "functionName": "flushWork",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 175,
+            "columnNumber": 21
+          },
+          {
+            "functionName": "performWorkUntilDeadline",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 383,
+            "columnNumber": 28
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "CancellationError",
+        "description": "Canceled: Canceled\n    at Delayer.cancel (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:8277:69)\n    at Delayer.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:8287:14)\n    at dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1437:13)\n    at _DisposableStore.clear (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1539:11)\n    at _DisposableStore.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1523:14)\n    at _a67.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2:51006:19)\n    at UniqueContainer.value (http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2:51027:31)\n    at Emitter._deliver (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2465:20)\n    at Emitter._deliverQueue (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2474:16)\n    at Emitter.fire (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2495:16)",
+        "objectId": "-4448860458366360264.2.1",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "Canceled: Canceled\n    at Delayer.cancel (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:8277:69)\n    at Delayer.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:8287:14)\n    at dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1437:13)\n    at _DisposableStore.clear (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1539:11)\n    at _DisposableStore.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1523:14)\n    at _a67.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2:51006:19)\n    at UniqueContainer.value (http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2:51027:31)\n    at Emitter._deliver (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2465:20)\n    at Emitter._deliverQueue (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2474:16)\n    at Emitter.fire (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2495:16)",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "name",
+              "type": "string",
+              "value": "Canceled"
+            },
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "Canceled: Canceled\n    at Delayer.cancel (http://1…/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2495:16)"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Canceled"
+            }
+          ]
+        }
+      },
+      "executionContextId": 2
+    },
+    {
+      "exceptionId": 2,
+      "text": "Uncaught (in promise)",
+      "lineNumber": 8276,
+      "columnNumber": 68,
+      "scriptId": "29",
+      "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "cancel",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 8276,
+            "columnNumber": 68
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 8286,
+            "columnNumber": 13
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1436,
+            "columnNumber": 12
+          },
+          {
+            "functionName": "clear",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1538,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1522,
+            "columnNumber": 13
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "16",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2",
+            "lineNumber": 51005,
+            "columnNumber": 18
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "16",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2",
+            "lineNumber": 51057,
+            "columnNumber": 28
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1436,
+            "columnNumber": 12
+          },
+          {
+            "functionName": "clearAndDisposeAll",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1681,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1671,
+            "columnNumber": 13
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1436,
+            "columnNumber": 12
+          },
+          {
+            "functionName": "clear",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1538,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1522,
+            "columnNumber": 13
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1586,
+            "columnNumber": 20
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1436,
+            "columnNumber": 12
+          },
+          {
+            "functionName": "clear",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1538,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1522,
+            "columnNumber": 13
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1586,
+            "columnNumber": 20
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 112483,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 118922,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "pe",
+            "scriptId": "342",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/@monaco-editor_react.js?v=f69767d2",
+            "lineNumber": 671,
+            "columnNumber": 172
+          },
+          {
+            "functionName": "",
+            "scriptId": "342",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/@monaco-editor_react.js?v=f69767d2",
+            "lineNumber": 614,
+            "columnNumber": 188
+          },
+          {
+            "functionName": "safelyCallDestroy",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 16795,
+            "columnNumber": 12
+          },
+          {
+            "functionName": "commitHookEffectListUnmount",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 16922,
+            "columnNumber": 18
+          },
+          {
+            "functionName": "commitPassiveUnmountInsideDeletedTreeOnFiber",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 18332,
+            "columnNumber": 16
+          },
+          {
+            "functionName": "commitPassiveUnmountEffectsInsideOfDeletedTree_begin",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 18294,
+            "columnNumber": 12
+          },
+          {
+            "functionName": "commitPassiveUnmountEffects_begin",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 18230,
+            "columnNumber": 18
+          },
+          {
+            "functionName": "commitPassiveUnmountEffects",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 18218,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "flushPassiveEffectsImpl",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 19541,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "flushPassiveEffects",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 19499,
+            "columnNumber": 21
+          },
+          {
+            "functionName": "",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 19380,
+            "columnNumber": 16
+          },
+          {
+            "functionName": "workLoop",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 196,
+            "columnNumber": 41
+          },
+          {
+            "functionName": "flushWork",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 175,
+            "columnNumber": 21
+          },
+          {
+            "functionName": "performWorkUntilDeadline",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 383,
+            "columnNumber": 28
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "CancellationError",
+        "description": "Canceled: Canceled\n    at Delayer.cancel (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:8277:69)\n    at Delayer.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:8287:14)\n    at dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1437:13)\n    at _DisposableStore.clear (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1539:11)\n    at _DisposableStore.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1523:14)\n    at _a67.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2:51006:19)\n    at _a68.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2:51058:29)\n    at dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1437:13)\n    at DisposableMap.clearAndDisposeAll (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1682:11)\n    at DisposableMap.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1672:14)",
+        "objectId": "-4448860458366360264.2.2",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "Canceled: Canceled\n    at Delayer.cancel (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:8277:69)\n    at Delayer.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:8287:14)\n    at dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1437:13)\n    at _DisposableStore.clear (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1539:11)\n    at _DisposableStore.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1523:14)\n    at _a67.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2:51006:19)\n    at _a68.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2:51058:29)\n    at dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1437:13)\n    at DisposableMap.clearAndDisposeAll (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1682:11)\n    at DisposableMap.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1672:14)",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "name",
+              "type": "string",
+              "value": "Canceled"
+            },
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "Canceled: Canceled\n    at Delayer.cancel (http://1…/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1672:14)"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Canceled"
+            }
+          ]
+        }
+      },
+      "executionContextId": 2
+    },
+    {
+      "exceptionId": 3,
+      "text": "Uncaught (in promise)",
+      "lineNumber": 8276,
+      "columnNumber": 68,
+      "scriptId": "29",
+      "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+      "stackTrace": {
+        "callFrames": [
+          {
+            "functionName": "cancel",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 8276,
+            "columnNumber": 68
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 8286,
+            "columnNumber": 13
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1436,
+            "columnNumber": 12
+          },
+          {
+            "functionName": "clear",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1538,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 1522,
+            "columnNumber": 13
+          },
+          {
+            "functionName": "dispose",
+            "scriptId": "16",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2",
+            "lineNumber": 51005,
+            "columnNumber": 18
+          },
+          {
+            "functionName": "",
+            "scriptId": "16",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2",
+            "lineNumber": 51026,
+            "columnNumber": 30
+          },
+          {
+            "functionName": "_deliver",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 2464,
+            "columnNumber": 19
+          },
+          {
+            "functionName": "_deliverQueue",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 2473,
+            "columnNumber": 15
+          },
+          {
+            "functionName": "fire",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 2494,
+            "columnNumber": 15
+          },
+          {
+            "functionName": "setModel",
+            "scriptId": "29",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2",
+            "lineNumber": 112568,
+            "columnNumber": 29
+          },
+          {
+            "functionName": "",
+            "scriptId": "342",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/@monaco-editor_react.js?v=f69767d2",
+            "lineNumber": 618,
+            "columnNumber": 176
+          },
+          {
+            "functionName": "commitHookEffectListMount",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 16962,
+            "columnNumber": 33
+          },
+          {
+            "functionName": "commitPassiveMountOnFiber",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 18205,
+            "columnNumber": 18
+          },
+          {
+            "functionName": "commitPassiveMountEffects_complete",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 18178,
+            "columnNumber": 16
+          },
+          {
+            "functionName": "commitPassiveMountEffects_begin",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 18168,
+            "columnNumber": 14
+          },
+          {
+            "functionName": "commitPassiveMountEffects",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 18158,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "flushPassiveEffectsImpl",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 19542,
+            "columnNumber": 10
+          },
+          {
+            "functionName": "flushPassiveEffects",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 19499,
+            "columnNumber": 21
+          },
+          {
+            "functionName": "",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 19380,
+            "columnNumber": 16
+          },
+          {
+            "functionName": "workLoop",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 196,
+            "columnNumber": 41
+          },
+          {
+            "functionName": "flushWork",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 175,
+            "columnNumber": 21
+          },
+          {
+            "functionName": "performWorkUntilDeadline",
+            "scriptId": "28",
+            "url": "http://127.0.0.1:1461/node_modules/.vite/deps/chunk-HUMZPKQA.js?v=f69767d2",
+            "lineNumber": 383,
+            "columnNumber": 28
+          }
+        ]
+      },
+      "exception": {
+        "type": "object",
+        "subtype": "error",
+        "className": "CancellationError",
+        "description": "Canceled: Canceled\n    at Delayer.cancel (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:8277:69)\n    at Delayer.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:8287:14)\n    at dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1437:13)\n    at _DisposableStore.clear (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1539:11)\n    at _DisposableStore.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1523:14)\n    at _a67.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2:51006:19)\n    at UniqueContainer.value (http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2:51027:31)\n    at Emitter._deliver (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2465:20)\n    at Emitter._deliverQueue (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2474:16)\n    at Emitter.fire (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2495:16)",
+        "objectId": "-4448860458366360264.2.3",
+        "preview": {
+          "type": "object",
+          "subtype": "error",
+          "description": "Canceled: Canceled\n    at Delayer.cancel (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:8277:69)\n    at Delayer.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:8287:14)\n    at dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1437:13)\n    at _DisposableStore.clear (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1539:11)\n    at _DisposableStore.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:1523:14)\n    at _a67.dispose (http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2:51006:19)\n    at UniqueContainer.value (http://127.0.0.1:1461/node_modules/.vite/deps/monaco-editor.js?v=f69767d2:51027:31)\n    at Emitter._deliver (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2465:20)\n    at Emitter._deliverQueue (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2474:16)\n    at Emitter.fire (http://127.0.0.1:1461/node_modules/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2495:16)",
+          "overflow": false,
+          "properties": [
+            {
+              "name": "name",
+              "type": "string",
+              "value": "Canceled"
+            },
+            {
+              "name": "stack",
+              "type": "string",
+              "value": "Canceled: Canceled\n    at Delayer.cancel (http://1…/.vite/deps/chunk-6RKGQUZ3.js?v=f69767d2:2495:16)"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Canceled"
+            }
+          ]
+        }
+      },
+      "executionContextId": 2
+    }
+  ]
+}

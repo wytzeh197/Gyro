@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use super::WorkspaceContextSnapshot;
+use gyro_core::WorkspaceContextSnapshot;
 
 /// How many projects keep live evidence at once. A turn reads one, and a few
 /// more cover switching between panes before the shell pushes again.

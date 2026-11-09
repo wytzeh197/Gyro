@@ -38,6 +38,8 @@ export type BillingSnapshot = {
   >;
   authStage?: "email" | "proof";
   accountLabel?: string;
+  /** The signed-in address, from the verified native session. */
+  accountEmail?: string;
   plan?: "lite" | "plus" | "premium";
   scheduledPlan?: "plus" | "premium";
   limits?: {
@@ -113,7 +115,7 @@ const statusLabels: Record<BillingStatus, string> = {
   offline: "Cannot refresh subscription",
   unavailable: "Gyro Cloud is not available in this build",
 };
-const planNames = {
+export const planNames = {
   lite: "Gyro Cloud",
   plus: "Gyro Plus",
   premium: "Gyro Premium",
@@ -336,8 +338,13 @@ export function CloudConnectionSettings({
           <SettingsRow
             label="Account"
             detail="Signing out of Gyro leaves provider logins and local work intact."
-            value={snapshot.accountLabel ?? "Not signed in"}
+            value={
+              (snapshot.accountLabel && snapshot.accountEmail) ||
+              (snapshot.accountLabel ?? "Not signed in")
+            }
           />
+          {(!snapshot.accountLabel && actions.restore) ||
+          (snapshot.accountLabel && actions.signOut) ? (
           <div className="gyro-settings-transfer-actions">
             {!snapshot.accountLabel && actions.restore ? (
               <button
@@ -358,6 +365,7 @@ export function CloudConnectionSettings({
               </button>
             ) : null}
           </div>
+          ) : null}
         </SettingsGroup>
       ) : null}
     </>
@@ -502,8 +510,13 @@ export function BillingSettings({
     name: string,
   ) =>
     snapshot.availability === "coming-soon" ? (
-      <button type="button" className="gyro-secondary-button" disabled>
-        Subscribe to {name} · Coming soon
+      <button
+        type="button"
+        className="gyro-secondary-button"
+        aria-label={`Subscribe to ${name}, coming soon`}
+        disabled
+      >
+        Coming soon
       </button>
     ) : actions.subscribe ? (
       <button

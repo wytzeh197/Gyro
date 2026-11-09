@@ -12,8 +12,8 @@ edition = "2021"
 homepage = "https://usegyro.io/"
 license = "Apache-2.0"
 repository = "https://github.com/wytzeh197/Gyro"
-rust-version = "1.78"
-version = "0.1.0"
+rust-version = "1.90"
+version = "0.1.1"
 
 [workspace.dependencies]
 anyhow = "1.0"

@@ -1,6 +1,17 @@
 //! Apply the user's existing spend limits consistently across provider runners.
-use super::*;
 
+use crate::{
+    providers::chat_types::ProviderChatRequest,
+    state::{
+        managers::ProviderCancellationManager,
+        provider_run::{stop_provider_run, ProviderStopReason},
+    },
+    stores::open_store,
+};
+use gyro_core::{GyroConfig, GyroPaths, SessionStore, UsageTokens};
+use std::time::{Duration, Instant};
+use tauri::Manager;
+use uuid::Uuid;
 pub(super) struct TurnSpendGuard {
     ceiling: u64,
     provider_budget: Option<(u64, u64)>,
@@ -165,6 +176,15 @@ pub(super) fn observe(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        provider_reliability::{is_transient_provider_error, provider_failure_recovery},
+        providers::{
+            retry::is_provider_cancellation,
+            retry_recovery::run_provider_chat_with_retry_using,
+            types::{ProviderResumeCursor, ProviderRunnerOutput},
+        },
+    };
+    use gyro_core::{ProviderSessionBinding, SessionOrigin, UsageEntry, UsageOrigin, UsageOutcome};
 
     #[test]
     fn multi_request_api_turn_stops_before_another_generation() {

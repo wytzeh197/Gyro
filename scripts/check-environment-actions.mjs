@@ -256,3 +256,86 @@ for (const selector of [
 }
 
 console.log("environment actions checks passed");
+
+// The card follows the chat: work in flight leads and promotes nothing; a
+// settled turn promotes exactly the next step.
+{
+  const { environmentFocus } = await import(
+    "../packages/ui/src/environment-actions.ts"
+  );
+  const dirty = repo({
+    upstream: "origin/feature",
+    detailsLoaded: true,
+    files: [file("src/a.ts")],
+  });
+  const running = environmentFocus({
+    isRunning: true,
+    planCurrent: 3,
+    planDone: 2,
+    planSteps: 4,
+    sourceControl: dirty,
+  });
+  assert.equal(running.focus, "working");
+  assert.equal(running.primaryAction, undefined);
+  assert.equal(running.status, "Step 3 of 4");
+  assert.equal(
+    environmentFocus({ workingSubagents: 2, sourceControl: dirty }).status,
+    "2 agents working",
+  );
+  // A step left in progress by a stopped turn is not work in flight.
+  assert.equal(
+    environmentFocus({ planCurrent: 3, planSteps: 4, sourceControl: dirty })
+      .focus,
+    "commit",
+  );
+  const commit = environmentFocus({ sourceControl: dirty });
+  assert.equal(commit.primaryAction, "commit-or-push");
+  assert.equal(commit.status, "Ready to commit");
+  assert.equal(
+    environmentFocus({
+      sourceControl: repo({
+        upstream: "origin/feature",
+        ahead: 2,
+        detailsLoaded: true,
+      }),
+    }).focus,
+    "push",
+  );
+  const review = environmentFocus({
+    sourceControl: repo({
+      upstream: "origin/feature",
+      detailsLoaded: true,
+      comparedToMain: { additions: 10, deletions: 2, partial: false },
+    }),
+  });
+  assert.equal(review.focus, "pull-request");
+  assert.equal(review.primaryAction, "create-pull-request");
+  // Without a git handler the row is drawn disabled, so it is not promoted.
+  assert.equal(
+    environmentFocus({
+      canRunGitActions: false,
+      sourceControl: repo({
+        upstream: "origin/feature",
+        detailsLoaded: true,
+        comparedToMain: { additions: 10, deletions: 2, partial: false },
+      }),
+    }).focus,
+    "idle",
+  );
+  // In sync with no branch diff (main itself): nothing to promote.
+  const idle = environmentFocus({
+    planDone: 2,
+    planSteps: 4,
+    sourceControl: repo({ upstream: "origin/main", detailsLoaded: true }),
+  });
+  assert.equal(idle.focus, "idle");
+  assert.equal(idle.primaryAction, undefined);
+  assert.equal(idle.status, "2 steps left");
+  // A status read still landing promotes nothing.
+  assert.equal(
+    environmentFocus({
+      sourceControl: { ...dirty, detailsLoaded: false },
+    }).focus,
+    "idle",
+  );
+}

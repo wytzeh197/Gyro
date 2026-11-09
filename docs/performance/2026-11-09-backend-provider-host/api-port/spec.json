@@ -1,0 +1,1 @@
+{"providers": [{"id": "deepseek", "model": "deepseek-flash", "effort": "low"}, {"id": "ollama", "model": "qwen3:0.6b", "effort": "low"}], "trials": 1, "timeoutSeconds": 120, "tasks": ["follow-up"], "reviewFixtureEdits": true}

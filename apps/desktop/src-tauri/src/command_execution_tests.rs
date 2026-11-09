@@ -1,4 +1,5 @@
 use super::*;
+use crate::terminal::types::{PaneGovernance, TerminalProcessManager};
 
 // Report presence only; test diagnostics must never echo environment values.
 const PROBE: &str = r#"printf '%s|%s|%s|%s|%s|%s' \

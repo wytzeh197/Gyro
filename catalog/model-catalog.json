@@ -1,6 +1,6 @@
 {
   "schema": "gyro.model-catalog.v1",
-  "revision": "2026-11-01.2",
+  "revision": "2026-11-08.1",
   "enabled": true,
   "rolloutPercentage": 100,
   "models": [
@@ -40,9 +40,29 @@
       "description": "Claude Code. Long-running agentic coding and knowledge work.",
       "minClientRevision": 1,
       "insertBefore": "claude-opus-5",
-      "contextWindowTokens": 200000,
+      "contextWindowTokens": 1000000,
       "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
       "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "anthropic",
+      "id": "claude-opus-5",
+      "displayName": "Claude Opus 5",
+      "description": "Claude Code. Frontier model for complex agentic coding and long-horizon work. OpenRouter's API row also serves 1M.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 1000000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultReasoningEffort": "high"
+    },
+    {
+      "providerId": "anthropic",
+      "id": "claude-opus-4-8",
+      "displayName": "Claude Opus 4.8",
+      "description": "Claude Code. Strong model for complex agentic coding.",
+      "minClientRevision": 2,
+      "contextWindowTokens": 1000000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultReasoningEffort": "high"
     },
     {
       "providerId": "anthropic",

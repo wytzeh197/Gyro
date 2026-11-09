@@ -4,7 +4,7 @@ import { languageDefinitions } from "../packages/ui/src/editor/languages/definit
 
 const root = new URL("../", import.meta.url);
 const rust = await readFile(
-  new URL("apps/desktop/src-tauri/src/language_server.rs", root),
+  new URL("apps/desktop/src-tauri/src/ide/language_server.rs", root),
   "utf8",
 );
 
@@ -19,7 +19,10 @@ for (const definition of languageDefinitions) {
     `${definition.lsp.languageId ?? definition.id}\u0000${definition.lsp.command}`,
   );
 }
-assert.ok(uiPairs.size > 0, "definitions.ts no longer declares any lsp command");
+assert.ok(
+  uiPairs.size > 0,
+  "definitions.ts no longer declares any lsp command",
+);
 
 // Rust owns what the capabilities may start, so both of its tables must agree
 // with the editor list. The crate cannot be executed from Node, so the Rust

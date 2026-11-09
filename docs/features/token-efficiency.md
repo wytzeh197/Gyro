@@ -14,10 +14,11 @@ and no effort was already supplied. Standard preserves current behavior.
 Parallel agents require an explicit task request or the explicit setting;
 reasoning effort alone no longer authorizes delegation. Explicit opt-outs win.
 
-New context policies are experimental and **off by default** until the paired
-pilot qualifies them. Turning off Context efficiency restores the preceding
-context behavior. Existing usage guards, approval policy, token-budget meanings,
-and the auto-compaction threshold remain independent.
+Experimental context policies are **off by default** until the paired pilot
+qualifies them. Turning off Context efficiency disables those policies. Internal
+summary isolation has its own rollback, described below. Existing usage guards,
+approval policy, token-budget meanings, and the auto-compaction threshold remain
+independent.
 
 The experimental compact tool catalog is independently off by default. On
 owned API and local-model requests it keeps common tools directly callable and
@@ -102,6 +103,43 @@ replay savings, or money. Earlier receipts and native paths remain unknown, not
 zero; mixed-task aggregates report partial coverage. Token budgets act on
 observed usage, may overshoot while a request is in flight, and are not invoice
 or hard currency limits.
+
+## Standalone token-efficiency controls (2026-11-08)
+
+Internal change summaries, context summaries and title repairs receive only their
+purpose-specific instructions and input. `fullContextInternalRequests: true`
+restores their preceding full-chat behavior. Ordinary chat context is preserved.
+
+The following opt-ins keep the selected model and reasoning effort:
+
+- `freshReadInlineBytes`: zero preserves the existing spill threshold; a positive
+  value gives fresh workspace reads a clamped 4-16 KiB inline window. Search and
+  command output retain their existing limits. Spill persistence and recovery
+  remain required before text is omitted.
+- `repeatedWorkDetection`: runs repeated-work detection without enabling the
+  other experimental policies. Existing wait/poll exemptions still apply.
+- `stableApiPrefix`: direct native-tool OpenAI-compatible requests retire older
+  evidence at bounded checkpoints rather than every generation. Checkpoints
+  occur after eight preparations or 64 KiB of request growth. Existing window
+  compaction and recovery may shorten a request sooner. This switch does not
+  change native CLI sessions, Ollama, tool catalogs, or cache API parameters.
+
+These three opt-ins require `enabled` and default off. Set a switch back to its
+default to roll it back independently. None has qualified for default promotion.
+
+The paired harness includes `fresh-read-4k`, `fresh-read-8k`, `fresh-read-16k`,
+`repeated-work` and `stable-api-prefix`. Read-size and prefix variants are
+measured separately from `combined`. Summary isolation stays identical across
+variants: these fixtures do not invoke background change summaries. Its prompt
+reduction is checked with request-capture tests, rather than an unexercised live
+variant.
+
+Each CLI-launched pilot writes `run-manifest.json` beside its results: checkout
+revision, tracked/untracked build-input hashes, spec and executable hashes, and
+runtime versions. A build-input change during the build stops the run before
+any generations. `--skip-build` explicitly records unverified build provenance.
+The task fixtures retain their own immutable snapshots. A report passing its
+quality gate still requires review before defaults change.
 
 ## Pilot and quality gate
 

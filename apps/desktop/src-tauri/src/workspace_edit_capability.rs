@@ -9,8 +9,27 @@
 //! run one at a time. When a sibling edit moves the hash and the matched text
 //! is still there, the same replacement is applied to the current file instead
 //! of failing the tool call.
-use super::*;
+use crate::{
+    app::{
+        config::load_config_blocking,
+        limits::{MAX_WORKSPACE_FILE_EDIT_BYTES, PROVIDER_CAPABILITY_EVENT},
+    },
+    capabilities::access::{capability_argument_string, capability_full_access_enabled},
+    delegated_agents,
+    ide::task_discovery::content_hash,
+    state::{managers::with_ide_evidence, provider_run::BoundProviderCapabilityContext},
+    stores::open_store,
+    workspace::{files::read_bounded_regular_file, types::FileMutationProposalRequest},
+    workspace_mutations,
+};
+use gyro_core::{
+    CapabilityId, CapabilityRequest, CapabilityResourceRef, CapabilityRunMode, MutationProposal,
+    SessionStore, WorkspaceContextSnapshot,
+};
 use serde_json::{json, Value};
+use std::path::Path;
+use tauri::Emitter;
+use uuid::Uuid;
 
 const IMMEDIATE_EDIT_ATTEMPTS: usize = 4;
 
@@ -27,6 +46,26 @@ enum EditShape {
     Content,
     /// An exact string was replaced in the file on disk.
     Replacement { count: usize, line: u64 },
+}
+
+/// New files require an explicit tool intent; a failed read must not silently
+/// become a reviewable create. Approval and journal application still follow.
+fn require_creation_intent(
+    workspace: &Path,
+    candidate: &Path,
+    path: &str,
+    arguments: &Value,
+) -> anyhow::Result<()> {
+    match candidate.symlink_metadata() {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            anyhow::ensure!(arguments.get("createIfMissing").and_then(Value::as_bool) == Some(true),
+                "No file exists at {path:?}; no proposal was created. Creating a new file requires createIfMissing: true and must be part of the user's requested change. {}",
+                crate::capability_workspace_helpers::workspace_path_recovery(workspace, path));
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub(super) fn execute(
@@ -51,6 +90,7 @@ pub(super) fn execute(
     let root_id = workspace_mutations::bound_workspace_root_id(&store, bound)?;
     let (proposal, shape) = match request.capability_id {
         CapabilityId::WorkspaceProposeEdit => {
+            require_creation_intent(&bound.workspace, &candidate, &path, arguments)?;
             let content = arguments
                 .get("content")
                 .and_then(Value::as_str)
@@ -134,7 +174,7 @@ pub(super) fn execute(
 /// can exceed the tool budget after the mutation has already succeeded, which
 /// would incorrectly report failure and encourage the model to repeat a write.
 fn bounded_proposal_result(proposal: &MutationProposal) -> Value {
-    json!({
+    let mut data = json!({
         "schema": WORKSPACE_EDIT_SCHEMA,
         "id": proposal.id,
         "proposalId": proposal.id,
@@ -144,7 +184,13 @@ fn bounded_proposal_result(proposal: &MutationProposal) -> Value {
         "expectedHash": proposal.expected_hash,
         "contentHash": content_hash(proposal.content.as_bytes()),
         "error": proposal.error.as_deref().map(gyro_core::sanitize_capability_summary),
-    })
+        "applied": proposal.status == gyro_core::MutationProposalStatus::Applied,
+        "approvalRequired": proposal.status == gyro_core::MutationProposalStatus::Pending,
+    });
+    if proposal.status == gyro_core::MutationProposalStatus::Pending {
+        data["nextStep"] = json!("This proposal has not changed the file on disk. Keep its proposalId and wait for user review before verifying this edit; do not resubmit the same edit. Independent work can continue.");
+    }
+    data
 }
 
 fn bounded_edit_result(proposal: &MutationProposal, count: usize, line: u64) -> Value {
@@ -172,7 +218,7 @@ fn string_replacement(
 ) -> anyhow::Result<Replacement> {
     if !candidate.exists() {
         anyhow::bail!(
-            "{path} does not exist; use gyro_workspace_propose_edit to create a new file"
+            "{path} does not exist. Recheck the exact workspace-root-relative path in the request and list the root before guessing another location. Use gyro_workspace_propose_edit only if the task actually calls for creating a new file."
         );
     }
     let (bytes, _) =
@@ -415,8 +461,9 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
     let (properties, required) = match id {
         CapabilityId::WorkspaceProposeEdit => (
             json!({
-                "path": { "type": "string", "description": "Workspace-relative file path. A missing file is created." },
+                "path": { "type": "string", "description": "Exact path relative to the workspace root. Preserve paths supplied by the user. A missing file is created only when the task calls for a new file; a failed read alone does not justify creation." },
                 "content": { "type": "string", "description": "Complete new file content, replacing the whole file." },
+                "createIfMissing": { "type": "boolean", "default": false, "description": "Required true to propose creating a missing file. Set only when the user's task calls for a new file at this exact path, not to work around a failed read of an existing file." },
                 "expectedHash": { "type": "string", "description": "Required for an existing file: contentHash from a prior read, rejected if the file changed since. Omit for a new file." },
                 "documentVersion": { "type": "string", "description": "Version returned by gyro_workspace_read_editor; reject if the live document changed." }
             }),
@@ -453,6 +500,12 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        ide::debug::redact_json_strings,
+        workspace_mutations::create_file_mutation_proposal_in_store,
+    };
+    use gyro_core::{GyroPaths, SessionOrigin};
+    use std::{fs, path::PathBuf};
 
     #[test]
     fn large_proposals_return_the_durable_outcome_within_the_tool_budget() {
@@ -497,6 +550,16 @@ mod tests {
                     }
                 );
                 assert_eq!(data["contentHash"], content_hash(content.as_bytes()));
+                assert_eq!(data["applied"], apply_immediately);
+                assert_eq!(data["approvalRequired"], !apply_immediately);
+                if apply_immediately {
+                    assert!(data.get("nextStep").is_none());
+                } else {
+                    assert!(data["nextStep"]
+                        .as_str()
+                        .unwrap()
+                        .contains("has not changed the file on disk"));
+                }
                 assert!(data.get("content").is_none());
             }
             let target = temp.path().join("large.txt");
@@ -592,6 +655,45 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("identical"), "{error}");
+    }
+
+    #[test]
+    fn missing_file_requires_explicit_creation_and_keeps_existing_paths_distinct() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path();
+        fs::create_dir(workspace.join("src")).unwrap();
+        fs::write(workspace.join("test.mjs"), "original\n").unwrap();
+        let target = workspace.join("src/test.mjs");
+        for arguments in [json!({}), json!({"createIfMissing":false})] {
+            let error = require_creation_intent(workspace, &target, "src/test.mjs", &arguments)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("no proposal was created"));
+            assert!(error.contains("createIfMissing: true"));
+            assert!(error.contains("workspace root: \"test.mjs\""));
+        }
+        require_creation_intent(
+            workspace,
+            &target,
+            "src/test.mjs",
+            &json!({"createIfMissing":true}),
+        )
+        .unwrap();
+        assert!(
+            !target.exists(),
+            "validation must not create a file or apply an approval"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("test.mjs")).unwrap(),
+            "original\n"
+        );
+        require_creation_intent(
+            workspace,
+            &workspace.join("test.mjs"),
+            "test.mjs",
+            &json!({}),
+        )
+        .unwrap();
     }
 
     #[test]

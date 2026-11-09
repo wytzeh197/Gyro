@@ -53,7 +53,8 @@ pub fn transient_retry_delay(index: usize) -> Option<Duration> {
 /// treats a long header.
 pub fn retry_after_hint(error: &str) -> Option<Duration> {
     match parse_retry_after_hint(error) {
-        RetryAfterHint::Delay(delay) => Some(delay),
+        RetryAfterHint::Delay(delay) if delay <= Duration::from_secs(30) => Some(delay),
+        RetryAfterHint::Delay(_) => None,
         RetryAfterHint::Absent | RetryAfterHint::Unusable => None,
     }
 }
@@ -63,7 +64,8 @@ pub fn retry_after_hint(error: &str) -> Option<Duration> {
 /// provider error actionable instead of restarting before its stated deadline.
 pub fn retry_delay_with_hint(error: &str, fallback: Duration) -> Option<Duration> {
     match parse_retry_after_hint(error) {
-        RetryAfterHint::Delay(delay) => Some(delay),
+        RetryAfterHint::Delay(delay) if delay <= Duration::from_secs(30) => Some(delay),
+        RetryAfterHint::Delay(_) => None,
         RetryAfterHint::Absent => Some(fallback),
         RetryAfterHint::Unusable => None,
     }
@@ -76,86 +78,106 @@ enum RetryAfterHint {
 }
 
 fn parse_retry_after_hint(error: &str) -> RetryAfterHint {
-    const MAX_HINT: Duration = Duration::from_secs(30);
     let normalized = error.to_ascii_lowercase();
+    let mut latest = None;
     for marker in ["retry-after:", "retry after ", "retry in ", "try again in "] {
-        let Some((_, rest)) = normalized.split_once(marker) else {
-            continue;
-        };
-        let rest = rest.trim_start();
-        let digits: String = rest
-            .chars()
-            .take_while(|character| character.is_ascii_digit())
-            .collect();
-        let Ok(whole) = digits.parse::<u64>() else {
-            return RetryAfterHint::Unusable;
-        };
-        let after = &rest[digits.len()..];
-        let (fraction, unit) = if let Some(rest) = after
-            .strip_prefix('.')
-            .filter(|rest| rest.starts_with(|character: char| character.is_ascii_digit()))
-        {
-            let count = rest.bytes().take_while(u8::is_ascii_digit).count();
-            (&rest[..count], rest[count..].trim_start())
-        } else {
-            ("", after.trim_start())
-        };
-        // "retry after 3 attempts" counts attempts, not seconds.
-        if unit.starts_with("attempt") || unit.starts_with("try") || unit.starts_with("time") {
-            continue;
-        }
-        let unit_end = unit
-            .char_indices()
-            .find(|(_, character)| !character.is_alphabetic())
-            .map_or(unit.len(), |(index, _)| index);
-        let unit_millis: u128 = match &unit[..unit_end] {
-            "" | "s" | "sec" | "secs" | "second" | "seconds" => 1_000,
-            "ms" | "millisecond" | "milliseconds" => 1,
-            "m" | "min" | "mins" | "minute" | "minutes" => 60_000,
-            "h" | "hr" | "hrs" | "hour" | "hours" => 3_600_000,
-            _ => return RetryAfterHint::Unusable,
-        };
-        // Compound durations are not part of this grammar. Do not mistake
-        // "1s500ms" for one second and retry before the actual cooldown.
-        let tail = unit[unit_end..].trim_start();
-        if tail.starts_with(|character: char| character.is_ascii_digit())
-            || tail
+        for (index, _) in normalized.match_indices(marker) {
+            let rest = &normalized[index + marker.len()..];
+            let rest = rest.trim_start();
+            let digits: String = rest
+                .chars()
+                .take_while(|character| character.is_ascii_digit())
+                .collect();
+            let Ok(whole) = digits.parse::<u64>() else {
+                return RetryAfterHint::Unusable;
+            };
+            let after = &rest[digits.len()..];
+            let (fraction, unit) = if let Some(rest) = after
                 .strip_prefix('.')
-                .is_some_and(|tail| tail.starts_with(|character: char| character.is_ascii_digit()))
-        {
-            return RetryAfterHint::Unusable;
+                .filter(|rest| rest.starts_with(|character: char| character.is_ascii_digit()))
+            {
+                let count = rest.bytes().take_while(u8::is_ascii_digit).count();
+                (&rest[..count], rest[count..].trim_start())
+            } else {
+                ("", after.trim_start())
+            };
+            // "retry after 3 attempts" counts attempts, not seconds.
+            if unit.starts_with("attempt") || unit.starts_with("try") || unit.starts_with("time") {
+                continue;
+            }
+            let unit_end = unit
+                .char_indices()
+                .find(|(_, character)| !character.is_alphabetic())
+                .map_or(unit.len(), |(index, _)| index);
+            let unit_millis: u128 = match &unit[..unit_end] {
+                "" | "s" | "sec" | "secs" | "second" | "seconds" => 1_000,
+                "ms" | "millisecond" | "milliseconds" => 1,
+                "m" | "min" | "mins" | "minute" | "minutes" => 60_000,
+                "h" | "hr" | "hrs" | "hour" | "hours" => 3_600_000,
+                _ => return RetryAfterHint::Unusable,
+            };
+            // Compound durations are not part of this grammar. Do not mistake
+            // "1s500ms" for one second and retry before the actual cooldown.
+            let tail = unit[unit_end..].trim_start();
+            if tail.starts_with(|character: char| character.is_ascii_digit())
+                || tail.strip_prefix('.').is_some_and(|tail| {
+                    tail.starts_with(|character: char| character.is_ascii_digit())
+                })
+            {
+                return RetryAfterHint::Unusable;
+            }
+            // Integer arithmetic preserves milliseconds and fractions of minutes.
+            // Round up discarded precision and fractional milliseconds; provider
+            // text must never overflow a worker or shorten its own cooldown.
+            let precision = fraction.len().min(9);
+            let mut numerator = fraction[..precision].parse::<u32>().unwrap_or_default() as u128;
+            numerator += u128::from(fraction[precision..].bytes().any(|digit| digit != b'0'));
+            let scale = 10_u128.pow(precision as u32);
+            let millis =
+                u128::from(whole) * unit_millis + (numerator * unit_millis).div_ceil(scale);
+            if millis > u64::MAX as u128 {
+                return RetryAfterHint::Unusable;
+            }
+            let delay = Duration::from_millis(millis as u64);
+            latest = Some(latest.map_or(delay, |old: Duration| old.max(delay)));
         }
-        // Integer arithmetic preserves milliseconds and fractions of minutes.
-        // Round up discarded precision and fractional milliseconds; provider
-        // text must never overflow a worker or shorten its own cooldown.
-        let precision = fraction.len().min(9);
-        let mut numerator = fraction[..precision].parse::<u32>().unwrap_or_default() as u128;
-        numerator += u128::from(fraction[precision..].bytes().any(|digit| digit != b'0'));
-        let scale = 10_u128.pow(precision as u32);
-        let millis = u128::from(whole) * unit_millis + (numerator * unit_millis).div_ceil(scale);
-        if millis > MAX_HINT.as_millis() {
-            return RetryAfterHint::Unusable;
-        }
-        return RetryAfterHint::Delay(Duration::from_millis(millis as u64));
     }
-    RetryAfterHint::Absent
+    latest.map_or(RetryAfterHint::Absent, RetryAfterHint::Delay)
+}
+
+/// Includes long cooldowns: they must still block manual/queued sends even
+/// though they exceed the automatic wait limit.
+pub fn provider_cooldown_hint(error: &str) -> Option<Duration> {
+    match parse_retry_after_hint(error) {
+        RetryAfterHint::Delay(delay) => Some(delay),
+        _ => None,
+    }
 }
 
 // The transport and stream layers share three retries. Nested retry loops
 // previously allowed up to twelve HTTP sends for one generation.
 thread_local! { static REMAINING: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) }; }
-struct RetryScope(Option<usize>);
+pub struct RetryScope(bool);
 impl RetryScope {
-    fn start() -> Self {
-        Self(REMAINING.with(|slot| slot.replace(Some(3))))
+    pub fn start() -> Self {
+        Self(REMAINING.with(|slot| {
+            if slot.get().is_some() {
+                false
+            } else {
+                slot.set(Some(3));
+                true
+            }
+        }))
     }
 }
 impl Drop for RetryScope {
     fn drop(&mut self) {
-        REMAINING.with(|slot| slot.set(self.0));
+        if self.0 {
+            REMAINING.with(|slot| slot.set(None));
+        }
     }
 }
-fn take_retry() -> bool {
+pub fn take_retry() -> bool {
     REMAINING.with(|slot| match slot.get() {
         None => true,
         Some(0) => false,
@@ -164,6 +186,32 @@ fn take_retry() -> bool {
             true
         }
     })
+}
+
+pub fn retries_used() -> u32 {
+    REMAINING.with(|slot| slot.get().map_or(0, |left| 3 - left as u32))
+}
+
+type WaitObserver = std::rc::Rc<dyn Fn(Duration, u32, bool)>;
+thread_local! { static WAIT_OBSERVER: std::cell::RefCell<Option<WaitObserver>> = const { std::cell::RefCell::new(None) }; }
+pub struct ObserveWait(Option<WaitObserver>);
+impl ObserveWait {
+    pub fn start(observer: impl Fn(Duration, u32, bool) + 'static) -> Self {
+        Self(WAIT_OBSERVER.with(|slot| slot.replace(Some(std::rc::Rc::new(observer)))))
+    }
+}
+impl Drop for ObserveWait {
+    fn drop(&mut self) {
+        WAIT_OBSERVER.with(|slot| {
+            slot.replace(self.0.take());
+        });
+    }
+}
+pub fn notify_wait(delay: Duration, waiting: bool) {
+    let observer = WAIT_OBSERVER.with(|slot| slot.borrow().clone());
+    if let Some(observer) = observer {
+        observer(delay, retries_used(), waiting);
+    }
 }
 pub(crate) fn compatibility_retry() -> bool {
     if !take_retry() {
@@ -188,13 +236,34 @@ pub(crate) fn http_response<T>(
     cancellation: &CancellationToken,
     mut send: impl FnMut() -> Result<T, ureq::Error>,
 ) -> Result<T, ureq::Error> {
+    let _budget = RetryScope::start();
     for attempt in 0..=DELAYS.len() {
         if cancellation.is_cancelled() {
             return Err(cancelled());
         }
+        let waited = std::cell::Cell::new(false);
+        crate::provider_cooldown::wait(
+            || {
+                cancellation
+                    .is_cancelled()
+                    .then(|| "Provider chat cancelled".into())
+            },
+            |delay| {
+                waited.set(true);
+                notify_wait(delay, true);
+            },
+        )
+        .map_err(|message| ureq::Error::from(std::io::Error::other(message)))?;
+        if waited.get() {
+            notify_wait(Duration::ZERO, false);
+        }
         match send() {
             Ok(response) => return Ok(response),
             Err(error) => {
+                // Even an exhausted attempt can extend the shared quota gate.
+                if matches!(&error, ureq::Error::Status(429, _)) {
+                    let _ = retry_delay(&error, Duration::from_secs(30));
+                }
                 let Some(delay) = DELAYS
                     .get(attempt)
                     .and_then(|delay| retry_delay(&error, jitter(*delay)))
@@ -202,6 +271,7 @@ pub(crate) fn http_response<T>(
                 else {
                     return Err(error);
                 };
+                notify_wait(delay, true);
                 let until = Instant::now() + delay;
                 while Instant::now() < until {
                     if cancellation.is_cancelled() {
@@ -214,6 +284,7 @@ pub(crate) fn http_response<T>(
                     );
                 }
                 crate::provider_observation::retry();
+                notify_wait(Duration::ZERO, false);
             }
         }
     }
@@ -227,22 +298,26 @@ fn cancelled() -> ureq::Error {
 fn retry_delay(error: &ureq::Error, fallback: Duration) -> Option<Duration> {
     match error {
         ureq::Error::Status(408 | 429 | 500 | 502 | 503 | 504 | 529, response) => {
-            let delay = response
-                .header("Retry-After")
-                .and_then(|value| {
-                    value
-                        .parse::<u64>()
-                        .ok()
-                        .map(Duration::from_secs)
-                        .or_else(|| {
-                            chrono::DateTime::parse_from_rfc2822(value).ok().map(|at| {
-                                (at.with_timezone(&chrono::Utc) - chrono::Utc::now())
-                                    .to_std()
-                                    .unwrap_or_default()
-                            })
+            let fallback = if response.status() == 429 {
+                Duration::from_secs(30)
+            } else {
+                fallback
+            };
+            let delay = match response.header("Retry-After") {
+                Some(value) => {
+                    provider_cooldown_hint(&format!("Retry-After: {value}")).or_else(|| {
+                        chrono::DateTime::parse_from_rfc2822(value).ok().map(|at| {
+                            (at.with_timezone(&chrono::Utc) - chrono::Utc::now())
+                                .to_std()
+                                .unwrap_or_default()
                         })
-                })
-                .unwrap_or(fallback);
+                    })?
+                }
+                None => fallback,
+            };
+            if response.status() == 429 {
+                crate::provider_cooldown::observe(delay);
+            }
             // Never retry before a provider's requested cooldown. Long waits
             // remain actionable rate-limit errors rather than hidden hangs.
             (delay <= Duration::from_secs(30)).then_some(delay)
@@ -265,6 +340,35 @@ fn retry_delay(error: &ureq::Error, fallback: Duration) -> Option<Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn conflicting_hints_use_the_latest_deadline_including_long_waits() {
+        assert_eq!(
+            retry_after_hint("Retry-After: 1; Please try again in 1.783s"),
+            Some(Duration::from_millis(1783))
+        );
+        assert_eq!(retry_after_hint("try again in 0s; retry after 90s"), None);
+        assert_eq!(
+            provider_cooldown_hint("try again in 0s; retry after 90s"),
+            Some(Duration::from_secs(90))
+        );
+        assert_eq!(
+            retry_delay(&status(429, "1.783"), Duration::ZERO),
+            Some(Duration::from_millis(1783))
+        );
+        assert_eq!(retry_delay(&status(429, "unknown"), Duration::ZERO), None);
+    }
+    #[test]
+    fn nested_scopes_do_not_restore_consumed_retries() {
+        let _root = RetryScope::start();
+        assert!(take_retry());
+        {
+            let _child = RetryScope::start();
+            assert!(take_retry());
+        }
+        assert_eq!(retries_used(), 2);
+        assert!(take_retry());
+        assert!(!take_retry());
+    }
     fn status(code: u16, retry_after: &str) -> ureq::Error {
         ureq::Error::Status(
             code,

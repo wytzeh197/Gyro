@@ -1,0 +1,180 @@
+{
+  "captureAssetScope": [
+    {
+      "allowed": true,
+      "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-UqWnU1/data/browser-captures/browser-preview-20261107T175630887Z-7ab9a96c-3e81-449e-9c1c-a414d3983da2.png"
+    }
+  ],
+  "captureImages": [],
+  "captures": [
+    {
+      "createdAt": "2026-11-07T17:56:30.887Z",
+      "filename": "browser-preview-20261107T175630887Z-7ab9a96c-3e81-449e-9c1c-a414d3983da2.png",
+      "height": 844,
+      "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-UqWnU1/data/browser-captures/browser-preview-20261107T175630887Z-7ab9a96c-3e81-449e-9c1c-a414d3983da2.png",
+      "resourceId": "80df4e6d-26b0-4b41-addc-5c698276c828",
+      "sourceUrl": "http://127.0.0.1:56482/browser-observation.html?label=Original",
+      "src": "asset://localhost/%2Fprivate%2Fvar%2Ffolders%2F20%2Fn8przxcs0g72jllfg677ys600000gn%2FT%2Fgyro-browser-events-native-UqWnU1%2Fdata%2Fbrowser-captures%2Fbrowser-preview-20261107T175630887Z-7ab9a96c-3e81-449e-9c1c-a414d3983da2.png",
+      "title": "Gyro Fixture Original",
+      "viewport": {
+        "deviceScaleFactor": 1,
+        "height": 844,
+        "scrollX": 0,
+        "scrollY": 0,
+        "width": 390
+      },
+      "width": 390
+    }
+  ],
+  "checks": [
+    "Native bootstrap supplies two isolated session owners",
+    "Production hooks run from embedded Tauri assets",
+    "Renderer is native Apple WebKit",
+    "Production browser renders its empty state",
+    "Native load notification updates the real reducer URL",
+    "Native title notification updates the real reducer title",
+    "Production URL toolbar renders the native page URL",
+    "Normal browser events do not reveal the active panel",
+    "Production address field receives DOM focus",
+    "Production Escape handler releases DOM focus",
+    "Rendered viewport control changes the native browser to 390x844",
+    "Production viewport button reflects the native selection",
+    "Native screenshot command succeeds (no error)",
+    "Native screenshot carries its browser resource ID",
+    "Production capture view decodes the real native PNG asset",
+    "Close removes the native resource while an old read result is held",
+    "Reopen creates a new native resource in the same chat",
+    "Replacement native load reaches React before the old read is released",
+    "Native event bus rejects stale load/title events from the previous resource",
+    "Stale viewport event cannot resize the replacement UI",
+    "Stale native opened event cannot reveal the Browser panel",
+    "Released old native read does not publish after Close/reopen",
+    "Valid native event uses current snapshot data instead of its old payload",
+    "Second chat receives independent native browser metadata",
+    "Inactive chat cannot replace or reveal the active chat browser"
+  ],
+  "commands": [
+    "session_browser_open",
+    "session_browser_snapshot",
+    "session_browser_snapshot",
+    "session_browser_snapshot",
+    "session_browser_snapshot",
+    "session_browser_open",
+    "session_browser_snapshot",
+    "session_browser_open",
+    "session_browser_snapshot"
+  ],
+  "error": "Error: Valid explicit native reveal still opens the active Browser panel",
+  "errors": [],
+  "faultInjection": "held real IPC results; no fabricated command responses",
+  "fullAppShellMounted": false,
+  "href": "tauri://localhost/browser-events-native-smoke.html",
+  "measurements": {
+    "closeWithHeldNativeReadMs": 3
+  },
+  "nativeBuild": "debug-embedded-tauri-production-handlers",
+  "nativeCsp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob:;style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost; frame-src gyro-canvas: http://localhost:* http://127.0.0.1:* https:",
+  "nativeOsMouseTested": false,
+  "passed": false,
+  "routed": [
+    {
+      "accepted": true,
+      "kind": "title",
+      "resourceId": "80df4e6d-26b0-4b41-addc-5c698276c828",
+      "sessionId": "161a3148-6511-4513-ad05-d8c8b116562e"
+    },
+    {
+      "accepted": true,
+      "kind": "loaded",
+      "resourceId": "80df4e6d-26b0-4b41-addc-5c698276c828",
+      "sessionId": "161a3148-6511-4513-ad05-d8c8b116562e"
+    },
+    {
+      "accepted": true,
+      "kind": "viewport",
+      "resourceId": "80df4e6d-26b0-4b41-addc-5c698276c828",
+      "sessionId": "161a3148-6511-4513-ad05-d8c8b116562e"
+    },
+    {
+      "accepted": true,
+      "kind": "viewport",
+      "resourceId": "80df4e6d-26b0-4b41-addc-5c698276c828",
+      "sessionId": "161a3148-6511-4513-ad05-d8c8b116562e"
+    },
+    {
+      "accepted": true,
+      "kind": "title",
+      "resourceId": "0880d4fe-9b4d-4355-8f93-ac82a2b8b84e",
+      "sessionId": "161a3148-6511-4513-ad05-d8c8b116562e"
+    },
+    {
+      "accepted": true,
+      "kind": "loaded",
+      "resourceId": "0880d4fe-9b4d-4355-8f93-ac82a2b8b84e",
+      "sessionId": "161a3148-6511-4513-ad05-d8c8b116562e"
+    },
+    {
+      "accepted": true,
+      "kind": "viewport",
+      "resourceId": "0880d4fe-9b4d-4355-8f93-ac82a2b8b84e",
+      "sessionId": "161a3148-6511-4513-ad05-d8c8b116562e"
+    },
+    {
+      "accepted": false,
+      "kind": "loaded",
+      "resourceId": "80df4e6d-26b0-4b41-addc-5c698276c828",
+      "sessionId": "161a3148-6511-4513-ad05-d8c8b116562e"
+    },
+    {
+      "accepted": false,
+      "kind": "title",
+      "resourceId": "80df4e6d-26b0-4b41-addc-5c698276c828",
+      "sessionId": "161a3148-6511-4513-ad05-d8c8b116562e"
+    },
+    {
+      "accepted": false,
+      "kind": "viewport",
+      "resourceId": "80df4e6d-26b0-4b41-addc-5c698276c828",
+      "sessionId": "161a3148-6511-4513-ad05-d8c8b116562e"
+    },
+    {
+      "accepted": false,
+      "kind": "opened",
+      "resourceId": "80df4e6d-26b0-4b41-addc-5c698276c828",
+      "sessionId": "161a3148-6511-4513-ad05-d8c8b116562e"
+    },
+    {
+      "accepted": true,
+      "kind": "title",
+      "resourceId": "0880d4fe-9b4d-4355-8f93-ac82a2b8b84e",
+      "sessionId": "161a3148-6511-4513-ad05-d8c8b116562e"
+    },
+    {
+      "accepted": true,
+      "kind": "title",
+      "resourceId": "ba00565d-59f9-4998-b8d7-c16bc477bb77",
+      "sessionId": "6185a0a3-0682-4967-b303-6a11bbb89e35"
+    },
+    {
+      "accepted": true,
+      "kind": "loaded",
+      "resourceId": "ba00565d-59f9-4998-b8d7-c16bc477bb77",
+      "sessionId": "6185a0a3-0682-4967-b303-6a11bbb89e35"
+    },
+    {
+      "accepted": true,
+      "kind": "opened",
+      "resourceId": "ba00565d-59f9-4998-b8d7-c16bc477bb77",
+      "sessionId": "6185a0a3-0682-4967-b303-6a11bbb89e35"
+    },
+    {
+      "accepted": true,
+      "kind": "opened",
+      "resourceId": "0880d4fe-9b4d-4355-8f93-ac82a2b8b84e",
+      "sessionId": "161a3148-6511-4513-ad05-d8c8b116562e"
+    }
+  ],
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+  "violations": [],
+  "workspaceAssetAllowed": false
+}

@@ -9,10 +9,20 @@ const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 
 const capabilities = await read("crates/gyro-core/src/capabilities.rs");
-const lib = await read("apps/desktop/src-tauri/src/lib.rs");
+const lib = (
+  await Promise.all(
+    [
+      "lib.rs",
+      "app/setup.rs",
+      "capabilities/execute.rs",
+      "capabilities/access.rs",
+      "capabilities/mcp_server.rs",
+    ].map((path) => read(`apps/desktop/src-tauri/src/${path}`)),
+  )
+).join("\n");
 const lsp = await read("apps/desktop/src-tauri/src/lsp_capability.rs");
 const languageServer = await read(
-  "apps/desktop/src-tauri/src/language_server.rs",
+  "apps/desktop/src-tauri/src/ide/language_server.rs",
 );
 const smoke = await read("apps/desktop/src-tauri/src/lsp_smoke.rs");
 const types = await read("packages/ui/src/types.ts");
@@ -162,7 +172,8 @@ for (const [id, label] of [
   );
 }
 assert.ok(
-  chatRun.includes("capabilityUi(capabilityId)") && chatRun.includes("capabilityLabel(capabilityId)"),
+  chatRun.includes("capabilityUi(capabilityId)") &&
+    chatRun.includes("capabilityLabel(capabilityId)"),
   "code capabilities have no activity beat",
 );
 assert.deepEqual(

@@ -1,0 +1,72 @@
+[
+  {
+    "cohort": "api-port",
+    "temporaryRoot": "/private/tmp/gyro-split-api-aqzmf_fm",
+    "pid": 13175,
+    "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+    "frontendMeasured": false
+  },
+  {
+    "cohort": "native-before-codex-port",
+    "temporaryRoot": "/private/tmp/gyro-split-native-el3nrfrb",
+    "pid": 15825,
+    "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+    "frontendMeasured": false
+  },
+  {
+    "cohort": "api-approval-posture",
+    "temporaryRoot": "/private/tmp/gyro-split-api-0qcpexdr",
+    "pid": 15983,
+    "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+    "frontendMeasured": false
+  },
+  {
+    "cohort": "all-hosts",
+    "temporaryRoot": "/private/tmp/gyro-split-final-agf850zo",
+    "pid": 31220,
+    "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+    "frontendMeasured": false
+  },
+  {
+    "cohort": "core-before-review",
+    "temporaryRoot": "/private/tmp/gyro-split-core-pcmzvrnp",
+    "pid": 45511,
+    "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+    "frontendMeasured": false
+  },
+  {
+    "cohort": "core-reviewed",
+    "temporaryRoot": "/private/tmp/gyro-split-core-review-771j9snr",
+    "pid": 66896,
+    "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+    "frontendMeasured": false
+  },
+  {
+    "cohort": "all-core-runners",
+    "temporaryRoot": "/private/tmp/gyro-split-core-all-hr2xtx55",
+    "pid": 85667,
+    "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+    "frontendMeasured": false
+  },
+  {
+    "cohort": "shared-client",
+    "temporaryRoot": "/private/tmp/gyro-split-core-client-h6zlu6z3",
+    "pid": 1733,
+    "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+    "frontendMeasured": false
+  },
+  {
+    "cohort": "shared-client-compaction",
+    "temporaryRoot": "/private/tmp/gyro-split-core-compaction-6_ha1kf8",
+    "pid": 4465,
+    "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+    "frontendMeasured": false
+  },
+  {
+    "cohort": "shared-client-claude-retry",
+    "temporaryRoot": "/private/tmp/gyro-split-core-claude-retry-73tf78uk",
+    "pid": 6319,
+    "executable": "/Users/wytze/Gyro/target/debug/gyro-desktop",
+    "frontendMeasured": false
+  }
+]

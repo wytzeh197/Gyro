@@ -46,18 +46,26 @@ for (const directory of ["apps/desktop/src", "packages/ui/src"]) {
     source.split("\n").forEach((line, index) => {
       const where = `${relativePath}:${index + 1}`;
       if (WEBVIEW_DIALOG.test(line)) {
-        failures.push(`${where} uses a WebView dialog that never opens: ${line.trim()}`);
+        failures.push(
+          `${where} uses a WebView dialog that never opens: ${line.trim()}`,
+        );
       }
       if (WEBVIEW_CONFIRM.test(line) && relativePath !== CONFIRM_WRAPPER) {
-        failures.push(`${where} calls window.confirm outside the dialog wrapper: ${line.trim()}`);
+        failures.push(
+          `${where} calls window.confirm outside the dialog wrapper: ${line.trim()}`,
+        );
       }
     });
   }
 }
 
 const read = (path) => readFileSync(join(root, path), "utf8");
-const lib = read("apps/desktop/src-tauri/src/lib.rs");
-const capability = read("apps/desktop/src-tauri/src/workspace_path_capability.rs");
+const lib = ["app/limits.rs", "workspace/paths.rs"]
+  .map((path) => read(`apps/desktop/src-tauri/src/${path}`))
+  .join("\n");
+const capability = read(
+  "apps/desktop/src-tauri/src/workspace_path_capability.rs",
+);
 const app = read("apps/desktop/src/App.tsx");
 
 const expect = (condition, message) => {
@@ -65,7 +73,9 @@ const expect = (condition, message) => {
 };
 
 expect(
-  lib.includes('const WORKSPACE_PATHS_CHANGED_EVENT: &str = "gyro://workspace-paths-changed";'),
+  lib.includes(
+    'const WORKSPACE_PATHS_CHANGED_EVENT: &str = "gyro://workspace-paths-changed";',
+  ),
   "lib.rs has no workspace path-change event, so open editors cannot follow a rename",
 );
 for (const command of [
@@ -96,10 +106,7 @@ expect(
   app.includes('"gyro://workspace-paths-changed"'),
   "App.tsx does not listen for workspace path changes",
 );
-expect(
-  app.includes("askTextValue("),
-  "App.tsx does not use the in-app prompt",
-);
+expect(app.includes("askTextValue("), "App.tsx does not use the in-app prompt");
 
 if (failures.length > 0) {
   console.error(`check-webview-dialogs: ${failures.length} failure(s)`);
@@ -107,4 +114,6 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log("check-webview-dialogs: no webview dialogs, workspace bridge announced on both sides");
+console.log(
+  "check-webview-dialogs: no webview dialogs, workspace bridge announced on both sides",
+);

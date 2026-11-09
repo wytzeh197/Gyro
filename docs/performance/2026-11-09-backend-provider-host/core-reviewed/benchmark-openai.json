@@ -1,0 +1,73 @@
+{
+  "build": "debug",
+  "elapsedMs": 61206,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "approve-fixture-edit",
+          "path": "src/clamp.mjs",
+          "proposalId": "7d329777-afab-4c65-b83d-aea0a63c3f5f",
+          "status": "applied"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "clamp.test.mjs",
+          "proposalId": "f3253b5f-e439-4ae1-ac60-802bb89b897c",
+          "status": "applied"
+        }
+      ],
+      "model": "gpt-5.6-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "d91c8660-e44c-43e5-9c58-5912cdee030a",
+      "task": "code",
+      "trial": 1,
+      "turnId": "09faa2af-bdab-43c9-bb22-7802876237a4",
+      "wallMs": 18430.862250000002
+    },
+    {
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "approve-fixture-edit",
+          "path": "src/clamp.mjs",
+          "proposalId": "44e4c492-e9a1-40e1-946c-cb8247261f75",
+          "status": "applied"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "clamp.test.mjs",
+          "proposalId": "474ea31c-a0be-497d-8d17-f6109cb8d1b4",
+          "status": "applied"
+        }
+      ],
+      "model": "gpt-5.6-sol",
+      "outcome": "completed",
+      "provider": "openai",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": true,
+      "resumedRequested": true,
+      "retryCount": 0,
+      "sessionId": "6f7a0dbb-340f-4a50-9813-21116fda121b",
+      "task": "code",
+      "trial": 1,
+      "turnId": "2490e247-4fe1-4497-93d7-e813d50a2a7f",
+      "wallMs": 19480.384542
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

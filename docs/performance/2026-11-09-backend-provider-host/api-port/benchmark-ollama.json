@@ -1,0 +1,44 @@
+{
+  "build": "debug",
+  "elapsedMs": 142192,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": false,
+      "effort": "low",
+      "failureClass": "provider-failed",
+      "failureDetail": "The model returned only invalid Gyro tool calls after one corrective retry; no invalid actions were executed. Check the tool names and arguments before continuing.",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [],
+      "model": "qwen3:0.6b",
+      "outcome": "failed",
+      "provider": "ollama",
+      "resumedRequested": false,
+      "sessionId": "b434ace5-e5ff-4d8f-830c-c11eeea28e9b",
+      "task": "follow-up",
+      "trial": 1,
+      "turnId": "165d2c04-e67b-47c7-b17b-2258381e6bfc",
+      "wallMs": 112561.828542
+    },
+    {
+      "correct": false,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [],
+      "model": "qwen3:0.6b",
+      "outcome": "completed",
+      "provider": "ollama",
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": true,
+      "retryCount": 0,
+      "sessionId": "e8c7083c-d0ab-47ad-98c8-7a5bfd8aece5",
+      "task": "follow-up",
+      "trial": 1,
+      "turnId": "e6fba8fb-9bc9-4560-9374-855849b9c359",
+      "wallMs": 14399.321125
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

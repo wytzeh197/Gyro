@@ -1,6 +1,15 @@
 //! Workspace reads honor their advertised ranges and the serialized tool budget.
-use super::*;
+use crate::{
+    app::limits::{MAX_WORKSPACE_FILE_EDIT_BYTES, MAX_WORKSPACE_SEARCH_FALLBACK_BYTES},
+    capabilities::access::{capability_argument_string, capability_positive_position},
+    capability_workspace_helpers::workspace_result_byte_limit,
+    ide::debug::redact_json_strings,
+    state::{managers::with_ide_evidence, provider_run::BoundProviderCapabilityContext},
+    workspace::{files::read_workspace_file_with_limit, types::WorkspaceFileContent},
+};
+use gyro_core::{CapabilityId, CapabilityRequest, CapabilityResourceRef};
 use serde_json::{json, Value};
+use std::path::Path;
 
 pub(super) fn execute(
     app: &tauri::AppHandle,
@@ -318,10 +327,32 @@ pub(super) fn held_editor_text(buffer: &Value) -> anyhow::Result<HeldEditorText<
     );
 }
 
+/// Keep missing-path recovery separate from permission, confinement and content
+/// failures. Never retry under another directory or turn a failed read into a
+/// create: the next model call must choose and authorize the correct path.
+fn missing_path_guidance(workspace: &str, path: &str, error: anyhow::Error) -> anyhow::Error {
+    if error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    }) {
+        error.context(format!(
+            "Workspace file {path:?} was not found. {}",
+            crate::capability_workspace_helpers::workspace_path_recovery(
+                Path::new(workspace),
+                path
+            )
+        ))
+    } else {
+        error
+    }
+}
+
 fn read_disk_file_data(workspace: &str, path: &str) -> anyhow::Result<Value> {
     // Guarded edits accept a complete-file hash. Reading through the edit
     // limit avoids advertising a preview hash as the hash of a larger file.
-    let file = read_workspace_file_with_limit(workspace, path, MAX_WORKSPACE_FILE_EDIT_BYTES)?;
+    let file = read_workspace_file_with_limit(workspace, path, MAX_WORKSPACE_FILE_EDIT_BYTES)
+        .map_err(|error| missing_path_guidance(workspace, path, error))?;
     let candidate =
         gyro_core::security::assert_path_inside_workspace(Path::new(workspace), Path::new(path))?;
     let modified_at = candidate
@@ -345,7 +376,8 @@ fn read_range_source(workspace: &str, path: &str) -> anyhow::Result<WorkspaceFil
         workspace,
         path,
         MAX_WORKSPACE_SEARCH_FALLBACK_BYTES as usize,
-    )?;
+    )
+    .map_err(|error| missing_path_guidance(workspace, path, error))?;
     if file.truncated {
         anyhow::bail!("File exceeds the workspace range scan limit; use a targeted terminal read");
     }
@@ -522,6 +554,83 @@ fn bound_read_result(mut data: Value, max_bytes: usize) -> anyhow::Result<Value>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        app::limits::MAX_WORKSPACE_FILE_PREVIEW_BYTES,
+        capability_workspace_helpers::{
+            redact_workspace_capability_result, DEFAULT_WORKSPACE_RESULT_BYTES,
+        },
+        ide::task_discovery::content_hash,
+    };
+    use std::fs;
+
+    #[test]
+    fn missing_reads_keep_exact_root_paths_and_never_rebase_or_create() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("src")).unwrap();
+        fs::write(root.path().join("clamp.test.mjs"), "original root test\n").unwrap();
+        let workspace = root.path().to_str().unwrap();
+        for error in [
+            read_disk_file_data(workspace, "src/clamp.test.mjs").unwrap_err(),
+            read_range_source(workspace, "src/clamp.test.mjs").unwrap_err(),
+        ] {
+            assert!(error.chain().any(|cause| cause
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)));
+            let message = error.to_string();
+            assert!(message.contains("selected workspace root"));
+            assert!(message.contains("bare filename names a root file"));
+            assert!(message.contains("Do not create"));
+            assert!(message.contains(
+                "Existing file with this name at the workspace root: \"clamp.test.mjs\""
+            ));
+        }
+        assert!(!root.path().join("src/clamp.test.mjs").exists());
+        assert_eq!(
+            read_disk_file_data(workspace, "clamp.test.mjs").unwrap()["content"],
+            "original root test\n"
+        );
+        assert_eq!(
+            read_range_source(workspace, "clamp.test.mjs")
+                .unwrap()
+                .content,
+            "original root test\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recovery_hints_do_not_follow_symlinks_or_disclose_sensitive_candidates() {
+        let root = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        fs::write(other.path().join("secret.txt"), "outside").unwrap();
+        std::os::unix::fs::symlink(
+            other.path().join("secret.txt"),
+            root.path().join("alias.txt"),
+        )
+        .unwrap();
+        fs::write(root.path().join(".env"), "private").unwrap();
+        for path in ["src/alias.txt", "src/.env", "src/absent.txt"] {
+            let hint =
+                crate::capability_workspace_helpers::workspace_path_recovery(root.path(), path);
+            assert!(!hint.contains("Existing file"), "{hint}");
+            assert!(!hint.contains("outside") && !hint.contains("private"));
+        }
+    }
+
+    #[test]
+    fn missing_path_recovery_does_not_reclassify_permission_or_content_failures() {
+        for error in [
+            anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            anyhow::anyhow!("binary workspace files cannot be previewed"),
+            anyhow::anyhow!("workspace path escapes its root"),
+        ] {
+            let original = error.to_string();
+            assert_eq!(
+                missing_path_guidance("/unavailable-test-workspace", "file.txt", error).to_string(),
+                original
+            );
+        }
+    }
 
     #[test]
     fn held_editor_text_accepts_only_complete_live_buffers() {
@@ -570,6 +679,48 @@ mod tests {
         let mut unknown = json!({"content":"partial source","contentHash":null});
         apply_known_content_hash(&mut unknown, &json!({"knownContentHash":known})).unwrap();
         assert_eq!(unknown["content"], "partial source");
+    }
+
+    #[test]
+    fn repaired_byte_hints_read_files_with_bounded_continuable_results() {
+        let temp = tempfile::tempdir().unwrap();
+        let text = ".window { color: red; }\n".repeat(1000);
+        fs::write(temp.path().join("styles.css"), &text).unwrap();
+        let file = read_range_source(temp.path().to_str().unwrap(), "styles.css").unwrap();
+        for value in [json!(null), json!(-1), json!(0), json!(512), json!(200000)] {
+            let arguments = json!({"path":"styles.css","line":1,"endLine":1,"maxBytes":value});
+            let budget = workspace_result_byte_limit(&arguments).unwrap();
+            let mut data = select_safe_range(&file.content, &arguments).unwrap();
+            data["contentHash"] = json!(file.content_hash);
+            let result = bound_read_result(data, budget).unwrap();
+            assert_eq!(result["content"], ".window { color: red; }");
+            assert_eq!(result["contentHash"], file.content_hash);
+            assert!(serde_json::to_vec(&result).unwrap().len() <= budget);
+
+            let truncated = bound_read_result(
+                json!({"content":text,"line":1,"column":1,"truncated":false}),
+                budget.min(DEFAULT_WORKSPACE_RESULT_BYTES),
+            )
+            .unwrap();
+            assert_eq!(truncated["truncated"], true);
+            let rest = select_range(
+                &text,
+                &json!({
+                    "line":truncated["nextLine"], "column":truncated["nextColumn"],
+                    "endLine":1001,
+                }),
+            )
+            .unwrap();
+            assert_eq!(
+                text,
+                format!(
+                    "{}{}",
+                    truncated["content"].as_str().unwrap(),
+                    rest["content"].as_str().unwrap()
+                )
+            );
+            assert!(serde_json::to_vec(&truncated).unwrap().len() <= budget);
+        }
     }
 
     #[test]

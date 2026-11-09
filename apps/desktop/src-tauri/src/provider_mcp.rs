@@ -25,7 +25,7 @@ fn send(output: &Mutex<impl Write>, message: &Value) -> anyhow::Result<()> {
     let mut output = output
         .lock()
         .map_err(|_| anyhow::anyhow!("MCP output is unavailable"))?;
-    super::write_desktop_mcp_message(&mut *output, message)
+    crate::capabilities::mcp_server::write_desktop_mcp_message(&mut *output, message)
 }
 
 pub(super) fn serve<R, W, F>(
@@ -79,9 +79,11 @@ where
             });
         }
         let result = (|| {
-            while let Some(line) =
-                super::read_bounded_protocol_line(input, super::MAX_PERMISSION_MCP_MESSAGE_BYTES)
-                    .map_err(anyhow::Error::msg)?
+            while let Some(line) = crate::providers::codex_app_server::read_bounded_protocol_line(
+                input,
+                crate::app::limits::MAX_PERMISSION_MCP_MESSAGE_BYTES,
+            )
+            .map_err(anyhow::Error::msg)?
             {
                 if let Some(failure) = write_error.lock().unwrap().take() {
                     anyhow::bail!(failure);

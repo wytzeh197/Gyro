@@ -1,0 +1,6 @@
+{
+  "test": "Relaunch without the required temporary-store marker refuses startup",
+  "code": 2,
+  "stderr": "The native shell review refuses to use an unverified store.\n",
+  "passed": true
+}

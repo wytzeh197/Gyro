@@ -1,0 +1,11 @@
+{
+  "apps/desktop/src/App.tsx": "4745a47e8097d3e838e95f57d935e0b0c7a30c91f59ea861e786bc584ac673c4",
+  "apps/desktop/src-tauri/src/lib.rs": "f839cbb711a522741d7680f8d973c9b018a007a0855560689b8dd9c4d1a2a6ca",
+  "apps/desktop/src-tauri/src/bin/browser-shell-review.rs": "3ab6d44698061e3f7af7e4ad8c33250f6c767ced914876a179fedfa215fd3fde",
+  "apps/desktop/src-tauri/Cargo.toml": "8b1e090afe315e6b2993a54ae06d447dc2ae02e6f8c19a36bbea7a02aa44c625",
+  "scripts/check-browser-draft.mjs": "18c57f9e5eb8a35ca7f3b34daaebe243694afe210321340a723e9a25af376235",
+  "scripts/run-browser-shell-review.mjs": "ab265d91108d31f5efdf64ff944b95e7718f89d3d9280d7f27e245a55fd3c57b",
+  "package.json": "dcdaad04f6d7fe7d931b7d31f7f467ea2cb6f6e330c1501c1b6295c4b52cdbba",
+  "apps/desktop/src-tauri/tauri.conf.json": "0d20aee8cfc34681002669c645766b2ea756110f26fc848f2ca761d2566c0e79",
+  "Cargo.lock": "e00ddd671f957eabad737b1b2b7ab998cddb9fbf5b5ad8cc7464a700b35febc8"
+}

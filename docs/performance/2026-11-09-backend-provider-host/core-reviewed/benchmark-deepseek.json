@@ -1,0 +1,79 @@
+{
+  "build": "debug",
+  "elapsedMs": 26642,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "approve-fixture-edit",
+          "path": "src/clamp.mjs",
+          "proposalId": "fabcab34-7bcf-4828-b7dd-de3fae8864f1",
+          "status": "applied"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "clamp.test.mjs",
+          "proposalId": "9bc5ea8d-7d84-4b28-bd31-dae475d98c72",
+          "status": "applied"
+        }
+      ],
+      "model": "deepseek-flash",
+      "outcome": "completed",
+      "provider": "deepseek",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "1abdb1ab-b0a7-4106-9e41-3ecddce8106c",
+      "task": "code",
+      "trial": 1,
+      "turnId": "c27bf082-2f43-4918-9f67-20b3c3d79949",
+      "wallMs": 11686.177083
+    },
+    {
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "skip",
+          "path": ".gyro/memory.md",
+          "proposalId": "48e64e88-dfd4-4baf-bdd1-55e38d922c68",
+          "status": "out-of-scope"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "src/clamp.mjs",
+          "proposalId": "df78d6c9-45e6-4f2c-8e0a-fdbad3e8c5b1",
+          "status": "applied"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "clamp.test.mjs",
+          "proposalId": "257d7765-d249-4a6e-bc6b-66531c9001ab",
+          "status": "applied"
+        }
+      ],
+      "model": "deepseek-flash",
+      "outcome": "completed",
+      "provider": "deepseek",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": true,
+      "retryCount": 0,
+      "sessionId": "216014a4-bc85-4b89-ac46-17c0c5749024",
+      "task": "code",
+      "trial": 1,
+      "turnId": "e1a74b3a-5df0-4cb7-b888-c8834ee9bb59",
+      "wallMs": 8150.654417
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

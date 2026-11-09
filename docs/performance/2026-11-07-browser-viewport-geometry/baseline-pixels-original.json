@@ -1,0 +1,222 @@
+{
+  "passed": false,
+  "nativePassed": false,
+  "cases": [
+    {
+      "case": "background",
+      "passed": false,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": false,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerMatchesDomWithinOneRasterPixel": true
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-0Hsz3X/data/geometry-background.png",
+      "size": [
+        1280,
+        800
+      ],
+      "markerPixels": [
+        80,
+        120,
+        92,
+        132
+      ],
+      "expectedMarkerPixels": [
+        80.0,
+        120.15018773466834,
+        92.0,
+        132.16520650813519
+      ]
+    },
+    {
+      "case": "initial-background",
+      "passed": false,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": false,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerMatchesDomWithinOneRasterPixel": false
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-0Hsz3X/data/geometry-initial-background.png",
+      "size": [
+        1280,
+        800
+      ],
+      "markerPixels": [
+        80,
+        120,
+        92,
+        132
+      ],
+      "expectedMarkerPixels": [
+        80.0,
+        125.00000000000001,
+        92.0,
+        137.5
+      ]
+    },
+    {
+      "case": "desktop-narrow",
+      "passed": false,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": false,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerMatchesDomWithinOneRasterPixel": true
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-0Hsz3X/data/geometry-desktop-narrow.png",
+      "size": [
+        1280,
+        800
+      ],
+      "markerPixels": [
+        80,
+        120,
+        93,
+        133
+      ],
+      "expectedMarkerPixels": [
+        80.0,
+        120.45169385194481,
+        92.0,
+        132.49686323713928
+      ]
+    },
+    {
+      "case": "desktop-fractional",
+      "passed": false,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": false,
+        "decodedPngMatchesRequestedViewport": false,
+        "markerMatchesDomWithinOneRasterPixel": false
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-0Hsz3X/data/geometry-desktop-fractional.png",
+      "size": [
+        1279,
+        800
+      ],
+      "markerPixels": [
+        80,
+        120,
+        93,
+        133
+      ],
+      "expectedMarkerPixels": [
+        79.98005676269531,
+        120.44251943322617,
+        91.94590377807617,
+        132.45340727802503
+      ]
+    },
+    {
+      "case": "mobile-fractional",
+      "passed": false,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": false,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerMatchesDomWithinOneRasterPixel": false
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-0Hsz3X/data/geometry-mobile-fractional.png",
+      "size": [
+        390,
+        844
+      ],
+      "markerPixels": [
+        80,
+        120,
+        91,
+        131
+      ],
+      "expectedMarkerPixels": [
+        79.98882293701172,
+        120.12555945273115,
+        91.98530864715576,
+        132.13627586953018
+      ]
+    },
+    {
+      "case": "tablet-fractional",
+      "passed": false,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": false,
+        "decodedPngMatchesRequestedViewport": false,
+        "markerMatchesDomWithinOneRasterPixel": true
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-0Hsz3X/data/geometry-tablet-fractional.png",
+      "size": [
+        767,
+        1024
+      ],
+      "markerPixels": [
+        79,
+        120,
+        92,
+        132
+      ],
+      "expectedMarkerPixels": [
+        79.97509002685547,
+        120.22620321673189,
+        91.96272945404053,
+        132.23730182087817
+      ]
+    },
+    {
+      "case": "custom-fractional",
+      "passed": false,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": false,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerMatchesDomWithinOneRasterPixel": false
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-0Hsz3X/data/geometry-custom-fractional.png",
+      "size": [
+        1920,
+        1080
+      ],
+      "markerPixels": [
+        82,
+        121,
+        92,
+        131
+      ],
+      "expectedMarkerPixels": [
+        79.96308135986328,
+        120.33426183844011,
+        91.92431831359863,
+        132.32881700096024
+      ]
+    },
+    {
+      "case": "responsive",
+      "passed": false,
+      "checks": {
+        "decodedPngMatchesCaptureMetadata": true,
+        "decodedPngMatchesDomViewport": false,
+        "decodedPngMatchesRequestedViewport": true,
+        "markerMatchesDomWithinOneRasterPixel": true
+      },
+      "png": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-0Hsz3X/data/geometry-responsive.png",
+      "size": [
+        536,
+        418
+      ],
+      "markerPixels": [
+        80,
+        120,
+        92,
+        132
+      ],
+      "expectedMarkerPixels": [
+        80.0,
+        120.28776978417267,
+        92.0,
+        132.31654676258992
+      ]
+    }
+  ]
+}

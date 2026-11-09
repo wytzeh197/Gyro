@@ -6,6 +6,7 @@ import {
   readFile,
   rm,
   symlink,
+  rename,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -206,6 +207,7 @@ try {
     (g) =>
       g.provider === "openai" && g.task === "readme" && g.session === "resumed",
   );
+  assert.equal(result.fixtureReviewMode, "none");
   assert.equal(group.medianMs, 150);
   assert.equal(group.p95Ms, 200);
   assert.equal(group.slowestMs, 200);
@@ -231,11 +233,17 @@ try {
     root,
     output,
   ]);
-  const subset = JSON.parse(await readFile(join(output, "measurements.json"), "utf8"));
+  const subset = JSON.parse(
+    await readFile(join(output, "measurements.json"), "utf8"),
+  );
   assert.equal(subset.expectedSlots, 20);
   assert.ok(subset.groups.length > 0);
   assert.ok(subset.groups.every((group) => group.task === "no-tool"));
-  assert.ok((await readFile(join(output, "results-table.md"), "utf8")).includes("no-tool"));
+  assert.ok(
+    (await readFile(join(output, "results-table.md"), "utf8")).includes(
+      "no-tool",
+    ),
+  );
   assert.ok(result.records.some((r) => r.provider === "ollama"));
   assert.ok(result.records.some((r) => r.provider === "openrouter"));
   const observed = result.records.find((r) => r.provider === "openai").timing;
@@ -301,6 +309,23 @@ try {
     originalBytes,
     "resume must not overwrite the original cohort evidence",
   );
+  await save(changedSpec, { ...originalSpec, reviewFixtureEdits: true });
+  const changedReview = spawnSync(
+    process.execPath,
+    [runner, "--spec", changedSpec, "--resume", resumeRoot, "--skip-build"],
+    { encoding: "utf8" },
+  );
+  assert.notEqual(changedReview.status, 0);
+  assert.ok(changedReview.stderr.includes("original benchmark spec"));
+  // A matching spec still cannot activate fixture review on a legacy store.
+  await save(previousPath, { ...originalSpec, reviewFixtureEdits: true });
+  const legacyReview = spawnSync(
+    process.execPath,
+    [runner, "--spec", changedSpec, "--resume", resumeRoot, "--skip-build"],
+    { encoding: "utf8" },
+  );
+  assert.notEqual(legacyReview.status, 0);
+  assert.ok(legacyReview.stderr.includes("isolated data/workspaces layout"));
   await rm(previousPath);
   await symlink(changedSpec, previousPath);
   const linked = spawnSync(
@@ -310,6 +335,87 @@ try {
   );
   assert.notEqual(linked.status, 0);
   assert.ok(linked.stderr.includes("regular file"));
+  // The same ledger and traces remain readable when the private app store is
+  // separated from fixture workspaces. Legacy reports above keep their layout.
+  await mkdir(join(root, "data"));
+  await rename(join(root, "sessions"), join(root, "data", "sessions"));
+  await rename(join(root, "logs"), join(root, "data", "logs"));
+  await save(join(root, "layout.json"), {
+    schema: "gyro.benchmark-layout.v1",
+    storeDirectory: "data",
+    workspacesDirectory: "workspaces",
+  });
+  const summarizer = fileURLToPath(
+    new URL("./summarize-provider-benchmark.mjs", import.meta.url),
+  );
+  execFileSync(process.execPath, [summarizer, root, output]);
+  const separated = JSON.parse(
+    await readFile(join(output, "measurements.json"), "utf8"),
+  );
+  assert.equal(
+    separated.records.find((r) => r.provider === "openai").timing.firstTokenMs,
+    16,
+  );
+  assert.equal(
+    separated.records.find((r) => r.provider === "openai" && r.trial === 2)
+      .pendingProposalCount,
+    1,
+  );
+  assert.equal(
+    separated.records.filter((r) => r.task === "follow-up")[0].correct,
+    true,
+  );
+  const nativeSession = randomUUID();
+  const nativeTurn = randomUUID();
+  await writeFile(join(root, "data", "sessions", `${nativeSession}.jsonl`), "");
+  await save(join(root, "benchmark-native.json"), {
+    records: [
+      {
+        provider: "xai",
+        task: "no-tool",
+        trial: 1,
+        sessionId: nativeSession,
+        turnId: nativeTurn,
+        outcome: "completed",
+        wallMs: 100,
+        correct: true,
+        responsePresent: true,
+      },
+    ],
+  });
+  await save(join(root, "data", "logs", "timings", "backend-native.json"), {
+    turnId: nativeTurn,
+    points: [],
+    providerRequests: {
+      requests: 0,
+      providerAttempts: 1,
+      usageObservations: [{ contract: "grok-prompt", modelCalls: 3 }],
+    },
+  });
+  execFileSync(process.execPath, [summarizer, root, output]);
+  const native = JSON.parse(
+    await readFile(join(output, "measurements.json"), "utf8"),
+  ).records.find((record) => record.turnId === nativeTurn).timing;
+  assert.equal(
+    native.requestCount,
+    null,
+    "unobserved native requests must not become zero model calls",
+  );
+  assert.equal(native.nativeModelCalls, 3);
+  const reviewedSpec = JSON.parse(await readFile(join(root, "spec.json"), "utf8"));
+  await save(join(root, "spec.json"), { ...reviewedSpec, reviewFixtureEdits: true });
+  execFileSync(process.execPath, [summarizer, root, output]);
+  assert.equal(JSON.parse(await readFile(join(output, "measurements.json"), "utf8")).fixtureReviewMode, "task-paths");
+  await save(join(root, "layout.json"), {
+    schema: "gyro.benchmark-layout.v1",
+    storeDirectory: "../elsewhere",
+    workspacesDirectory: "workspaces",
+  });
+  const malformed = spawnSync(process.execPath, [summarizer, root, output], {
+    encoding: "utf8",
+  });
+  assert.notEqual(malformed.status, 0);
+  assert.ok(malformed.stderr.includes("Unsupported benchmark layout"));
   console.log(
     "Benchmark summary: medians, overlap, resume metadata, pending proposals, exclusions, and content boundaries passed.",
   );

@@ -1,0 +1,30 @@
+[
+  {
+    "command": [
+      "node",
+      "scripts/check-browser-event-routing.mjs"
+    ],
+    "exitCode": 0
+  },
+  {
+    "command": [
+      "node",
+      "scripts/check-browser-navigation.mjs"
+    ],
+    "exitCode": 0
+  },
+  {
+    "command": [
+      "node",
+      "scripts/check-browser-viewport.mjs"
+    ],
+    "exitCode": 0
+  },
+  {
+    "command": [
+      "node",
+      "scripts/check-browser-reveal.mjs"
+    ],
+    "exitCode": 0
+  }
+]

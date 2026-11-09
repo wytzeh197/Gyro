@@ -1,8 +1,26 @@
 //! Explicit v2 pilot. Serial runs preserve budgets and avoid cross-variant cache/config races.
-use super::*;
+use crate::{
+    command_execution::run_bounded_command, ipc::cli::start_cli_ipc_listener,
+    providers::process::command_with_gui_path,
+};
 use gyro_core::efficiency::pricing::PriceSnapshot;
+use gyro_core::{
+    decide_mutation_proposal, CapabilityAccess, CapabilityClass, ExecutionTermination, GyroConfig,
+    GyroPaths, MutationDecision, ProjectCapabilityPolicy, Session, SessionEvent, SessionOrigin,
+    SessionStore, UsageTokens,
+};
+use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    time::{Duration, Instant},
+};
+use uuid::Uuid;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Spec {
@@ -192,6 +210,11 @@ fn validate(spec: &Spec) -> anyhow::Result<()> {
                     | "compact-cli-catalog"
                     | "catalog-retention"
                     | "routine-profile"
+                    | "fresh-read-4k"
+                    | "fresh-read-8k"
+                    | "fresh-read-16k"
+                    | "repeated-work"
+                    | "stable-api-prefix"
                     | "combined"
             ),
             "Unknown optimization variant"
@@ -422,6 +445,39 @@ fn with_fixture_review<T>(
     (result, reviewed)
 }
 
+fn apply_efficiency_variant(e: &mut gyro_core::efficiency::Config, variant: &str) {
+    let standalone = variant.starts_with("fresh-read-")
+        || matches!(variant, "repeated-work" | "stable-api-prefix");
+    e.experimental = variant != "baseline" && !standalone;
+    e.structured_evidence = variant == "combined" || variant == "structured-evidence";
+    e.cache_assembly = variant == "combined" || variant == "cache-assembly";
+    e.task_state = variant == "combined" || variant == "task-state";
+    e.repository_retrieval = variant == "combined" || variant == "retrieval";
+    e.progress_detection = variant == "combined" || variant == "progress-detection";
+    e.compact_tool_catalog = variant == "combined" || variant == "compact-tool-catalog";
+    e.recoverable_evidence = variant == "combined" || variant == "recoverable-evidence";
+    // Keep mutually exclusive evidence policies separate from the combined candidate.
+    e.tight_evidence = variant == "tight-evidence";
+    e.batch_reads = variant == "batch-reads";
+    e.compact_cli_catalog = variant == "compact-cli-catalog";
+    e.retain_tool_catalog = variant == "combined" || variant == "catalog-retention";
+    e.fresh_read_inline_bytes = match variant {
+        "fresh-read-4k" => 4 * 1024,
+        "fresh-read-8k" => 8 * 1024,
+        "fresh-read-16k" => 16 * 1024,
+        _ => 0,
+    };
+    e.repeated_work_detection = variant == "repeated-work";
+    e.stable_api_prefix = variant == "stable-api-prefix";
+    // Keep summary behavior identical: these fixtures do not invoke background summaries.
+    e.full_context_internal_requests = false;
+    e.profile = if variant == "routine-profile" {
+        gyro_core::efficiency::Profile::Routine
+    } else {
+        gyro_core::efficiency::Profile::Standard
+    };
+}
+
 fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
     let paths = GyroPaths::for_current_user()?;
     let store = SessionStore::open(paths.clone())?;
@@ -456,35 +512,11 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                             persist(root, &records)?;
                             continue;
                         }
-                        GyroConfig::update(&paths, |cfg| {
-                            let e = &mut cfg.efficiency;
-                            e.experimental = variant != "baseline";
-                            e.structured_evidence =
-                                variant == "combined" || variant == "structured-evidence";
-                            e.cache_assembly = variant == "combined" || variant == "cache-assembly";
-                            e.task_state = variant == "combined" || variant == "task-state";
-                            e.repository_retrieval =
-                                variant == "combined" || variant == "retrieval";
-                            e.progress_detection =
-                                variant == "combined" || variant == "progress-detection";
-                            e.compact_tool_catalog =
-                                variant == "combined" || variant == "compact-tool-catalog";
-                            e.recoverable_evidence =
-                                variant == "combined" || variant == "recoverable-evidence";
-                            // Not part of `combined`: tight evidence replaces recoverable
-                            // evidence, so each is measured on its own first.
-                            e.tight_evidence = variant == "tight-evidence";
-                            e.batch_reads = variant == "batch-reads";
-                            e.compact_cli_catalog = variant == "compact-cli-catalog";
-                            e.retain_tool_catalog =
-                                variant == "combined" || variant == "catalog-retention";
-                            e.profile = if variant == "routine-profile" {
-                                gyro_core::efficiency::Profile::Routine
-                            } else {
-                                gyro_core::efficiency::Profile::Standard
-                            };
-                            Ok(())
+                        let applied_efficiency = GyroConfig::update(&paths, |cfg| {
+                            apply_efficiency_variant(&mut cfg.efficiency, &variant);
+                            Ok(cfg.efficiency.clone())
                         })?;
+                        record["efficiencyConfig"] = json!(applied_efficiency);
                         let workspace = root
                             .join("sessions/workspaces")
                             .join(Uuid::new_v4().to_string());
@@ -833,6 +865,8 @@ fn persist(root: &Path, records: &[Value]) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ide::task_discovery::content_hash;
+    use gyro_core::SessionEventKind;
     #[test]
     fn frozen_native_pair_is_valid_and_requires_its_baseline() {
         let file = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1174,6 +1208,35 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn standalone_variants_change_only_their_named_policy() {
+        let mut baseline = gyro_core::efficiency::Config::default();
+        apply_efficiency_variant(&mut baseline, "baseline");
+        assert!(!baseline.full_context_internal_requests);
+        let mut actual = baseline.clone();
+        for variant in [
+            "fresh-read-4k",
+            "fresh-read-8k",
+            "fresh-read-16k",
+            "repeated-work",
+            "stable-api-prefix",
+            "baseline",
+        ] {
+            let mut expected = baseline.clone();
+            match variant {
+                "fresh-read-4k" => expected.fresh_read_inline_bytes = 4 * 1024,
+                "fresh-read-8k" => expected.fresh_read_inline_bytes = 8 * 1024,
+                "fresh-read-16k" => expected.fresh_read_inline_bytes = 16 * 1024,
+                "repeated-work" => expected.repeated_work_detection = true,
+                "stable-api-prefix" => expected.stable_api_prefix = true,
+                _ => {}
+            }
+            apply_efficiency_variant(&mut actual, variant);
+            assert_eq!(actual, expected, "{variant} changed an unrelated policy");
+            assert!(!actual.policies());
+        }
+    }
+
     #[test]
     fn no_budget_is_rejected() {
         let spec:Spec=serde_json::from_value(json!({"schema":"gyro.efficiency-benchmark.v2","providers":[],"trials":3,"timeoutSeconds":180,"variants":["baseline"],"cacheConditions":["fresh-session"],"executionBudget":{"maxCalls":0,"maxObservedTokens":0,"maxCostMicros":null,"currency":"USD"},"tasks":[]})).unwrap();

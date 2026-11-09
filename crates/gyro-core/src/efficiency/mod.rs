@@ -7,6 +7,7 @@ pub mod checkpoint;
 pub mod compaction;
 pub mod context;
 pub mod evidence;
+pub mod prefix_retention;
 pub mod pricing;
 pub mod progress;
 pub mod retrieval;
@@ -122,6 +123,21 @@ pub struct Config {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub compact_cli_catalog: bool,
     pub retain_tool_catalog: bool,
+    /// Rollback for internal summary and title calls: on restores the full chat
+    /// prompt and history they received before isolation.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub full_context_internal_requests: bool,
+    /// Inline window, in bytes, for fresh workspace reads before they spill.
+    /// Zero keeps the universal ~2.2KB threshold; other values clamp to 4-16KB.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub fresh_read_inline_bytes: u32,
+    /// Repeated-work detection on its own, without `experimental` and the
+    /// task-state and retrieval policies that gate brings with it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub repeated_work_detection: bool,
+    /// Keep owned API message prefixes stable between bounded retirement checkpoints.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub stable_api_prefix: bool,
     pub task_state: bool,
     pub repository_retrieval: bool,
     pub progress_detection: bool,
@@ -143,6 +159,10 @@ impl Default for Config {
             batch_reads: false,
             compact_cli_catalog: false,
             retain_tool_catalog: false,
+            full_context_internal_requests: false,
+            fresh_read_inline_bytes: 0,
+            repeated_work_detection: false,
+            stable_api_prefix: false,
             task_state: true,
             repository_retrieval: true,
             progress_detection: true,
@@ -150,9 +170,30 @@ impl Default for Config {
         }
     }
 }
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+/// Capabilities whose result is code or text the model asked to see now.
+const FRESH_READ_CAPABILITIES: &[&str] = &[
+    "workspace.read",
+    "workspace.read_range",
+    "workspace.read_editor",
+];
 impl Config {
     pub fn policies(&self) -> bool {
         self.enabled && self.experimental
+    }
+    /// Whether the repeated-work detector observes tool results.
+    pub fn progress_active(&self) -> bool {
+        self.enabled
+            && (self.repeated_work_detection || (self.experimental && self.progress_detection))
+    }
+    /// The widened inline window for this capability's fresh result, if any.
+    /// Independent of `experimental`, so it can be measured on its own.
+    pub fn fresh_read_window(&self, capability: &str) -> Option<usize> {
+        (self.enabled && self.fresh_read_inline_bytes > 0)
+            .then_some(self.fresh_read_inline_bytes as usize)
+            .filter(|_| FRESH_READ_CAPABILITIES.contains(&capability))
     }
     /// Tight wins over recoverable because it also spills the complete JSON.
     pub fn evidence_policy(&self) -> context::EvidencePolicy {
@@ -198,7 +239,15 @@ mod tests {
     fn switches_that_are_off_stay_out_of_saved_config() {
         // An installed older build shares this config and rejects unknown keys.
         let saved = serde_json::to_value(Config::default()).unwrap();
-        for key in ["tightEvidence", "batchReads", "compactCliCatalog"] {
+        for key in [
+            "tightEvidence",
+            "batchReads",
+            "compactCliCatalog",
+            "fullContextInternalRequests",
+            "freshReadInlineBytes",
+            "repeatedWorkDetection",
+            "stableApiPrefix",
+        ] {
             assert!(saved.get(key).is_none(), "{key} was written");
         }
         assert_eq!(
@@ -212,6 +261,41 @@ mod tests {
         let saved = serde_json::to_value(&on).unwrap();
         assert_eq!(saved["compactCliCatalog"], true);
         assert_eq!(serde_json::from_value::<Config>(saved).unwrap(), on);
+    }
+    #[test]
+    fn standalone_switches_do_not_need_or_enable_experiments() {
+        let base = Config::default();
+        assert!(!base.progress_active(), "defaults keep detection off");
+        let detection = Config {
+            repeated_work_detection: true,
+            ..Config::default()
+        };
+        assert!(detection.progress_active() && !detection.policies());
+        let experimental = Config {
+            experimental: true,
+            ..Config::default()
+        };
+        assert!(
+            experimental.progress_active(),
+            "existing experimental behavior is kept"
+        );
+        let off = Config {
+            enabled: false,
+            repeated_work_detection: true,
+            fresh_read_inline_bytes: 8192,
+            ..Config::default()
+        };
+        assert!(!off.progress_active());
+        assert_eq!(off.fresh_read_window("workspace.read"), None);
+        let reads = Config {
+            fresh_read_inline_bytes: 8192,
+            ..Config::default()
+        };
+        assert_eq!(reads.fresh_read_window("workspace.read"), Some(8192));
+        assert!(!reads.policies());
+        let saved = serde_json::to_value(&reads).unwrap();
+        assert_eq!(saved["freshReadInlineBytes"], 8192);
+        assert_eq!(serde_json::from_value::<Config>(saved).unwrap(), reads);
     }
     #[test]
     fn evidence_policy_needs_experiments_and_tight_wins() {

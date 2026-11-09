@@ -1,0 +1,54 @@
+{
+  "schema": "gyro.backend-split-timings.v1",
+  "date": "2026-11-09",
+  "command": [
+    "cargo",
+    "check",
+    "-p",
+    "gyro-desktop",
+    "--locked"
+  ],
+  "touch": "mtime only, unchanged content",
+  "baseCommit": "3117971ed10de6561e42b664eb5d244b79731a3c",
+  "workingTree": "Phase 3.3 reviewed source",
+  "records": [
+    {
+      "path": "apps/desktop/src-tauri/src/lib.rs",
+      "wallSeconds": [
+        3.254,
+        2.049,
+        1.903
+      ],
+      "medianSeconds": 2.049
+    },
+    {
+      "path": "crates/gyro-core/src/lib.rs",
+      "wallSeconds": [
+        4.86,
+        4.037,
+        4.286
+      ],
+      "medianSeconds": 4.286
+    },
+    {
+      "path": "crates/gyro-core/src/provider_runtime/runners/codex.rs",
+      "wallSeconds": [
+        4.596,
+        4.492,
+        4.574
+      ],
+      "medianSeconds": 4.574
+    }
+  ],
+  "sourceCommit": "270a307ae586717a2f0dfb2ef11c0f15156f60be",
+  "decision": "retain gyro-core::provider_runtime; no new crate",
+  "environment": {
+    "machine": "Apple M1",
+    "cores": 8,
+    "memoryGiB": 8,
+    "architecture": "arm64",
+    "rustc": "1.96.1 (31fca3adb 2026-06-26)",
+    "concurrentCargoOrAcceptance": false,
+    "installedAppsUnchanged": true
+  }
+}

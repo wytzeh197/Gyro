@@ -1,0 +1,694 @@
+[
+  {
+    "spec": {
+      "width": 1920,
+      "height": 1050,
+      "name": "desktop-wide"
+    },
+    "surface": {
+      "x": 240,
+      "y": 6,
+      "width": 1674,
+      "height": 1038,
+      "right": 1914,
+      "bottom": 1044,
+      "cx": 1077
+    },
+    "composer": {
+      "x": 697,
+      "y": 511.75,
+      "width": 760,
+      "height": 102.6875,
+      "right": 1457,
+      "bottom": 614.4375,
+      "cx": 1077
+    },
+    "title": {
+      "x": 939.546875,
+      "y": 463.65625,
+      "width": 274.890625,
+      "height": 25.296875,
+      "right": 1214.4375,
+      "bottom": 488.953125,
+      "cx": 1076.9921875
+    },
+    "logo": {
+      "x": 1061,
+      "y": 411.65625,
+      "width": 32,
+      "height": 32,
+      "right": 1093,
+      "bottom": 443.65625,
+      "cx": 1077
+    },
+    "metadata": {
+      "x": 698,
+      "y": 621.03125,
+      "width": 758,
+      "height": 36.09375,
+      "right": 1456,
+      "bottom": 657.125,
+      "cx": 1077
+    },
+    "centerDelta": 0,
+    "titleDelta": 0.0078125,
+    "logoDelta": 0,
+    "metadataJustify": "center",
+    "pageOverflow": 0,
+    "barOverflow": 0,
+    "toolbar": [
+      {
+        "name": "gyro-composer-control gyro-composer-control-context gyro-composer-reveal",
+        "x": 709.390625,
+        "y": 573.546875,
+        "width": 28.5,
+        "height": 28.5,
+        "right": 737.890625,
+        "bottom": 602.046875,
+        "cx": 723.640625
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-approval gyro-composer-reveal",
+        "x": 749.28125,
+        "y": 574.5,
+        "width": 141.328125,
+        "height": 26.59375,
+        "right": 890.609375,
+        "bottom": 601.09375,
+        "cx": 819.9453125
+      },
+      {
+        "name": "gyro-composer-context-meter",
+        "x": 1118.875,
+        "y": 579.25,
+        "width": 18.03125,
+        "height": 17.09375,
+        "right": 1136.90625,
+        "bottom": 596.34375,
+        "cx": 1127.890625
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-model",
+        "x": 1148.296875,
+        "y": 574.5,
+        "width": 136.78125,
+        "height": 26.59375,
+        "right": 1285.078125,
+        "bottom": 601.09375,
+        "cx": 1216.6875
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-effort",
+        "x": 1300.265625,
+        "y": 574.5,
+        "width": 60.765625,
+        "height": 26.59375,
+        "right": 1361.03125,
+        "bottom": 601.09375,
+        "cx": 1330.6484375
+      },
+      {
+        "name": "Dictate",
+        "x": 1376.21875,
+        "y": 573.546875,
+        "width": 28.5,
+        "height": 28.5,
+        "right": 1404.71875,
+        "bottom": 602.046875,
+        "cx": 1390.46875
+      },
+      {
+        "name": "Send message",
+        "x": 1416.109375,
+        "y": 573.546875,
+        "width": 28.5,
+        "height": 28.5,
+        "right": 1444.609375,
+        "bottom": 602.046875,
+        "cx": 1430.359375
+      }
+    ],
+    "textareaMin": "64px",
+    "gap": "12px",
+    "radius": "14px",
+    "shadow": "none",
+    "separators": [
+      "\"\"",
+      "\"\""
+    ]
+  },
+  {
+    "spec": {
+      "width": 1440,
+      "height": 900,
+      "name": "desktop"
+    },
+    "surface": {
+      "x": 240,
+      "y": 6,
+      "width": 1194,
+      "height": 888,
+      "right": 1434,
+      "bottom": 894,
+      "cx": 837
+    },
+    "composer": {
+      "x": 457,
+      "y": 436.75,
+      "width": 760,
+      "height": 102.6875,
+      "right": 1217,
+      "bottom": 539.4375,
+      "cx": 837
+    },
+    "title": {
+      "x": 699.546875,
+      "y": 388.65625,
+      "width": 274.890625,
+      "height": 25.296875,
+      "right": 974.4375,
+      "bottom": 413.953125,
+      "cx": 836.9921875
+    },
+    "logo": {
+      "x": 821,
+      "y": 336.65625,
+      "width": 32,
+      "height": 32,
+      "right": 853,
+      "bottom": 368.65625,
+      "cx": 837
+    },
+    "metadata": {
+      "x": 458,
+      "y": 546.03125,
+      "width": 758,
+      "height": 36.09375,
+      "right": 1216,
+      "bottom": 582.125,
+      "cx": 837
+    },
+    "centerDelta": 0,
+    "titleDelta": 0.0078125,
+    "logoDelta": 0,
+    "metadataJustify": "center",
+    "pageOverflow": 0,
+    "barOverflow": 0,
+    "toolbar": [
+      {
+        "name": "gyro-composer-control gyro-composer-control-context gyro-composer-reveal",
+        "x": 469.390625,
+        "y": 498.546875,
+        "width": 28.5,
+        "height": 28.5,
+        "right": 497.890625,
+        "bottom": 527.046875,
+        "cx": 483.640625
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-approval gyro-composer-reveal",
+        "x": 509.28125,
+        "y": 499.5,
+        "width": 141.328125,
+        "height": 26.59375,
+        "right": 650.609375,
+        "bottom": 526.09375,
+        "cx": 579.9453125
+      },
+      {
+        "name": "gyro-composer-context-meter",
+        "x": 878.875,
+        "y": 504.25,
+        "width": 18.03125,
+        "height": 17.09375,
+        "right": 896.90625,
+        "bottom": 521.34375,
+        "cx": 887.890625
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-model",
+        "x": 908.296875,
+        "y": 499.5,
+        "width": 136.78125,
+        "height": 26.59375,
+        "right": 1045.078125,
+        "bottom": 526.09375,
+        "cx": 976.6875
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-effort",
+        "x": 1060.265625,
+        "y": 499.5,
+        "width": 60.765625,
+        "height": 26.59375,
+        "right": 1121.03125,
+        "bottom": 526.09375,
+        "cx": 1090.6484375
+      },
+      {
+        "name": "Dictate",
+        "x": 1136.21875,
+        "y": 498.546875,
+        "width": 28.5,
+        "height": 28.5,
+        "right": 1164.71875,
+        "bottom": 527.046875,
+        "cx": 1150.46875
+      },
+      {
+        "name": "Send message",
+        "x": 1176.109375,
+        "y": 498.546875,
+        "width": 28.5,
+        "height": 28.5,
+        "right": 1204.609375,
+        "bottom": 527.046875,
+        "cx": 1190.359375
+      }
+    ],
+    "textareaMin": "64px",
+    "gap": "12px",
+    "radius": "14px",
+    "shadow": "none",
+    "separators": [
+      "\"\"",
+      "\"\""
+    ]
+  },
+  {
+    "spec": {
+      "width": 1440,
+      "height": 900,
+      "theme": "light",
+      "name": "light"
+    },
+    "surface": {
+      "x": 240,
+      "y": 6,
+      "width": 1194,
+      "height": 888,
+      "right": 1434,
+      "bottom": 894,
+      "cx": 837
+    },
+    "composer": {
+      "x": 457,
+      "y": 436.75,
+      "width": 760,
+      "height": 102.6875,
+      "right": 1217,
+      "bottom": 539.4375,
+      "cx": 837
+    },
+    "title": {
+      "x": 699.546875,
+      "y": 388.65625,
+      "width": 274.890625,
+      "height": 25.296875,
+      "right": 974.4375,
+      "bottom": 413.953125,
+      "cx": 836.9921875
+    },
+    "logo": {
+      "x": 821,
+      "y": 336.65625,
+      "width": 32,
+      "height": 32,
+      "right": 853,
+      "bottom": 368.65625,
+      "cx": 837
+    },
+    "metadata": {
+      "x": 458,
+      "y": 546.03125,
+      "width": 758,
+      "height": 36.09375,
+      "right": 1216,
+      "bottom": 582.125,
+      "cx": 837
+    },
+    "centerDelta": 0,
+    "titleDelta": 0.0078125,
+    "logoDelta": 0,
+    "metadataJustify": "center",
+    "pageOverflow": 0,
+    "barOverflow": 0,
+    "toolbar": [
+      {
+        "name": "gyro-composer-control gyro-composer-control-context gyro-composer-reveal",
+        "x": 469.390625,
+        "y": 498.546875,
+        "width": 28.5,
+        "height": 28.5,
+        "right": 497.890625,
+        "bottom": 527.046875,
+        "cx": 483.640625
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-approval gyro-composer-reveal",
+        "x": 509.28125,
+        "y": 499.5,
+        "width": 141.328125,
+        "height": 26.59375,
+        "right": 650.609375,
+        "bottom": 526.09375,
+        "cx": 579.9453125
+      },
+      {
+        "name": "gyro-composer-context-meter",
+        "x": 878.875,
+        "y": 504.25,
+        "width": 18.03125,
+        "height": 17.09375,
+        "right": 896.90625,
+        "bottom": 521.34375,
+        "cx": 887.890625
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-model",
+        "x": 908.296875,
+        "y": 499.5,
+        "width": 136.78125,
+        "height": 26.59375,
+        "right": 1045.078125,
+        "bottom": 526.09375,
+        "cx": 976.6875
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-effort",
+        "x": 1060.265625,
+        "y": 499.5,
+        "width": 60.765625,
+        "height": 26.59375,
+        "right": 1121.03125,
+        "bottom": 526.09375,
+        "cx": 1090.6484375
+      },
+      {
+        "name": "Dictate",
+        "x": 1136.21875,
+        "y": 498.546875,
+        "width": 28.5,
+        "height": 28.5,
+        "right": 1164.71875,
+        "bottom": 527.046875,
+        "cx": 1150.46875
+      },
+      {
+        "name": "Send message",
+        "x": 1176.109375,
+        "y": 498.546875,
+        "width": 28.5,
+        "height": 28.5,
+        "right": 1204.609375,
+        "bottom": 527.046875,
+        "cx": 1190.359375
+      }
+    ],
+    "textareaMin": "64px",
+    "gap": "12px",
+    "radius": "14px",
+    "shadow": "none",
+    "separators": [
+      "\"\"",
+      "\"\""
+    ]
+  },
+  {
+    "spec": {
+      "width": 900,
+      "height": 760,
+      "size": "large",
+      "name": "large-narrow"
+    },
+    "surface": {
+      "x": 190,
+      "y": 6,
+      "width": 704,
+      "height": 748,
+      "right": 894,
+      "bottom": 754,
+      "cx": 542
+    },
+    "composer": {
+      "x": 270.3125,
+      "y": 365.84375,
+      "width": 543.375,
+      "height": 116.078125,
+      "right": 813.6875,
+      "bottom": 481.921875,
+      "cx": 542
+    },
+    "title": {
+      "x": 384.53125,
+      "y": 313.96875,
+      "width": 314.9375,
+      "height": 29.078125,
+      "right": 699.46875,
+      "bottom": 343.046875,
+      "cx": 542
+    },
+    "logo": {
+      "x": 523.59375,
+      "y": 254.171875,
+      "width": 36.796875,
+      "height": 36.796875,
+      "right": 560.390625,
+      "bottom": 290.96875,
+      "cx": 541.9921875
+    },
+    "metadata": {
+      "x": 271.3125,
+      "y": 488.515625,
+      "width": 541.375,
+      "height": 41.5,
+      "right": 812.6875,
+      "bottom": 530.015625,
+      "cx": 542
+    },
+    "centerDelta": 0,
+    "titleDelta": 0,
+    "logoDelta": 0.0078125,
+    "metadataJustify": "center",
+    "pageOverflow": 0,
+    "barOverflow": 0,
+    "toolbar": [
+      {
+        "name": "gyro-composer-control gyro-composer-control-context gyro-composer-reveal",
+        "x": 278.90625,
+        "y": 436.75,
+        "width": 32.765625,
+        "height": 32.765625,
+        "right": 311.671875,
+        "bottom": 469.515625,
+        "cx": 295.2890625
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-approval gyro-composer-reveal",
+        "x": 315.46875,
+        "y": 437.84375,
+        "width": 58.203125,
+        "height": 30.578125,
+        "right": 373.671875,
+        "bottom": 468.421875,
+        "cx": 344.5703125
+      },
+      {
+        "name": "gyro-composer-context-meter",
+        "x": 481.90625,
+        "y": 444.59375,
+        "width": 18.03125,
+        "height": 17.09375,
+        "right": 499.9375,
+        "bottom": 461.6875,
+        "cx": 490.921875
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-model",
+        "x": 503.734375,
+        "y": 437.84375,
+        "width": 155.34375,
+        "height": 30.578125,
+        "right": 659.078125,
+        "bottom": 468.421875,
+        "cx": 581.40625
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-effort",
+        "x": 662.875,
+        "y": 437.84375,
+        "width": 69.09375,
+        "height": 30.578125,
+        "right": 731.96875,
+        "bottom": 468.421875,
+        "cx": 697.421875
+      },
+      {
+        "name": "Dictate",
+        "x": 735.765625,
+        "y": 436.75,
+        "width": 32.765625,
+        "height": 32.765625,
+        "right": 768.53125,
+        "bottom": 469.515625,
+        "cx": 752.1484375
+      },
+      {
+        "name": "Send message",
+        "x": 772.328125,
+        "y": 436.75,
+        "width": 32.765625,
+        "height": 32.765625,
+        "right": 805.09375,
+        "bottom": 469.515625,
+        "cx": 788.7109375
+      }
+    ],
+    "textareaMin": "73.6px",
+    "gap": "4px",
+    "radius": "14px",
+    "shadow": "none",
+    "separators": [
+      "none",
+      "none"
+    ]
+  },
+  {
+    "spec": {
+      "width": 420,
+      "height": 760,
+      "name": "narrow"
+    },
+    "surface": {
+      "x": 6,
+      "y": 6,
+      "width": 408,
+      "height": 748,
+      "right": 414,
+      "bottom": 754,
+      "cx": 210
+    },
+    "composer": {
+      "x": 36,
+      "y": 346.65625,
+      "width": 348,
+      "height": 134.890625,
+      "right": 384,
+      "bottom": 481.546875,
+      "cx": 210
+    },
+    "title": {
+      "x": 72.546875,
+      "y": 298.5625,
+      "width": 274.890625,
+      "height": 25.296875,
+      "right": 347.4375,
+      "bottom": 323.859375,
+      "cx": 209.9921875
+    },
+    "logo": {
+      "x": 194,
+      "y": 246.5625,
+      "width": 32,
+      "height": 32,
+      "right": 226,
+      "bottom": 278.5625,
+      "cx": 210
+    },
+    "metadata": {
+      "x": 37,
+      "y": 488.140625,
+      "width": 330.796875,
+      "height": 36.09375,
+      "right": 367.796875,
+      "bottom": 524.234375,
+      "cx": 202.3984375
+    },
+    "centerDelta": 0,
+    "titleDelta": 0.0078125,
+    "logoDelta": 0,
+    "metadataJustify": "center",
+    "pageOverflow": 0,
+    "barOverflow": 0,
+    "toolbar": [
+      {
+        "name": "gyro-composer-control gyro-composer-control-context gyro-composer-reveal",
+        "x": 44.59375,
+        "y": 408.453125,
+        "width": 28.5,
+        "height": 28.5,
+        "right": 73.09375,
+        "bottom": 436.953125,
+        "cx": 58.84375
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-approval gyro-composer-reveal",
+        "x": 76.890625,
+        "y": 409.40625,
+        "width": 66.609375,
+        "height": 26.59375,
+        "right": 143.5,
+        "bottom": 436,
+        "cx": 110.1953125
+      },
+      {
+        "name": "gyro-composer-context-meter",
+        "x": 163.515625,
+        "y": 414.15625,
+        "width": 18.03125,
+        "height": 17.09375,
+        "right": 181.546875,
+        "bottom": 431.25,
+        "cx": 172.53125
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-model",
+        "x": 185.34375,
+        "y": 409.40625,
+        "width": 91.1875,
+        "height": 26.59375,
+        "right": 276.53125,
+        "bottom": 436,
+        "cx": 230.9375
+      },
+      {
+        "name": "gyro-composer-control gyro-composer-control-effort",
+        "x": 280.328125,
+        "y": 409.40625,
+        "width": 30.484375,
+        "height": 26.59375,
+        "right": 310.8125,
+        "bottom": 436,
+        "cx": 295.5703125
+      },
+      {
+        "name": "Dictate",
+        "x": 314.609375,
+        "y": 408.453125,
+        "width": 28.5,
+        "height": 28.5,
+        "right": 343.109375,
+        "bottom": 436.953125,
+        "cx": 328.859375
+      },
+      {
+        "name": "Send message",
+        "x": 346.90625,
+        "y": 408.453125,
+        "width": 28.5,
+        "height": 28.5,
+        "right": 375.40625,
+        "bottom": 436.953125,
+        "cx": 361.15625
+      }
+    ],
+    "textareaMin": "64px",
+    "gap": "4px",
+    "radius": "14px",
+    "shadow": "none",
+    "separators": [
+      "none",
+      "none"
+    ]
+  }
+]

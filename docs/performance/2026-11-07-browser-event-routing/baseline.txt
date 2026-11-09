@@ -1,0 +1,17 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: a stale browser event changed the current UI or revealed its panel
+    at file:///Users/wytze/Gyro/scripts/check-browser-event-routing.mjs:231:12
+    at async check (file:///Users/wytze/Gyro/scripts/check-browser-event-routing.mjs:198:3)
+    at async file:///Users/wytze/Gyro/scripts/check-browser-event-routing.mjs:202:1 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
+
+Node.js v26.0.0

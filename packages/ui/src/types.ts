@@ -119,6 +119,7 @@ export type CapabilityId =
   | "workspace-read-editor"
   | "workspace-diagnostics"
   | "workspace-git-status"
+  | "workspace-git-branches"
   | "workspace-diff"
   | "workspace-git-log"
   | "workspace-git-show"
@@ -618,6 +619,8 @@ export type MenuBarJob = {
   modelLabel?: string;
   /** A pending provider approval the popover can answer inline. */
   approval?: MenuBarApproval;
+  /** An unanswered chat question. Replying always opens its original chat. */
+  question?: { id: string; summary: string };
 };
 
 export type MenuBarApproval = {
@@ -634,6 +637,10 @@ export type MenuBarOutcome = {
   detail: string;
   status: "succeeded" | "failed" | "stopped";
   finishedAt: string;
+  providerId?: string;
+  providerLabel?: string;
+  modelId?: string;
+  modelLabel?: string;
 };
 
 export type MenuBarSnapshotState =
@@ -823,6 +830,11 @@ export type BrowserPreview = {
   verificationMessage: string;
   /** When true, the page is rendered by a native child webview over the host rect. */
   nativeHost?: boolean;
+  /** Identity of the native document whose metadata is displayed. */
+  nativeResourceId?: string;
+  nativeNavigationId?: number;
+  nativeLoading?: boolean;
+  navigationError?: { kind: string; message: string; code: number };
   title?: string;
 };
 
@@ -844,6 +856,8 @@ export type NotificationKind =
   | "provider";
 
 export type Notification = {
+  /** Replace/resolve one turn's lifecycle without hiding unrelated failures. */
+  correlationKey?: string;
   id: string;
   kind: NotificationKind;
   title: string;
@@ -1061,6 +1075,14 @@ export type ProviderChatStreamPhase =
   | "cancelled";
 
 export type ProviderChatStreamEvent = {
+  recovery?: {
+    cycleId: string;
+    state: "waiting" | "retrying" | "exhausted" | "failed" | "continuation-unavailable";
+    attemptsUsed: number;
+    maxRetries: number;
+    retryAt?: string | null;
+    continuationAvailable?: boolean;
+  } | null;
   sessionId: string;
   turnId?: string | null;
   providerId: string;
@@ -1079,7 +1101,7 @@ export type ProviderChatStreamEvent = {
       }[]
     | null;
   phase: ProviderChatStreamPhase;
-  /** Native recovery deadline in UTC; distinct from host-owned resend timers. */
+  /** Backend recovery deadline in UTC; frontend timers only display it. */
   retryAt?: string | null;
   retryAttempt?: number | null;
   retryMaxAttempts?: number | null;
@@ -1370,6 +1392,8 @@ export type WorkbenchPreferences = {
   desktopNotifications: DesktopNotificationPreferences;
   workspaceSidebarHidden: boolean;
   workspaceSidebarWidth?: number;
+  /** Dragged width of the chat Sessions sidebar. Omitted uses the responsive default. */
+  chatSidebarWidth?: number;
   workspacePanelHeight: number;
   /**
    * Preferred mode for new chats. Session storage and APIs still use
@@ -1449,6 +1473,7 @@ export type UsageOrigin =
   | "council-seat"
   | "council-synthesis"
   | "council-resynthesis"
+  | "session-title"
   | "optimization"
   | "agent-session";
 
@@ -1816,8 +1841,24 @@ export type GithubState = {
 
 export type GitBranchCatalog = {
   available: boolean;
+  repoRoot?: string | null;
   current?: string;
   branches: string[];
+  /** Unix seconds of each local branch tip's commit, not checkout activity. */
+  lastCommitAt?: Record<string, number>;
+  /** Local and last-fetched remote tips, ordered by their commit timestamp. */
+  tips?: Array<{
+    name: string;
+    reference: string;
+    commit: string;
+    symbolicTarget?: string;
+    committedAt?: number | null;
+    remote: boolean;
+    current: boolean;
+    worktreePath?: string | null;
+  }>;
+  latestCommitAt?: number | null;
+  checkedAt?: string;
   worktrees?: Array<{
     branch: string;
     path: string;
@@ -1830,14 +1871,41 @@ export type TaskDefinition = {
   label: string;
   command: string;
   args: string[];
-  group: "build" | "test" | "dev" | "custom";
+  group: "build" | "test" | "dev" | "check" | "custom";
   cwd?: string;
   status: "idle" | "running" | "done" | "failed" | "cancelled";
   lastRunAt?: string;
+  /** How long the last finished run took, in milliseconds. */
+  durationMs?: number;
   outputChannelId?: string;
   /** "suggested" comes from project manifests, "custom" from saved commands. */
   source?: "suggested" | "custom";
+  /** Manifest family that produced the command. */
+  toolchain?:
+    | "node"
+    | "cargo"
+    | "make"
+    | "just"
+    | "python"
+    | "go"
+    | "deno"
+    | "custom";
+  /** Repo-relative directory of a workspace member. Absent on root commands. */
+  packagePath?: string;
+  /** "primary" is a front door. "variant" is a sibling such as test:unit. */
+  role?: "primary" | "variant";
 };
+
+/** A finished Run and Test command, remembered for one workspace. */
+export type TaskRunRecord = {
+  status: "done" | "failed" | "cancelled";
+  lastRunAt: string;
+  commandLine: string;
+  durationMs?: number;
+};
+
+/** Finished command results, keyed by workspace path then task id. */
+export type TaskRunRecords = Record<string, Record<string, TaskRunRecord>>;
 
 /** A command the person typed into Run and Test to keep for this workspace. */
 export type CustomTaskDraft = {
@@ -1966,6 +2034,8 @@ export type IdeState = {
   diagnostics: ProblemDiagnostic[];
   sourceControl: SourceControlState;
   taskDefinitions: TaskDefinition[];
+  /** Finished command results, keyed by workspace path then task id. */
+  taskRunRecords: TaskRunRecords;
   testTree: TestTreeItem[];
   debugSessions: DebugSessionState[];
   languageServers: LanguageServerState[];

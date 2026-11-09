@@ -1,0 +1,21 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "name": "folderless draft navigation reaches the native open command",
+      "passed": true
+    },
+    {
+      "name": "capture attaches to its draft for workbench",
+      "passed": true
+    },
+    {
+      "name": "capture attaches to its draft for workbench:/tmp/Project with spaces",
+      "passed": true
+    },
+    {
+      "name": "capture attaches to its draft for 00000000-0000-4000-8000-000000000001",
+      "passed": true
+    }
+  ]
+}

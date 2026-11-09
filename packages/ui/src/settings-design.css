@@ -1351,7 +1351,8 @@
   .gyro-workspace-settings-list
   input {
   min-height: calc(32px * var(--gyro-ui-scale, 1));
-  border-color: var(--gyro-border-soft);
+  /* Same edge as the settings selects, so the field reads as a control. */
+  border-color: var(--gyro-border);
   border-radius: var(--gyro-radius-sm);
   font-size: var(--gyro-font-micro);
 }
@@ -1369,7 +1370,7 @@
   .gyro-settings-select-field
   > select.gyro-settings-select {
   min-height: calc(32px * var(--gyro-ui-scale, 1));
-  border-color: var(--gyro-border-soft);
+  border-color: var(--gyro-border);
   font-size: var(--gyro-font-micro);
 }
 
@@ -1860,20 +1861,20 @@
   border-bottom: 0;
 }
 
-/* The save status floats by the page header, so it never moves the page, and
-   shows only while there is something to say. */
+/* The scope label and save status share one fixed-height line above the first
+   group, so a changing status never moves the page. The label sits close to
+   the group it introduces, as the other settings group labels do. */
 :root[data-theme] .gyro-settings-surface .gyro-appearance-scope {
-  height: 0;
-  min-height: 0;
+  position: static;
+  align-items: baseline;
+  min-height: calc(20px * var(--gyro-ui-scale, 1));
+  margin-bottom: calc(8px * var(--gyro-ui-scale, 1));
   padding: 0;
-  overflow: visible;
   background: transparent;
   border: 0;
 }
 :root[data-theme] .gyro-settings-surface .gyro-appearance-save-status {
-  position: absolute;
-  top: calc(-24px * var(--gyro-ui-scale, 1));
-  right: 0;
+  min-height: 0;
 }
 /* A group heading keeps its height whether or not it has a Reset to offer. */
 :root[data-theme] .gyro-settings-surface .gyro-settings-group-header {
@@ -2083,5 +2084,10 @@
   display: none;
 }
 :root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-body > :is(.gyro-workspace-contributions, .gyro-workspace-services) {
+  margin-top: 0;
+}
+/* The label span is already a grid with a compact gap; the shared row
+   margin doubled it, so the description sat apart from its title. */
+:root[data-theme] .gyro-settings-surface .gyro-workspace-settings-list label > span > small {
   margin-top: 0;
 }

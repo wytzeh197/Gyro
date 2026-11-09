@@ -31,17 +31,24 @@ const js = ts.transpileModule(
 const slots = [],
   effects = [];
 let slot = 0;
+let timerId = 0;
+const timers = new Map();
+const listeners = new Map();
+const document = {
+  visibilityState: "visible",
+  addEventListener: (name, fn) => listeners.set(name, fn),
+  removeEventListener: (name) => listeners.delete(name),
+};
 const same = (a, b) =>
   a && b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
 const hookFn = vm.runInNewContext(js, {
   mergeExplorerDirectories,
   sameListings,
-  window: { setInterval: () => 1, clearInterval: () => {} },
-  document: {
-    visibilityState: "visible",
-    addEventListener() {},
-    removeEventListener() {},
+  window: {
+    setInterval: fn => { timers.set(++timerId, fn); return timerId; },
+    clearInterval: id => timers.delete(id),
   },
+  document,
   useRef: (initial) => {
     const id = slot++;
     return (slots[id] ??= { current: initial });
@@ -85,8 +92,10 @@ const render = (revision) => {
 };
 const flush = () => new Promise(setImmediate);
 let result = render(0);
+assert.equal(timers.size, 0, "No expanded folders means no polling timer");
 result.onExpandedDirectoriesChange([root.path]);
 render(0);
+assert.equal(timers.size, 1);
 await flush();
 assert.equal(reads.length, 1);
 render(1);
@@ -118,8 +127,24 @@ assert.equal(
   3,
   "A native change must refresh without a polling tick",
 );
-for (const entry of slots) entry?.cleanup?.();
 reads[2].resolve([]);
+await flush();
+document.visibilityState = "hidden";
+render(4);
+for (const tick of timers.values()) tick();
+await flush();
+assert.equal(reads.length, 3, "Native changes and timer ticks must not read hidden folders");
+document.visibilityState = "visible";
+listeners.get("visibilitychange")();
+await flush();
+assert.equal(reads.length, 4, "Returning to the window catches up without waiting for a tick");
+result = render(4);
+result.onExpandedDirectoriesChange([]);
+render(4);
+assert.equal(timers.size, 0, "Collapsing the last folder retires its polling timer");
+assert.equal(listeners.size, 0);
+for (const entry of slots) entry?.cleanup?.();
+reads[3].resolve([]);
 await flush();
 assert.deepEqual(errors, []);
 console.log(

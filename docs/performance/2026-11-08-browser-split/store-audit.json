@@ -1,0 +1,25 @@
+{
+  "data": "/private/tmp/gyro-shell-WZRuqH/data",
+  "providerTables": {
+    "provider_session_bindings": 0,
+    "session_turn_messages": 0,
+    "session_turn_status": 0,
+    "usage_turn_links": 0,
+    "efficiency_task_turns": 0
+  },
+  "attachmentFileCounts": {
+    "Browser review Alpha": 0,
+    "Browser review Beta": 1
+  },
+  "preparedImage": {
+    "path": "/private/tmp/gyro-shell-WZRuqH/data/sessions/attachments/7310d173-b2de-4fde-83bb-ccd3cf8bd275/4758c5691ef53368704f9dad0479195f610d30d52a18589279ddffeb508e89ac.png",
+    "size": [
+      1280,
+      800
+    ],
+    "allRgbaPixelsMatchCapture": [
+      "/private/tmp/gyro-shell-WZRuqH/data/browser-captures/browser-preview-20261108T113446496Z-e7b7cc12-c76a-4833-8c19-de89315ede70.png"
+    ],
+    "pixelSha256": "aeaf2434ec1fb32b3bf212cf079bdfdc609c24b1197ae98437ccd6d6747d0d66"
+  }
+}

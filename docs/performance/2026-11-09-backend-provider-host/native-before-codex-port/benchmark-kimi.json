@@ -1,0 +1,38 @@
+{
+  "build": "debug",
+  "elapsedMs": 10611,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": false,
+      "effort": "low",
+      "failureClass": "provider-failed",
+      "failureDetail": "Internal error: {\"details\":\"ACP stdio MCP server gyro_capabilities does not declare a runtime identity\"}",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [],
+      "model": "k3",
+      "outcome": "failed",
+      "provider": "kimi",
+      "resumedRequested": false,
+      "sessionId": "365471a8-c266-4ad2-b02e-baddeeabdf04",
+      "task": "follow-up",
+      "trial": 1,
+      "turnId": "aa71c691-0e91-4400-a3b6-6a8bf724b1c2",
+      "wallMs": 5820.206292
+    },
+    {
+      "effort": "low",
+      "failureClass": "provider-failed",
+      "failureDetail": "Internal error: {\"details\":\"ACP stdio MCP server gyro_capabilities does not declare a runtime identity\"}",
+      "fixtureReviewMode": "task-paths",
+      "model": "k3",
+      "outcome": "setup-failed",
+      "provider": "kimi",
+      "resumedRequested": true,
+      "task": "follow-up",
+      "trial": 1
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

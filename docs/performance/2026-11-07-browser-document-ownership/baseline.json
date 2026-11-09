@@ -1,0 +1,673 @@
+{
+  "checks": [
+    {
+      "name": "cycle 1: previous document read is rejected before response headers",
+      "passed": false
+    },
+    {
+      "name": "cycle 1: previous document click is rejected before response headers",
+      "passed": false
+    },
+    {
+      "name": "cycle 1: rejected click leaves the actual old document unchanged",
+      "passed": false
+    },
+    {
+      "name": "cycle 1: old tool result cannot overwrite the requested native URL",
+      "passed": false
+    },
+    {
+      "name": "cycle 1: current interactive document remains usable while an image is held",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: old document reference is rejected after commit",
+      "passed": true
+    },
+    {
+      "name": "cycle 1: a fresh reference changes the current interactive document",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: previous document read is rejected before response headers",
+      "passed": false
+    },
+    {
+      "name": "cycle 2: previous document click is rejected before response headers",
+      "passed": false
+    },
+    {
+      "name": "cycle 2: rejected click leaves the actual old document unchanged",
+      "passed": false
+    },
+    {
+      "name": "cycle 2: old tool result cannot overwrite the requested native URL",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: current interactive document remains usable while an image is held",
+      "passed": false
+    },
+    {
+      "name": "cycle 2: old document reference is rejected after commit",
+      "passed": true
+    },
+    {
+      "name": "cycle 2: a fresh reference changes the current interactive document",
+      "passed": true
+    },
+    {
+      "name": "native browser closes after both navigation cycles",
+      "passed": true
+    }
+  ],
+  "engine": "native-WKWebView",
+  "error": null,
+  "nativeBuild": "debug-embedded-tauri-production-handlers",
+  "nativeOsInputTested": false,
+  "observations": [
+    {
+      "after": {
+        "clicks": "Clicks: 1",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:59090/browser-observation.html?label=Original"
+      },
+      "before": {
+        "clicks": "Clicks: 0",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:59090/browser-observation.html?label=Original"
+      },
+      "clickResult": {
+        "Ok": {
+          "name": "Change visible state",
+          "ok": true,
+          "ref": "ref_au7zon78sa_9"
+        }
+      },
+      "cycle": 1,
+      "interactiveState": "interactive",
+      "newRef": "ref_2dlb7o34ish_9",
+      "readResult": {
+        "Ok": {
+          "framing": "OBSERVED_PAGE_CONTENT_UNTRUSTED",
+          "history": {
+            "length": 1
+          },
+          "ok": true,
+          "readyState": "complete",
+          "title": "Gyro Fixture Original",
+          "titleTruncated": false,
+          "tree": {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "name": "Deterministic loopback page for Gyro Browser acceptance.",
+                        "ref": "ref_au7zon78sa_4",
+                        "role": "p",
+                        "tag": "p"
+                      },
+                      {
+                        "name": "Browser observation ready",
+                        "ref": "ref_au7zon78sa_5",
+                        "role": "heading",
+                        "tag": "h1"
+                      },
+                      {
+                        "name": "Viewport:",
+                        "ref": "ref_au7zon78sa_6",
+                        "role": "p",
+                        "tag": "p"
+                      }
+                    ],
+                    "ref": "ref_au7zon78sa_3",
+                    "role": "banner",
+                    "tag": "header"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "State-changing control",
+                        "ref": "ref_au7zon78sa_8",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "inputType": "button",
+                        "name": "Change visible state",
+                        "ref": "ref_au7zon78sa_9",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "name": "State: initial",
+                        "ref": "ref_au7zon78sa_10",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "name": "Clicks: 0",
+                        "ref": "ref_au7zon78sa_11",
+                        "role": "output",
+                        "tag": "output"
+                      }
+                    ],
+                    "name": "State-changing control",
+                    "ref": "ref_au7zon78sa_7",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "Mouse interaction",
+                        "ref": "ref_au7zon78sa_13",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "inputType": "button",
+                        "name": "Hover target",
+                        "ref": "ref_au7zon78sa_14",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "name": "Hover: initial",
+                        "ref": "ref_au7zon78sa_15",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "name": "Canvas target",
+                        "ref": "ref_au7zon78sa_16",
+                        "role": "canvas",
+                        "tag": "canvas"
+                      },
+                      {
+                        "name": "Canvas: initial",
+                        "ref": "ref_au7zon78sa_17",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [
+                          {
+                            "children": [],
+                            "name": "Drag handle",
+                            "ref": "ref_au7zon78sa_19",
+                            "role": "button",
+                            "tag": "div"
+                          },
+                          {
+                            "children": [],
+                            "name": "Drop zone",
+                            "ref": "ref_au7zon78sa_20",
+                            "role": "button",
+                            "tag": "div"
+                          }
+                        ],
+                        "ref": "ref_au7zon78sa_18",
+                        "role": "div",
+                        "tag": "div"
+                      },
+                      {
+                        "name": "Drag: initial",
+                        "ref": "ref_au7zon78sa_21",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "name": "Context: initial",
+                        "ref": "ref_au7zon78sa_22",
+                        "role": "output",
+                        "tag": "output"
+                      }
+                    ],
+                    "name": "Mouse interaction",
+                    "ref": "ref_au7zon78sa_12",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "Form controls",
+                        "ref": "ref_au7zon78sa_24",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "children": [
+                          {
+                            "children": [],
+                            "name": "Project name",
+                            "ref": "ref_au7zon78sa_26",
+                            "role": "label",
+                            "tag": "label"
+                          },
+                          {
+                            "children": [],
+                            "name": "Project name",
+                            "ref": "ref_au7zon78sa_27",
+                            "role": "textbox",
+                            "tag": "input",
+                            "value": "Gyro"
+                          },
+                          {
+                            "children": [],
+                            "name": "Project kind",
+                            "ref": "ref_au7zon78sa_28",
+                            "role": "combobox",
+                            "tag": "select",
+                            "value": "site"
+                          },
+                          {
+                            "children": [],
+                            "inputType": "checkbox",
+                            "name": "Enabled",
+                            "ref": "ref_au7zon78sa_29",
+                            "role": "checkbox",
+                            "tag": "input",
+                            "value": "on"
+                          },
+                          {
+                            "children": [],
+                            "name": "Kind: site; enabled: false",
+                            "ref": "ref_au7zon78sa_30",
+                            "role": "output",
+                            "tag": "output"
+                          },
+                          {
+                            "children": [],
+                            "inputType": "submit",
+                            "name": "Save project",
+                            "ref": "ref_au7zon78sa_31",
+                            "role": "button",
+                            "tag": "button"
+                          },
+                          {
+                            "children": [],
+                            "name": "Form: untouched",
+                            "ref": "ref_au7zon78sa_32",
+                            "role": "output",
+                            "tag": "output"
+                          }
+                        ],
+                        "name": "Project name Kind: site; enabled: false Save project Form: untouched",
+                        "ref": "ref_au7zon78sa_25",
+                        "role": "form",
+                        "tag": "form"
+                      },
+                      {
+                        "name": "Blocked credential field",
+                        "ref": "ref_au7zon78sa_33",
+                        "role": "label",
+                        "tag": "label"
+                      },
+                      {
+                        "inputType": "password",
+                        "name": "Blocked credential field",
+                        "ref": "ref_au7zon78sa_34",
+                        "role": "textbox",
+                        "tag": "input",
+                        "value": "[redacted-credential]"
+                      }
+                    ],
+                    "name": "Form controls",
+                    "ref": "ref_au7zon78sa_23",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "ref": "ref_au7zon78sa_35",
+                    "role": "div",
+                    "tag": "div"
+                  }
+                ],
+                "ref": "ref_au7zon78sa_2",
+                "role": "main",
+                "tag": "main"
+              }
+            ],
+            "ref": "ref_au7zon78sa_1",
+            "role": "body",
+            "tag": "body"
+          },
+          "truncated": true,
+          "url": "http://127.0.0.1:59090/browser-observation.html?label=Original",
+          "viewport": {
+            "deviceScaleFactor": 1,
+            "height": 768,
+            "scrollX": 0,
+            "scrollY": 0,
+            "width": 1280
+          }
+        }
+      },
+      "snapshotAfterOldRead": {
+        "backgroundOnly": false,
+        "label": "session-browser-e2289f3a7239487eb61e92be6af6dbaf",
+        "loading": true,
+        "navigationId": 3,
+        "resourceId": "d6459d89-a7d6-4414-b17d-6b91dc1ce376",
+        "sessionId": "e2289f3a-7239-487e-b61e-92be6af6dbaf",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:59090/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-hS3dgc/workspaces/first"
+      }
+    },
+    {
+      "after": {
+        "clicks": "Clicks: 2",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:59090/browser-observation.html?label=Provisional"
+      },
+      "before": {
+        "clicks": "Clicks: 1",
+        "readyState": "complete",
+        "url": "http://127.0.0.1:59090/browser-observation.html?label=Provisional"
+      },
+      "clickResult": {
+        "Ok": {
+          "name": "Change visible state",
+          "ok": true,
+          "ref": "ref_2dlb7o34ish_9"
+        }
+      },
+      "cycle": 2,
+      "interactiveState": "complete",
+      "newRef": "ref_zc1b5xofgl_1",
+      "readResult": {
+        "Ok": {
+          "framing": "OBSERVED_PAGE_CONTENT_UNTRUSTED",
+          "history": {
+            "length": 2
+          },
+          "ok": true,
+          "readyState": "complete",
+          "title": "Gyro Fixture Provisional",
+          "titleTruncated": false,
+          "tree": {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "name": "Deterministic loopback page for Gyro Browser acceptance.",
+                        "ref": "ref_2dlb7o34ish_4",
+                        "role": "p",
+                        "tag": "p"
+                      },
+                      {
+                        "name": "Browser observation ready",
+                        "ref": "ref_2dlb7o34ish_5",
+                        "role": "heading",
+                        "tag": "h1"
+                      },
+                      {
+                        "name": "Viewport:",
+                        "ref": "ref_2dlb7o34ish_6",
+                        "role": "p",
+                        "tag": "p"
+                      }
+                    ],
+                    "ref": "ref_2dlb7o34ish_3",
+                    "role": "banner",
+                    "tag": "header"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "State-changing control",
+                        "ref": "ref_2dlb7o34ish_8",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "inputType": "button",
+                        "name": "Change visible state",
+                        "ref": "ref_2dlb7o34ish_9",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "name": "State: changed",
+                        "ref": "ref_2dlb7o34ish_10",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "name": "Clicks: 1",
+                        "ref": "ref_2dlb7o34ish_11",
+                        "role": "output",
+                        "tag": "output"
+                      }
+                    ],
+                    "name": "State-changing control",
+                    "ref": "ref_2dlb7o34ish_7",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "Mouse interaction",
+                        "ref": "ref_2dlb7o34ish_13",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "inputType": "button",
+                        "name": "Hover target",
+                        "ref": "ref_2dlb7o34ish_14",
+                        "role": "button",
+                        "tag": "button"
+                      },
+                      {
+                        "name": "Hover: initial",
+                        "ref": "ref_2dlb7o34ish_15",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "name": "Canvas target",
+                        "ref": "ref_2dlb7o34ish_16",
+                        "role": "canvas",
+                        "tag": "canvas"
+                      },
+                      {
+                        "name": "Canvas: initial",
+                        "ref": "ref_2dlb7o34ish_17",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "children": [
+                          {
+                            "children": [],
+                            "name": "Drag handle",
+                            "ref": "ref_2dlb7o34ish_19",
+                            "role": "button",
+                            "tag": "div"
+                          },
+                          {
+                            "children": [],
+                            "name": "Drop zone",
+                            "ref": "ref_2dlb7o34ish_20",
+                            "role": "button",
+                            "tag": "div"
+                          }
+                        ],
+                        "ref": "ref_2dlb7o34ish_18",
+                        "role": "div",
+                        "tag": "div"
+                      },
+                      {
+                        "name": "Drag: initial",
+                        "ref": "ref_2dlb7o34ish_21",
+                        "role": "output",
+                        "tag": "output"
+                      },
+                      {
+                        "name": "Context: initial",
+                        "ref": "ref_2dlb7o34ish_22",
+                        "role": "output",
+                        "tag": "output"
+                      }
+                    ],
+                    "name": "Mouse interaction",
+                    "ref": "ref_2dlb7o34ish_12",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "Form controls",
+                        "ref": "ref_2dlb7o34ish_24",
+                        "role": "heading",
+                        "tag": "h2"
+                      },
+                      {
+                        "children": [
+                          {
+                            "children": [],
+                            "name": "Project name",
+                            "ref": "ref_2dlb7o34ish_26",
+                            "role": "label",
+                            "tag": "label"
+                          },
+                          {
+                            "children": [],
+                            "name": "Project name",
+                            "ref": "ref_2dlb7o34ish_27",
+                            "role": "textbox",
+                            "tag": "input",
+                            "value": "Gyro"
+                          },
+                          {
+                            "children": [],
+                            "name": "Project kind",
+                            "ref": "ref_2dlb7o34ish_28",
+                            "role": "combobox",
+                            "tag": "select",
+                            "value": "site"
+                          },
+                          {
+                            "children": [],
+                            "inputType": "checkbox",
+                            "name": "Enabled",
+                            "ref": "ref_2dlb7o34ish_29",
+                            "role": "checkbox",
+                            "tag": "input",
+                            "value": "on"
+                          },
+                          {
+                            "children": [],
+                            "name": "Kind: site; enabled: false",
+                            "ref": "ref_2dlb7o34ish_30",
+                            "role": "output",
+                            "tag": "output"
+                          },
+                          {
+                            "children": [],
+                            "inputType": "submit",
+                            "name": "Save project",
+                            "ref": "ref_2dlb7o34ish_31",
+                            "role": "button",
+                            "tag": "button"
+                          },
+                          {
+                            "children": [],
+                            "name": "Form: untouched",
+                            "ref": "ref_2dlb7o34ish_32",
+                            "role": "output",
+                            "tag": "output"
+                          }
+                        ],
+                        "name": "Project name Kind: site; enabled: false Save project Form: untouched",
+                        "ref": "ref_2dlb7o34ish_25",
+                        "role": "form",
+                        "tag": "form"
+                      },
+                      {
+                        "name": "Blocked credential field",
+                        "ref": "ref_2dlb7o34ish_33",
+                        "role": "label",
+                        "tag": "label"
+                      },
+                      {
+                        "inputType": "password",
+                        "name": "Blocked credential field",
+                        "ref": "ref_2dlb7o34ish_34",
+                        "role": "textbox",
+                        "tag": "input",
+                        "value": "[redacted-credential]"
+                      }
+                    ],
+                    "name": "Form controls",
+                    "ref": "ref_2dlb7o34ish_23",
+                    "role": "section",
+                    "tag": "section"
+                  },
+                  {
+                    "ref": "ref_2dlb7o34ish_35",
+                    "role": "div",
+                    "tag": "div"
+                  }
+                ],
+                "ref": "ref_2dlb7o34ish_2",
+                "role": "main",
+                "tag": "main"
+              }
+            ],
+            "ref": "ref_2dlb7o34ish_1",
+            "role": "body",
+            "tag": "body"
+          },
+          "truncated": true,
+          "url": "http://127.0.0.1:59090/browser-observation.html?label=Provisional",
+          "viewport": {
+            "deviceScaleFactor": 1,
+            "height": 768,
+            "scrollX": 0,
+            "scrollY": 0,
+            "width": 1280
+          }
+        }
+      },
+      "snapshotAfterOldRead": {
+        "backgroundOnly": false,
+        "label": "session-browser-e2289f3a7239487eb61e92be6af6dbaf",
+        "loading": true,
+        "navigationId": 5,
+        "resourceId": "d6459d89-a7d6-4414-b17d-6b91dc1ce376",
+        "sessionId": "e2289f3a-7239-487e-b61e-92be6af6dbaf",
+        "title": "Gyro Fixture Provisional",
+        "url": "http://127.0.0.1:59090/browser-observation.html?label=Provisional",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-hS3dgc/workspaces/first"
+      }
+    }
+  ],
+  "passed": false
+}

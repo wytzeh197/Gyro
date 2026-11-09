@@ -1,0 +1,179 @@
+{
+  "date": "2026-11-07",
+  "baselineCommit": "ebe4ae5f439d4fd0f6a8893f31c96e25be4e966c",
+  "environment": "isolated headless Brave on local macOS; no provider calls",
+  "boundary": "DOM readPage call, not model response latency",
+  "before": {
+    "baseline": true,
+    "checks": [
+      {
+        "name": "find resolves associated form labels",
+        "passed": false
+      },
+      {
+        "name": "find resolves aria-labelledby in order",
+        "passed": false
+      },
+      {
+        "name": "subtree reads preserve other connected refs",
+        "passed": false
+      },
+      {
+        "name": "disabled fields fail without changes",
+        "passed": false
+      },
+      {
+        "name": "disabled clicks report failure",
+        "passed": false
+      },
+      {
+        "name": "missing select option fails without clearing selection",
+        "passed": false
+      },
+      {
+        "name": "disconnected refs fail without acting",
+        "passed": true
+      },
+      {
+        "name": "breadth limits report incomplete observations",
+        "passed": false
+      },
+      {
+        "name": "depth limits report incomplete observations",
+        "passed": false
+      },
+      {
+        "name": "hidden-node traversal is bounded and reported",
+        "passed": false
+      },
+      {
+        "name": "previous-document refs never alias new targets",
+        "passed": false
+      }
+    ],
+    "performance": {
+      "samples": 25,
+      "medianMs": 2.900000035762787,
+      "slowestMs": 6.900000035762787,
+      "textReadsPerCall": 19
+    }
+  },
+  "after": {
+    "baseline": false,
+    "checks": [
+      {
+        "name": "find resolves associated form labels",
+        "passed": true
+      },
+      {
+        "name": "find resolves aria-labelledby in order",
+        "passed": true
+      },
+      {
+        "name": "subtree reads preserve other connected refs",
+        "passed": true
+      },
+      {
+        "name": "disabled fields fail without changes",
+        "passed": true
+      },
+      {
+        "name": "disabled clicks report failure",
+        "passed": true
+      },
+      {
+        "name": "missing select option fails without clearing selection",
+        "passed": true
+      },
+      {
+        "name": "disconnected refs fail without acting",
+        "passed": true
+      },
+      {
+        "name": "breadth limits report incomplete observations",
+        "passed": true
+      },
+      {
+        "name": "depth limits report incomplete observations",
+        "passed": true
+      },
+      {
+        "name": "hidden-node traversal is bounded and reported",
+        "passed": true
+      },
+      {
+        "name": "previous-document refs never alias new targets",
+        "passed": true
+      }
+    ],
+    "performance": {
+      "samples": 25,
+      "medianMs": 0.5,
+      "slowestMs": 1.100000023841858,
+      "textReadsPerCall": 6
+    }
+  },
+  "validation": {
+    "openaiCompatible": {
+      "passed": 59,
+      "failed": 0,
+      "network": "loopback mocks"
+    },
+    "providerRetry": {
+      "passed": 15,
+      "failed": 0
+    },
+    "desktopSessionBrowser": {
+      "passed": 11,
+      "failed": 0
+    }
+  },
+  "webkit": {
+    "checks": [
+      {
+        "name": "find resolves associated form labels",
+        "passed": true
+      },
+      {
+        "name": "find resolves aria-labelledby in order",
+        "passed": true
+      },
+      {
+        "name": "subtree reads preserve other connected refs",
+        "passed": true
+      },
+      {
+        "name": "disabled fields fail without changes",
+        "passed": true
+      },
+      {
+        "name": "disabled clicks report failure",
+        "passed": true
+      },
+      {
+        "name": "missing select option fails without clearing selection",
+        "passed": true
+      },
+      {
+        "name": "disconnected refs fail without acting",
+        "passed": true
+      },
+      {
+        "name": "breadth limits report incomplete observations",
+        "passed": true
+      },
+      {
+        "name": "depth limits report incomplete observations",
+        "passed": true
+      },
+      {
+        "name": "hidden-node traversal is bounded and reported",
+        "passed": true
+      }
+    ],
+    "engine": "WKWebView",
+    "error": null,
+    "ok": true,
+    "method": "Ad hoc Swift runner with nonpersistent WKWebView; same extracted agent and HTML; first ten runtime expressions; navigation case remains Chromium-only; not the Tauri application."
+  }
+}

@@ -1,0 +1,601 @@
+{
+  "actions": [
+    {
+      "action": {
+        "background": true,
+        "type": "browser-navigate",
+        "url": "http://127.0.0.1:56596/browser-observation.html?label=Original"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "title": "",
+        "type": "browser-title"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1,
+          "height": 800,
+          "mode": "auto",
+          "width": 1280
+        }
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "title": "Gyro Fixture Original",
+        "type": "browser-title"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-loaded",
+        "url": "http://127.0.0.1:56596/browser-observation.html?label=Original"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1,
+          "height": 800,
+          "mode": "auto",
+          "width": 1280
+        }
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 0.859375,
+          "height": 800,
+          "mode": "auto",
+          "width": 1280
+        }
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "mobile",
+          "displayScale": 0.8145734597156398,
+          "height": 844,
+          "mode": "mobile",
+          "width": 390
+        }
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-capture-start"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "capture": {
+          "createdAt": "2026-11-07T17:59:34.305Z",
+          "filename": "browser-preview-20261107T175934305Z-2c863b86-01f8-498c-abe2-d6061f87870b.png",
+          "height": 844,
+          "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-a1EuTf/data/browser-captures/browser-preview-20261107T175934305Z-2c863b86-01f8-498c-abe2-d6061f87870b.png",
+          "resourceId": "1ede9cd8-d71a-4ce0-882a-6651e8edce8d",
+          "sourceUrl": "http://127.0.0.1:56596/browser-observation.html?label=Original",
+          "src": "asset://localhost/%2Fprivate%2Fvar%2Ffolders%2F20%2Fn8przxcs0g72jllfg677ys600000gn%2FT%2Fgyro-browser-events-native-a1EuTf%2Fdata%2Fbrowser-captures%2Fbrowser-preview-20261107T175934305Z-2c863b86-01f8-498c-abe2-d6061f87870b.png",
+          "title": "Gyro Fixture Original",
+          "viewport": {
+            "deviceScaleFactor": 1,
+            "height": 844,
+            "scrollX": 0,
+            "scrollY": 0,
+            "width": 390
+          },
+          "width": 390
+        },
+        "type": "browser-capture-success"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-close"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "background": true,
+        "type": "browser-navigate",
+        "url": "http://127.0.0.1:56596/browser-observation.html?label=Replacement"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "title": "",
+        "type": "browser-title"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1,
+          "height": 800,
+          "mode": "auto",
+          "width": 1280
+        }
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "title": "Gyro Fixture Replacement",
+        "type": "browser-title"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-loaded",
+        "url": "http://127.0.0.1:56596/browser-observation.html?label=Replacement"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1,
+          "height": 800,
+          "mode": "auto",
+          "width": 1280
+        }
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 0.859375,
+          "height": 800,
+          "mode": "auto",
+          "width": 1280
+        }
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "title": "Gyro Fixture Replacement",
+        "type": "browser-title"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "background": true,
+        "type": "browser-navigate",
+        "url": "http://127.0.0.1:56596/browser-observation.html?label=Second"
+      },
+      "sessionId": "ae234a1e-7347-4d86-ad6a-d8f290a31286",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "title": "",
+        "type": "browser-title"
+      },
+      "sessionId": "ae234a1e-7347-4d86-ad6a-d8f290a31286",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1,
+          "height": 800,
+          "mode": "auto",
+          "width": 1280
+        }
+      },
+      "sessionId": "ae234a1e-7347-4d86-ad6a-d8f290a31286",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "title": "Gyro Fixture Second",
+        "type": "browser-title"
+      },
+      "sessionId": "ae234a1e-7347-4d86-ad6a-d8f290a31286",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-loaded",
+        "url": "http://127.0.0.1:56596/browser-observation.html?label=Second"
+      },
+      "sessionId": "ae234a1e-7347-4d86-ad6a-d8f290a31286",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1,
+          "height": 800,
+          "mode": "auto",
+          "width": 1280
+        }
+      },
+      "sessionId": "ae234a1e-7347-4d86-ad6a-d8f290a31286",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "background": true,
+        "type": "browser-navigate",
+        "url": "http://127.0.0.1:56596/browser-observation.html?label=Second"
+      },
+      "sessionId": "ae234a1e-7347-4d86-ad6a-d8f290a31286",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "message": "Native \u00b7 http://127.0.0.1:56596/browser-observation.html?label=Second",
+        "nativeHost": true,
+        "status": "ready",
+        "type": "browser-status"
+      },
+      "sessionId": "ae234a1e-7347-4d86-ad6a-d8f290a31286",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "title": "Gyro Fixture Second",
+        "type": "browser-title"
+      },
+      "sessionId": "ae234a1e-7347-4d86-ad6a-d8f290a31286",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1,
+          "height": 800,
+          "mode": "auto",
+          "width": 1280
+        }
+      },
+      "sessionId": "ae234a1e-7347-4d86-ad6a-d8f290a31286",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "background": false,
+        "type": "browser-navigate",
+        "url": "http://127.0.0.1:56596/browser-observation.html?label=Replacement"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "panel": "browser",
+      "type": "set-chat-panel"
+    },
+    {
+      "action": {
+        "message": "Native \u00b7 http://127.0.0.1:56596/browser-observation.html?label=Replacement",
+        "nativeHost": true,
+        "status": "ready",
+        "type": "browser-status"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "title": "Gyro Fixture Replacement",
+        "type": "browser-title"
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    },
+    {
+      "action": {
+        "type": "browser-viewport",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 0.859375,
+          "height": 800,
+          "mode": "auto",
+          "width": 1280
+        }
+      },
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+      "type": "browser-session"
+    }
+  ],
+  "activeSessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd",
+  "captureAssetScope": [
+    {
+      "allowed": true,
+      "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-a1EuTf/data/browser-captures/browser-preview-20261107T175934305Z-2c863b86-01f8-498c-abe2-d6061f87870b.png"
+    }
+  ],
+  "captureImages": [],
+  "captures": [
+    {
+      "createdAt": "2026-11-07T17:59:34.305Z",
+      "filename": "browser-preview-20261107T175934305Z-2c863b86-01f8-498c-abe2-d6061f87870b.png",
+      "height": 844,
+      "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-a1EuTf/data/browser-captures/browser-preview-20261107T175934305Z-2c863b86-01f8-498c-abe2-d6061f87870b.png",
+      "resourceId": "1ede9cd8-d71a-4ce0-882a-6651e8edce8d",
+      "sourceUrl": "http://127.0.0.1:56596/browser-observation.html?label=Original",
+      "src": "asset://localhost/%2Fprivate%2Fvar%2Ffolders%2F20%2Fn8przxcs0g72jllfg677ys600000gn%2FT%2Fgyro-browser-events-native-a1EuTf%2Fdata%2Fbrowser-captures%2Fbrowser-preview-20261107T175934305Z-2c863b86-01f8-498c-abe2-d6061f87870b.png",
+      "title": "Gyro Fixture Original",
+      "viewport": {
+        "deviceScaleFactor": 1,
+        "height": 844,
+        "scrollX": 0,
+        "scrollY": 0,
+        "width": 390
+      },
+      "width": 390
+    }
+  ],
+  "checks": [
+    "Native bootstrap supplies two isolated session owners",
+    "Production hooks run from embedded Tauri assets",
+    "Renderer is native Apple WebKit",
+    "Production browser renders its empty state",
+    "Native load notification updates the real reducer URL",
+    "Native title notification updates the real reducer title",
+    "Production URL toolbar renders the native page URL",
+    "Normal browser events do not reveal the active panel",
+    "Production address field receives DOM focus",
+    "Production Escape handler releases DOM focus",
+    "Rendered viewport control changes the native browser to 390x844",
+    "Production viewport button reflects the native selection",
+    "Native screenshot command succeeds (no error)",
+    "Native screenshot carries its browser resource ID",
+    "Production capture view decodes the real native PNG asset",
+    "Close removes the native resource while an old read result is held",
+    "Reopen creates a new native resource in the same chat",
+    "Replacement native load reaches React before the old read is released",
+    "Native event bus rejects stale load/title events from the previous resource",
+    "Stale viewport event cannot resize the replacement UI",
+    "Stale native opened event cannot reveal the Browser panel",
+    "Released old native read does not publish after Close/reopen",
+    "Valid native event uses current snapshot data instead of its old payload",
+    "Second chat receives independent native browser metadata",
+    "Inactive chat cannot replace or reveal the active chat browser"
+  ],
+  "commands": [
+    "session_browser_open",
+    "session_browser_snapshot",
+    "session_browser_snapshot",
+    "session_browser_snapshot",
+    "session_browser_snapshot",
+    "session_browser_open",
+    "session_browser_snapshot",
+    "session_browser_open",
+    "session_browser_snapshot"
+  ],
+  "error": "Error: Valid explicit native reveal still opens the active Browser panel",
+  "errors": [],
+  "faultInjection": "held real IPC results; no fabricated command responses",
+  "finalPreferences": {
+    "chatEnvironmentRailOpen": true,
+    "checkReminders": false,
+    "cliLaunchPreset": {
+      "entries": [
+        {
+          "count": 1,
+          "profileId": "shell"
+        }
+      ],
+      "focus": "first"
+    },
+    "commandPaletteRecents": [],
+    "dailyPaceWarning": true,
+    "defaultWorkspaceMode": "local",
+    "density": "comfortable",
+    "desktopNotifications": {
+      "approvals": true,
+      "enabled": true,
+      "failed": true,
+      "finished": true,
+      "showNames": true
+    },
+    "interfaceSize": "default",
+    "lastSettingsSection": "general",
+    "launchView": "last",
+    "mainColor": "#0874df",
+    "missionSessionIds": [],
+    "modelFollow": "peek",
+    "motionSpeed": "default",
+    "projectDetails": {},
+    "secondaryColor": "#8b6fcb",
+    "settingsSections": {},
+    "showMenuBarIcon": true,
+    "sideChatSessionIds": [],
+    "sidebarChatsCollapsed": false,
+    "theme": "system",
+    "usageVisualization": "bars",
+    "workspaceFolders": {},
+    "workspaceKeybindings": {},
+    "workspacePanelHeight": 280,
+    "workspaceSettingsByFolder": {},
+    "workspaceSettingsByWorkspace": {},
+    "workspaceSidebarHidden": false,
+    "workspaceTrust": {},
+    "workspaceUserSettings": {
+      "editorMinimapEnabled": true,
+      "filesExclude": [
+        ".git/**"
+      ],
+      "searchExclude": [
+        ".git/**",
+        "node_modules/**",
+        "dist/**",
+        "build/**",
+        "target/**"
+      ],
+      "searchMaxResults": 200
+    }
+  },
+  "fullAppShellMounted": false,
+  "href": "tauri://localhost/browser-events-native-smoke.html",
+  "measurements": {
+    "closeWithHeldNativeReadMs": 3
+  },
+  "nativeBuild": "debug-embedded-tauri-production-handlers",
+  "nativeCsp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob:;style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost; frame-src gyro-canvas: http://localhost:* http://127.0.0.1:* https:",
+  "nativeOsMouseTested": false,
+  "passed": false,
+  "routed": [
+    {
+      "accepted": true,
+      "kind": "title",
+      "resourceId": "1ede9cd8-d71a-4ce0-882a-6651e8edce8d",
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd"
+    },
+    {
+      "accepted": true,
+      "kind": "loaded",
+      "resourceId": "1ede9cd8-d71a-4ce0-882a-6651e8edce8d",
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd"
+    },
+    {
+      "accepted": true,
+      "kind": "viewport",
+      "resourceId": "1ede9cd8-d71a-4ce0-882a-6651e8edce8d",
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd"
+    },
+    {
+      "accepted": true,
+      "kind": "viewport",
+      "resourceId": "1ede9cd8-d71a-4ce0-882a-6651e8edce8d",
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd"
+    },
+    {
+      "accepted": true,
+      "kind": "title",
+      "resourceId": "188a0407-a645-42e2-af22-3bbe11942850",
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd"
+    },
+    {
+      "accepted": true,
+      "kind": "loaded",
+      "resourceId": "188a0407-a645-42e2-af22-3bbe11942850",
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd"
+    },
+    {
+      "accepted": true,
+      "kind": "viewport",
+      "resourceId": "188a0407-a645-42e2-af22-3bbe11942850",
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd"
+    },
+    {
+      "accepted": false,
+      "kind": "loaded",
+      "resourceId": "1ede9cd8-d71a-4ce0-882a-6651e8edce8d",
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd"
+    },
+    {
+      "accepted": false,
+      "kind": "title",
+      "resourceId": "1ede9cd8-d71a-4ce0-882a-6651e8edce8d",
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd"
+    },
+    {
+      "accepted": false,
+      "kind": "viewport",
+      "resourceId": "1ede9cd8-d71a-4ce0-882a-6651e8edce8d",
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd"
+    },
+    {
+      "accepted": false,
+      "kind": "opened",
+      "resourceId": "1ede9cd8-d71a-4ce0-882a-6651e8edce8d",
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd"
+    },
+    {
+      "accepted": true,
+      "kind": "title",
+      "resourceId": "188a0407-a645-42e2-af22-3bbe11942850",
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd"
+    },
+    {
+      "accepted": true,
+      "kind": "title",
+      "resourceId": "a3175010-0f39-49ea-a724-6a531df7b12b",
+      "sessionId": "ae234a1e-7347-4d86-ad6a-d8f290a31286"
+    },
+    {
+      "accepted": true,
+      "kind": "loaded",
+      "resourceId": "a3175010-0f39-49ea-a724-6a531df7b12b",
+      "sessionId": "ae234a1e-7347-4d86-ad6a-d8f290a31286"
+    },
+    {
+      "accepted": true,
+      "kind": "opened",
+      "resourceId": "a3175010-0f39-49ea-a724-6a531df7b12b",
+      "sessionId": "ae234a1e-7347-4d86-ad6a-d8f290a31286"
+    },
+    {
+      "accepted": true,
+      "kind": "opened",
+      "resourceId": "188a0407-a645-42e2-af22-3bbe11942850",
+      "sessionId": "73d84eba-be8e-4533-8daf-d56ab6074fbd"
+    }
+  ],
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+  "violations": [],
+  "workspaceAssetAllowed": false
+}

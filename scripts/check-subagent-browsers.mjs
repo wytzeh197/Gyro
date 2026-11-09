@@ -356,7 +356,10 @@ const browser = readFileSync(
   "utf8",
 );
 const native = readRepoSource(
-  new URL("../apps/desktop/src-tauri/src/lib.rs", import.meta.url),
+  new URL(
+    "../apps/desktop/src-tauri/src/capabilities/execute.rs",
+    import.meta.url,
+  ),
   "utf8",
 );
 // Compile the full injected agent, including the separately embedded factory.
@@ -433,7 +436,7 @@ assert.equal(
 assert.equal(installedEvents.at(-1).type, "click");
 assert.match(
   browser,
-  /if snapshot.background_only \|\| !snapshot.visible \{\s*return call_agent\(/,
+  /if snapshot.background_only \|\| !snapshot.visible \{\s*return call_agent_for\(\s*app,\s*lease,\s*snapshot,/,
 );
 assert.match(browser, /if manager.background_only\(session_id\)\? \{/);
 assert.match(
@@ -442,16 +445,13 @@ assert.match(
 );
 assert.match(
   browser,
-  /!matches!\(kind, "console" \| "network"\) && !is_background_browser/,
+  /!matches!\(kind, "console" \| "network"\)\s*&& lease\.validate\(&manager\)\.is_ok\(\)\s*&& !is_background_browser/,
 );
-assert.equal(
-  (
-    browser.match(
-      /if !background_only \{\s*let _ = (?:app_for_title|app).emit\(/g,
-    ) ?? []
-  ).length,
-  2,
+assert.match(
+  browser,
+  /if !background_only\s*&& app\s*\.state::<SessionBrowserManager>\(\)\s*\.navigation_is_finished\(&lease, navigation_id\)\s*\{\s*let _ = app.emit\(/,
 );
+assert.match(browser, /if !background_only \{\s*let _ = app_for_title.emit\(/);
 assert.match(
   native,
   /if !snapshot.background_only \{\s*let _ = app.emit\(\s*"session-browser-opened"/,

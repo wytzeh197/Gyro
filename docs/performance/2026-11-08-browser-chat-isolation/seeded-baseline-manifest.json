@@ -1,0 +1,81 @@
+{
+  "root": "/private/tmp/gyro-shell-SkrXCx",
+  "data": "/private/tmp/gyro-shell-SkrXCx/data",
+  "workspace": "/private/tmp/gyro-shell-SkrXCx/workspace",
+  "frontend": "/private/tmp/gyro-shell-SkrXCx/frontend",
+  "identifier": "dev.gyro.browser-shell-review.gyro-shell-SkrXCx",
+  "mode": "normal-app-manual-review",
+  "build": "passed",
+  "uiVerdict": "unverified",
+  "binary": "/Users/wytze/Gyro/target/debug/gyro-browser-shell-review",
+  "executableSha256": "e36ef70f72d34f92fe9fa648bc39aa81b8c51dd4921f059d133e8cfdedb2472d",
+  "app": "/private/tmp/gyro-shell-SkrXCx/Gyro Browser Shell Review.app",
+  "seededChats": [
+    {
+      "id": "eeb8cdbd-3ff0-423c-a183-6d95f459b4cd",
+      "title": "Browser review Alpha",
+      "workspacePath": "/private/tmp/gyro-shell-SkrXCx/workspace",
+      "workspaceIdentity": {
+        "schema": "gyro.workspace.v2",
+        "revision": 1,
+        "roots": [
+          {
+            "id": "root-ff11370675e80b11",
+            "path": "/private/tmp/gyro-shell-SkrXCx/workspace"
+          }
+        ],
+        "activeRootId": "root-ff11370675e80b11"
+      },
+      "origin": "desktop",
+      "workspaceMode": "local",
+      "branch": "main",
+      "worktreeName": null,
+      "providerId": null,
+      "providerLabel": null,
+      "modelId": null,
+      "modelLabel": null,
+      "reasoningEffort": null,
+      "summary": null,
+      "summaryUpdatedAt": null,
+      "createdAt": "2026-11-08T10:00:40.412186Z",
+      "updatedAt": "2026-11-08T10:00:40.413591Z",
+      "eventsPath": "/private/tmp/gyro-shell-SkrXCx/data/sessions/eeb8cdbd-3ff0-423c-a183-6d95f459b4cd.jsonl"
+    },
+    {
+      "id": "fa7321a2-3b6a-45fa-8496-ba3c2f9397c5",
+      "title": "Browser review Beta",
+      "workspacePath": "/private/tmp/gyro-shell-SkrXCx/workspace",
+      "workspaceIdentity": {
+        "schema": "gyro.workspace.v2",
+        "revision": 1,
+        "roots": [
+          {
+            "id": "root-ff11370675e80b11",
+            "path": "/private/tmp/gyro-shell-SkrXCx/workspace"
+          }
+        ],
+        "activeRootId": "root-ff11370675e80b11"
+      },
+      "origin": "desktop",
+      "workspaceMode": "local",
+      "branch": "main",
+      "worktreeName": null,
+      "providerId": null,
+      "providerLabel": null,
+      "modelId": null,
+      "modelLabel": null,
+      "reasoningEffort": null,
+      "summary": null,
+      "summaryUpdatedAt": null,
+      "createdAt": "2026-11-08T10:00:40.460978Z",
+      "updatedAt": "2026-11-08T10:00:40.461357Z",
+      "eventsPath": "/private/tmp/gyro-shell-SkrXCx/data/sessions/fa7321a2-3b6a-45fa-8496-ba3c2f9397c5.jsonl"
+    }
+  ],
+  "fixtureUrl": "http://127.0.0.1:58492/browser-observation.html",
+  "native": {
+    "status": "running",
+    "pid": 27830,
+    "startedAt": "2026-11-08T10:00:40.518Z"
+  }
+}

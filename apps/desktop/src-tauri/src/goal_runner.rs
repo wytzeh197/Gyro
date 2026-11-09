@@ -1,7 +1,31 @@
 //! Durable, bounded goal continuation. The goal event log is the queue.
 //! Only a queued turn with no dispatched attempt is recoverable automatically.
-use super::*;
+use crate::{
+    providers::{
+        chat_types::{
+            normal_chat_requests_plan, ChatMode, ProviderChatRequest, ProviderChatResponse,
+        },
+        commands::run_goal_chat,
+        events::provider_turn_has_unfinished_attempt,
+        session_lifecycle::ProviderSessionLease,
+        streaming::provider_stop_message,
+    },
+    session_goal,
+    state::{
+        managers::ProviderCancellationManager,
+        provider_run::{ProviderRunControl, ProviderStopReason},
+    },
+    stores::{open_store, parse_uuid, to_string},
+    turn_timing,
+};
+use gyro_core::{SessionEvent, SessionEventKind, SessionStore, UsageOrigin, UsageTokens};
 use serde::{Deserialize, Serialize};
+use std::{
+    sync::{atomic::Ordering, mpsc, Arc},
+    time::Duration,
+};
+use tauri::{Emitter, Manager};
+use uuid::Uuid;
 
 pub(super) const EVENT: &str = "gyro://goal-run-event";
 
@@ -678,6 +702,8 @@ pub(super) fn recover(app: tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::provider_run::PROVIDER_CUT_OFF_NOTICE;
+    use gyro_core::GyroPaths;
     fn response(update: serde_json::Value) -> ProviderChatResponse {
         ProviderChatResponse {
             activity_events: vec![],

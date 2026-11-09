@@ -1,9 +1,8 @@
-/// Overlay traffic-light origin matching `tauri.conf.json` and the sidebar
-/// titlebar CSS. A native 14px control draws its circle a couple of px below
-/// the frame origin, so y=16 put the visible dots on the 48px window bar's
-/// centreline (y=24). y=17 sits them 1px below that line, as requested.
+/// Overlay traffic-light origin matching `tauri.conf.json` and the CSS tokens.
+/// A native 14px control draws its circle a couple of px below its frame.
+/// y=15 aligns its visible center with the compact inset chat header.
 const MAIN_TRAFFIC_LIGHT_X: f64 = 16.0;
-const MAIN_TRAFFIC_LIGHT_Y: f64 = 17.0;
+const MAIN_TRAFFIC_LIGHT_Y: f64 = 15.0;
 
 /// Tauri's `unstable` feature hosts the main webview as a child, which leaves
 /// `trafficLightPosition` stuck at (0, 0) (tauri-apps/tauri#14072). Tauri 2.11
@@ -195,6 +194,6 @@ mod tests {
     #[test]
     fn main_window_traffic_lights_use_overlay_inset() {
         assert_eq!(MAIN_TRAFFIC_LIGHT_X, 16.0);
-        assert_eq!(MAIN_TRAFFIC_LIGHT_Y, 17.0);
+        assert_eq!(MAIN_TRAFFIC_LIGHT_Y, 15.0);
     }
 }

@@ -1,0 +1,30 @@
+Window: "Gyro", App: Gyro Browser Shell Review.
+0 standard window Gyro, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: Gyro, URL: tauri://localhost
+			3 container Search Gyro
+				4 container
+					5 combo box (expanded, settable) Search files, projects, sessions, and actions, Secondary Actions: Collapse
+						6 text Search files, projects, sessions, and actions
+					7 text ⌘K
+				8 list (settable) Search results
+					9 text Suggested 6 Open files 2 Recent sessions 2 Projects 1
+					10 container
+						11 text 11  results
+				12 container
+					13 text Search stays local to this Mac. ↑↓ navigate ↵ open esc close
+	14 close button
+	15 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	16 minimize button
+17 menu bar
+	18 Gyro Browser Shell Review
+	19 File
+	20 Edit
+	21 View
+	22 Window
+	23 Help
+
+Selected:
+	24 text (selected) New chat Start a desktop session ⌘N
+
+Note: Pay special attention to the content selected by the user. If the user asks a question or refers to the content they are looking at on-screen, they might be referring to the selected content (but they might be referring to something else that's visible, too).

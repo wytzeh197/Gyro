@@ -121,9 +121,13 @@
   flex: none;
 }
 
+/* Rows are sized to their content. With `auto` rows, a list whose height the
+   popover caps squeezes each row down to its min-height, and a branch's
+   "Last commit" line spills over the row below. */
 .gyro-composer-menu-list {
   display: grid;
   gap: calc(var(--gyro-space-compact) / 2);
+  grid-auto-rows: max-content;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -193,4 +197,44 @@
   color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
   padding: var(--gyro-space-comfortable) var(--gyro-space-standard);
+}
+
+/* Both branch pickers use real commit times and the existing quiet badge. */
+.gyro-scm-branch-copy {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--gyro-space-compact);
+}
+
+.gyro-scm-branch-copy .gyro-scm-branch-name {
+  flex: 1 1 auto;
+  font-family: var(--gyro-font-mono);
+}
+
+.gyro-scm-branch-copy small {
+  color: var(--gyro-muted);
+  flex-basis: 100%;
+  font-size: var(--gyro-font-caption);
+}
+
+.gyro-scm-branch-badge {
+  background: var(--gyro-premium-control);
+  border-radius: var(--gyro-radius-xs);
+  color: var(--gyro-muted);
+  flex: none;
+  font-size: var(--gyro-font-caption);
+  font-style: normal;
+  padding: calc(var(--gyro-space-compact) / 2) var(--gyro-space-compact);
+}
+
+.gyro-scm-branch-menu .gyro-composer-menu-search {
+  background: var(--gyro-surface-raised);
+  flex: none;
+  margin: 0 0 var(--gyro-space-compact);
+}
+
+.gyro-scm-branch-menu .gyro-composer-menu-search:focus-within {
+  border-color: var(--gyro-focus-ring);
+  box-shadow: 0 0 0 1px var(--gyro-focus-ring);
 }

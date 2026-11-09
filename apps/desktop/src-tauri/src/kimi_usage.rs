@@ -1,8 +1,22 @@
 //! Kimi Code plan usage: the OAuth sign-in the CLI keeps and the account
 //! usage endpoint behind its own usage view.
 
-use super::*;
-
+use crate::{
+    diagnostics::export::user_home_directory,
+    stores::to_string,
+    usage::{
+        fetch::{plan_window_identity, plan_window_status},
+        types::{ProviderRateLimitWindow, ProviderUsageSnapshot},
+    },
+};
+use std::{
+    collections::HashSet,
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+use uuid::Uuid;
 /// Where Kimi Code writes the OAuth token for the managed account.
 ///
 /// The CLI names each slot after the sign-in it belongs to: `kimi-code` is the
@@ -32,31 +46,36 @@ pub(crate) fn fetch_kimi_provider_usage(
         .timeout_connect(Duration::from_secs(5))
         .timeout_read(Duration::from_secs(10))
         .build();
-    let payload: serde_json::Value = agent
+    let response = match agent
         .get(KIMI_USAGE_URL)
         .set("Authorization", &format!("Bearer {token}"))
         .set("Accept", "application/json")
         .call()
-        .map_err(|error| match error {
-            ureq::Error::Status(401 | 403, _) => {
+    {
+        Ok(response) => response,
+        // The endpoint belongs to the Kimi For Coding membership. An account
+        // without one is not broken; it has no plan to meter.
+        Err(ureq::Error::Status(404, _)) => return Ok(kimi_without_plan_limits(provider_id)),
+        Err(ureq::Error::Status(401 | 403, _)) => {
+            return Err(
                 "Kimi Code sign-in was rejected. Run `kimi login` to read your plan usage."
-                    .to_string()
-            }
-            // The endpoint belongs to the Kimi For Coding membership. An
-            // account without one is not broken; it has no plan to meter.
-            ureq::Error::Status(404, _) => {
-                "This Kimi account does not publish plan usage limits.".to_string()
-            }
-            ureq::Error::Status(status, _) => {
-                format!("Kimi could not report plan usage ({status}).")
-            }
-            other => format!("Kimi could not report plan usage: {other}"),
-        })?
+                    .to_string(),
+            )
+        }
+        Err(ureq::Error::Status(status, _)) => {
+            return Err(format!("Kimi could not report plan usage ({status})."))
+        }
+        Err(other) => return Err(format!("Kimi could not report plan usage: {other}")),
+    };
+    let payload: serde_json::Value = response
         .into_json()
         .map_err(|error| format!("Kimi returned an unreadable usage response: {error}"))?;
     let windows = provider_usage_windows_from_kimi_usages(&payload);
+    // A signed-in account outside the membership gets `{}` back, which the
+    // Kimi CLI itself reads as "no limits". That is a settled answer, not a
+    // failed read to retry and paint as stale.
     if windows.is_empty() {
-        return Err("Kimi did not report a plan usage window".into());
+        return Ok(kimi_without_plan_limits(provider_id));
     }
     Ok(ProviderUsageSnapshot {
         stale: false,
@@ -65,6 +84,20 @@ pub(crate) fn fetch_kimi_provider_usage(
         windows,
         fetched_at: chrono::Utc::now().to_rfc3339(),
     })
+}
+
+pub(crate) const KIMI_NO_PLAN_LIMITS: &str =
+    "This Kimi account does not publish plan usage limits.";
+
+/// A live reading with no windows: the account has nothing to meter.
+fn kimi_without_plan_limits(provider_id: &str) -> ProviderUsageSnapshot {
+    ProviderUsageSnapshot {
+        stale: false,
+        error: Some(KIMI_NO_PLAN_LIMITS.into()),
+        provider_id: provider_id.into(),
+        windows: Vec::new(),
+        fetched_at: chrono::Utc::now().to_rfc3339(),
+    }
 }
 
 /// Kimi's sign-in service, which mints an access token from the refresh token

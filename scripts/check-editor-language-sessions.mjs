@@ -269,6 +269,45 @@ test("disposing during startup stops the eventual server and opens no documents"
   assert.deepEqual(f.calls, []);
 });
 
+test("slow diagnostic polls are shared per server and release on failure", async () => {
+  const pending = [];
+  const f = fixture({ send: async (server, method) => {
+    if (method !== "$/gyro/poll") return { status: "sent" };
+    const result = deferred();
+    pending.push({ server, ...result });
+    return result.promise;
+  } });
+  await f.manager.reconcile([document(), document("/other/a.ts", "other", "/other")]);
+  const ticks = Array.from({ length: 60 }, () => f.manager.poll());
+  await nextTurn();
+  assert.equal(pending.length, 2, "60 overlapping ticks need one request per server, not 120");
+  pending[0].resolve({ status: "ok", messages: [{ diagnostic: "latest" }] });
+  pending[1].reject(new Error("temporary transport failure"));
+  await Promise.all(ticks);
+  assert.equal(f.messages.length, 1);
+  const next = f.manager.poll();
+  await nextTurn();
+  assert.equal(pending.length, 4, "settled and failed polls must both admit the next tick");
+  pending[2].resolve({ status: "ok" });
+  pending[3].resolve({ status: "ok" });
+  await next;
+  await f.manager.dispose();
+});
+
+test("a diagnostic reply after disposal cannot publish stale state", async () => {
+  const response = deferred();
+  const f = fixture({ send: async (_server, method) => method === "$/gyro/poll" ? response.promise : { status: "sent" } });
+  await f.manager.sync(document());
+  const poll = f.manager.poll();
+  await nextTurn();
+  await f.manager.dispose();
+  response.resolve({ status: "ok", messages: [{ diagnostic: "retired" }] });
+  await poll;
+  await f.manager.poll();
+  assert.deepEqual(f.messages, []);
+  assert.equal(f.calls.filter(call => call.method === "$/gyro/poll").length, 1);
+});
+
 const outcomes = await Promise.allSettled(tests.map(async ({ name, run }) => {
   let timeout;
   try {

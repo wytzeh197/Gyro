@@ -9,8 +9,9 @@
 //! It lives in its own module because the desktop root sits at its architecture
 //! size ceiling, and because "what the launch path may wait for" is one rule.
 
-use super::*;
+use gyro_core::{GyroPaths, SessionStore};
 use std::sync::atomic::AtomicU8;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 0 = scan still running, 1 = ok, 2 = the scan reported a problem.
 static LAUNCH_INTEGRITY_STATUS: AtomicU8 = AtomicU8::new(LAUNCH_INTEGRITY_RUNNING);

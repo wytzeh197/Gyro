@@ -114,6 +114,8 @@ struct DateTimeSeconds(i64);
 pub struct Session {
     project_ref: String,
     account_id: Uuid,
+    /// The issuer-verified address, kept so the UI can say who is signed in.
+    email: String,
     access_token: String,
     refresh_token: String,
     expires_at: DateTime<Utc>,
@@ -149,6 +151,9 @@ impl Session {
     }
     pub fn account_id(&self) -> Uuid {
         self.account_id
+    }
+    pub fn email(&self) -> &str {
+        &self.email
     }
     pub fn expires_at(&self) -> DateTime<Utc> {
         self.expires_at
@@ -353,6 +358,7 @@ impl Client {
         Ok(Session {
             project_ref: self.config.project_ref.clone(),
             account_id: verified.id,
+            email: verified.email,
             access_token: response.access_token,
             refresh_token: response.refresh_token,
             expires_at,
@@ -382,6 +388,7 @@ pub(crate) fn fixture_session(config: &StagingConfig, account: Uuid, session: Uu
     Session {
         project_ref: config.project_ref.clone(),
         account_id: account,
+        email: "fixture@example.com".into(),
         access_token: format!("fixture.{payload}.fixture"),
         refresh_token: "fixture-refresh-only".into(),
         expires_at: Utc::now() + chrono::Duration::hours(1),

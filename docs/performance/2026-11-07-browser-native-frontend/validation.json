@@ -1,0 +1,94 @@
+{
+  "schema": "gyro.native-validation.v1",
+  "generatedAt": "2026-11-07T18:07:38.659744+00:00",
+  "head": "1d0b7e1321790246390b9ad64d78f73813a37ab6",
+  "workspace": "dirty; unrelated changes preserved",
+  "nativeChecks": 33,
+  "nativeSource": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-oGn9vn",
+  "engine": "AppleWebKit",
+  "origin": "tauri://localhost/",
+  "modelTurnsDispatched": 0,
+  "isolatedStoreCounts": {
+    "provider_session_bindings": 0,
+    "session_turn_messages": 0,
+    "session_turn_status": 0,
+    "usage_turn_links": 0,
+    "efficiency_task_turns": 0
+  },
+  "measurements": {
+    "closeWithHeldNativeReadMs": 3
+  },
+  "productionCspUnchanged": true,
+  "captureAssetAllowed": true,
+  "workspaceAssetAllowed": false,
+  "fullAppShellMounted": false,
+  "nativeOsMouseTested": false,
+  "keyboardEvidence": "DOM focus/Escape only",
+  "faultInjection": "held real IPC results; no fabricated command responses",
+  "acceptedObservations": 15,
+  "rejectedObservations": 4,
+  "checks": {
+    "desktopTypecheck": "passed",
+    "normalDesktopViteBuild": "passed",
+    "defaultFeatureCargoCheck": "passed",
+    "architectureBoundaries": "passed",
+    "format": "passed",
+    "eventRoutingCases": 16,
+    "normalFrontendExcludesFixture": true,
+    "normalJavaScriptFilesScanned": 104
+  },
+  "warnings": [
+    "existing Vite chunk-size warnings",
+    "existing Rust unused/dead-code warnings"
+  ],
+  "preparationFailures": [
+    {
+      "source": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-civcZS",
+      "report": "preparation/01-civcZS.json",
+      "error": "Error: native screenshot asset did not render in the production capture view",
+      "completedChecks": 13
+    },
+    {
+      "source": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gDKSPq",
+      "report": "preparation/02-gDKSPq.json",
+      "error": "Error: Valid explicit native reveal still opens the active Browser panel",
+      "completedChecks": 25
+    },
+    {
+      "source": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-UqWnU1",
+      "report": "preparation/03-UqWnU1.json",
+      "error": "Error: Valid explicit native reveal still opens the active Browser panel",
+      "completedChecks": 25
+    },
+    {
+      "source": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-a1EuTf",
+      "report": "preparation/04-a1EuTf.json",
+      "error": "Error: Valid explicit native reveal still opens the active Browser panel",
+      "completedChecks": 25
+    }
+  ],
+  "open": [
+    "whole App/companion/split-shell acceptance",
+    "OS input/accessibility",
+    "missing screenshot image recovery",
+    "same-resource ready-state ordering",
+    "live GPT/Grok/provider browser completion"
+  ],
+  "sourceSha256": {
+    "apps/desktop/src-tauri/src/bin/browser-events-smoke.rs": "bab032bec94035bd1799bf3ecc5ae542c55fe9ce6a01f60497a2c41691d2e592",
+    "apps/desktop/src-tauri/src/browser_frontend_smoke.rs": "8c7ace6a6f837412ec3da706968c2d0292f0b4cbedf7a7353aae46a5e36f8b39",
+    "apps/desktop/src-tauri/src/lib.rs": "0a28ef753ab67a9d085f14bb57a4294d654b6fcf8ac2087039000a46987be80e",
+    "apps/desktop/src-tauri/Cargo.toml": "eb4e4e523a8ae27994456b5bb3b37f90041b47f8b29b275aeb2242677d32005a",
+    "apps/desktop/src-tauri/tauri.conf.json": "0d20aee8cfc34681002669c645766b2ea756110f26fc848f2ca761d2566c0e79",
+    "apps/desktop/vite.config.ts": "1c92d238fad518fb3d3878983a488bde48e9642fa75ec43f6b8a1a362139039e",
+    "apps/desktop/src/browser-events-native-smoke.tsx": "56edf90d4b997eff195588ae0c471fb9cbeb13b1a948f20e3ab483c177df0d8b",
+    "apps/desktop/browser-events-native-smoke.html": "47354f2b800c6cbb83f53ae62527256d077a1e2f80d5700ee6d3543e3aa6e20f",
+    "scripts/run-browser-events-native.mjs": "f0c09432f0d880859121aa4a897c8192bf61a130ee10129e5a2f4abcfa437903",
+    "apps/desktop/src/session-browser-queue.ts": "71f4a0509f3dd0a38fad15b07b7e30bf6f476df06235e56d3a3184307b3125ab",
+    "apps/desktop/src/session-browser-native.ts": "ae57e75845fe5494941ae12cfd4da4f769532f4185daaa95d063b5dd89871aa5",
+    "apps/desktop/src/model-browser-reveal.ts": "b11fb2ea9ce2efa3d0cb7e243651c5d6b6cdd3ae603dae8f0448e5782dbfe56f",
+    "apps/desktop/src/use-session-browser-events.ts": "8575c0bfba0a9daf5f97f5a15bc68b9067cbe9ccc570f8992316ee7ccc5e0a4c",
+    "package.json": "452951164e89c9f666d5efb00a6caf7b5b0867d36dc150e0899c8adbc39e408f"
+  },
+  "binarySha256": "1b681ceae8f8db7c01a1559dd62bf18f89702fa18b00a6bd240d31ae041faa56"
+}

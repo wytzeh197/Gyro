@@ -1,0 +1,10 @@
+{
+  "root": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-CPsnRv",
+  "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-CPsnRv/data",
+  "frontend": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-CPsnRv/frontend",
+  "build": "passed",
+  "native": "failed",
+  "binary": "/Users/wytze/Gyro/target/debug/gyro-browser-events-smoke",
+  "error": "AssertionError [ERR_ASSERTION]: native browser frontend fixture timed out\n\nfalse !== true\n",
+  "pageRequests": 7
+}

@@ -1,0 +1,144 @@
+Window: "Gyro", App: Gyro Browser Shell Review.
+0 standard window Gyro, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: Gyro, URL: tauri://localhost
+			3 container
+				4 container Window navigation
+					5 button Hide sidebar
+					6 container Primary surfaces
+						7 toggle button Sessions, Value: on
+						8 toggle button Workspace, Value: off
+				9 pop up button New Session
+				10 button Search ⌘K
+				11 button Automations
+				12 text Projects
+				13 button (expanded) Collapse workspace, Secondary Actions: Collapse
+				14 button No recent sessions
+				15 container Recent chats
+					16 text Recents
+					17 text No standalone chats yet
+				18 button Settings
+				19 splitter Resize sidebar, Help: Drag to resize. Double-click to reset., Value: 224
+			20 container
+				21 container Claude Code 2.1.318 → 2.1.319 is available
+					22 container
+						23 text Claude Code 2.1.318 → 2.1.319 is available
+					24 button Update
+					25 button Dismiss CLI update notice
+				26 container Thread
+					27 container Chat pane 1
+						28 container Browser review Alpha
+							29 text Browser review Alpha
+						30 container Chat surfaces
+						31 container Chat surfaces
+							32 toggle button Environment, Value: off
+						33 container Chat
+							34 container
+								35 text Synthetic fixture Alpha. No provider turn ran; use the browser controls for this review.
+								36 button Copy response
+								37 text Synthetic Alpha conversation for native browser acceptance.
+								38 container
+									39 button Use prompt again
+									40 text 11:48 AM
+									41 button Copy message
+								42 text Worked
+							43 text entry area (settable) Message Gyro, Value: [text entry area: Message Gyro], Placeholder: Connect a provider to send a message…
+								44 text Connect a provider to send a message…
+							45 container
+								46 text Connect a provider to start chatting.
+								47 button Connect a provider
+							48 pop up button Add context
+							49 pop up button Approval mode: Ask for approval
+							50 progress indicator (settable, float) Selected model context: 0 tokens used; context window unknown, Value: 50
+							51 pop up button Model: Choose model
+							52 toggle button Dictate, Value: off
+							53 button (disabled) Send message, Help: Connect a provider before sending
+						54 container Chat companion
+							55 splitter Resize companion, Value: 570
+							56 container
+								57 tab group (selectable) Open companion tabs
+									58 tab (selected) Browser, Help: Gyro Browser Observation Fixture
+									59 button Close Browser
+								60 button Add companion tab
+								61 toggle button Expand panel, Value: off
+								62 button Hide companion
+							63 container Browser
+								64 container Browser
+									65 container App preview and inspection
+										66 pop up button Preview target, Value: Web preview
+										67 button Refresh targets, Help: Discover windows and Simulator devices
+										68 button Capture
+										69 summary Runtime availability (1), Value: off
+											70 text Runtime availability (
+											71 text 1
+											72 text )
+										73 container Navigation
+											74 button (disabled) Back
+											75 button (disabled) Forward
+											76 button Reload
+										77 container
+											78 text field (settable) Browser URL, Value: http://127.0.0.1:49756/browser-observation.html, Placeholder: Search or enter a URL
+											79 button Open page in system browser, Help: Open in system browser
+										80 button (collapsed) Browser options, Secondary Actions: Expand
+										81 container Native browser surface
+										82 text Web preview ·  Desktop  ·  1280  ×  800  · 45%
+	83 scroll area
+		84 HTML content Description: Gyro Browser Observation Fixture, URL: 127.0.0.1:49756/browser-observation.html
+			85 container
+				86 text Deterministic loopback page for Gyro Browser acceptance.
+				87 heading Shell Original ready, Value: 1
+					88 text Shell Original ready
+				89 container
+					90 text Viewport: desktop
+				91 container State-changing control
+					92 heading State-changing control, Value: 2
+						93 text State-changing control
+					94 button Change visible state
+					95 container State: changed
+						96 text State: changed
+					97 container Clicks: 1
+						98 text Clicks: 1
+				99 container Mouse interaction
+					100 heading Mouse interaction, Value: 2
+						101 text Mouse interaction
+					102 button Hover target
+					103 container Hover: initial
+						104 text Hover: initial
+					105 image Canvas target
+					106 container Canvas: initial
+						107 text Canvas: initial
+					108 button Drag handle
+					109 button Drop zone
+					110 container Drag: initial
+						111 text Drag: initial
+					112 container Context: initial
+						113 text Context: initial
+				114 container Form controls
+					115 heading Form controls, Value: 2
+						116 text Form controls
+					117 container
+						118 text Project name
+						119 text field (settable) Project name, Value: Gyro
+						120 pop up button Project kind, Value: Site
+						121 checkbox Enabled, Value: 0
+						122 container Kind: site; enabled: false
+							123 text Kind: site; enabled: false
+						124 button Save project
+						125 container Form: untouched
+							126 text Form: untouched
+					127 text Blocked credential field
+					128 secure text field (settable) Blocked credential field, Value: ••••••••••••••
+			129 link Open second fixture page, Value: 127.0.0.1:49756/browser-observation.html?page=second
+		130 scroll bar (settable, float) 0
+	131 close button
+	132 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	133 minimize button
+134 menu bar
+	135 Gyro Browser Shell Review
+	136 File
+	137 Edit
+	138 View
+	139 Window
+	140 Help
+
+The focused UI element is 94 button Change visible state

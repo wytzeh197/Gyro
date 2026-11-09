@@ -1,0 +1,10 @@
+{
+  "temporaryRunnerPid": 23540,
+  "runnerEnded": "SIGTERM after 30-minute review timeout",
+  "relaunchedReviewPid": 53611,
+  "observedDatabase": "/Users/wytze/Library/Application Support/Gyro/gyro.sqlite3",
+  "action": "Stopped only the relaunched temporary review process; removed execute permission from its temporary binary.",
+  "uiActions": "Only initial accessibility observation; no UI edits or intentional provider requests.",
+  "limits": "Normal startup may have run store recovery or background routines; no prior database snapshot exists to prove it was unchanged.",
+  "nextFix": "Review-only debug entrypoint will pin a compile-time temporary store and refuse launch without that path."
+}

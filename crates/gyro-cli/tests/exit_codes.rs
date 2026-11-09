@@ -477,12 +477,12 @@ exit 1"#,
     let paths = GyroPaths::from_base_dir(data_base(&home));
     let store = SessionStore::open(paths).unwrap();
     let session = store.latest_session().unwrap().unwrap();
-    let binding = store
+    // Authentication failed before the provider acknowledged any session.
+    // The host must not save its proposed UUID as a resumable conversation.
+    assert!(store
         .get_provider_session_binding(session.id, "anthropic")
         .unwrap()
-        .unwrap();
-    assert_eq!(binding.status, "failed");
-    assert_eq!(binding.resume_cursor_json["kind"], "claude-session");
+        .is_none());
 }
 
 #[test]
@@ -1417,7 +1417,13 @@ fn real_binary_setup_and_handoff_recover_stale_app_sockets() {
 
     let provider = write_script(
         &root,
-        r#"test "$1" = "app-server" || exit 21
+        r#"test "$1" = "-c" || exit 19
+test "$2" = 'model_provider="openai"' || exit 20
+shift 2
+while [ "$1" = "-c" ]; do
+ case "$2" in features.multi_agent=false|features.image_generation=false|features.fast_mode=true|service_tier=\"default\") shift 2 ;; *) exit 21 ;; esac
+done
+test "$1" = "app-server" || exit 21
 test "$2" = "--stdio" || exit 22
 IFS= read -r initialize
 printf '%s\n' '{"id":1,"result":{}}'
@@ -1802,6 +1808,7 @@ case " $* " in
 esac
 printf 'start\n' >> "$GYRO_TEST_MARKER"
 printf '%s' "$provider_session" > "$GYRO_TEST_SESSION_MARKER"
+printf '{"type":"system","subtype":"init","session_id":"%s"}\n' "$provider_session"
 exit 9"#,
     );
     write_provider_config(&home, &provider, false, "anthropic");

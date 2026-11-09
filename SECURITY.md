@@ -36,7 +36,10 @@ times are best-effort while the project is maintainer-led.
 
 - Sessions, configuration, and history remain local by default.
 - Gyro sends no telemetry by default.
-- Provider credentials remain in provider-owned storage or macOS Keychain.
+- Provider CLI credentials remain in provider-owned storage. API keys saved by
+  Gyro are stored in a private local `secrets.json` file (0700 directory, 0600
+  file on macOS), not encrypted by Keychain. Optional Cloud refresh tokens use
+  a separate macOS Keychain store.
 - Commands and file changes follow the user's explicit approval policy.
 - Common secret patterns are redacted from diagnostics and session logs.
 - Workspace access is bounded to the selected workspace unless another path is

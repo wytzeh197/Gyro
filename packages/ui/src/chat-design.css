@@ -870,11 +870,28 @@
 }
 
 :root[data-theme] .gyro-side-chat .gyro-side-chat-context {
+  align-items: center;
+  border-bottom: 1px solid var(--gyro-border);
   color: var(--gyro-muted);
+  display: flex;
   font-size: var(--gyro-chat-font-work);
+  gap: 6px;
   line-height: 1.5;
   margin: 0;
-  padding: var(--gyro-space-panel) var(--gyro-space-panel) 0;
+  min-width: 0;
+  padding: 8px var(--gyro-space-panel);
+}
+
+:root[data-theme] .gyro-side-chat .gyro-side-chat-context > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-theme] .gyro-side-chat .gyro-side-chat-context strong {
+  color: var(--gyro-text);
+  font-weight: 500;
 }
 
 /* Progress stays secondary to the answer; failures retain their own colors. */
@@ -1313,4 +1330,128 @@
 }
 :root[data-theme] .gyro-sidebar-thread-main {
   user-select: none;
+}
+
+/* Environment follows the chat. The header says where things stand in a few
+   words; while a turn runs the plan leads and unfolds, and once it settles the
+   one action that is the next step is drawn as such. */
+:root[data-theme] .gyro-chat-environment-popover .gyro-environment-heading {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+:root[data-theme] .gyro-chat-environment-popover .gyro-environment-status {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  font-size: var(--gyro-font-caption);
+  font-variant-numeric: tabular-nums;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-environment-status-dot {
+  background: var(--gyro-faint);
+  border-radius: 50%;
+  flex: 0 0 auto;
+  height: 6px;
+  width: 6px;
+}
+
+.gyro-environment-status.is-working > .gyro-environment-status-dot {
+  animation: gyro-terminal-status-pulse 1.4s ease-in-out infinite;
+  background: var(--gyro-accent);
+}
+
+.gyro-environment-status.is-commit > .gyro-environment-status-dot {
+  background: var(--gyro-warn);
+}
+
+.gyro-environment-status:is(.is-push, .is-pull-request)
+  > .gyro-environment-status-dot {
+  background: var(--gyro-accent);
+}
+
+:root[data-theme]
+  .gyro-chat-environment-popover
+  .gyro-environment-status:is(.is-working, .is-commit, .is-push, .is-pull-request) {
+  color: var(--gyro-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-environment-status.is-working > .gyro-environment-status-dot {
+    animation: none;
+  }
+}
+
+/* The live plan: its progress reads in the accent, the step being worked on
+   is the brightest line in the card. */
+:root[data-theme]
+  .gyro-chat-environment-popover
+  .gyro-environment-section.is-plan.is-live
+  .gyro-environment-plan-fill {
+  background: var(--gyro-accent);
+}
+
+:root[data-theme]
+  .gyro-chat-environment-popover
+  .gyro-environment-section.is-plan.is-live
+  .gyro-environment-plan-steps
+  > li.is-in-progress {
+  background: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
+  border-radius: var(--gyro-radius-sm);
+}
+
+/* Leading the card, the plan sits straight under the identity block. */
+:root[data-theme]
+  .gyro-chat-environment-popover.is-focus-working
+  .gyro-environment-identity
+  + .gyro-environment-section {
+  margin-top: 0;
+}
+
+:root[data-theme]
+  .gyro-chat-environment-popover
+  .is-plan-row
+  .gyro-environment-label
+  > .is-quiet {
+  color: var(--gyro-faint);
+  margin-right: 2px;
+}
+
+/* The next step: a filled row, not a louder button, so the card stays calm. */
+:root[data-theme]
+  .gyro-chat-environment-popover
+  .gyro-chat-environment-popover-actions
+  > button.is-primary {
+  background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--gyro-accent) 28%, transparent);
+}
+
+:root[data-theme]
+  .gyro-chat-environment-popover
+  .gyro-chat-environment-popover-actions
+  > button.is-primary:hover {
+  background: color-mix(in srgb, var(--gyro-accent) 18%, transparent);
+}
+
+:root[data-theme]
+  .gyro-chat-environment-popover
+  .gyro-chat-environment-popover-actions
+  > button.is-primary
+  > svg {
+  color: var(--gyro-accent);
+}
+
+:root[data-theme]
+  .gyro-chat-environment-popover
+  .is-plan-row[aria-expanded="true"]
+  .gyro-environment-label {
+  color: var(--gyro-muted);
 }

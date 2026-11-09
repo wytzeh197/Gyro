@@ -1,0 +1,11 @@
+{
+  "apps/desktop/src-tauri/src/browser_viewport_native.rs": "c26a6f13df9f6ce870c5e9d63735408c01dbb0b84c839659365cf231d6afd62a",
+  "apps/desktop/src-tauri/src/browser_viewport.rs": "baeb9876a9ad386e817a8017f436664bee04020eba8bdba23d2c0c930ba4592f",
+  "apps/desktop/src-tauri/src/browser_geometry_smoke.rs": "1b123b42fa4d1241daffbd14646485664cc8d007271e311f50f43ea0f91d1c62",
+  "apps/desktop/src-tauri/src/session_browser.rs": "c4fa4e799fe81dd4f0d614a1d29276e12cd493afeb4e020c49462b64b553ebe0",
+  "apps/desktop/src/browser-events-native-smoke.tsx": "4bbd567b0d3782255be46ad43fec1b28b2bdc3765c9eec3a76fda46cbc31e6d2",
+  "scripts/run-browser-events-native.mjs": "ebc4fe8b737e9b97f1137cce134d46cc3fffd3a0fab8f45418f5860c8734b5b4",
+  "scripts/check-native-browser-geometry.py": "445e68ce24449fe4ae250b36113e19ea57a3064a60dbec59f672a90504dc8f2c",
+  "apps/desktop/src-tauri/tauri.conf.json": "0d20aee8cfc34681002669c645766b2ea756110f26fc848f2ca761d2566c0e79",
+  "Cargo.lock": "e00ddd671f957eabad737b1b2b7ab998cddb9fbf5b5ad8cc7464a700b35febc8"
+}

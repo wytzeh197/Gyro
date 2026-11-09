@@ -1,0 +1,84 @@
+{
+  "build": "debug",
+  "elapsedMs": 199697,
+  "fixture": "meridian-v1",
+  "frontendMeasured": false,
+  "records": [
+    {
+      "correct": true,
+      "effort": "low",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "approve-fixture-edit",
+          "path": "src/clamp.mjs",
+          "proposalId": "e3bce93c-82b9-4567-9f70-6ac9981874a6",
+          "status": "applied"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "clamp.test.mjs",
+          "proposalId": "2412967d-ced0-4ca9-b9c5-8560cb84923e",
+          "status": "applied"
+        }
+      ],
+      "model": "deepseek-flash",
+      "outcome": "completed",
+      "provider": "deepseek",
+      "requireFileEditApproval": true,
+      "responsePresent": true,
+      "resumedActual": false,
+      "resumedRequested": false,
+      "retryCount": 0,
+      "sessionId": "b37e6f33-2b4f-4565-b76c-480341483563",
+      "task": "code",
+      "trial": 1,
+      "turnId": "f613c879-a35f-4a12-b202-0b4b79e7dcde",
+      "wallMs": 13830.191707999998
+    },
+    {
+      "correct": true,
+      "effort": "low",
+      "failureClass": "timeout-or-cancelled",
+      "failureDetail": "chat cancelled by: cancelled during DeepSeek response",
+      "fixtureReviewMode": "task-paths",
+      "fixtureReviews": [
+        {
+          "decision": "skip",
+          "path": ".gyro/memory.md",
+          "proposalId": "dadb34cf-838a-44da-a03c-3e6b57c5c41c",
+          "status": "out-of-scope"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "src/clamp.mjs",
+          "proposalId": "bbb72ca8-f8ae-488b-97ef-f98b53ad1a58",
+          "status": "applied"
+        },
+        {
+          "decision": "skip",
+          "path": "src/clamp.test.mjs",
+          "proposalId": "46db76b2-ab58-4af4-bbea-b0853a14aa16",
+          "status": "out-of-scope"
+        },
+        {
+          "decision": "approve-fixture-edit",
+          "path": "clamp.test.mjs",
+          "proposalId": "4c755aef-3c6f-4850-8817-025b745f7e1e",
+          "status": "applied"
+        }
+      ],
+      "model": "deepseek-flash",
+      "outcome": "failed",
+      "provider": "deepseek",
+      "requireFileEditApproval": true,
+      "resumedRequested": true,
+      "sessionId": "c2501911-cf41-47ee-aadd-15d0f8b58ee7",
+      "task": "code",
+      "trial": 1,
+      "turnId": "0fc03a0e-312a-41e1-842f-039840a25720",
+      "wallMs": 180225.207583
+    }
+  ],
+  "schema": "gyro.benchmark.v1"
+}

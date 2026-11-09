@@ -67,7 +67,8 @@ only Claude installed (or with Codex disabled).
 
 ## Known limits (not part of this path)
 
-- Application DMGs are still ad-hoc signed; first launch needs **Open Anyway**.
+- Stable application DMGs are Developer ID signed and notarized; historical
+  ad-hoc Alpha builds require **Open Anyway**.
 - Cursor and OpenCode are not approval-safe adapters yet.
 - Notebook and binary mutations fail closed.
 - Authenticated offline / stale-resume / physical sleep-wake proofs remain

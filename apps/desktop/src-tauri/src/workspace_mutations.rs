@@ -1,5 +1,23 @@
-use super::*;
-
+use crate::{
+    app::limits::MAX_WORKSPACE_FILE_EDIT_BYTES,
+    ide::task_discovery::content_hash,
+    state::provider_run::BoundProviderCapabilityContext,
+    stores::open_store,
+    workspace::{
+        files::{
+            read_bounded_regular_file, read_workspace_file_with_limit,
+            validated_workspace_file_target,
+        },
+        types::{
+            FileMutationDecisionRequest, FileMutationDecisionResult, FileMutationProposalRequest,
+        },
+    },
+};
+use gyro_core::{
+    decide_mutation_proposal, mutation_approval_payload, MutationDecision, MutationProposal,
+    SessionEventKind, SessionStore,
+};
+use uuid::Uuid;
 pub(super) fn bound_workspace_root_id(
     store: &SessionStore,
     bound: &BoundProviderCapabilityContext,
@@ -156,6 +174,8 @@ pub(super) fn resolve_file_mutation_proposal_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gyro_core::{GyroPaths, SessionOrigin};
+    use std::fs;
     #[test]
     fn full_access_workspace_edit_applies_without_a_pending_approval() {
         let temp = tempfile::tempdir().unwrap();

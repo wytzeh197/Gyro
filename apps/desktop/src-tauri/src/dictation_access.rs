@@ -136,10 +136,16 @@ pub async fn start_dictation(app: AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
-pub async fn stop_dictation(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || end_dictation(&app))
-        .await
-        .map_err(|_| "Dictation stopped.".to_string())
+pub async fn stop_dictation(app: AppHandle, finish: Option<bool>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if finish.unwrap_or(false) {
+            finish_dictation(&app);
+        } else {
+            end_dictation(&app);
+        }
+    })
+    .await
+    .map_err(|_| "Dictation stopped.".to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -267,6 +273,8 @@ struct EngineSession {
     /// Kept for the recognizer's background result queue.
     _queue: Option<objc2::rc::Retained<objc2::runtime::AnyObject>>,
     input: *mut objc2::runtime::AnyObject,
+    latest: Arc<Mutex<String>>,
+    closed: Arc<AtomicBool>,
     /// Tap and result blocks. Released only after the tap is removed.
     _blocks: Box<dyn std::any::Any>,
 }
@@ -344,6 +352,48 @@ fn end_dictation(app: &AppHandle) {
     if let Some(session) = take_session() {
         drop_engine(app, session);
     }
+}
+
+#[cfg(target_os = "macos")]
+fn finish_dictation(app: &AppHandle) {
+    use objc2::msg_send;
+    let id = session_token().load(Ordering::SeqCst);
+    let Some(session) = take_session() else {
+        return;
+    };
+    let Ok(session) = run_on_main(app, move || {
+        let mut session = session;
+        unsafe {
+            if !session.input.is_null() {
+                let _: () = msg_send![session.input, removeTapOnBus: 0usize];
+                session.input = std::ptr::null_mut();
+            }
+            let _: () = msg_send![&*session.engine, stop];
+            let _: () = msg_send![&*session.request, endAudio];
+        }
+        session
+    }) else {
+        return;
+    };
+    // Wait only for actual finalization, with a bounded fallback to the latest
+    // partial. Capture is already off; keep the request/task alive for its tail.
+    let deadline = std::time::Instant::now() + Duration::from_millis(1500);
+    while !session.closed.load(Ordering::SeqCst)
+        && session_token().load(Ordering::SeqCst) == id
+        && std::time::Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if session_token().load(Ordering::SeqCst) == id && !session.closed.swap(true, Ordering::SeqCst)
+    {
+        let text = session
+            .latest
+            .lock()
+            .map(|value| value.clone())
+            .unwrap_or_default();
+        emit_update(app, "final", text);
+    }
+    drop_engine(app, session);
 }
 
 #[cfg(target_os = "macos")]
@@ -565,6 +615,8 @@ fn build_session(app: &AppHandle, id: u64) -> Result<EngineSession, String> {
         _recognizer: recognizer,
         _queue: queue,
         input,
+        latest,
+        closed,
         _blocks: Box::new((tap, handler)),
     })
 }

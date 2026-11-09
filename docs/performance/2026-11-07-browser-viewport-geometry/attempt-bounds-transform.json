@@ -1,0 +1,1308 @@
+{
+  "checks": [
+    {
+      "name": "background: actual DOM matches requested viewport before capture",
+      "passed": true
+    },
+    {
+      "name": "background: actual DOM matches requested viewport after capture",
+      "passed": true
+    },
+    {
+      "name": "background: PNG dimensions match current DOM coordinates",
+      "passed": true
+    },
+    {
+      "name": "background: background pointer reaches the calibration target",
+      "passed": true
+    },
+    {
+      "name": "background: screenshot preserves the current viewport",
+      "passed": true
+    },
+    {
+      "name": "initial-background: actual DOM matches requested viewport before capture",
+      "passed": true
+    },
+    {
+      "name": "initial-background: actual DOM matches requested viewport after capture",
+      "passed": true
+    },
+    {
+      "name": "initial-background: PNG dimensions match current DOM coordinates",
+      "passed": true
+    },
+    {
+      "name": "initial-background: background pointer reaches the calibration target",
+      "passed": true
+    },
+    {
+      "name": "initial-background: screenshot preserves the current viewport",
+      "passed": true
+    },
+    {
+      "name": "desktop-narrow: actual DOM matches requested viewport before capture",
+      "passed": false
+    },
+    {
+      "name": "desktop-narrow: actual DOM matches requested viewport after capture",
+      "passed": false
+    },
+    {
+      "name": "desktop-narrow: PNG dimensions match current DOM coordinates",
+      "passed": false
+    },
+    {
+      "name": "desktop-narrow: background pointer reaches the calibration target",
+      "passed": true
+    },
+    {
+      "name": "desktop-narrow: screenshot preserves the current viewport",
+      "passed": true
+    },
+    {
+      "name": "desktop-fractional: actual DOM matches requested viewport before capture",
+      "passed": false
+    },
+    {
+      "name": "desktop-fractional: actual DOM matches requested viewport after capture",
+      "passed": false
+    },
+    {
+      "name": "desktop-fractional: PNG dimensions match current DOM coordinates",
+      "passed": false
+    },
+    {
+      "name": "desktop-fractional: background pointer reaches the calibration target",
+      "passed": true
+    },
+    {
+      "name": "desktop-fractional: screenshot preserves the current viewport",
+      "passed": true
+    },
+    {
+      "name": "mobile-fractional: actual DOM matches requested viewport before capture",
+      "passed": false
+    },
+    {
+      "name": "mobile-fractional: actual DOM matches requested viewport after capture",
+      "passed": false
+    },
+    {
+      "name": "mobile-fractional: PNG dimensions match current DOM coordinates",
+      "passed": false
+    },
+    {
+      "name": "mobile-fractional: background pointer reaches the calibration target",
+      "passed": true
+    },
+    {
+      "name": "mobile-fractional: screenshot preserves the current viewport",
+      "passed": false
+    },
+    {
+      "name": "tablet-fractional: actual DOM matches requested viewport before capture",
+      "passed": false
+    },
+    {
+      "name": "tablet-fractional: actual DOM matches requested viewport after capture",
+      "passed": false
+    },
+    {
+      "name": "tablet-fractional: PNG dimensions match current DOM coordinates",
+      "passed": false
+    },
+    {
+      "name": "tablet-fractional: background pointer reaches the calibration target",
+      "passed": true
+    },
+    {
+      "name": "tablet-fractional: screenshot preserves the current viewport",
+      "passed": false
+    },
+    {
+      "name": "custom-fractional: actual DOM matches requested viewport before capture",
+      "passed": false
+    },
+    {
+      "name": "custom-fractional: actual DOM matches requested viewport after capture",
+      "passed": false
+    },
+    {
+      "name": "custom-fractional: PNG dimensions match current DOM coordinates",
+      "passed": false
+    },
+    {
+      "name": "custom-fractional: background pointer reaches the calibration target",
+      "passed": true
+    },
+    {
+      "name": "custom-fractional: screenshot preserves the current viewport",
+      "passed": false
+    },
+    {
+      "name": "responsive: actual DOM matches requested viewport before capture",
+      "passed": true
+    },
+    {
+      "name": "responsive: actual DOM matches requested viewport after capture",
+      "passed": true
+    },
+    {
+      "name": "responsive: PNG dimensions match current DOM coordinates",
+      "passed": true
+    },
+    {
+      "name": "responsive: background pointer reaches the calibration target",
+      "passed": true
+    },
+    {
+      "name": "responsive: screenshot preserves the current viewport",
+      "passed": true
+    }
+  ],
+  "engine": "native-WKWebView",
+  "error": null,
+  "mode": "geometry",
+  "nativeBuild": "debug-embedded-tauri-production-handlers",
+  "nativeOsInputTested": false,
+  "observations": [
+    {
+      "advertised": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-3b0ce1aed2d9496b97c667ff9451dc3c",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 1,
+        "resourceId": "8ea4ed23-ecbb-417d-8658-75defefbcb31",
+        "sessionId": "3b0ce1ae-d2d9-496b-97c6-67ff9451dc3c",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "desktop",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/workspaces/first"
+      },
+      "capture": {
+        "height": 800,
+        "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/data/geometry-background.png",
+        "width": 1280
+      },
+      "case": "background",
+      "documentAfter": {
+        "clientHeight": 800,
+        "clientWidth": 1266,
+        "dpr": 1,
+        "height": 800,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 800,
+          "scale": 1,
+          "width": 1266
+        },
+        "width": 1280
+      },
+      "documentBefore": {
+        "clientHeight": 800,
+        "clientWidth": 1266,
+        "dpr": 1,
+        "height": 800,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 800,
+          "scale": 1,
+          "width": 1266
+        },
+        "width": 1280
+      },
+      "elapsedMs": 58,
+      "nativeAfter": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 800.0,
+          "width": 1280.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 800.0,
+          "width": 1280.0,
+          "x": 10.25,
+          "y": -10.75
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "nativeBefore": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 800.0,
+          "width": 1280.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 800.0,
+          "width": 1280.0,
+          "x": 10.25,
+          "y": -10.75
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "requested": {
+        "height": 800.0,
+        "width": 1280.0
+      }
+    },
+    {
+      "advertised": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-3b0ce1aed2d9496b97c667ff9451dc3c",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 1,
+        "resourceId": "0236227d-dfdd-45b1-ac13-41be8b6dbc37",
+        "sessionId": "3b0ce1ae-d2d9-496b-97c6-67ff9451dc3c",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 1.0,
+          "height": 800.0,
+          "mode": "auto",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/workspaces/first"
+      },
+      "capture": {
+        "height": 800,
+        "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/data/geometry-initial-background.png",
+        "width": 1280
+      },
+      "case": "initial-background",
+      "documentAfter": {
+        "clientHeight": 800,
+        "clientWidth": 1266,
+        "dpr": 1,
+        "height": 800,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 800,
+          "scale": 1,
+          "width": 1266
+        },
+        "width": 1280
+      },
+      "documentBefore": {
+        "clientHeight": 800,
+        "clientWidth": 1266,
+        "dpr": 1,
+        "height": 800,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 800,
+          "scale": 1,
+          "width": 1266
+        },
+        "width": 1280
+      },
+      "elapsedMs": 19,
+      "nativeAfter": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 800.0,
+          "width": 1280.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 800.0,
+          "width": 1280.0,
+          "x": 0.0,
+          "y": 20.0
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 32.0
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "nativeBefore": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 800.0,
+          "width": 1280.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 800.0,
+          "width": 1280.0,
+          "x": 0.0,
+          "y": 20.0
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 32.0
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "requested": {
+        "height": 800.0,
+        "width": 1280.0
+      }
+    },
+    {
+      "advertised": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-3b0ce1aed2d9496b97c667ff9451dc3c",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 1,
+        "resourceId": "1ea9bc26-b67c-4ef3-84cf-8ca21eba82d2",
+        "sessionId": "3b0ce1ae-d2d9-496b-97c6-67ff9451dc3c",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 0.375,
+          "height": 800.0,
+          "mode": "desktop",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/workspaces/first"
+      },
+      "capture": {
+        "height": 800,
+        "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/data/geometry-desktop-narrow.png",
+        "width": 1280
+      },
+      "case": "desktop-narrow",
+      "documentAfter": {
+        "clientHeight": 300,
+        "clientWidth": 466,
+        "dpr": 1,
+        "height": 300,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 300,
+          "scale": 1,
+          "width": 466
+        },
+        "width": 480
+      },
+      "documentBefore": {
+        "clientHeight": 300,
+        "clientWidth": 466,
+        "dpr": 1,
+        "height": 300,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 300,
+          "scale": 1,
+          "width": 466
+        },
+        "width": 480
+      },
+      "elapsedMs": 17,
+      "nativeAfter": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 800.0,
+          "width": 1280.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 300.0,
+          "width": 480.0,
+          "x": 10.25,
+          "y": 489.25
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "nativeBefore": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 800.0,
+          "width": 1280.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 300.0,
+          "width": 480.0,
+          "x": 10.25,
+          "y": 489.25
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "requested": {
+        "height": 800.0,
+        "width": 1280.0
+      }
+    },
+    {
+      "advertised": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-3b0ce1aed2d9496b97c667ff9451dc3c",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 1,
+        "resourceId": "bfe16b72-b3fb-453c-ab16-232d7be13fd9",
+        "sessionId": "3b0ce1ae-d2d9-496b-97c6-67ff9451dc3c",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 0.3760703125,
+          "height": 800.0,
+          "mode": "desktop",
+          "width": 1280.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/workspaces/first"
+      },
+      "capture": {
+        "height": 800,
+        "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/data/geometry-desktop-fractional.png",
+        "width": 1280
+      },
+      "case": "desktop-fractional",
+      "documentAfter": {
+        "clientHeight": 300,
+        "clientWidth": 467,
+        "dpr": 1,
+        "height": 300,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 300,
+          "scale": 1,
+          "width": 467
+        },
+        "width": 481
+      },
+      "documentBefore": {
+        "clientHeight": 300,
+        "clientWidth": 467,
+        "dpr": 1,
+        "height": 300,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 300,
+          "scale": 1,
+          "width": 467
+        },
+        "width": 481
+      },
+      "elapsedMs": 16,
+      "nativeAfter": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 800.0,
+          "width": 1280.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 300.85625,
+          "width": 481.37,
+          "x": 10.25,
+          "y": 488.39375
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "nativeBefore": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 800.0,
+          "width": 1280.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 300.85625,
+          "width": 481.37,
+          "x": 10.25,
+          "y": 488.39375
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "requested": {
+        "height": 800.0,
+        "width": 1280.0
+      }
+    },
+    {
+      "advertised": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-3b0ce1aed2d9496b97c667ff9451dc3c",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 1,
+        "resourceId": "72e7ac7c-1818-43db-9429-0a7708f4f53f",
+        "sessionId": "3b0ce1ae-d2d9-496b-97c6-67ff9451dc3c",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "mobile",
+          "displayScale": 0.8505094786729859,
+          "height": 844.0,
+          "mode": "mobile",
+          "width": 390.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/workspaces/first"
+      },
+      "capture": {
+        "height": 843,
+        "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/data/geometry-mobile-fractional.png",
+        "width": 390
+      },
+      "case": "mobile-fractional",
+      "documentAfter": {
+        "clientHeight": 717,
+        "clientWidth": 317,
+        "dpr": 1,
+        "height": 717,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 717,
+          "scale": 1,
+          "width": 317
+        },
+        "width": 331
+      },
+      "documentBefore": {
+        "clientHeight": 718,
+        "clientWidth": 318,
+        "dpr": 1,
+        "height": 718,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 718,
+          "scale": 1,
+          "width": 318
+        },
+        "width": 332
+      },
+      "elapsedMs": 11,
+      "nativeAfter": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 843.9999999999999,
+          "width": 390.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 717.83,
+          "width": 331.6986966824645,
+          "x": 15.035651658767733,
+          "y": 71.41999999999996
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "nativeBefore": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 843.9999999999999,
+          "width": 390.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 717.83,
+          "width": 331.6986966824645,
+          "x": 15.035651658767733,
+          "y": 71.41999999999996
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "requested": {
+        "height": 844.0,
+        "width": 390.0
+      }
+    },
+    {
+      "advertised": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-3b0ce1aed2d9496b97c667ff9451dc3c",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 1,
+        "resourceId": "d74f2734-14f7-4163-9ff1-c363548a086f",
+        "sessionId": "3b0ce1ae-d2d9-496b-97c6-67ff9451dc3c",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "tablet",
+          "displayScale": 0.5435286458333334,
+          "height": 1024.0,
+          "mode": "tablet",
+          "width": 768.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/workspaces/first"
+      },
+      "capture": {
+        "height": 1023,
+        "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/data/geometry-tablet-fractional.png",
+        "width": 768
+      },
+      "case": "tablet-fractional",
+      "documentAfter": {
+        "clientHeight": 556,
+        "clientWidth": 403,
+        "dpr": 1,
+        "height": 556,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 556,
+          "scale": 1,
+          "width": 403
+        },
+        "width": 417
+      },
+      "documentBefore": {
+        "clientHeight": 261,
+        "clientWidth": 403,
+        "dpr": 1,
+        "height": 261,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 261,
+          "scale": 1,
+          "width": 403
+        },
+        "width": 417
+      },
+      "elapsedMs": 17,
+      "nativeAfter": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 1023.9999999999999,
+          "width": 768.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 556.5733333333334,
+          "width": 417.43000000000006,
+          "x": 10.249999999999972,
+          "y": 232.67666666666662
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "nativeBefore": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 1023.9999999999999,
+          "width": 768.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 556.5733333333334,
+          "width": 417.43000000000006,
+          "x": 10.249999999999972,
+          "y": 232.67666666666662
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "requested": {
+        "height": 1024.0,
+        "width": 768.0
+      }
+    },
+    {
+      "advertised": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-3b0ce1aed2d9496b97c667ff9451dc3c",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 1,
+        "resourceId": "f5fd818e-c905-4f50-8395-289b9daf76cb",
+        "sessionId": "3b0ce1ae-d2d9-496b-97c6-67ff9451dc3c",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "desktop",
+          "displayScale": 0.28216145833333334,
+          "height": 1080.0,
+          "mode": "desktop",
+          "width": 1920.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/workspaces/first"
+      },
+      "capture": {
+        "height": 1080,
+        "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/data/geometry-custom-fractional.png",
+        "width": 1920
+      },
+      "case": "custom-fractional",
+      "documentAfter": {
+        "clientHeight": 304,
+        "clientWidth": 527,
+        "dpr": 1,
+        "height": 304,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 304,
+          "scale": 1,
+          "width": 527
+        },
+        "width": 541
+      },
+      "documentBefore": {
+        "clientHeight": 305,
+        "clientWidth": 528,
+        "dpr": 1,
+        "height": 305,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 305,
+          "scale": 1,
+          "width": 528
+        },
+        "width": 542
+      },
+      "elapsedMs": 34,
+      "nativeAfter": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 1080.0000000000002,
+          "width": 1920.0000000000002,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 304.734375,
+          "width": 541.75,
+          "x": 10.25,
+          "y": 484.515625
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "nativeBefore": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 1080.0000000000002,
+          "width": 1920.0000000000002,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 304.734375,
+          "width": 541.75,
+          "x": 10.25,
+          "y": 484.515625
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "requested": {
+        "height": 1080.0,
+        "width": 1920.0
+      }
+    },
+    {
+      "advertised": {
+        "backgroundOnly": false,
+        "documentCommitted": true,
+        "label": "session-browser-3b0ce1aed2d9496b97c667ff9451dc3c",
+        "loading": false,
+        "navigationError": null,
+        "navigationId": 1,
+        "resourceId": "fa0652ac-6885-4064-8bab-548bcd31660a",
+        "sessionId": "3b0ce1ae-d2d9-496b-97c6-67ff9451dc3c",
+        "title": "Gyro Fixture Original",
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "viewport": {
+          "device": "responsive",
+          "displayScale": 1.0,
+          "height": 418.0,
+          "mode": "responsive",
+          "width": 536.0
+        },
+        "visible": false,
+        "workspaceKey": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/workspaces/first"
+      },
+      "capture": {
+        "height": 418,
+        "path": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-gbOxPm/data/geometry-responsive.png",
+        "width": 536
+      },
+      "case": "responsive",
+      "documentAfter": {
+        "clientHeight": 418,
+        "clientWidth": 522,
+        "dpr": 1,
+        "height": 418,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 418,
+          "scale": 1,
+          "width": 522
+        },
+        "width": 536
+      },
+      "documentBefore": {
+        "clientHeight": 418,
+        "clientWidth": 522,
+        "dpr": 1,
+        "height": 418,
+        "marker": {
+          "clicks": "0",
+          "height": 12,
+          "width": 12,
+          "x": 80,
+          "y": 120
+        },
+        "url": "http://127.0.0.1:51308/browser-observation.html?label=Original",
+        "visual": {
+          "height": 418,
+          "scale": 1,
+          "width": 522
+        },
+        "width": 536
+      },
+      "elapsedMs": 8,
+      "nativeAfter": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 418.0,
+          "width": 536.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 418.0,
+          "width": 536.0,
+          "x": 10.25,
+          "y": 371.25
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "nativeBefore": {
+        "additionalSafeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0
+        },
+        "backingScale": 1.0,
+        "bounds": {
+          "height": 418.0,
+          "width": 536.0,
+          "x": 0.0,
+          "y": 0.0
+        },
+        "frame": {
+          "height": 418.0,
+          "width": 536.0,
+          "x": 10.25,
+          "y": 371.25
+        },
+        "hidden": true,
+        "parent": {
+          "height": 820.0,
+          "width": 1100.0
+        },
+        "safeArea": {
+          "bottom": 0.0,
+          "left": 0.0,
+          "right": 0.0,
+          "top": 1.25
+        },
+        "scroll": null,
+        "zoom": 1.0
+      },
+      "requested": {
+        "height": 418.0,
+        "width": 536.0
+      }
+    }
+  ],
+  "passed": false
+}

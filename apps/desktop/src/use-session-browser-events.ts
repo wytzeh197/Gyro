@@ -6,31 +6,47 @@ import type {
   BrowserViewportState,
   WorkbenchAction,
 } from "@gyro-dev/ui";
+import { sessionBrowserNative } from "./session-browser-native";
 
 export function useSessionBrowserEvents(dispatch: Dispatch<WorkbenchAction>) {
   useEffect(() => {
     if (!isTauri()) return;
+    let disposed = false;
     const unlisten = listen<{
       kind?: string;
       sessionId: string;
-      title?: string;
-      url?: string;
-      viewport?: BrowserViewportState;
+      resourceId?: string;
     }>("session-browser-event", ({ payload }) => {
+      if (disposed) return;
       const send = (action: WorkbenchAction) =>
         dispatch({
           type: "browser-session",
           sessionId: payload.sessionId,
           action,
         });
-      if (payload.kind === "loaded" && payload.url)
-        send({ type: "browser-loaded", url: payload.url });
-      if (payload.kind === "title" && payload.title !== undefined)
-        send({ type: "browser-title", title: payload.title });
-      if (payload.viewport)
-        send({ type: "browser-viewport", viewport: payload.viewport });
+      const kind = payload.kind;
+      if (
+        kind !== "loading" &&
+        kind !== "loaded" &&
+        kind !== "failed" &&
+        kind !== "title" &&
+        kind !== "viewport"
+      )
+        return;
+      void sessionBrowserNative.observe(
+        payload.sessionId,
+        payload.resourceId,
+        kind,
+        (snapshot) => {
+          if (disposed) return;
+          // The event may belong to a previous navigation in this resource.
+          // Publish one current snapshot, including its real loading state.
+          send({ type: "browser-native-state", ...snapshot });
+        },
+      );
     }).catch(() => undefined);
     return () => {
+      disposed = true;
       void unlisten.then((dispose) => dispose?.());
     };
   }, [dispatch]);
@@ -49,16 +65,18 @@ export async function changeSessionBrowserViewport(
     send({ type: "browser-device", device: mode });
     return;
   }
-  try {
-    const snapshot = await invoke<{ viewport: BrowserViewportState }>(
-      "session_browser_set_viewport",
-      {
-        sessionId,
-        request: { mode },
-      },
-    );
-    send({ type: "browser-viewport", viewport: snapshot.viewport });
-  } catch (error) {
-    onError(error);
-  }
+  await sessionBrowserNative.run(
+    sessionId,
+    () =>
+      invoke<{ viewport: BrowserViewportState }>(
+        "session_browser_set_viewport",
+        {
+          sessionId,
+          request: { mode },
+        },
+      ),
+    (snapshot) =>
+      send({ type: "browser-viewport", viewport: snapshot.viewport }),
+    onError,
+  );
 }

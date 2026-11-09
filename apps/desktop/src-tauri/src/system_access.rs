@@ -181,18 +181,20 @@ pub async fn open_system_access_settings(scope: SystemAccessScopeId) -> Result<(
         tauri::async_runtime::spawn_blocking(move || {
             let mut command = std::process::Command::new("open");
             command.arg(scope.settings_url());
-            let output = super::run_bounded_command(
+            let output = crate::command_execution::run_bounded_command(
                 &command,
                 std::time::Duration::from_secs(5),
                 None,
                 4096,
                 4096,
             )
-            .map_err(super::to_string)?;
+            .map_err(crate::stores::to_string)?;
             if !output.succeeded() {
-                return Err(
-                    super::bounded_command_error("open System Settings", &output).to_string(),
-                );
+                return Err(crate::command_execution::bounded_command_error(
+                    "open System Settings",
+                    &output,
+                )
+                .to_string());
             }
             Ok(())
         })

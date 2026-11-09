@@ -17,6 +17,7 @@ import {
   isGenericProviderToolLabel,
   isRunPhaseLive,
   liveWindow,
+  partitionSegmentCalls,
   runCallText,
   runHeaderLabel,
   runRetryText,
@@ -1598,6 +1599,24 @@ const call = (id, item, repeat) => ({
   ...(repeat ? { repeat } : {}),
 });
 
+const completedRead = call("completed-read", { kind: "read", path: "a.ts" });
+const pendingFirst = call("parallel-first", { kind: "command", command: "first", status: "running" });
+const failedCall = call("failed-call", { kind: "command", command: "failed", status: "failed" });
+const pendingSecond = call("parallel-second", { kind: "command", command: "second", status: "running" });
+assert.deepEqual(
+  partitionSegmentCalls([pendingFirst, completedRead, failedCall, pendingSecond]),
+  { completed: [completedRead], visible: [pendingFirst, failedCall, pendingSecond] },
+  "only confirmed history folds; every parallel running call and failure stays visible in order",
+);
+const commentarySegments = segmentRunSteps([
+  completedRead,
+  { kind: "say", id: "between-calls", at: at(1), text: "The retry limit is ready. I am checking the failure case." },
+  pendingFirst,
+]);
+assert.deepEqual(commentarySegments.map(segment => segment.kind), ["work", "say", "work"],
+  "folding work must not swallow or reorder the model's progress paragraph");
+assert.deepEqual(partitionSegmentCalls([]), { completed: [], visible: [] });
+
 assert.deepEqual(
   segmentRunSteps([
     { kind: "status", id: "r1", at: at(0), text: "Planning" },
@@ -2091,3 +2110,17 @@ assert.equal(
 );
 
 console.log("chat run checks passed");
+
+// Failed inspections keep the requested target separate from the error.
+for (const [capabilityId, inspection, expectedKind, expectedTarget] of [
+  ["workspace-search", {query:"pointerDrag|useChatPointer|begin.*Drag",path:"packages/ui/src/surfaces.tsx"}, "search", "pointerDrag|useChatPointer|begin.*Drag"],
+  ["workspace-read", {path:"packages/ui/src/not-created-yet.ts"}, "read", "packages/ui/src/not-created-yet.ts"],
+]) {
+  const error="open workspace file: No such file or directory";
+  const item=workItemFromEvent({id:"failed-tool",sessionId:"chat",turnId:"turn",createdAt:new Date(0).toISOString(),kind:"system-event",message:error,
+    payload:{schema:"gyro.capability.v1",kind:"capability-call",capabilityId,status:"failed",summary:error,inspection}});
+  assert.equal(item.kind,expectedKind);
+  assert.equal(item.kind==="search" ? item.query : item.path,expectedTarget);
+  assert.equal(item.error,error);
+  assert.match(runCallText({kind:"work",id:"row",at:new Date(0).toISOString(),item}).label,/failed/);
+}

@@ -432,10 +432,10 @@
   border-radius: var(--gyro-chat-canvas-radius);
 }
 
-:root[data-theme] .gyro-chat-companion-content .gyro-side-chat-empty h1 {
+:root[data-theme] .gyro-chat-companion-content .gyro-side-chat-empty h2 {
   font-size: var(--gyro-font-lead);
-  font-weight: 500;
-  line-height: 1.5;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 /* Plan retains its document/steps switch and state semantics. The document is
@@ -565,7 +565,7 @@
 :root[data-theme]
   .gyro-chat-surface
   .gyro-chat-environment-popover
-  .gyro-environment-row:not(.is-commit) {
+  .gyro-environment-row:not(.is-commit, .is-plan-row) {
   grid-template-columns: 15px minmax(64px, 0.9fr) minmax(0, 1fr) 13px;
   column-gap: var(--gyro-space-standard);
 }

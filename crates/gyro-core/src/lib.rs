@@ -38,6 +38,7 @@ pub mod policy;
 pub mod process_guard;
 pub mod project_import;
 pub mod provider_contract;
+pub mod provider_cooldown;
 pub mod provider_health;
 pub mod provider_install;
 pub mod provider_observation;
@@ -69,14 +70,15 @@ pub use automations::{
 pub use capabilities::{
     advertised_capability_descriptors, capability_advertised_for_mode, capability_descriptor,
     capability_path_is_sensitive, normalize_capability_relative_path, provider_capability_manifest,
-    provider_capability_support, sanitize_capability_summary, validate_capability_result_data,
-    CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent, CapabilityClass,
-    CapabilityDescriptor, CapabilityError, CapabilityId, CapabilityInvocationContext,
-    CapabilityPolicySnapshot, CapabilityRequest, CapabilityResourceRef, CapabilityResponse,
-    CapabilityResult, CapabilityRunMode, CapabilityStatus, ProjectCapabilityGrant,
-    ProjectCapabilityPolicy, ProviderCapabilitySupport, WorkspaceContextSnapshot,
-    CAPABILITY_DESCRIPTORS, CAPABILITY_SCHEMA_V1, MAX_CAPABILITY_RESULT_BYTES,
-    PROVIDER_CAPABILITY_IPC_SCHEMA_V1, PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1,
+    provider_capability_support, provider_capability_support_with_kind,
+    sanitize_capability_summary, validate_capability_result_data, CapabilityAccess,
+    CapabilityApprovalDecision, CapabilityCallEvent, CapabilityClass, CapabilityDescriptor,
+    CapabilityError, CapabilityId, CapabilityInvocationContext, CapabilityPolicySnapshot,
+    CapabilityRequest, CapabilityResourceRef, CapabilityResponse, CapabilityResult,
+    CapabilityRunMode, CapabilityStatus, ProjectCapabilityGrant, ProjectCapabilityPolicy,
+    ProviderCapabilitySupport, WorkspaceContextSnapshot, CAPABILITY_DESCRIPTORS,
+    CAPABILITY_SCHEMA_V1, MAX_CAPABILITY_RESULT_BYTES, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+    PROVIDER_CAPABILITY_MANIFEST_SCHEMA_V1,
 };
 pub use cli_install::{
     provider_cli_install_plan, CliInstallMethod, CliInstallPlan, CliInstallPlanReport,
@@ -236,3 +238,5 @@ pub use worktrees::{
     create_worktree, git_top_level, slugify as slugify_worktree_name, validate_branch_name,
     validate_worktree_name, WorktreeSessionPlan,
 };
+
+pub mod provider_runtime;

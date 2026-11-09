@@ -1,0 +1,13 @@
+{
+  "data": "/private/tmp/gyro-browser-focus-tests-_rxff2j3/data",
+  "command": [
+    "cargo",
+    "test",
+    "--offline",
+    "--locked",
+    "-p",
+    "gyro-desktop",
+    "--lib",
+    "browser"
+  ]
+}

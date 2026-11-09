@@ -8,6 +8,7 @@
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  CliSessionList,
   TerminalPanel,
   terminalDefaultProfiles,
   type TerminalPane,
@@ -70,17 +71,32 @@ const modelPane: TerminalPane = {
 
 const panes = [shellPane, taskPane, modelPane];
 const profiles = terminalDefaultProfiles();
+const sessionNavigation = appearance.has("sessions");
+const sessionPanes = sessionNavigation ? [
+  shellPane, taskPane,
+  ...["Build", "Tests", "Server"].map((title, index): TerminalPane => ({
+    ...basePane, id: `pane-extra-${index}`, title, command: "pnpm check",
+    output: `$ pnpm check\n${title} ready`,
+  })),
+] : panes;
 
 function Fixture() {
   const [selectedPaneId, setSelectedPaneId] = useState<string>(shellPane.id);
+  const [closeCount, setCloseCount] = useState(0);
   const choices = [
     { id: shellPane.id, label: "Select shell" },
     { id: taskPane.id, label: "Select task terminal" },
     { id: modelPane.id, label: "Select model terminal" },
   ];
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-      <nav
+    <div data-close-count={closeCount} style={sessionNavigation
+      ? { height: "100vh", display: "grid", gridTemplateColumns: "224px minmax(0, 1fr)" }
+      : { height: "100vh", display: "flex", flexDirection: "column" }}>
+      {sessionNavigation ? <aside style={{ borderRight: "1px solid var(--gyro-border-soft)", background: "var(--gyro-pane)", padding: "12px 8px" }}>
+        <CliSessionList items={sessionPanes.map((pane) => ({ pane, status: pane.status }))}
+          selectedId={selectedPaneId} onBack={() => {}} onSelect={setSelectedPaneId}
+          onClose={() => setCloseCount((count) => count + 1)} />
+      </aside> : <nav
         aria-label="Terminal selection"
         style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: 12 }}
       >
@@ -94,12 +110,13 @@ function Fixture() {
             {choice.label}
           </button>
         ))}
-      </nav>
-      <div style={{ flex: 1, minHeight: 0 }}>
+      </nav>}
+      <div style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
         <TerminalPanel
+          sessionNavigation={sessionNavigation}
           activeProfileId="shell"
           onAddTerminalPane={() => {}}
-          onCloseTerminalPane={() => {}}
+          onCloseTerminalPane={() => setCloseCount((count) => count + 1)}
           onMoveTerminalPane={() => {}}
           onOpenCommandPalette={() => {}}
           onProfileChange={() => {}}
@@ -113,7 +130,7 @@ function Fixture() {
             <pre style={{ margin: 0, padding: 12 }}>{pane.output}</pre>
           )}
           selectedTerminalPaneId={selectedPaneId}
-          terminalPanes={panes}
+          terminalPanes={sessionPanes}
         />
       </div>
     </div>

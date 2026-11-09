@@ -21,6 +21,7 @@ import {
   Columns2,
   Command,
   Copy,
+  CreditCard,
   CornerDownRight,
   Download,
   Edit3,
@@ -87,6 +88,7 @@ import {
   XCircle,
   createLucideIcon,
 } from "lucide-react";
+import { branchCommitDetail, recentBranches } from "./branch-recency";
 import {
   Fragment,
   memo,
@@ -109,7 +111,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
-import { AppPreviewPanel } from "./app-preview-panel";
+import { AppPreviewPanel, useAppPreviewMenu } from "./app-preview-panel";
 import { AppearanceSettings } from "./appearance-settings";
 import {
   parseAssistantResponseHeading,
@@ -148,6 +150,7 @@ import {
   parseChatMarkdownLink,
 } from "./chat-file-links";
 import { createTranscriptTurnCache } from "./chat-history-efficiency";
+import { memoWithStableCallbacks } from "./stable-callback-props";
 import {
   chatMediaFiles,
   deliverChatMediaDrop,
@@ -159,7 +162,11 @@ import {
   startChatPointerDrag,
 } from "./chat-pointer-drag";
 import { ChatQuestionPopup } from "./chat-question-popup";
-import { latestChatQuestions, parseChatAnswers } from "./chat-questions";
+import {
+  CHAT_QUESTION_REVEAL_EVENT,
+  latestChatQuestions,
+  parseChatAnswers,
+} from "./chat-questions";
 import {
   beginChatPaneDrag,
   chatDragSource,
@@ -268,11 +275,22 @@ import { SettingsTransferPanel } from "./settings-transfer-panel";
 import { type SidebarProjectSettings } from "./sidebar-project-card";
 import {
   pendingSubagentApprovals,
+  subagentsForStatus,
   type SubagentSurfaceState,
 } from "./subagents";
 import { SubagentsEnvironment } from "./subagents-environment";
 import { SubagentMark, SubagentPanel, SubagentStrip } from "./subagents-view";
 import { navigateTabList } from "./tab-navigation";
+import {
+  beginTerminalSessionDrag,
+  dropTerminalSessionDrag,
+  finishTerminalSessionDrag,
+  hoverTerminalSessionDrag,
+  placeTerminalSessionByKeyboard,
+  startTerminalSessionPointerDrag,
+  subscribeTerminalSessionDrag,
+  subscribeTerminalSessionDrop,
+} from "./terminal-session-drag";
 import {
   activeTerminalPaneId,
   listedTerminalPanes,
@@ -384,6 +402,7 @@ import {
   runNeedsFinalResponse,
 } from "./chat-run";
 import { ChatRun } from "./chat-run-view";
+import { providerQuotaNotice } from "./provider-quota";
 import { browserCapabilityText } from "./chat-run.ts";
 import {
   interleaveModelSwitches,
@@ -417,6 +436,7 @@ import {
 import type { EnvironmentActionIntent } from "./environment-actions";
 import {
   environmentActions,
+  environmentFocus,
   environmentNotice,
   environmentSync,
   middleTruncate,
@@ -483,6 +503,7 @@ import {
   type TurnTokenReading,
   type TurnTokens,
 } from "./turn-tokens";
+import { formatCompactTokenCount } from "./token-count";
 import type {
   AppDestination,
   Automation,
@@ -603,6 +624,8 @@ import {
 } from "./usage-ledger";
 import { remainingUsage } from "./usage-remaining";
 import {
+  CHAT_SIDEBAR_MAX_WIDTH,
+  CHAT_SIDEBAR_MIN_WIDTH,
   CLI_LAUNCH_PRESET_MAX_PANES,
   canSendChat,
   chatGridReducer,
@@ -619,6 +642,7 @@ import {
   workspaceModeTechnicalHint,
 } from "./workspace-mode";
 import { workspaceRelativeFilePath } from "./workspace-project";
+import { useSidebarResize } from "./use-sidebar-resize";
 import {
   workspaceCommandRegistry,
   workspacePanelContributions,
@@ -664,13 +688,18 @@ const IDE_SIDEBAR_KEYBOARD_STEP = 16;
 const AI_VIEW_SIDEBAR_MINIMUM_WIDTH = 440;
 const SOURCE_CONTROL_SIDEBAR_MINIMUM_WIDTH = 360;
 function restingSidebarWidth() {
-  if (typeof window === "undefined") {
-    return 240;
-  }
-  if (window.innerWidth <= 980) {
+  return restingSidebarWidthFor(
+    typeof window === "undefined" ? 1440 : window.innerWidth,
+  );
+}
+/** A dragged Sessions sidebar never takes more than this share of the window. */
+const CHAT_SIDEBAR_MAX_VIEWPORT_SHARE = 0.3;
+/** Mirrors the Sessions sidebar breakpoints in styles.css. */
+function restingSidebarWidthFor(viewportWidth: number) {
+  if (viewportWidth <= 980) {
     return 190;
   }
-  if (window.innerWidth <= 1280) {
+  if (viewportWidth <= 1280) {
     return 224;
   }
   return 240;
@@ -715,72 +744,180 @@ function ChatSwitcher({
   chatSwitcher: NonNullable<ChatSurfaceProps["chatSwitcher"]>;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const switcherRef = useOutsidePointerDismiss<HTMLDivElement>(isOpen, () =>
-    setIsOpen(false),
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useOutsidePointerDismiss<HTMLDivElement>(
+    isOpen,
+    () => setIsOpen(false),
+    triggerRef,
   );
+  // The list is portaled onto the workspace chat so it can fill that column.
+  // A menu anchored to the trigger cannot: the trigger sits in a 24px corner.
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  const menuId = useId();
+
+  useLayoutEffect(() => {
+    const surface = triggerRef.current?.closest(".gyro-chat-surface");
+    setHost(
+      surface instanceof HTMLElement &&
+        surface.closest(".gyro-sidebar-ai-chat")
+        ? surface
+        : null,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const frame = requestAnimationFrame(() => {
+      panelRef.current
+        ?.querySelector<HTMLElement>('[role="menuitem"]')
+        ?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [isOpen]);
+
+  const close = () => setIsOpen(false);
+  const menu =
+    host && isOpen ? (
+      <div className="gyro-chat-mini-sidebar-layer" id={menuId} ref={panelRef}>
+        <button
+          aria-label="Close chats"
+          className="gyro-chat-mini-sidebar-scrim"
+          onClick={close}
+          type="button"
+        />
+        <div
+          aria-label="Chats"
+          className="gyro-chat-mini-sidebar"
+          role="menu"
+        >
+          <div className="gyro-sidebar-actions">
+            <button
+              className="gyro-sidebar-action"
+              onClick={() => {
+                close();
+                chatSwitcher.onNewChat();
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <Plus size={15} />
+              <span>New chat</span>
+            </button>
+          </div>
+          <div className="gyro-sidebar-project-chat-list">
+            <div className="gyro-sidebar-small-title">Recents</div>
+            {chatSwitcher.chats.length > 0 ? (
+              chatSwitcher.chats.map((chat) => {
+                const isActive = chat.id === chatSwitcher.activeChatId;
+                return (
+                  <div
+                    className={[
+                      "gyro-session-row",
+                      "is-draft",
+                      isActive ? "is-active" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    key={chat.id}
+                  >
+                    <button
+                      aria-current={isActive ? "page" : undefined}
+                      className="gyro-sidebar-thread-main"
+                      onClick={() => {
+                        close();
+                        chatSwitcher.onSelect(chat.id);
+                      }}
+                      role="menuitem"
+                      title={chat.title}
+                      type="button"
+                    >
+                      <span className="gyro-sidebar-thread-title">
+                        <span>{chat.title}</span>
+                      </span>
+                      {chat.meta ? <small>{chat.meta}</small> : null}
+                    </button>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="gyro-sidebar-recents-empty">
+                No other chats in this project
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    ) : isOpen ? (
+      <div
+        className="gyro-chat-switcher-menu"
+        id={menuId}
+        ref={panelRef}
+        role="menu"
+      >
+        <button
+          className="gyro-chat-switcher-item is-action"
+          onClick={() => {
+            close();
+            chatSwitcher.onNewChat();
+          }}
+          role="menuitem"
+          type="button"
+        >
+          <Plus size={13} />
+          New chat
+        </button>
+        {chatSwitcher.chats.length > 0 ? (
+          <>
+            <span className="gyro-chat-switcher-label">Recent</span>
+            {chatSwitcher.chats.map((chat) => (
+              <button
+                aria-current={
+                  chat.id === chatSwitcher.activeChatId ? "true" : undefined
+                }
+                className={
+                  chat.id === chatSwitcher.activeChatId
+                    ? "gyro-chat-switcher-item is-active"
+                    : "gyro-chat-switcher-item"
+                }
+                key={chat.id}
+                onClick={() => {
+                  close();
+                  chatSwitcher.onSelect(chat.id);
+                }}
+                role="menuitem"
+                title={chat.title}
+                type="button"
+              >
+                <MessageSquare size={13} />
+                <span>{chat.title}</span>
+                {chat.meta ? <small>{chat.meta}</small> : null}
+              </button>
+            ))}
+          </>
+        ) : (
+          <div className="gyro-chat-switcher-empty">
+            No other chats in this project
+          </div>
+        )}
+      </div>
+    ) : null;
 
   return (
-    <div className="gyro-chat-switcher" ref={switcherRef}>
+    <div className="gyro-chat-switcher">
       <button
+        aria-controls={menuId}
         aria-expanded={isOpen}
         aria-haspopup="menu"
         aria-label="Recent chats"
         className="gyro-chat-switcher-trigger"
         onClick={() => setIsOpen((open) => !open)}
+        ref={triggerRef}
         title="Recent chats"
         type="button"
       >
         <ChatSwitcherIcon />
       </button>
-      {isOpen ? (
-        <div className="gyro-chat-switcher-menu" role="menu">
-          <button
-            className="gyro-chat-switcher-item is-action"
-            onClick={() => {
-              setIsOpen(false);
-              chatSwitcher.onNewChat();
-            }}
-            role="menuitem"
-            type="button"
-          >
-            <Plus size={13} />
-            New chat
-          </button>
-          {chatSwitcher.chats.length > 0 ? (
-            <>
-              <span className="gyro-chat-switcher-label">Recent</span>
-              {chatSwitcher.chats.map((chat) => (
-                <button
-                  aria-current={
-                    chat.id === chatSwitcher.activeChatId ? "true" : undefined
-                  }
-                  className={
-                    chat.id === chatSwitcher.activeChatId
-                      ? "gyro-chat-switcher-item is-active"
-                      : "gyro-chat-switcher-item"
-                  }
-                  key={chat.id}
-                  onClick={() => {
-                    setIsOpen(false);
-                    chatSwitcher.onSelect(chat.id);
-                  }}
-                  role="menuitem"
-                  title={chat.title}
-                  type="button"
-                >
-                  <MessageSquare size={13} />
-                  <span>{chat.title}</span>
-                  {chat.meta ? <small>{chat.meta}</small> : null}
-                </button>
-              ))}
-            </>
-          ) : (
-            <div className="gyro-chat-switcher-empty">
-              No other chats in this project
-            </div>
-          )}
-        </div>
-      ) : null}
+      {host && menu ? createPortal(menu, host) : menu}
     </div>
   );
 }
@@ -830,6 +967,8 @@ type AppChromeProps = {
   onProviderReadinessAction?: () => void;
   workspaceSidebarHidden?: boolean;
   workspaceSidebarWidth?: number;
+  /** Saved width of the Sessions sidebar outside the code view. */
+  chatSidebarWidth?: number;
   workspacePreparation?: WorkspacePreparationProgress;
   onSelectSession: (sessionId: string) => void;
   onAddSessionToGrid?: (sessionId: string) => void;
@@ -936,6 +1075,8 @@ type AppChromeProps = {
   onUpdateAction?: (state: UpdateState) => void;
   onWorkspaceSidebarHiddenChange?: (hidden: boolean) => void;
   onWorkspaceSidebarWidthChange?: (width?: number) => void;
+  /** Omit to keep the Sessions sidebar at its fixed responsive width. */
+  onChatSidebarWidthChange?: (width?: number) => void;
   onRetryWorkspacePreparation?: () => void;
   /**
    * The AI view is the workspace's chat: the sidebar renders the same
@@ -1032,7 +1173,7 @@ const settingsSidebarItems: Array<{
   {
     id: "billing",
     label: "Plan & billing",
-    icon: Gauge,
+    icon: CreditCard,
     group: "Gyro account",
   },
   { id: "advanced", label: "Data & privacy", icon: Settings, group: "System" },
@@ -1807,6 +1948,7 @@ export function AppChrome({
   onProviderReadinessAction,
   workspaceSidebarHidden,
   workspaceSidebarWidth,
+  chatSidebarWidth,
   onSelectSession,
   onAddSessionToGrid,
   onSelectWorkspaceLayout,
@@ -1887,6 +2029,7 @@ export function AppChrome({
   onUpdateAction,
   onWorkspaceSidebarHiddenChange,
   onWorkspaceSidebarWidthChange,
+  onChatSidebarWidthChange,
   workspacePreparation,
   onRetryWorkspacePreparation,
   renderAiChat,
@@ -2004,6 +2147,27 @@ export function AppChrome({
   const [isIdeSidebarCustomized, setIsIdeSidebarCustomized] = useState(false);
   const [isIdeSidebarResizing, setIsIdeSidebarResizing] = useState(false);
   const appShellRef = useRef<HTMLDivElement>(null);
+  // The Sessions sidebar (every view but code, Settings included so the rail
+  // never jumps when Settings opens) keeps its own saved width, apart from the
+  // code view's, whose panels need other minimums.
+  const isChatSidebarResizable =
+    !isIdeSurface && onChatSidebarWidthChange !== undefined;
+  const chatSidebarResize = useSidebarResize({
+    targetRef: appShellRef,
+    cssVariable: "--gyro-chat-sidebar-width",
+    savedWidth: chatSidebarWidth,
+    defaultWidth: restingSidebarWidthFor,
+    minimumWidth: () => CHAT_SIDEBAR_MIN_WIDTH,
+    maximumWidth: (viewportWidth) =>
+      Math.min(
+        CHAT_SIDEBAR_MAX_WIDTH,
+        Math.round(viewportWidth * CHAT_SIDEBAR_MAX_VIEWPORT_SHARE),
+      ),
+    onCommit: onChatSidebarWidthChange,
+  });
+  const hasChatSidebarWidth =
+    isChatSidebarResizable &&
+    (chatSidebarResize.isCustomized || chatSidebarResize.isResizing);
 
   useEffect(() => {
     const compact = window.matchMedia("(max-width: 780px)");
@@ -2324,11 +2488,16 @@ export function AppChrome({
           : ""
       } ${isIdeSurface ? "is-workspace-chrome-active" : ""} ${
         isSidebarHidden ? "is-sidebar-hidden" : ""
-      } ${isIdeSidebarResizing ? "is-ide-sidebar-resizing" : ""} ${isCompactNavigationOpen ? "is-compact-navigation-open" : ""}`}
+      } ${isIdeSidebarResizing ? "is-ide-sidebar-resizing" : ""} ${
+        isChatSidebarResizable && chatSidebarResize.isResizing
+          ? "is-sidebar-resizing"
+          : ""
+      } ${hasChatSidebarWidth ? "has-chat-sidebar-width" : ""} ${isCompactNavigationOpen ? "is-compact-navigation-open" : ""}`}
       data-workspace-activity-rail={isIdeSurface ? "visible" : "hidden"}
       style={
         {
           "--gyro-ide-sidebar-width": `${ideSidebarWidth}px`,
+          "--gyro-chat-sidebar-width": `${chatSidebarResize.width}px`,
         } as CSSProperties
       }
       ref={appShellRef}
@@ -2805,6 +2974,14 @@ export function AppChrome({
               role="separator"
               tabIndex={0}
               title="Resize Workspace sidebar"
+            />
+          ) : null}
+          {isChatSidebarResizable && !isCompactNavigationOpen ? (
+            <div
+              {...chatSidebarResize.handleProps}
+              aria-label="Resize sidebar"
+              aria-description="Drag to resize. Use the Left and Right arrow keys to adjust, Home and End for limits. Double-click to reset."
+              className="gyro-ide-sidebar-resizer is-chat-sidebar-resizer"
             />
           ) : null}
         </aside>
@@ -5050,6 +5227,28 @@ export function ChatSurface({
 
   const [dismissedQuestionId, setDismissedQuestionId] = useState<string>();
   const questionRequest = useMemo(() => latestChatQuestions(events), [events]);
+  useLayoutEffect(() => {
+    const reveal = (event: Event) => {
+      const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail
+        ?.sessionId;
+      if (
+        !questionRequest ||
+        !sessionId ||
+        !events.some(
+          (item) => item.id === questionRequest.id && item.sessionId === sessionId,
+        )
+      ) return;
+      setDismissedQuestionId(undefined);
+      requestAnimationFrame(() => {
+        document
+          .getElementById(`${questionRequest.id}-question`)
+          ?.closest<HTMLElement>("form")
+          ?.focus({ preventScroll: true });
+      });
+    };
+    window.addEventListener(CHAT_QUESTION_REVEAL_EVENT, reveal);
+    return () => window.removeEventListener(CHAT_QUESTION_REVEAL_EVENT, reveal);
+  }, [events, questionRequest]);
   const showQuestionPopup =
     questionRequest &&
     questionRequest.id !== dismissedQuestionId &&
@@ -5259,6 +5458,10 @@ export function ChatSurface({
   const composerProviderUsage = contextModel.providerId
     ? providerUsageByProvider?.[contextModel.providerId]
     : undefined;
+  const composerQuotaNotice = useMemo(
+    () => providerQuotaNotice(transcriptEvents, contextModel.providerId),
+    [transcriptEvents, contextModel.providerId],
+  );
   const composerLedger = contextModel.providerId
     ? providerLedgerById?.[contextModel.providerId]
     : undefined;
@@ -5354,6 +5557,111 @@ export function ChatSurface({
   );
   // Browser connectivity belongs to the surface; history turns share it.
   const isOnline = useNetworkOnline();
+  // Per-turn props are built once per input change, not per render, so the
+  // memoized ChatTurn skips every turn a streamed delta did not touch.
+  // Parents pass inline handlers, so read the latest ones through a ref and
+  // keep one actions object for the life of the surface. A changing object
+  // would re-render every memoized transcript turn on each streamed delta.
+  const artifactHandlers = useRef({
+    handleArtifactPrompt,
+    onBrowserNavigate,
+    onBrowserOpenExternal,
+    onComposerAction,
+    onOpenToolPanel,
+    onSelectChatPanel,
+    openCanvas,
+  });
+  artifactHandlers.current = {
+    handleArtifactPrompt,
+    onBrowserNavigate,
+    onBrowserOpenExternal,
+    onComposerAction,
+    onOpenToolPanel,
+    onSelectChatPanel,
+    openCanvas,
+  };
+  const transcriptArtifactActions = useMemo<ChatArtifactActions>(() => {
+    const latest = () => artifactHandlers.current;
+    return {
+      onOpenCanvas: (...args: Parameters<typeof openCanvas>) =>
+        latest().openCanvas(...args),
+      onOpenPreview: (url) => {
+        const { onSelectChatPanel, onBrowserNavigate } = latest();
+        onSelectChatPanel?.("browser");
+        if (url && /^https?:\/\//i.test(url)) onBrowserNavigate?.(url);
+      },
+      onOpenFiles: () => {
+        const { onSelectChatPanel, onComposerAction } = latest();
+        if (onSelectChatPanel) onSelectChatPanel("files");
+        else onComposerAction?.("open-files");
+      },
+      // Artifact actions belong beside their owning conversation.
+      onOpenTool: (tab) => {
+        const { onSelectChatPanel, onOpenToolPanel } = latest();
+        if ((tab === "browser" || tab === "terminal") && onSelectChatPanel) {
+          onSelectChatPanel(tab);
+          return;
+        }
+        if (tab === "diff" && onSelectChatPanel) {
+          onSelectChatPanel("review");
+          return;
+        }
+        onOpenToolPanel?.(tab);
+      },
+      onOpenExternalPreview: () => latest().onBrowserOpenExternal?.(),
+      onSendPrompt: (...args: Parameters<typeof handleArtifactPrompt>) =>
+        latest().handleArtifactPrompt(...args),
+    };
+  }, []);
+  const keepAlivesByTurn = useMemo(() => {
+    const byTurn = new Map<string, KeepAliveWatch[]>();
+    for (const watch of keepAlives) {
+      if (!watch.turnId) continue;
+      const list = byTurn.get(watch.turnId);
+      if (list) list.push(watch);
+      else byTurn.set(watch.turnId, [watch]);
+    }
+    return byTurn;
+  }, [keepAlives]);
+  const latestCaptureSrc = browserPreview?.latestCapture?.src;
+  const latestCapturePath = browserPreview?.latestCapture?.path;
+  const hasLatestCapture = Boolean(browserPreview?.latestCapture);
+  const transcriptPreviewCapture = useMemo(
+    () =>
+      hasLatestCapture
+        ? { src: latestCaptureSrc, path: latestCapturePath }
+        : undefined,
+    [hasLatestCapture, latestCapturePath, latestCaptureSrc],
+  );
+  // One review object per turn, rebuilt only when review state changes.
+  const fileReviewByTurn = useMemo(
+    () => new Map<string, ChatTurnFileReview>(),
+    [
+      fileReviewPendingTurnIds,
+      fileReviewSummaries,
+      onFileReviewAsk,
+      onFileReviewKeep,
+    ],
+  );
+  const fileReviewForTurn = (
+    turnId: string,
+  ): ChatTurnFileReview | undefined => {
+    if (!isFileReviewEnabled) return undefined;
+    let review = fileReviewByTurn.get(turnId);
+    if (!review) {
+      review = {
+        summaries: fileReviewSummaries?.[turnId],
+        isSummarizing: fileReviewPendingTurnIds?.includes(turnId) ?? false,
+        onKeep: onFileReviewKeep
+          ? (path, contentHash) =>
+              onFileReviewKeep({ turnId, path, contentHash })
+          : undefined,
+        onAsk: onFileReviewAsk,
+      };
+      fileReviewByTurn.set(turnId, review);
+    }
+    return review;
+  };
   const transcriptContent = useMemo(
     () => (
       <>
@@ -5377,62 +5685,15 @@ export function ChatSurface({
             <ChatTurn
               isOnline={isOnline}
               subagents={subagents}
-              artifactActions={{
-                onOpenCanvas: openCanvas,
-                onOpenPreview: (url) => {
-                  onSelectChatPanel?.("browser");
-                  if (url && /^https?:\/\//i.test(url))
-                    onBrowserNavigate?.(url);
-                },
-                onOpenFiles: () =>
-                  onSelectChatPanel
-                    ? onSelectChatPanel("files")
-                    : onComposerAction?.("open-files"),
-                // Artifact actions belong beside their owning conversation.
-                onOpenTool: (tab) => {
-                  if (
-                    (tab === "browser" || tab === "terminal") &&
-                    onSelectChatPanel
-                  ) {
-                    onSelectChatPanel(tab);
-                    return;
-                  }
-                  if (tab === "diff" && onSelectChatPanel) {
-                    onSelectChatPanel("review");
-                    return;
-                  }
-                  onOpenToolPanel?.(tab);
-                },
-                onOpenExternalPreview: () => onBrowserOpenExternal?.(),
-                onSendPrompt: handleArtifactPrompt,
-              }}
+              artifactActions={transcriptArtifactActions}
               isActive={turn.id === activeTurnId}
-              keepAlives={keepAlives.filter(
-                (watch) => watch.turnId === turn.id,
-              )}
+              keepAlives={keepAlivesByTurn.get(turn.id) ?? NO_KEEP_ALIVES}
               liveChangesTarget={liveChangesTarget}
               onOpenBrowserUrl={onBrowserNavigate}
               onOpenKeepAlive={onOpenKeepAlive}
               onRelaunchKeepAlive={onRelaunchKeepAlive}
               onStopKeepAlive={onStopKeepAlive}
-              fileReview={
-                isFileReviewEnabled
-                  ? {
-                      summaries: fileReviewSummaries?.[turn.id],
-                      isSummarizing:
-                        fileReviewPendingTurnIds?.includes(turn.id) ?? false,
-                      onKeep: onFileReviewKeep
-                        ? (path, contentHash) =>
-                            onFileReviewKeep({
-                              turnId: turn.id,
-                              path,
-                              contentHash,
-                            })
-                        : undefined,
-                      onAsk: onFileReviewAsk,
-                    }
-                  : undefined
-              }
+              fileReview={fileReviewForTurn(turn.id)}
               key={turn.id}
               onLoadChangeDiff={onLoadChangeDiff}
               onOpenChanges={(path, files) => {
@@ -5464,14 +5725,7 @@ export function ChatSurface({
               isPlanInPanel={activeRailPanel === "plan"}
               onOpenPlanPanel={onTogglePlanPanel}
               plan={sessionPlan}
-              previewCapture={
-                browserPreview?.latestCapture
-                  ? {
-                      src: browserPreview.latestCapture.src,
-                      path: browserPreview.latestCapture.path,
-                    }
-                  : undefined
-              }
+              previewCapture={transcriptPreviewCapture}
               sourceControl={sourceControl}
               sourceControlBaseline={turnSourceControlBaselines?.[turn.id]}
               turn={turn}
@@ -5512,8 +5766,10 @@ export function ChatSurface({
       railDiffTools?.onSelectFile,
       handlePlanDecision,
       handleArtifactPrompt,
-      browserPreview?.latestCapture?.path,
-      browserPreview?.latestCapture?.src,
+      transcriptArtifactActions,
+      transcriptPreviewCapture,
+      keepAlivesByTurn,
+      fileReviewByTurn,
       sourceControl,
       turnSourceControlBaselines,
       activeTurnId,
@@ -5660,6 +5916,7 @@ export function ChatSurface({
         (onOpenCompanionTab ?? onSelectChatPanel)?.(tab);
       }}
       onSelectTab={onSelectChatPanel}
+      onShowEnvironment={!isTiled ? onToggleEnvironmentRail : undefined}
       onShowLauncher={onShowCompanionLauncher}
       onToggleToolPanel={isToolPanelAvailable ? onToggleToolPanel : undefined}
       isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
@@ -5672,11 +5929,9 @@ export function ChatSurface({
           ? "New tab"
           : browserPreviewHostLabel(browserPreview?.url) || "Browser")
       }
-      width={
-        activeCompanionTab === "browser"
-          ? (browserCompanionWidth ?? BROWSER_COMPANION_DEFAULT_WIDTH)
-          : companionWidth
-      }
+      // One width for every tool: switching tabs must not resize the panel the
+      // user sized. The browser earns more room only when the user drags it.
+      width={companionWidth}
     >
       {displayedRailPanel === "canvas" ? (
         <ChatCanvas
@@ -5733,8 +5988,8 @@ export function ChatSurface({
       ) : displayedRailPanel === "side-chat" ? (
         <SideChatPanel
           onOpenBrowserUrl={onBrowserNavigate}
+          parentTitle={sessionTitle}
           sideChat={sideChat}
-          workspacePath={workspacePath}
           renderComposer={({ draft, onDraftChange, onSend, isSending }) => (
             <Composer
               config={config}
@@ -5756,6 +6011,7 @@ export function ChatSurface({
               shellReady={shellReady && Boolean(sideChat?.onSend)}
               isCliUpdating={isCliUpdating}
               dictation={dictation}
+              placeholder="Ask about this chat…"
               showContextRow={false}
             />
           )}
@@ -5771,6 +6027,7 @@ export function ChatSurface({
     <ChatEnvironmentPopover
       attachments={attachments}
       branchLabel={environmentBranchLabel}
+      isRunning={Boolean(isComposerSending)}
       branchItems={branchPopoverItems({
         branchCatalog,
         branchName: environmentBranchLabel,
@@ -5936,6 +6193,7 @@ export function ChatSurface({
             providerLedger={composerLedger}
             dailyPaceWarning={dailyPaceWarning}
             limitWindows={composerLimits}
+            quotaNotice={composerQuotaNotice}
             canCompactContext={canCompactContext}
             savedProjects={savedProjects}
             shellReady={shellReady}
@@ -6118,7 +6376,9 @@ export function ChatSurface({
             onToggleToolPanel={onToggleToolPanel}
             planItemCount={sessionPlan?.items.length ?? 0}
             showClose={isTiled}
-            showEnvironment
+            // While the dock is open its header carries this toggle, in the
+            // same spot beside the panel toggle, so nothing jumps sideways.
+            showEnvironment={!(isCompanionPanel && !isTiled)}
             showOverflow={false}
             showToolPanel={isToolPanelAvailable}
           />
@@ -6252,6 +6512,7 @@ export function ChatSurface({
             providerLedger={composerLedger}
             dailyPaceWarning={dailyPaceWarning}
             limitWindows={composerLimits}
+            quotaNotice={composerQuotaNotice}
             canCompactContext={canCompactContext}
             savedProjects={savedProjects}
             shellReady={shellReady}
@@ -7515,6 +7776,7 @@ function ChatCompanionDock({
   onCloseTab,
   onOpenTab,
   onSelectTab,
+  onShowEnvironment,
   onShowLauncher,
   onToggleToolPanel,
   onWidthChange,
@@ -7534,6 +7796,9 @@ function ChatCompanionDock({
   onCloseTab?: (tab: ChatCompanionTabId) => void;
   onOpenTab?: (tab: ChatCompanionTabId) => void;
   onSelectTab?: (panel: ChatSidePanelId) => void;
+  /** Hands the right edge back to the Environment. The button sits where the
+      top bar's Environment toggle sits while the dock is closed. */
+  onShowEnvironment?: () => void;
   onShowLauncher?: () => void;
   onToggleToolPanel?: () => void;
   onWidthChange?: (width: number, mode?: ChatCompanionWidthMode) => void;
@@ -7560,8 +7825,7 @@ function ChatCompanionDock({
   const dockRef = useRef<HTMLElement | null>(null);
   const focusTabAfterCloseRef = useRef(false);
   const panelId = useId();
-  const widthMode: ChatCompanionWidthMode =
-    activeTab === "browser" ? "browser" : "tool";
+  const widthMode: ChatCompanionWidthMode = "tool";
   const {
     availableWidth,
     beginResize,
@@ -7694,6 +7958,7 @@ function ChatCompanionDock({
   }, [isVisible, selectedTab?.key, tabs.length]);
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       const surface =
         sharedHost?.frameRef.current ?? dockRef.current?.parentElement;
       if (!isVisible || !surface || !surface.contains(document.activeElement))
@@ -7863,6 +8128,17 @@ function ChatCompanionDock({
               type="button"
             >
               <PanelBottom size={14} />
+            </button>
+          ) : null}
+          {onShowEnvironment ? (
+            <button
+              aria-label="Environment"
+              aria-pressed={false}
+              onClick={onShowEnvironment}
+              title="Environment"
+              type="button"
+            >
+              <SlidersHorizontal size={14} />
             </button>
           ) : null}
           <button
@@ -8128,13 +8404,21 @@ function CompanionFiles({
  * The session is transient — it never reaches the sidebar or history, and
  * closing the tab deletes it.
  */
+const SIDE_CHAT_STARTERS = [
+  "Summarize this chat so far",
+  "What is left to do?",
+  "Explain the last change",
+] as const;
+
 function SideChatPanel({
   onOpenBrowserUrl,
+  parentTitle,
   sideChat,
   renderComposer,
-  workspacePath,
 }: {
   onOpenBrowserUrl?: (url: string) => void;
+  /** The chat this side chat reads, named so the two are never confused. */
+  parentTitle?: string;
   sideChat?: SideChatState;
   renderComposer: (props: {
     draft: string;
@@ -8142,7 +8426,6 @@ function SideChatPanel({
     onSend: () => void;
     isSending: boolean;
   }) => ReactNode;
-  workspacePath?: string;
 }) {
   const [draft, setDraft] = useState("");
   const transcriptRef = useRef<HTMLDivElement | null>(null);
@@ -8164,25 +8447,33 @@ function SideChatPanel({
   return (
     <div className="gyro-side-chat">
       <p className="gyro-side-chat-context">
-        Reads this chat · replies stay here · cleared when this tab closes.
+        <MessageSquare aria-hidden="true" size={13} />
+        <span>
+          Side chat about{" "}
+          <strong title={parentTitle ?? "This chat"}>
+            {parentTitle?.trim() || "this chat"}
+          </strong>
+        </span>
       </p>
       <div className="gyro-side-chat-transcript" ref={transcriptRef}>
         {messages.length === 0 && !sideChat?.streamingMessage ? (
-          <div className="gyro-side-chat-empty gyro-chat-start">
-            <h1>
-              {workspacePath ? (
-                <>
-                  What should we do in{" "}
-                  <ChatStartWorkspaceLabel
-                    name={workspaceName(workspacePath)}
-                    path={workspacePath}
-                  />
-                  ?
-                </>
-              ) : (
-                "What should we work on?"
-              )}
-            </h1>
+          <div className="gyro-side-chat-empty">
+            <h2>Ask about this chat</h2>
+            <p>
+              Gyro reads the conversation so far. Replies stay in this panel and
+              never reach the main chat; they clear when the tab closes.
+            </p>
+            <div className="gyro-side-chat-starters">
+              {SIDE_CHAT_STARTERS.map((starter) => (
+                <button
+                  key={starter}
+                  onClick={() => setDraft(starter)}
+                  type="button"
+                >
+                  {starter}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           <>
@@ -8490,8 +8781,15 @@ function ChatContextSection({
   );
 }
 
-/** 358444 is unreadable at a glance; 358,444 is not. */
+/** Exact below 10,000; larger totals read at a glance as +170K, not +169,614. */
 function formatEnvironmentCount(value: number) {
+  return value < 10_000
+    ? value.toLocaleString("en-US")
+    : formatCompactTokenCount(value);
+}
+
+/** The exact figure stays one hover away for the compact totals above. */
+function formatEnvironmentCountExact(value: number) {
   return value.toLocaleString("en-US");
 }
 
@@ -8499,6 +8797,7 @@ export function ChatEnvironmentPopover({
   attachments,
   branchLabel,
   branchItems,
+  isRunning,
   onBranchAction,
   onClose,
   onOpenPlan,
@@ -8516,6 +8815,8 @@ export function ChatEnvironmentPopover({
   attachments: ChatAttachment[];
   branchLabel: string;
   branchItems: ComposerPopoverItem[];
+  /** The chat is mid-turn: what it is working on leads the card. */
+  isRunning?: boolean;
   onBranchAction?: (action: string) => void;
   onClose?: () => void;
   onOpenPlan?: () => void;
@@ -8544,9 +8845,28 @@ export function ChatEnvironmentPopover({
   const currentPlanStep = plan?.items.find(
     (item) => item.status === "in-progress",
   );
+  const nextPlanStep = plan?.items.find((item) => item.status === "todo");
   const hasPlan = planSteps > 0 || Boolean(plan?.content);
-  // The steps unfold in place; they start open while the model works on one.
-  const [showPlan, setShowPlan] = useState(isPlanWorking);
+  const workingSubagents = subagents
+    ? subagentsForStatus(subagents.agents, "working").length
+    : 0;
+  const focus = environmentFocus({
+    canRunGitActions: Boolean(onRunGitAction),
+    isRunning,
+    planCurrent: currentPlanStep
+      ? (plan?.items.indexOf(currentPlanStep) ?? 0) + 1
+      : undefined,
+    planDone,
+    planSteps,
+    sourceControl,
+    workingSubagents,
+  });
+  // The steps unfold on their own while the chat works through them and fold
+  // away once it settles, until the user opens or closes them by hand.
+  const [planToggle, setPlanToggle] = useState<boolean>();
+  const isPlanLive =
+    focus.focus === "working" && planSteps > 0 && planDone < planSteps;
+  const showPlan = planToggle ?? isPlanLive;
   const planStepsId = useId();
   const branchMenuId = useId();
   const runningProcesses = (terminalPanes ?? []).filter(
@@ -8605,11 +8925,325 @@ export function ChatEnvironmentPopover({
       : changeTotals.kind === "working-tree"
         ? "Uncommitted"
         : "Changes";
+  // Two greyed rows saying there is nothing to do is noise; one says it.
+  const allActions = environmentActions(sourceControl);
+  const enabledActions = allActions.filter((action) => action.enabled);
+  const visibleActions = enabledActions.length
+    ? enabledActions
+    : allActions.slice(0, 1);
+
+  const treeBlock = (
+    <>
+      <section className="gyro-environment-section">
+        <header>
+          <span>Working tree</span>
+          {treeKnown && changedFileCount ? (
+            <small>
+              {formatEnvironmentCount(changedFileCount)}{" "}
+              {changedFileCount === 1 ? "file" : "files"}
+            </small>
+          ) : null}
+        </header>
+        <div className="gyro-chat-environment-popover-rows">
+          <button
+            aria-label={`Open changes, ${changesDetail}, ${changeScope}`}
+            className="gyro-environment-row"
+            onClick={openReview}
+            title={changeScope}
+            type="button"
+          >
+            <FileDiff aria-hidden="true" size={14} />
+            <span className="gyro-environment-label">{changesLabel}</span>
+            <span
+              className="gyro-environment-value is-changed"
+              title={
+                hasChangeTotals
+                  ? `${formatEnvironmentCountExact(changeTotals.additions)} lines added, ${formatEnvironmentCountExact(changeTotals.deletions)} removed`
+                  : undefined
+              }
+            >
+              {hasChangeTotals ? (
+                <>
+                  <span className="is-added">
+                    +{formatEnvironmentCount(changeTotals.additions)}
+                  </span>
+                  <span className="is-removed">
+                    −{formatEnvironmentCount(changeTotals.deletions)}
+                  </span>
+                </>
+              ) : (
+                <span className="is-quiet">
+                  {sourceControlTotalsLabel(changeTotals)}
+                </span>
+              )}
+            </span>
+            <ChevronRight
+              aria-hidden="true"
+              className="gyro-environment-trail"
+              size={13}
+            />
+          </button>
+          {stashCount > 0 ? (
+            <button
+              aria-label={`Open stashes, ${stashCount} saved`}
+              className="gyro-environment-row"
+              onClick={openReview}
+              type="button"
+            >
+              <Archive aria-hidden="true" size={14} />
+              <span className="gyro-environment-label">Stashes</span>
+              <span className="gyro-environment-value">
+                {stashCount} {stashCount === 1 ? "stash" : "stashes"}
+              </span>
+              <ChevronRight
+                aria-hidden="true"
+                className="gyro-environment-trail"
+                size={13}
+              />
+            </button>
+          ) : null}
+          {lastCommit && focus.focus !== "working" ? (
+            <button
+              aria-label={`Open history, last commit ${lastCommit.subject}, ${lastCommit.relativeDate}`}
+              className="gyro-environment-row is-commit"
+              onClick={openReview}
+              title={`${lastCommit.shortHash} ${lastCommit.subject}\n${lastCommit.author}, ${lastCommit.relativeDate}`}
+              type="button"
+            >
+              <History aria-hidden="true" size={14} />
+              <span className="gyro-environment-commit">
+                <span className="gyro-environment-value-text">
+                  {lastCommit.subject}
+                </span>
+                <span className="is-quiet">{lastCommit.relativeDate}</span>
+              </span>
+              <ChevronRight
+                aria-hidden="true"
+                className="gyro-environment-trail"
+                size={13}
+              />
+            </button>
+          ) : null}
+          {runningProcesses > 0 ? (
+            <button
+              aria-label={`Open terminal, ${runningProcesses} running process${runningProcesses === 1 ? "" : "es"}`}
+              className="gyro-environment-row"
+              onClick={() => openCompanionTab("terminal")}
+              type="button"
+            >
+              <SquareTerminal aria-hidden="true" size={14} />
+              <span className="gyro-environment-label">Processes</span>
+              <span className="gyro-environment-value">
+                {runningProcesses} running
+              </span>
+              <ChevronRight
+                aria-hidden="true"
+                className="gyro-environment-trail"
+                size={13}
+              />
+            </button>
+          ) : null}
+        </div>
+      </section>
+    </>
+  );
+  const planBlock = (
+    <>
+      {hasPlan && plan ? (
+        <section
+          className={`gyro-environment-section is-plan${
+            isPlanLive ? " is-live" : ""
+          }`}
+        >
+          <header>
+            <span>Plan</span>
+            <small>
+              {planSteps ? `${planDone} / ${planSteps}` : "Document"}
+            </small>
+          </header>
+          {planSteps ? (
+            <span aria-hidden="true" className="gyro-environment-plan-bar">
+              <span
+                className="gyro-environment-plan-fill"
+                style={{
+                  width: `${Math.round((planDone / planSteps) * 100)}%`,
+                }}
+              />
+            </span>
+          ) : null}
+          <button
+            aria-controls={showPlan ? planStepsId : undefined}
+            aria-expanded={planSteps ? showPlan : undefined}
+            aria-label={`Plan, ${planSteps ? `${planDone} of ${planSteps} steps done` : "plan document"}`}
+            className="gyro-environment-row is-plan-row"
+            onClick={() => {
+              if (planSteps) {
+                setPlanToggle(!showPlan);
+                return;
+              }
+              onClose?.();
+              onOpenPlan?.();
+            }}
+            type="button"
+          >
+            {isPlanWorking && !showPlan ? (
+              <PlanStepStatus status="in-progress" />
+            ) : (
+              <ListChecks aria-hidden="true" size={14} />
+            )}
+            {/* The header already counts the steps; this row names where the
+                plan stands instead of repeating "Plan" and the count. */}
+            <span
+              className="gyro-environment-label"
+              title={(currentPlanStep ?? nextPlanStep)?.title}
+            >
+              {/* Open, the list below names the step; the row only folds it. */}
+              {planSteps && showPlan ? (
+                "Hide steps"
+              ) : currentPlanStep ? (
+                currentPlanStep.title
+              ) : planSteps ? (
+                planDone === planSteps ? (
+                  "All steps done"
+                ) : nextPlanStep ? (
+                  <>
+                    <span className="is-quiet">Next</span> {nextPlanStep.title}
+                  </>
+                ) : (
+                  "Show steps"
+                )
+              ) : (
+                "Open plan"
+              )}
+            </span>
+            <ChevronRight
+              aria-hidden="true"
+              className="gyro-environment-trail"
+              size={13}
+            />
+          </button>
+          {planSteps && showPlan ? (
+            <div id={planStepsId}>
+              <EnvironmentPlanSteps
+                onOpen={
+                  onOpenPlan
+                    ? () => {
+                        onClose?.();
+                        onOpenPlan();
+                      }
+                    : undefined
+                }
+                onStatusChange={onPlanItemStatusChange}
+                plan={plan}
+              />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+    </>
+  );
+  const actionsBlock = (
+    <>
+      <div className="gyro-chat-environment-popover-actions">
+        {visibleActions.map((action) => {
+          const Icon =
+            action.id === "commit-or-push"
+              ? GitCommitHorizontal
+              : GitPullRequest;
+          // A git-backed row without a handler behind it would look live and do
+          // nothing, so it reads as unavailable instead.
+          const isRunnable =
+            action.intent?.kind === "review" || Boolean(onRunGitAction);
+          const isEnabled = action.enabled && isRunnable;
+          return (
+            <button
+              aria-label={`${action.label}. ${action.detail}`}
+              className={
+                isEnabled && action.id === focus.primaryAction
+                  ? "is-primary"
+                  : undefined
+              }
+              disabled={!isEnabled}
+              key={action.id}
+              onClick={() => {
+                if (action.intent) runEnvironmentAction(action.intent);
+              }}
+              title={action.detail}
+              type="button"
+            >
+              <Icon aria-hidden="true" size={14} />
+              <span>{action.label}</span>
+              <small>{action.detail}</small>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+  const subagentsBlock = (
+    <>
+      {subagents ? (
+        <SubagentsEnvironment
+          autoExpand={focus.focus === "working" && workingSubagents > 0}
+          state={subagents}
+        />
+      ) : null}
+    </>
+  );
+  const sourcesBlock = (
+    <>
+      {sourceItems.length ? (
+        <section className="gyro-environment-section gyro-chat-environment-popover-sources">
+          <header>
+            <span>Sources</span>
+            <small>{attachments.length}</small>
+          </header>
+          <ul>
+            {sourceItems.map((source) => (
+              <li key={source} title={source}>
+                <Paperclip aria-hidden="true" size={13} />
+                <span>{source}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </>
+  );
+  const blocks = {
+    tree: treeBlock,
+    plan: planBlock,
+    actions: actionsBlock,
+    subagents: subagentsBlock,
+    sources: sourcesBlock,
+  };
+  // Work in flight leads with what is being worked on; a settled turn leads
+  // with the tree and the next step; an idle card reads state, then options.
+  const order: Array<keyof typeof blocks> =
+    focus.focus === "working"
+      ? ["plan", "subagents", "tree", "actions", "sources"]
+      : focus.focus === "idle"
+        ? ["tree", "plan", "subagents", "actions", "sources"]
+        : ["tree", "actions", "plan", "subagents", "sources"];
 
   return (
-    <aside aria-label="Environment" className="gyro-chat-environment-popover">
+    <aside
+      aria-label="Environment"
+      className={`gyro-chat-environment-popover is-focus-${focus.focus}`}
+    >
       <header>
-        <span className="gyro-environment-overline">Environment</span>
+        <span className="gyro-environment-heading">
+          <span className="gyro-environment-overline">Environment</span>
+          {focus.status ? (
+            <span
+              className={`gyro-environment-status is-${focus.focus}`}
+              role="status"
+            >
+              <span aria-hidden="true" className="gyro-environment-status-dot" />
+              {focus.status}
+            </span>
+          ) : null}
+        </span>
         <button
           aria-label="Close environment"
           onClick={onClose}
@@ -8696,230 +9330,9 @@ export function ChatEnvironmentPopover({
           title="Branch"
         />
       ) : null}
-      <section className="gyro-environment-section">
-        <header>
-          <span>Working tree</span>
-          {treeKnown && changedFileCount ? (
-            <small>
-              {formatEnvironmentCount(changedFileCount)}{" "}
-              {changedFileCount === 1 ? "file" : "files"}
-            </small>
-          ) : null}
-        </header>
-        <div className="gyro-chat-environment-popover-rows">
-          <button
-            aria-label={`Open changes, ${changesDetail}, ${changeScope}`}
-            className="gyro-environment-row"
-            onClick={openReview}
-            title={changeScope}
-            type="button"
-          >
-            <FileDiff aria-hidden="true" size={14} />
-            <span className="gyro-environment-label">{changesLabel}</span>
-            <span className="gyro-environment-value is-changed">
-              {hasChangeTotals ? (
-                <>
-                  <span className="is-added">
-                    +{formatEnvironmentCount(changeTotals.additions)}
-                  </span>
-                  <span className="is-removed">
-                    −{formatEnvironmentCount(changeTotals.deletions)}
-                  </span>
-                </>
-              ) : (
-                <span className="is-quiet">
-                  {sourceControlTotalsLabel(changeTotals)}
-                </span>
-              )}
-            </span>
-            <ChevronRight
-              aria-hidden="true"
-              className="gyro-environment-trail"
-              size={13}
-            />
-          </button>
-          {stashCount > 0 ? (
-            <button
-              aria-label={`Open stashes, ${stashCount} saved`}
-              className="gyro-environment-row"
-              onClick={openReview}
-              type="button"
-            >
-              <Archive aria-hidden="true" size={14} />
-              <span className="gyro-environment-label">Stashes</span>
-              <span className="gyro-environment-value">
-                {stashCount} {stashCount === 1 ? "stash" : "stashes"}
-              </span>
-              <ChevronRight
-                aria-hidden="true"
-                className="gyro-environment-trail"
-                size={13}
-              />
-            </button>
-          ) : null}
-          {lastCommit ? (
-            <button
-              aria-label={`Open history, last commit ${lastCommit.subject}, ${lastCommit.relativeDate}`}
-              className="gyro-environment-row is-commit"
-              onClick={openReview}
-              title={`${lastCommit.shortHash} ${lastCommit.subject}\n${lastCommit.author}, ${lastCommit.relativeDate}`}
-              type="button"
-            >
-              <History aria-hidden="true" size={14} />
-              <span className="gyro-environment-commit">
-                <span className="gyro-environment-value-text">
-                  {lastCommit.subject}
-                </span>
-                <span className="is-quiet">{lastCommit.relativeDate}</span>
-              </span>
-              <ChevronRight
-                aria-hidden="true"
-                className="gyro-environment-trail"
-                size={13}
-              />
-            </button>
-          ) : null}
-          {runningProcesses > 0 ? (
-            <button
-              aria-label={`Open terminal, ${runningProcesses} running process${runningProcesses === 1 ? "" : "es"}`}
-              className="gyro-environment-row"
-              onClick={() => openCompanionTab("terminal")}
-              type="button"
-            >
-              <SquareTerminal aria-hidden="true" size={14} />
-              <span className="gyro-environment-label">Processes</span>
-              <span className="gyro-environment-value">
-                {runningProcesses} running
-              </span>
-              <ChevronRight
-                aria-hidden="true"
-                className="gyro-environment-trail"
-                size={13}
-              />
-            </button>
-          ) : null}
-        </div>
-      </section>
-      {hasPlan && plan ? (
-        <section className="gyro-environment-section">
-          <header>
-            <span>Plan</span>
-            <small>
-              {planSteps ? `${planDone} / ${planSteps}` : "Document"}
-            </small>
-          </header>
-          {planSteps ? (
-            <span aria-hidden="true" className="gyro-environment-plan-bar">
-              <span
-                className="gyro-environment-plan-fill"
-                style={{
-                  width: `${Math.round((planDone / planSteps) * 100)}%`,
-                }}
-              />
-            </span>
-          ) : null}
-          <button
-            aria-controls={showPlan ? planStepsId : undefined}
-            aria-expanded={planSteps ? showPlan : undefined}
-            aria-label={`Plan, ${planSteps ? `${planDone} of ${planSteps} steps done` : "plan document"}`}
-            className="gyro-environment-row"
-            onClick={() => {
-              if (planSteps) {
-                setShowPlan((open) => !open);
-                return;
-              }
-              onClose?.();
-              onOpenPlan?.();
-            }}
-            type="button"
-          >
-            {isPlanWorking ? (
-              <PlanStepStatus status="in-progress" />
-            ) : (
-              <ListChecks aria-hidden="true" size={14} />
-            )}
-            <span className="gyro-environment-label">Plan</span>
-            <span className="gyro-environment-value">
-              {currentPlanStep ? (
-                <span className="gyro-environment-value-text">
-                  {currentPlanStep.title}
-                </span>
-              ) : planSteps ? (
-                `${planDone} of ${planSteps} done`
-              ) : (
-                "Document"
-              )}
-            </span>
-            <ChevronRight
-              aria-hidden="true"
-              className="gyro-environment-trail"
-              size={13}
-            />
-          </button>
-          {planSteps && showPlan ? (
-            <div id={planStepsId}>
-              <EnvironmentPlanSteps
-                onOpen={
-                  onOpenPlan
-                    ? () => {
-                        onClose?.();
-                        onOpenPlan();
-                      }
-                    : undefined
-                }
-                onStatusChange={onPlanItemStatusChange}
-                plan={plan}
-              />
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-      <div className="gyro-chat-environment-popover-actions">
-        {environmentActions(sourceControl).map((action) => {
-          const Icon =
-            action.id === "commit-or-push"
-              ? GitCommitHorizontal
-              : GitPullRequest;
-          // A git-backed row without a handler behind it would look live and do
-          // nothing, so it reads as unavailable instead.
-          const isRunnable =
-            action.intent?.kind === "review" || Boolean(onRunGitAction);
-          const isEnabled = action.enabled && isRunnable;
-          return (
-            <button
-              aria-label={`${action.label}. ${action.detail}`}
-              disabled={!isEnabled}
-              key={action.id}
-              onClick={() => {
-                if (action.intent) runEnvironmentAction(action.intent);
-              }}
-              title={action.detail}
-              type="button"
-            >
-              <Icon aria-hidden="true" size={14} />
-              <span>{action.label}</span>
-              <small>{action.detail}</small>
-            </button>
-          );
-        })}
-      </div>
-      {subagents ? <SubagentsEnvironment state={subagents} /> : null}
-      {sourceItems.length ? (
-        <section className="gyro-environment-section gyro-chat-environment-popover-sources">
-          <header>
-            <span>Sources</span>
-            <small>{attachments.length}</small>
-          </header>
-          <ul>
-            {sourceItems.map((source) => (
-              <li key={source} title={source}>
-                <Paperclip aria-hidden="true" size={13} />
-                <span>{source}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      {order.map((key) => (
+        <Fragment key={key}>{blocks[key]}</Fragment>
+      ))}
     </aside>
   );
 }
@@ -9627,6 +10040,11 @@ function WorkspaceSettingsEditor({
           <Settings size={13} /> Workspace
         </span>
         <h1 id="gyro-workspace-settings-title">
+          {view === "editor" ? (
+            <FileText aria-hidden="true" size={18} />
+          ) : (
+            <Blocks aria-hidden="true" size={18} />
+          )}
           {view === "editor" ? "Workspace" : "Tools"}
         </h1>
         <p>
@@ -11413,6 +11831,8 @@ export type ChatRailTerminalTools = Omit<
 >;
 
 type TerminalPanelProps = {
+  /** Full CLI workspace uses sidebar sessions and draggable pane headers. */
+  sessionNavigation?: boolean;
   panelActions?: ReactNode;
   onSelectPanel?: (tab: WorkbenchPaneTab) => void;
   onShowToolLauncher?: () => void;
@@ -11815,6 +12235,7 @@ function TerminalActionsMenu({
 }
 
 export function TerminalPanel({
+  sessionNavigation = false,
   panelActions,
   onSelectPanel,
   profiles,
@@ -11925,6 +12346,42 @@ export function TerminalPanel({
     finishTerminalDrag();
   };
   const [draggedPaneId, setDraggedPaneId] = useState<string | undefined>();
+  const sessionGridRef = useRef<HTMLDivElement>(null);
+  const [sessionDrop, setSessionDrop] = useState<{
+    targetId: string;
+    edge: TerminalDropEdge;
+  }>();
+  useEffect(() => {
+    if (!sessionNavigation) return;
+    const unsubscribe = subscribeTerminalSessionDrag((drag) => {
+      setDraggedPaneId(drag?.paneId);
+      setSessionDrop(drag?.over);
+    });
+    window.addEventListener("dragend", finishTerminalSessionDrag);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("dragend", finishTerminalSessionDrag);
+    };
+  }, [sessionNavigation]);
+  useEffect(() => {
+    if (!sessionNavigation) return;
+    return subscribeTerminalSessionDrop((sourceId, target) => {
+      if (!sessionGridRef.current?.contains(target.element) ||
+          !panes.some((pane) => pane.id === sourceId)) return;
+      const next = placeTerminalTab(
+        { ...splitLayout, ids: visibleIds }, target.targetId, sourceId, target.edge,
+      );
+      setSplitLayout(next);
+      if (next.ids.includes(sourceId)) onSelectTerminalPane?.(sourceId);
+    });
+  }, [
+    sessionNavigation,
+    terminalPanes,
+    activePaneId,
+    splitLayout,
+    visibleIds.join("|"),
+    onSelectTerminalPane,
+  ]);
   useEffect(() => {
     if (!draggedPaneId) return;
     const cancel = () => {
@@ -11947,223 +12404,246 @@ export function TerminalPanel({
   };
   return (
     <div
-      className={["gyro-terminal-workspace", hasPanes ? "" : "is-empty"]
+      className={[
+        "gyro-terminal-workspace",
+        sessionNavigation ? "is-session-workspace" : "",
+        hasPanes ? "" : "is-empty",
+      ]
         .filter(Boolean)
         .join(" ")}
     >
-      <div
-        className={
-          hasPanes ? "gyro-terminal-toolbar" : "gyro-terminal-toolbar is-empty"
-        }
-      >
+      {!sessionNavigation && (
         <div
-          className="gyro-terminal-tabs"
-          role="tablist"
-          aria-label="Terminals"
-          onKeyDown={navigateTabList}
-        >
-          {panes.map((pane) => (
-            <div
-              className={`gyro-terminal-tab ${pane.id === activePaneId ? "is-active" : ""}`}
-              key={pane.id}
-            >
-              <button
-                onClick={() => onSelectTerminalPane?.(pane.id)}
-                role="tab"
-                aria-selected={pane.id === activePaneId}
-                tabIndex={pane.id === activePaneId ? 0 : -1}
-                aria-controls={`terminal-panel-${pane.id}`}
-                id={`terminal-tab-${pane.id}`}
-                draggable
-                onDragStart={(event) => {
-                  event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData(
-                    "application/x-gyro-terminal",
-                    pane.id,
-                  );
-                  setDraggedPaneId(pane.id);
-                }}
-                onDragEnd={finishTerminalDrag}
-                onDragOver={(event) => {
-                  if (draggedPaneId) event.preventDefault();
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  if (draggedPaneId && draggedPaneId !== pane.id)
-                    onMoveTerminalPane?.(draggedPaneId, pane.id);
-                  finishTerminalDrag();
-                }}
-                onKeyDown={(event) => {
-                  if (
-                    event.altKey &&
-                    [
-                      "ArrowLeft",
-                      "ArrowRight",
-                      "ArrowUp",
-                      "ArrowDown",
-                    ].includes(event.key)
-                  ) {
-                    event.preventDefault();
-                    const edge = (
-                      {
-                        ArrowLeft: "left",
-                        ArrowRight: "right",
-                        ArrowUp: "top",
-                        ArrowDown: "bottom",
-                      } as const
-                    )[event.key as "ArrowLeft"];
-                    if (activePaneId) {
-                      setSplitLayout(
-                        placeTerminalTab(
-                          { ...splitLayout, ids: visibleIds },
-                          activePaneId,
-                          pane.id,
-                          edge,
-                        ),
-                      );
-                      onSelectTerminalPane?.(pane.id);
-                    }
-                  }
-                }}
-                title={`${pane.title} · ${pane.status} · ${pane.workingDirectory || pane.projectPath || "Terminal"} · Drag to split; Alt+arrow to place`}
-                type="button"
-              >
-                <SquareTerminal size={15} aria-hidden="true" />
-                <span>{pane.taskTitle ?? pane.title}</span>
-                <GripVertical
-                  className="gyro-terminal-tab-grip"
-                  size={12}
-                  aria-hidden="true"
-                />
-              </button>
-              <button
-                className="gyro-terminal-tab-close"
-                aria-label={`Close ${pane.taskTitle ?? pane.title}`}
-                title={`Close ${pane.taskTitle ?? pane.title}`}
-                onClick={() => onCloseTerminalPane?.(pane.id)}
-                type="button"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          ))}
-        </div>
-        <button
-          className="gyro-terminal-agent-button"
-          aria-label={onShowToolLauncher ? "Add drawer tab" : "New terminal"}
-          aria-expanded={onShowToolLauncher ? isToolLauncherOpen : undefined}
-          title={onShowToolLauncher ? "Add drawer tab" : "New terminal"}
-          onClick={() =>
-            onShowToolLauncher
-              ? onShowToolLauncher()
-              : onAddTerminalPane?.(launchOptions)
+          className={
+            hasPanes
+              ? "gyro-terminal-toolbar"
+              : "gyro-terminal-toolbar is-empty"
           }
-          type="button"
         >
-          <Plus size={14} />
-          <span>{onShowToolLauncher ? "Add drawer tab" : "New terminal"}</span>
-        </button>
-        <span className="gyro-terminal-toolbar-spacer" />
-        {visibleIds.length > 1 ? (
+          <div
+            className="gyro-terminal-tabs"
+            role="tablist"
+            aria-label="Terminals"
+            onKeyDown={navigateTabList}
+          >
+            {panes.map((pane) => (
+              <div
+                className={`gyro-terminal-tab ${pane.id === activePaneId ? "is-active" : ""}`}
+                key={pane.id}
+              >
+                <button
+                  onClick={() => onSelectTerminalPane?.(pane.id)}
+                  role="tab"
+                  aria-selected={pane.id === activePaneId}
+                  tabIndex={pane.id === activePaneId ? 0 : -1}
+                  aria-controls={`terminal-panel-${pane.id}`}
+                  id={`terminal-tab-${pane.id}`}
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData(
+                      "application/x-gyro-terminal",
+                      pane.id,
+                    );
+                    setDraggedPaneId(pane.id);
+                  }}
+                  onDragEnd={finishTerminalDrag}
+                  onDragOver={(event) => {
+                    if (draggedPaneId) event.preventDefault();
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    if (draggedPaneId && draggedPaneId !== pane.id)
+                      onMoveTerminalPane?.(draggedPaneId, pane.id);
+                    finishTerminalDrag();
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      event.altKey &&
+                      [
+                        "ArrowLeft",
+                        "ArrowRight",
+                        "ArrowUp",
+                        "ArrowDown",
+                      ].includes(event.key)
+                    ) {
+                      event.preventDefault();
+                      const edge = (
+                        {
+                          ArrowLeft: "left",
+                          ArrowRight: "right",
+                          ArrowUp: "top",
+                          ArrowDown: "bottom",
+                        } as const
+                      )[event.key as "ArrowLeft"];
+                      if (activePaneId) {
+                        setSplitLayout(
+                          placeTerminalTab(
+                            { ...splitLayout, ids: visibleIds },
+                            activePaneId,
+                            pane.id,
+                            edge,
+                          ),
+                        );
+                        onSelectTerminalPane?.(pane.id);
+                      }
+                    }
+                  }}
+                  title={`${pane.title} · ${pane.status} · ${pane.workingDirectory || pane.projectPath || "Terminal"} · Drag to split; Alt+arrow to place`}
+                  type="button"
+                >
+                  <SquareTerminal size={15} aria-hidden="true" />
+                  <span>{pane.taskTitle ?? pane.title}</span>
+                  <GripVertical
+                    className="gyro-terminal-tab-grip"
+                    size={12}
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  className="gyro-terminal-tab-close"
+                  aria-label={`Close ${pane.taskTitle ?? pane.title}`}
+                  title={`Close ${pane.taskTitle ?? pane.title}`}
+                  onClick={() => onCloseTerminalPane?.(pane.id)}
+                  type="button"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
           <button
-            className="gyro-terminal-focus-toggle"
-            aria-label="Focus terminal"
-            title="Focus terminal"
-            onClick={() => setSplitLayout({ ids: [], axis: "horizontal" })}
+            className="gyro-terminal-agent-button"
+            aria-label={onShowToolLauncher ? "Add drawer tab" : "New terminal"}
+            aria-expanded={onShowToolLauncher ? isToolLauncherOpen : undefined}
+            title={onShowToolLauncher ? "Add drawer tab" : "New terminal"}
+            onClick={() =>
+              onShowToolLauncher
+                ? onShowToolLauncher()
+                : onAddTerminalPane?.(launchOptions)
+            }
             type="button"
           >
-            <Maximize2 size={15} />
+            <Plus size={14} />
+            <span>
+              {onShowToolLauncher ? "Add drawer tab" : "New terminal"}
+            </span>
           </button>
-        ) : null}
-        {hasPanes ? (
-          <TerminalActionsMenu
-            extraActions={[
-              ...(onSelectPanel
-                ? paneTabs
-                    .filter((tab) => tab.id !== "terminal")
-                    .map((tab) => ({
-                      label: `Show ${tab.label}`,
-                      icon: tab.icon,
-                      onClick: () => onSelectPanel(tab.id),
-                    }))
-                : []),
-              {
-                label: "Open terminal in folder…",
-                icon: FolderOpen,
-                onClick: () =>
-                  onAddTerminalPane?.({
-                    ...launchOptions,
-                    directory: "choose",
-                  }),
-              },
-              {
-                label: "Split terminal",
-                icon: Columns2,
-                onClick: () => onSplitTerminalPane?.(2),
-              },
-              {
-                label: "Stop active terminal",
-                icon: Square,
-                disabled: !canStopActivePane,
-                onClick: () =>
-                  activePaneId && onKillTerminalPane?.(activePaneId),
-              },
-              ...(onSendTerminalErrorToChat
-                ? [
-                    {
-                      label: "Send last error to chat",
-                      icon: Sparkles,
-                      disabled: !activePaneId || !activePaneHasError,
-                      onClick: () =>
-                        activePaneId && onSendTerminalErrorToChat(activePaneId),
-                    },
-                  ]
-                : []),
-              {
-                label: "Review changes",
-                icon: GitPullRequest,
-                onClick: () => onReviewTerminalChanges?.(),
-              },
-              {
-                label: "Open commands",
-                icon: Command,
-                onClick: () => onOpenCommandPalette?.(),
-              },
-              {
-                label: `Launch ${presetLabel}`,
-                icon: Plus,
-                disabled: !canLaunchPreset,
-                onClick: () => onLaunchCliPreset?.(launchOptions),
-              },
-            ]}
-            canMoveToEnd={
-              activePaneIndex >= 0 && activePaneIndex < panes.length - 1
-            }
-            canMoveToStart={activePaneIndex > 0}
-            onClose={onCloseTerminalPane}
-            onMoveToEnd={(paneId) => {
-              const lastPane = panes[panes.length - 1];
-              if (lastPane) {
-                onMoveTerminalPane?.(paneId, lastPane.id);
+          <span className="gyro-terminal-toolbar-spacer" />
+          {visibleIds.length > 1 ? (
+            <button
+              className="gyro-terminal-focus-toggle"
+              aria-label="Focus terminal"
+              title="Focus terminal"
+              onClick={() => setSplitLayout({ ids: [], axis: "horizontal" })}
+              type="button"
+            >
+              <Maximize2 size={15} />
+            </button>
+          ) : null}
+          {hasPanes ? (
+            <TerminalActionsMenu
+              extraActions={[
+                ...(onSelectPanel
+                  ? paneTabs
+                      .filter((tab) => tab.id !== "terminal")
+                      .map((tab) => ({
+                        label: `Show ${tab.label}`,
+                        icon: tab.icon,
+                        onClick: () => onSelectPanel(tab.id),
+                      }))
+                  : []),
+                {
+                  label: "Open terminal in folder…",
+                  icon: FolderOpen,
+                  onClick: () =>
+                    onAddTerminalPane?.({
+                      ...launchOptions,
+                      directory: "choose",
+                    }),
+                },
+                {
+                  label: "Split terminal",
+                  icon: Columns2,
+                  onClick: () => onSplitTerminalPane?.(2),
+                },
+                {
+                  label: "Stop active terminal",
+                  icon: Square,
+                  disabled: !canStopActivePane,
+                  onClick: () =>
+                    activePaneId && onKillTerminalPane?.(activePaneId),
+                },
+                ...(onSendTerminalErrorToChat
+                  ? [
+                      {
+                        label: "Send last error to chat",
+                        icon: Sparkles,
+                        disabled: !activePaneId || !activePaneHasError,
+                        onClick: () =>
+                          activePaneId &&
+                          onSendTerminalErrorToChat(activePaneId),
+                      },
+                    ]
+                  : []),
+                {
+                  label: "Review changes",
+                  icon: GitPullRequest,
+                  onClick: () => onReviewTerminalChanges?.(),
+                },
+                {
+                  label: "Open commands",
+                  icon: Command,
+                  onClick: () => onOpenCommandPalette?.(),
+                },
+                {
+                  label: `Launch ${presetLabel}`,
+                  icon: Plus,
+                  disabled: !canLaunchPreset,
+                  onClick: () => onLaunchCliPreset?.(launchOptions),
+                },
+              ]}
+              canMoveToEnd={
+                activePaneIndex >= 0 && activePaneIndex < panes.length - 1
               }
-            }}
-            onMoveToStart={(paneId) => {
-              const firstPane = panes[0];
-              if (firstPane) {
-                onMoveTerminalPane?.(paneId, firstPane.id);
-              }
-            }}
-            onRefresh={() => onTerminalUtilityAction?.("read-screen")}
-            onRename={onRenameTerminalPane}
-            onRestart={onRestartTerminalPane}
-            onSetLayout={onSetTerminalPaneLayout}
-            paneId={activePaneId}
-            paneIsWide={activePaneIsWide}
-          />
-        ) : null}
-        {panelActions}
-      </div>
+              canMoveToStart={activePaneIndex > 0}
+              onClose={onCloseTerminalPane}
+              onMoveToEnd={(paneId) => {
+                const lastPane = panes[panes.length - 1];
+                if (lastPane) {
+                  onMoveTerminalPane?.(paneId, lastPane.id);
+                }
+              }}
+              onMoveToStart={(paneId) => {
+                const firstPane = panes[0];
+                if (firstPane) {
+                  onMoveTerminalPane?.(paneId, firstPane.id);
+                }
+              }}
+              onRefresh={() => onTerminalUtilityAction?.("read-screen")}
+              onRename={onRenameTerminalPane}
+              onRestart={onRestartTerminalPane}
+              onSetLayout={onSetTerminalPaneLayout}
+              paneId={activePaneId}
+              paneIsWide={activePaneIsWide}
+            />
+          ) : null}
+          {panelActions}
+        </div>
+      )}
       <div
+        ref={sessionGridRef}
+        onDragOver={sessionNavigation ? (event) => {
+          if (!draggedPaneId) return;
+          event.preventDefault();
+          hoverTerminalSessionDrag(event.clientX, event.clientY);
+        } : undefined}
+        onDrop={sessionNavigation ? (event) => {
+          if (!draggedPaneId) return;
+          event.preventDefault();
+          event.stopPropagation();
+          dropTerminalSessionDrag(event.clientX, event.clientY);
+        } : undefined}
         className="gyro-terminal-grid"
         data-terminal-count={visibleIds.length}
         data-terminal-axis={splitLayout.axis}
@@ -12174,6 +12654,64 @@ export function TerminalPanel({
         {panes.length > 0 ? (
           panes.map((pane) => (
             <TerminalPaneView
+              sessionNavigation={sessionNavigation}
+              sessionDropEdge={
+                sessionDrop?.targetId === pane.id && draggedPaneId !== pane.id
+                  ? sessionDrop.edge
+                  : undefined
+              }
+              headerActions={
+                sessionNavigation ? (
+                  <>
+                    <button
+                      className="gyro-terminal-session-action"
+                      aria-label="New terminal"
+                      title="New terminal"
+                      onClick={() => onAddTerminalPane?.(launchOptions)}
+                      type="button"
+                    >
+                      <Plus size={14} />
+                    </button>
+                    <TerminalActionsMenu
+                      paneId={pane.id}
+                      onRename={onRenameTerminalPane}
+                      onRestart={onRestartTerminalPane}
+                      onClose={onCloseTerminalPane}
+                      extraActions={[
+                        {
+                          label: "Focus terminal",
+                          icon: Maximize2,
+                          onClick: () => {
+                            setSplitLayout({
+                              ids: [pane.id],
+                              axis: "horizontal",
+                            });
+                            onSelectTerminalPane?.(pane.id);
+                          },
+                        },
+                        {
+                          label: "Stop terminal",
+                          icon: Square,
+                          disabled:
+                            pane.status !== "running" &&
+                            pane.status !== "waiting",
+                          onClick: () => onKillTerminalPane?.(pane.id),
+                        },
+                        {
+                          label: "Review changes",
+                          icon: GitPullRequest,
+                          onClick: () => onReviewTerminalChanges?.(),
+                        },
+                        {
+                          label: "Open commands",
+                          icon: Command,
+                          onClick: () => onOpenCommandPalette?.(),
+                        },
+                      ]}
+                    />
+                  </>
+                ) : undefined
+              }
               hidden={!visibleIds.includes(pane.id)}
               placementStyle={{
                 gridColumn:
@@ -12305,7 +12843,7 @@ export function TerminalPanel({
             </nav>
           </section>
         )}
-        {draggedPaneId && panes.length > 1 ? (
+        {!sessionNavigation && draggedPaneId && panes.length > 1 ? (
           <div
             className="gyro-terminal-drop-zones"
             aria-label="Place terminal in split view"
@@ -12403,6 +12941,7 @@ function WorkbenchPaneTabs({
 }
 
 function WorkbenchPaneContent({
+  terminalSessionNavigation = false,
   terminalPanelActions,
   onShowToolLauncher,
   isToolLauncherOpen,
@@ -12466,6 +13005,7 @@ function WorkbenchPaneContent({
   onSelectOutputChannel,
   onRunTestTask,
 }: {
+  terminalSessionNavigation?: boolean;
   terminalPanelActions?: ReactNode;
   onShowToolLauncher?: () => void;
   isToolLauncherOpen?: boolean;
@@ -12641,6 +13181,7 @@ function WorkbenchPaneContent({
 
   return (
     <TerminalPanel
+      sessionNavigation={terminalSessionNavigation}
       panelActions={terminalPanelActions}
       onShowToolLauncher={onShowToolLauncher}
       isToolLauncherOpen={isToolLauncherOpen}
@@ -13241,6 +13782,7 @@ export function WorkspaceToolPanel({
         </div>
       ) : null}
       <WorkbenchPaneContent
+        terminalSessionNavigation={isPrimary}
         onShowToolLauncher={!isPrimary ? toggleLauncher : undefined}
         isToolLauncherOpen={isLauncherOpen}
         terminalPanelActions={compactTerminal ? panelControls : undefined}
@@ -15320,6 +15862,7 @@ function WebBrowserPreviewSurface({
   agentActivity?: string;
   onStopAgent?: () => void;
 }) {
+  const runtimeMenu = useAppPreviewMenu();
   const preview =
     browserPreview ??
     ({
@@ -15416,7 +15959,8 @@ function WebBrowserPreviewSurface({
   // Only surfaces covering the page require hiding the native child.
   const companionMoving = useContext(CompanionMotionContext);
   const hostShouldHide =
-    companionMoving || overlayOccluded || showingCapture || isBlank;
+    companionMoving || overlayOccluded || showingCapture || isBlank ||
+    Boolean(preview.navigationError);
 
   useLayoutEffect(() => {
     if (!useNativeHost || !onHostBoundsChange) {
@@ -15667,6 +16211,7 @@ function WebBrowserPreviewSurface({
                 <Globe2 size={14} />
               </button>
             ) : null}
+            {runtimeMenu}
           </div>
         </div>
         {isChat && agentActivity ? (
@@ -15731,6 +16276,7 @@ function WebBrowserPreviewSurface({
                     isLoading={isLoading}
                     isOccluded={overlayOccluded}
                     isUnreachable={preview.status === "verification-failed"}
+                    navigationError={preview.navigationError}
                     onNavigate={onNavigate}
                     onOpenExternal={onOpenExternal}
                     onReload={reloadFrame}
@@ -15759,6 +16305,7 @@ function WebBrowserPreviewSurface({
                   isLoading={isLoading}
                   isOccluded={overlayOccluded}
                   isUnreachable={preview.status === "verification-failed"}
+                  navigationError={preview.navigationError}
                   onNavigate={onNavigate}
                   onOpenExternal={onOpenExternal}
                   onReload={reloadFrame}
@@ -15904,6 +16451,7 @@ function BrowserFramePlaceholder({
   isLoading,
   isOccluded,
   isUnreachable,
+  navigationError,
   onNavigate,
   onOpenExternal,
   onReload,
@@ -15915,6 +16463,7 @@ function BrowserFramePlaceholder({
   isLoading: boolean;
   isOccluded: boolean;
   isUnreachable: boolean;
+  navigationError?: BrowserPreview["navigationError"];
   onNavigate?: (url: string) => void;
   onOpenExternal?: () => void;
   onReload?: () => void;
@@ -15926,7 +16475,7 @@ function BrowserFramePlaceholder({
     : isLoading
       ? "Loading preview"
       : isUnreachable
-        ? "Can't reach this page"
+        ? navigationError?.kind === "cancelled" ? "Navigation cancelled" : "Can't reach this page"
         : "No live preview yet";
   const detail = isOccluded
     ? "Close the overlay to show the native browser surface again."
@@ -15935,9 +16484,10 @@ function BrowserFramePlaceholder({
         ? `Connecting to ${hostLabel}…`
         : "Connecting…"
       : isUnreachable
-        ? isLoopbackBrowserPreviewUrl(suggestedUrl)
-          ? `Nothing is responding at ${hostLabel || "this address"}. Start the app, then try again.`
-          : "Check the address or your connection, then try again."
+        ? (navigationError?.message ??
+          (isLoopbackBrowserPreviewUrl(suggestedUrl)
+            ? `Nothing is responding at ${hostLabel || "this address"}. Start the app, then try again.`
+            : "Check the address or your connection, then try again."))
         : hasUrl
           ? "Point the browser at a running app, or open this URL externally."
           : "Enter a URL above to preview a running app or website.";
@@ -19570,6 +20120,27 @@ function useLimitClock(enabled: boolean) {
   return now;
 }
 
+/**
+ * Say how old a reading the provider could not refresh is.
+ *
+ * "Last known usage" read as current while the stored figure was days old,
+ * so a 39% week sat beside an account that had since spent 92%.
+ */
+function staleUsageLabel(fetchedAt: string | undefined, now: number) {
+  const fetchedMs = fetchedAt ? Date.parse(fetchedAt) : NaN;
+  if (!Number.isFinite(fetchedMs)) return "Last known usage · retrying";
+  const minutes = Math.max(0, Math.floor((now - fetchedMs) / 60_000));
+  const age =
+    minutes < 1
+      ? "just now"
+      : minutes < 60
+        ? `${minutes} min ago`
+        : minutes < 48 * 60
+          ? `${Math.floor(minutes / 60)} hr ago`
+          : `${Math.floor(minutes / (24 * 60))} days ago`;
+  return `Reading from ${age} · retrying`;
+}
+
 /** Plan limits turn at 80% and 95%. Context uses the same bands. */
 function contextMeterSeverity(
   usage: { contextWindowTokens: number; percent: number } | undefined,
@@ -19820,9 +20391,78 @@ type ComposerSlashCommand = {
   available?: boolean;
   action?: string;
   popover?: Extract<ComposerPopoverId, "approval" | "branch" | "provider">;
-  /** Plain-language explainer shown when hovering the row's "?" marker. */
+  /** Plain-language explainer shown in the menu's detail strip. */
   hint?: string;
+  /** Section in the unfiltered menu; chat commands when omitted. */
+  group?: ComposerSlashGroup;
 };
+
+type ComposerSlashGroup = "chat" | "attach" | "workspace";
+
+const COMPOSER_SLASH_GROUPS: Array<{ id: ComposerSlashGroup; label: string }> =
+  [
+    { id: "chat", label: "Chat" },
+    { id: "attach", label: "Attach" },
+    { id: "workspace", label: "Workspace" },
+  ];
+
+/**
+ * How well a typed `/query` names a command: 0 for the exact command, 1 for a
+ * command prefix, 2 for a word in its label, and -1 for no match. An empty
+ * query is a prefix of every command.
+ */
+function composerSlashMatchRank(
+  command: ComposerSlashCommand,
+  query: string,
+): number {
+  const name = command.command.slice(1).toLocaleLowerCase();
+  if (query && name === query) return 0;
+  if (name.startsWith(query)) return 1;
+  return command.label
+    .toLocaleLowerCase()
+    .split(/\s+/)
+    .some((word) => word.startsWith(query))
+    ? 2
+    : -1;
+}
+
+/**
+ * Orders commands for display. Unfiltered, they follow their section order;
+ * filtered, the best match comes first so Enter runs what was typed, with the
+ * shorter command winning a shared prefix (`/n` picks `/new` over `/normal`).
+ */
+function rankComposerSlashCommands(
+  commands: ComposerSlashCommand[],
+  query: string,
+): ComposerSlashCommand[] {
+  const groupOrder = (command: ComposerSlashCommand) =>
+    COMPOSER_SLASH_GROUPS.findIndex(
+      (group) => group.id === (command.group ?? "chat"),
+    );
+  return commands
+    .map((command, index) => ({
+      command,
+      index,
+      rank: composerSlashMatchRank(command, query),
+    }))
+    .filter((entry) => entry.rank >= 0)
+    .sort((left, right) => {
+      if (!query) {
+        return (
+          groupOrder(left.command) - groupOrder(right.command) ||
+          left.index - right.index
+        );
+      }
+      return (
+        left.rank - right.rank ||
+        (left.rank === 1
+          ? left.command.command.length - right.command.command.length
+          : 0) ||
+        left.index - right.index
+      );
+    })
+    .map((entry) => entry.command);
+}
 
 function branchPopoverItems({
   branchCatalog,
@@ -19903,15 +20543,10 @@ function branchPopoverItems({
         ? `Branch from ${branchCatalog.current}`
         : "Branch from the current commit"),
   };
-  // One line per branch: what each row does lives in its tooltip, and the
-  // current branch leads the list so it never scrolls out of view.
-  const branchItems = [...branchCatalog.branches]
-    .sort(
-      (a, b) =>
-        Number(b === branchCatalog.current) -
-        Number(a === branchCatalog.current),
-    )
-    .map((branch): ComposerPopoverItem => {
+  // Keep the current branch visible, then order by commit time. Recency is
+  // local Git data, independent of a branch's name or release version.
+  const branchItems = recentBranches(branchCatalog).map(
+    ({ name: branch, latest, committedAt }): ComposerPopoverItem => {
       const inWorktree =
         branch !== branchCatalog.current &&
         Boolean(
@@ -19922,7 +20557,11 @@ function branchPopoverItems({
       return {
         action: `select-branch:${encodeURIComponent(branch)}`,
         active: branch === branchCatalog.current,
-        badge: inWorktree ? "worktree" : undefined,
+        badge:
+          [latest ? "Latest commit" : "", inWorktree ? "worktree" : ""]
+            .filter(Boolean)
+            .join(" · ") || undefined,
+        detail: branchCommitDetail(committedAt),
         disabled: isDisabled,
         icon: GitBranch,
         kind: "branch",
@@ -19938,7 +20577,8 @@ function branchPopoverItems({
               ? "Checked out in a linked worktree"
               : "Switch branch; keep compatible local changes"),
       };
-    });
+    },
+  );
   return [
     ...branchItems,
     createBranchItem,
@@ -19979,6 +20619,7 @@ function ComposerPopover({
   align = "start",
   className,
   keepInBounds = false,
+  nativeTooltips = true,
   id,
   items,
   onAction,
@@ -19988,6 +20629,7 @@ function ComposerPopover({
   align?: "start" | "end";
   className?: string;
   keepInBounds?: boolean;
+  nativeTooltips?: boolean;
   id: string;
   items: ComposerPopoverItem[];
   onAction: (action?: string, item?: ComposerPopoverItem) => void;
@@ -20043,8 +20685,14 @@ function ComposerPopover({
         panel.style.minWidth = "0";
         panel.style.maxWidth = `${Math.max(0, bounds.right - bounds.left - pad * 2) / scaleX}px`;
       }
-      const anchorTop = anchor.top;
-      const anchorBottom = anchor.bottom;
+      // Keep Add aligned with its trigger horizontally, but clear the whole
+      // composer vertically so the menu cannot cover the draft or toolbar.
+      const composer = panel.classList.contains("gyro-context-picker")
+        ? panel.closest<HTMLElement>(".gyro-composer-shell")
+        : null;
+      const placementAnchor = composer?.getBoundingClientRect() ?? anchor;
+      const anchorTop = placementAnchor.top;
+      const anchorBottom = placementAnchor.bottom;
       const above = Math.max(0, anchorTop - bounds.top - pad - gap);
       const below = Math.max(0, bounds.bottom - anchorBottom - pad - gap);
       const preferred = placement === "up" ? above : below;
@@ -20052,8 +20700,12 @@ function ComposerPopover({
       const flip =
         panel.offsetHeight * scaleY > preferred && opposite > preferred;
       const direction = flip ? (placement === "up" ? "down" : "up") : placement;
-      panel.style.top = direction === "down" ? "calc(100% + 8px)" : "auto";
-      panel.style.bottom = direction === "up" ? "calc(100% + 8px)" : "auto";
+      panel.style.top = direction === "down"
+        ? composer ? `${(anchorBottom - anchor.top + gap) / scaleY}px` : "calc(100% + 8px)"
+        : "auto";
+      panel.style.bottom = direction === "up"
+        ? composer ? `${(anchor.bottom - anchorTop + gap) / scaleY}px` : "calc(100% + 8px)"
+        : "auto";
       panel.style.maxHeight = `${Math.min(420, (direction === "up" ? above : below) / scaleY)}px`;
       const positioned = panel.getBoundingClientRect();
       const shift = Math.max(
@@ -20239,9 +20891,10 @@ function ComposerPopover({
               disabled={item.disabled}
               onClick={() => onAction(item.action, item)}
               role="menuitem"
-              title={
-                item.tooltip ? `${item.label} — ${item.tooltip}` : item.label
-              }
+              aria-description={nativeTooltips ? undefined : item.tooltip}
+              title={nativeTooltips
+                ? item.tooltip ? `${item.label} — ${item.tooltip}` : item.label
+                : undefined}
               type="button"
             >
               {itemContent}
@@ -20273,7 +20926,10 @@ function ComposerPopover({
           disabled={item.disabled}
           onClick={() => onAction(item.action, item)}
           role="menuitem"
-          title={item.tooltip ? `${item.label} — ${item.tooltip}` : item.label}
+          aria-description={nativeTooltips ? undefined : item.tooltip}
+          title={nativeTooltips
+            ? item.tooltip ? `${item.label} — ${item.tooltip}` : item.label
+            : undefined}
           type="button"
         >
           {itemContent}
@@ -20655,6 +21311,7 @@ function Composer({
   providerLedger,
   dailyPaceWarning = true,
   limitWindows = [],
+  quotaNotice,
   canCompactContext = false,
   onComposerAction,
   onCancelGoalComposer,
@@ -20680,6 +21337,7 @@ function Composer({
   /** False while the desktop shell is still warming the backend. */
   shellReady = true,
   isCliUpdating = false,
+  placeholder,
   sendDisabledReason,
   showContextRow,
   variant = "thread",
@@ -20715,6 +21373,7 @@ function Composer({
   providerLedger?: ProviderLedgerSummary;
   dailyPaceWarning?: boolean;
   limitWindows?: ComposerLimitWindow[];
+  quotaNotice?: string;
   /** This chat has a provider-backed context that can be compacted manually. */
   canCompactContext?: boolean;
   onComposerAction?: (action: string) => void;
@@ -20765,6 +21424,8 @@ function Composer({
   /** A provider executable is updating; wait before starting a run. */
   isCliUpdating?: boolean;
   sendDisabledReason?: string;
+  /** Replaces the ready-state prompt; lock and update notices still win. */
+  placeholder?: string;
   /** Defaults to the hero layout: project, mode, and branch only at the start. */
   showContextRow?: boolean;
   variant?: "thread" | "hero";
@@ -20792,12 +21453,20 @@ function Composer({
   /** Caret the user last placed. Unset means dictation appends. */
   const dictationCaretChoiceRef = useRef<number | null>(null);
   const dictationSessionRef = useRef<AbortController | null>(null);
-  /** Pending settle timer: a stop shows the processing ring, then clears. */
+  /** Safety deadline only; normal completion clears as soon as final text arrives. */
   const dictationSettleRef = useRef<number | null>(null);
   const [dictationPhase, setDictationPhase] = useState<
-    "idle" | "listening" | "processing"
+    "idle" | "starting" | "listening" | "processing"
   >("idle");
   const [dictationNotice, setDictationNotice] = useState("");
+  const dictationStatus =
+    dictationPhase === "starting"
+      ? "Starting microphone…"
+      : dictationPhase === "listening"
+        ? "Listening… Click the microphone to finish."
+        : dictationPhase === "processing"
+          ? "Finishing dictation…"
+          : dictationNotice;
   const releaseDictation = useCallback(
     (restoreBase: boolean) => {
       const anchor = dictationAnchorRef.current;
@@ -20829,27 +21498,23 @@ function Composer({
    * processing ring, and clear the badge once the session settles.
    */
   const settleDictation = useCallback(() => {
-    const session = dictationSessionRef.current;
-    setDictationPhase("processing");
-    dictation?.stop();
-    if (dictationSettleRef.current !== null) {
-      window.clearTimeout(dictationSettleRef.current);
+    if (!dictation?.finish) {
+      releaseDictation(false);
+      return;
     }
-    // A late final still lands in the draft, so hold the session open briefly.
+    setDictationPhase("processing");
+    // Set the deadline first: controllers may finalize synchronously.
     dictationSettleRef.current = window.setTimeout(() => {
-      dictationSettleRef.current = null;
-      session?.abort();
-      dictationSessionRef.current = null;
-      dictationAnchorRef.current = null;
-      dictationCaretRef.current = null;
-      setDictationPhase("idle");
-    }, 900);
-  }, [dictation]);
+      releaseDictation(false);
+    }, 2000);
+    dictation.finish();
+  }, [dictation, releaseDictation]);
   const toggleDictation = useCallback(() => {
     if (!dictation) return;
     if (dictationPhase === "processing") return;
     if (dictationAnchorRef.current) {
-      settleDictation();
+      if (dictationPhase === "starting") releaseDictation(false);
+      else settleDictation();
       return;
     }
     const textarea = composerTextareaRef.current;
@@ -20860,7 +21525,7 @@ function Composer({
     const session = new AbortController();
     dictationSessionRef.current = session;
     setDictationNotice("");
-    setDictationPhase("listening");
+    setDictationPhase("starting");
     textarea?.focus({ preventScroll: true });
     const limit = isGoalComposerActive ? 1000 : maxDraftLength;
     const applyUtterance = (utterance: string) => {
@@ -20874,10 +21539,19 @@ function Composer({
     };
     dictation.start({
       signal: session.signal,
-      onPartial: applyUtterance,
+      onStart: () => {
+        if (!session.signal.aborted) setDictationPhase("listening");
+      },
+      onPartial: (utterance) => {
+        if (session.signal.aborted) return;
+        setDictationPhase((phase) =>
+          phase === "starting" ? "listening" : phase,
+        );
+        applyUtterance(utterance);
+      },
       onFinal: (utterance) => {
         if (session.signal.aborted) return;
-        applyUtterance(utterance);
+        if (utterance.trim()) applyUtterance(utterance);
         if (dictationSettleRef.current !== null) {
           window.clearTimeout(dictationSettleRef.current);
           dictationSettleRef.current = null;
@@ -20889,19 +21563,8 @@ function Composer({
       },
       onError: (message) => {
         if (session.signal.aborted) return;
-        session.abort();
-        dictationSessionRef.current = null;
-        const anchor = dictationAnchorRef.current;
-        dictationAnchorRef.current = null;
-        if (anchor && anchor.base !== dictationAppliedRef.current) {
-          dictationAppliedRef.current = anchor.base;
-          dictationCaretRef.current = anchor.caret;
-          dictationCaretChoiceRef.current = anchor.caret;
-          onDraftChange(anchor.base);
-        }
+        releaseDictation(false);
         setDictationNotice(message);
-        setDictationPhase("idle");
-        dictation.stop();
       },
     });
   }, [
@@ -20911,6 +21574,7 @@ function Composer({
     maxDraftLength,
     onDraftChange,
     settleDictation,
+    releaseDictation,
   ]);
   useEffect(() => {
     return () => {
@@ -20965,13 +21629,6 @@ function Composer({
   const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
   /** `/help` keeps the catalog open after removing its inline trigger. */
   const [isSlashHelpOpen, setIsSlashHelpOpen] = useState(false);
-  // Hover explainer for a slash command. Positioned fixed against the "?"
-  // marker so it can escape the menu's own scroll clipping.
-  const [slashHint, setSlashHint] = useState<{
-    text: string;
-    top: number;
-    left: number;
-  }>();
   const slashCommandRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const dismissActiveComposerPopover = useCallback(() => {
     setActivePopover(null);
@@ -21364,8 +22021,7 @@ function Composer({
       action: "attach-files",
       icon: Paperclip,
       label: "Attach files",
-      detail: "Add context to your message",
-      tooltip: "Images, videos, or project files",
+      detail: "Images, videos, or project files",
     },
     ...(canAttachEditorSnapshot
       ? [
@@ -21460,7 +22116,10 @@ function Composer({
         ]),
     {
       action: "attach-editor-snapshot",
+      // Without an open editor the action can only report a failure.
+      available: canAttachEditorSnapshot,
       command: "/editor",
+      group: "attach",
       description: "Attach the open editor file",
       hint: "Sends a copy of the file you have open, exactly as it looks right now.",
       icon: FileCode2,
@@ -21469,6 +22128,7 @@ function Composer({
     {
       action: "select-image",
       command: "/image",
+      group: "attach",
       description: "Attach an image",
       icon: ImagePlus,
       label: "Attach image",
@@ -21476,6 +22136,7 @@ function Composer({
     {
       action: "select-video",
       command: "/video",
+      group: "attach",
       description: "Attach a video",
       icon: Video,
       label: "Attach video",
@@ -21483,6 +22144,7 @@ function Composer({
     {
       action: "select-file",
       command: "/file",
+      group: "attach",
       description: "Attach a workspace file",
       icon: Paperclip,
       label: "Attach file",
@@ -21490,6 +22152,7 @@ function Composer({
     {
       action: "select-folder",
       command: "/folder",
+      group: "workspace",
       description: "Choose the workspace folder",
       hint: "Pick the project folder this chat is allowed to work in.",
       icon: Folder,
@@ -21498,6 +22161,7 @@ function Composer({
     {
       action: "search-workspace",
       command: "/search",
+      group: "workspace",
       description: "Search workspace files",
       icon: Search,
       label: "Search workspace",
@@ -21527,6 +22191,7 @@ function Composer({
     {
       available: hasUserWorkspace,
       command: "/branch",
+      group: "workspace",
       description: "Create or switch a Git branch",
       icon: GitBranch,
       label: "Choose branch",
@@ -21536,6 +22201,7 @@ function Composer({
       action: "open-source-control",
       available: hasUserWorkspace,
       command: "/review",
+      group: "workspace",
       description: "Review current workspace changes",
       icon: GitPullRequest,
       label: "Review changes",
@@ -21544,6 +22210,7 @@ function Composer({
       action: "run-workspace-test",
       available: hasUserWorkspace,
       command: "/test",
+      group: "workspace",
       description: "Run the detected test task",
       icon: Play,
       label: "Run workspace tests",
@@ -21552,6 +22219,7 @@ function Composer({
       action: "open-diff",
       available: hasUserWorkspace,
       command: "/diff",
+      group: "workspace",
       description: "Open the current workspace diff",
       icon: ScrollText,
       label: "Show diff",
@@ -21633,23 +22301,25 @@ function Composer({
   const filteredSlashCommands =
     slashQuery === undefined
       ? []
-      : availableSlashCommands.filter((command) => {
-          const commandName = command.command.slice(1).toLocaleLowerCase();
-          const labelWords = command.label.toLocaleLowerCase().split(/\s+/);
-          return (
-            commandName.startsWith(slashQuery) ||
-            labelWords.some((word) => word.startsWith(slashQuery))
-          );
-        });
+      : rankComposerSlashCommands(availableSlashCommands, slashQuery);
+  const isSlashMenuGrouped = isSlashHelpOpen || !slashQuery;
   const visibleSlashCommands = isSlashHelpOpen
-    ? availableSlashCommands
+    ? rankComposerSlashCommands(availableSlashCommands, "")
     : filteredSlashCommands;
   const isSlashMenuOpen =
     !isSlashMenuDismissed && visibleSlashCommands.length > 0;
+  // A draft that is only `/word` with no matching command most likely meant
+  // one, so say so instead of silently sending it. Mid-sentence slashes and
+  // anything after the first line stay quiet. Enter still sends the draft.
+  const isSlashEmptyStateOpen =
+    !isSlashMenuDismissed &&
+    !isSlashMenuOpen &&
+    Boolean(slashQuery) &&
+    draft.trim() === `/${slashMatch?.[1] ?? ""}`;
   // The slash menu is driven by the draft, so it stays open while the textarea
   // is in use and closes on a press anywhere outside the composer.
   const slashMenuScopeRef = useOutsidePointerDismiss<HTMLDivElement>(
-    isSlashMenuOpen,
+    isSlashMenuOpen || isSlashEmptyStateOpen,
     () => {
       setIsSlashHelpOpen(false);
       setIsSlashMenuDismissed(true);
@@ -21659,6 +22329,7 @@ function Composer({
     activeSlashCommandIndex,
     Math.max(0, visibleSlashCommands.length - 1),
   );
+  const selectedSlashCommand = visibleSlashCommands[selectedSlashCommandIndex];
 
   const togglePopover = (popover: ComposerPopoverId) => {
     setActivePopover((current) => (current === popover ? null : popover));
@@ -21724,23 +22395,7 @@ function Composer({
       onComposerAction?.(action);
     }
   };
-  const showSlashHint = (text: string, marker: HTMLElement) => {
-    const rect = marker.getBoundingClientRect();
-    const width = 216;
-    const gap = 8;
-    const fitsRight = rect.right + gap + width <= window.innerWidth - 8;
-    setSlashHint({
-      left: fitsRight ? rect.right + gap : Math.max(8, rect.left - gap - width),
-      text,
-      // Centred on the marker, but kept clear of the viewport edges.
-      top: Math.min(
-        Math.max(rect.top + rect.height / 2, 44),
-        window.innerHeight - 44,
-      ),
-    });
-  };
   const runSlashCommand = (command: ComposerSlashCommand) => {
-    setSlashHint(undefined);
     setIsSlashMenuDismissed(true);
     setHistoryIndex(undefined);
     // Remove just the active `/command`, keeping the thought the person was
@@ -21824,7 +22479,6 @@ function Composer({
 
   useEffect(() => {
     setActiveSlashCommandIndex(0);
-    setSlashHint(undefined);
   }, [isSlashHelpOpen, slashQuery]);
 
   useEffect(() => {
@@ -22082,85 +22736,127 @@ function Composer({
           ))}
         </ComposerCompletionMenu>
       ) : null}
-      {isSlashMenuOpen ? (
+      {isSlashMenuOpen || isSlashEmptyStateOpen ? (
         <ComposerCompletionMenu
           aria-label="Chat commands"
           className="gyro-composer-slash-menu is-commands"
           id={`${popoverBaseId}-slash-menu`}
-          role="menu"
+          role="listbox"
         >
           <header role="presentation">
-            <strong>Chat commands</strong>
-            <span>{visibleSlashCommands.length} available</span>
+            <strong>
+              {isSlashHelpOpen ? "All chat commands" : "Chat commands"}
+            </strong>
+            {isSlashMenuOpen ? (
+              <span aria-hidden="true" className="gyro-composer-slash-keys">
+                <kbd>↑</kbd>
+                <kbd>↓</kbd>
+                <span>move</span>
+                <kbd>↵</kbd>
+                <span>run</span>
+                <kbd>esc</kbd>
+                <span>close</span>
+              </span>
+            ) : null}
           </header>
-          <div
-            className="gyro-composer-slash-list"
-            onScroll={() => setSlashHint(undefined)}
-            role="presentation"
-          >
-            {visibleSlashCommands.map((command, index) => {
-              const Icon = command.icon;
-              return (
-                <button
-                  aria-current={
-                    index === selectedSlashCommandIndex ? "true" : undefined
-                  }
-                  className={
-                    index === selectedSlashCommandIndex ? "is-selected" : ""
-                  }
-                  id={`${popoverBaseId}-slash-command-${index}`}
-                  key={command.command}
-                  onClick={() => runSlashCommand(command)}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onPointerEnter={() => {
-                    setActiveSlashCommandIndex(index);
-                    setSlashHint(undefined);
-                  }}
-                  ref={(element) => {
-                    slashCommandRefs.current[index] = element;
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <Icon aria-hidden="true" size={16} />
-                  <code>{command.command}</code>
-                  <span className="gyro-composer-slash-command-copy">
-                    <strong>{command.label}</strong>
-                    {isSlashHelpOpen ? (
-                      <small>{command.description}</small>
-                    ) : null}
-                  </span>
-                  {command.hint ? (
-                    <>
-                      <span
+          {isSlashMenuOpen ? (
+            <div className="gyro-composer-slash-list" role="presentation">
+              {visibleSlashCommands.map((command, index) => {
+                const Icon = command.icon;
+                const group = command.group ?? "chat";
+                const startsGroup =
+                  isSlashMenuGrouped &&
+                  (index === 0 ||
+                    (visibleSlashCommands[index - 1]?.group ?? "chat") !==
+                      group);
+                const isSelected = index === selectedSlashCommandIndex;
+                // Bold the typed part of the command so it is clear why each
+                // row matched; label-word matches keep the plain command.
+                const typedLength =
+                  slashQuery &&
+                  !isSlashHelpOpen &&
+                  composerSlashMatchRank(command, slashQuery) <= 1
+                    ? slashQuery.length + 1
+                    : 0;
+                return (
+                  <Fragment key={command.command}>
+                    {startsGroup ? (
+                      <div
                         aria-hidden="true"
-                        className="gyro-composer-slash-hint-mark"
-                        onPointerEnter={(event) =>
-                          showSlashHint(command.hint ?? "", event.currentTarget)
-                        }
-                        onPointerLeave={() => setSlashHint(undefined)}
+                        className="gyro-composer-slash-group"
                       >
-                        ?
+                        {
+                          COMPOSER_SLASH_GROUPS.find(
+                            (entry) => entry.id === group,
+                          )?.label
+                        }
+                      </div>
+                    ) : null}
+                    <button
+                      aria-describedby={
+                        isSelected
+                          ? `${popoverBaseId}-slash-detail`
+                          : undefined
+                      }
+                      aria-selected={isSelected}
+                      className={isSelected ? "is-selected" : ""}
+                      id={`${popoverBaseId}-slash-command-${index}`}
+                      onClick={() => runSlashCommand(command)}
+                      onPointerDown={(event) => event.preventDefault()}
+                      // Pointer movement, not entry, picks a row: rows that
+                      // scroll under a resting pointer must not steal the
+                      // keyboard selection.
+                      onPointerMove={() => {
+                        if (!isSelected) setActiveSlashCommandIndex(index);
+                      }}
+                      ref={(element) => {
+                        slashCommandRefs.current[index] = element;
+                      }}
+                      role="option"
+                      tabIndex={-1}
+                      type="button"
+                    >
+                      <Icon aria-hidden="true" size={16} />
+                      <code>
+                        {typedLength ? (
+                          <mark>{command.command.slice(0, typedLength)}</mark>
+                        ) : null}
+                        {command.command.slice(typedLength)}
+                      </code>
+                      <span className="gyro-composer-slash-command-copy">
+                        <strong>{command.label}</strong>
+                        {isSlashHelpOpen ? (
+                          <small>{command.description}</small>
+                        ) : null}
                       </span>
-                      <span className="gyro-sr-only">{command.hint}</span>
-                    </>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-          <footer className="gyro-composer-slash-footer" role="presentation">
-            <span>
-              <kbd>↑</kbd>
-              <kbd>↓</kbd> Navigate
-            </span>
-            <span>
-              <kbd>↵</kbd> Select
-            </span>
-            <span>
-              <kbd>esc</kbd> Close
-            </span>
-          </footer>
+                    </button>
+                  </Fragment>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="gyro-composer-slash-empty" role="status">
+              <span>
+                No command matches <code>/{slashMatch?.[1]}</code>
+              </span>
+              <small>
+                Press <kbd>↵</kbd> to send it as a message, or <kbd>esc</kbd> to
+                hide this.
+              </small>
+            </p>
+          )}
+          {isSlashMenuOpen ? (
+            <footer
+              className="gyro-composer-slash-footer"
+              id={`${popoverBaseId}-slash-detail`}
+              role="presentation"
+            >
+              <span>
+                {selectedSlashCommand?.hint ??
+                  selectedSlashCommand?.description}
+              </span>
+            </footer>
+          ) : null}
         </ComposerCompletionMenu>
       ) : null}
       {activePopover === "branch" ? (
@@ -22206,21 +22902,6 @@ function Composer({
           windows={providerUsage?.windows ?? []}
         />
       ) : null}
-      {/* Portalled to the body: the hero composer carries a drop-shadow
-          filter, which would otherwise become the containing block for this
-          fixed bubble and offset it by the composer's own position. */}
-      {isSlashMenuOpen && slashHint
-        ? createPortal(
-            <div
-              className="gyro-composer-slash-hint-bubble"
-              role="tooltip"
-              style={{ left: slashHint.left, top: slashHint.top }}
-            >
-              {slashHint.text}
-            </div>,
-            document.body,
-          )
-        : null}
       <textarea
         data-tour="composer.input"
         ref={composerTextareaRef}
@@ -22234,7 +22915,7 @@ function Composer({
         aria-controls={
           mentionOpen
             ? `${popoverBaseId}-context-menu`
-            : isSlashMenuOpen
+            : isSlashMenuOpen || isSlashEmptyStateOpen
               ? `${popoverBaseId}-slash-menu`
               : undefined
         }
@@ -22245,8 +22926,8 @@ function Composer({
               ? `${popoverBaseId}-slash-command-${selectedSlashCommandIndex}`
               : undefined
         }
-        aria-expanded={mentionOpen || isSlashMenuOpen}
-        aria-haspopup={mentionOpen ? "listbox" : "menu"}
+        aria-expanded={mentionOpen || isSlashMenuOpen || isSlashEmptyStateOpen}
+        aria-haspopup="listbox"
         onPaste={(event) => {
           const files = chatMediaFiles(event.clipboardData);
           if (files.length) {
@@ -22321,6 +23002,11 @@ function Composer({
           if (isGoalComposerActive && event.key === "Escape") {
             event.preventDefault();
             onCancelGoalComposer?.();
+            return;
+          }
+          if (isSlashEmptyStateOpen && event.key === "Escape") {
+            event.preventDefault();
+            setIsSlashMenuDismissed(true);
             return;
           }
           if (isSlashMenuOpen) {
@@ -22408,9 +23094,11 @@ function Composer({
                   ? isCliUpdating
                     ? "Updating a provider CLI — sending unlocks when it finishes…"
                     : cleanMachinePath.placeholder
-                  : variant === "hero"
-                    ? "Describe a task or attach images"
-                    : "Ask for follow-up changes or attach images"
+                  : placeholder
+                    ? placeholder
+                    : variant === "hero"
+                      ? "Describe a task or attach images"
+                      : "Ask for follow-up changes or attach images"
         }
         value={draft}
       />
@@ -22446,12 +23134,7 @@ function Composer({
           ) : null}
         </div>
       ) : null}
-      <div
-        className="gyro-composer-bar"
-        // The full-width Add menu must anchor to the shell, including in
-        // hero/tiled layouts whose toolbar rules establish a positioning box.
-        style={activePopover === "context" ? { position: "static" } : undefined}
-      >
+      <div className="gyro-composer-bar">
         {hasSelectedProvider || isHero ? (
           <>
             <div
@@ -22462,7 +23145,7 @@ function Composer({
                 aria-label="Add context"
                 className="gyro-composer-tool"
                 onClick={() => togglePopover("context")}
-                title="Add context"
+                title={activePopover === "context" ? undefined : "Add context"}
                 type="button"
                 {...menuProps("context")}
               >
@@ -22472,6 +23155,7 @@ function Composer({
                 <ComposerPopover
                   className="gyro-context-picker"
                   title="Add"
+                  nativeTooltips={false}
                   keepInBounds
                   id={`${popoverBaseId}-context`}
                   items={contextItems}
@@ -22735,8 +23419,13 @@ function Composer({
                   <header className="gyro-composer-limit-title">
                     <span>Plan usage</span>
                   </header>
+                  {quotaNotice ? (
+                    <small role="status">{quotaNotice}</small>
+                  ) : null}
                   {providerUsage?.stale ? (
-                    <small>Last known usage · retrying</small>
+                    <small title={providerUsage.error}>
+                      {staleUsageLabel(providerUsage.fetchedAt, Date.now())}
+                    </small>
                   ) : null}
                   {limitWindows.length > 0 ? (
                     limitWindows.map((window) => (
@@ -22906,18 +23595,28 @@ function Composer({
         {dictation ? (
           <button
             aria-label={
-              dictationPhase === "listening"
-                ? "Stop dictation"
-                : dictationPhase === "processing"
-                  ? "Transcribing your words"
-                  : "Dictate"
+              dictationPhase === "starting"
+                ? "Cancel microphone start"
+                : dictationPhase === "listening"
+                  ? "Stop dictation"
+                  : dictationPhase === "processing"
+                    ? "Finishing dictation"
+                    : "Dictate"
             }
-            aria-pressed={dictationPhase === "listening"}
+            aria-pressed={
+              dictationPhase === "starting" || dictationPhase === "listening"
+            }
+            aria-busy={
+              dictationPhase === "starting" || dictationPhase === "processing"
+            }
+            disabled={dictationPhase === "processing"}
             className={[
               "gyro-composer-tool",
               "gyro-dictation-button",
               dictationPhase === "listening" ? "is-listening" : "",
-              dictationPhase === "processing" ? "is-processing" : "",
+              dictationPhase === "processing" || dictationPhase === "starting"
+                ? "is-processing"
+                : "",
             ]
               .filter(Boolean)
               .join(" ")}
@@ -22927,11 +23626,13 @@ function Composer({
               toggleDictation();
             }}
             title={
-              dictationPhase === "listening"
-                ? "Stop dictation"
-                : dictationPhase === "processing"
-                  ? "Transcribing your words"
-                  : "Dictate"
+              dictationPhase === "starting"
+                ? "Cancel microphone start"
+                : dictationPhase === "listening"
+                  ? "Stop dictation"
+                  : dictationPhase === "processing"
+                    ? "Finishing dictation"
+                    : "Dictate"
             }
             type="button"
           >
@@ -23071,9 +23772,9 @@ function Composer({
           )}
         </button>
       </div>
-      {dictation && dictationNotice ? (
-        <p className="gyro-dictation-status" role="status">
-          {dictationNotice}
+      {dictation && dictationStatus ? (
+        <p className="gyro-dictation-status" role="status" aria-live="polite">
+          {dictationStatus}
         </p>
       ) : null}
       {shouldShowContextRow ? (
@@ -23983,7 +24684,18 @@ function turnKeyFromEvent(event: SessionEvent) {
   );
 }
 
-function ChatTurn({
+/** Present only in "Ask first"; absent means the plain summary card. */
+type ChatTurnFileReview = {
+  summaries?: FileReviewSummary[];
+  isSummarizing?: boolean;
+  onKeep?: (path: string, contentHash?: string) => void;
+  onAsk?: (path: string) => void;
+};
+const NO_KEEP_ALIVES: KeepAliveWatch[] = [];
+// A streamed delta changes one turn; every other turn keeps its props and is
+// skipped, instead of re-rendering the whole transcript per token.
+const ChatTurn = memoWithStableCallbacks(ChatTurnView);
+function ChatTurnView({
   artifactActions,
   subagents,
   fileReview,
@@ -24014,13 +24726,7 @@ function ChatTurn({
 }: {
   artifactActions?: ChatArtifactActions;
   subagents?: SubagentSurfaceState;
-  /** Present only in "Ask first"; absent means the plain summary card. */
-  fileReview?: {
-    summaries?: FileReviewSummary[];
-    isSummarizing?: boolean;
-    onKeep?: (path: string, contentHash?: string) => void;
-    onAsk?: (path: string) => void;
-  };
+  fileReview?: ChatTurnFileReview;
   isActive: boolean;
   keepAlives?: KeepAliveWatch[];
   onOpenKeepAlive?: (paneId: string) => void;
@@ -24098,6 +24804,7 @@ function ChatTurn({
               error: providerStatus.error,
               recoveryKind: providerStatus.recoveryKind,
               recoveryMessage: providerStatus.recoveryMessage,
+              retryNotBefore: providerStatus.retryNotBefore,
               at: turn.statusEvent?.createdAt,
               quietForSeconds: runQuietSeconds(turn.statusEvent),
             }
@@ -24106,7 +24813,7 @@ function ChatTurn({
         // otherwise transport loss uses the existing reconnect beat.
         retry: nativeRetry
           ? {
-              reason: "Model is temporarily busy",
+              reason: nativeRetry.recoveryKind === "rate-limit" ? "Provider rate limit reached" : "Waiting for the provider",
               attempt: nativeRetry.attempt,
             }
           : !isOnline
@@ -24255,7 +24962,9 @@ function ChatTurn({
           aggregateFileStats={aggregateFileStats}
           headerActions={
             <>
-              {(isRunning || !responseEvent) && turn.turnTokens ? (
+              {(isRunning || !responseEvent) &&
+              turn.turnTokens &&
+              turn.turnTokens.totalTokens > 0 ? (
                 <span
                   className="gyro-run-token-count"
                   title={turnTokensDetail(turn.turnTokens)}
@@ -26095,9 +26804,15 @@ function providerStatusFromEvent(event: SessionEvent) {
           retryAt: nativeRetryAt,
           attempt: numberFromEventPayload(payload, "retryAttempt"),
           maxAttempts: numberFromEventPayload(payload, "retryMaxAttempts"),
+          recoveryKind: stringFromEventPayload(payload, "recoveryKind"),
         }
       : undefined,
     error: stringFromEventPayload(payload, "error"),
+    retryNotBefore: Number.isFinite(
+      Date.parse(stringFromEventPayload(payload, "retryNotBefore") ?? ""),
+    )
+      ? Date.parse(stringFromEventPayload(payload, "retryNotBefore")!)
+      : undefined,
     modelLabel: stringFromEventPayload(payload, "modelLabel"),
     providerId: stringFromEventPayload(payload, "providerId"),
     providerLabel:
@@ -26172,7 +26887,10 @@ function isHiddenTranscriptEvent(event: SessionEvent) {
     event.kind === "system-event" &&
     (payloadKind === "workspace-context" ||
       payloadKind === "provider-context-usage" ||
-      payloadKind === "provider-turn-tokens")
+      payloadKind === "provider-turn-tokens" ||
+      // Per-turn accounting read by the efficiency panel; it has no message
+      // and would otherwise print as an empty "system event" row.
+      payloadKind === "efficiency-receipt")
   ) {
     return true;
   }
@@ -26497,6 +27215,9 @@ function ToolDetailFact({ label, value }: { label: string; value: string }) {
 type TerminalStatus = "restored" | "running" | "waiting" | "done" | "failed";
 
 function TerminalPaneView({
+  sessionNavigation = false,
+  sessionDropEdge,
+  headerActions,
   pane,
   hidden,
   placementStyle,
@@ -26513,6 +27234,9 @@ function TerminalPaneView({
   onSelect,
   renderBody,
 }: {
+  sessionNavigation?: boolean;
+  sessionDropEdge?: TerminalDropEdge;
+  headerActions?: ReactNode;
   hidden?: boolean;
   placementStyle?: CSSProperties;
   title: string;
@@ -26590,8 +27314,10 @@ function TerminalPaneView({
     <section
       ref={paneRef}
       id={`terminal-panel-${pane.id}`}
-      role="tabpanel"
-      aria-labelledby={`terminal-tab-${pane.id}`}
+      role={sessionNavigation ? "region" : "tabpanel"}
+      aria-label={sessionNavigation ? (pane.taskTitle ?? title) : undefined}
+      aria-labelledby={sessionNavigation ? undefined : `terminal-tab-${pane.id}`}
+      data-terminal-session-pane={sessionNavigation ? pane.id : undefined}
       data-terminal-hidden={hidden ? "true" : undefined}
       style={placementStyle}
       className={className}
@@ -26606,7 +27332,43 @@ function TerminalPaneView({
       onClick={onSelect}
     >
       <header
-        title={`${title} · ${activity} · ${contextLabel || workspaceMode}`}
+        draggable={sessionNavigation || undefined}
+        tabIndex={sessionNavigation ? 0 : undefined}
+        aria-label={
+          sessionNavigation ? `Move ${pane.taskTitle ?? title}` : undefined
+        }
+        aria-keyshortcuts={
+          sessionNavigation
+            ? "Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown"
+            : undefined
+        }
+        onKeyDown={
+          sessionNavigation
+            ? (event) => {
+                if (event.target === event.currentTarget)
+                  placeTerminalSessionByKeyboard(event.nativeEvent, pane.id);
+              }
+            : undefined
+        }
+        onPointerDown={
+          sessionNavigation
+            ? (event) => {
+                if ((event.target as HTMLElement).closest("button")) return;
+                startTerminalSessionPointerDrag(
+                  event.nativeEvent,
+                  event.currentTarget,
+                  pane.id,
+                );
+              }
+            : undefined
+        }
+        onDragStart={
+          sessionNavigation
+            ? (event) => beginTerminalSessionDrag(event.dataTransfer, pane.id)
+            : undefined
+        }
+        onDragEnd={sessionNavigation ? finishTerminalSessionDrag : undefined}
+        title={`${pane.taskTitle ?? title} · ${activity} · ${contextLabel || workspaceMode}${sessionNavigation ? " · Drag to split; Alt+arrow to place" : ""}`}
       >
         <button
           onClick={(event) => event.stopPropagation()}
@@ -26626,13 +27388,13 @@ function TerminalPaneView({
         </button>
         <div className="gyro-terminal-pane-title">
           <Terminal aria-hidden="true" size={14} />
-          <strong>{title}</strong>
+          <strong>{pane.taskTitle ?? title}</strong>
           {status === "restored" || status === "failed" || pane.attention ? (
             <span className="gyro-terminal-pane-state">
               {status === "restored" ? "Stopped" : activity}
             </span>
           ) : null}
-          {onClose ? (
+          {!sessionNavigation && onClose ? (
             <button
               aria-label={`Close ${title}`}
               className="gyro-terminal-pane-close"
@@ -26649,8 +27411,42 @@ function TerminalPaneView({
             </button>
           ) : null}
         </div>
+        {sessionNavigation ? (
+          <div className="gyro-terminal-session-actions" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+            {headerActions}
+            {onRemoveFromSplit ? (
+              <button
+                className="gyro-terminal-session-action"
+                aria-label={`Remove ${title} from split`}
+                title="Remove from split (keep running)"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRemoveFromSplit();
+                }}
+                type="button"
+              >
+                <X size={14} />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </header>
-      {onClose ? (
+      {sessionNavigation && sessionDropEdge ? (
+        <div
+          className={`gyro-terminal-session-drop is-${sessionDropEdge}`}
+          aria-hidden="true"
+        >
+          <span>
+            Split{" "}
+            {sessionDropEdge === "top"
+              ? "above"
+              : sessionDropEdge === "bottom"
+                ? "below"
+                : sessionDropEdge}
+          </span>
+        </div>
+      ) : null}
+      {!sessionNavigation && onClose ? (
         <div
           className={`gyro-terminal-corner ${closeMenuOpen ? "is-open" : ""}`}
           ref={closeMenuRef}

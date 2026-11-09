@@ -203,43 +203,63 @@ function ScopedDiffPane({
     Math.min(recordedEdit ?? patches.length - 1, patches.length - 1),
   );
   if (!historical) return <ComparisonDiffPane {...props} />;
+  const editPicker =
+    patches.length > 1 ? (
+      <select
+        aria-label="Recorded edit"
+        value={selectedEdit}
+        onChange={(event) => {
+          const edit = Number(event.target.value);
+          setRecordedEdit(edit === patches.length - 1 ? undefined : edit);
+        }}
+      >
+        {patches.map((_, index) => (
+          <option key={index} value={index}>
+            Edit {index + 1} of {patches.length}
+            {index === patches.length - 1 ? " · Latest" : ""}
+          </option>
+        ))}
+      </select>
+    ) : null;
+  const compareButton = (
+    <button
+      title={
+        showCurrent
+          ? "Show the diff this turn recorded"
+          : "Compare against the file as it is now"
+      }
+      type="button"
+      onClick={() => setShowCurrent(!showCurrent)}
+    >
+      {showCurrent ? "Recorded turn" : "Current file"}
+    </button>
+  );
+  // A recorded patch folds its controls into the diff's own toolbar: one row
+  // instead of a "Recorded turn" row stacked above a sections row.
+  const foldsToolbar = !showCurrent && patches.length > 0;
   return (
     <div className="gyro-comparison-diff-pane gyro-recorded-diff-pane">
-      <div className="gyro-diff-review-toolbar">
-        <strong>
-          {showCurrent
-            ? "Current working tree"
-            : "Recorded turn"}
-        </strong>
-        <div className="gyro-recorded-diff-controls">
-          {!showCurrent && patches.length > 1 ? (
-            <select
-              aria-label="Recorded edit"
-              value={selectedEdit}
-              onChange={(event) => {
-                const edit = Number(event.target.value);
-                setRecordedEdit(edit === patches.length - 1 ? undefined : edit);
-              }}
-            >
-              {patches.map((_, index) => (
-                <option key={index} value={index}>
-                  Edit {index + 1} of {patches.length}
-                  {index === patches.length - 1 ? " · Latest" : ""}
-                </option>
-              ))}
-            </select>
-          ) : null}
-          <button type="button" onClick={() => setShowCurrent(!showCurrent)}>
-            {showCurrent ? "Back to recorded turn" : "Compare current file"}
-          </button>
+      {foldsToolbar ? null : (
+        <div className="gyro-diff-review-toolbar">
+          <strong>
+            {showCurrent ? "Current working tree" : "Recorded turn"}
+          </strong>
+          <div className="gyro-recorded-diff-controls">{compareButton}</div>
         </div>
-      </div>
+      )}
       {showCurrent ? (
         <ComparisonDiffPane {...props} />
       ) : patches.length ? (
         <PlainDiffView
           key={selectedEdit}
+          actions={
+            <span className="gyro-recorded-diff-controls">
+              {editPicker}
+              {compareButton}
+            </span>
+          }
           diff={patches[selectedEdit]!}
+          lead="Recorded turn"
         />
       ) : (
         <div className="gyro-diff-empty-state">

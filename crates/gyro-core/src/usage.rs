@@ -46,6 +46,8 @@ pub enum UsageOrigin {
     /// compact command of its own, to write the checkpoint the next turn
     /// starts from.
     ContextCompaction,
+    /// A title-only repair when a model omitted the opening title marker.
+    SessionTitle,
     /// A read-only research sub-agent started by a chat turn.
     SubAgent,
     Optimization,
@@ -63,6 +65,7 @@ impl UsageOrigin {
             Self::CouncilResynthesis => "council-resynthesis",
             Self::ChangeSummary => "change-summary",
             Self::ContextCompaction => "context-compaction",
+            Self::SessionTitle => "session-title",
             Self::SubAgent => "sub-agent",
             Self::Optimization => "optimization",
             Self::AgentSession => "agent-session",
@@ -77,6 +80,7 @@ impl UsageOrigin {
             "council-resynthesis" => Self::CouncilResynthesis,
             "change-summary" => Self::ChangeSummary,
             "context-compaction" => Self::ContextCompaction,
+            "session-title" => Self::SessionTitle,
             "sub-agent" => Self::SubAgent,
             "optimization" => Self::Optimization,
             "agent-session" => Self::AgentSession,
@@ -94,6 +98,7 @@ impl UsageOrigin {
             Self::CouncilResynthesis => "Council re-synthesis",
             Self::ChangeSummary => "Change summaries",
             Self::ContextCompaction => "Context compaction",
+            Self::SessionTitle => "Chat titles",
             Self::SubAgent => "Sub-agents",
             Self::Optimization => "Optimization",
             Self::AgentSession => "Agent sessions",

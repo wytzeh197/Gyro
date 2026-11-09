@@ -1,0 +1,1 @@
+{"providers": [{"id": "anthropic", "model": "claude-sonnet-5", "effort": "low"}], "trials": 1, "timeoutSeconds": 180, "tasks": ["code"], "reviewFixtureEdits": true, "requireFileEditApproval": true}

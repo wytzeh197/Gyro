@@ -1,5 +1,6 @@
 mod context_query;
 mod project_import_storage;
+mod titles;
 pub use project_import_storage::{ProjectImportCommit, SessionImportSource};
 
 use crate::capabilities::ProjectCapabilityPolicy;
@@ -37,7 +38,7 @@ const LEGACY_TURN_MESSAGE_SCAN_LINES: usize = 64;
 const TRUNCATED_SESSION_EVENT_MARKER: &str = "… [truncated]";
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 /// Bump when additive schema migrations change so reopen skips table_info scans.
-const SESSION_STORE_SCHEMA_VERSION: i32 = 8;
+const SESSION_STORE_SCHEMA_VERSION: i32 = 9;
 /// Ceiling for one delete's sub-agent cleanup, so a cycle in the data — which
 /// the write path cannot create — cannot spin forever.
 const MAX_SUBAGENT_SESSION_TREE: usize = 256;
@@ -749,13 +750,21 @@ impl SessionStore {
         let title = title.into().trim().to_string();
         let title = normalize_session_title(title)?;
 
-        let changed = self.conn.execute(
+        let transaction = self.conn.unchecked_transaction()?;
+        let changed = transaction.execute(
             "update sessions set title = ?1 where id = ?2",
             params![title, session_id.to_string()],
         )?;
         if changed == 0 {
             return Ok(None);
         }
+        transaction.execute(
+            "insert into session_titles(session_id, source, expected_title, task)
+             values (?1, 'manual', ?2, '')
+             on conflict(session_id) do update set source = 'manual', expected_title = ?2, task = ''",
+            params![session_id.to_string(), title],
+        )?;
+        transaction.commit()?;
         self.get_session(session_id)
     }
 
@@ -2245,6 +2254,13 @@ impl SessionStore {
                created_at text not null,
                updated_at text not null,
                events_path text not null
+             );
+
+             create table if not exists session_titles (
+               session_id text primary key not null references sessions(id) on delete cascade,
+               source text not null,
+               expected_title text not null,
+               task text not null
              );
 
              create index if not exists idx_sessions_updated_at

@@ -1,0 +1,6 @@
+{
+  "seedExistingExit": 0,
+  "wrongWorkspaceMarkerExit": 2,
+  "wrongWorkspaceMarkerError": "Could not seed native review chats: review workspace must be its own marker-guarded directory",
+  "markerRestored": true
+}

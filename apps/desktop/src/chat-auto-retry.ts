@@ -20,6 +20,7 @@ const PERMANENT_RECOVERY_KINDS = new Set([
   "authentication",
   "login-expired",
   "plan-exhausted",
+  "quota-exceeded",
   "model-capacity-exhausted",
   "provider-config",
   "cli-contract",
@@ -34,7 +35,7 @@ const PERMANENT_RECOVERY_KINDS = new Set([
   "stalled",
 ]);
 const PERMANENT_ERROR =
-  /\b(?:unauthori[sz]ed|authentication|authentication_failed|credential|invalid api key|not logged in|login required|quota|insufficient_quota|credit|balance|billing|payment|budget|usage limit|token ceiling|per-call ceiling|tool.call limit|output exceeded|size limit|missing environment variable|subscription access|cancelled|canceled|stopped|interrupted|acp run timed out|acp run became inactive)\b|\bhttp\s+(?:400|401|402|403)\b|["']?(?:http_status|error_status|status)["']?\s*:\s*(?:400|401|402|403)\b/i;
+  /\b(?:unauthori[sz]ed|authentication|authentication_failed|credential|invalid api key|not logged in|login required|quota|insufficient_quota|usage[ _-]?limit[ _-]?exceeded|credit|balance|billing|payment|budget|usage limit|token ceiling|per-call ceiling|tool.call limit|output exceeded|size limit|missing environment variable|subscription access|cancelled|canceled|stopped|interrupted|acp run timed out|acp run became inactive)\b|\bhttp\s+(?:400|401|402|403)\b|["']?(?:http_status|error_status|status)["']?\s*:\s*(?:400|401|402|403)\b/i;
 const TRANSIENT_ERROR =
   /\b(?:selected model is at capacity|model (?:is (?:temporarily )?|temporarily )?at capacity|overloaded|overloaded_error|temporarily unavailable|internal server error|service unavailable|rate limit|too many requests|connection (?:reset|refused|failed)|broken pipe|network is unreachable|could not resolve host|dns|unexpected eof|eof while|timed out|timeout)\b|\bhttp\s+(?:408|429|500|502|503|504|529)\b|["']?(?:http_status|error_status|status)["']?\s*:\s*(?:408|429|500|502|503|504|529)\b/i;
 
@@ -139,6 +140,9 @@ export function eligibleChatAutoRetryFailure(
   });
   if (!status || !isFailedStatus(status)) return undefined;
   const payload = record(status.payload);
+  // The native worker owns its complete retry budget. A terminal status is
+  // not permission to begin another backend cycle from a browser timer.
+  if (payload?.recoveryOwner === "backend" || payload?.recovery) return undefined;
   const recoveryKind = text(payload, "recoveryKind");
   const error = `${text(payload, "error") ?? ""} ${status.message}`;
   if (

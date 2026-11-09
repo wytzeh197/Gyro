@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./check-provider-quota.mjs";
 import { remainingUsage } from "../packages/ui/src/usage-remaining.ts";
 
 for (const [used, expected, label] of [
@@ -214,6 +215,9 @@ assert.equal(
 
 for (const [providerId, modelId, window] of [
   ["openai", "gpt-6.1-sol", 500_000],
+  ["anthropic", "claude-opus-5", 1_000_000],
+  ["anthropic", "claude-opus-4-8", 1_000_000],
+  ["anthropic", "claude-haiku-4-5", 200_000],
   ["xai", "grok-4.7", 256_000],
   ["antigravity", "antigravity-default", 0],
   ["openrouter", "z-ai/glm-5.3", 1_048_576],
@@ -238,6 +242,8 @@ assert.equal(
 // offline catalog, in either direction. Counts must use the actual window.
 for (const [providerId, modelId, catalog, runtime] of [
   ["kimi", "k3", 262_144, 1_048_576],
+  ["anthropic", "claude-opus-5", 1_000_000, 200_000],
+  ["openai", "gpt-6.1-sol", 500_000, 475_000],
   ["ollama", "local-model", 131_072, 4_096],
 ]) {
   const actual = estimateComposerContextUsage(
@@ -1152,3 +1158,22 @@ for (const providerId of ["openai", "anthropic", "xai", "kimi", "gemini", "custo
   assert.equal(providerUsageFromSnapshot({ ...older, fetchedAt: latest.fetchedAt }, stale).stale, undefined);
 }
 console.log("Provider usage snapshot ordering checks passed.");
+
+const identicalReading = {
+  providerId: "anthropic",
+  fetchedAt: "2026-11-08T12:00:00Z",
+  windows: [{ id: "weekly", label: "Weekly", usedPercent: 42, status: "ok", resetsAt: "2026-11-09T12:00:00Z" }],
+};
+const identityState = providerUsageFromSnapshot(identicalReading);
+assert.equal(providerUsageFromSnapshot(structuredClone(identicalReading), identityState), identityState);
+for (const changed of [
+  { id: "five-hour" }, { label: "Plan" }, { usedPercent: 43 },
+  { status: "warning" }, { resetsAt: "2026-11-10T12:00:00Z" },
+]) {
+  const result = providerUsageFromSnapshot({ ...identicalReading, windows: [{ ...identicalReading.windows[0], ...changed }] }, identityState);
+  assert.notEqual(result, identityState, "A changed usage window must reach the UI");
+}
+for (const changed of [{ stale: true }, { error: "Offline" }, { fetchedAt: "2026-11-08T12:01:00Z" }, { windows: [] }]) {
+  assert.notEqual(providerUsageFromSnapshot({ ...identicalReading, ...changed }, identityState), identityState);
+}
+console.log("Provider usage identity passed: duplicate poll/broadcast suppression without hiding fresh age, errors, resets or levels.");

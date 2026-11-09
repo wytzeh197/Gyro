@@ -13,6 +13,7 @@ import {
   type WorkbenchAction,
   type WorkbenchState,
 } from "@gyro-dev/ui";
+import { isPreviewSessionId } from "./session-creation";
 import { isTauriRuntime } from "./tauri-runtime";
 
 /**
@@ -228,7 +229,7 @@ export function useTerminalAttachmentController(
       // A preview chat is local UI state, not a persisted session UUID. Store
       // its attachments as a draft so the first successful send can migrate them.
       const sessionId =
-        activeSessionId && !activeSessionId.startsWith("preview-")
+        activeSessionId && !isPreviewSessionId(activeSessionId)
           ? activeSessionId
           : NEW_CHAT_DRAFT_KEY;
       try {

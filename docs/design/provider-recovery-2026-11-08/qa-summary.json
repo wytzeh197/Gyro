@@ -1,0 +1,118 @@
+{
+  "date": "2026-11-08",
+  "baseline": {
+    "recordedTurnTotalTokens": 2754229,
+    "cachedInputTokensIncludedInTotal": 2681162,
+    "rateLimitTokensPerMinute": 1000000,
+    "rateLimitUsed": 795154,
+    "rateLimitRequested": 234568,
+    "retryHintSeconds": 1.783,
+    "readFailure": "File was read before creation; not a broken file reader.",
+    "searchFailure": "Existing single-file scopes were rejected by older directory-only runtime. Current file/directory contract passed its focused suite."
+  },
+  "checks": [
+    {
+      "name": "core-provider",
+      "command": "cargo test -p gyro-core provider_ --lib --offline",
+      "result": "ok",
+      "passed": 129,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "desktop-provider",
+      "command": "cargo test -p gyro-desktop --lib provider_ --offline",
+      "result": "ok",
+      "passed": 197,
+      "failed": 0,
+      "ignored": 5
+    },
+    {
+      "name": "workspace-search",
+      "command": "cargo test -p gyro-desktop --lib workspace_search::tests --offline",
+      "result": "ok",
+      "passed": 23,
+      "failed": 0,
+      "ignored": 1
+    },
+    {
+      "name": "inspection-metadata",
+      "command": "cargo test -p gyro-desktop --lib capability_inspection::tests --offline",
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "resumed-context",
+      "command": "cargo test -p gyro-desktop --lib resumed_turns_skip_standing_guidance_but_keep_turn_state --offline",
+      "result": "ok",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "name": "recovery-browser",
+      "result": "passed",
+      "evidence": "browser-qa.json",
+      "coverage": "production components with simulated provider recovery, cancellation, deadlines, retained work/approval state, lost cursors, failed tools, themes and narrow layouts"
+    },
+    {
+      "name": "frontend-build",
+      "result": "passed",
+      "command": "pnpm --filter @gyro-dev/desktop build"
+    },
+    {
+      "name": "native-build",
+      "result": "passed",
+      "command": "cargo build -p gyro-desktop --bin gyro-desktop --features tauri/custom-protocol --offline"
+    },
+    {
+      "name": "native-lsp-smoke",
+      "result": "passed",
+      "steps": 3
+    },
+    {
+      "name": "native-browser-smoke",
+      "result": "failed",
+      "reason": "Hover target did not change to Hover: open. This is separate from the recovery fixture checks."
+    },
+    {
+      "name": "focused-frontend",
+      "result": "passed",
+      "command": "pnpm test:chat-recovery"
+    },
+    {
+      "name": "typecheck",
+      "result": "passed",
+      "command": "pnpm --filter @gyro-dev/desktop typecheck"
+    },
+    {
+      "name": "final-native-recovery",
+      "result": "passed",
+      "passed": 16,
+      "command": "cargo test -p gyro-desktop --lib provider_retry_recovery::tests --offline"
+    }
+  ],
+  "limitations": [
+    "No live paid provider inference was performed.",
+    "Native browser smoke failed at hover; native LSP passed.",
+    "No numerical token reduction is claimed; resumed-context and usage accounting regressions pass.",
+    "CLI-internal provider retries remain outside Gyro-controlled retry ownership."
+  ],
+  "visualReview": {
+    "tokensAndComponents": "Existing Gyro semantic tokens and recovery/disclosure components",
+    "statusTruth": "Rate-limit waiting, exhausted, unavailable and cooldown states exercised",
+    "keyboard": "Cancel/manual retry and focus-visible verified; technical disclosures opened programmatically.",
+    "layout": "Dark/light themes, narrow panes, sizes and overflow checks passed"
+  },
+  "sourceDigests": {
+    "apps/desktop/src-tauri/src/provider_retry_recovery.rs": "c76c9c0258df0c62c99915dd84cca1c02798b0bc0212b0748afab9da8901e621",
+    "crates/gyro-core/src/provider_retry.rs": "daed863be2a02041c9cfff525daf6755ba533520234ecd7f45d232ea3bde0563",
+    "crates/gyro-core/src/provider_cooldown.rs": "68fb5f8db3a29a72ee68cbc9df3b39fc382473f729b983542aa1f7328b6e76c1",
+    "apps/desktop/src/chat-send-outcome.ts": "982d4f6052b52fd1a9599c2d11b6de3469f81c465491cfab5fe382173508e128",
+    "apps/desktop/src/App.tsx": "b291e8067db40657b4561416358a0294bb5996dc11acc37d95819cc87193d4b7",
+    "packages/ui/src/chat-run-view.tsx": "b94a64f2795330665d0e32e9b554e46bf8bf9af6731ca4a753565c2efc685f12",
+    "packages/ui/src/chat-recovery.css": "f60a2ee9fbc93a93dc3f09b684dafa4048e2f6e1986535319ccbd94e02bcae53"
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "schema": "gyro.page-navigation-validation.v1",
+  "generatedAt": "2026-11-07T20:12:38.670209+00:00",
+  "head": "1d0b7e1321790246390b9ad64d78f73813a37ab6",
+  "workspace": "dirty; unrelated work preserved",
+  "nativeRuns": {
+    "navigation": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-DFHRUn",
+    "frontend": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-browser-events-native-aVk2LH"
+  },
+  "baselineChecks": 51,
+  "baselineFailedChecks": 18,
+  "nativeNavigationChecks": 52,
+  "nativeFrontendChecks": 47,
+  "rustBrowserTests": 53,
+  "eventRoutingCases": 20,
+  "observerLifecycle": {
+    "detached": 13,
+    "dropped": 13,
+    "forwardedCallbacks": 82,
+    "installed": 13
+  },
+  "wireAssertions": {
+    "heldDocuments": 5,
+    "releasedDocuments": 5,
+    "heldImages": 5,
+    "releasedImages": 5,
+    "blockedCredentialRequests": 0,
+    "source": "successful runner assertions; held/released counts also retained in native-navigation-manifest.json"
+  },
+  "isolatedNativeStoreCounts": {
+    "navigation": {
+      "provider_session_bindings": 0,
+      "session_turn_messages": 0,
+      "session_turn_status": 0,
+      "usage_turn_links": 0,
+      "efficiency_task_turns": 0
+    },
+    "frontend": {
+      "provider_session_bindings": 0,
+      "session_turn_messages": 0,
+      "session_turn_status": 0,
+      "usage_turn_links": 0,
+      "efficiency_task_turns": 0
+    }
+  },
+  "modelTurnsDispatched": 0,
+  "unitIsolation": {
+    "data": "/private/var/folders/20/n8przxcs0g72jllfg677ys600000gn/T/gyro-page-navigation-unit-hjf31r1i/data",
+    "exitCode": 0,
+    "remainingAttachmentFixtureDirectories": 0
+  },
+  "productionCspUnchanged": true,
+  "captureAssetsAllowed": true,
+  "workspaceAssetAllowed": false,
+  "nativeOsInputTested": false,
+  "fullAppShellMounted": false,
+  "checks": {
+    "defaultFeatureCargoCheck": "passed",
+    "desktopTypecheck": "passed",
+    "browserSourceAndRuntimeRegressions": "passed; browser-regressions.log",
+    "focusedFormatting": "passed",
+    "scopedWhitespace": "passed"
+  },
+  "measurements": {
+    "closeWithHeldNativeReadMs": 4,
+    "imageRecovery": {
+      "feedbackBlockedUntilReady": true,
+      "freshNativeCaptureDecoded": true,
+      "missingAssetFailed": true
+    },
+    "loadingState": {
+      "actualCompletionObserved": true,
+      "pendingObserved": true,
+      "staleLoadedRejected": true
+    }
+  },
+  "sourceSha256": {
+    "apps/desktop/src-tauri/src/browser_navigation_observer.rs": "88e506c3f49c7c5b7b87a4461503a89bb02e255b6f5e916015a5a5249628fb1f",
+    "apps/desktop/src-tauri/src/session_browser.rs": "ebcb1dcc2d26c838d1ad1f62c3019e41251ad35439669566f0ce38beef27cd65",
+    "apps/desktop/src-tauri/src/browser_navigation_smoke.rs": "d4a719041409818cdb3dd24470f1f89cb9eda6461b7a5bedf4b59374b1d3ae1a",
+    "scripts/run-browser-events-native.mjs": "940713ae60150bc6f52dba6b3443eb3453cb49cfc25dd648eb77afa9a3b99548",
+    "docs/model-tools.md": "6ce50b7aa56c832ad014cdd19040bbb1228206370bde1ba67348588ed9f3c7c2",
+    "apps/desktop/src-tauri/tauri.conf.json": "0d20aee8cfc34681002669c645766b2ea756110f26fc848f2ca761d2566c0e79",
+    "Cargo.lock": "e00ddd671f957eabad737b1b2b7ab998cddb9fbf5b5ad8cc7464a700b35febc8"
+  },
+  "open": [
+    "failed/cancelled navigation and before-unload prompt recovery",
+    "redirect and superseded-navigation callback edge cases",
+    "full App/companion/split-shell and native OS input/accessibility acceptance",
+    "live GPT/Grok task completion and response-speed measurement"
+  ]
+}

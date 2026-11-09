@@ -48,15 +48,45 @@
   color: var(--gyro-accent);
   border-color: currentColor;
 }
+/* Unreachable runtimes are a count in the controls row, details on demand. */
 .gyro-app-preview-issues {
   font-size: var(--gyro-font-caption);
-  padding: 6px 10px;
   color: var(--gyro-muted);
-  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-app-preview-issues > summary {
+  cursor: default;
+  padding: 4px 2px;
+  white-space: nowrap;
+}
+.gyro-app-preview-issues[open] {
+  flex-basis: 100%;
 }
 .gyro-app-preview-issues p {
   overflow-wrap: anywhere;
   margin: 6px 0;
+}
+/* The same controls inside the browser's options menu: one quiet group. */
+.gyro-app-preview-menu {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.gyro-app-preview-menu select {
+  flex: 1;
+  width: 0;
+  min-width: 120px;
+}
+.gyro-app-preview-menu :is(button, select) {
+  font: inherit;
+  font-size: var(--gyro-font-caption);
+  color: var(--gyro-text);
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  padding: 4px 8px;
 }
 .gyro-app-preview-error {
   font-size: var(--gyro-font-micro);

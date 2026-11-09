@@ -8,12 +8,17 @@ import {
 } from "./subagents";
 
 export function SubagentsEnvironment({
+  autoExpand = false,
   state,
 }: {
+  /** Open the list without a click, e.g. while agents are working. */
+  autoExpand?: boolean;
   state: SubagentSurfaceState;
 }) {
   const [selected, setSelected] = useState<"working" | "done">();
-  const [expanded, setExpanded] = useState(false);
+  const [expandedToggle, setExpanded] = useState<boolean>();
+  // Follows the caller until the user opens or closes the list by hand.
+  const expanded = expandedToggle ?? autoExpand;
   const listId = useId();
   const working = subagentsForStatus(state.agents, "working");
   const done = subagentsForStatus(state.agents, "done");
@@ -77,7 +82,7 @@ export function SubagentsEnvironment({
             title={`${expanded ? "Hide" : "Show"} ${view} sub-agents`}
             aria-expanded={expanded}
             aria-controls={listId}
-            onClick={() => setExpanded((current) => !current)}
+            onClick={() => setExpanded(!expanded)}
           >
             <SubagentMarks agents={agents} />
             <span role="status">
