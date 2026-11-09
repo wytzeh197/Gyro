@@ -125,10 +125,8 @@ try {
   const code = repair.match(/node --input-type=module <<'JS'\n([\s\S]*?)\n          JS/)[1]
     .split("\n").map(line => line.slice(10)).join("\n");
   const fixture = "crates/gyro-cli/tests/shared_provider_host.rs";
-  const fixed = readFileSync(join(repo, fixture), "utf8");
-  const comments = "                // Accepted sockets can inherit the listener's nonblocking mode\n                // on macOS. Wait for the request instead of racing its writer.\n";
   const insertion = "                stream.set_nonblocking(false).unwrap();\n";
-  const legacy = fixed.replace(comments + insertion, "");
+  const legacy = readFileSync(join(repo, "scripts/fixtures/v0.1.1-cli-http.rs"), "utf8");
   assert.equal(createHash("sha256").update(legacy).digest("hex"), "a4534a16bd407adf794d0e974886f190d0ea532c0b0530f0b4c0ce4f7383e235");
   mkdirSync(join(root, dirname(fixture)), { recursive: true });
   const repairFixture = content => {
@@ -137,7 +135,10 @@ try {
   };
   const repaired = repairFixture(legacy);
   assert.equal(repaired.status, 0, repaired.stderr);
-  assert.equal(readFileSync(join(root, fixture), "utf8"), fixed.replace(comments, ""));
+  const repairedSource = readFileSync(join(root, fixture), "utf8");
+  assert.equal(repairedSource.split(insertion).length, 2);
+  assert.equal(repairedSource.replace(insertion, ""), legacy);
+  assert.ok(repairedSource.includes("Ok((stream, _)) => {\n" + insertion));
   const unexpected = legacy + "// unexpected source change\n";
   assert.notEqual(repairFixture(unexpected).status, 0);
   assert.equal(readFileSync(join(root, fixture), "utf8"), unexpected);
