@@ -1,5 +1,13 @@
 # Provider host extraction: native acceptance evidence
 
+> Scope correction, 2026-11-09: Wytze confirmed that Kimi/Antigravity access and
+> a downloaded Ollama model are unavailable, and budget/disk space rule out adding
+> them for this work. Those providers are excluded from the current live acceptance
+> scope. No subscription, sign-in setup or model download is a completion requirement.
+> Earlier probes and setup-gate language below are historical; they are not pending
+> tasks for Wytze. Available live scope: Codex, Claude and DeepSeek. Unavailable
+> providers remain unverified, not passed.
+
 These bounded runs used the real debug desktop chat command, AppHandle, capability broker, run lease, cancellation and provider processes. Each process used its own temporary data store and disposable git workspaces. Launch PIDs and executable paths were checked with `ps` and recorded in `launches.json`. The installed app and its chat store were not changed. Frontend rendering and window interaction were not measured.
 
 `all-hosts/` was built after all six runners switched to `RunnerHost` and the temporary legacy dispatcher was removed. Earlier cohorts retain the original failures for comparison. Each task includes a fresh turn and a separate session with a bootstrap turn followed by a resumed request. API runners use local conversation history rather than a native provider cursor, so `resumedActual: false` is expected for them.

@@ -397,5 +397,22 @@
       ],
       "cohort": "ollama-all-modes"
     }
-  ]
+  ],
+  "scopeCorrection": {
+    "date": "2026-11-09",
+    "source": "User confirmation in this chat",
+    "availableLiveProviders": [
+      "openai",
+      "anthropic",
+      "deepseek"
+    ],
+    "unavailableProviders": [
+      "kimi",
+      "antigravity",
+      "ollama"
+    ],
+    "constraints": "No budget for subscriptions and no disk space for model downloads; no purchase, provider setup, download or storage change is required.",
+    "priorCohorts": "Retained as historical probe results; unavailable providers are not setup blockers or passed live tests.",
+    "ollamaLabel": "Earlier endpoint-reported qwen3:0.6b label does not establish a currently available downloaded model."
+  }
 }

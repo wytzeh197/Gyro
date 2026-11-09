@@ -20,11 +20,14 @@ and Ctrl-C. New binary API peers verify real tool use and cancellation. The
 [acceptance record](README.md) retains the fixed Claude hang, an existing timing
 assertion failure under concurrent load, model/task failures and setup blocks.
 
-Manual acceptance remains partial: installed Kimi reports subscription HTTP 403,
-Antigravity needs sign-in, and installed Ollama qwen3:0.6b failed the exact edit and
-approval task. The desktop recheck passed Codex/Claude; DeepSeek's fresh wrong-path
-failure is retained. No installed-app/frontend or clean-machine acceptance is
-claimed. No new dependencies or crate were introduced.
+Available live CLI acceptance (Codex, Claude and DeepSeek) passed. Wytze confirmed
+on 2026-11-09 that Kimi/Antigravity access and a downloaded Ollama model are
+unavailable, with no budget or disk space to add them. These providers are outside
+the current acceptance scope; no purchase, setup or download is required. Earlier
+failed probes remain historical evidence, not setup blockers. The desktop recheck
+passed Codex/Claude; DeepSeek's fresh wrong-path failure is retained. No live
+coverage of unavailable providers, installed-app/frontend or clean-machine
+acceptance is claimed. No new dependencies or crate were introduced.
 
 Local review base: `3117971e`. Keep this behaviour change separate from the
 preceding provider moves and the subsequent crate/measurement decision. No push

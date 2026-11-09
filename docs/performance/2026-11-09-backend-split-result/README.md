@@ -1,7 +1,11 @@
 # Backend split outcome and crate decision
 
 Recorded 2026-11-09. Implementation checkpoints cover every planned phase.
-Full live-provider acceptance remains partial; the open gates are listed below.
+Acceptance is scoped to the available Codex, Claude and DeepSeek setup.
+Kimi, Antigravity and Ollama are unavailable and excluded from this run, as
+confirmed by Wytze on 2026-11-09. Budget and disk space rule out subscriptions
+or model downloads for this work. Historical probes remain evidence only.
+Strict desktop task reliability and broader native acceptance remain partial.
 No remote push, remote PR, new crate, model download or installed-app replacement
 was performed.
 
@@ -67,8 +71,7 @@ measured, so no speedup for that crate can be claimed.
 10.5k-line module tree already shared by both hosts. Provider edits currently
 check in about 4.6 seconds; the measured difference from touching desktop is about
 2.5 seconds, within the baseline's stated noise band. The available data does not
-justify the dependency/API churn of a new crate while provider acceptance still
-has open setup and model gates. A separate provider crate can be evaluated with
+justify the dependency/API churn of a new crate. A separate provider crate can be evaluated with
 an actual comparative build if editing latency later warrants it; that would
 require the plan's explicit user approval before creating the crate.
 
@@ -93,16 +96,19 @@ desktop code cohort passed Codex and Claude fresh/resumed turns; DeepSeek's fres
 wrong-path failure and successful subsequent turn are retained alongside prior
 successful cohorts.
 
-Remaining acceptance gates:
+Unavailable providers — excluded from the current acceptance scope:
 
-- Installed Kimi Code returns subscription HTTP 403. Its CLI accepts the empty
-  headless MCP list, but tools/approvals/resume need an entitled session. Desktop's
-  existing stdio MCP incompatibility remains recorded separately.
-- Installed Antigravity requires Google sign-in. Supported posture and tool/resume
-  behaviour remain unverified. It has no per-call approval-dialog support.
-- Installed Ollama `qwen3:0.6b` failed the exact file edit and refusal task; local
-  history resume and Ctrl-C passed. A capable configured model is needed to pass
-  the tool gate; none was downloaded or substituted.
+- Kimi and Antigravity: Wytze has no subscription/access for these providers.
+  No purchase, sign-in setup or paid test is required to finish this refactor.
+- Ollama: Wytze has no downloaded model available for this work and lacks disk
+  space for one. No download, model substitution or additional storage is required.
+- Earlier harness results (Kimi HTTP 403, Antigravity sign-in prompt and an endpoint
+  reporting `qwen3:0.6b`) are retained as historical probe results. The endpoint's
+  model label does not establish that Wytze has a currently usable downloaded model.
+  These results are not open setup tasks for Wytze and are not passing live tests.
+
+Remaining limitations for the available setup:
+
 - Strict desktop model/task reliability remains partial because out-of-scope
   proposals were correctly blocked. No approval allowlist or verifier was relaxed.
 - Native harnesses use isolated stores/workspaces and verified debug PIDs. They

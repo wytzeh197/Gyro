@@ -50,7 +50,17 @@ in the evidence. A separate earlier default-concurrency test run hit an existing
 Ollama deadline timing assertion while live providers ran; the unchanged complete
 suite then passed with the required four threads. No threshold was relaxed.
 
-## Real terminal acceptance
+## Current acceptance scope (2026-11-09 correction)
+
+Wytze confirmed that Kimi and Antigravity access and an available downloaded
+Ollama model are absent. Budget and disk space do not allow adding them for this
+work. Their live acceptance checks are **not applicable to the current setup**;
+no subscription, sign-in setup, model download or storage change is required.
+The available live scope is Codex, Claude and DeepSeek. The table below preserves
+historical probes, including the earlier endpoint-reported `qwen3:0.6b` label;
+it is not proof of a currently usable downloaded model on Wytze's machine.
+
+## Historical real terminal acceptance
 
 Each cohort launched the actual `target/debug/gyro` under a controlling PTY,
 verified its executable by PID, and used a disposable workspace and private Gyro
@@ -87,10 +97,11 @@ cohorts in [provider-host evidence](../2026-11-09-backend-provider-host/README.m
 The scoped reviewer and verifier were not relaxed. Frontend/window interaction
 was not measured.
 
-**Code and automated validation are complete; the full live-provider acceptance
-gate is partial.** Kimi entitlement, Antigravity sign-in/posture, a tool-capable
-Ollama setup, and strict desktop task reliability still require verification.
-This checkpoint does not claim installed-app or clean-machine acceptance.
+**Code and automated validation are complete.** The available live CLI providers
+(Codex, Claude and DeepSeek) passed all four checks. Kimi, Antigravity and Ollama
+are excluded as unavailable, rather than left as setup blockers. Strict desktop
+task reliability remains partial. This checkpoint does not claim live coverage
+of unavailable providers, installed-app or clean-machine acceptance.
 
 Artifacts: [terminal records](terminal-acceptance.json),
 [desktop recheck](desktop-defaults-acceptance.json), [checks](validation.json).
