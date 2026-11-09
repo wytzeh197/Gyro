@@ -374,6 +374,26 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm --filter @gyro-dev/codemode build && pnpm --filter @gyro-dev/codemode test
+      # v0.1.1 was tagged before its Intel-only fixture race was discovered.
+      # Keep every distributed binary on the immutable tag. Recovery changes
+      # only this exact test fixture's socket mode, without skipping assertions.
+      - name: Normalize legacy CLI fixture for v0.1.1 recovery
+        if: github.event_name == 'workflow_dispatch' && env.RELEASE_TAG == 'v0.1.1'
+        run: |
+          node --input-type=module <<'JS'
+          import { createHash } from 'node:crypto';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const path = 'crates/gyro-cli/tests/shared_provider_host.rs';
+          const source = readFileSync(path, 'utf8');
+          const digest = createHash('sha256').update(source).digest('hex');
+          if (digest !== 'a4534a16bd407adf794d0e974886f190d0ea532c0b0530f0b4c0ce4f7383e235') {
+            throw new Error('Refusing to alter an unexpected legacy test fixture');
+          }
+          const needle = '                stream\n                    .set_read_timeout';
+          if (source.split(needle).length !== 2) throw new Error('Expected one accepted-socket setup');
+          writeFileSync(path, source.replace(needle, '                stream.set_nonblocking(false).unwrap();\n' + needle));
+          JS
+          git diff --exit-code -- . ':!crates/gyro-cli/tests/shared_provider_host.rs'
       - run: cargo test --workspace --locked -- --test-threads=4
 
   verify:

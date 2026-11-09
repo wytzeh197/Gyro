@@ -1,5 +1,6 @@
 // Execute the workflow's source gates against disposable Git history.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -116,9 +117,41 @@ try {
   git("tag", "v0.1.0-launch.20261107");
   run("approved launch identity", { tag: "v0.1.0-launch.20261106", commit: modern, head: modern, accepted: true });
   run("wrong launch identity", { tag: "v0.1.0-launch.20261107", commit: modern, head: modern });
+
+  // Execute the narrow legacy fixture repair, including its preimage refusal.
+  const repair = workflow.match(/- name: Normalize legacy CLI fixture for v0\.1\.1 recovery\n([\s\S]*?)\n      - run: cargo test/)[1];
+  assert.ok(repair.includes("github.event_name == 'workflow_dispatch' && env.RELEASE_TAG == 'v0.1.1'"));
+  assert.ok(repair.includes("git diff --exit-code -- . ':!crates/gyro-cli/tests/shared_provider_host.rs'"));
+  const code = repair.match(/node --input-type=module <<'JS'\n([\s\S]*?)\n          JS/)[1]
+    .split("\n").map(line => line.slice(10)).join("\n");
+  const fixture = "crates/gyro-cli/tests/shared_provider_host.rs";
+  const fixed = readFileSync(join(repo, fixture), "utf8");
+  const comments = "                // Accepted sockets can inherit the listener's nonblocking mode\n                // on macOS. Wait for the request instead of racing its writer.\n";
+  const insertion = "                stream.set_nonblocking(false).unwrap();\n";
+  const legacy = fixed.replace(comments + insertion, "");
+  assert.equal(createHash("sha256").update(legacy).digest("hex"), "a4534a16bd407adf794d0e974886f190d0ea532c0b0530f0b4c0ce4f7383e235");
+  mkdirSync(join(root, dirname(fixture)), { recursive: true });
+  const repairFixture = content => {
+    writeFileSync(join(root, fixture), content);
+    return spawnSync(process.execPath, ["--input-type=module"], { cwd: root, input: code, encoding: "utf8" });
+  };
+  const repaired = repairFixture(legacy);
+  assert.equal(repaired.status, 0, repaired.stderr);
+  assert.equal(readFileSync(join(root, fixture), "utf8"), fixed.replace(comments, ""));
+  const unexpected = legacy + "// unexpected source change\n";
+  assert.notEqual(repairFixture(unexpected).status, 0);
+  assert.equal(readFileSync(join(root, fixture), "utf8"), unexpected);
+  writeFileSync(join(root, fixture), legacy);
+  git("add", fixture);
+  git("commit", "-m", "Legacy test fixture");
+  assert.equal(repairFixture(legacy).status, 0);
+  const guard = () => spawnSync("git", ["diff", "--exit-code", "--", ".", `:!${fixture}`], { cwd: root });
+  assert.equal(guard().status, 0);
+  writeFileSync(join(root, "package.json"), '{"unexpectedProductionChange":true}\n');
+  assert.notEqual(guard().status, 0);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
 console.log(
-  "Release recovery passed: approved immutable merged source accepted; wrong commits, checkouts, versions, missing or unmerged tags and malformed requests rejected.",
+  "Release recovery passed: approved immutable merged source accepted; wrong commits, checkouts, versions, missing or unmerged tags and malformed requests rejected; exact legacy test fixture repaired and unexpected source refused.",
 );

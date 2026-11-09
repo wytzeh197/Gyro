@@ -249,6 +249,11 @@ signing secrets, then builds that immutable commit. Never move or recreate the
 tag. Recovery still creates a draft and requires the same artifact acceptance
 before publication.
 
+The v0.1.1 recovery also corrects blocking mode in its SHA-256-pinned legacy
+CLI HTTP test fixture on the Intel test runner. It keeps every test assertion
+and all distributed binary source unchanged. Unexpected fixture contents or
+other tracked source edits fail the recovery check.
+
 Delete the release branch after it is merged. These branches are temporary
 coordination points, not permanent branches for historic versions. Ordinary
 feature and dependency changes continue to use normal short-lived branches and

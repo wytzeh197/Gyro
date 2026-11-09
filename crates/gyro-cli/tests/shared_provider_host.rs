@@ -67,6 +67,9 @@ fn accept(listener: &TcpListener) -> TcpStream {
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
+                // Accepted sockets can inherit the listener's nonblocking mode
+                // on macOS. Wait for the request instead of racing its writer.
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
