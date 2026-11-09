@@ -6,8 +6,8 @@ use crate::provider_runtime::{
     limits::{MAX_CHAT_IMAGE_BYTES, PROVIDER_CHAT_MAX_RUNTIME_SECS},
     native_args::build_grok_acp_program_args,
     support::{
-        load_config_blocking, provider_billed_usage_from_acp_tokens, provider_chat_cwd,
-        provider_output_summary, sanitize_provider_approval_details,
+        provider_billed_usage_from_acp_tokens, provider_chat_cwd, provider_output_summary,
+        sanitize_provider_approval_details,
     },
     types::{
         ChatMode, PromptTurn, ProviderActivity, ProviderApprovalDecision, ProviderChatRequest,
@@ -226,7 +226,7 @@ pub fn run_kimi_acp_chat(
     let conversation_history_text = host.acp_conversation_history(&request.session_id);
 
     let launched_model = if request.provider_id == "xai" {
-        let speed_config = load_config_blocking().map_err(anyhow::Error::msg)?;
+        let speed_config = host.config()?;
         crate::fast_mode::launch_model_id(&speed_config, "xai", request.model_id.as_deref())
     } else {
         None
@@ -253,6 +253,7 @@ pub fn run_kimi_acp_chat(
         runtime.args.iter().map(Into::into).collect()
     };
 
+    let (program, program_args) = host.acp_program(request, runtime.program, program_args);
     let activities = Arc::new(Mutex::new(Vec::<ProviderActivity>::new()));
     let activity_sink = activities.clone();
     let plan_mode = request.mode == ChatMode::Plan;
@@ -272,7 +273,7 @@ pub fn run_kimi_acp_chat(
             opened_session: Some(opened_session.clone()),
             credentials: CredentialPolicy::for_provider(&request.provider_id),
             provider_label: provider_label.into(),
-            program: runtime.program.into(),
+            program,
             program_args,
             auth_method_ids: acp_auth_methods(runtime),
             workspace: workspace.clone(),

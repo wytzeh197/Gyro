@@ -593,7 +593,8 @@ where
     result
 }
 
-fn content_hash(bytes: &[u8]) -> String {
+/// Hash shared by observed file content and guarded mutation proposals.
+pub fn content_hash(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }

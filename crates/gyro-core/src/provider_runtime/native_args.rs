@@ -88,14 +88,20 @@ pub fn claude_chat_args(
             "--permission-prompt-tool".into(),
             "mcp__gyro_approval__approve".into(),
             "--allowedTools".into(),
-            format!("mcp__gyro_approval__approve,{capability_tools}"),
+            if capability_tools.is_empty() {
+                "mcp__gyro_approval__approve".into()
+            } else {
+                format!("mcp__gyro_approval__approve,{capability_tools}")
+            },
             "--permission-mode".into(),
             crate::claude_permission_mode(posture).into(),
         ]);
     } else if posture == crate::ApprovalPosture::FullAccess {
         args.push("--dangerously-skip-permissions".into());
-        args.push("--allowedTools".into());
-        args.push(capability_tools);
+        if !capability_tools.is_empty() {
+            args.push("--allowedTools".into());
+            args.push(capability_tools);
+        }
     }
     // `claude --allowedTools <tools...>` is variadic. Without an option
     // terminator, Commander consumes the chat prompt as another tool name and

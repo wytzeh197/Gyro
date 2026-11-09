@@ -1,0 +1,401 @@
+{
+  "schema": "gyro.backend-cli-host-acceptance.v1",
+  "date": "2026-11-09",
+  "sourceBase": "3117971ed10de6561e42b664eb5d244b79731a3c",
+  "terminal": "native controlling PTY",
+  "installedAppsModified": false,
+  "privateGyroStores": true,
+  "providerSignIn": "existing provider-owned sign-in, unchanged",
+  "credentialsInReport": false,
+  "cohorts": [
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "root": "/private/tmp/gyro-cli-host-openai-u0oyzwd_",
+      "executable": "/Users/wytze/Gyro/target/debug/gyro",
+      "terminal": "native-pty",
+      "records": [
+        {
+          "mode": "allow",
+          "pid": 22381,
+          "pidExecutableVerified": true,
+          "exitCode": 0,
+          "elapsedMs": 45575,
+          "sessionId": "6917d099-fba0-40ff-be6e-0e8a28227b34",
+          "decisions": [
+            {
+              "approvalId": "5c5dc508-969d-4648-b57d-1aa2b0d2ef1a",
+              "kind": "file-change",
+              "scope": "fixture",
+              "decision": "yes"
+            }
+          ],
+          "appliedRecords": 1,
+          "cancelSent": false,
+          "correct": true
+        },
+        {
+          "mode": "resume",
+          "pid": 22611,
+          "pidExecutableVerified": true,
+          "exitCode": 0,
+          "elapsedMs": 4726,
+          "sessionId": "6917d099-fba0-40ff-be6e-0e8a28227b34",
+          "decisions": [],
+          "appliedRecords": 1,
+          "cancelSent": false,
+          "resumedReported": true,
+          "correct": true,
+          "resumeKind": "native"
+        },
+        {
+          "mode": "deny",
+          "pid": 22687,
+          "pidExecutableVerified": true,
+          "exitCode": 4,
+          "elapsedMs": 56742,
+          "sessionId": "994212d6-23e4-4b4e-bad2-9ec108d9a56f",
+          "decisions": [
+            {
+              "approvalId": "45e1e48c-1bf7-4662-8e32-470be52a2c00",
+              "kind": "file-change",
+              "scope": "fixture",
+              "decision": "no"
+            },
+            {
+              "approvalId": "949fcc9c-923d-4253-9dbd-7e40f6d95f0e",
+              "kind": "file-change",
+              "scope": "fixture",
+              "decision": "no"
+            }
+          ],
+          "appliedRecords": 0,
+          "cancelSent": false,
+          "correct": true
+        },
+        {
+          "mode": "cancel",
+          "pid": 22951,
+          "pidExecutableVerified": true,
+          "exitCode": 130,
+          "elapsedMs": 1536,
+          "sessionId": "ac227508-bb38-4851-88a7-49c3f8a9746c",
+          "decisions": [],
+          "appliedRecords": 0,
+          "cancelSent": true,
+          "correct": true
+        }
+      ],
+      "cohort": "codex"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "root": "/private/tmp/gyro-cli-host-anthropic-_1qc84si",
+      "executable": "/Users/wytze/Gyro/target/debug/gyro",
+      "terminal": "native-pty",
+      "records": [
+        {
+          "mode": "allow",
+          "pid": 22440,
+          "pidExecutableVerified": true,
+          "exitCode": 5,
+          "elapsedMs": 90354,
+          "sessionId": "02f0dddb-b992-460d-8178-659ce9501e9b",
+          "decisions": [
+            {
+              "approvalId": "0a185b5c-2275-4c3e-b0e8-0fe075377882",
+              "kind": "file-change",
+              "scope": "fixture",
+              "decision": "yes"
+            }
+          ],
+          "appliedRecords": 0,
+          "cancelSent": false,
+          "correct": false,
+          "failureReason": "Timed out after the terminal permission prompt. Fixed by the foreground-host approval relay; subsequent full Claude cohort passed."
+        }
+      ],
+      "cohort": "claude-before-relay"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "root": "/private/tmp/gyro-cli-host-anthropic-7naby2ln",
+      "executable": "/Users/wytze/Gyro/target/debug/gyro",
+      "terminal": "native-pty",
+      "records": [
+        {
+          "mode": "allow",
+          "pid": 25900,
+          "pidExecutableVerified": true,
+          "exitCode": 0,
+          "elapsedMs": 10451,
+          "sessionId": "fa34a6b2-f84b-4df7-b3ee-370c792318d4",
+          "decisions": [
+            {
+              "approvalId": "e0087bb5-0725-4ca5-b50a-b00c8a621ede",
+              "kind": "file-change",
+              "scope": "fixture",
+              "decision": "yes"
+            }
+          ],
+          "appliedRecords": 1,
+          "cancelSent": false,
+          "correct": true
+        },
+        {
+          "mode": "resume",
+          "pid": 26512,
+          "pidExecutableVerified": true,
+          "exitCode": 0,
+          "elapsedMs": 3618,
+          "sessionId": "fa34a6b2-f84b-4df7-b3ee-370c792318d4",
+          "decisions": [],
+          "appliedRecords": 1,
+          "cancelSent": false,
+          "resumedReported": true,
+          "correct": true,
+          "resumeKind": "native"
+        },
+        {
+          "mode": "deny",
+          "pid": 26731,
+          "pidExecutableVerified": true,
+          "exitCode": 4,
+          "elapsedMs": 7757,
+          "sessionId": "ddc425b9-4f7b-4ed4-b977-49fb97996b16",
+          "decisions": [
+            {
+              "approvalId": "b385c2a2-cd1e-4ba4-a6bf-37d14e0675be",
+              "kind": "file-change",
+              "scope": "fixture",
+              "decision": "no"
+            }
+          ],
+          "appliedRecords": 0,
+          "cancelSent": false,
+          "correct": true
+        },
+        {
+          "mode": "cancel",
+          "pid": 26805,
+          "pidExecutableVerified": true,
+          "exitCode": 130,
+          "elapsedMs": 1734,
+          "sessionId": "31441d62-6ee3-4a65-bb49-e93ee616856b",
+          "decisions": [],
+          "appliedRecords": 0,
+          "cancelSent": true,
+          "correct": true
+        }
+      ],
+      "cohort": "claude"
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-flash",
+      "root": "/private/tmp/gyro-cli-host-deepseek-mrjaz2wt",
+      "executable": "/Users/wytze/Gyro/target/debug/gyro",
+      "terminal": "native-pty",
+      "records": [
+        {
+          "mode": "allow",
+          "pid": 22559,
+          "pidExecutableVerified": true,
+          "exitCode": 0,
+          "elapsedMs": 5039,
+          "sessionId": "e74cadd9-a030-4429-a484-2c232609b991",
+          "decisions": [
+            {
+              "approvalId": "c0e65bfe-a9cd-4f4d-8763-0af46042ae3a",
+              "kind": "file-change",
+              "scope": "fixture",
+              "decision": "yes"
+            }
+          ],
+          "appliedRecords": 2,
+          "cancelSent": false,
+          "correct": true
+        },
+        {
+          "mode": "resume",
+          "pid": 22573,
+          "pidExecutableVerified": true,
+          "exitCode": 0,
+          "elapsedMs": 1074,
+          "sessionId": "e74cadd9-a030-4429-a484-2c232609b991",
+          "decisions": [],
+          "appliedRecords": 2,
+          "cancelSent": false,
+          "resumedReported": true,
+          "correct": true,
+          "resumeKind": "local-history"
+        },
+        {
+          "mode": "deny",
+          "pid": 22580,
+          "pidExecutableVerified": true,
+          "exitCode": 4,
+          "elapsedMs": 5032,
+          "sessionId": "cb3e098c-cb2b-4a49-b10a-34f472aab13c",
+          "decisions": [
+            {
+              "approvalId": "5fd86f58-bd28-4e0c-93c8-e97e3e298ec3",
+              "kind": "file-change",
+              "scope": "fixture",
+              "decision": "no"
+            }
+          ],
+          "appliedRecords": 0,
+          "cancelSent": false,
+          "correct": true
+        },
+        {
+          "mode": "cancel",
+          "pid": 22588,
+          "pidExecutableVerified": true,
+          "exitCode": 130,
+          "elapsedMs": 1415,
+          "sessionId": "a538a453-f8fa-4d4e-9ffd-8a05553ace04",
+          "decisions": [],
+          "appliedRecords": 0,
+          "cancelSent": true,
+          "correct": true
+        }
+      ],
+      "cohort": "deepseek"
+    },
+    {
+      "provider": "kimi",
+      "model": "k3",
+      "root": "/private/tmp/gyro-cli-host-kimi-i64pravr",
+      "executable": "/Users/wytze/Gyro/target/debug/gyro",
+      "terminal": "native-pty",
+      "records": [
+        {
+          "mode": "allow",
+          "pid": 23862,
+          "pidExecutableVerified": true,
+          "exitCode": 3,
+          "elapsedMs": 3092,
+          "sessionId": "5af4c6f6-ebeb-4822-ae94-96a244c54612",
+          "decisions": [],
+          "appliedRecords": 0,
+          "cancelSent": false,
+          "correct": false,
+          "failureReason": "Installed Kimi Code returned HTTP 403: current subscription has no Kimi Code access."
+        }
+      ],
+      "cohort": "kimi"
+    },
+    {
+      "provider": "antigravity",
+      "model": "antigravity-default",
+      "root": "/private/tmp/gyro-cli-host-antigravity-8y9bxhfd",
+      "executable": "/Users/wytze/Gyro/target/debug/gyro",
+      "terminal": "native-pty",
+      "records": [
+        {
+          "mode": "allow",
+          "pid": 23891,
+          "pidExecutableVerified": true,
+          "exitCode": 5,
+          "elapsedMs": 60846,
+          "sessionId": "3f7da050-bb58-42a7-a456-960f300a15e1",
+          "decisions": [],
+          "appliedRecords": 0,
+          "cancelSent": false,
+          "correct": false,
+          "failureReason": "Installed agy requested Google sign-in. No sign-in or approval bypass was performed."
+        }
+      ],
+      "cohort": "antigravity"
+    },
+    {
+      "provider": "ollama",
+      "model": "qwen3:0.6b",
+      "root": "/private/tmp/gyro-cli-host-ollama-561iityc",
+      "executable": "/Users/wytze/Gyro/target/debug/gyro",
+      "terminal": "native-pty",
+      "records": [
+        {
+          "mode": "allow",
+          "pid": 23879,
+          "pidExecutableVerified": true,
+          "exitCode": 0,
+          "elapsedMs": 33405,
+          "sessionId": "e24292ee-14d7-4eca-a418-ab98ae2a6546",
+          "decisions": [],
+          "appliedRecords": 0,
+          "cancelSent": false,
+          "correct": false,
+          "failureReason": "Installed qwen3:0.6b did not make the exact requested file change; model success text was not accepted as proof."
+        }
+      ],
+      "cohort": "ollama-first"
+    },
+    {
+      "provider": "ollama",
+      "model": "qwen3:0.6b",
+      "root": "/private/tmp/gyro-cli-host-ollama-9utwogbx",
+      "executable": "/Users/wytze/Gyro/target/debug/gyro",
+      "terminal": "native-pty",
+      "records": [
+        {
+          "mode": "allow",
+          "pid": 27624,
+          "pidExecutableVerified": true,
+          "exitCode": 0,
+          "elapsedMs": 27917,
+          "sessionId": "d6c216f0-0401-4dc6-8c66-833fa51692db",
+          "decisions": [],
+          "appliedRecords": 0,
+          "cancelSent": false,
+          "correct": false,
+          "failureReason": "Exact edit and refusal checks failed: no file-change approval was requested or applied. Local-history keyword recall and Ctrl-C passed."
+        },
+        {
+          "mode": "resume",
+          "pid": 28545,
+          "pidExecutableVerified": true,
+          "exitCode": 0,
+          "elapsedMs": 3824,
+          "sessionId": "d6c216f0-0401-4dc6-8c66-833fa51692db",
+          "decisions": [],
+          "appliedRecords": 0,
+          "cancelSent": false,
+          "resumedReported": true,
+          "correct": true,
+          "resumeKind": "local-history"
+        },
+        {
+          "mode": "deny",
+          "pid": 28657,
+          "pidExecutableVerified": true,
+          "exitCode": 0,
+          "elapsedMs": 9129,
+          "sessionId": "53d431a1-923d-4562-bf31-18f4a44e1fb5",
+          "decisions": [],
+          "appliedRecords": 0,
+          "cancelSent": false,
+          "correct": false,
+          "failureReason": "Exact edit and refusal checks failed: no file-change approval was requested or applied. Local-history keyword recall and Ctrl-C passed."
+        },
+        {
+          "mode": "cancel",
+          "pid": 28954,
+          "pidExecutableVerified": true,
+          "exitCode": 130,
+          "elapsedMs": 1487,
+          "sessionId": "c46169ad-9ae7-4ac6-8b1d-a84bb869b5d5",
+          "decisions": [],
+          "appliedRecords": 0,
+          "cancelSent": true,
+          "correct": true
+        }
+      ],
+      "cohort": "ollama-all-modes"
+    }
+  ]
+}

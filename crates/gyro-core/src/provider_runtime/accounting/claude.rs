@@ -1,12 +1,12 @@
 //! Native Claude stream accounting. Request snapshots are keyed by message ID;
 //! assistant output is provisional until message_stop or a successful result.
-use crate::provider_context::ProviderContextUsage;
-use gyro_core::usage::{UsageReason, UsageScope};
-use gyro_core::UsageTokens;
+use crate::provider_runtime::types::ProviderContextUsage;
+use crate::usage::{UsageReason, UsageScope};
+use crate::UsageTokens;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Default)]
-struct ClaudeCounts {
+pub struct ClaudeCounts {
     fresh: Option<u64>,
     read: Option<u64>,
     write: Option<u64>,
@@ -74,7 +74,7 @@ impl ClaudeCounts {
     }
 }
 #[derive(Default)]
-struct ClaudeMessageUsage {
+pub struct ClaudeMessageUsage {
     counts: ClaudeCounts,
     stopped: bool,
     inconsistent: bool,
@@ -84,20 +84,20 @@ struct ClaudeMessageUsage {
 /// No runtime is silently allowlisted; callers can supply verified evidence.
 /// The schema is versioned so a persisted baseline cannot change interpretation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ClaudeModelUsageScope {
+pub enum ClaudeModelUsageScope {
     Turn,
     Session,
 }
-pub(crate) struct ClaudeModelUsageEvidence {
-    pub(crate) schema: u8,
-    pub(crate) runtime_version: String,
-    pub(crate) scope: ClaudeModelUsageScope,
-    pub(crate) session_id: String,
-    pub(crate) baseline: Option<UsageTokens>,
+pub struct ClaudeModelUsageEvidence {
+    pub schema: u8,
+    pub runtime_version: String,
+    pub scope: ClaudeModelUsageScope,
+    pub session_id: String,
+    pub baseline: Option<UsageTokens>,
 }
 
 #[derive(Default)]
-pub(crate) struct ClaudeTurnUsage {
+pub struct ClaudeTurnUsage {
     messages: BTreeMap<String, ClaudeMessageUsage>,
     active_message: Option<String>,
     context_message: Option<String>,
@@ -112,10 +112,10 @@ pub(crate) struct ClaudeTurnUsage {
     tree_unverified: bool,
 }
 impl ClaudeTurnUsage {
-    pub(crate) fn set_tree_evidence(&mut self, evidence: ClaudeModelUsageEvidence) {
+    pub fn set_tree_evidence(&mut self, evidence: ClaudeModelUsageEvidence) {
         self.tree_evidence = Some(evidence);
     }
-    pub(crate) fn observe(&mut self, value: &serde_json::Value) {
+    pub fn observe(&mut self, value: &serde_json::Value) {
         let kind = value
             .get("type")
             .and_then(serde_json::Value::as_str)
@@ -282,7 +282,7 @@ impl ClaudeTurnUsage {
             }
         })
     }
-    pub(crate) fn tokens(&self) -> Option<UsageTokens> {
+    pub fn tokens(&self) -> Option<UsageTokens> {
         let mut tokens = self
             .tree
             .or(self.final_main)
@@ -295,11 +295,11 @@ impl ClaudeTurnUsage {
         }
         Some(tokens)
     }
-    pub(crate) fn interrupt(&mut self) {
+    pub fn interrupt(&mut self) {
         self.failure = Some(UsageReason::Interrupted);
     }
     /// Only a main-loop request can describe context occupancy.
-    pub(crate) fn context_usage(&self) -> Option<ProviderContextUsage> {
+    pub fn context_usage(&self) -> Option<ProviderContextUsage> {
         let counts = self.messages.get(self.context_message.as_ref()?)?.counts;
         let tokens = counts.tokens(false);
         Some(ProviderContextUsage {
@@ -380,7 +380,7 @@ impl ClaudeTurnUsage {
 
 /// Preserve already observed consumption if a crash reports zero/incomplete usage.
 /// This is a union of lower bounds, never an addition of two snapshots.
-fn lower_bound_union(a: UsageTokens, mut b: UsageTokens) -> UsageTokens {
+pub fn lower_bound_union(a: UsageTokens, mut b: UsageTokens) -> UsageTokens {
     b.input_tokens = b.input_tokens.max(a.input_tokens);
     b.cached_input_tokens = b.cached_input_tokens.max(a.cached_input_tokens);
     b.cache_write_tokens = b.cache_write_tokens.max(a.cache_write_tokens);
@@ -396,7 +396,7 @@ fn lower_bound_union(a: UsageTokens, mut b: UsageTokens) -> UsageTokens {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gyro_core::usage::{UsageCoverage, UsageSource};
+    use crate::usage::{UsageCoverage, UsageSource};
     use serde_json::json;
 
     fn usage(input: u64, output: u64) -> serde_json::Value {

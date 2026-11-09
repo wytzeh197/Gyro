@@ -46,6 +46,6 @@ pub(crate) struct ProviderChatStreamEvent {
 }
 
 pub(crate) use gyro_core::provider_runtime::types::{
-    ProviderActivity, ProviderAdapterDescriptor, ProviderAdapterKind, ProviderResumeCursor,
-    ProviderRunAttempt, ProviderRunnerOutput,
+    ProviderActivity, ProviderAdapterKind, ProviderResumeCursor, ProviderRunAttempt,
+    ProviderRunnerOutput,
 };

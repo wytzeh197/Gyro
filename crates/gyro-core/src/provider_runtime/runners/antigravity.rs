@@ -186,10 +186,7 @@ pub fn run_antigravity_chat(
 }
 
 /// This turn's token counts, excluding prior turns in a resumed conversation.
-pub(crate) fn antigravity_accounted_usage(
-    stdout: &str,
-    resumed: bool,
-) -> Option<crate::UsageTokens> {
+pub fn antigravity_accounted_usage(stdout: &str, resumed: bool) -> Option<crate::UsageTokens> {
     let usage = crate::antigravity_cli::turn_usage(stdout, resumed)?;
     Some(crate::UsageTokens {
         input_tokens: usage.input_tokens,

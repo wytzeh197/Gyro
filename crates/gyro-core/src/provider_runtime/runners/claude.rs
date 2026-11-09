@@ -5,9 +5,8 @@ use crate::provider_runtime::{
     prompts::claude_chat_prompt,
     support::{
         audit_provider_chat_args, claude_multimodal_input, is_model_capacity_error,
-        load_config_blocking, provider_activities_for_response, provider_chat_cwd,
-        provider_output_summary, provider_run_failure, provider_stream_failure_detail,
-        recover_streamed_provider_answer,
+        provider_activities_for_response, provider_chat_cwd, provider_output_summary,
+        provider_run_failure, provider_stream_failure_detail, recover_streamed_provider_answer,
     },
     text::sanitize_provider_chat_response,
     types::{
@@ -68,7 +67,7 @@ pub fn run_anthropic_claude_chat(
         // The default one-hour cache writes at 2x input against 1.25x here.
         // Under 1% of request gaps outlast five minutes, and a read renews it.
         .env("FORCE_PROMPT_CACHING_5M", "1");
-    let speed_config = load_config_blocking().map_err(anyhow::Error::msg)?;
+    let speed_config = host.config()?;
     process.args(crate::fast_mode::cli_args(
         &speed_config,
         "anthropic",

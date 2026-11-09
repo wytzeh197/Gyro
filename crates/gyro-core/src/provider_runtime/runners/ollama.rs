@@ -20,8 +20,8 @@ use super::super::{
     types::{ChatMode, ProviderChatRequest, ProviderRunnerOutput},
 };
 use crate::{
-    CapabilityId, CapabilityResponse, CapabilityRunMode, CapabilityStatus, GyroConfig, GyroPaths,
-    HarnessRunStatus, OllamaToolChatRequest, UsageTokens, OLLAMA_CANCELLED_MESSAGE,
+    CapabilityId, CapabilityResponse, CapabilityRunMode, CapabilityStatus, HarnessRunStatus,
+    OllamaToolChatRequest, UsageTokens, OLLAMA_CANCELLED_MESSAGE,
 };
 use base64::Engine;
 use provider_tool_batch::mark_browser_image_attached;
@@ -177,8 +177,8 @@ pub fn run_ollama_chat(
     if cancellation.is_cancelled() {
         anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled before Ollama started");
     }
-    let paths = GyroPaths::for_current_user()?;
-    let config = GyroConfig::load(&paths)?;
+    let paths = host.paths()?;
+    let config = host.config()?;
     let provider = config
         .model_providers
         .iter()

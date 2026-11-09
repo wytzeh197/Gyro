@@ -41,6 +41,9 @@ pub struct ProviderHeartbeat {
 }
 
 impl ProviderHeartbeat {
+    pub fn without_worker(stop: Arc<AtomicBool>) -> Self {
+        Self { stop, worker: None }
+    }
     pub fn new(stop: Arc<AtomicBool>, worker: std::thread::JoinHandle<()>) -> Self {
         Self {
             stop,
@@ -62,6 +65,26 @@ impl Drop for ProviderHeartbeat {
 /// Application services supplied to a provider run.
 
 pub trait RunnerHost: Send + Sync {
+    fn paths(&self) -> anyhow::Result<crate::GyroPaths> {
+        crate::GyroPaths::for_current_user()
+    }
+    fn config(&self) -> anyhow::Result<crate::GyroConfig> {
+        crate::GyroConfig::load(&self.paths()?)
+    }
+    fn acp_program(
+        &self,
+        _request: &ProviderChatRequest,
+        program: &str,
+        args: Vec<std::ffi::OsString>,
+    ) -> (std::ffi::OsString, Vec<std::ffi::OsString>) {
+        (program.into(), args)
+    }
+    fn codex_client_options(&self) -> super::codex_client::CodexClientOptions {
+        super::codex_client::CodexClientOptions::desktop()
+    }
+    fn supports_generated_images(&self) -> bool {
+        true
+    }
     fn tool_catalog(&self) -> &dyn super::catalog::ToolCatalog;
     fn context_sections(
         &self,

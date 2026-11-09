@@ -1,0 +1,25 @@
+{
+  "schema": "gyro.backend-cli-host-validation.v1",
+  "date": "2026-11-09",
+  "commands": {
+    "cargo test --workspace --locked -- --test-threads=4": "passed",
+    "cargo check -p gyro-desktop --all-targets --locked": "passed; 0 errors, 0 new warnings against original warning keys",
+    "cargo check -p gyro-cli --all-targets --locked": "passed; no warnings",
+    "cargo fmt -p gyro-desktop -p gyro-core -p gyro-cli --check": "passed",
+    "node scripts/check-architecture-boundaries.mjs": "passed",
+    "git diff --check": "passed"
+  },
+  "tests": {
+    "cliUnit": 43,
+    "cliExitCodes": 25,
+    "cliInstallPaths": 1,
+    "cliSharedProviderHost": 2,
+    "coreUnit": 1019,
+    "coreUnitIgnored": 2,
+    "coreOtherIntegration": 5,
+    "coreLiveOllamaIgnored": 2,
+    "desktopUnit": 993,
+    "desktopUnitIgnored": 12
+  },
+  "earlierFailure": "One prior CLI run with Cargo default test concurrency, while live providers ran, exceeded an existing 3-second Ollama deadline assertion. The complete unchanged suite passed with the required four test threads. The timing threshold was not weakened."
+}

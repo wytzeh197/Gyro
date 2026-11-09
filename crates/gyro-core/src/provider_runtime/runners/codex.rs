@@ -1,9 +1,6 @@
 use crate::provider_runtime::{
     accounting,
-    codex_client::{
-        codex_app_server_result, receive_codex_turn_response, write_codex_app_server_message,
-        CodexClient, CodexClientOptions,
-    },
+    codex_client::{codex_app_server_result, receive_codex_turn_response, CodexClient},
     codex_turn_completion, file_patch_counts,
     host::{
         self as host_services, emit_provider_activity_event, emit_provider_context_usage,
@@ -22,7 +19,7 @@ use crate::provider_runtime::{
     prompts::{openai_codex_chat_prompt, provider_approval_instructions},
     support::{
         audit_provider_chat_args, codex_context_compaction_activity, generated_image_event_matches,
-        image_generation_activity, is_model_capacity_error, load_config_blocking, protocol_item,
+        image_generation_activity, is_model_capacity_error, protocol_item,
         provider_activities_for_response, provider_chat_cwd, provider_output_summary,
         provider_run_failure, provider_stream_failure_detail, recover_streamed_provider_answer,
         TempFileGuard,
@@ -33,7 +30,7 @@ use crate::provider_runtime::{
         ProviderContextUsage, ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput,
     },
 };
-use crate::{timing, timing::Stage as TimingStage, GyroPaths};
+use crate::{timing, timing::Stage as TimingStage};
 use anyhow::Context;
 use std::{
     collections::{HashMap, HashSet},
@@ -115,7 +112,7 @@ pub fn run_openai_codex_chat(
     let mut process = host.provider_command("codex", "openai")?;
     host.apply_session_environment(&mut process, request)?;
     process.current_dir(cwd);
-    let speed_config = load_config_blocking().map_err(anyhow::Error::msg)?;
+    let speed_config = host.config()?;
     process.args(crate::fast_mode::cli_args(
         &speed_config,
         "openai",
@@ -334,7 +331,7 @@ pub fn run_openai_codex_app_server_chat(
     let mut process = host.provider_command("codex", "openai")?;
     let capability_args = host.codex_mcp_args(request)?;
     host.apply_session_environment(&mut process, request)?;
-    let speed_config = load_config_blocking().map_err(anyhow::Error::msg)?;
+    let speed_config = host.config()?;
     process.args(crate::fast_mode::cli_args(
         &speed_config,
         "openai",
@@ -344,9 +341,16 @@ pub fn run_openai_codex_app_server_chat(
         .current_dir(&cwd)
         .args(capability_args)
         .args(["-c", "features.multi_agent=false"])
-        .args(["-c", codex_image_config_arg(&request.mode)]);
+        .args([
+            "-c",
+            if host.supports_generated_images() {
+                codex_image_config_arg(&request.mode)
+            } else {
+                "features.image_generation=false"
+            },
+        ]);
     timing::mark(TimingStage::ProcessStart);
-    let mut child = CodexClient::spawn(process, CodexClientOptions::desktop())
+    let mut child = CodexClient::spawn(process, host.codex_client_options())
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
     timing::mark(TimingStage::ProcessSpawned);
     let cancellation = host.cancellation(&request.session_id).unwrap_or_default();
@@ -358,7 +362,8 @@ pub fn run_openai_codex_app_server_chat(
         let (mut stdin, messages) = child.take_io().map_err(anyhow::Error::msg)?;
         let deadline = Instant::now() + Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS);
 
-        write_codex_app_server_message(
+        write_codex_turn_message(
+            host,
             &mut stdin,
             &serde_json::json!({
                 "id": 1,
@@ -376,8 +381,12 @@ pub fn run_openai_codex_app_server_chat(
         .map_err(anyhow::Error::msg)?;
         let initialize = receive_codex_turn_response(host, request, &messages, 1, deadline)?;
         codex_app_server_result(&initialize).map_err(anyhow::Error::msg)?;
-        write_codex_app_server_message(&mut stdin, &serde_json::json!({ "method": "initialized" }))
-            .map_err(anyhow::Error::msg)?;
+        write_codex_turn_message(
+            host,
+            &mut stdin,
+            &serde_json::json!({ "method": "initialized" }),
+        )
+        .map_err(anyhow::Error::msg)?;
 
         let resume_id = resume_cursor.and_then(|cursor| {
             (cursor.kind == "codex-session").then_some(cursor.session_id.as_str())
@@ -422,7 +431,7 @@ pub fn run_openai_codex_app_server_chat(
                 },
             })
         };
-        write_codex_app_server_message(&mut stdin, &thread_request).map_err(anyhow::Error::msg)?;
+        write_codex_turn_message(host, &mut stdin, &thread_request).map_err(anyhow::Error::msg)?;
         let thread_response = receive_codex_turn_response(host, request, &messages, 2, deadline)?;
         let thread_result =
             codex_app_server_result(&thread_response).map_err(anyhow::Error::msg)?;
@@ -481,7 +490,8 @@ pub fn run_openai_codex_app_server_chat(
         ) {
             turn_params["effort"] = serde_json::Value::String(effort);
         }
-        write_codex_app_server_message(
+        write_codex_turn_message(
+            host,
             &mut stdin,
             &serde_json::json!({
                 "id": 3,
@@ -697,7 +707,7 @@ pub fn run_openai_codex_app_server_chat(
                                     provider_turn_id.as_deref(),
                                 ) =>
                             {
-                                let paths = GyroPaths::for_current_user()?;
+                                let paths = host.paths()?;
                                 if let Some(activity) = host.complete_generated_image(
                                     request,
                                     item,
@@ -883,13 +893,14 @@ pub fn run_openai_codex_context_compaction(
     let mut process = host.provider_command("codex", "openai")?;
     host.apply_session_environment(&mut process, request)?;
     process.current_dir(&cwd);
-    let mut child = CodexClient::spawn(process, CodexClientOptions::desktop())
+    let mut child = CodexClient::spawn(process, host.codex_client_options())
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
     let result = (|| -> anyhow::Result<Option<ProviderContextUsage>> {
         let (mut stdin, messages) = child.take_io().map_err(anyhow::Error::msg)?;
         let deadline = Instant::now() + Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS);
 
-        write_codex_app_server_message(
+        write_codex_turn_message(
+            host,
             &mut stdin,
             &serde_json::json!({
                 "id": 1,
@@ -907,8 +918,12 @@ pub fn run_openai_codex_context_compaction(
         .map_err(anyhow::Error::msg)?;
         let initialize = receive_codex_turn_response(host, request, &messages, 1, deadline)?;
         codex_app_server_result(&initialize).map_err(anyhow::Error::msg)?;
-        write_codex_app_server_message(&mut stdin, &serde_json::json!({ "method": "initialized" }))
-            .map_err(anyhow::Error::msg)?;
+        write_codex_turn_message(
+            host,
+            &mut stdin,
+            &serde_json::json!({ "method": "initialized" }),
+        )
+        .map_err(anyhow::Error::msg)?;
 
         let model = codex_model_arg(request.model_id.as_deref());
         let approval_instructions = provider_approval_instructions(request).join("\n");
@@ -921,7 +936,8 @@ pub fn run_openai_codex_context_compaction(
             request.full_access,
             &cwd,
         );
-        write_codex_app_server_message(
+        write_codex_turn_message(
+            host,
             &mut stdin,
             &serde_json::json!({
                 "id": 2,
@@ -946,7 +962,8 @@ pub fn run_openai_codex_context_compaction(
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| anyhow::anyhow!("Codex did not return a thread id"))?;
 
-        write_codex_app_server_message(
+        write_codex_turn_message(
+            host,
             &mut stdin,
             &serde_json::json!({
                 "id": 3,
@@ -1456,7 +1473,8 @@ pub fn handle_codex_app_server_request(
             (decision, response)
         }
         _ => {
-            write_codex_app_server_message(
+            write_codex_turn_message(
+                host,
                 stdin,
                 &serde_json::json!({
                     "id": request_id,
@@ -1468,7 +1486,8 @@ pub fn handle_codex_app_server_request(
         }
     };
     let _ = decision;
-    write_codex_app_server_message(
+    write_codex_turn_message(
+        host,
         stdin,
         &serde_json::json!({ "id": request_id, "result": response }),
     )
@@ -1480,4 +1499,16 @@ pub fn codex_provider_approval_response(decision: ProviderApprovalDecision) -> &
         ProviderApprovalDecision::Approve => "accept",
         ProviderApprovalDecision::Reject | ProviderApprovalDecision::AppliedByGyro => "decline",
     }
+}
+
+fn write_codex_turn_message(
+    host: &dyn RunnerHost,
+    stdin: &mut ChildStdin,
+    message: &serde_json::Value,
+) -> Result<(), String> {
+    crate::provider_runtime::codex_client::write_message(
+        stdin,
+        message,
+        host.codex_client_options(),
+    )
 }

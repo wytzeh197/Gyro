@@ -21,70 +21,7 @@ pub(super) fn catalog_context_window(provider_id: &str, model_id: Option<&str>) 
     {
         return Some(window);
     }
-    let model_id = model_id.map(str::trim).unwrap_or_default();
-    let window = match provider_id {
-        // Codex defaults differ from the API maxima. Runtime reports win.
-        // Signed-in catalogs serve 500K for GPT-6.1 Sol. The logged-out
-        // bundled catalog still lists 272K for that slug.
-        "openai" => match model_id {
-            "gpt-6.1-sol" => 500_000,
-            "gpt-5.4-mini" => 400_000,
-            "" | "gpt-6-astra" | "gpt-6-sol" | "gpt-6-luna" | "gpt-5.6-sol" | "gpt-5.6-terra"
-            | "gpt-5.6-luna" | "gpt-5.5" | "gpt-5.4" => 272_000,
-            _ => return None,
-        },
-        "anthropic" => match model_id {
-            // Opus 4.7 and later have native 1M context, without a suffix.
-            // Explicit runtime restrictions (for example disabling 1M) win.
-            "claude-haiku-4-5" => 200_000,
-            "" | "claude-fable-5-1" | "claude-fable-5" | "claude-opus-5-5" | "claude-opus-5"
-            | "claude-opus-4-8" | "claude-opus-5-5-1m" | "claude-opus-5-1m"
-            | "claude-opus-4-8-1m" | "claude-sonnet-5-5" | "claude-sonnet-5"
-            | "claude-haiku-5-5" => 1_000_000,
-            _ => return None,
-        },
-        // K3 and K3.1 Pro entitlements depend on the plan; retain the Plus
-        // baseline until the runtime reports the session's provisioned window.
-        // Highspeed is offered only on Pro and Allegretto, at 1,048,576.
-        "kimi" => match model_id {
-            "" | "k3" | "k3.1-pro" => 262_144,
-            "k3.1-pro-highspeed" => 1_048_576,
-            _ => return None,
-        },
-        "gemini" if matches!(model_id, "" | "gemini-default" | "gemini-3.8-flash") => 1_048_576,
-        // Grok Build's served context_window is 256K. 500K is the optional
-        // larger window on that CLI, not this baseline. The public API is a
-        // different connection and is not this table.
-        "xai" => match model_id {
-            "" | "grok-4.7" | "grok-4.7-build-fast" | "grok-4.6" | "grok-4.5" => 256_000,
-            _ => return None,
-        },
-        "deepseek" => match model_id {
-            "deepseek-flash" | "deepseek-v4-pro" => 1_000_000,
-            _ => return None,
-        },
-        "mistral" => match model_id {
-            "mistral-medium-latest" | "mistral-large-latest" | "mistral-small-latest" => 256_000,
-            "codestral-latest" => 128_000,
-            _ => return None,
-        },
-        "openrouter" => match model_id {
-            "anthropic/claude-sonnet-5" | "anthropic/claude-opus-5" | "qwen/qwen3.8-max-0902" => {
-                1_000_000
-            }
-            "openai/gpt-6-astra" => 1_050_000,
-            "google/gemini-3.8-flash"
-            | "deepseek/deepseek-v4.1-flash"
-            | "moonshotai/kimi-k3"
-            | "moonshotai/kimi-k3.1-pro"
-            | "z-ai/glm-5.3" => 1_048_576,
-            "x-ai/grok-4.7" | "x-ai/grok-4.6" => 500_000,
-            "meta-llama/llama-3.3-70b-instruct" => 131_072,
-            _ => return None,
-        },
-        _ => return None,
-    };
-    Some(window)
+    gyro_core::provider_runtime::api_config::fallback_context_window(provider_id, model_id)
 }
 
 pub(super) fn provider_context_usage_with_window(

@@ -23,7 +23,7 @@ use super::ollama::{
 };
 use crate::{
     openai_compat_endpoint, openai_compat_host_is_loopback, provider_api_key_env_name,
-    CapabilityId, GyroConfig, GyroPaths, HarnessRunStatus, OpenAiCompatChatRequest, UsageTokens,
+    CapabilityId, HarnessRunStatus, OpenAiCompatChatRequest, UsageTokens,
     OPENAI_COMPAT_CANCELLED_MESSAGE,
 };
 use base64::Engine;
@@ -141,8 +141,8 @@ pub fn run_openai_compatible_chat(
     if cancellation.is_cancelled() {
         anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled before {label} started");
     }
-    let paths = GyroPaths::for_current_user()?;
-    let config = GyroConfig::load(&paths)?;
+    let paths = host.paths()?;
+    let config = host.config()?;
     let provider = config
         .model_providers
         .iter()

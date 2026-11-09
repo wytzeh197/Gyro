@@ -10,14 +10,12 @@ use crate::{
     stores::parse_uuid,
     usage::{fetch::remember_provider_rate_limits_in, guard::UsageContext},
 };
+pub(super) use gyro_core::provider_runtime::accounting::claude::ClaudeTurnUsage;
 use gyro_core::{
     timing, CapabilityStatus, SessionEventKind, SessionStore, UsageEntry, UsageOutcome, UsageTokens,
 };
 use tauri::{Emitter, Manager};
 use uuid::Uuid;
-#[path = "native_accounting.rs"]
-mod native_accounting;
-pub(super) use native_accounting::ClaudeTurnUsage;
 
 pub(super) fn has_dispatched_tools(app: &tauri::AppHandle, session_id: &str) -> bool {
     app.state::<ProviderCancellationManager>()
@@ -1001,9 +999,7 @@ mod tests {
     }
 }
 
-pub(crate) use gyro_core::provider_runtime::accounting::{
-    counts_regressed, provider_turn_tokens, subtract, usage_tokens,
-};
+pub(crate) use gyro_core::provider_runtime::accounting::{provider_turn_tokens, usage_tokens};
 
 #[cfg(test)]
 use gyro_core::provider_runtime::accounting::parse_counts;

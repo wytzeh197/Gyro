@@ -187,8 +187,7 @@ mod image_tests {
 }
 
 pub(crate) use gyro_core::provider_runtime::api_config::{
-    configured_capability_support, declared_provider_kind, openai_compatible_adapter,
-    supports_images,
+    configured_capability_support, supports_images,
 };
 
 #[cfg(test)]

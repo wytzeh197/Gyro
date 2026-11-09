@@ -1,54 +1,7 @@
-use crate::{
-    context_compaction,
-    conversation_history::acp_conversation_history_text_for_session,
-    openai_compatible_runner,
-    providers::{
-        streaming::PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS,
-        types::{ProviderAdapterDescriptor, ProviderAdapterKind},
-    },
-};
-use gyro_core::{
-    augmented_gui_path, is_openai_compatible_provider, provider_descriptor, ProviderExecutionKind,
-};
+use crate::{context_compaction, conversation_history::acp_conversation_history_text_for_session};
+use gyro_core::augmented_gui_path;
+pub(crate) use gyro_core::provider_runtime::api_config::provider_adapter_for;
 use std::process::Command;
-pub(crate) fn provider_adapter_for(provider_id: &str) -> ProviderAdapterDescriptor {
-    let Some(descriptor) = provider_descriptor(provider_id) else {
-        // A provider Gyro does not ship. An endpoint the user defined runs over
-        // HTTPS; anything else stays readiness-only.
-        if is_openai_compatible_provider(
-            provider_id,
-            openai_compatible_runner::declared_provider_kind(provider_id).as_deref(),
-        ) {
-            return openai_compatible_runner::openai_compatible_adapter();
-        }
-        return ProviderAdapterDescriptor {
-            kind: ProviderAdapterKind::ReadinessOnly,
-            runner: "readiness-only",
-            auth_owner: "provider-owned",
-            timeout_seconds: 0,
-        };
-    };
-    let kind = match descriptor.execution_kind {
-        ProviderExecutionKind::CodexCli => ProviderAdapterKind::OpenAiCodex,
-        ProviderExecutionKind::ClaudeCode => ProviderAdapterKind::AnthropicClaude,
-        ProviderExecutionKind::KimiAcp => ProviderAdapterKind::KimiAcp,
-        ProviderExecutionKind::AntigravityCli => ProviderAdapterKind::AntigravityCli,
-        ProviderExecutionKind::AcpCli => ProviderAdapterKind::KimiAcp,
-        ProviderExecutionKind::OllamaApi => ProviderAdapterKind::Ollama,
-        ProviderExecutionKind::OpenAiCompatibleApi => ProviderAdapterKind::OpenAiCompatible,
-        ProviderExecutionKind::ReadinessOnly => ProviderAdapterKind::ReadinessOnly,
-    };
-    ProviderAdapterDescriptor {
-        kind,
-        runner: descriptor.runner,
-        auth_owner: descriptor.auth_owner,
-        timeout_seconds: if kind == ProviderAdapterKind::ReadinessOnly {
-            0
-        } else {
-            PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS
-        },
-    }
-}
 
 /// Recent user/assistant turns for agents that cannot reopen a provider session.
 pub(crate) fn acp_conversation_history_text(
