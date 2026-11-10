@@ -141,62 +141,129 @@ fn resolve_from_nearest_existing_ancestor(path: &Path) -> Result<PathBuf> {
 }
 
 pub fn redact_secrets(input: &str) -> String {
-    let mut current = Cow::Borrowed(input);
-    for regex in redaction_patterns() {
-        if !regex.is_match(current.as_ref()) {
-            continue;
+    redact_matches(input, |caps| {
+        if caps.len() > 1 {
+            format!(
+                "{}[REDACTED]",
+                caps.get(1).map(|m| m.as_str()).unwrap_or("")
+            )
+        } else {
+            "[REDACTED]".to_string()
         }
-        current = Cow::Owned(
-            regex
-                .replace_all(current.as_ref(), |caps: &regex::Captures<'_>| {
-                    if caps.len() > 1 {
-                        format!(
-                            "{}[REDACTED]",
-                            caps.get(1).map(|m| m.as_str()).unwrap_or("")
-                        )
-                    } else {
-                        "[REDACTED]".to_string()
-                    }
-                })
-                .into_owned(),
-        );
-    }
-    current.into_owned()
+    })
 }
 
 /// Mask secrets without moving the editor positions of the surrounding text.
 /// Workspace read continuations use UTF-16 columns, so a replacement must keep
 /// both line breaks and UTF-16 width even when the secret contains Unicode.
 pub fn redact_secrets_preserving_positions(input: &str) -> String {
+    redact_matches(input, |caps| {
+        let matched = caps.get(0).expect("redaction match").as_str();
+        let prefix = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        let mut masked = prefix.to_owned();
+        for character in matched[prefix.len()..].chars() {
+            if matches!(character, '\n' | '\r') {
+                masked.push(character);
+            } else if character.len_utf16() == 2 {
+                // Keep surrogate pairs atomic: two ASCII masks
+                // would permit a chunk to split within the source
+                // character's two-column width.
+                masked.push('🔒');
+            } else {
+                masked.push('*');
+            }
+        }
+        masked
+    })
+}
+
+/// Run the pattern table, or copy `input` when it cannot match.
+///
+/// Command output and workspace reads call this with multi-megabyte text that
+/// usually matches nothing. Each pattern is a full scan. [`might_need_redaction`]
+/// is a necessary condition for those patterns, so a miss skips them. A hit
+/// still runs every pattern and masks the same way as before.
+fn redact_matches(input: &str, mut mask: impl FnMut(&regex::Captures<'_>) -> String) -> String {
+    if !might_need_redaction(input) {
+        return input.to_owned();
+    }
     let mut current = Cow::Borrowed(input);
     for regex in redaction_patterns() {
         if !regex.is_match(current.as_ref()) {
             continue;
         }
-        current = Cow::Owned(
-            regex
-                .replace_all(current.as_ref(), |caps: &regex::Captures<'_>| {
-                    let matched = caps.get(0).expect("redaction match").as_str();
-                    let prefix = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                    let mut masked = prefix.to_owned();
-                    for character in matched[prefix.len()..].chars() {
-                        if matches!(character, '\n' | '\r') {
-                            masked.push(character);
-                        } else if character.len_utf16() == 2 {
-                            // Keep surrogate pairs atomic: two ASCII masks
-                            // would permit a chunk to split within the source
-                            // character's two-column width.
-                            masked.push('🔒');
-                        } else {
-                            masked.push('*');
-                        }
-                    }
-                    masked
-                })
-                .into_owned(),
-        );
+        current = Cow::Owned(regex.replace_all(current.as_ref(), &mut mask).into_owned());
     }
     current.into_owned()
+}
+
+/// True when `input` might match [`redaction_patterns`].
+///
+/// ASCII text can match only by containing a literal the pattern requires.
+/// A non-ASCII byte keeps the full scan: `(?i)` and `\s` follow Unicode case
+/// folding, which a byte compare would miss. This is not a matcher. Adding a
+/// pattern means adding its literal here and a sample in
+/// `prefilter_sees_every_current_pattern`.
+fn might_need_redaction(input: &str) -> bool {
+    let bytes = input.as_bytes();
+    for (index, &byte) in bytes.iter().enumerate() {
+        if !byte.is_ascii() {
+            return true;
+        }
+        if marker_at(bytes, index, byte) {
+            return true;
+        }
+    }
+    false
+}
+
+fn marker_at(bytes: &[u8], index: usize, byte: u8) -> bool {
+    match byte {
+        b's' => {
+            starts_with_at(bytes, index, b"sk-") || starts_with_ignore_at(bytes, index, b"secret")
+        }
+        b'S' => starts_with_ignore_at(bytes, index, b"secret"),
+        b'g' => gh_token_prefix(bytes, index) || starts_with_at(bytes, index, b"github_pat_"),
+        b't' | b'T' => starts_with_ignore_at(bytes, index, b"token"),
+        b'p' | b'P' => starts_with_ignore_at(bytes, index, b"password"),
+        b'a' | b'A' => {
+            starts_with_ignore_at(bytes, index, b"apikey")
+                || starts_with_ignore_at(bytes, index, b"api_key")
+                || starts_with_ignore_at(bytes, index, b"api-key")
+                || starts_with_ignore_at(bytes, index, b"authorization")
+                || (byte == b'A'
+                    && (starts_with_at(bytes, index, b"AKIA")
+                        || starts_with_at(bytes, index, b"ASIA")
+                        || starts_with_at(bytes, index, b"AIza")))
+        }
+        b'x' => {
+            starts_with_at(bytes, index, b"xai-")
+                || (bytes.get(index + 1) == Some(&b'o')
+                    && bytes.get(index + 2) == Some(&b'x')
+                    && matches!(bytes.get(index + 3), Some(b'a' | b'b' | b'p' | b'r' | b's'))
+                    && bytes.get(index + 4) == Some(&b'-'))
+        }
+        b'e' => starts_with_at(bytes, index, b"eyJ"),
+        _ => false,
+    }
+}
+
+fn gh_token_prefix(bytes: &[u8], index: usize) -> bool {
+    bytes.get(index + 1) == Some(&b'h')
+        && matches!(bytes.get(index + 2), Some(b'p' | b'o' | b'u' | b's' | b'r'))
+        && bytes.get(index + 3) == Some(&b'_')
+}
+
+fn starts_with_at(bytes: &[u8], index: usize, literal: &[u8]) -> bool {
+    bytes
+        .get(index..index + literal.len())
+        .is_some_and(|window| window == literal)
+}
+
+fn starts_with_ignore_at(bytes: &[u8], index: usize, literal: &[u8]) -> bool {
+    bytes
+        .get(index..index + literal.len())
+        .is_some_and(|window| window.eq_ignore_ascii_case(literal))
 }
 
 #[cfg(test)]
@@ -269,6 +336,110 @@ mod tests {
         ] {
             assert_eq!(redact_secrets(text), text, "{text}");
         }
+    }
+
+    #[test]
+    fn prefilter_sees_every_current_pattern() {
+        let mut samples = vec![
+            "sk-abcdefghijklmnopqrstuvwxyz123456".to_string(),
+            r#"{"token":"hidden-value"}"#.to_string(),
+            r#"{"API_KEY":"hidden-value"}"#.to_string(),
+            r#"{"api-key":"hidden-value"}"#.to_string(),
+            r#"{"apikey":"hidden-value"}"#.to_string(),
+            r#"{"secret":"hidden-value"}"#.to_string(),
+            r#"{"password":"hidden-value"}"#.to_string(),
+            "mytoken=hidden-value".to_string(),
+            "TOKEN=hidden-value".to_string(),
+            "SECRET=hidden-value".to_string(),
+            "API-KEY=hidden-value".to_string(),
+            "password: hidden-value".to_string(),
+            "Password: hidden-value".to_string(),
+            "authorization: bearer hidden-value".to_string(),
+            "Authorization: Bearer hidden-value".to_string(),
+        ];
+        for prefix in ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"] {
+            samples.push(format!("{prefix}{}", "a".repeat(20)));
+        }
+        for prefix in ["AKIA", "ASIA"] {
+            samples.push(format!("{prefix}{}", "A".repeat(16)));
+        }
+        samples.push(format!("AIza{}", "d".repeat(35)));
+        for prefix in ["xoxa-", "xoxb-", "xoxp-", "xoxr-", "xoxs-"] {
+            samples.push(format!("{prefix}{}", "a".repeat(10)));
+        }
+        samples.push(format!("xai-{}", "e".repeat(20)));
+        samples.push(format!(
+            "eyJ{}.{}.{}",
+            "f".repeat(8),
+            "g".repeat(8),
+            "h".repeat(8)
+        ));
+
+        let patterns = redaction_patterns();
+        for sample in &samples {
+            assert!(
+                patterns.iter().any(|pattern| pattern.is_match(sample)),
+                "pattern missed {sample}"
+            );
+            assert!(might_need_redaction(sample), "prefilter missed {sample}");
+            let redacted = redact_secrets(sample);
+            assert!(redacted.contains("[REDACTED]"), "{sample} -> {redacted}");
+            assert_ne!(redacted, *sample);
+            let masked = redact_secrets_preserving_positions(sample);
+            assert_ne!(masked, *sample);
+            assert_eq!(
+                sample.encode_utf16().count(),
+                masked.encode_utf16().count(),
+                "{sample}"
+            );
+        }
+    }
+
+    #[test]
+    fn clean_ascii_skips_the_pattern_table() {
+        let text = "src/workspace.rs: compiled successfully; 42 checks passed.\n".repeat(40);
+        assert!(!might_need_redaction(&text));
+        assert_eq!(redact_secrets(&text), text);
+        assert_eq!(redact_secrets_preserving_positions(&text), text);
+
+        // These look like markers and must not be treated as ones. The pattern
+        // table agrees, so skipping it leaves the same bytes.
+        let near_miss = "SK-abcdefghijklmnopqrstuvwxyz123456 xoxo ghp ey xoxb xai model";
+        assert!(!redaction_patterns()
+            .iter()
+            .any(|pattern| pattern.is_match(near_miss)));
+        assert!(!might_need_redaction(near_miss));
+        assert_eq!(redact_secrets(near_miss), near_miss);
+        assert_eq!(redact_secrets_preserving_positions(near_miss), near_miss);
+    }
+
+    #[test]
+    fn a_marker_after_clean_ascii_still_redacts() {
+        let mut text = "compiled successfully\n".repeat(2_000);
+        text.push_str("token=hidden-value\n");
+        assert!(might_need_redaction(&text));
+        let redacted = redact_secrets(&text);
+        assert!(redacted.starts_with("compiled successfully\n"));
+        assert!(redacted.contains("[REDACTED]"));
+        assert!(!redacted.contains("hidden-value"));
+    }
+
+    #[test]
+    fn non_ascii_text_still_runs_the_patterns() {
+        let clean = "café compiled successfully";
+        assert!(might_need_redaction(clean));
+        assert_eq!(redact_secrets(clean), clean);
+        assert_eq!(redact_secrets_preserving_positions(clean), clean);
+
+        let secret = "café token=hidden-value";
+        assert!(might_need_redaction(secret));
+        let redacted = redact_secrets(secret);
+        assert!(redacted.contains("café"));
+        assert!(redacted.contains("[REDACTED]"));
+        assert!(!redacted.contains("hidden-value"));
+        let masked = redact_secrets_preserving_positions(secret);
+        assert_eq!(secret.encode_utf16().count(), masked.encode_utf16().count());
+        assert!(!masked.contains("hidden-value"));
     }
 
     #[test]
