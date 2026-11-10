@@ -1,6 +1,6 @@
 {
   "schema": "gyro.model-catalog.v1",
-  "revision": "2026-11-08.1",
+  "revision": "2026-11-10.1",
   "enabled": true,
   "rolloutPercentage": 100,
   "models": [
@@ -32,6 +32,17 @@
       "contextWindowTokens": 500000,
       "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
       "defaultReasoningEffort": "low"
+    },
+    {
+      "providerId": "anthropic",
+      "id": "claude-fable-5-2",
+      "displayName": "Claude Fable 5.2",
+      "description": "Claude Code. Demanding reasoning and long-running agentic work.",
+      "minClientRevision": 1,
+      "insertBefore": "claude-fable-5-1",
+      "contextWindowTokens": 200000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultReasoningEffort": "high"
     },
     {
       "providerId": "anthropic",
