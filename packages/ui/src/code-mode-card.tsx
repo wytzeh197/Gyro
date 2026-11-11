@@ -7,7 +7,6 @@ import {
 } from "lucide-react";
 import type { SessionEvent } from "./types";
 import { workflowDetails, workflowChildren, workflowState } from "./code-mode";
-import "./code-mode.css";
 
 const ACTIVITY_STATUS_LABELS: Record<string, string> = {
   completed: "Completed",

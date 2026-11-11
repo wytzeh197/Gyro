@@ -275,31 +275,6 @@ use std::{
 };
 use uuid::Uuid;
 
-fn anthropic_provider_request() -> ProviderChatRequest {
-    ProviderChatRequest {
-        session_id: Uuid::new_v4().to_string(),
-        message: "edit it".into(),
-        turn_id: Some(Uuid::new_v4().to_string()),
-        provider_id: "anthropic".into(),
-        provider_label: Some("Anthropic".into()),
-        model_id: Some("sonnet".into()),
-        model_label: Some("Claude Sonnet".into()),
-        reasoning_effort: None,
-        require_command_approval: true,
-        require_file_edit_approval: true,
-        full_access: false,
-        suggest_title: false,
-        workspace_path: Some("/tmp/gyro-workspace".into()),
-        mode: ChatMode::Normal,
-        goal: None,
-        plan: None,
-        attachments: Vec::new(),
-        workspace_context: None,
-        workspace_check: None,
-        side_chat_context: None,
-        internal_purpose: None,
-    }
-}
 
 fn bound_capability_context(request: &ProviderChatRequest) -> BoundProviderCapabilityContext {
     let workspace_key = request.workspace_path.clone().unwrap();
@@ -428,35 +403,6 @@ fn every_provider_chat_arg_vector() -> Vec<(&'static str, String, Vec<String>)> 
     vectors
 }
 
-fn provider_chat_request_for(
-    session: &Session,
-    workspace: &Path,
-    provider_id: &str,
-) -> ProviderChatRequest {
-    ProviderChatRequest {
-        session_id: session.id.to_string(),
-        message: "explain this repo".into(),
-        turn_id: Some(Uuid::new_v4().to_string()),
-        provider_id: provider_id.into(),
-        provider_label: Some("Anthropic".into()),
-        model_id: Some("claude-opus-5".into()),
-        model_label: Some("Opus 5".into()),
-        reasoning_effort: None,
-        require_command_approval: false,
-        require_file_edit_approval: false,
-        full_access: true,
-        suggest_title: false,
-        workspace_path: Some(workspace.display().to_string()),
-        mode: ChatMode::Normal,
-        goal: None,
-        plan: None,
-        attachments: Vec::new(),
-        workspace_context: None,
-        workspace_check: None,
-        side_chat_context: None,
-        internal_purpose: None,
-    }
-}
 
 fn create_due_stop_condition_automation(paths: &GyroPaths) -> Automation {
     AutomationStore::open(paths.clone())
@@ -591,3 +537,7 @@ mod sessions_titles_tests;
 
 #[path = "app/tests.rs"]
 mod app_tests;
+
+#[path="tests/provider_requests.rs"]
+mod provider_requests;
+use provider_requests::{anthropic_provider_request,provider_chat_request_for};

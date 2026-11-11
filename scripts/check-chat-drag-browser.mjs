@@ -125,7 +125,8 @@ try {
       if (!source) throw Error('Missing source '+id);
       this.source=source;
       this.transfer=new DataTransfer();
-      source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:this.transfer}));
+      if (pane) window.__chatDragFixture.startPaneDrag(id,this.transfer);
+      else source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:this.transfer}));
     },
     event(type,x=.5,y=.5,hidden=false,outside=false) {
       const grid=document.querySelector('.gyro-chat-grid');
@@ -375,13 +376,15 @@ try {
     "rows",
   );
 
-  // Resizing under a stationary pointer can change row intent into a corner.
+  // Resize the owning workspace: the grid now flexes to fill it, so setting
+  // the flex child's width alone does not resize the rendered surface.
+  // A stationary pointer must change row intent into a corner.
   await setLayout(["alpha", "beta"]);
   await evaluate("__dragTest.start('gamma');__dragTest.event('dragover',.6,.85,true)");
   await until(()=>evaluate("document.querySelector('.gyro-chat-grid-drop-overlay')?.dataset.layout==='row'"),"row intent before resize");
-  await evaluate("document.querySelector('.gyro-chat-grid').style.width='70%'");
+  await evaluate("document.querySelector('.gyro-chat-workspace').style.width='70%'");
   await until(()=>evaluate("document.querySelector('[data-position=position-4]')?.classList.contains('is-drop-target')"),"corner intent after resize");
-  await evaluate("document.querySelector('.gyro-chat-grid').style.width=''");
+  await evaluate("document.querySelector('.gyro-chat-workspace').style.width=''");
   await until(()=>evaluate("document.querySelector('.gyro-chat-grid-drop-overlay')?.dataset.layout==='row'"),"row intent after restoring size");
   await evaluate("__dragTest.end()");
   await noFeedback();
@@ -398,7 +401,7 @@ try {
       ),
     "row seam lights",
   );
-  await evaluate("document.querySelector('.gyro-chat-grid').style.width='70%'");
+  await evaluate("document.querySelector('.gyro-chat-workspace').style.width='70%'");
   await until(
     () =>
       evaluate(
@@ -407,7 +410,7 @@ try {
     "stationary resized preview",
   );
   await evaluate(
-    "document.querySelector('.gyro-chat-grid').style.width=''; window.dispatchEvent(new Event('blur'))",
+    "document.querySelector('.gyro-chat-workspace').style.width=''; window.dispatchEvent(new Event('blur'))",
   );
   await noFeedback();
   await quickDrop("gamma", 0.5);
@@ -632,10 +635,10 @@ try {
       ),
     "left preview follows mouse",
   );
-  const processes = await pointOf(
-    "Array.from(document.querySelectorAll('.gyro-chat-environment-popover-rows button')).find(button=>button.textContent.includes('Processes'))",
+  const environmentRow = await pointOf(
+    "Array.from(document.querySelectorAll('.gyro-chat-environment-popover button')).find(button=>button.textContent.trim().startsWith('Changes'))",
   );
-  await mouseMove(processes);
+  await mouseMove(environmentRow);
   await until(
     () =>
       evaluate(
@@ -644,7 +647,7 @@ try {
     "right preview over nested Environment row",
   );
   await screenshot("pointer-environment-preview.png");
-  await mouseRelease(processes);
+  await mouseRelease(environmentRow);
   await assertOrder(["alpha", "beta"]);
   await noFeedback();
   assert.equal(

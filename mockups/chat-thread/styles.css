@@ -1,0 +1,18 @@
+/* Development controls only. No copied app styles or geometry. */
+.chat-design-review { position: fixed; z-index: 100000; left: 12px; bottom: 46px; color: var(--gyro-text); background: var(--gyro-surface); border: 1px solid var(--gyro-border); border-radius: var(--gyro-radius-md); font: 12px/1.5 var(--gyro-font-sans); box-shadow: 0 8px 32px var(--gyro-shadow); max-width: min(330px, calc(100vw - 24px)); }
+.chat-design-review[hidden] { display: none; }
+.chat-design-review summary { cursor: pointer; padding: 8px 12px; }
+.chat-design-review summary span { color: var(--gyro-faint); margin-left: 8px; }
+.chat-design-review-body { display: grid; gap: 12px; padding: 4px 12px 12px; }
+.chat-design-review header { display: grid; gap: 4px; }
+.chat-design-review header span, .chat-design-review p, .chat-design-review footer span { color: var(--gyro-faint); }
+.chat-design-review p { margin: 0; }
+.chat-design-review label { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 8px; align-items: center; }
+.chat-design-review select, .chat-design-review button { font: inherit; color: var(--gyro-text); background: var(--gyro-control-bg); border: 1px solid var(--gyro-border); border-radius: var(--gyro-radius-sm); padding: 6px 8px; }
+.chat-design-review button { cursor: pointer; }
+.chat-design-review button:hover { background: var(--gyro-control-hover); }
+.chat-design-review :is(button, select, summary):focus-visible { outline: 2px solid var(--gyro-focus-ring); outline-offset: 2px; }
+.chat-design-review-modes { display: flex; gap: 8px; }
+.chat-design-review-modes button { flex: 1; }
+.chat-design-review-modes [aria-pressed="true"] { background: var(--gyro-ink-bg); color: var(--gyro-ink-text); }
+.chat-design-review footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

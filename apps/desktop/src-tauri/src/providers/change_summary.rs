@@ -17,6 +17,7 @@ use gyro_core::{
 use serde::Deserialize;
 use std::{collections::HashMap, sync::Arc};
 use tauri::Manager;
+use uuid::Uuid;
 /// What the end-of-turn review card asks for: one plain sentence per file.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -173,7 +174,8 @@ pub(crate) fn run_change_summary_call(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
-        internal_purpose: Some(InternalRequestPurpose::ChangeSummary),
+        workflow_run_id: None,
+        project_memory: None,        internal_purpose: Some(InternalRequestPurpose::ChangeSummary),
     };
 
     // The runners read their cancellation control out of this map, and the chat
@@ -203,7 +205,7 @@ pub(crate) fn run_change_summary_call(
         app,
         &summary_request,
         None,
-        UsageContext::new(UsageOrigin::ChangeSummary),
+        UsageContext::new(store.workflow_dispatch_origin(Uuid::parse_str(&request.session_id).map_err(to_string)?).map_err(to_string)?.filter(|origin|matches!(origin,UsageOrigin::Automation|UsageOrigin::AgentSession)).unwrap_or(UsageOrigin::ChangeSummary)),
     )
     .map(|output| output.response)
     .map_err(|error| gyro_core::security::redact_secrets(&error.to_string()));

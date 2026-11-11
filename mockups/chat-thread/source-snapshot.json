@@ -1,0 +1,41 @@
+{
+  "capturedAt": "2026-11-10T09:08:31.391Z",
+  "files": [
+    {
+      "path": "apps/desktop/chat-design-preview.html",
+      "sha256": "05cc07313d3848a57f27c92dd7d844ae8ed3ab84e2c6c564e8ef1396366ac745"
+    },
+    {
+      "path": "apps/desktop/src/chat-design-preview.ts",
+      "sha256": "95211df8521c0be9943fdfd5e020eb27e26860ee426519901fdb8ead48b3d602"
+    },
+    {
+      "path": "mockups/chat-thread/proposal.css",
+      "sha256": "3a6e634931a632a1bfc953252d9527f207569724f9e641dfab92462200210871"
+    },
+    {
+      "path": "apps/desktop/src/main.tsx",
+      "sha256": "e31cc8823141d8cf2ccccc2061ab8ffd64dd72d2125e3bcf4d3246e5f3edb9fe"
+    },
+    {
+      "path": "apps/desktop/src/capture-fixtures.ts",
+      "sha256": "745728a39d5a2f9dc823bfb668ee70e5257fdf0929daa30944d7987100f27146"
+    },
+    {
+      "path": "apps/desktop/src/App.tsx",
+      "sha256": "247b4fda03430ed605e942292a7d44905d4e27787049b0eab7a723e73c4566b3"
+    },
+    {
+      "path": "packages/ui/src/surfaces.tsx",
+      "sha256": "5f29cf0cdf61cf4f6d8cbcdedb36485883a633f4cbe665483a8d81c813c27459"
+    },
+    {
+      "path": "packages/ui/src/styles-entry.css",
+      "sha256": "825b265b5c73ef6e1262e9c7dacd18ef8bf2a68a80664cee21e28bff6de84bcd"
+    },
+    {
+      "path": "scripts/check-chat-render-snapshot.mjs",
+      "sha256": "3d0d7aa12ba939e558c8d77080c5e45dba776f8f8dc56dc8b223a06061ddf771"
+    }
+  ]
+}

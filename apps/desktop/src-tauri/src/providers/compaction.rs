@@ -62,7 +62,8 @@ pub(crate) fn run_compaction_summary_call(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
-        internal_purpose: Some(InternalRequestPurpose::ContextSummary),
+        workflow_run_id: None,
+        project_memory: None,        internal_purpose: Some(InternalRequestPurpose::ContextSummary),
     };
     // An auto-compaction runs inside a turn that already bound its context. A
     // manual `/compact` runs between turns, where nothing is bound, and every
@@ -89,7 +90,7 @@ pub(crate) fn run_compaction_summary_call(
         app,
         &summary_request,
         None,
-        UsageContext::new(UsageOrigin::ContextCompaction),
+        UsageContext::new(store.workflow_dispatch_origin(Uuid::parse_str(&request.session_id).map_err(to_string)?).map_err(to_string)?.filter(|origin|matches!(origin,UsageOrigin::Automation|UsageOrigin::AgentSession)).unwrap_or(UsageOrigin::ContextCompaction)),
     )
     .map(|output| (output.response, output.billed_usage))
     .map_err(|error| gyro_core::security::redact_secrets(&error.to_string()))

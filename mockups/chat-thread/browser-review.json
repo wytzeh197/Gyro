@@ -1,0 +1,176 @@
+{
+  "kind": "real React app with fixture IPC",
+  "desktop": [
+    {
+      "name": "finished-desktop-dark",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "finished-desktop-light",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "live-desktop-dark",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "live-desktop-light",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "split-desktop-dark",
+      "panes": 2,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "split-desktop-light",
+      "panes": 2,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "start-desktop-dark",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    }
+  ],
+  "narrow": [
+    {
+      "name": "finished-narrow-dark",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "finished-narrow-light",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "split-narrow-dark",
+      "panes": 2,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "split-narrow-light",
+      "panes": 2,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "environment-narrow-dark",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "environment-narrow-light",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "finished-narrow-small",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "finished-narrow-large",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "start-narrow-default",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "start-narrow-large",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "approval-narrow",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    },
+    {
+      "name": "question-narrow",
+      "panes": 1,
+      "overflow": false,
+      "tiny": [],
+      "overlap": false
+    }
+  ],
+  "comparison": {
+    "before": {
+      "draft": "Keep this draft while comparing.",
+      "menu": true,
+      "variant": "proposal"
+    },
+    "after": {
+      "draft": "Keep this draft while comparing.",
+      "menu": true,
+      "variant": "current"
+    }
+  },
+  "keyboard": {
+    "focusVisible": true,
+    "label": "Add context",
+    "outline": "solid",
+    "width": "2px"
+  },
+  "fidelityReport": "fidelity-review.json",
+  "checks": {
+    "previewStates": 19,
+    "previewFailures": 0,
+    "currentRendererParity": "matched measured properties at 1440x900",
+    "productionRendererBaseline": "36 states matched; baseline unchanged",
+    "workbenchSmoke": "passed",
+    "focusedPreviewTypecheck": "passed",
+    "fullDesktopTypecheck": "passed on final rerun",
+    "freshFinalNavigationConsoleErrors": []
+  },
+  "additionalEvidence": [
+    "final-component-metrics.json",
+    "start-large-review.json",
+    "source-snapshot.json",
+    "screenshots/real-components/model-picker.png",
+    "screenshots/real-components/review-companion.png"
+  ]
+}

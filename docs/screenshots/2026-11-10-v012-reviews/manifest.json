@@ -1,0 +1,17 @@
+{
+  "status": "passed",
+  "evidence": "synthetic production components; no native/provider execution",
+  "captures": [
+    "review-setup-dark",
+    "review-result-dark",
+    "review-fix-queue-dark",
+    "review-setup-light-narrow",
+    "review-result-light-narrow",
+    "review-incomplete",
+    "review-zero-findings",
+    "review-stale",
+    "review-unavailable",
+    "review-workspace-entry",
+    "review-turn-entry"
+  ]
+}

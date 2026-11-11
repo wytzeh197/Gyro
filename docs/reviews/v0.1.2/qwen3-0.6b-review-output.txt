@@ -1,0 +1,21 @@
+```json
+{
+  "schema":"gyro.code-review-result.v1",
+  "summary":"The test case 'add(2, 1) must return 3' is correct. No other findings are reported.",
+  "reviewedFiles":["src/add.rs"],
+  "findings":[
+    {
+      "path":"src/add.rs",
+      "side":"modified",
+      "lineStart":1,
+      "lineEnd":1,
+      "severity":"P1",
+      "title":"Test case correctness",
+      "explanation":"The test case correctly returns 3, aligning with the function's logic of adding operands.",
+      "suggestedResolution":"No further action needed for test case correctness"
+    }
+  ],
+  "limitations":[],
+  "resolutions":[]
+}
+```

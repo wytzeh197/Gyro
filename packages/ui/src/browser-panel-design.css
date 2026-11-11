@@ -1,24 +1,8 @@
 /* The chat's browser panel. The toolbar is the only chrome: everything beneath
    it is the page, or a plain message where a page would be. Geometry below the
    toolbar is reported to a native webview, which CSS cannot clip or overlap. */
-:root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat {
-  --gyro-browser-panel-inset: 12px;
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-preview-toolbar {
-  padding-inline: var(--gyro-browser-panel-inset);
-}
 
 /* Address */
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-url-bar {
-  gap: 7px;
-}
 
 .gyro-url-glyph {
   align-items: center;
@@ -75,128 +59,12 @@
 }
 
 /* The status ring is a dot; while waiting on a page, this has to read as motion. */
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-loading-mark {
-  animation: gyro-update-spin 900ms linear infinite;
-  background: transparent;
-  border: 2px solid color-mix(in srgb, var(--gyro-text) 16%, transparent);
-  border-radius: 50%;
-  border-top-color: var(--gyro-muted);
-  box-shadow: none;
-  box-sizing: border-box;
-  display: block;
-  height: 20px;
-  width: 20px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  :root[data-theme]
-    .gyro-chat-companion
-    .gyro-browser-preview.is-chat
-    .gyro-browser-loading-mark {
-    animation: none;
-  }
-}
 
 /* Options row */
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-menu-trigger[aria-expanded="true"] {
-  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
-  color: var(--gyro-text);
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-actions.is-overflow-menu.is-open {
-  border-top: 0;
-  gap: 8px;
-  justify-content: flex-start;
-  padding-top: 2px;
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  :is(.gyro-browser-device-group, .gyro-browser-view-group) {
-  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
-  border: 0;
-  border-radius: var(--gyro-radius-md);
-  padding: 2px;
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-device-group {
-  margin-right: auto;
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  :is(.gyro-browser-device-group, .gyro-browser-view-group)
-  > button {
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  box-shadow: none;
-  color: var(--gyro-muted);
-  font-size: var(--gyro-font-micro);
-  font-weight: 500;
-  height: 24px;
-  min-width: 28px;
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  :is(.gyro-browser-device-group, .gyro-browser-view-group)
-  > button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  color: var(--gyro-text);
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  :is(.gyro-browser-device-group, .gyro-browser-view-group)
-  > button.is-active {
-  background: var(--gyro-surface-raised);
-  box-shadow: 0 0 0 1px var(--gyro-border-soft);
-  color: var(--gyro-text);
-}
 
 .gyro-browser-device-group > button.is-text {
   font-size: var(--gyro-font-micro);
   padding: 0 8px;
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-capture-button {
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  color: var(--gyro-muted);
-  font-size: var(--gyro-font-micro);
-  gap: 6px;
-  height: 28px;
-  padding: 0 8px;
-  width: auto;
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-capture-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-  color: var(--gyro-text);
 }
 
 @container gyro-browser (max-width: 380px) {
@@ -207,109 +75,5 @@
 
 /* Messages in place of a page match "Start browsing": a bare glyph and two
    lines on the panel's own surface, with no tile or frame around them. */
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-placeholder {
-  background: var(--gyro-pane);
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-placeholder.has-capture {
-  background: var(--gyro-code-bg);
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-placeholder-body {
-  gap: 10px;
-  max-width: 320px;
-  padding-bottom: 20px;
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-placeholder-icon {
-  background: transparent;
-  border: 0;
-  height: auto;
-  margin-bottom: 6px;
-  width: auto;
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-placeholder-icon
-  > svg {
-  height: 28px;
-  width: 28px;
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-placeholder-body
-  > strong {
-  font-size: var(--gyro-font-lead);
-  font-weight: 500;
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-placeholder-body
-  > p {
-  font-size: var(--gyro-font-support);
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-placeholder-actions {
-  margin-top: 8px;
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-placeholder-actions
-  > button {
-  font-size: var(--gyro-font-micro);
-  min-height: var(--gyro-companion-control-height);
-  padding: 0 10px;
-}
 
 /* Capture */
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-capture-meta {
-  background: var(--gyro-pane);
-  padding-inline: var(--gyro-browser-panel-inset);
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  :is(
-    .gyro-browser-capture-actions > button,
-    .gyro-browser-feedback-form button
-  ) {
-  border-radius: var(--gyro-radius-md);
-  font-size: var(--gyro-font-micro);
-  min-height: 26px;
-  padding: 0 10px;
-}
-
-:root[data-theme]
-  .gyro-chat-companion
-  .gyro-browser-preview.is-chat
-  .gyro-browser-capture-actions
-  > button[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--gyro-text) 12%, transparent);
-}

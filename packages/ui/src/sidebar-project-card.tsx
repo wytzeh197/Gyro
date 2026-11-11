@@ -1,12 +1,9 @@
 import { Folder, FolderPlus } from "./workspace-folder-icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import {
-  MessageCircle,
-  Pin,
-  Settings,
-  X,
-} from "lucide-react";
+import { MessageCircle, Pin, Settings, X } from "lucide-react";
+import { ProjectMemoryPanel } from "./project-memory/panel";
+import type { ProjectMemoryRuntime } from "./project-memory/types";
 import { MAX_WORKSPACE_FOLDERS } from "./workspace-project";
 import type { WorkspaceRootValidation } from "./workspace-roots";
 import "./sidebar-project-card.css";
@@ -23,6 +20,7 @@ export type SidebarProjectSettings = {
   >;
   folders: Record<string, string[]>;
   pickFolder: () => Promise<string | null>;
+  memory?: (sessionId: string) => ProjectMemoryRuntime;
   /**
    * Check candidate folders against `[path, ...folders]`. Without it the
    * dialog only refuses exact repeats, as before.
@@ -52,6 +50,8 @@ export function SidebarProjectCard({
   taskCount,
   activeCount,
   settings,
+  memorySessionId,
+  expandedContent,
   onRemove,
   children,
 }: {
@@ -60,6 +60,8 @@ export function SidebarProjectCard({
   taskCount: number;
   activeCount: number;
   settings?: SidebarProjectSettings;
+  memorySessionId?: string;
+  expandedContent?: ReactNode;
   onRemove?: () => void;
   children: ReactNode;
 }) {
@@ -146,6 +148,9 @@ export function SidebarProjectCard({
       >
         {children}
       </div>
+      {expandedContent ? (
+        <div className="gyro-sidebar-project-children">{expandedContent}</div>
+      ) : null}
       {position &&
         createPortal(
           <div
@@ -221,9 +226,13 @@ export function SidebarProjectCard({
           validateFolders={settings.validateFolders}
           onClose={() => {
             setEditing(false);
-            anchor.current
-              ?.querySelector<HTMLButtonElement>(".gyro-sidebar-project-toggle")
-              ?.focus();
+            requestAnimationFrame(() => {
+              anchor.current
+                ?.querySelector<HTMLButtonElement>(
+                  ".gyro-sidebar-project-toggle",
+                )
+                ?.focus();
+            });
           }}
           onSave={(nextName, folders, primaryFolder, allowNested) =>
             settings.save(
@@ -236,6 +245,9 @@ export function SidebarProjectCard({
             )
           }
           onRemove={onRemove}
+          memory={
+            memorySessionId ? settings.memory?.(memorySessionId) : undefined
+          }
         />
       )}
     </>
@@ -253,6 +265,7 @@ function ProjectEditDialog({
   onClose,
   onSave,
   onRemove,
+  memory,
 }: {
   path: string;
   name: string;
@@ -269,7 +282,10 @@ function ProjectEditDialog({
     allowNested: boolean,
   ) => void;
   onRemove?: () => void;
+  memory?: ProjectMemoryRuntime;
 }) {
+  const [view, setView] = useState<"general" | "memory">("general");
+  const [memoryVisited, setMemoryVisited] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const [draftName, setDraftName] = useState(name);
   const [draftFolders, setDraftFolders] = useState(folders);
@@ -332,7 +348,41 @@ function ProjectEditDialog({
         }
       }}
     >
+      <header>
+        <h2 id="gyro-project-edit-title">
+          {view === "memory" ? "Project memory" : "Edit project"}
+        </h2>
+        <button type="button" aria-label="Close edit project" onClick={onClose}>
+          <X size={17} />
+        </button>
+      </header>
+      {memory ? (
+        <div
+          className="gyro-memory-tabs gyro-project-settings-views"
+          role="group"
+          aria-label="Project settings"
+        >
+          <button
+            type="button"
+            aria-pressed={view === "general"}
+            onClick={() => setView("general")}
+          >
+            General
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === "memory"}
+            onClick={() => {
+              setMemoryVisited(true);
+              setView("memory");
+            }}
+          >
+            Project memory
+          </button>
+        </div>
+      ) : null}
       <form
+        hidden={view !== "general"}
         onSubmit={(event) => {
           event.preventDefault();
           if (!draftName.trim() || picking) return;
@@ -376,16 +426,6 @@ function ProjectEditDialog({
           })();
         }}
       >
-        <header>
-          <h2 id="gyro-project-edit-title">Edit project</h2>
-          <button
-            type="button"
-            aria-label="Close edit project"
-            onClick={onClose}
-          >
-            <X size={17} />
-          </button>
-        </header>
         <div className="gyro-project-name-input">
           <Folder size={18} />
           <input
@@ -499,6 +539,14 @@ function ProjectEditDialog({
           </div>
         </footer>
       </form>
+      {memoryVisited ? (
+        <div
+          hidden={view !== "memory"}
+          className="gyro-project-settings-memory"
+        >
+          <ProjectMemoryPanel runtime={memory} />
+        </div>
+      ) : null}
     </dialog>,
     document.body,
   );

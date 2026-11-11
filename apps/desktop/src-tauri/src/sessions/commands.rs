@@ -228,6 +228,8 @@ pub(crate) async fn delete_session(
     app: tauri::AppHandle,
     session_id: String,
 ) -> Result<bool, String> {
+    let review_app=app.clone();let review_source=parse_uuid(&session_id)?;
+    tauri::async_runtime::spawn_blocking(move||crate::features::workflow_execution::commands::stop_for_source(&review_app,review_source).map_err(to_string)).await.map_err(to_string)??;
     let reservation = Arc::new(ProviderRunControl::default());
     {
         let manager = app.state::<ProviderCancellationManager>();

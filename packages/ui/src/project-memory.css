@@ -1,0 +1,195 @@
+.gyro-memory-panel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gyro-space-comfortable);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  padding: var(--gyro-space-panel);
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: var(--gyro-font-support);
+}
+.gyro-memory-panel h3,
+.gyro-memory-panel p {
+  margin: 0;
+}
+.gyro-memory-root,
+.gyro-memory-toolbar,
+.gyro-memory-actions,
+.gyro-memory-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  flex-wrap: wrap;
+}
+.gyro-memory-root {
+  justify-content: space-between;
+}
+.gyro-memory-root label {
+  min-width: 0;
+  flex: 1;
+}
+.gyro-memory-panel label {
+  display: grid;
+  gap: var(--gyro-space-compact);
+}
+.gyro-memory-panel input,
+.gyro-memory-panel select,
+.gyro-memory-panel textarea {
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-text);
+  font: inherit;
+  min-width: 0;
+  max-width: 100%;
+  padding: var(--gyro-space-standard);
+}
+.gyro-memory-panel textarea {
+  resize: vertical;
+  width: 100%;
+  box-sizing: border-box;
+}
+.gyro-memory-panel :is(button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+.gyro-memory-toolbar {
+  flex-wrap: nowrap;
+}
+.gyro-memory-toolbar label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+.gyro-memory-toolbar input {
+  width: 100%;
+}
+.gyro-memory-tabs {
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-memory-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--gyro-muted);
+  font: inherit;
+  padding: var(--gyro-space-standard);
+}
+.gyro-memory-tabs button[aria-pressed="true"] {
+  border-bottom-color: var(--gyro-text);
+  color: var(--gyro-text);
+}
+.gyro-memory-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.gyro-memory-list li {
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-memory-list li > button {
+  display: grid;
+  gap: var(--gyro-space-compact);
+  text-align: left;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  padding: var(--gyro-space-comfortable) var(--gyro-space-compact);
+  cursor: pointer;
+}
+.gyro-memory-list li > button:hover {
+  background: var(--gyro-control-hover);
+}
+.gyro-memory-list span,
+.gyro-memory-entry-text,
+.gyro-memory-paths {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.gyro-memory-list small,
+.gyro-memory-hint,
+.gyro-memory-empty,
+.gyro-memory-panel label > span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  line-height: 1.5;
+}
+.gyro-memory-empty {
+  padding: var(--gyro-space-section) 0;
+}
+.gyro-memory-editor,
+.gyro-memory-detail,
+.gyro-memory-confirm,
+.gyro-memory-used,
+.gyro-memory-error {
+  display: grid;
+  gap: var(--gyro-space-comfortable);
+}
+.gyro-memory-suggestions {
+  display: grid;
+  gap: var(--gyro-space-panel);
+}
+.gyro-memory-suggestion {
+  display: grid;
+  gap: var(--gyro-space-standard);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  padding-bottom: var(--gyro-space-comfortable);
+  overflow-wrap: anywhere;
+}
+.gyro-memory-suggestion blockquote {
+  margin: 0;
+  color: var(--gyro-muted);
+  padding-inline-start: var(--gyro-space-standard);
+  border-inline-start: 1px solid var(--gyro-border);
+}
+.gyro-memory-editor h3 {
+  font-size: var(--gyro-font-body);
+}
+.gyro-memory-detail > .gyro-secondary-button {
+  justify-self: start;
+}
+.gyro-memory-panel details {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.gyro-memory-panel summary {
+  color: var(--gyro-muted);
+  cursor: pointer;
+  padding: var(--gyro-space-standard) 0;
+}
+.gyro-memory-panel details > :not(summary) {
+  margin-top: var(--gyro-space-standard);
+}
+.gyro-memory-settings {
+  border-top: 1px solid var(--gyro-border-soft);
+  margin-top: auto;
+}
+.gyro-memory-settings label {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+}
+.gyro-memory-diagnostics,
+.gyro-memory-confirm {
+  border-top: 1px solid var(--gyro-border-soft);
+  padding-top: var(--gyro-space-comfortable);
+}
+.gyro-memory-error {
+  color: var(--gyro-danger);
+}
+.gyro-memory-status {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-memory-status:empty {
+  display: none;
+}
+.gyro-memory-context-hint { justify-self: start; align-self: start; border: 0; background: transparent; color: var(--gyro-muted); font: inherit; font-size: var(--gyro-font-micro); padding: var(--gyro-space-compact) 0; cursor: pointer; }
+.gyro-memory-context-hint:focus-visible { outline: 2px solid var(--gyro-focus-ring); outline-offset: 2px; }

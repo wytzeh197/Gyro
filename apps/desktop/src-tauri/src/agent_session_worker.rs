@@ -212,7 +212,8 @@ fn execute(app: &tauri::AppHandle, paths: &GyroPaths, row: &AgentSessionRow) {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
-        internal_purpose: None,
+        workflow_run_id: None,
+        project_memory: None,        internal_purpose: None,
     };
     match run_provider_chat_blocking(app.clone(), request, UsageOrigin::AgentSession) {
         Ok(response) => finish(Ok(response.assistant_event.message)),

@@ -113,6 +113,7 @@ pub fn run_openai_compatible_chat(
     host: &dyn RunnerHost,
     request: &ProviderChatRequest,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    crate::provider_runtime::advisory::validate_advisory_request(crate::provider_runtime::types::ProviderAdapterKind::OpenAiCompatible,request,None)?;
     let catalog = host.tool_catalog();
     let label = request.provider_label.as_deref().unwrap_or("This provider");
     let supports_images = supports_images(request);
@@ -222,7 +223,7 @@ pub fn run_openai_compatible_chat(
         serde_json::json!({ "role": "user", "content": user_content(&user, &request.attachments)? }),
     ];
     let allow_delegation = host.allow_delegation(request);
-    let mut tools = if compatibility {
+    let mut tools = if crate::provider_runtime::advisory::is_advisory(request) || compatibility {
         Vec::new()
     } else {
         provider_tool_batch::model_tools_for(

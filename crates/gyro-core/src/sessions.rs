@@ -1,5 +1,14 @@
+mod code_review_storage;
+mod workflow_storage;
+mod review_fix_storage;
+mod workflow_continuation;
+mod workflow_retention;
+mod workflow_drafts;
+mod feature_lifecycle;
 mod context_query;
 mod project_import_storage;
+mod project_memory_candidates;
+mod project_memory_storage;
 mod titles;
 pub use project_import_storage::{ProjectImportCommit, SessionImportSource};
 
@@ -38,7 +47,7 @@ const LEGACY_TURN_MESSAGE_SCAN_LINES: usize = 64;
 const TRUNCATED_SESSION_EVENT_MARKER: &str = "… [truncated]";
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 /// Bump when additive schema migrations change so reopen skips table_info scans.
-const SESSION_STORE_SCHEMA_VERSION: i32 = 9;
+const SESSION_STORE_SCHEMA_VERSION: i32 = 16;
 /// Ceiling for one delete's sub-agent cleanup, so a cycle in the data — which
 /// the write path cannot create — cannot spin forever.
 const MAX_SUBAGENT_SESSION_TREE: usize = 256;
@@ -810,6 +819,7 @@ impl SessionStore {
     /// and that session would otherwise be orphaned the same way. One that
     /// cannot be removed does not fail the delete the user did ask for.
     pub fn delete_session(&self, session_id: Uuid) -> Result<bool> {
+        self.prepare_feature_session_deletion(session_id)?;
         let deleted = self.delete_session_only(session_id)?;
         let mut pending = self.child_session_ids(session_id)?;
         let mut removed = 0usize;
@@ -2197,6 +2207,12 @@ impl SessionStore {
         self.ensure_project_import_schema()?;
         crate::usage::ensure_usage_schema(&self.conn)?;
         crate::file_review::ensure_file_review_schema(&self.conn)?;
+        project_memory_storage::ensure_schema(&self.conn)?;
+        project_memory_candidates::ensure_schema(&self.conn)?;
+        code_review_storage::ensure_schema(&self.conn)?;
+        workflow_storage::ensure_schema(&self.conn)?;
+        workflow_drafts::ensure_schema(&self.conn)?;
+        review_fix_storage::ensure_schema(&self.conn)?;
         Ok(())
     }
 
@@ -2227,6 +2243,12 @@ impl SessionStore {
         self.ensure_mutation_proposal_column("surfaced_at", "surfaced_at text")?;
         crate::usage::ensure_usage_schema(&self.conn)?;
         crate::file_review::ensure_file_review_schema(&self.conn)?;
+        project_memory_storage::ensure_schema(&self.conn)?;
+        project_memory_candidates::ensure_schema(&self.conn)?;
+        code_review_storage::ensure_schema(&self.conn)?;
+        workflow_storage::ensure_schema(&self.conn)?;
+        workflow_drafts::ensure_schema(&self.conn)?;
+        review_fix_storage::ensure_schema(&self.conn)?;
         self.conn
             .pragma_update(None, "user_version", SESSION_STORE_SCHEMA_VERSION)?;
         Ok(())

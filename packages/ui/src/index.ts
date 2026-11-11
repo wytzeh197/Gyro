@@ -1,4 +1,6 @@
 export { applyGoogleModelDiscovery } from "./google-models";
+export { ProjectMemoryPanel } from "./project-memory/panel";
+export type { ProjectMemoryRuntime, MemorySnapshot, MemoryEntry, MemoryDraft, MemorySettings, MemoryReceipt, MemoryCandidate } from "./project-memory/types";
 export type { GoogleModelDiscovery } from "./google-models";
 export {
   applyModelContextWindows,
@@ -862,3 +864,7 @@ export {
   FirstRunTour,
   type FirstRunTourProps,
 } from "./first-run-tour-overlay";
+export {CodeReviewPanel} from "./code-reviews/panel";
+export type {CodeReviewRuntime,CodeReviewRun,CodeReviewFinding,CodeReviewSnapshot,CodeReviewDetail,ReviewerSetup} from "./code-reviews/types";
+export {WorkflowDestination} from "./workflows/destination";
+export type {WorkflowRuntime,WorkflowDefinition,WorkflowBinding,WorkflowRun,WorkflowJob,WorkflowDraft,WorkflowProject,WorkflowLibrary,WorkflowSetup,WorkflowExtractionRequest} from "./workflows/types";

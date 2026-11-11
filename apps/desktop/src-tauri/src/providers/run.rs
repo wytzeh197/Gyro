@@ -101,6 +101,10 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     let config = GyroConfig::load(&paths).map_err(to_string)?;
     bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
+    request.project_memory = Some(gyro_core::project_memory::PreparedMemoryContext {
+        suggest_candidates: origin == UsageOrigin::Chat && session.parent_session_id.is_none(),
+        ..Default::default()
+    });
     delegated_agents::restrict_request(&app, &mut request);
     // The stored goal outranks the window's copy, which may predate a clear or
     // a completion made elsewhere; the window's copy covers a failed save.
@@ -147,7 +151,7 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
             }
         }
     }
-    let automatically_entered_plan = request.mode == ChatMode::Normal
+    let automatically_entered_plan = request.workflow_run_id.is_none() && request.mode == ChatMode::Normal
         && lease.is_none()
         && normal_chat_requests_plan(&request.message);
     if automatically_entered_plan {
@@ -573,6 +577,27 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
         )
         .map_err(to_string)?;
     turn_finalizer.response_saved();
+    if origin == UsageOrigin::Chat
+        && session.parent_session_id.is_none()
+        && request.mode == ChatMode::Normal
+        && !runner_output.answer_cut_off
+        && !runner_output.paused_at_tool_budget
+    {
+        if let Err(error) = crate::features::project_memory::candidates::capture(
+            &app,
+            &store,
+            &session,
+            &request,
+            run_id,
+            &assistant_event,
+            &runner_output.response,
+        ) {
+            eprintln!(
+                "Memory suggestions unavailable: {}",
+                gyro_core::sanitize_capability_summary(&error.to_string())
+            );
+        }
+    }
     if let Err(error) = efficiency::save_checkpoint(&app, &store, &request) {
         eprintln!(
             "Checkpoint save failed: {}",
@@ -863,6 +888,8 @@ pub(crate) fn compact_provider_chat_blocking(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        workflow_run_id: None,
+        project_memory: None,
         internal_purpose: None,
     };
     bind_provider_chat_request(&mut request, &session, &config, store.paths())?;

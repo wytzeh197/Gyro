@@ -1,0 +1,207 @@
+.gyro-workflows-destination {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--gyro-app);
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-sans);
+  font-size: var(--gyro-font-support);
+}
+.gyro-workflows-destination > nav {
+  display: flex;
+  gap: var(--gyro-space-compact);
+  padding: var(--gyro-space-standard) var(--gyro-space-panel);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  flex-shrink: 0;
+}
+.gyro-workflows-destination button {
+  font: inherit;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  background: var(--gyro-control-bg);
+  color: var(--gyro-text);
+  padding: var(--gyro-space-standard);
+  cursor: pointer;
+}
+.gyro-workflows-destination button[aria-pressed="true"] {
+  background: var(--gyro-surface-raised);
+  border-color: var(--gyro-text);
+}
+.gyro-workflows-destination button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.gyro-workflows-destination
+  :is(button, input, textarea, select, summary):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+.gyro-workflows-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--gyro-space-panel);
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.gyro-workflows-content > *,
+.gyro-workflow-scheduled > * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.gyro-workflows-content section {
+  min-width: 0;
+  max-width: 900px;
+  margin: 0 auto;
+}
+.gyro-workflows-content :is(h1, h2, h3, p) {
+  margin: 0 0 var(--gyro-space-comfortable);
+}
+.gyro-workflows-content h1 {
+  font-size: var(--gyro-font-heading);
+}
+.gyro-workflows-content h2,
+.gyro-workflow-scheduled h2 {
+  font-size: var(--gyro-font-lead);
+}
+.gyro-workflows-content h3 {
+  font-size: var(--gyro-font-body);
+  margin-top: var(--gyro-space-panel);
+}
+.gyro-workflows-content label {
+  display: grid;
+  gap: var(--gyro-space-compact);
+  margin-bottom: var(--gyro-space-comfortable);
+}
+.gyro-workflows-content :is(input, textarea, select) {
+  font: inherit;
+  color: var(--gyro-text);
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  padding: var(--gyro-space-standard);
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+.gyro-workflows-content textarea {
+  resize: vertical;
+  min-height: 90px;
+}
+.gyro-workflows-content fieldset {
+  min-width: 0;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  padding: var(--gyro-space-comfortable);
+  margin: var(--gyro-space-comfortable) 0;
+  display: grid;
+  gap: var(--gyro-space-standard);
+}
+.gyro-workflows-content .gyro-workflow-check {
+  display: flex;
+  align-items: start;
+  gap: var(--gyro-space-standard);
+}
+.gyro-workflows-content input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--gyro-accent);
+  flex-shrink: 0;
+}
+.gyro-workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-standard);
+  margin: var(--gyro-space-comfortable) 0;
+}
+.gyro-workflow-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--gyro-space-comfortable) 0;
+}
+.gyro-workflow-list > li {
+  border-bottom: 1px solid var(--gyro-border-soft);
+  padding: var(--gyro-space-comfortable) 0;
+  overflow-wrap: anywhere;
+}
+.gyro-workflows-destination .gyro-workflow-row {
+  border: 0;
+  border-radius: 0;
+  display: grid;
+  gap: var(--gyro-space-compact);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+}
+.gyro-workflow-row span,
+.gyro-workflow-muted {
+  color: var(--gyro-muted);
+}
+.gyro-workflow-steps {
+  padding-left: var(--gyro-space-panel);
+}
+.gyro-workflow-steps > li {
+  padding: var(--gyro-space-standard) 0;
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-workflows-content pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+  max-height: 400px;
+  padding: var(--gyro-space-standard);
+  background: var(--gyro-control-bg);
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-workflows-content code {
+  overflow-wrap: anywhere;
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-workflows-content summary {
+  cursor: pointer;
+  padding: var(--gyro-space-standard) 0;
+}
+.gyro-workflow-check small {
+  display: block;
+  color: var(--gyro-muted);
+}
+.gyro-workflows-schedules {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.gyro-workflow-scheduled {
+  padding: var(--gyro-space-panel);
+  flex-shrink: 0;
+}
+.gyro-workflow-legacy-schedules {
+  min-height: 600px;
+  flex: 1;
+}
+/* The workbench's global list layout must not flatten ordered step evidence. */
+.gyro-workflows-destination ol.gyro-workflow-steps {
+  list-style: decimal;
+}
+.gyro-workflows-destination .gyro-workflow-steps > li {
+  display: list-item;
+}
+.gyro-workflows-destination .gyro-workflow-steps > li > strong {
+  display: block;
+  margin-bottom: var(--gyro-space-standard);
+}
+.gyro-workflows-destination button.gyro-primary-button {
+  background: var(--gyro-ink-bg);
+  border-color: var(--gyro-ink-bg);
+  color: var(--gyro-ink-text);
+  box-shadow: none;
+}
+.gyro-workflows-destination button.gyro-primary-button:hover:not(:disabled) {
+  background: var(--gyro-ink-hover);
+  border-color: var(--gyro-ink-hover);
+}

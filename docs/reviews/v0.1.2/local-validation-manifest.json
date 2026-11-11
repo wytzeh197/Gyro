@@ -1,0 +1,82 @@
+{
+  "createdAt": "2026-11-10T14:03:30.100Z",
+  "scope": "selected feature digests and local checks; not a release attestation",
+  "startingHead": "07dfacdbb93ba8be2c13df9bcca20ade70169ee9",
+  "observedHead": "0c98d147d465e16bf7cb67c1bfac65e6a4012a8a",
+  "branch": "Heads/v0.1.2",
+  "featureChangesUncommitted": true,
+  "sourceDigestAlgorithm": "sha256 of sorted relative path, NUL, hex sha256(content), LF",
+  "sourceGroups": {
+    "coreMemory": {
+      "files": 13,
+      "sha256": "0b8b8059fcd219a202d8481e86d293d077f701977d5125bd28fabe8041e6f1d5"
+    },
+    "coreReviews": {
+      "files": 8,
+      "sha256": "b007991d75fc70dcf3b5121a511b7cc8b136ca8a7e5698d0b3e967193615b6dd"
+    },
+    "coreWorkflows": {
+      "files": 12,
+      "sha256": "8650e9ef0916868052e0e86103c952dc43afa7d373d11b2d40e5e0ea7008cabd"
+    },
+    "sharedRuntime": {
+      "files": 8,
+      "sha256": "4ecc1ed1d5b39466410b07cedc1a7411cc35ba3cfc75800fc51b1fb1a9cc0e4b"
+    },
+    "nativeFeatures": {
+      "files": 27,
+      "sha256": "d43fe9fd442a6c076e3c67965be6407ef5e92041b3fb043d21aeb0d19bfcf0b9"
+    },
+    "ui": {
+      "files": 27,
+      "sha256": "45b203a2bedc83d87df971523253ffc9354a8fb960ff89076b36161a3d649d6e"
+    },
+    "cli": {
+      "files": 3,
+      "sha256": "d15923f11402737a42bf39cb685b5876c53b26cf866d7f7ca29ed1d379e592a4"
+    }
+  },
+  "automatedTests": {
+    "coreMemory": 27,
+    "coreReviews": 10,
+    "coreWorkflows": 10,
+    "coreAutomations": 20,
+    "legacyMigration": 1,
+    "advisoryTransport": 4,
+    "cliMemory": 2,
+    "desktopMemory": 7,
+    "desktopWorkflows": 3,
+    "desktopReviews": 2,
+    "workspaceMutations": 5
+  },
+  "automatedTestsPassed": 91,
+  "browserFixtures": {
+    "memory": {
+      "manifest": "docs/screenshots/2026-11-10-v012-memory/manifest.json",
+      "count": 9
+    },
+    "reviews": {
+      "manifest": "docs/screenshots/2026-11-10-v012-reviews/manifest.json",
+      "count": 11
+    },
+    "workflows": {
+      "manifest": "docs/screenshots/2026-11-10-v012-workflows/manifest.json",
+      "count": 17
+    }
+  },
+  "nativeSmoke": "Bundled WebView recipe validation/save/library refresh/setup; no model launch",
+  "liveLocalModelProbe": {
+    "model": "qwen3:0.6b",
+    "result": "failed positive review acceptance; invalid/inaccurate response rejected",
+    "paidProviderUsed": false,
+    "rawSyntheticOutput": "qwen3-0.6b-review-output.txt"
+  },
+  "bundle": {
+    "path": "target/debug/bundle/macos/Gyro.app",
+    "version": "0.1.1",
+    "binarySha256": "2a51f99aecef3a1479789da2013fcb1172e036e1ad1b253d156b7b4d8b3cc449",
+    "signingRequested": false,
+    "installed": false,
+    "published": false
+  }
+}

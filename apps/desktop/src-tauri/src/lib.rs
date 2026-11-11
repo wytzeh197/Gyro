@@ -97,6 +97,7 @@ mod lsp_capability;
 #[cfg(debug_assertions)]
 mod lsp_smoke;
 mod memory_capability;
+mod features;
 mod menu_bar;
 mod provider_context;
 mod provider_timeline;
@@ -117,6 +118,5 @@ mod workspace_mutations;
 mod workspace_open_capability;
 mod workspace_path_capability;
 mod workspace_path_history;
-
 #[cfg(test)]
 mod tests;

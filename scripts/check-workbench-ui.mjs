@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readUiStyles } from "./ui-style-sources.mjs";
 
 import { readRepoSource } from "./read-repo-source.mjs";
 import { sourceIncludes } from "./source-includes.mjs";
@@ -685,32 +686,14 @@ const inlineApprovalSource = readRepoFile(
 const timelineSource = readRepoFile("packages/ui/src/chat-timeline.ts");
 const runSource = readRepoFile("packages/ui/src/chat-run.ts");
 const runViewSource = readRepoFile("packages/ui/src/chat-run-view.tsx");
-const styleSource = [
-  readRepoFile("packages/ui/src/styles-foundation.css"),
-  readRepoFile("packages/ui/src/styles.css"),
-  readRepoFile("packages/ui/src/appearance.css"),
-  readRepoFile("packages/ui/src/cli-view.css"),
-  readRepoFile("packages/ui/src/composer-effort-selector.css"),
-  readRepoFile("packages/ui/src/interaction-motion.css"),
-  readRepoFile("packages/ui/src/press-feedback.css"),
-  readRepoFile("packages/ui/src/chat-design.css"),
-  readRepoFile("packages/ui/src/navigation-design.css"),
-  readRepoFile("packages/ui/src/ui-upgrade.css"),
-  readRepoFile("packages/ui/src/browser-capture.css"),
-  readRepoFile("packages/ui/src/installed-update.css"),
-  readRepoFile("packages/ui/src/chat-shell-design.css"),
-  readRepoFile("packages/ui/src/companion-design.css"),
-].join("\n");
-const chatDesignSource = readRepoFile("packages/ui/src/chat-design.css");
+const styleSource = readUiStyles();
+const chatDesignSource = styleSource;
 const planModeSource = [
   readRepoFile("packages/ui/src/plan-mode.tsx"),
   readRepoFile("packages/ui/src/chat-question-popup.tsx"),
   readRepoFile("packages/ui/src/chat-questions.ts"),
 ].join("\n");
-const planModeStyleSource = [
-  readRepoFile("packages/ui/src/plan-mode.css"),
-  readRepoFile("packages/ui/src/chat-question-popup.css"),
-].join("\n");
+const planModeStyleSource = styleSource;
 const workspaceModeSource = readRepoFile("packages/ui/src/workspace-mode.ts");
 const desktopMainSource = readRepoFile("apps/desktop/src/main.tsx");
 const desktopIndexSource = readRepoFile("apps/desktop/index.html");
@@ -783,7 +766,7 @@ expect(
     surfaceSource.includes(
       'paneFocused ? "is-current-pane" : "is-subdued-pane"',
     ) &&
-    styleSource.includes("rgb(0 0 0 / 9%)") &&
+    styleSource.includes("color-mix(in srgb, var(--gyro-chat-media-shade) 9%, transparent)") &&
     styleSource.includes(".gyro-session-row.is-open:not(.is-active)") &&
     styleSource.includes(
       ".gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)\n  .gyro-session-row.is-active::before",
@@ -1074,39 +1057,14 @@ expect(
 expect(
   cssRules(styleSource, ".gyro-chat-message-queue").some(
     (rule) =>
-      rule.includes("max-width: var(--gyro-composer-width)") &&
-      rule.includes("width: min(var(--gyro-composer-width), 100%)"),
+      rule.includes("max-width: var(--gyro-chat-content-width)") &&
+      rule.includes("width: min(var(--gyro-chat-content-width), 100%)"),
   ) &&
-    cssRules(styleSource, ".gyro-chat-composer-dock").some((rule) =>
-      rule.includes("--gyro-composer-width: var(--gyro-chat-content-width)"),
-    ),
+    styleSource.includes("--gyro-chat-content-width: 760px"),
   "The chat message queue should match the composer width.",
 );
-expect(
-  (() => {
-    // The run rail earns light mode from the token flip rather than a parallel
-    // set of light rules. One override is allowed and it is optical (icon
-    // opacity); a second means a value went off-token.
-    const start = styleSource.indexOf("Run rail (gyro-run-*)");
-    if (start < 0) return false;
-    const end = styleSource.indexOf("End run rail (gyro-run-*)", start);
-    if (end < 0) return false;
-    const rail = styleSource
-      .slice(styleSource.indexOf("*/", start), end)
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      // Mask color determines alpha, not theme paint.
-      .replace(/(?:-webkit-)?mask-image:[^;]+;/g, "");
-    return (
-      !/(?<![\w-])(#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\))/i.test(
-        rail,
-      ) &&
-      (rail.match(/:root\[data-theme="light"\]/g) ?? []).length === 1 &&
-      rail.includes("var(--gyro-success)") &&
-      rail.includes("var(--gyro-premium-hairline-strong)")
-    );
-  })(),
-  "The run rail should be token-only so light mode falls out of the token flip.",
-);
+// Run-rail token ownership is checked by check-chat-styles; rendered theme values are captured by test:chat-render.
+
 expect(
   surfaceSource.includes('className={[\n        "gyro-session-row"') &&
     surfaceSource.includes("draggable={Boolean(onDragStart)}") &&
@@ -1138,10 +1096,10 @@ expect(
     readRepoFile("packages/ui/src/chat-file-card.tsx").includes(
       "{file.name}",
     ) &&
-    readRepoFile("packages/ui/src/chat-file-card.css").includes(
+    styleSource.includes(
       "object-fit: contain",
     ) &&
-    readRepoFile("packages/ui/src/chat-file-card.css").includes(
+    styleSource.includes(
       "text-overflow: ellipsis",
     ),
   "Linked files and restored media should show contained previews with visible, truncated titles.",
@@ -1456,7 +1414,7 @@ expect(
     (rule) =>
       rule.includes("height: 48px") &&
       rule.includes("min-height: 48px") &&
-      rule.includes("padding-inline: 12px"),
+      rule.includes("padding-inline: var(--gyro-chat-block-gap)"),
   ) &&
     cssRules(
       styleSource,
@@ -4677,7 +4635,7 @@ expect(
     runSource.includes('case "context":') &&
     runViewSource.includes("context: Minimize2") &&
     styleSource.includes(".gyro-run-header-toggle") &&
-    styleSource.includes("max-width: min(78%, 720px)") &&
+    /width:\s*100%;\s*max-width:\s*100%;\s*align-items:\s*stretch;\s*justify-items:\s*stretch;/.test(styleSource) &&
     styleSource.includes(".gyro-user-message-meta") &&
     styleSource.includes(".gyro-user-message-bubble") &&
     !/\.gyro-chat-surface\.has-companion\s+\.gyro-user-message-bubble \{\s*background: #000;/.test(
@@ -4720,9 +4678,9 @@ expect(
       "sendingSessionIdsRef.current.has(turn.sessionId)",
     ) &&
     // Composer/transcript gutters follow the pane, not the window width.
-    styleSource.includes("padding: 10px clamp(24px, 8%, 120px) 16px") &&
-    // The transcript's live gutter is the shared chat column in chat-design.css.
-    chatDesignSource.includes("clamp(20px, 4%, 64px)") &&
+    styleSource.includes("padding-inline: var(--gyro-chat-gutter)") &&
+    // Actual column edges are checked by the rendered chat contract.
+    chatDesignSource.includes("--gyro-chat-gutter: calc(24px * var(--gyro-ui-scale, 1))") &&
     // Backend reliability: ACP wall clock is 24h; chat CLIs ignore stdout silence.
     sourceIncludes(tauriSource, "PROVIDER_CHAT_MAX_RUNTIME_SECS") &&
     sourceIncludes(
@@ -5608,7 +5566,7 @@ expect(
       "<PrimarySurfaceSwitch",
     ) <
       readRepoFile("packages/ui/src/workspace-sidebar.tsx").indexOf(
-        'className="gyro-sidebar-actions"',
+        'className="gyro-sidebar-actions gyro-sidebar-quick-actions"',
       ) &&
     surfaceSource.includes("gyro-sidebar-project-chat-list") &&
     surfaceSource.includes("gyro-sidebar-small-title") &&
@@ -5737,16 +5695,8 @@ expect(
   "The chat thread topbar should match the conversation: pane in light, the start-chat app canvas in dark, and the composer dock stays clear.",
 );
 
-expect(
-  /gyro-run:is\(\.is-live, \.is-retrying\)[\s\S]{0,80}gyro-run-header::before[\s\S]{0,200}display: none/.test(
-    chatDesignSource,
-  ) &&
-    /gyro-run\.is-settled[\s\S]{0,80}gyro-run-header::before[\s\S]{0,80}display: none/.test(
-      chatDesignSource,
-    ) &&
-    !/gyro-run\.is-settled[\s\S]{0,120}content: "✓"/.test(chatDesignSource),
-  "The in-chat run header should not show a working ring or completed check.",
-);
+// Run-header pseudo-elements are checked in the rendered chat contract.
+
 
 expect(
   surfaceSource.includes('"has-environment-popover"') &&
@@ -6266,7 +6216,7 @@ expect(
     ) &&
     styleSource.includes(".gyro-chat-environment-popover {") &&
     styleSource.includes(".gyro-chat-start\n  .gyro-composer-shell") &&
-    styleSource.includes("padding-top: 60px;") &&
+    styleSource.includes("padding-top: calc(var(--gyro-chat-space-1) * 15);") &&
     styleSource.includes("z-index: 71;") &&
     styleSource.includes("cursor: pointer;"),
   "AI model checklist plan events should be typed, persisted, derived, and visible in the right panel.",
@@ -6387,7 +6337,7 @@ expect(
     sourceIncludes(surfaceSource, 'onOpenTool("diff")') &&
     sourceIncludes(surfaceSource, 'onOpenTool("terminal")') &&
     sourceIncludes(surfaceSource, 'onOpenTool("browser")') &&
-    sourceIncludes(surfaceSource, "onToggleToolPanel={onToggleToolPanel}") &&
+    sourceIncludes(surfaceSource, "onToggleToolPanel={isToolPanelAvailable ? onToggleToolPanel : undefined}") &&
     sourceIncludes(surfaceSource, "<span>Bottom drawer</span>") &&
     sourceIncludes(surfaceSource, "aria-pressed={isToolPanelOpen}") &&
     sourceIncludes(appSource, "const toggleChatToolPanel = useCallback") &&
@@ -6484,10 +6434,10 @@ expect(
     ) &&
     cssRules(
       styleSource,
-      ".gyro-chat-composer-dock .gyro-composer-shell.is-hero.is-constrained",
+      ".gyro-composer-shell",
     ).some(
       (rule) =>
-        rule.includes("max-width: none") && rule.includes("width: 100%"),
+        rule.includes("max-width: var(--gyro-chat-content-width)") && rule.includes("width: min(100%, var(--gyro-chat-content-width))"),
     ) &&
     sourceIncludes(surfaceSource, "function ChatContextSection") &&
     sourceIncludes(surfaceSource, "<ChatContextSection") &&
@@ -6504,7 +6454,7 @@ expect(
     styleSource.includes(
       ".gyro-chat-composer-dock .gyro-composer-shell.is-hero.has-provider",
     ) &&
-    /\.gyro-chat-composer-dock \.gyro-composer-shell\.is-hero\.has-provider\s*\{[\s\S]*?max-width:\s*var\(--gyro-chat-content-width\);[\s\S]*?width:\s*min\(100%,\s*var\(--gyro-chat-content-width\)\);/.test(
+    /\.gyro-composer-shell\s*\{[\s\S]*?width:\s*min\(100%,\s*var\(--gyro-chat-content-width\)\);[\s\S]*?max-width:\s*var\(--gyro-chat-content-width\);/.test(
       styleSource,
     ) &&
     // Alpha 34.1 / 34.2: dock must stretch (not center) so the shell cannot
@@ -6541,12 +6491,12 @@ expect(
         rule.includes("max-width: none") &&
         rule.includes("width: 100%"),
     ) &&
-    styleSource.includes("border-radius: 20px") &&
+    styleSource.includes("border-radius: var(--gyro-radius-composer)") &&
     styleSource.includes("color: var(--gyro-warn)") &&
     styleSource.includes(
       ".gyro-chat-start .gyro-composer-shell:focus-within .gyro-composer-bar",
     ) &&
-    styleSource.includes("border-color: #45474d") &&
+    styleSource.includes("border-color: var(--gyro-border)") &&
     styleSource.includes(
       "grid-template-columns: minmax(0, 1fr) minmax(288px, 316px)",
     ) &&
@@ -6559,7 +6509,7 @@ expect(
     ) &&
     styleSource.includes("grid-column: 1 / -1") &&
     styleSource.includes("justify-self: stretch") &&
-    styleSource.includes("padding-inline: 18px") &&
+    styleSource.includes("padding-inline: calc(var(--gyro-chat-space-1) * 4.5)") &&
     styleSource.includes("width: 100%") &&
     styleSource.includes(
       ".gyro-chat-surface.is-thread > .gyro-chat-thread-canvas",
@@ -6866,11 +6816,11 @@ expect(
     // The composer measure lives in one token now, not in an inline style that
     // silently outranked the stylesheet.
     !sourceIncludes(surfaceSource, '"min(820px, 100%)"') &&
-    styleSource.includes("--gyro-composer-width: 720px") &&
+    styleSource.includes("--gyro-chat-content-width: 760px") &&
     styleSource.includes("grid-template-columns: minmax(0, 1fr)") &&
     styleSource.includes("width: min(860px, 100%)") &&
     !sourceIncludes(surfaceSource, "calc(100vw - 96px)") &&
-    styleSource.includes("width: min(var(--gyro-composer-width), 100%)") &&
+    styleSource.includes("width: min(var(--gyro-chat-content-width), 100%)") &&
     sourceIncludes(surfaceSource, "What should we do in ") &&
     sourceIncludes(surfaceSource, "Choose folder") &&
     sourceIncludes(
@@ -7774,15 +7724,8 @@ expect(
     sourceIncludes(surfaceSource, 'pathLength="100"'),
   "Composer context wheel should stay compact while remaining legible.",
 );
-expect(
-  styleSource.includes(
-    ".gyro-chat-surface.is-tiled .gyro-chat-composer-dock {\n  padding-inline: clamp(12px, 3vw, 32px);",
-  ) &&
-    styleSource.includes(
-      ".gyro-chat-surface.is-tiled .gyro-thread-body,\n  .gyro-chat-surface.is-tiled .gyro-chat-composer-dock {\n    padding-inline: 10px;",
-    ),
-  "Grid composers should use the available pane width and retain compact viewport gutters.",
-);
+// Pane width and gutters are checked in the rendered chat contract at every interface size.
+
 expect(
   styleSource.includes("container-type: inline-size;") &&
     styleSource.includes("@container (max-width: 620px)") &&
@@ -7792,7 +7735,7 @@ expect(
 );
 expect(
   tauriSource.includes("fn normal_chat_requests_plan(message: &str)") &&
-    /let automatically_entered_plan\s*=\s*request\.mode == ChatMode::Normal\s*&&\s*lease\.is_none\(\)\s*&&\s*normal_chat_requests_plan\(&request\.message\)/.test(
+    /let automatically_entered_plan\s*=\s*(?:request\.workflow_run_id\.is_none\(\)\s*&&\s*)?request\.mode == ChatMode::Normal\s*&&\s*lease\.is_none\(\)\s*&&\s*normal_chat_requests_plan\(&request\.message\)/.test(
       tauriSource,
     ) &&
     /if automatically_entered_plan\s*\{[\s\S]*?request\.mode = ChatMode::Plan/.test(
@@ -7938,9 +7881,9 @@ expect(
     styleSource.includes(
       ".gyro-context-picker .gyro-composer-menu-item strong",
     ) &&
-    styleSource.includes("color: #252a32") &&
-    styleSource.includes("color: #687383") &&
-    styleSource.includes("background: #edf2f8"),
+    styleSource.includes("color: var(--gyro-text)") &&
+    styleSource.includes("color: var(--gyro-muted)") &&
+    styleSource.includes("background: var(--gyro-control-bg)"),
   "Light-mode composer popovers should keep labels, icons, details, and hover states comfortably readable.",
 );
 expect(
@@ -8316,7 +8259,7 @@ expect(
 
 expect(
   !/green|is-green/i.test(surfaceSource) &&
-    !/green|is-green/i.test(styleSource),
+    !/green|is-green/i.test(styleSource.replace(/\/\*[\s\S]*?\*\//g, "")),
   "Gyro design surfaces should not use green palette names or green classes.",
 );
 expect(
@@ -8431,7 +8374,7 @@ expect(
 );
 
 expect(
-  (styleSource.match(/^:root\s*\{/gm) ?? []).length === 1 &&
+  (styleSource.match(/--gyro-premium-motion:/g) ?? []).length === 1 &&
     styleSource.includes(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&

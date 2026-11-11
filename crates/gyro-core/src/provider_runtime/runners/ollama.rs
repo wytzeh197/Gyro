@@ -162,6 +162,7 @@ pub fn run_ollama_chat(
     host: &dyn RunnerHost,
     request: &ProviderChatRequest,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    crate::provider_runtime::advisory::validate_advisory_request(crate::provider_runtime::types::ProviderAdapterKind::Ollama,request,None)?;
     let catalog = host.tool_catalog();
     if request.attachments.iter().any(|attachment| {
         !matches!(
@@ -285,7 +286,7 @@ pub fn run_ollama_chat(
         messages[1]["images"] = serde_json::json!(browser_images);
     }
     let allow_delegation = host.allow_delegation(request);
-    let mut tools = if discovered.supports_tools {
+    let mut tools = if discovered.supports_tools && !crate::provider_runtime::advisory::is_advisory(request) {
         provider_tool_batch::model_tools_for(
             catalog,
             run_mode,

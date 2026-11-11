@@ -1,3 +1,6 @@
+import { ProjectMemoryPanel } from "./project-memory/panel";
+import { ProjectMemoryContextHint } from "./project-memory/context-hint";
+import type { ProjectMemoryRuntime } from "./project-memory/types";
 import {
   Activity,
   Archive,
@@ -191,7 +194,6 @@ import { CloudChatBackup, type ChatBackupReview } from "./cloud-chat-backup";
 import { CloudSettings } from "./cloud-settings";
 import { groupWorkflowEvents, workflowDetails } from "./code-mode";
 import { CodeModeActivityCard } from "./code-mode-card";
-import "./companion-motion.css";
 import { ComposerCompletionMenu } from "./composer-completion-menu";
 import {
   ComposerContextCandidates,
@@ -348,7 +350,6 @@ import {
 } from "./chat-artifacts";
 import { latestCanvasArtifacts } from "./chat-canvas";
 import { ChatCanvas, type CanvasDrafts } from "./chat-canvas-view";
-import "./chat-canvas.css";
 import {
   finalAssistantResponseText,
   stripHiddenControlMarkers,
@@ -455,6 +456,8 @@ import {
 } from "./file-review";
 import type { ComparisonDiffResult } from "./git-comparison-review";
 import { GitComparisonReview } from "./git-comparison-review";
+import { CodeReviewPanel } from "./code-reviews/panel";
+import type { CodeReviewRuntime } from "./code-reviews/types";
 import {
   GlobalSearchRanker,
   createGlobalSearchTarget,
@@ -1029,6 +1032,7 @@ type AppChromeProps = {
   onStageAllSourceControl?: () => void | Promise<void>;
   onDiscardSourceControlFile?: (path: string) => void | Promise<void>;
   onOpenSourceControlDiff?: (path: string, staged: boolean) => void;
+  onReviewWithAgent?:()=>void;
   onCommitSourceControl?: (message: string) => void;
   onPushSourceControl?: () => void;
   onPullSourceControl?: () => void;
@@ -1987,6 +1991,7 @@ export function AppChrome({
   onStageAllSourceControl,
   onDiscardSourceControlFile,
   onOpenSourceControlDiff,
+  onReviewWithAgent,
   onCommitSourceControl,
   onPushSourceControl,
   onPullSourceControl,
@@ -2824,6 +2829,7 @@ export function AppChrome({
               projectSettings={projectSettings}
               onRefreshSourceControl={onRefreshSourceControl}
               onOpenSourceControlDiff={onOpenSourceControlDiff}
+              onReviewWithAgent={onReviewWithAgent}
               onCommitSourceControl={onCommitSourceControl}
               onPushSourceControl={onPushSourceControl}
               onPullSourceControl={onPullSourceControl}
@@ -4566,7 +4572,7 @@ type ChatSurfaceProps = {
   taskSuggestions?: ChatTaskSuggestionHandlers;
   /** Set on a chat a suggested task started. */
   taskOrigin?: ChatTaskOrigin;
-  /** Pending suggestions from the project's chats, under the new-chat composer. */
+  /** Pending suggestions from the project's chats, above the new-chat composer. */
   startTaskSuggestions?: ChatStartTaskSuggestionsSource;
   workspacePath?: string;
   config: GyroConfig;
@@ -4703,6 +4709,10 @@ type ChatSurfaceProps = {
    * session is destroyed when the tab closes.
    */
   sideChat?: SideChatState;
+  projectMemory?: ProjectMemoryRuntime;
+  codeReviewEntry?: import("./code-reviews/types").CodeReviewEntryRequest;
+  onSaveWorkflow?: (turnId?:string)=>void;
+  codeReviews?: CodeReviewRuntime;
   subagents?: SubagentSurfaceState;
   planEditorRequest?: {
     kind: "goal" | "item";
@@ -4810,6 +4820,7 @@ const chatCompanionTabIcons: Record<ChatCompanionTabId, IconComponent> = {
   files: Folders,
   "side-chat": MessageCirclePlus,
   agents: Users,
+  memory: ScrollText,
 };
 
 /** Agents open from their rows; the launcher offers only general tools. */
@@ -4949,6 +4960,10 @@ export function ChatSurface({
   browserCompanionWidth,
   onCompanionWidthChange,
   sideChat,
+  projectMemory,
+  codeReviewEntry,
+  onSaveWorkflow,
+  codeReviews,
   subagents,
   planEditorRequest,
   isEnvironmentRailOpen,
@@ -5058,6 +5073,7 @@ export function ChatSurface({
   const [isPlanDecisionPending, setIsPlanDecisionPending] = useState(false);
   const [liveChangesTarget, setLiveChangesTarget] =
     useState<HTMLDivElement | null>(null);
+  const [agentReviewEntry,setAgentReviewEntry]=useState<import("./code-reviews/types").CodeReviewEntryRequest>();
   const [reviewScope, setReviewScope] = useState<ReviewScope>({
     kind: "proposed",
   });
@@ -5683,6 +5699,13 @@ export function ChatSurface({
           const { turn, turnIndex } = item;
           return (
             <ChatTurn
+              onSaveWorkflow={onSaveWorkflow}
+              onReviewWithAgent={codeReviews ? () => {
+                const turnId=turn.user?.turnId ?? turn.id;
+                setReviewScope({kind:"turn",turnId});
+                setAgentReviewEntry({token:Date.now(),scope:{kind:"turn",turnId}});
+                if(onOpenCompanionTab)onOpenCompanionTab("review");else onSelectChatPanel?.("review");
+              } : undefined}
               isOnline={isOnline}
               subagents={subagents}
               artifactActions={transcriptArtifactActions}
@@ -5738,6 +5761,8 @@ export function ChatSurface({
       </>
     ),
     [
+      onSaveWorkflow,
+      codeReviews, onOpenCompanionTab, onSelectChatPanel,
       subagents,
       isOnline,
       onMutationApprovalAction,
@@ -5956,6 +5981,10 @@ export function ChatSurface({
           onOpenFile={onOpenCompanionFile}
           workspacePath={workspacePath}
         />
+      ) : displayedRailPanel === "review" || displayedRailPanel === "changes" ? (
+        <CodeReviewPanel key={codeReviews?.key} entry={codeReviewEntry && (!agentReviewEntry || codeReviewEntry.token > agentReviewEntry.token) ? codeReviewEntry : agentReviewEntry} runtime={codeReviews} scope={reviewScope.kind === "proposed" ? defaultReview.scope : reviewScope} changes={legacySidePanel} onComposeFix={onDraftChange ? (message) => {if(draft.trim())return false;onDraftChange(message);return true;} : undefined} />
+      ) : displayedRailPanel === "memory" ? (
+        <ProjectMemoryPanel runtime={projectMemory} />
       ) : displayedRailPanel === "agents" ? (
         <SubagentPanel
           key={subagents?.selectedAgentId}
@@ -6096,6 +6125,7 @@ export function ChatSurface({
             </div>
             <div className="gyro-thread-topbar-actions">
               <ChatSurfaceControls
+                onSaveWorkflow={onSaveWorkflow && events.some(event=>event.kind==="user-message") ? ()=>onSaveWorkflow() : undefined}
                 isDockOpen={false}
                 isPlanOpen={false}
                 isToolPanelOpen={false}
@@ -6124,37 +6154,54 @@ export function ChatSurface({
           aria-label="New Chat"
           style={{ width: "min(860px, 100%)" }}
         >
-          {
-            <span className="gyro-brand-logo">
-              <img
-                alt="Gyro"
-                className="is-light"
-                src={gyroLogoTransparentDark}
+          <div className="gyro-chat-start-intro">
+            {
+              <span className="gyro-brand-logo">
+                <img
+                  alt="Gyro"
+                  className="is-light"
+                  src={gyroLogoTransparentDark}
+                />
+                <img
+                  alt=""
+                  aria-hidden="true"
+                  className="is-dark"
+                  src={gyroLogoTransparentLight}
+                />
+              </span>
+            }
+            <h1>
+              {startProjectLabel ? (
+                <>
+                  <span>What should we do in </span>
+                  <span className="gyro-chat-start-brand-word">
+                    <ChatStartWorkspaceLabel
+                      name={startProjectLabel}
+                      path={workspacePath!}
+                    />
+                    ?
+                  </span>
+                </>
+              ) : (
+                <span>What should we work on?</span>
+              )}
+            </h1>
+            {startTaskSuggestions && startProjectLabel && !isTiled ? (
+              <ChatStartTaskSuggestions
+                choice={
+                  sessionModel?.providerId && sessionModel.modelId
+                    ? {
+                        providerId: sessionModel.providerId,
+                        modelId: sessionModel.modelId,
+                        reasoningEffort: sessionModel.reasoningEffort,
+                      }
+                    : undefined
+                }
+                source={startTaskSuggestions}
+                workspacePath={workspacePath!}
               />
-              <img
-                alt=""
-                aria-hidden="true"
-                className="is-dark"
-                src={gyroLogoTransparentLight}
-              />
-            </span>
-          }
-          <h1>
-            {startProjectLabel ? (
-              <>
-                <span>What should we do in </span>
-                <span className="gyro-chat-start-brand-word">
-                  <ChatStartWorkspaceLabel
-                    name={startProjectLabel}
-                    path={workspacePath!}
-                  />
-                  ?
-                </span>
-              </>
-            ) : (
-              <span>What should we work on?</span>
-            )}
-          </h1>
+            ) : null}
+          </div>
           {/* The outcome is drawn on the composer itself rather than above it,
               so the start screen and a running chat show the goal the same
               way. Only a save failure still needs a line of its own. */}
@@ -6164,6 +6211,7 @@ export function ChatSurface({
             </p>
           ) : null}
           {chatNotice}
+          <ProjectMemoryContextHint events={events} onOpen={onOpenCompanionTab?()=>onOpenCompanionTab("memory"):undefined}/>
           <Composer
             attachments={attachments}
             chatMode={chatMode}
@@ -6220,21 +6268,6 @@ export function ChatSurface({
             usageSafety={usageSafety}
             onResumeUsage={onResumeUsage}
           />
-          {startTaskSuggestions && startProjectLabel && !isTiled ? (
-            <ChatStartTaskSuggestions
-              choice={
-                sessionModel?.providerId && sessionModel.modelId
-                  ? {
-                      providerId: sessionModel.providerId,
-                      modelId: sessionModel.modelId,
-                      reasoningEffort: sessionModel.reasoningEffort,
-                    }
-                  : undefined
-              }
-              source={startTaskSuggestions}
-              workspacePath={workspacePath!}
-            />
-          ) : null}
         </section>
         <SharedChatCompanion>{sidePanel}</SharedChatCompanion>
       </div>
@@ -6280,30 +6313,6 @@ export function ChatSurface({
           >
             {sessionTitle ?? "Gyro session"}
           </strong>
-          <ChatSurfaceControls
-            compactOverflowActions={isTiled}
-            isDockOpen={isCompanionPanel}
-            isEnvironmentOpen={isEnvironmentPopoverOpen}
-            isPlanOpen={activeRailPanel === "plan"}
-            isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
-            modelFocus={isToolPanelAvailable ? visibleModelFocus : undefined}
-            onToggleEnvironmentRail={onToggleEnvironmentRail}
-            onToggleDock={onReopenCompanionDock}
-            onTogglePlanPanel={onTogglePlanPanel}
-            onToggleToolPanel={
-              isToolPanelAvailable ? onToggleToolPanel : undefined
-            }
-            planCompletedCount={
-              sessionPlan?.items.filter((item) => item.status === "complete")
-                .length ?? 0
-            }
-            planItemCount={sessionPlan?.items.length ?? 0}
-            showClose={false}
-            showEnvironmentInOverflow={false}
-            showOverflow={!isCompanionPanel}
-            showPanel={false}
-            showToolPanelInOverflow={false}
-          />
           {workspaceMode === "worktree" ? (
             <span
               className="gyro-thread-mode-badge is-agent-workspace"
@@ -6362,6 +6371,8 @@ export function ChatSurface({
             </span>
           ) : null}
           <ChatSurfaceControls
+                onSaveWorkflow={onSaveWorkflow && events.some(event=>event.kind==="user-message") ? ()=>onSaveWorkflow() : undefined}
+            compactOverflowActions={isTiled}
             isDockOpen={isCompanionPanel}
             isEnvironmentOpen={isEnvironmentPopoverOpen}
             isPlanOpen={activeRailPanel === "plan"}
@@ -6373,13 +6384,15 @@ export function ChatSurface({
             }
             onToggleEnvironmentRail={onToggleEnvironmentRail}
             onTogglePlanPanel={onTogglePlanPanel}
-            onToggleToolPanel={onToggleToolPanel}
+            onToggleToolPanel={isToolPanelAvailable ? onToggleToolPanel : undefined}
+            planCompletedCount={sessionPlan?.items.filter((item) => item.status === "complete").length ?? 0}
             planItemCount={sessionPlan?.items.length ?? 0}
             showClose={isTiled}
             // While the dock is open its header carries this toggle, in the
             // same spot beside the panel toggle, so nothing jumps sideways.
             showEnvironment={!(isCompanionPanel && !isTiled)}
-            showOverflow={false}
+            showEnvironmentInOverflow={false}
+            showToolPanelInOverflow={false}
             showToolPanel={isToolPanelAvailable}
           />
         </div>
@@ -6443,6 +6456,7 @@ export function ChatSurface({
             </button>
           ) : null}
           {chatNotice}
+          <ProjectMemoryContextHint events={events} onOpen={onOpenCompanionTab?()=>onOpenCompanionTab("memory"):undefined}/>
           {queuedMessages.length > 0 ? (
             <div className="gyro-chat-message-queue-wrap">
               <ChatMessageQueue
@@ -6777,6 +6791,7 @@ export type ModelFocusPeekContent = {
  * bottom drawer, and the companion. The companion owns its own tool launcher.
  */
 function ChatSurfaceControls({
+  onSaveWorkflow,
   compactOverflowActions = false,
   isDockOpen,
   isEnvironmentOpen,
@@ -6799,6 +6814,7 @@ function ChatSurfaceControls({
   showToolPanelInOverflow = true,
 }: {
   compactOverflowActions?: boolean;
+  onSaveWorkflow?:()=>void;
   isDockOpen: boolean;
   isEnvironmentOpen?: boolean;
   isPlanOpen: boolean;
@@ -6831,6 +6847,7 @@ function ChatSurfaceControls({
   );
   const showPlanInOverflow = planItemCount > 0 && Boolean(onTogglePlanPanel);
   const hasOverflowActions = Boolean(
+    onSaveWorkflow ||
     showPlanInOverflow ||
     (compactOverflowActions &&
       (onToggleEnvironmentRail ||
@@ -6925,6 +6942,7 @@ function ChatSurfaceControls({
           </button>
           {openMenu === "overflow" ? (
             <div className="gyro-chat-companion-menu is-header" role="menu">
+              {onSaveWorkflow?<button role="menuitem" type="button" onClick={()=>{setOpenMenu(undefined);onSaveWorkflow();}}><ScrollText size={14}/><span>Save as workflow</span></button>:null}
               {showPlanInOverflow ? (
                 <button
                   aria-label={`Plan checklist, ${planCompletedCount} of ${planItemCount} steps complete`}
@@ -8184,6 +8202,7 @@ function ChatCompanionDock({
                         files: "⌘P",
                         "side-chat": "⌥⌘S",
                         agents: "",
+                        memory: "",
                       }[id]
                     }
                   </kbd>
@@ -8743,7 +8762,7 @@ function ChatContextSection({
                 onAction?.("select-branch");
               }
             }}
-            title={title}
+            title={activePopover === popover ? undefined : title}
             type="button"
           >
             <Icon size={14} aria-hidden="true" />
@@ -9582,6 +9601,7 @@ type CliWorkspaceSurfaceProps = {
   onSelectDiffFile?: (path: string) => void;
   onToggleDiffDirectory?: (directory: string) => void;
   onRunGitReviewAction?: (actionId: GitReviewActionId) => void;
+  onReviewWorkspaceWithAgent?: (path?:string)=>void;
   onAcceptDiffFile?: (path: string) => void;
   onRejectDiffFile?: (path: string) => void;
   onAcceptAllDiffs?: () => void;
@@ -9636,6 +9656,7 @@ export function CliWorkspaceSurface({
   onSelectDiffFile,
   onToggleDiffDirectory,
   onRunGitReviewAction,
+  onReviewWorkspaceWithAgent,
   onAcceptDiffFile,
   onRejectDiffFile,
   onAcceptAllDiffs,
@@ -9879,6 +9900,7 @@ export function CliWorkspaceSurface({
           onSelectDiffFile={onSelectDiffFile}
           onToggleDiffDirectory={onToggleDiffDirectory}
           onRunGitReviewAction={onRunGitReviewAction}
+          onReviewWorkspaceWithAgent={onReviewWorkspaceWithAgent}
           onSelectTerminalPane={onSelectTerminalPane}
           onSplitTerminalPane={onSplitTerminalPane}
           onTerminalUtilityAction={onTerminalUtilityAction}
@@ -10550,6 +10572,7 @@ type IdeSurfaceProps = {
   onSelectDiffFile?: (path: string) => void;
   onToggleDiffDirectory?: (directory: string) => void;
   onRunGitReviewAction?: (actionId: GitReviewActionId) => void;
+  onReviewWorkspaceWithAgent?: (path?:string)=>void;
   onAcceptDiffFile?: (path: string) => void;
   onRejectDiffFile?: (path: string) => void;
   onAcceptAllDiffs?: () => void;
@@ -10627,6 +10650,7 @@ export function IdeSurface({
   onSelectDiffFile,
   onToggleDiffDirectory,
   onRunGitReviewAction,
+  onReviewWorkspaceWithAgent,
   onAcceptDiffFile,
   onRejectDiffFile,
   onAcceptAllDiffs,
@@ -12984,6 +13008,7 @@ function WorkbenchPaneContent({
   onSelectDiffFile,
   onToggleDiffDirectory,
   onRunGitReviewAction,
+  onReviewWorkspaceWithAgent,
   onAcceptDiffFile,
   onRejectDiffFile,
   onAcceptAllDiffs,
@@ -13054,6 +13079,7 @@ function WorkbenchPaneContent({
   onSelectDiffFile?: (path: string) => void;
   onToggleDiffDirectory?: (directory: string) => void;
   onRunGitReviewAction?: (actionId: GitReviewActionId) => void;
+  onReviewWorkspaceWithAgent?: (path?:string)=>void;
   onAcceptDiffFile?: (path: string) => void;
   onRejectDiffFile?: (path: string) => void;
   onAcceptAllDiffs?: () => void;
@@ -13097,6 +13123,7 @@ function WorkbenchPaneContent({
         onSelectFile={onSelectDiffFile}
         onToggleDirectory={onToggleDiffDirectory}
         onRunGitAction={onRunGitReviewAction}
+        onReviewWithAgent={onReviewWorkspaceWithAgent}
         onUndo={onUndoDiff}
       />
     );
@@ -13434,6 +13461,7 @@ type WorkspaceToolPanelProps = {
   onSelectDiffFile?: (path: string) => void;
   onToggleDiffDirectory?: (directory: string) => void;
   onRunGitReviewAction?: (actionId: GitReviewActionId) => void;
+  onReviewWorkspaceWithAgent?: (path?:string)=>void;
   onAcceptDiffFile?: (path: string) => void;
   onRejectDiffFile?: (path: string) => void;
   onAcceptAllDiffs?: () => void;
@@ -13513,6 +13541,7 @@ export function WorkspaceToolPanel({
   onSelectDiffFile,
   onToggleDiffDirectory,
   onRunGitReviewAction,
+  onReviewWorkspaceWithAgent,
   onAcceptDiffFile,
   onRejectDiffFile,
   onAcceptAllDiffs,
@@ -13831,6 +13860,7 @@ export function WorkspaceToolPanel({
         onRenameTerminalPane={onRenameTerminalPane}
         onRestartTerminalPane={onRestartTerminalPane}
         onRunGitReviewAction={onRunGitReviewAction}
+          onReviewWorkspaceWithAgent={onReviewWorkspaceWithAgent}
         onRunProfile={onRunProfile}
         onSelectDiffFile={onSelectDiffFile}
         onSelectTerminalPane={onSelectTerminalPane}
@@ -15093,6 +15123,7 @@ function relativeFutureTime(value: string) {
 }
 
 export function DiffReviewSurface({
+  onReviewWithAgent,
   compact = false,
   collapsibleFiles = false,
   diffReview,
@@ -15108,6 +15139,7 @@ export function DiffReviewSurface({
   onOpenInEditor,
   onRunGitAction,
 }: {
+  onReviewWithAgent?: (path?:string)=>void;
   compact?: boolean;
   collapsibleFiles?: boolean;
   diffReview?: DiffReview;
@@ -15161,6 +15193,7 @@ export function DiffReviewSurface({
     >
       <header className="gyro-review-scope" aria-label="Comparison scope">
         <strong>File reading review</strong>
+        {onReviewWithAgent && selectedFile ? <button type="button" onClick={()=>onReviewWithAgent(selectedDisplayPath)}>Get a second opinion on this file</button>:null}
         {hasFiles && countsKnown ? (
           <span>
             <span className="gyro-diff-added-count">+{additions}</span>
@@ -20685,12 +20718,14 @@ function ComposerPopover({
         panel.style.minWidth = "0";
         panel.style.maxWidth = `${Math.max(0, bounds.right - bounds.left - pad * 2) / scaleX}px`;
       }
-      // Keep Add aligned with its trigger horizontally, but clear the whole
-      // composer vertically so the menu cannot cover the draft or toolbar.
-      const composer = panel.classList.contains("gyro-context-picker")
-        ? panel.closest<HTMLElement>(".gyro-composer-shell")
-        : null;
-      const placementAnchor = composer?.getBoundingClientRect() ?? anchor;
+      // Anchor each menu to the control that opens it, including the context row.
+      const contextTrigger = panel.closest(".gyro-composer-context-row")
+        ?.querySelector<HTMLElement>('[aria-expanded="true"]');
+      if (contextTrigger) {
+        panel.style.left = `${(contextTrigger.getBoundingClientRect().left - anchor.left) / scaleX}px`;
+        panel.style.right = "auto";
+      }
+      const placementAnchor = contextTrigger?.getBoundingClientRect() ?? anchor;
       const anchorTop = placementAnchor.top;
       const anchorBottom = placementAnchor.bottom;
       const above = Math.max(0, anchorTop - bounds.top - pad - gap);
@@ -20701,10 +20736,10 @@ function ComposerPopover({
         panel.offsetHeight * scaleY > preferred && opposite > preferred;
       const direction = flip ? (placement === "up" ? "down" : "up") : placement;
       panel.style.top = direction === "down"
-        ? composer ? `${(anchorBottom - anchor.top + gap) / scaleY}px` : "calc(100% + 8px)"
+        ? `${(anchorBottom - anchor.top + gap) / scaleY}px`
         : "auto";
       panel.style.bottom = direction === "up"
-        ? composer ? `${(anchor.bottom - anchorTop + gap) / scaleY}px` : "calc(100% + 8px)"
+        ? `${(anchor.bottom - anchorTop + gap) / scaleY}px`
         : "auto";
       panel.style.maxHeight = `${Math.min(420, (direction === "up" ? above : below) / scaleY)}px`;
       const positioned = panel.getBoundingClientRect();
@@ -21684,19 +21719,17 @@ function Composer({
     if (!textarea) return;
 
     const updateHeight = () => {
-      // Collapse the previous height before measuring wrapped text. An empty
-      // field uses the same height as one line, so the first character does
-      // not shrink the composer.
+      // Measure wrapped text and the empty-field placeholder. At narrow pane
+      // widths the placeholder may need more than the one-line minimum.
       textarea.style.height = "0px";
       const contentHeight = textarea.scrollHeight;
-      const lineHeight = 52;
-      const nextHeight =
-        draft.length === 0
-          ? lineHeight
-          : Math.min(Math.max(contentHeight, lineHeight), 148);
+      const style = getComputedStyle(textarea);
+      const minimum = parseFloat(style.minHeight) || 52;
+      const maximum = parseFloat(style.maxHeight) || 148;
+      const nextHeight = Math.min(Math.max(contentHeight, minimum), maximum);
       textarea.style.height = `${nextHeight}px`;
       textarea.style.overflowY =
-        draft.length > 0 && contentHeight > 148 ? "auto" : "hidden";
+        draft.length > 0 && contentHeight > maximum ? "auto" : "hidden";
     };
     updateHeight();
 
@@ -22057,6 +22090,7 @@ function Composer({
     },
   ];
   const slashCommands: ComposerSlashCommand[] = [
+    { action: "open-memory", command: "/memory", description: "Inspect or update this project's memory", icon: ScrollText, label: "Project memory", group: "workspace" },
     {
       command: "/help",
       description: "Browse every chat command",
@@ -22529,6 +22563,11 @@ function Composer({
     };
   }, [draftKey, onAttachMediaFiles, onAttachMediaPaths, onMediaDropError]);
 
+  const showSetupNotice =
+    !isGoalComposerActive && shellReady && !canSubmitChat &&
+    chatMode !== "council" && !isCliUpdating &&
+    (!hasUserWorkspace || needsProviderSetup || !hasSelectedProvider);
+
   const hasGoalCaption = Boolean(
     sessionGoal?.status === "active" &&
     sessionGoal.text &&
@@ -22586,6 +22625,18 @@ function Composer({
           onResume={
             onGoalAction ? () => void onGoalAction("resume") : undefined
           }
+        />
+      ) : null}
+      {shouldShowContextRow ? (
+        <ChatContextSection
+          branchCatalog={branchCatalog}
+          branchName={branchName}
+          isBranchLoading={isBranchLoading}
+          isSending={isSending}
+          onAction={onComposerAction}
+          savedProjects={savedProjects}
+          workspaceMode={workspaceMode}
+          workspacePath={workspacePath}
         />
       ) : null}
       {attachments.length > 0 ? (
@@ -22902,238 +22953,235 @@ function Composer({
           windows={providerUsage?.windows ?? []}
         />
       ) : null}
-      <textarea
-        data-tour="composer.input"
-        ref={composerTextareaRef}
-        aria-label={
-          isGoalComposerActive
-            ? startsGoalSession
-              ? "Set goal and send"
-              : "Set session goal"
-            : "Message Gyro"
-        }
-        aria-controls={
-          mentionOpen
-            ? `${popoverBaseId}-context-menu`
-            : isSlashMenuOpen || isSlashEmptyStateOpen
-              ? `${popoverBaseId}-slash-menu`
-              : undefined
-        }
-        aria-activedescendant={
-          mentionOpen
-            ? `${popoverBaseId}-context-${selectedMention}`
-            : isSlashMenuOpen
-              ? `${popoverBaseId}-slash-command-${selectedSlashCommandIndex}`
-              : undefined
-        }
-        aria-expanded={mentionOpen || isSlashMenuOpen || isSlashEmptyStateOpen}
-        aria-haspopup="listbox"
-        onPaste={(event) => {
-          const files = chatMediaFiles(event.clipboardData);
-          if (files.length) {
-            event.preventDefault();
-            onAttachMediaFiles?.(files);
+      <div className={`gyro-composer-input${showSetupNotice && !draft.trim() ? " is-setup-empty" : ""}`}>
+        <textarea
+          data-tour="composer.input"
+          ref={composerTextareaRef}
+          aria-label={
+            isGoalComposerActive
+              ? startsGoalSession
+                ? "Set goal and send"
+                : "Set session goal"
+              : "Message Gyro"
           }
-        }}
-        onFocus={() => {
-          composerWantsFocus = true;
-          setActivePopover(null);
-          setIsSlashMenuDismissed(false);
-        }}
-        onBlur={(event) => {
-          // A detached node means a branch swap removed the textarea rather
-          // than the user moving on: keep the flag so the composer replacing
-          // this one reclaims the caret.
-          if (!event.currentTarget.isConnected) return;
-          composerWantsFocus = false;
-        }}
-        maxLength={isGoalComposerActive ? 1000 : maxDraftLength}
-        onSelect={(event) => {
-          if (dictationAnchorRef.current) return;
-          dictationCaretChoiceRef.current = event.currentTarget.selectionStart;
-        }}
-        onChange={(event) => {
-          const value = event.target.value;
-          if (
-            dictationAnchorRef.current &&
-            value !== dictationAppliedRef.current
-          ) {
-            releaseDictation(false);
+          aria-controls={
+            mentionOpen
+              ? `${popoverBaseId}-context-menu`
+              : isSlashMenuOpen || isSlashEmptyStateOpen
+                ? `${popoverBaseId}-slash-menu`
+                : undefined
           }
-          dictationCaretChoiceRef.current = event.target.selectionStart;
-          setMentionDismissed(false);
-          setMentionIndex(0);
-          setIsSlashHelpOpen(false);
-          setIsSlashMenuDismissed(false);
-          onDraftChange(value);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && dictationAnchorRef.current) {
-            event.preventDefault();
-            releaseDictation(true);
-            return;
+          aria-activedescendant={
+            mentionOpen
+              ? `${popoverBaseId}-context-${selectedMention}`
+              : isSlashMenuOpen
+                ? `${popoverBaseId}-slash-command-${selectedSlashCommandIndex}`
+                : undefined
           }
-          if (mentionOpen && !event.nativeEvent.isComposing) {
-            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          aria-expanded={mentionOpen || isSlashMenuOpen || isSlashEmptyStateOpen}
+          aria-haspopup="listbox"
+          onPaste={(event) => {
+            const files = chatMediaFiles(event.clipboardData);
+            if (files.length) {
               event.preventDefault();
-              setMentionIndex(
-                (current) =>
-                  (current +
-                    (event.key === "ArrowDown" ? 1 : -1) +
-                    mentions.length) %
-                  mentions.length,
-              );
-              return;
+              onAttachMediaFiles?.(files);
             }
-            if (event.key === "Escape") {
-              event.preventDefault();
-              setMentionDismissed(true);
-              return;
-            }
+          }}
+          onFocus={() => {
+            composerWantsFocus = true;
+            setActivePopover(null);
+            setIsSlashMenuDismissed(false);
+          }}
+          onBlur={(event) => {
+            // A detached node means a branch swap removed the textarea rather
+            // than the user moving on: keep the flag so the composer replacing
+            // this one reclaims the caret.
+            if (!event.currentTarget.isConnected) return;
+            composerWantsFocus = false;
+          }}
+          maxLength={isGoalComposerActive ? 1000 : maxDraftLength}
+          onSelect={(event) => {
+            if (dictationAnchorRef.current) return;
+            dictationCaretChoiceRef.current = event.currentTarget.selectionStart;
+          }}
+          onChange={(event) => {
+            const value = event.target.value;
             if (
-              (event.key === "Enter" || event.key === "Tab") &&
-              !event.shiftKey
+              dictationAnchorRef.current &&
+              value !== dictationAppliedRef.current
             ) {
+              releaseDictation(false);
+            }
+            dictationCaretChoiceRef.current = event.target.selectionStart;
+            setMentionDismissed(false);
+            setMentionIndex(0);
+            setIsSlashHelpOpen(false);
+            setIsSlashMenuDismissed(false);
+            onDraftChange(value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && dictationAnchorRef.current) {
               event.preventDefault();
-              attachMention(selectedMention);
+              releaseDictation(true);
               return;
             }
-          }
-          if (isGoalComposerActive && event.key === "Escape") {
-            event.preventDefault();
-            onCancelGoalComposer?.();
-            return;
-          }
-          if (isSlashEmptyStateOpen && event.key === "Escape") {
-            event.preventDefault();
-            setIsSlashMenuDismissed(true);
-            return;
-          }
-          if (isSlashMenuOpen) {
-            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-              event.preventDefault();
-              const direction = event.key === "ArrowDown" ? 1 : -1;
-              setActiveSlashCommandIndex(
-                (current) =>
-                  (current + direction + visibleSlashCommands.length) %
-                  visibleSlashCommands.length,
-              );
-              return;
-            }
-            if (event.key === "Escape") {
-              event.preventDefault();
-              setIsSlashHelpOpen(false);
-              setIsSlashMenuDismissed(true);
-              return;
-            }
-            if (
-              (event.key === "Enter" || event.key === "Tab") &&
-              !event.shiftKey &&
-              !event.nativeEvent.isComposing
-            ) {
-              const command =
-                visibleSlashCommands[selectedSlashCommandIndex] ??
-                visibleSlashCommands[0];
-              if (command) {
+            if (mentionOpen && !event.nativeEvent.isComposing) {
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault();
-                runSlashCommand(command);
+                setMentionIndex(
+                  (current) =>
+                    (current +
+                      (event.key === "ArrowDown" ? 1 : -1) +
+                      mentions.length) %
+                    mentions.length,
+                );
+                return;
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setMentionDismissed(true);
+                return;
+              }
+              if (
+                (event.key === "Enter" || event.key === "Tab") &&
+                !event.shiftKey
+              ) {
+                event.preventDefault();
+                attachMention(selectedMention);
                 return;
               }
             }
-          }
-          if (
-            !isGoalComposerActive &&
-            (event.key === "ArrowUp" || event.key === "ArrowDown") &&
-            !event.shiftKey &&
-            (draft.length === 0 || historyIndex !== undefined)
-          ) {
-            const next =
-              event.key === "ArrowUp"
-                ? Math.min(promptHistory.length - 1, (historyIndex ?? -1) + 1)
-                : Math.max(-1, (historyIndex ?? 0) - 1);
-            if (promptHistory.length > 0 && next >= 0) {
+            if (isGoalComposerActive && event.key === "Escape") {
               event.preventDefault();
-              setHistoryIndex(next);
-              onDraftChange(
-                promptHistory[promptHistory.length - 1 - next] ?? "",
-              );
+              onCancelGoalComposer?.();
               return;
             }
-            if (next < 0 && historyIndex !== undefined) {
+            if (isSlashEmptyStateOpen && event.key === "Escape") {
               event.preventDefault();
-              setHistoryIndex(undefined);
-              onDraftChange("");
+              setIsSlashMenuDismissed(true);
               return;
             }
-          }
-          const shouldSend =
-            event.key === "Enter" &&
-            !event.shiftKey &&
-            !event.nativeEvent.isComposing;
-          if (shouldSend) {
-            event.preventDefault();
-            setActivePopover(null);
-            if (dictationAnchorRef.current) releaseDictation(false);
-            if (explorerAskSendHeld) return;
-            if (canSubmitComposer && draft.trim().length > 0) {
-              setHistoryIndex(undefined);
-              requestSend();
+            if (isSlashMenuOpen) {
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                const direction = event.key === "ArrowDown" ? 1 : -1;
+                setActiveSlashCommandIndex(
+                  (current) =>
+                    (current + direction + visibleSlashCommands.length) %
+                    visibleSlashCommands.length,
+                );
+                return;
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setIsSlashHelpOpen(false);
+                setIsSlashMenuDismissed(true);
+                return;
+              }
+              if (
+                (event.key === "Enter" || event.key === "Tab") &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                const command =
+                  visibleSlashCommands[selectedSlashCommandIndex] ??
+                  visibleSlashCommands[0];
+                if (command) {
+                  event.preventDefault();
+                  runSlashCommand(command);
+                  return;
+                }
+              }
             }
+            if (
+              !isGoalComposerActive &&
+              (event.key === "ArrowUp" || event.key === "ArrowDown") &&
+              !event.shiftKey &&
+              (draft.length === 0 || historyIndex !== undefined)
+            ) {
+              const next =
+                event.key === "ArrowUp"
+                  ? Math.min(promptHistory.length - 1, (historyIndex ?? -1) + 1)
+                  : Math.max(-1, (historyIndex ?? 0) - 1);
+              if (promptHistory.length > 0 && next >= 0) {
+                event.preventDefault();
+                setHistoryIndex(next);
+                onDraftChange(
+                  promptHistory[promptHistory.length - 1 - next] ?? "",
+                );
+                return;
+              }
+              if (next < 0 && historyIndex !== undefined) {
+                event.preventDefault();
+                setHistoryIndex(undefined);
+                onDraftChange("");
+                return;
+              }
+            }
+            const shouldSend =
+              event.key === "Enter" &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing;
+            if (shouldSend) {
+              event.preventDefault();
+              setActivePopover(null);
+              if (dictationAnchorRef.current) releaseDictation(false);
+              if (explorerAskSendHeld) return;
+              if (canSubmitComposer && draft.trim().length > 0) {
+                setHistoryIndex(undefined);
+                requestSend();
+              }
+            }
+          }}
+          placeholder={
+            !shellReady
+              ? "Draft freely — send unlocks when Gyro finishes optimizing"
+              : isGoalComposerActive
+                ? startsGoalSession
+                  ? "What should this chat achieve? Send to set the goal and start"
+                  : "Edit the goal, then save it"
+                : chatMode === "council"
+                  ? "Ask for architecture, review, or alternatives — models answer in parallel"
+                  : !canSubmitChat
+                    ? isCliUpdating
+                      ? "Updating a provider CLI — sending unlocks when it finishes…"
+                      : cleanMachinePath.placeholder
+                    : placeholder
+                      ? placeholder
+                      : variant === "hero"
+                        ? "Describe a task or attach images"
+                        : "Ask for follow-up changes or attach images"
           }
-        }}
-        placeholder={
-          !shellReady
-            ? "Draft freely — send unlocks when Gyro finishes optimizing"
-            : isGoalComposerActive
-              ? startsGoalSession
-                ? "What should this chat achieve? Send to set the goal and start"
-                : "Edit the goal, then save it"
-              : chatMode === "council"
-                ? "Ask for architecture, review, or alternatives — models answer in parallel"
-                : !canSubmitChat
-                  ? isCliUpdating
-                    ? "Updating a provider CLI — sending unlocks when it finishes…"
-                    : cleanMachinePath.placeholder
-                  : placeholder
-                    ? placeholder
-                    : variant === "hero"
-                      ? "Describe a task or attach images"
-                      : "Ask for follow-up changes or attach images"
-        }
-        value={draft}
-      />
-      {!isGoalComposerActive &&
-      shellReady &&
-      !canSubmitChat &&
-      chatMode !== "council" &&
-      !isCliUpdating &&
-      (!hasUserWorkspace || needsProviderSetup || !hasSelectedProvider) ? (
-        <div className="gyro-composer-blocker" role="status">
-          <span>
-            <PlugZap
-              className="gyro-composer-blocker-icon"
-              size={15}
-              aria-hidden="true"
-            />
-            {isCliUpdating
-              ? "Updating a provider CLI. Sending will unlock when it finishes."
-              : cleanMachinePath.readinessLabel}
-          </span>
-          {!isCliUpdating &&
-          cleanMachinePath.nextAction &&
-          cleanMachinePath.nextActionLabel ? (
-            <button
-              onClick={() => {
-                const action = cleanMachinePath.nextAction;
-                if (action) onComposerAction?.(action);
-              }}
-              type="button"
-            >
-              {cleanMachinePath.nextActionLabel}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+          value={draft}
+        />
+        {showSetupNotice ? (
+          <div className="gyro-composer-blocker" role="status">
+            <span onClick={() => composerTextareaRef.current?.focus()}>
+              <PlugZap
+                className="gyro-composer-blocker-icon"
+                size={15}
+                aria-hidden="true"
+              />
+              {isCliUpdating
+                ? "Updating a provider CLI. Sending will unlock when it finishes."
+                : cleanMachinePath.readinessLabel}
+            </span>
+            {!isCliUpdating &&
+            cleanMachinePath.nextAction &&
+            cleanMachinePath.nextActionLabel ? (
+              <button
+                onClick={() => {
+                  const action = cleanMachinePath.nextAction;
+                  if (action) onComposerAction?.(action);
+                }}
+                type="button"
+              >
+                {cleanMachinePath.nextActionLabel}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
       <div className="gyro-composer-bar">
         {hasSelectedProvider || isHero ? (
           <>
@@ -23776,18 +23824,6 @@ function Composer({
         <p className="gyro-dictation-status" role="status" aria-live="polite">
           {dictationStatus}
         </p>
-      ) : null}
-      {shouldShowContextRow ? (
-        <ChatContextSection
-          branchCatalog={branchCatalog}
-          branchName={branchName}
-          isBranchLoading={isBranchLoading}
-          isSending={isSending}
-          onAction={onComposerAction}
-          savedProjects={savedProjects}
-          workspaceMode={workspaceMode}
-          workspacePath={workspacePath}
-        />
       ) : null}
     </div>
   );
@@ -24696,6 +24732,8 @@ const NO_KEEP_ALIVES: KeepAliveWatch[] = [];
 // skipped, instead of re-rendering the whole transcript per token.
 const ChatTurn = memoWithStableCallbacks(ChatTurnView);
 function ChatTurnView({
+  onReviewWithAgent,
+  onSaveWorkflow,
   artifactActions,
   subagents,
   fileReview,
@@ -24725,6 +24763,8 @@ function ChatTurnView({
   turn,
 }: {
   artifactActions?: ChatArtifactActions;
+  onReviewWithAgent?:()=>void;
+  onSaveWorkflow?: (turnId?:string)=>void;
   subagents?: SubagentSurfaceState;
   fileReview?: ChatTurnFileReview;
   isActive: boolean;
@@ -24962,6 +25002,7 @@ function ChatTurnView({
           aggregateFileStats={aggregateFileStats}
           headerActions={
             <>
+              {!isRunning&&hasResponse&&turn.user?.turnId&&onSaveWorkflow?<button type="button" onClick={()=>onSaveWorkflow(turn.user!.turnId)}>Save as workflow</button>:null}
               {(isRunning || !responseEvent) &&
               turn.turnTokens &&
               turn.turnTokens.totalTokens > 0 ? (
@@ -25136,6 +25177,7 @@ function ChatTurnView({
                 );
               return patches.join("\n");
             }}
+            onReviewWithAgent={onReviewWithAgent}
             onReview={openTurnChanges}
             onUndo={onUndoChanges}
             summaries={fileReviewSummaries}
@@ -25181,6 +25223,7 @@ function LiveFileChanges({
  * would imply it is waiting on something.
  */
 function ChatRunChangeSummary({
+  onReviewWithAgent,
   decisions,
   files,
   isReviewable = false,
@@ -25192,6 +25235,7 @@ function ChatRunChangeSummary({
   onUndo,
   summaries,
 }: {
+  onReviewWithAgent?:()=>void;
   decisions?: Map<string, FileReviewRecord>;
   files: Array<{
     path: string;
@@ -25266,6 +25310,7 @@ function ChatRunChangeSummary({
               <RotateCcw aria-hidden="true" size={13} /> Undo
             </button>
           ) : null}
+          {onReviewWithAgent ? <button type="button" onClick={onReviewWithAgent}>Get a second opinion</button> : null}
           {onReview || canExpandDiff ? (
             <button onClick={reviewFiles} type="button">
               Review

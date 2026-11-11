@@ -539,6 +539,9 @@ pub(crate) fn strip_control_markers_from_line(
                     None => rest = "",
                 }
             }
+            gyro_core::project_memory::MEMORY_CANDIDATE_MARKER => {
+                rest = "";
+            }
             GYRO_ARTIFACTS_MARKER => match take_leading_json_value(after_marker.trim_start()) {
                 Some((value, remainder)) => {
                     collect_chat_artifacts_from_value(value, artifacts);
@@ -569,6 +572,7 @@ pub(crate) fn next_control_marker(text: &str) -> Option<(&'static str, usize)> {
         GYRO_AGENT_UPDATE_MARKER,
         GYRO_QUESTIONS_MARKER,
         task_suggestions::GYRO_TASKS_MARKER,
+        gyro_core::project_memory::MEMORY_CANDIDATE_MARKER,
         GYRO_ARTIFACTS_MARKER,
     ];
     candidates
@@ -671,6 +675,7 @@ pub(crate) fn derive_session_summary(response: &str) -> Option<String> {
                 && !line.starts_with("GYRO_GOAL_UPDATE:")
                 && !line.starts_with("GYRO_QUESTIONS:")
                 && !line.starts_with(task_suggestions::GYRO_TASKS_MARKER)
+                && !line.starts_with(gyro_core::project_memory::MEMORY_CANDIDATE_MARKER)
         })
         .map(|line| {
             line.trim_start_matches(['#', '-', '*', '>'])

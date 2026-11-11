@@ -1,0 +1,477 @@
+{
+  "parityIssues": [],
+  "current": {
+    "pageOverflow": false,
+    "panes": [
+      {
+        "composerOverflow": false,
+        "elements": {
+          ".gyro-chat-environment-popover": {
+            "background": "rgb(28, 28, 30)",
+            "border": "1px solid color(srgb 1 1 1 / 0.09)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 204.94,
+            "left": 1100,
+            "line": "normal",
+            "padding": "6px",
+            "radius": "12px",
+            "right": 1420,
+            "top": 62,
+            "width": 320,
+            "zoom": "1"
+          },
+          ".gyro-chat-run-change-summary": {
+            "background": "color(srgb 0.964706 0.964706 0.968627 / 0.015)",
+            "border": "1px solid color(srgb 1 1 1 / 0.09)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 137,
+            "left": 324,
+            "line": "normal",
+            "padding": "0px",
+            "radius": "16px",
+            "right": 1008,
+            "top": 536.64,
+            "width": 684,
+            "zoom": "1"
+          },
+          ".gyro-chat-thread-topbar": {
+            "background": "rgb(20, 20, 21)",
+            "border": "",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 34,
+            "left": 240,
+            "line": "normal",
+            "padding": "0px 8px 0px 14px",
+            "radius": "0px",
+            "right": 1434,
+            "top": 6,
+            "width": 1194,
+            "zoom": "1"
+          },
+          ".gyro-chat-turn": {
+            "background": "rgba(0, 0, 0, 0)",
+            "border": "0px none rgb(246, 246, 247)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 732.64,
+            "left": 324,
+            "line": "normal",
+            "padding": "0px",
+            "radius": "0px",
+            "right": 1008,
+            "top": -59,
+            "width": 684,
+            "zoom": "1"
+          },
+          ".gyro-composer-chip": {
+            "background": "rgba(0, 0, 0, 0)",
+            "border": "1.05263px solid rgba(0, 0, 0, 0)",
+            "color": "rgb(198, 198, 202)",
+            "font": "12px",
+            "height": 26.59,
+            "left": 367.73,
+            "line": "normal",
+            "padding": "0px 8px",
+            "radius": "999px",
+            "right": 507.14,
+            "top": 847.86,
+            "width": 139.41,
+            "zoom": "1"
+          },
+          ".gyro-composer-shell": {
+            "background": "rgb(28, 28, 30)",
+            "border": "1.05263px solid color(srgb 1 1 1 / 0.055)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 89.38,
+            "left": 324,
+            "line": "normal",
+            "padding": "0px",
+            "radius": "14px",
+            "right": 1008,
+            "top": 794.63,
+            "width": 684,
+            "zoom": "0.95"
+          },
+          ".gyro-composer-shell textarea": {
+            "background": "rgba(0, 0, 0, 0)",
+            "border": "0px none rgb(246, 246, 247)",
+            "color": "rgb(246, 246, 247)",
+            "font": "13px",
+            "height": 49.39,
+            "left": 325,
+            "line": "19.5px",
+            "padding": "12px 14px 6px",
+            "radius": "14px 14px 0px 0px",
+            "right": 1007,
+            "top": 795.63,
+            "width": 682,
+            "zoom": "1"
+          },
+          ".gyro-response": {
+            "background": "rgba(0, 0, 0, 0)",
+            "border": "0px none rgb(246, 246, 247)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 387.55,
+            "left": 324,
+            "line": "23.1px",
+            "padding": "0px",
+            "radius": "0px",
+            "right": 1008,
+            "top": 123.09,
+            "width": 684,
+            "zoom": "1"
+          },
+          ".gyro-response-actions": {
+            "background": "rgba(0, 0, 0, 0)",
+            "border": "0px none rgb(246, 246, 247)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 28,
+            "left": 318,
+            "line": "23.1px",
+            "padding": "0px",
+            "radius": "0px",
+            "right": 1008,
+            "top": 482.64,
+            "width": 690,
+            "zoom": "1"
+          },
+          ".gyro-response-body": {
+            "background": "rgba(0, 0, 0, 0)",
+            "border": "0px none rgb(246, 246, 247)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 355.55,
+            "left": 324,
+            "line": "23.1px",
+            "padding": "0px",
+            "radius": "0px",
+            "right": 1008,
+            "top": 123.09,
+            "width": 684,
+            "zoom": "1"
+          },
+          ".gyro-response-code-block": {
+            "background": "color(srgb 0.100588 0.100588 0.10451)",
+            "border": "1px solid color(srgb 1 1 1 / 0.09)",
+            "color": "rgb(230, 230, 232)",
+            "font": "13px",
+            "height": 215.17,
+            "left": 324,
+            "line": "20.8px",
+            "padding": "13px 14px",
+            "radius": "16px",
+            "right": 1008,
+            "top": 160.19,
+            "width": 684,
+            "zoom": "1"
+          },
+          ".gyro-run-call-verb": null,
+          ".gyro-run-row.is-say .gyro-run-row-label": null,
+          ".gyro-user-message-bubble": {
+            "background": "rgb(28, 28, 30)",
+            "border": "1px solid color(srgb 1 1 1 / 0.055)",
+            "color": "rgb(246, 246, 247)",
+            "font": "13px",
+            "height": 68.09,
+            "left": 460.81,
+            "line": "21.45px",
+            "padding": "12px 16px",
+            "radius": "12px",
+            "right": 1008,
+            "top": -59,
+            "width": 547.19,
+            "zoom": "1"
+          }
+        },
+        "overlap": false,
+        "tiny": [
+          {
+            "class": "",
+            "font": "11px",
+            "text": "11:23 AM"
+          },
+          {
+            "class": "",
+            "font": "11px",
+            "text": "Line counts unavailable"
+          },
+          {
+            "class": "gyro-composer-context-model",
+            "font": "11px",
+            "text": "Claude Opus 5"
+          },
+          {
+            "class": "gyro-composer-context-caption",
+            "font": "11px",
+            "text": "Waiting for provider measurement"
+          }
+        ]
+      }
+    ],
+    "ready": "true",
+    "sidebar": {
+      "background": "rgba(0, 0, 0, 0)",
+      "border": "",
+      "color": "rgb(226, 226, 228)",
+      "font": "14px",
+      "height": 900,
+      "left": 0,
+      "line": "normal",
+      "padding": "0px 8px",
+      "radius": "0px",
+      "right": 240,
+      "top": 0,
+      "width": 240,
+      "zoom": "1"
+    },
+    "size": "default",
+    "theme": "dark",
+    "variant": "current",
+    "viewport": [
+      1440,
+      900
+    ]
+  },
+  "original": {
+    "pageOverflow": false,
+    "panes": [
+      {
+        "composerOverflow": false,
+        "elements": {
+          ".gyro-chat-environment-popover": {
+            "background": "rgb(28, 28, 30)",
+            "border": "1px solid color(srgb 1 1 1 / 0.09)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 204.94,
+            "left": 1100,
+            "line": "normal",
+            "padding": "6px",
+            "radius": "12px",
+            "right": 1420,
+            "top": 62,
+            "width": 320,
+            "zoom": "1"
+          },
+          ".gyro-chat-run-change-summary": {
+            "background": "color(srgb 0.964706 0.964706 0.968627 / 0.015)",
+            "border": "1px solid color(srgb 1 1 1 / 0.09)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 137,
+            "left": 324,
+            "line": "normal",
+            "padding": "0px",
+            "radius": "16px",
+            "right": 1008,
+            "top": 536.64,
+            "width": 684,
+            "zoom": "1"
+          },
+          ".gyro-chat-thread-topbar": {
+            "background": "rgb(20, 20, 21)",
+            "border": "",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 34,
+            "left": 240,
+            "line": "normal",
+            "padding": "0px 8px 0px 14px",
+            "radius": "0px",
+            "right": 1434,
+            "top": 6,
+            "width": 1194,
+            "zoom": "1"
+          },
+          ".gyro-chat-turn": {
+            "background": "rgba(0, 0, 0, 0)",
+            "border": "0px none rgb(246, 246, 247)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 732.64,
+            "left": 324,
+            "line": "normal",
+            "padding": "0px",
+            "radius": "0px",
+            "right": 1008,
+            "top": -59,
+            "width": 684,
+            "zoom": "1"
+          },
+          ".gyro-composer-chip": {
+            "background": "rgba(0, 0, 0, 0)",
+            "border": "1.05263px solid rgba(0, 0, 0, 0)",
+            "color": "rgb(198, 198, 202)",
+            "font": "12px",
+            "height": 26.59,
+            "left": 367.73,
+            "line": "normal",
+            "padding": "0px 8px",
+            "radius": "999px",
+            "right": 507.14,
+            "top": 847.86,
+            "width": 139.41,
+            "zoom": "1"
+          },
+          ".gyro-composer-shell": {
+            "background": "rgb(28, 28, 30)",
+            "border": "1.05263px solid color(srgb 1 1 1 / 0.055)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 89.38,
+            "left": 324,
+            "line": "normal",
+            "padding": "0px",
+            "radius": "14px",
+            "right": 1008,
+            "top": 794.63,
+            "width": 684,
+            "zoom": "0.95"
+          },
+          ".gyro-composer-shell textarea": {
+            "background": "rgba(0, 0, 0, 0)",
+            "border": "0px none rgb(246, 246, 247)",
+            "color": "rgb(246, 246, 247)",
+            "font": "13px",
+            "height": 49.39,
+            "left": 325,
+            "line": "19.5px",
+            "padding": "12px 14px 6px",
+            "radius": "14px 14px 0px 0px",
+            "right": 1007,
+            "top": 795.63,
+            "width": 682,
+            "zoom": "1"
+          },
+          ".gyro-response": {
+            "background": "rgba(0, 0, 0, 0)",
+            "border": "0px none rgb(246, 246, 247)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 387.55,
+            "left": 324,
+            "line": "23.1px",
+            "padding": "0px",
+            "radius": "0px",
+            "right": 1008,
+            "top": 123.09,
+            "width": 684,
+            "zoom": "1"
+          },
+          ".gyro-response-actions": {
+            "background": "rgba(0, 0, 0, 0)",
+            "border": "0px none rgb(246, 246, 247)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 28,
+            "left": 318,
+            "line": "23.1px",
+            "padding": "0px",
+            "radius": "0px",
+            "right": 1008,
+            "top": 482.64,
+            "width": 690,
+            "zoom": "1"
+          },
+          ".gyro-response-body": {
+            "background": "rgba(0, 0, 0, 0)",
+            "border": "0px none rgb(246, 246, 247)",
+            "color": "rgb(246, 246, 247)",
+            "font": "14px",
+            "height": 355.55,
+            "left": 324,
+            "line": "23.1px",
+            "padding": "0px",
+            "radius": "0px",
+            "right": 1008,
+            "top": 123.09,
+            "width": 684,
+            "zoom": "1"
+          },
+          ".gyro-response-code-block": {
+            "background": "color(srgb 0.100588 0.100588 0.10451)",
+            "border": "1px solid color(srgb 1 1 1 / 0.09)",
+            "color": "rgb(230, 230, 232)",
+            "font": "13px",
+            "height": 215.17,
+            "left": 324,
+            "line": "20.8px",
+            "padding": "13px 14px",
+            "radius": "16px",
+            "right": 1008,
+            "top": 160.19,
+            "width": 684,
+            "zoom": "1"
+          },
+          ".gyro-run-call-verb": null,
+          ".gyro-run-row.is-say .gyro-run-row-label": null,
+          ".gyro-user-message-bubble": {
+            "background": "rgb(28, 28, 30)",
+            "border": "1px solid color(srgb 1 1 1 / 0.055)",
+            "color": "rgb(246, 246, 247)",
+            "font": "13px",
+            "height": 68.09,
+            "left": 460.81,
+            "line": "21.45px",
+            "padding": "12px 16px",
+            "radius": "12px",
+            "right": 1008,
+            "top": -59,
+            "width": 547.19,
+            "zoom": "1"
+          }
+        },
+        "overlap": false,
+        "tiny": [
+          {
+            "class": "",
+            "font": "11px",
+            "text": "11:23 AM"
+          },
+          {
+            "class": "",
+            "font": "11px",
+            "text": "Line counts unavailable"
+          },
+          {
+            "class": "gyro-composer-context-model",
+            "font": "11px",
+            "text": "Claude Opus 5"
+          },
+          {
+            "class": "gyro-composer-context-caption",
+            "font": "11px",
+            "text": "Waiting for provider measurement"
+          }
+        ]
+      }
+    ],
+    "sidebar": {
+      "background": "rgba(0, 0, 0, 0)",
+      "border": "",
+      "color": "rgb(226, 226, 228)",
+      "font": "14px",
+      "height": 900,
+      "left": 0,
+      "line": "normal",
+      "padding": "0px 8px",
+      "radius": "0px",
+      "right": 240,
+      "top": 0,
+      "width": 240,
+      "zoom": "1"
+    },
+    "size": "default",
+    "theme": "dark",
+    "viewport": [
+      1440,
+      900
+    ]
+  }
+}

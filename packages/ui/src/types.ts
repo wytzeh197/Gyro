@@ -48,6 +48,7 @@ export type WorkbenchMode = "local" | "worktree";
  * picking one never closes the pane.
  */
 export type ChatSidePanelId =
+  | "memory"
   | "canvas"
   | "tools"
   | "environment"
@@ -566,6 +567,7 @@ export type CalendarSchedule = {
 };
 
 export type AutomationExecutionContext = {
+  workflowBinding?:import("./workflows/types").WorkflowJob["execution"]["workflowBinding"];
   calendar?: CalendarSchedule;
   workspacePath?: string;
   providerId?: string;
@@ -1474,6 +1476,8 @@ export type UsageOrigin =
   | "council-synthesis"
   | "council-resynthesis"
   | "session-title"
+  | "code-review"
+  | "workflow-extraction"
   | "optimization"
   | "agent-session";
 

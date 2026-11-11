@@ -42,6 +42,8 @@ pub enum UsageOrigin {
     /// so a user can see what the review card costs rather than finding it
     /// folded into their chat total.
     ChangeSummary,
+    CodeReview,
+    WorkflowExtraction,
     /// The one model call a manual `/compact` spends on a provider that has no
     /// compact command of its own, to write the checkpoint the next turn
     /// starts from.
@@ -64,6 +66,8 @@ impl UsageOrigin {
             Self::CouncilSynthesis => "council-synthesis",
             Self::CouncilResynthesis => "council-resynthesis",
             Self::ChangeSummary => "change-summary",
+            Self::CodeReview => "code-review",
+            Self::WorkflowExtraction => "workflow-extraction",
             Self::ContextCompaction => "context-compaction",
             Self::SessionTitle => "session-title",
             Self::SubAgent => "sub-agent",
@@ -79,6 +83,8 @@ impl UsageOrigin {
             "council-synthesis" => Self::CouncilSynthesis,
             "council-resynthesis" => Self::CouncilResynthesis,
             "change-summary" => Self::ChangeSummary,
+            "code-review" => Self::CodeReview,
+            "workflow-extraction" => Self::WorkflowExtraction,
             "context-compaction" => Self::ContextCompaction,
             "session-title" => Self::SessionTitle,
             "sub-agent" => Self::SubAgent,
@@ -97,6 +103,8 @@ impl UsageOrigin {
             Self::CouncilSynthesis => "Council synthesis",
             Self::CouncilResynthesis => "Council re-synthesis",
             Self::ChangeSummary => "Change summaries",
+            Self::CodeReview => "Code reviews",
+            Self::WorkflowExtraction => "Workflow extraction",
             Self::ContextCompaction => "Context compaction",
             Self::SessionTitle => "Chat titles",
             Self::SubAgent => "Sub-agents",

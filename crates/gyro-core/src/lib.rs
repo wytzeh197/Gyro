@@ -11,6 +11,7 @@ pub mod cli_install;
 pub mod cli_path;
 pub mod cli_updates;
 pub mod cloud_connection;
+pub mod code_reviews;
 pub mod config;
 pub mod council;
 pub mod credentials;
@@ -37,6 +38,7 @@ pub mod paths;
 pub mod policy;
 pub mod process_guard;
 pub mod project_import;
+pub mod project_memory;
 pub mod provider_contract;
 pub mod provider_cooldown;
 pub mod provider_health;
@@ -58,6 +60,7 @@ pub mod workspace_check;
 pub mod workspace_roots;
 pub mod workspace_sandbox;
 pub mod worktrees;
+pub mod workflows;
 
 pub use account::{
     generate_pkce_flow, logout_account, refresh_account_session, start_account_login,

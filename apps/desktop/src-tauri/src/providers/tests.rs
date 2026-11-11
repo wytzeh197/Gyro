@@ -2417,7 +2417,8 @@ fn stale_resume_binding_is_cleared_and_retried_without_cursor() {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
-        internal_purpose: None,
+        workflow_run_id: None,
+        project_memory: None,        internal_purpose: None,
     };
     let mut attempts = Vec::new();
     let output = run_provider_chat_with_retry_using(
@@ -2498,7 +2499,8 @@ fn model_handoff_skips_incompatible_provider_binding() {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
-        internal_purpose: None,
+        workflow_run_id: None,
+        project_memory: None,        internal_purpose: None,
     };
     assert!(compatible_provider_session_binding(binding.clone(), &request).is_none());
     let same_model = ProviderChatRequest {
@@ -2900,7 +2902,8 @@ fn provider_status_event_stores_run_metadata_without_tokens() {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
-        internal_purpose: None,
+        workflow_run_id: None,
+        project_memory: None,        internal_purpose: None,
     };
 
     let event = append_provider_status_event(
@@ -2990,7 +2993,8 @@ fn native_provider_binding_owns_execution_authority() {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
-        internal_purpose: None,
+        workflow_run_id: None,
+        project_memory: None,        internal_purpose: None,
     };
 
     bind_provider_chat_request(&mut request, &session, &config, store.paths()).unwrap();
@@ -3489,6 +3493,7 @@ fn automation_notifications_are_private_and_only_cover_actionable_outcomes() {
             stop_condition: None,
             next_run_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
             execution: gyro_core::AutomationExecutionContext {
+                workflow_binding: None,
                 calendar: None,
                 workspace_path: Some("/secret/workspace".into()),
                 ..Default::default()

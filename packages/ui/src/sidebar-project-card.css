@@ -18,3 +18,13 @@
 .gyro-project-nested-toggle:hover {
   color: var(--gyro-text);
 }
+
+.gyro-project-settings-views {
+  margin-bottom: var(--gyro-space-panel);
+}
+
+.gyro-project-settings-memory .gyro-memory-panel {
+  height: auto;
+  overflow: visible;
+  padding: 0;
+}

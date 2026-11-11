@@ -628,6 +628,7 @@ fn scheduler_dispatches_distinct_workspaces_and_defers_conflicts() {
                 stop_condition: None,
                 next_run_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
                 execution: gyro_core::AutomationExecutionContext {
+                workflow_binding: None,
                     workspace_path: Some(workspace.display().to_string()),
                     ..Default::default()
                 },

@@ -55,6 +55,27 @@ pub(super) fn create_file_mutation_proposal_at_root(
     apply_immediately: bool,
     root_id: Option<&str>,
 ) -> anyhow::Result<MutationProposal> {
+    create_file_mutation_proposal_with_base(store, request, apply_immediately, root_id, false)
+}
+
+/// Unlike a generic whole-file edit, a replacement derived from a snapshot
+/// must not adopt a file created after the host observed an absent base.
+pub(super) fn create_file_mutation_proposal_from_snapshot_at_root(
+    store: &SessionStore,
+    request: FileMutationProposalRequest,
+    apply_immediately: bool,
+    root_id: Option<&str>,
+) -> anyhow::Result<MutationProposal> {
+    create_file_mutation_proposal_with_base(store, request, apply_immediately, root_id, true)
+}
+
+fn create_file_mutation_proposal_with_base(
+    store: &SessionStore,
+    request: FileMutationProposalRequest,
+    apply_immediately: bool,
+    root_id: Option<&str>,
+    require_expected_base: bool,
+) -> anyhow::Result<MutationProposal> {
     let session_id = Uuid::parse_str(&request.session_id)?;
     let turn_id = request
         .turn_id
@@ -84,6 +105,9 @@ pub(super) fn create_file_mutation_proposal_at_root(
         anyhow::bail!("binary mutation proposals are not supported");
     }
     let base_exists = candidate.exists();
+    if require_expected_base && base_exists != request.expected_hash.is_some() {
+        anyhow::bail!("file changed on disk; reload before proposing an edit");
+    }
     let expected_hash = if base_exists {
         let (current, _) =
             read_bounded_regular_file(&candidate, MAX_WORKSPACE_FILE_EDIT_BYTES, "workspace file")?;
@@ -176,6 +200,56 @@ mod tests {
     use super::*;
     use gyro_core::{GyroPaths, SessionOrigin};
     use std::fs;
+
+    #[test]
+    fn snapshot_replacements_refuse_changed_created_or_removed_bases() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "snapshot")
+            .unwrap();
+        let target = temp.path().join("memory.md");
+        let request = |expected_hash| FileMutationProposalRequest {
+            session_id: session.id.to_string(),
+            turn_id: None,
+            path: "memory.md".into(),
+            content: "replacement".into(),
+            expected_hash,
+        };
+        fs::write(&target, "external edit").unwrap();
+        for expected in [None, Some(content_hash(b"old bytes"))] {
+            assert!(create_file_mutation_proposal_from_snapshot_at_root(
+                &store,
+                request(expected),
+                true,
+                None
+            )
+            .is_err());
+            assert_eq!(fs::read_to_string(&target).unwrap(), "external edit");
+        }
+        fs::remove_file(&target).unwrap();
+        assert!(create_file_mutation_proposal_from_snapshot_at_root(
+            &store,
+            request(Some(content_hash(b"external edit"))),
+            true,
+            None
+        )
+        .is_err());
+        assert!(!target.exists());
+        let proposal =
+            create_file_mutation_proposal_from_snapshot_at_root(&store, request(None), true, None)
+                .unwrap();
+        assert_eq!(proposal.status.as_str(), "applied");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "replacement");
+        assert!(create_file_mutation_proposal_from_snapshot_at_root(
+            &store,
+            request(Some(content_hash(b"replacement"))),
+            false,
+            None
+        )
+        .is_ok());
+    }
+
     #[test]
     fn full_access_workspace_edit_applies_without_a_pending_approval() {
         let temp = tempfile::tempdir().unwrap();

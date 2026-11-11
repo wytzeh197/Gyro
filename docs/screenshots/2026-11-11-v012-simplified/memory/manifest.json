@@ -1,0 +1,17 @@
+{
+  "evidence": "Production React components with synthetic fixture data; no native or live-provider acceptance",
+  "result": "passed",
+  "captures": [
+    "memory-dark",
+    "memory-conflict",
+    "memory-receipts",
+    "memory-light-compact-large",
+    "memory-suggestions-accepted",
+    "memory-empty",
+    "memory-error",
+    "memory-companion-light",
+    "memory-companion-narrow",
+    "memory-sidebar-entry-light"
+  ],
+  "errors": []
+}

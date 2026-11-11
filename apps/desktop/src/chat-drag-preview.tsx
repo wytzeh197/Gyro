@@ -233,6 +233,9 @@ function simulateDrop(
 }
 
 type FixtureApi = {
+  // Exercise the native pane payload contract directly. Production titles
+  // intentionally have no dragstart handler; real users drag sidebar rows.
+  startPaneDrag: (paneId: string, transfer: DataTransfer) => void;
   getState: () => {
     grid: ChatGridState;
     drafts: Record<string, string>;
@@ -249,6 +252,9 @@ declare global {
 }
 
 function Preview() {
+  const paneDragStarters = useRef(
+    new Map<string, (event: React.DragEvent<HTMLSpanElement>) => void>(),
+  );
   const [grid, setGrid] = useState(initialState);
   const gridRef = useRef(grid);
   gridRef.current = grid;
@@ -273,6 +279,11 @@ function Preview() {
   };
   useEffect(() => {
     window.__chatDragFixture = {
+      startPaneDrag: (paneId, transfer) => {
+        const start = paneDragStarters.current.get(paneId);
+        if (!start) throw new Error(`Missing pane drag callback: ${paneId}`);
+        start({ dataTransfer: transfer } as React.DragEvent<HTMLSpanElement>);
+      },
       getState: () => ({ grid, drafts, active, media }),
       setGrid,
       reset,
@@ -330,9 +341,11 @@ function Preview() {
             Quick drop Beta right
           </button>
           <button
-            disabled={!layout.slots.some(
-              (pane) => pane?.kind === "session" && pane.sessionId === "beta",
-            )}
+            disabled={
+              !layout.slots.some(
+                (pane) => pane?.kind === "session" && pane.sessionId === "beta",
+              )
+            }
             onClick={() => simulateDrop("beta", 0.4)}
           >
             Reorder Beta over Alpha
@@ -431,49 +444,52 @@ function Preview() {
             if (accepted) setActive(sessionId);
             return accepted;
           }}
-          renderPane={(pane, options) => (
-            <ChatSurface
-              config={config}
-              events={[
-                {
-                  id: `request-${pane.paneId}`,
-                  sessionId: pane.kind === "session" ? pane.sessionId : "",
-                  kind: "user-message",
-                  createdAt: "2026-10-10T10:00:00Z",
-                  message: "Verify splitview drag and drop.",
-                  payload: {},
-                },
-              ]}
-              sessionTitle={
-                sessions.find(
-                  (session) =>
-                    session.id ===
-                    (pane.kind === "session" ? pane.sessionId : ""),
-                )?.title
-              }
-              workspacePath={pane.workspacePath}
-              paneKey={pane.paneId}
-              isTiled={options.isTiled}
-              isEnvironmentRailOpen
-              onPaneDragStart={options.onPaneDragStart}
-              onPaneDragEnd={options.onPaneDragEnd}
-              onPanePointerDown={options.onPanePointerDown}
-              draft={drafts[pane.paneId] ?? ""}
-              onDraftChange={(draft) =>
-                setDrafts((current) => ({ ...current, [pane.paneId]: draft }))
-              }
-              onAttachMediaFiles={() => setMedia((count) => count + 1)}
-              onCloseChat={() =>
-                dispatch({
-                  type: "close-pane",
-                  projectKey: activeProjectKey,
-                  paneId: pane.paneId,
-                })
-              }
-              onComposerAction={() => undefined}
-              onSend={() => undefined}
-            />
-          )}
+          renderPane={(pane, options) => {
+            paneDragStarters.current.set(pane.paneId, options.onPaneDragStart);
+            return (
+              <ChatSurface
+                config={config}
+                events={[
+                  {
+                    id: `request-${pane.paneId}`,
+                    sessionId: pane.kind === "session" ? pane.sessionId : "",
+                    kind: "user-message",
+                    createdAt: "2026-10-10T10:00:00Z",
+                    message: "Verify splitview drag and drop.",
+                    payload: {},
+                  },
+                ]}
+                sessionTitle={
+                  sessions.find(
+                    (session) =>
+                      session.id ===
+                      (pane.kind === "session" ? pane.sessionId : ""),
+                  )?.title
+                }
+                workspacePath={pane.workspacePath}
+                paneKey={pane.paneId}
+                isTiled={options.isTiled}
+                isEnvironmentRailOpen
+                onPaneDragStart={options.onPaneDragStart}
+                onPaneDragEnd={options.onPaneDragEnd}
+                onPanePointerDown={options.onPanePointerDown}
+                draft={drafts[pane.paneId] ?? ""}
+                onDraftChange={(draft) =>
+                  setDrafts((current) => ({ ...current, [pane.paneId]: draft }))
+                }
+                onAttachMediaFiles={() => setMedia((count) => count + 1)}
+                onCloseChat={() =>
+                  dispatch({
+                    type: "close-pane",
+                    projectKey: activeProjectKey,
+                    paneId: pane.paneId,
+                  })
+                }
+                onComposerAction={() => undefined}
+                onSend={() => undefined}
+              />
+            );
+          }}
         />
       </div>
     </AppChrome>

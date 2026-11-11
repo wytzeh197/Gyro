@@ -1,0 +1,41 @@
+{
+  "date": "2026-11-10",
+  "scope": "Chat steps 1–5; sidebar/settings are separate follow-ons",
+  "css": {
+    "path": "packages/ui/src/chat.css",
+    "sha256": "eb5ee0b4e2698efa8df7ae8417fcac04b0cb521dc3d5465ed2f651b068bbb124",
+    "rules": 2808,
+    "important": 0
+  },
+  "baseline": {
+    "states": 100,
+    "sha256": "b80e5479b73f0443e32d1dff04ab8a5fa740f13b4839cb34c36ed78b640c7515"
+  },
+  "contracts": {
+    "states": 100,
+    "failures": []
+  },
+  "checks": {
+    "productionStates": 36,
+    "typecheck": "passed",
+    "sourceSmoke": "passed",
+    "smokeSelfStartFilteredState": "start-narrow-light-large",
+    "dragBrowser": "passed",
+    "chatHardening": "passed",
+    "dragSource": "passed",
+    "companionMotion": "passed",
+    "nativeBuild": "passed",
+    "nativeVisual": "dark layout + Environment + code/list + real sidebar drag to two panes, before final margin-only cleanup"
+  },
+  "boundaries": {
+    "committed": false,
+    "installedAppReplaced": false,
+    "liveProviderTurns": false,
+    "remoteCIRun": false
+  },
+  "artifacts": {
+    "preview": "http://127.0.0.1:1420/chat-design-preview.html?scene=active-chat&edge=code-block&theme=dark&environment=closed&reset=1",
+    "review": "docs/design/chat-consolidation-review-2026-11-10.md"
+  },
+  "supersededForVisualAcceptanceBy": "design-pass-review.json"
+}

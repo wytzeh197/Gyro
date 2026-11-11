@@ -66,14 +66,3 @@
 .gyro-cloud-workspace .gyro-cloud-tools {
   display: flow-root;
 }
-.gyro-chat-backup-icon {
-  position: relative;
-  display: inline-flex;
-}
-.gyro-chat-backup-spinner {
-  position: absolute;
-  inset-inline-end: calc(-1 * var(--gyro-space-compact));
-  inset-block-end: calc(-1 * var(--gyro-space-compact));
-  border-radius: 50%;
-  background: var(--gyro-control-bg);
-}

@@ -58,7 +58,7 @@
   --allowance-color: var(--gyro-success);
 }
 .gyro-provider-allowance.is-warning {
-  --allowance-color: var(--gyro-warning, #e6b663);
+  --allowance-color: var(--gyro-warn);
 }
 .gyro-provider-allowance.is-critical {
   --allowance-color: var(--gyro-danger);

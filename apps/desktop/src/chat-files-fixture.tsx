@@ -8,8 +8,8 @@ import {
   type GyroConfig,
   type SessionEvent,
 } from "@gyro-dev/ui";
-import screenshot from "../../../site/assets/screenshots/current-chat-dark.webp";
-import clip from "../../../site/assets/motion/workflow-dark.mp4";
+import screenshot from "../../../docs/screenshots/readme/chat-workflow.webp";
+import clip from "../../../docs/media/launch/reel-v03/gyro-launch-16x9-15s-en-v03.mp4";
 import "@gyro-dev/ui/styles.css";
 const theme =
   new URLSearchParams(location.search).get("theme") === "light"

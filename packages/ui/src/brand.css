@@ -64,82 +64,16 @@ html {
 
 /* Start screen ---------------------------------------------------------- */
 
-:root[data-theme] .gyro-chat-surface.is-empty:not(.is-tiled) {
-  isolation: isolate;
-  position: relative;
-}
-
 /* A faint beam behind the start screen only. Working surfaces stay plain. */
-:root[data-theme] .gyro-chat-surface.is-empty:not(.is-tiled)::before {
-  background:
-    conic-gradient(
-      from 0deg at 34% 170%,
-      transparent 14deg,
-      var(--gyro-beam-1) 20deg,
-      var(--gyro-beam-2) 25deg,
-      var(--gyro-beam-3) 29deg,
-      var(--gyro-beam-4) 32deg,
-      transparent 37deg
-    ),
-    radial-gradient(52% 46% at 24% 0, var(--gyro-beam-drift), transparent);
-  content: "";
-  filter: blur(28px);
-  height: min(56%, 520px);
-  inset: 0 0 auto;
-  -webkit-mask-image: linear-gradient(#000 30%, transparent);
-  mask-image: linear-gradient(#000 30%, transparent);
-  opacity: var(--gyro-beam-strength);
-  pointer-events: none;
-  position: absolute;
-  z-index: -1;
-}
-
-:root[data-theme]
-  .gyro-chat-surface.is-empty:not(.is-tiled)
-  > .gyro-chat-start:not(.is-mission)
-  > h1 {
-  font-family: var(--gyro-font-display);
-  font-size: calc(30px * var(--gyro-ui-scale, 1));
-  font-weight: 500;
-  letter-spacing: var(--gyro-letter-spacing-start);
-  line-height: 1.12;
-}
 
 /* The hero composer is the site's glass frame: a hairline, a soft tinted
    drop, and a slightly larger radius than utility cards. */
-:root[data-theme] .gyro-composer-shell.is-hero {
-  border-radius: calc(var(--gyro-radius-composer) + 2px);
-}
 
 /* Ink send button ------------------------------------------------------- */
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-composer-bar
-  .gyro-send-button:not(:disabled):not(.is-stop) {
-  background: var(--gyro-ink-bg);
-  box-shadow: var(--gyro-lift-shadow);
-  color: var(--gyro-ink-text);
-}
-
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-composer-bar
-  .gyro-send-button:not(:disabled):not(.is-stop):hover {
-  background: var(--gyro-ink-hover);
-}
 
 /* Disabled send is one quiet neutral in every composer and theme. The start
    screen's hero fill used to win here and showed a bright, clickable-looking
    button in dark mode while the draft was empty. */
-:root[data-theme]
-  :is(.gyro-chat-start, .gyro-chat-surface, .gyro-chat-composer-dock)
-  .gyro-send-button:disabled:not(.is-stop) {
-  background: var(--gyro-send-disabled-bg);
-  box-shadow: none;
-  color: var(--gyro-send-disabled-text);
-  opacity: 1;
-}
 
 /* The first-run tour leads with the same ink button as the composer. */
 :root[data-theme] .gyro-tour-primary {

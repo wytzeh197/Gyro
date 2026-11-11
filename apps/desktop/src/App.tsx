@@ -360,6 +360,9 @@ import {
   type SessionModelSelection,
 } from "./use-session-model-save";
 import { useSubagents } from "./use-subagents";
+import { projectMemoryClient } from "./project-memory-client";
+import { codeReviewClient } from "./code-review-client";
+import { workflowClient } from "./workflow-client";
 import { useTaskHandoff } from "./use-task-handoff";
 import { useWorkbenchAppearance } from "./use-workbench-appearance";
 import {
@@ -382,6 +385,8 @@ import {
   applyProviderCapabilityManifest,
   askAboutFilePrompt,
   AutomationsSurface,
+  WorkflowDestination,
+  type WorkflowExtractionRequest,
   CHAT_GRID_MAX_SLOTS,
   ChatCloseConfirmOverlay,
   chatCompanionPane,
@@ -750,6 +755,8 @@ export function App() {
     "idle" | "loading" | "ready" | "error"
   >("idle");
   const [draftResetToken, setDraftResetToken] = useState(0);
+  const [workflowExtractionRequest,setWorkflowExtractionRequest]=useState<WorkflowExtractionRequest>();
+  const [workspaceReviewEntry,setWorkspaceReviewEntry]=useState<{sessionId:string;token:number;rootId?:string;scope:{kind:"uncommitted"};paths?:string[]}>();
   const [automationCreateRequestToken, setAutomationCreateRequestToken] =
     useState(0);
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>(() =>
@@ -1694,6 +1701,10 @@ export function App() {
     };
   };
   const companionSurfaceProps = (paneId: string) => ({
+    onSaveWorkflow: isTauriRuntime() && (paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId)) ? (turnId?:string)=>{setWorkflowExtractionRequest({sessionId:(paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId))!,turnId,token:Date.now()});dispatchWorkbench({type:"select-destination",destination:"automations"});} : undefined,
+    codeReviewEntry: workspaceReviewEntry?.sessionId === (paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId)) ? workspaceReviewEntry : undefined,
+    codeReviews: isTauriRuntime() && (paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId)) ? codeReviewClient((paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId))!) : undefined,
+    projectMemory: isTauriRuntime() && (paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId)) ? projectMemoryClient((paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId))!) : undefined,
     dailyPaceWarning: workbench.preferences.dailyPaceWarning,
     providerLedgerById,
     sideChat: sideChatFor(paneId),
@@ -6340,6 +6351,14 @@ export function App() {
     workspacePath,
   ]);
 
+  const reviewWorkspaceWithAgent = useCallback((path?:string)=>{
+    if(!isTauriRuntime()||!activeSession)return;
+    const root=activeSession.workspaceIdentity?.roots.find(root=>root.path===workspaceActionRoot);
+    if(!root && activeSession.workspacePath!==workspaceActionRoot){notify("command-failed","Choose a chat for this project","The Workspace review root must belong to the implementing chat.");return;}
+    setWorkspaceReviewEntry({sessionId:activeSession.id,rootId:root?.id,scope:{kind:"uncommitted"},paths:path?[path]:undefined,token:Date.now()});
+    dispatchWorkbench({type:"select-sessions"});openCompanionTab("review",SOLO_CHAT_PANE_ID);
+  },[activeSession,workspaceActionRoot,notify,openCompanionTab]);
+
   const reviewTerminalChanges = useCallback(
     (file?: SourceControlState["files"][number]) => {
       if (!selectedTerminalSourceControl?.available) {
@@ -10929,6 +10948,9 @@ export function App() {
         case "open-terminal-panel":
           openToolPanel("terminal");
           break;
+        case "open-memory":
+          openCompanionTab("memory");
+          break;
         case "open-browser-panel":
           openToolPanel("browser");
           break;
@@ -10959,6 +10981,7 @@ export function App() {
       openGlobalSearch,
       openSettingsSection,
       openToolPanel,
+      openCompanionTab,
       openWorkspace,
       persistConfig,
       refreshEvents,
@@ -17251,6 +17274,7 @@ export function App() {
       onReviewTerminalChanges={reviewTerminalChanges}
       onSendTerminalErrorToChat={sendTerminalErrorToChat}
       onRunGitReviewAction={(actionId) => void runGitReviewAction(actionId)}
+      onReviewWorkspaceWithAgent={isTauriRuntime() && activeSession ? reviewWorkspaceWithAgent : undefined}
       onRunCommandProfile={runCommandProfile}
       onRunProfile={runProfile}
       onSelectDiffFile={(path) =>
@@ -17898,6 +17922,7 @@ export function App() {
             notify("command-failed", "Image could not be attached", message)
           }
           onComposerAction={(action) => {
+            if (action === "open-memory") { paneCompanionProps.onOpenCompanionTab("memory"); return; }
             focusChatPane(pane);
             handleComposerAction(action, paneDraftKey, {
               draftKey: paneDraftKey,
@@ -18432,6 +18457,7 @@ export function App() {
       onAskWorkspacePath={(path) => askWorkspacePath(path)}
       onOpenToolPanel={openToolPanel}
       onOpenSourceControlDiff={openSourceControlDiff}
+      onReviewWithAgent={isTauriRuntime() && activeSession ? reviewWorkspaceWithAgent : undefined}
       onCommitSourceControl={commitSourceControl}
       onPullSourceControl={() => void pullSourceControl()}
       onPushSourceControl={() => void pushSourceControl()}
@@ -18485,6 +18511,7 @@ export function App() {
           : undefined
       }
       projectSettings={{
+        memory: isTauriRuntime() ? projectMemoryClient : undefined,
         details: workbench.preferences.projectDetails ?? {},
         folders: workbench.preferences.workspaceFolders,
         pickFolder: async () => {
@@ -18951,6 +18978,7 @@ export function App() {
                 onRunGitReviewAction={(actionId) =>
                   void runGitReviewAction(actionId)
                 }
+                onReviewWorkspaceWithAgent={isTauriRuntime() && activeSession ? reviewWorkspaceWithAgent : undefined}
                 onRestartTerminalPane={restartTerminalPane}
                 onSelectDiffFile={(path) =>
                   dispatchWorkbench({ type: "select-diff-file", path })
@@ -19405,6 +19433,7 @@ export function App() {
         </div>
       ) : null}
       {activeDestination === "automations" ? (
+        <WorkflowDestination runtime={isTauriRuntime()?workflowClient:undefined} initialSessionId={activeSessionId} onOpenSession={id=>{void refreshSessions().then(()=>selectSession(id));}} openSchedulesToken={automationCreateRequestToken} extractionRequest={workflowExtractionRequest} onExtractionHandled={()=>setWorkflowExtractionRequest(undefined)}>
         <AutomationsSurface
           providerChoices={providersForConfig(config)
             .filter(
@@ -19433,7 +19462,7 @@ export function App() {
             });
             return typeof path === "string" ? path : undefined;
           }}
-          automations={workbench.automations}
+          automations={workbench.automations.filter(item=>!item.execution?.workflowBinding)}
           createRequestToken={automationCreateRequestToken}
           creationWorkspace={workspaceRootForPath(workspaceRoots, selectedFile)}
           creationWorkspaceMode={workbench.workspaceMode}
@@ -19541,6 +19570,7 @@ export function App() {
           onToggleAutomation={toggleAutomation}
           selectedAutomationId={workbench.selectedAutomationId}
         />
+        </WorkflowDestination>
       ) : null}
       {activeDestination === "onboarding" ? (
         <ChatSurface

@@ -36,6 +36,13 @@ pub struct ProviderChatRequest {
     /// Set only by Gyro for its own text-only calls. Never read from the UI.
     #[serde(skip)]
     pub internal_purpose: Option<InternalRequestPurpose>,
+    /// Host-resolved, root-scoped context. Repository and renderer fields cannot
+    /// supply it or turn it into tool authority.
+    #[serde(skip)]
+    pub project_memory: Option<crate::project_memory::PreparedMemoryContext>,
+    /// Only a native coordinator can bind a request to a running journal step.
+    #[serde(skip)]
+    pub workflow_run_id:Option<uuid::Uuid>,
 }
 
 /// Why Gyro itself, rather than the person in the chat, sent a request.
@@ -45,6 +52,8 @@ pub struct ProviderChatRequest {
 /// never trigger compaction of the conversation they describe.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InternalRequestPurpose {
+    CodeReview,
+    WorkflowExtraction,
     ChangeSummary,
     ContextSummary,
     SessionTitle,
@@ -53,6 +62,8 @@ pub enum InternalRequestPurpose {
 impl InternalRequestPurpose {
     pub fn label(self) -> &'static str {
         match self {
+            Self::CodeReview => "code review",
+            Self::WorkflowExtraction => "workflow extraction",
             Self::ChangeSummary => "file-change summary",
             Self::ContextSummary => "conversation checkpoint summary",
             Self::SessionTitle => "chat title",

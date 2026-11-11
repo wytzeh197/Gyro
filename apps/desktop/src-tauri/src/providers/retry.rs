@@ -131,6 +131,8 @@ pub(crate) fn run_provider_chat_with_retry(
     binding: Option<ProviderSessionBinding>,
     usage_context: UsageContext,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    validate_workflow_request(store,request)?;
+    let _checkout_lease=ordinary_checkout_lease(store,request)?;
     let _budget = gyro_core::provider_retry::RetryScope::start();
     let _cycle = provider_retry_recovery::Cycle::start();
     let _cooldown = gyro_core::provider_cooldown::Scope::enter(
@@ -479,13 +481,85 @@ pub(crate) fn run_provider_chat_once(
     )?;
     timing::attempt();
     let runner = runner_for(provider_adapter_for(&request.provider_id).kind);
-    let expanded = with_browser_attachment_images(request, runner.supports_images(request))?;
-    runner.run(
+    let mut expanded = with_browser_attachment_images(request, runner.supports_images(request))?;
+    let memory_store = crate::stores::open_store().map_err(anyhow::Error::msg)?;
+    validate_workflow_request(&memory_store,request)?;
+    let _checkout_lease=ordinary_checkout_lease(&memory_store,request)?;
+    let memory_session = memory_store
+        .get_session(uuid::Uuid::parse_str(&request.session_id)?)?
+        .ok_or_else(|| anyhow::anyhow!("memory session no longer exists"))?;
+    expanded.project_memory = if request.internal_purpose.is_none() && request.workflow_run_id.is_none()
+    {
+        Some(gyro_core::project_memory::prepare_memory_context(
+            &memory_store,
+            &memory_session,
+            request,
+            crate::provider_context::provider_model_context_window(
+                &request.provider_id,
+                request.model_id.as_deref(),
+            ),
+        )?)
+    } else {
+        None
+    };
+    if let Some(memory) = expanded.project_memory.as_mut() {
+        memory.suggest_candidates &= request
+            .project_memory
+            .as_ref()
+            .is_some_and(|memory| memory.suggest_candidates);
+    }
+    if expanded.project_memory.is_some() {
+        memory_store.invalidate_project_memory_receipt(memory_session.id, &request.provider_id)?;
+    }
+    let output = runner.run(
         &TauriRunnerHost::new(app),
         &expanded,
         resume_cursor,
         attempt,
-    )
+    )?;
+    if !output.answer_cut_off {
+        if let (Some(turn), Some(cursor)) =
+            (request.turn_id.as_deref(), output.resume_cursor.as_ref())
+        {
+            // Only acknowledged successful attempts can suppress later input.
+            if let Some(memory) = &expanded.project_memory {
+                if let Err(error) = memory_store.acknowledge_project_memory_receipt(
+                    memory_session.id,
+                    uuid::Uuid::parse_str(turn)?,
+                    &request.provider_id,
+                    &serde_json::to_value(cursor)?,
+                    &memory.render(output.resumed).1,
+                ) {
+                    eprintln!(
+                        "Memory context acknowledgement unavailable: {}",
+                        gyro_core::sanitize_capability_summary(&error.to_string())
+                    );
+                }
+            }
+        }
+    }
+    Ok(output)
 }
 
 pub(crate) use gyro_core::provider_runtime::reliability::is_provider_cancellation;
+
+fn validate_workflow_request(store:&SessionStore,request:&ProviderChatRequest)->anyhow::Result<()> {
+    if request.internal_purpose.is_none() {
+        if let Some(root)=request.workspace_path.as_deref().map(std::path::Path::new).and_then(|root|root.canonicalize().ok()) {
+            if let Some(id)=request.workflow_run_id {
+                store.validate_workflow_dispatch(id,Uuid::parse_str(&request.session_id)?,&request.provider_id,request.model_id.as_deref(),&root.to_string_lossy())?;
+            }else{
+                anyhow::ensure!(store.active_workflow_for_root(&root.to_string_lossy())?.is_none(),"A workflow owns this checkout; stop it or use another worktree");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ordinary_checkout_lease(store:&SessionStore,request:&ProviderChatRequest)->anyhow::Result<Option<gyro_core::workflows::WorkflowCheckoutLease>>{
+ if request.workflow_run_id.is_some()||request.internal_purpose.is_some(){return Ok(None)}
+ #[cfg(not(unix))] {return Ok(None)}
+ let session=store.get_session(Uuid::parse_str(&request.session_id)?)?.ok_or_else(||anyhow::anyhow!("source session is unavailable"))?;
+ if session.workspace_path.as_os_str().is_empty(){return Ok(None)}
+ Ok(Some(gyro_core::workflows::WorkflowCheckoutLease::try_acquire(store.paths(),&session.workspace_path,false)?.ok_or_else(||anyhow::anyhow!("A workflow owns this checkout; stop it or choose another worktree"))?))
+}

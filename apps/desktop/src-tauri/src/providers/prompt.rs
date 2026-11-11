@@ -251,6 +251,15 @@ pub(crate) fn provider_context_message_with_capabilities_for_turn(
     if let Some(plan) = request.plan.as_ref().and_then(plan_context_line) {
         context.push(plan);
     }
+    if let Some(memory) = &request.project_memory {
+        let (text, _) = memory.render(turn.resumed);
+        if !text.is_empty() {
+            context.push(text);
+        }
+        if memory.suggest_candidates {
+            context.push(gyro_core::project_memory::CANDIDATE_INSTRUCTION.into());
+        }
+    }
     let references = request
         .attachments
         .iter()
@@ -325,7 +334,9 @@ pub(crate) fn provider_context_message_with_capabilities_for_turn(
             } else {
                 attribution.history += chars;
             }
-        } else if part.starts_with("Explicit user attachments:") {
+        } else if part.starts_with("Explicit user attachments:")
+            || part.starts_with("Project memory")
+        {
             attribution.source_excerpts += chars;
         } else if part.starts_with("Goal:") || part.starts_with("Gyro plan") {
             attribution.task_state += chars;
@@ -420,3 +431,7 @@ pub(crate) use gyro_core::provider_runtime::types::PromptTurn;
 pub(crate) use gyro_core::provider_runtime::prompts::claude_chat_prompt;
 #[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::prompts::openai_codex_chat_prompt;
+
+#[cfg(test)]
+#[path = "memory_prompt_tests.rs"]
+mod memory_tests;

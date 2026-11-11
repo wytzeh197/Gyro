@@ -78,7 +78,8 @@ mod tests {
             workspace_context: None,
             workspace_check: None,
             side_chat_context: None,
-            internal_purpose: None,
+            workflow_run_id: None,
+        project_memory: None,            internal_purpose: None,
         }
     }
 

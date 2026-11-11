@@ -20,6 +20,7 @@ export type ChatCompanionTabId = Extract<
   | "side-chat"
   | "canvas"
   | "agents"
+  | "memory"
 >;
 
 export const chatCompanionTabIds: ChatCompanionTabId[] = [
@@ -30,6 +31,7 @@ export const chatCompanionTabIds: ChatCompanionTabId[] = [
   "files",
   "side-chat",
   "agents",
+  "memory",
 ];
 
 export const chatCompanionTabLabels: Record<ChatCompanionTabId, string> = {
@@ -40,6 +42,7 @@ export const chatCompanionTabLabels: Record<ChatCompanionTabId, string> = {
   files: "Files",
   "side-chat": "Side chat",
   agents: "Agents",
+  memory: "Project memory",
 };
 
 export function isChatCompanionTabId(

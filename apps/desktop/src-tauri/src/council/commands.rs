@@ -251,7 +251,8 @@ pub(crate) fn run_council_chat_blocking(
                 workspace_context: None,
                 workspace_check: None,
                 side_chat_context: None,
-                internal_purpose: None,
+                workflow_run_id: None,
+        project_memory: None,                internal_purpose: None,
             };
             (seat.clone(), seat_request)
         })
@@ -464,7 +465,8 @@ pub(crate) fn run_council_chat_blocking(
                 workspace_context: None,
                 workspace_check: None,
                 side_chat_context: None,
-                internal_purpose: None,
+                workflow_run_id: None,
+        project_memory: None,                internal_purpose: None,
             };
             emit_provider_chat_event(
                 &app,
@@ -668,7 +670,8 @@ pub(crate) fn run_council_chat_blocking(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
-        internal_purpose: None,
+        workflow_run_id: None,
+        project_memory: None,        internal_purpose: None,
     };
     emit_provider_chat_event(
         &app,
@@ -904,7 +907,8 @@ pub(crate) fn retry_council_synthesis_blocking(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
-        internal_purpose: None,
+        workflow_run_id: None,
+        project_memory: None,        internal_purpose: None,
     };
 
     let _ = store.append_event_with_turn_id(

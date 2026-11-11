@@ -1,0 +1,109 @@
+/* ARCHIVED review skin. Superseded by packages/ui/src/chat.css on 2026-11-10.
+   No development or production entry imports this file. */
+/* Review skin on the actual React tree; never imported by the shipped entry.
+   Current mode disables EVERY rule. The ID beats legacy CSS specificity here;
+   this is a review surface, not the planned production consolidation. */
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface {
+  --gyro-chat-content-width: 760px;
+  --gyro-chat-gutter: calc(24px * var(--gyro-ui-scale, 1));
+  --gyro-chat-text-size: calc(15px * var(--gyro-ui-scale, 1));
+  --gyro-chat-text-line: 1.6;
+  --gyro-chat-small-size: calc(13px * var(--gyro-ui-scale, 1));
+  --gyro-chat-meta-size: calc(12px * var(--gyro-ui-scale, 1));
+  --gyro-chat-radius-card: 12px;
+  --gyro-radius-composer: 18px;
+  --gyro-chat-turn-gap: calc(24px * var(--gyro-ui-scale, 1));
+  --gyro-chat-block-gap: calc(12px * var(--gyro-ui-scale, 1));
+  --gyro-chat-raised: var(--gyro-surface);
+  --gyro-chat-hairline: var(--gyro-border);
+  --gyro-chat-space-1: calc(4px * var(--gyro-ui-scale, 1));
+  --gyro-chat-space-2: calc(8px * var(--gyro-ui-scale, 1));
+  --gyro-chat-space-4: calc(16px * var(--gyro-ui-scale, 1));
+  --gyro-chat-motion-fast: 120ms;
+  --gyro-chat-motion-normal: 240ms;
+  --gyro-chat-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --gyro-composer-zoom: 1;
+  --gyro-composer-width: var(--gyro-chat-content-width);
+  --gyro-chat-font-body: var(--gyro-chat-text-size);
+  --gyro-chat-font-response: var(--gyro-chat-text-size);
+  --gyro-chat-font-work: var(--gyro-chat-small-size);
+}
+#gyro-chat-design-preview[data-chat-design="proposal"][data-chat-reading="14"] .gyro-chat-surface { --gyro-chat-text-size: calc(14px * var(--gyro-ui-scale, 1)); }
+#gyro-chat-design-preview[data-chat-design="proposal"][data-theme="light"] .gyro-chat-surface { --gyro-chat-raised: var(--gyro-surface-soft); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface :is(.gyro-chat-transcript, .gyro-chat-composer-dock) { padding-inline: var(--gyro-chat-gutter); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface.is-empty:not(.is-tiled) { padding-inline: var(--gyro-chat-gutter); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-start { padding-inline: 0; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-transcript { padding-top: var(--gyro-chat-turn-gap); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface.is-thread .gyro-chat-transcript > :not(.gyro-chat-jump-to-bottom),
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-composer-dock > :not(.gyro-chat-jump-to-bottom),
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface .gyro-composer-shell {
+  box-sizing: border-box;
+  width: min(100%, var(--gyro-chat-content-width));
+  max-width: var(--gyro-chat-content-width);
+  min-width: 0;
+  margin-inline: auto;
+}
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-turn { margin-bottom: var(--gyro-chat-turn-gap); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-run-sequence.is-response { gap: var(--gyro-chat-block-gap); padding-block: 0; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-run-timeline.is-final-response { gap: var(--gyro-chat-block-gap); padding-top: 0; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-run .gyro-message.is-assistant { margin: 0; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-run-header { margin-bottom: var(--gyro-chat-block-gap); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-run-change-summary { margin-top: var(--gyro-chat-block-gap); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-turn > .gyro-message.is-user { justify-content: stretch; margin-bottom: var(--gyro-chat-block-gap); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-transcript .gyro-message.is-user > div.gyro-user-message-content:last-child {
+  width: 100%; max-width: 100%; align-items: stretch; justify-items: stretch;
+}
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-user-message-bubble {
+  width: 100%; padding: var(--gyro-chat-block-gap) var(--gyro-chat-space-4);
+  background: var(--gyro-chat-raised); border: 0;
+  border-radius: var(--gyro-chat-radius-card);
+  font-size: var(--gyro-chat-text-size); line-height: var(--gyro-chat-text-line); box-shadow: none;
+}
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-user-message-bubble p { font-size: inherit; line-height: inherit; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-user-message-meta { font-size: var(--gyro-chat-meta-size); margin-top: var(--gyro-chat-space-1); justify-self: end; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface :is(.gyro-response, .gyro-response-body, .gyro-response-streaming-text, .gyro-run-row.is-say .gyro-run-row-label) {
+  font-size: var(--gyro-chat-text-size); line-height: var(--gyro-chat-text-line);
+}
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-response-body :is(p, li) { font-size: inherit; line-height: inherit; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-response-body { gap: var(--gyro-chat-block-gap); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-response-body > * { margin-block: 0; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-response-body :is(ul, ol) { padding-inline-start: var(--gyro-chat-space-4); margin-inline: 0; gap: var(--gyro-chat-space-2); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-response-body ul { list-style: disc outside; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-response-body li { padding-inline-start: var(--gyro-chat-space-1); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-response-body li::before { content: none; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-response-body li::marker { color: var(--gyro-muted); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-response-actions { margin-left: 0; padding-left: 0; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-response-actions > button:first-child { margin-left: 0; padding-left: 0; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface :is(.gyro-chat-run-change-summary, .gyro-response-code-block, .gyro-chat-file-card) {
+  border: 1px solid var(--gyro-chat-hairline); border-radius: var(--gyro-chat-radius-card); background: var(--gyro-chat-raised); box-shadow: none;
+}
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-response-code-block { padding: var(--gyro-chat-block-gap); line-height: var(--gyro-chat-text-line); }
+#gyro-chat-design-preview[data-chat-design="proposal"] :is(.gyro-response-code-block code, .gyro-response-inline-code) { font-size: var(--gyro-chat-small-size); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface :is(.gyro-run-call, .gyro-run-call-verb, .gyro-run-call-target, .gyro-run-segment-toggle, .gyro-change-summary-file, .gyro-change-file-path, .gyro-chat-run-change-summary, .gyro-composer-chip, .gyro-composer-tool) { font-size: var(--gyro-chat-small-size); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface :is(.gyro-run-header, .gyro-run-header-toggle, .gyro-run-header-action, .gyro-chat-run-change-summary-heading small, .gyro-run-call-meta, .gyro-change-summary-subtitle) { font-size: var(--gyro-chat-meta-size); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-run-change-summary :is(small, em) { font-size: var(--gyro-chat-meta-size); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-run-change-summary strong { font-size: var(--gyro-chat-small-size); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface :is(.gyro-chat-turn, .gyro-composer-shell) {
+  --gyro-font-tiny: var(--gyro-chat-meta-size); --gyro-font-caption: var(--gyro-chat-meta-size); --gyro-font-micro: var(--gyro-chat-meta-size);
+}
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface .gyro-composer-shell {
+  zoom: 1; border: 1px solid var(--gyro-chat-hairline); border-radius: var(--gyro-radius-composer);
+  background: var(--gyro-chat-raised); box-shadow: none;
+  transition: border-color var(--gyro-chat-motion-fast) var(--gyro-chat-ease);
+}
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-composer-shell > textarea { font-size: var(--gyro-chat-small-size); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-composer-shell:focus-within { border-color: var(--gyro-focus-ring); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface .gyro-send-button:not(:disabled):not(.is-stop) { background: var(--gyro-ink-bg); color: var(--gyro-ink-text); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface-button.is-active { color: var(--gyro-text); background: var(--gyro-control-bg); }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-environment-popover-actions button.is-primary { background: var(--gyro-ink-bg); color: var(--gyro-ink-text); border-color: transparent; }
+/* Actual Environment component and handlers, allocated a grid track. No DOM
+   relocation. This optional placement remains a separate design proposal. */
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion) { grid-template-columns: minmax(0, 1fr) min(320px, 38%); column-gap: 0; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion) > .gyro-chat-thread-topbar { grid-column: 1 / -1; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion) > .gyro-chat-thread-canvas { grid-column: 1; grid-row: 2; padding-right: 0; width: 100%; }
+#gyro-chat-design-preview[data-chat-design="proposal"] .gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion) > .gyro-chat-environment-popover {
+  position: relative; grid-column: 2; grid-row: 2; inset: auto; align-self: start;
+  width: calc(100% - var(--gyro-chat-space-2)); max-width: none;
+  max-height: calc(100% - var(--gyro-chat-space-2));
+  margin: var(--gyro-chat-space-2) var(--gyro-chat-space-2) 0 0;
+}

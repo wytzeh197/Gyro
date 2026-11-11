@@ -5,8 +5,6 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import "./chat-question-popup.css";
-import "./plan-mode.css";
 import {
   ArrowRight,
   ArrowUp,

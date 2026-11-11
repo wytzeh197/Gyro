@@ -10,9 +10,12 @@ use serde::{Deserialize, Serialize};
 pub(crate) fn isolated_internal_purpose(
     request: &ProviderChatRequest,
 ) -> Option<InternalRequestPurpose> {
-    request
-        .internal_purpose
-        .filter(|_| !efficiency::config().full_context_internal_requests)
+    request.internal_purpose.filter(|purpose| {
+        matches!(
+            purpose,
+            InternalRequestPurpose::CodeReview | InternalRequestPurpose::WorkflowExtraction
+        ) || !efficiency::config().full_context_internal_requests
+    })
 }
 
 /// Promote an explicit planning request made in Normal chat to the real Plan

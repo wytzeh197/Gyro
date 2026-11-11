@@ -63,7 +63,7 @@ impl AutomationRunAdmission {
             .flags
             .lock()
             .map_err(|_| "provider cancellation state is unavailable".to_string())?;
-        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
+        if flags.contains_key(&reservation_key)||flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
             return Ok(None);
         }
         flags.insert(
@@ -82,10 +82,25 @@ impl AutomationRunAdmission {
             .flags
             .lock()
             .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        if flags.contains_key(session_id) {
+            return Err("the workflow step session is already active".into());
+        }
         let control = flags
             .remove(&self.reservation_key)
             .ok_or_else(|| "automation provider reservation was lost".to_string())?;
         flags.insert(session_id.to_string(), control);
+        Ok(())
+    }
+    pub(crate) fn reclaim_from_session(&self, session_id: &str) -> Result<(), String> {
+        let manager = self.app.state::<ProviderCancellationManager>();
+        let mut flags = manager
+            .flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?;
+        let control = flags
+            .remove(session_id)
+            .ok_or_else(|| "workflow provider reservation was lost".to_string())?;
+        flags.insert(self.reservation_key.clone(), control);
         Ok(())
     }
 }

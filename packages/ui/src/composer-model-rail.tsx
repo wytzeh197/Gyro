@@ -340,12 +340,12 @@ export function ComposerModelRail({
       const railScroll = railRef.current?.scrollTop ?? 0;
       const bounds = clippingBounds(panel);
       const pad = 12;
-      const gap = 6;
       const anchor = control.getBoundingClientRect();
       // Gyro's interface zoom scales CSS pixels; bounds are viewport pixels.
       const controlStyle = window.getComputedStyle(control);
       const scaleX = anchor.width / parseFloat(controlStyle.width) || 1;
       const scaleY = anchor.height / parseFloat(controlStyle.height) || 1;
+      const gap = 8 * scaleY;
       const availableWidth =
         Math.max(0, bounds.right - bounds.left - pad * 2) / scaleX;
       panel.style.maxWidth = `${availableWidth}px`;
@@ -360,12 +360,19 @@ export function ComposerModelRail({
             ? "down"
             : "up"
           : placement;
-      panel.style.top = direction === "down" ? "calc(100% + 6px)" : "auto";
-      panel.style.bottom = direction === "up" ? "calc(100% + 6px)" : "auto";
+      panel.style.top =
+        direction === "down"
+          ? `${(anchor.bottom - anchor.top + gap) / scaleY}px`
+          : "auto";
+      panel.style.bottom =
+        direction === "up"
+          ? `${(anchor.bottom - anchor.top + gap) / scaleY}px`
+          : "auto";
       panel.style.maxHeight = `${(direction === "up" ? above : below) / scaleY}px`;
       // Use layout dimensions so the opening animation cannot skew the anchor.
       const width = panel.offsetWidth * scaleX;
-      const naturalLeft = align === "start" ? anchor.left : anchor.right - width;
+      const naturalLeft =
+        align === "start" ? anchor.left : anchor.right - width;
       const left = Math.min(
         Math.max(naturalLeft, bounds.left + pad),
         bounds.right - pad - width,

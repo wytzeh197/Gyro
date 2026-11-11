@@ -138,64 +138,15 @@
   width: max(24px, calc(22px * var(--gyro-ui-scale, 1)));
   height: max(24px, calc(22px * var(--gyro-ui-scale, 1)));
 }
-:root[data-theme]
-  :is(
-    .gyro-sidebar-explorer-toolbar,
-    .gyro-change-summary-actions,
-    .gyro-settings-control-column
-  )
-  button
-  > svg {
-  flex: none;
-  stroke-width: 1.75;
-}
-:root[data-theme]
-  :is(
-    .gyro-session-action,
-    .gyro-sidebar-explorer-toolbar button,
-    .gyro-change-summary-actions > button
-  ):focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 1px;
-}
 
 /* Identity is shared with Explorer; de-emphasize directories, not filenames. */
 :root[data-theme] .gyro-file-identity {
   color: var(--gyro-file-tone, var(--gyro-file-default));
   flex: none;
 }
-:root[data-theme] .gyro-change-file-identity {
-  display: flex;
-  align-items: center;
-  gap: var(--gyro-space-standard);
-  min-width: 0;
-}
 /* A long path gives way from the left, so the filename always stays in view.
    The directory is laid out right to left only to move its ellipsis to the
    front; the <bdi> inside keeps the path itself reading left to right. */
-.gyro-change-file-path {
-  display: flex;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-}
-.gyro-change-file-directory {
-  color: var(--gyro-muted);
-  direction: rtl;
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.gyro-change-file-directory > bdi {
-  direction: ltr;
-}
-.gyro-change-file-name {
-  flex: 0 0 auto;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /* A clear rim and thumb keep on/off states crisp at every interface size. */
 :root[data-theme] .gyro-settings-switch {
@@ -231,15 +182,3 @@
 }
 
 /* Counts should keep a stable rhythm as work updates. */
-:root[data-theme]
-  :is(
-    .gyro-session-time,
-    .gyro-workspace-search-count,
-    .gyro-scm-count,
-    .gyro-change-summary-files small,
-    .gyro-review-tree-directory small,
-    .gyro-settings-status,
-    .gyro-chat-environment-popover strong
-  ) {
-  font-variant-numeric: tabular-nums;
-}

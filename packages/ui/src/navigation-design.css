@@ -4,28 +4,19 @@
   gap: 2px;
 }
 
-/* Approvals keep their semantic color; questions use the blue theme ramp. */
-:root[data-theme] .gyro-sidebar .gyro-session-row.is-awaiting-approval {
-  --gyro-session-waiting-color: var(--gyro-success);
+/* Waiting for a decision uses the product's attention token in either state. */
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question) {
+  --gyro-session-waiting-color: var(--gyro-status-waiting);
   --gyro-session-waiting-row: color-mix(
     in srgb,
-    var(--gyro-success) 7%,
+    var(--gyro-status-waiting) 7%,
     var(--gyro-sidebar)
   );
-  --gyro-session-pill-width: 102px;
 }
 
-:root[data-theme] .gyro-sidebar .gyro-session-row.is-awaiting-question {
-  --gyro-session-waiting-color: var(--gyro-blue);
-  --gyro-session-waiting-row: color-mix(
-    in srgb,
-    var(--gyro-text) 4%,
-    var(--gyro-sidebar)
-  );
-  --gyro-session-pill-width: 84px;
-}
-
-/* Both waiting states share placement, title fading, and keyboard behavior. */
+/* Keep the title readable; full waiting status is in the row label and tooltip. */
 :root[data-theme]
   .gyro-sidebar
   .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question),
@@ -41,17 +32,12 @@
   .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question)
   > .gyro-sidebar-thread-main {
   overflow: hidden;
-  padding-right: 8px;
-}
-
-:root[data-theme]
-  .gyro-sidebar
-  .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question)
-  .gyro-sidebar-thread-title {
-  mask-image: linear-gradient(
-    to right,
-    #000 calc(100% - var(--gyro-session-pill-width) - 10px),
-    transparent calc(100% - var(--gyro-session-pill-width) + 10px)
+  padding-right: calc(
+    max(
+        var(--gyro-control-compact),
+        var(--gyro-control-compact) * var(--gyro-ui-scale, 1)
+      ) +
+      var(--gyro-space-standard)
   );
 }
 
@@ -64,10 +50,16 @@
   box-sizing: border-box;
   flex: none;
   right: 8px;
-  min-width: min(var(--gyro-session-pill-width), calc(100% - 40px));
-  max-width: calc(100% - 40px);
-  min-height: max(20px, calc(20px * var(--gyro-ui-scale, 1)));
-  padding: 2px 3px;
+  width: max(
+    var(--gyro-control-compact),
+    calc(var(--gyro-control-compact) * var(--gyro-ui-scale, 1))
+  );
+  min-height: max(
+    var(--gyro-control-compact),
+    calc(var(--gyro-control-compact) * var(--gyro-ui-scale, 1))
+  );
+  max-width: none;
+  padding: 0;
   border: 1px solid
     color-mix(in srgb, var(--gyro-session-waiting-color) 22%, transparent);
   border-radius: var(--gyro-radius-pill);
@@ -88,17 +80,12 @@
     var(--gyro-premium-ease) both;
 }
 
-:root[data-theme] .gyro-sidebar .gyro-session-time.is-question {
-  padding-inline: 8px;
-  border-color: transparent;
-  font-size: var(--gyro-font-micro);
-}
-
-:root[data-theme] .gyro-session-time:is(.is-approval, .is-question) > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Status glyphs retain the waiting color instead of the sidebar icon neutral. */
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-time:is(.is-approval, .is-question)
+  > svg {
+  color: var(--gyro-session-waiting-color);
 }
 
 /* Hover and keyboard focus reveal the existing row actions without covering
@@ -132,17 +119,6 @@
   )
   .gyro-session-time:is(.is-approval, .is-question) {
   opacity: 0;
-}
-
-:root[data-theme]
-  .gyro-sidebar
-  .gyro-session-row:is(.is-awaiting-approval, .is-awaiting-question):is(
-    :hover,
-    :focus-within,
-    .is-menu-open
-  )
-  .gyro-sidebar-thread-title {
-  mask-image: none;
 }
 
 :root[data-theme]
@@ -349,7 +325,9 @@
 :root[data-theme] .gyro-sidebar .gyro-sidebar-project-row,
 :root[data-theme] .gyro-sidebar .gyro-sidebar-project-row:is(:hover, :active),
 :root[data-theme] .gyro-sidebar .gyro-sidebar-project-toggle,
-:root[data-theme] .gyro-sidebar .gyro-sidebar-project-toggle:is(:hover, :active) {
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-project-toggle:is(:hover, :active) {
   background: transparent;
   box-shadow: none;
 }
@@ -416,13 +394,6 @@
 }
 
 /* Retain the useful focused-chat marker in a split without a glowing edge. */
-:root[data-theme]
-  .gyro-app-shell:has(.gyro-chat-grid.has-multiple-panes)
-  .gyro-session-row.is-active::before {
-  box-shadow: none;
-  opacity: 0.75;
-  width: 2px;
-}
 
 :root[data-theme]
   .gyro-sidebar
@@ -449,27 +420,41 @@
 
 /* Idle ages yield their width to the title. Hover and keyboard focus expose
    the age beside row actions; work, approval and unread marks stay visible. */
-:root[data-theme] .gyro-sidebar .gyro-session-row.has-idle-time
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row.has-idle-time
   .gyro-session-time {
   opacity: 0;
   pointer-events: none;
 }
-:root[data-theme] .gyro-sidebar .gyro-session-row.has-idle-time:not(:hover):not(:focus-within):not(.is-menu-open)
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row.has-idle-time:not(:hover):not(:focus-within):not(
+    .is-menu-open
+  )
   .gyro-sidebar-thread-main {
   padding-right: 8px;
 }
-:root[data-theme] .gyro-sidebar .gyro-session-row.has-idle-time:not(:hover):not(:focus-within):not(.is-menu-open)
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row.has-idle-time:not(:hover):not(:focus-within):not(
+    .is-menu-open
+  )
   .gyro-session-actions {
   opacity: 0;
   pointer-events: none;
 }
-:root[data-theme] .gyro-sidebar .gyro-session-row.has-idle-time:is(:hover, :focus-within, .is-menu-open)
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row.has-idle-time:is(:hover, :focus-within, .is-menu-open)
   .gyro-session-time {
   opacity: 1;
   right: 60px;
   max-width: 32px;
 }
-:root[data-theme] .gyro-sidebar .gyro-session-row.has-idle-time:is(:hover, :focus-within, .is-menu-open)
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row.has-idle-time:is(:hover, :focus-within, .is-menu-open)
   .gyro-sidebar-thread-main {
   padding-right: 96px;
 }
@@ -590,4 +575,208 @@
 
 :root[data-theme] .gyro-sidebar .gyro-sidebar-footer {
   border-top-color: var(--gyro-border-soft);
+}
+:root[data-theme] .gyro-sidebar-thread-main {
+  user-select: none;
+}
+
+/* Quiet workspace sidebar: compact commands and a shallow project tree. */
+:root[data-theme] .gyro-sidebar .gyro-sidebar-window-actions {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-titlebar-switch {
+  flex: 0 1 calc(108px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-sidebar .gyro-sidebar-quick-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px 28px;
+  align-items: center;
+  gap: var(--gyro-space-compact);
+  padding: var(--gyro-space-standard) 0 var(--gyro-space-comfortable);
+  margin: 0;
+}
+
+:root[data-theme] .gyro-sidebar-quick-actions .gyro-sidebar-action {
+  height: calc(32px * var(--gyro-ui-scale, 1));
+  min-height: 32px;
+  padding: 0 var(--gyro-space-standard);
+  gap: var(--gyro-space-standard);
+  white-space: nowrap;
+}
+
+:root[data-theme]
+  .gyro-sidebar-quick-actions
+  .gyro-sidebar-new-session
+  > button {
+  width: 100%;
+  font-weight: 500;
+}
+
+:root[data-theme] .gyro-sidebar-quick-actions .gyro-sidebar-icon-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  width: 28px;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-sidebar-project-chat-list {
+  padding-inline: 0;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-sidebar-small-title {
+  padding: var(--gyro-space-standard);
+  margin: 0;
+  min-height: 32px;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-sidebar-projects-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-block: var(--gyro-space-compact);
+}
+
+:root[data-theme] .gyro-sidebar-projects-heading > button,
+:root[data-theme] .gyro-sidebar-project-row > .gyro-sidebar-project-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  width: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  background: transparent;
+  color: var(--gyro-muted);
+  cursor: pointer;
+}
+
+:root[data-theme] .gyro-sidebar-projects-heading > button:hover,
+:root[data-theme] .gyro-sidebar-project-row > .gyro-sidebar-project-pin:hover {
+  background: var(--gyro-shell-row-hover);
+  color: var(--gyro-text);
+}
+
+:root[data-theme] .gyro-sidebar .gyro-sidebar-project-row {
+  min-height: calc(34px * var(--gyro-ui-scale, 1));
+  padding: 0 var(--gyro-space-compact);
+  margin-bottom: var(--gyro-space-compact);
+}
+
+:root[data-theme] .gyro-sidebar .gyro-sidebar-project-row.has-pin {
+  grid-template-columns: minmax(0, 1fr) 28px;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-sidebar-project-toggle[aria-expanded] {
+  display: grid;
+  grid-template-columns: 12px 16px minmax(0, 1fr);
+  gap: var(--gyro-space-standard);
+  padding: 0;
+  font-weight: 600;
+  min-width: 0;
+  min-height: 32px;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-project-chevron {
+  width: 12px;
+  height: 12px;
+  opacity: 1;
+  color: var(--gyro-muted);
+}
+
+:root[data-theme] .gyro-sidebar .gyro-sidebar-project-group {
+  margin-bottom: var(--gyro-space-comfortable);
+}
+
+:root[data-theme] .gyro-sidebar-project-children {
+  margin-left: 12px;
+  padding-left: 12px;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-project-children
+  > .gyro-session-row {
+  position: relative;
+  margin-left: 0;
+}
+
+/* Each chat owns its stem; pagination controls never extend the tree. */
+:root[data-theme]
+  .gyro-sidebar-project-children
+  > .gyro-session-row
+  > .gyro-sidebar-tree-branch {
+  position: absolute;
+  inset: 0 auto 0 -12px;
+  width: 8px;
+  border-left: 1px solid var(--gyro-border-soft);
+  pointer-events: none;
+}
+
+:root[data-theme] .gyro-sidebar-tree-branch::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 7px;
+  border-top: 1px solid var(--gyro-border-soft);
+}
+
+:root[data-theme]
+  .gyro-sidebar-project-children
+  > .gyro-session-row:not(:has(~ .gyro-session-row))
+  > .gyro-sidebar-tree-branch {
+  bottom: 50%;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  border-bottom-left-radius: var(--gyro-radius-sm);
+}
+
+:root[data-theme]
+  .gyro-sidebar-project-children
+  > .gyro-session-row:not(:has(~ .gyro-session-row))
+  > .gyro-sidebar-tree-branch::after {
+  display: none;
+}
+
+:root[data-theme] .gyro-sidebar-project-children > .gyro-sidebar-more-actions {
+  margin: var(--gyro-space-compact) 0 0 var(--gyro-space-standard);
+}
+
+:root[data-theme] .gyro-sidebar .gyro-session-row .gyro-sidebar-thread-main {
+  min-height: calc(32px * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .gyro-sidebar .gyro-session-row.is-active,
+:root[data-theme] .gyro-sidebar .gyro-session-row.is-active:hover {
+  background: var(--gyro-shell-row-hover);
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-project-pin,
+    .gyro-sidebar-projects-heading > button
+  ):focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 2px;
+}
+
+/* Reveal actions in place; a sideways entrance extended the scrollable list. */
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-project-chat-list
+  .gyro-session-row
+  .gyro-session-actions {
+  transform: translateY(-50%);
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-project-chat-list
+  .gyro-session-row:is(.is-active, :hover, :focus-within) {
+  border-radius: var(--gyro-radius-sm);
 }
