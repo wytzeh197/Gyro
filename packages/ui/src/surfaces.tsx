@@ -22659,66 +22659,6 @@ function Composer({
           workspacePath={workspacePath}
         />
       ) : null}
-      {attachments.length > 0 ? (
-        <>
-          <div className="gyro-composer-attachments" aria-label="Attachments">
-            {attachments.map((attachment) => (
-              <div
-                className={`gyro-composer-attachment is-${attachment.kind}${attachment.kind === "video" ? " is-image" : ""}${attachment.stale ? " is-stale" : ""}${attachment.pending ? " is-pending" : ""}`}
-                aria-busy={attachment.pending || undefined}
-                key={attachment.id}
-                title={`${attachment.name} · ${formatAttachmentSize(attachment.size)}${attachment.stale ? " · the command ran again after this was captured" : ""}`}
-              >
-                {attachment.kind === "image" || attachment.kind === "video" ? (
-                  <ComposerMediaPreview attachment={attachment} />
-                ) : attachment.kind === "terminal-output" &&
-                  attachment.previewText ? (
-                  <button
-                    aria-expanded={previewedAttachmentId === attachment.id}
-                    aria-label={`Preview ${attachment.name}`}
-                    className="gyro-composer-attachment-preview-toggle"
-                    onClick={() =>
-                      setPreviewedAttachmentId((current) =>
-                        current === attachment.id ? undefined : attachment.id,
-                      )
-                    }
-                    title="Preview exactly what the model will receive"
-                    type="button"
-                  >
-                    <SquareTerminal size={15} />
-                  </button>
-                ) : (
-                  <FileText size={15} />
-                )}
-                <span>
-                  <strong>{attachment.name}</strong>
-                  <small>
-                    {attachment.stale
-                      ? "Out of date"
-                      : formatAttachmentSize(attachment.size)}
-                  </small>
-                </span>
-                <button
-                  aria-label={`Remove ${attachment.name}`}
-                  onClick={() => onRemoveAttachment?.(attachment.id)}
-                  title={`Remove ${attachment.name}`}
-                  type="button"
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            ))}
-          </div>
-          {previewedTerminalAttachment?.previewText ? (
-            <pre
-              aria-label={`${previewedTerminalAttachment.name} preview`}
-              className="gyro-composer-attachment-preview"
-            >
-              {previewedTerminalAttachment.previewText}
-            </pre>
-          ) : null}
-        </>
-      ) : null}
       {chatMode === "council" && councilResolution ? (
         <div
           className={[
@@ -22974,6 +22914,66 @@ function Composer({
         />
       ) : null}
       <div className={`gyro-composer-input${showSetupNotice && !draft.trim() ? " is-setup-empty" : ""}`}>
+        {attachments.length > 0 ? (
+          <>
+            <div className="gyro-composer-attachments" aria-label="Attachments">
+              {attachments.map((attachment) => (
+                <div
+                  className={`gyro-composer-attachment is-${attachment.kind}${attachment.kind === "video" ? " is-image" : ""}${attachment.stale ? " is-stale" : ""}${attachment.pending ? " is-pending" : ""}`}
+                  aria-busy={attachment.pending || undefined}
+                  key={attachment.id}
+                  title={`${attachment.name} · ${formatAttachmentSize(attachment.size)}${attachment.stale ? " · the command ran again after this was captured" : ""}`}
+                >
+                  {attachment.kind === "image" || attachment.kind === "video" ? (
+                    <ComposerMediaPreview attachment={attachment} />
+                  ) : attachment.kind === "terminal-output" &&
+                    attachment.previewText ? (
+                    <button
+                      aria-expanded={previewedAttachmentId === attachment.id}
+                      aria-label={`Preview ${attachment.name}`}
+                      className="gyro-composer-attachment-preview-toggle"
+                      onClick={() =>
+                        setPreviewedAttachmentId((current) =>
+                          current === attachment.id ? undefined : attachment.id,
+                        )
+                      }
+                      title="Preview exactly what the model will receive"
+                      type="button"
+                    >
+                      <SquareTerminal size={15} />
+                    </button>
+                  ) : (
+                    <FileText size={15} />
+                  )}
+                  <span>
+                    <strong>{attachment.name}</strong>
+                    <small>
+                      {attachment.stale
+                        ? "Out of date"
+                        : formatAttachmentSize(attachment.size)}
+                    </small>
+                  </span>
+                  <button
+                    aria-label={`Remove ${attachment.name}`}
+                    onClick={() => onRemoveAttachment?.(attachment.id)}
+                    title={`Remove ${attachment.name}`}
+                    type="button"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            {previewedTerminalAttachment?.previewText ? (
+              <pre
+                aria-label={`${previewedTerminalAttachment.name} preview`}
+                className="gyro-composer-attachment-preview"
+              >
+                {previewedTerminalAttachment.previewText}
+              </pre>
+            ) : null}
+          </>
+        ) : null}
         <textarea
           data-tour="composer.input"
           ref={composerTextareaRef}

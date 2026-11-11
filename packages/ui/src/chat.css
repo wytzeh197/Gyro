@@ -10991,109 +10991,6 @@ button.gyro-response-changed-files:hover {
 :root[data-theme="light"] .gyro-chat-composer-dock .gyro-model-chip {
   color: var(--gyro-hero-muted);
 }
-.gyro-composer-shell > .gyro-composer-attachments {
-  flex-wrap: nowrap;
-  max-width: 100%;
-  overflow-x: auto;
-  padding: calc(var(--gyro-chat-space-1) * 2.5) var(--gyro-chat-block-gap)
-    var(--gyro-chat-space-1);
-  scrollbar-width: none;
-  width: 100%;
-}
-
-.gyro-composer-shell > .gyro-composer-attachments::-webkit-scrollbar {
-  display: none;
-}
-
-.gyro-composer-shell
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image {
-  background: var(--gyro-surface-raised);
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  box-shadow: none;
-  flex: 0 0 88px;
-  height: 68px;
-  transition:
-    border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    box-shadow var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    transform var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
-  width: 88px;
-}
-
-.gyro-composer-shell
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image:hover {
-  border-color: color-mix(
-    in srgb,
-    var(--gyro-accent) 32%,
-    var(--gyro-premium-hairline-strong)
-  );
-  box-shadow: 0 5px 14px var(--gyro-premium-shadow-soft);
-  transform: translateY(-1px);
-}
-
-.gyro-composer-shell
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image
-  > img,
-.gyro-composer-shell
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-video
-  > video {
-  object-fit: contain;
-}
-
-.gyro-composer-shell
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image::after {
-  background: linear-gradient(
-    transparent,
-    color-mix(in srgb, var(--gyro-chat-media-shade) 84%, transparent)
-  );
-  height: 38px;
-}
-
-.gyro-composer-shell
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image
-  > span {
-  bottom: 6px;
-  left: 9px;
-  max-width: 122px;
-  right: 9px;
-}
-
-.gyro-composer-shell
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image
-  strong {
-  font-size: var(--gyro-chat-meta-size);
-  font-weight: 600;
-}
-
-.gyro-composer-shell
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image
-  button {
-  backdrop-filter: blur(8px);
-  background: color-mix(in srgb, var(--gyro-chat-raised) 72%, transparent);
-  border: 1px solid
-    color-mix(in srgb, var(--gyro-chat-media-text) 24%, transparent);
-  color: var(--gyro-chat-media-text);
-  height: 24px;
-  right: 6px;
-  top: 6px;
-  width: 24px;
-}
-
-.gyro-composer-shell
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image
-  button:hover {
-  background: color-mix(in srgb, var(--gyro-chat-raised) 92%, transparent);
-}
-
 .gyro-chat-composer-dock
   .gyro-composer-shell.is-hero.has-provider
   > .gyro-composer-bar {
@@ -19139,6 +19036,8 @@ button.gyro-response-changed-files:hover {
   flex-grow: 0;
   justify-content: flex-start;
   margin: 0;
+  backdrop-filter: none;
+  box-shadow: none;
   min-height: 0;
   padding: 0 var(--gyro-space-compact) var(--gyro-space-standard);
   position: relative;
@@ -19225,9 +19124,144 @@ button.gyro-response-changed-files:hover {
   }
 }
 
+/* Focus is a quiet border lift, not a ring: the caret already says where
+   typing goes. */
+.gyro-composer-input {
+  transition: border-color var(--gyro-premium-motion-fast)
+    var(--gyro-premium-ease);
+}
 .gyro-composer-input:has(> textarea:focus-visible) {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 2px;
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-text) 22%,
+    var(--gyro-chat-hairline)
+  );
+}
+:root[data-theme] .gyro-chat-surface .gyro-composer-shell:focus-within {
+  filter: none;
+}
+
+/* Attachments sit inside the input, above the text: square thumbnails and
+   compact file chips in one scrolling row. */
+.gyro-composer-input > .gyro-composer-attachments {
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: var(--gyro-chat-space-2);
+  grid-row: 1;
+  min-width: 0;
+  overflow-x: auto;
+  padding: var(--gyro-chat-space-2) var(--gyro-chat-space-2) 0;
+  scrollbar-width: none;
+}
+.gyro-composer-input > .gyro-composer-attachments::-webkit-scrollbar {
+  display: none;
+}
+.gyro-composer-input > .gyro-composer-attachments .gyro-composer-attachment {
+  --gyro-composer-attachment-size: calc(56px * var(--gyro-ui-scale, 1));
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-chat-hairline);
+  border-radius: var(--gyro-radius-md);
+  box-sizing: border-box;
+  flex: none;
+  height: var(--gyro-composer-attachment-size);
+  max-width: calc(var(--gyro-space-panel) * 14);
+  padding: 0 var(--gyro-chat-space-2) 0 calc(var(--gyro-chat-space-1) * 2.5);
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image {
+  padding: 0;
+  width: var(--gyro-composer-attachment-size);
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image::after,
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image
+  > span {
+  display: none;
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image
+  > .gyro-composer-image-fallback {
+  top: 50%;
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image
+  button {
+  background: color-mix(in srgb, var(--gyro-chat-media-shade) 68%, transparent);
+  border: 0;
+  color: var(--gyro-chat-media-text);
+  height: calc(var(--gyro-space-panel) + var(--gyro-chat-space-1));
+  opacity: 0;
+  right: calc(var(--gyro-chat-space-1) * 0.75);
+  top: calc(var(--gyro-chat-space-1) * 0.75);
+  transform: none;
+  transition: opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+  width: calc(var(--gyro-space-panel) + var(--gyro-chat-space-1));
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image:hover
+  button,
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image
+  button:focus-visible {
+  opacity: 1;
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image
+  button:hover {
+  background: color-mix(in srgb, var(--gyro-chat-media-shade) 86%, transparent);
+}
+@media (hover: none) {
+  .gyro-composer-input
+    > .gyro-composer-attachments
+    .gyro-composer-attachment.is-image
+    button {
+    opacity: 1;
+  }
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment:not(.is-image)
+  > svg {
+  color: var(--gyro-muted);
+  flex: none;
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment:not(.is-image)
+  strong {
+  font-size: var(--gyro-chat-small-size);
+  font-weight: 500;
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment:not(.is-image)
+  > button:last-child {
+  border-radius: var(--gyro-radius-sm);
+  padding: var(--gyro-chat-space-1);
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment:not(.is-image)
+  > button:last-child:hover {
+  background: var(--gyro-sidebar-soft);
+  color: var(--gyro-text);
+}
+.gyro-composer-input > .gyro-composer-attachment-preview {
+  grid-row: 2;
+  margin: var(--gyro-chat-space-2) var(--gyro-chat-space-2) 0;
+}
+.gyro-composer-input.is-setup-empty:has(> .gyro-composer-attachments)
+  > :is(textarea, .gyro-composer-blocker) {
+  grid-area: 3 / 1;
 }
 
 :root[data-theme]
