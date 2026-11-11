@@ -738,7 +738,7 @@ export function buildRunModel(
         item.deletions = item.deletions ?? stats?.deletions;
         mergeFileChange(files, item);
       }
-      if (!absorbRepeatedWork(steps, item, event.createdAt)) {
+      if (!absorbRepeatedWork(steps, item)) {
         steps.push({ kind: "work", id: event.id, at: event.createdAt, item });
       }
       continue;
@@ -863,6 +863,7 @@ function coalesceAdjacentToolSteps(steps: RunStep[]): RunStep[] {
       step.item.kind === "tool" &&
       previous?.kind === "work" &&
       previous.item.kind === "tool" &&
+      !(previous.item.status !== "running" && step.item.status === "running") &&
       toolIdentity(previous.item) === toolIdentity(step.item)
     ) {
       // Keep the latest status/label (failed wins over done only if last).
@@ -2384,7 +2385,6 @@ function humanizeToolSegment(value: string) {
 function absorbRepeatedWork(
   steps: RunStep[],
   item: WorkItem,
-  at: string,
 ): boolean {
   const identity = workIdentity(item);
   if (!identity) {
@@ -2397,10 +2397,10 @@ function absorbRepeatedWork(
   if (!target) {
     return false;
   }
-  // A rerun starts its own clock. The row's elapsed time would otherwise count
-  // from the first attempt, so a fresh retry opens already minutes old.
+  // Finished rows never regain a spinner. A new invocation gets a new row
+  // and its own clock, even when it repeats the same tool or path.
   if (item.status === "running" && target.item.status !== "running") {
-    target.at = at;
+    return false;
   }
   target.item = carryWorkStats(target.item, item);
   target.repeat = (target.repeat ?? 1) + 1;
@@ -2526,6 +2526,7 @@ function isHiddenRunEvent(event: SessionEvent) {
       label.includes("GYRO_ARTIFACTS:") ||
       label.includes("GYRO_QUESTIONS:") ||
       label.includes("GYRO_TASKS:") ||
+      label.includes("GYRO_MEMORY:") ||
       label.includes("GYRO_AGENT_UPDATE:")) &&
     !stripHiddenControlMarkers(label).trim()
   );

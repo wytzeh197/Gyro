@@ -48,6 +48,7 @@ export type WorkbenchMode = "local" | "worktree";
  * picking one never closes the pane.
  */
 export type ChatSidePanelId =
+  | "memory"
   | "canvas"
   | "tools"
   | "environment"
@@ -566,6 +567,7 @@ export type CalendarSchedule = {
 };
 
 export type AutomationExecutionContext = {
+  workflowBinding?:import("./workflows/types").WorkflowJob["execution"]["workflowBinding"];
   calendar?: CalendarSchedule;
   workspacePath?: string;
   providerId?: string;
@@ -800,13 +802,71 @@ export type BrowserPreviewCapture = {
     scrollX?: number;
     scrollY?: number;
   };
+  annotationState?: BrowserAnnotationPageState;
   /** Optional asset URL for rendering the capture in UI (e.g. convertFileSrc). */
   src?: string;
 };
 
+export type BrowserAnnotationPageState = {
+  documentEpoch: string;
+  revision: number;
+  url: string;
+  viewport: NonNullable<BrowserPreviewCapture["viewport"]>;
+};
+
+export type BrowserElementAnnotation = BrowserAnnotationPageState & {
+  schema: "gyro.browser-annotation.v1";
+  framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED";
+  resourceId: string;
+  navigationId: number;
+  capturedAt: string;
+  ref: string;
+  tag: string;
+  role: string;
+  name: string;
+  text: string;
+  selector: string;
+  shadowRoot: boolean;
+  rect: { x: number; y: number; width: number; height: number };
+  styles: Record<string, string>;
+  outline?: { path: string; matrix: number[]; exact: boolean };
+  protectedRects?: Array<{ x: number; y: number; width: number; height: number }>;
+};
+
+export type BrowserAnnotationCapture = {
+  /** Sanitized viewport for the local, frozen annotation surface. Never sent. */
+  backdrop: string;
+  /** PNG crop of the selected visible region. */
+  image: string;
+  width: number;
+  height: number;
+  annotation: BrowserElementAnnotation;
+};
+
+export type BrowserAnnotationResult = {
+  active?: boolean;
+  annotation?: BrowserElementAnnotation | null;
+  capture?: BrowserAnnotationCapture;
+  sent?: boolean;
+  error?: string;
+};
+
+export type BrowserScreenshotAction =
+  | "capture" | "reveal" | "feedback"
+  | "annotate-start" | "annotate-read" | "annotate-stop"
+  | "annotate-point" | "annotate-add" | "annotate-capture" | "annotate-send";
+export type BrowserScreenshotResult = void | boolean | BrowserAnnotationResult;
+export type BrowserScreenshotHandler = (
+  action?: BrowserScreenshotAction,
+  feedback?: BrowserFeedback,
+) => BrowserScreenshotResult | Promise<BrowserScreenshotResult>;
+
 export type BrowserFeedback = {
   captureId: string;
   comment: string;
+  annotationToken?: string;
+  annotation?: BrowserElementAnnotation;
+  annotationCapture?: BrowserAnnotationCapture;
   /** Rectangle in normalized screenshot coordinates (0–1). */
   region: { x: number; y: number; width: number; height: number };
 };
@@ -1474,6 +1534,8 @@ export type UsageOrigin =
   | "council-synthesis"
   | "council-resynthesis"
   | "session-title"
+  | "code-review"
+  | "workflow-extraction"
   | "optimization"
   | "agent-session";
 
@@ -1697,7 +1759,17 @@ export type SourceControlFile = {
   deletions: number;
 };
 
+export type GitReadState =
+  | "ready"
+  | "not-repository"
+  | "unavailable"
+  | "timed-out"
+  | "failed";
+
 export type SourceControlState = {
+  /** Omitted only by legacy snapshots and fixtures. Independent of GitHub. */
+  readState?: GitReadState;
+  stale?: boolean;
   /** Requested workspace: file paths in this snapshot are relative to it. */
   workspacePath?: string | null;
   history?: Array<{
@@ -1840,6 +1912,7 @@ export type GithubState = {
 };
 
 export type GitBranchCatalog = {
+  readState?: GitReadState;
   available: boolean;
   repoRoot?: string | null;
   current?: string;
@@ -2665,11 +2738,14 @@ export type WorkspacePreparationStatus =
   "idle" | "preparing" | "ready" | "degraded" | "failed";
 
 export type WorkspacePreparationError = {
+  gitCheck?: "status" | "branches";
   phase: WorkspacePreparationPhase;
   message: string;
 };
 
 export type WorkspacePreparationProgress = {
+  gitState?: GitReadState;
+  gitRetrying?: boolean;
   runId: string;
   workspacePath: string;
   phase?: WorkspacePreparationPhase;

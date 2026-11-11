@@ -301,9 +301,29 @@ impl RunnerHost for CliRunnerHost {
         &self,
         request: &ProviderChatRequest,
         history: Option<&str>,
-        _turn: PromptTurn,
+        turn: PromptTurn,
     ) -> String {
         let mut text = String::new();
+        if let Some(memory) = &request.project_memory {
+            let (context, receipt) = memory.render(turn.resumed);
+            if let Err(error) = self.store().and_then(|store| {
+                store.record_project_memory_receipt(
+                    self.session.id,
+                    self.turn,
+                    &request.provider_id,
+                    &receipt,
+                )
+            }) {
+                eprintln!(
+                    "Memory context receipt unavailable: {}",
+                    gyro_core::sanitize_capability_summary(&error.to_string())
+                );
+            }
+            if !context.is_empty() {
+                text.push_str(&context);
+                text.push('\n');
+            }
+        }
         if let Some(history) = history.filter(|h| !h.is_empty()) {
             text.push_str("Previous conversation (reference context):\n");
             text.push_str(history);
@@ -692,6 +712,18 @@ pub(super) fn execute(
     turn: Uuid,
     attempt_id: Uuid,
 ) -> Result<super::CliRunOutput> {
+    ensure!(
+        store.advisory_session_purpose(session.id)?.is_none(),
+        "this session is managed by an advisory feature; start a normal chat instead"
+    );
+    let checkout = session.workspace_path.canonicalize()?;
+    #[cfg(unix)]
+    let _checkout_lease =
+        gyro_core::workflows::WorkflowCheckoutLease::try_acquire(store.paths(), &checkout, false)?
+            .ok_or_else(|| {
+                anyhow::anyhow!("a workflow owns this checkout; stop it or choose another worktree")
+            })?;
+    ensure!(store.active_workflow_for_root(&checkout.to_string_lossy())?.is_none(),"a workflow owns this checkout; stop it or choose another worktree before starting a CLI agent");
     let provider = profile.provider_id.as_deref().ok_or_else(|| {
         super::cli_failure(
             super::CliErrorCategory::ProviderUnavailable,
@@ -723,9 +755,18 @@ pub(super) fn execute(
         "council" => ChatMode::Council,
         _ => ChatMode::Normal,
     };
-    let request: ProviderChatRequest = serde_json::from_value(
+    let mut request: ProviderChatRequest = serde_json::from_value(
         json!({"sessionId":session.id,"turnId":turn,"providerId":provider,"providerLabel":profile.display_name,"modelId":model,"modelLabel":model,"message":prompt,"workspacePath":session.workspace_path,"mode":chat_mode,"requireCommandApproval":config.require_command_approval&&!(approved&&provider=="antigravity"),"requireFileEditApproval":config.require_file_edit_approval&&!(approved&&provider=="antigravity"),"fullAccess":config.full_access,"suggestTitle":false}),
     )?;
+    request.project_memory = Some(gyro_core::project_memory::prepare_memory_context(
+        store,
+        session,
+        &request,
+        gyro_core::provider_runtime::api_config::fallback_context_window(
+            provider,
+            model.as_deref(),
+        ),
+    )?);
     let had_history = !super::cli_ollama_history(store, session.id)?.is_empty();
     let host = CliRunnerHost {
         paths: store.paths().clone(),
@@ -776,7 +817,31 @@ pub(super) fn execute(
         Duration::from_secs(timeout),
     );
     let mut attempt = ProviderRunAttempt::default();
+    if request.project_memory.is_some() {
+        store.invalidate_project_memory_receipt(session.id, provider)?;
+    }
     let mut result = runner.run(&host, &request, resume.as_ref(), &mut attempt);
+    if let Some(cursor) = result
+        .as_ref()
+        .ok()
+        .filter(|output| !output.answer_cut_off)
+        .and_then(|output| output.resume_cursor.as_ref())
+    {
+        if let Some(memory) = &request.project_memory {
+            if let Err(error) = store.acknowledge_project_memory_receipt(
+                session.id,
+                turn,
+                provider,
+                &serde_json::to_value(cursor)?,
+                &memory.render(result.as_ref().unwrap().resumed).1,
+            ) {
+                eprintln!(
+                    "Memory context acknowledgement unavailable: {}",
+                    gyro_core::sanitize_capability_summary(&error.to_string())
+                );
+            }
+        }
+    }
     deadline.finish();
     if let Some(error) = host.event_failure.lock().ok().and_then(|s| s.clone()) {
         result = Err(anyhow!("could not persist provider events: {error}"));

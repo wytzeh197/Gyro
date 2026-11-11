@@ -122,6 +122,8 @@ pub(super) fn start(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>>
         WebviewUrl::App("browser-events-native-smoke.html".into()),
     )
     .title("Gyro isolated native browser check")
+    .visible(visual_review)
+    .focused(false)
     .inner_size(1100.0, 820.0)
     .incognito(true)
     .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)

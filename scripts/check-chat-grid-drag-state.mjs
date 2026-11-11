@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import ts from "typescript";
+import { readRepoSource } from "./read-repo-source.mjs";
 import {
   chatGridReducer,
   chatPaneIdentity,
+  chatProjectKey,
   resolveChatGridDropSlot,
+  persistableChatGridState,
+  sanitizeStoredChatGridState,
 } from "../packages/ui/src/workbench-state.ts";
 
 const PROJECT = "/fixture/Gyro";
@@ -228,10 +233,31 @@ assert.equal(
   initial,
   "stale moves must not create/activate another project's layout",
 );
-assert.equal(
-  drop(initial, { ...pane("foreign"), workspacePath: "/fixture/elsewhere" }, 0),
-  initial,
-);
+const foreign = { ...pane("foreign"), workspacePath: "/fixture/elsewhere" };
+const mixed = drop(initial, foreign, 0);
+assertLayout(mixed, [...ids(slotsOf(initial)), chatPaneIdentity(foreign)].sort());
+assert.equal(mixed.activeProjectKey, PROJECT);
+assert.equal(slotsOf(mixed)[0].workspacePath, foreign.workspacePath);
+const restoredMixed = sanitizeStoredChatGridState(persistableChatGridState(mixed));
+assert.deepEqual(slotsOf(restoredMixed), slotsOf(mixed), "mixed workspace panes survive restart");
+assert.equal(restoredMixed.layouts[PROJECT].focusedPaneId, mixed.layouts[PROJECT].focusedPaneId);
+assert.equal(restoredMixed.layouts[PROJECT].arrangement, mixed.layouts[PROJECT].arrangement);
+const refocused = chatGridReducer(restoredMixed, {
+  type: "focus-pane", projectKey: PROJECT, paneId: foreign.paneId,
+});
+assert.equal(refocused.activeProjectKey, PROJECT);
+assert.equal(refocused.layouts[PROJECT].focusedPaneId, foreign.paneId);
+const sourceLayout = stateOf([foreign, null, null, null]);
+sourceLayout.layouts[foreign.workspacePath] = {
+  projectKey: foreign.workspacePath, slots: [foreign, null, null, null],
+  focusedPaneId: foreign.paneId,
+};
+sourceLayout.layouts[PROJECT].slots = [pane("a"), null, null, null];
+const copied = drop(sourceLayout, foreign, 1);
+assert.notEqual(slotsOf(copied)[1].paneId, foreign.paneId, "each layout owns a distinct pane handle");
+assert.equal(copied.layouts[foreign.workspacePath], sourceLayout.layouts[foreign.workspacePath]);
+const full = stateOf(["a", "b", "c", "d"].map(id => pane(id)));
+assert.equal(drop(full, foreign, 0), full, "cross-folder drops cannot evict a full grid");
 assert.equal(
   drop(initial, pane("a"), 0),
   initial,
@@ -267,6 +293,90 @@ assert.equal(
   undefined,
 );
 
+// Execute production callbacks too: a reducer-only test cannot catch App
+// accidentally selecting the source folder again after a successful drop.
+const app = ts.createSourceFile("App.tsx", readRepoSource("apps/desktop/src/App.tsx", "utf8"),
+  ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+function callback(name, bindings) {
+  let expression;
+  const visit = node => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(app) === name) {
+      expression = ts.isCallExpression(node.initializer)
+        ? node.initializer.arguments[0] : node.initializer;
+    }
+    if (name === "onDropSession" && ts.isJsxAttribute(node) && node.name.getText(app) === name)
+      expression = node.initializer.expression;
+    ts.forEachChild(node, visit);
+  };
+  visit(app);
+  assert.ok(expression, name);
+  const js = ts.transpileModule("const handler = " + expression.getText(app) + "; return handler;",
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  return new Function(...Object.keys(bindings), js)(...Object.values(bindings));
+}
+const chatGridRef = { current: stateOf([pane("a"), null, null, null]) };
+const activeSessionIdRef = { current: "a" };
+let workspace;
+const bindings = {
+  chatGridRef, activeSessionIdRef, chatProjectKey,
+  suppressSessionAutoSelectRef: { current: false },
+  sessions: [{ id: "a", workspacePath: PROJECT }, { id: "foreign", workspacePath: foreign.workspacePath }],
+  acknowledgeFinishedChat() {}, dispatchWorkbench() {}, notify() {},
+  setWorkspacePath(value) { workspace = value; },
+  setActiveSessionId(value) { activeSessionIdRef.current = value; },
+  refreshEvents: async () => {},
+  chatPaneForSession: session => ({ ...pane(session.id), workspacePath: session.workspacePath }),
+  dispatchChatGrid(action) {
+    const next = chatGridReducer(chatGridRef.current, action);
+    const changed = next !== chatGridRef.current;
+    chatGridRef.current = next;
+    return changed;
+  },
+};
+bindings.focusChatPane = callback("focusChatPane", bindings);
+callback("addSessionToChatGrid", bindings)("foreign");
+assert.deepEqual(slotsOf(chatGridRef.current).filter(Boolean).map(p => p.sessionId), ["a", "foreign"]);
+assert.equal(workspace, foreign.workspacePath);
+bindings.focusChatPane(pane("a"));
+bindings.focusChatPane(foreign);
+assert.equal(chatGridRef.current.activeProjectKey, PROJECT);
+assert.equal(chatGridRef.current.layouts[PROJECT].focusedPaneId, foreign.paneId);
+callback("selectSession", bindings)("foreign");
+assert.equal(chatGridRef.current.activeProjectKey, PROJECT, "sidebar selection keeps a visible mixed split");
+const beforeForgedDrop = chatGridRef.current;
+const dropCallback = callback("onDropSession", { ...bindings, displayedChatLayout: beforeForgedDrop.layouts[PROJECT] });
+assert.equal(dropCallback("foreign", "/forged/path", 0), false);
+assert.equal(chatGridRef.current, beforeForgedDrop);
+assert.equal(dropCallback("foreign", foreign.workspacePath, 0), true);
+assert.equal(slotsOf(chatGridRef.current)[0].workspacePath, foreign.workspacePath);
+const diffRequests = [];
+const loadPaneDiff = callback("loadInlineChangeDiff", {
+  activeSession: { workspacePath: PROJECT }, workspacePath: PROJECT,
+  workbench: { ide: { sourceControl: {} } },
+  sourceControlForWorkspace: (_state, root) => {
+    assert.equal(root, foreign.workspacePath);
+    return { files: [] };
+  },
+  isTauriRuntime: () => true,
+  invoke: async (_command, args) => { diffRequests.push(args.request); return { stdout: "diff" }; },
+});
+assert.equal(await loadPaneDiff("src/shared-name.ts", foreign.workspacePath), "diff");
+assert.equal(diffRequests[0].workspacePath, foreign.workspacePath, "background diff reads its own folder");
+
+for (const isFocused of [false, true]) {
+  let sent;
+  const pendingPaneSendRef = {};
+  callback("requestSend", {
+    pane: foreign, isFocused, pendingPaneSendRef, paneMode: "normal",
+    paneDraftKey: foreign.sessionId, chatDraftModeRevisionsRef: { current: {} },
+    focusChatPane: bindings.focusChatPane,
+    sendDraft: (message, context) => { sent = { message, context }; },
+  })("Use this folder", { workspacePath: PROJECT, sessionId: "a" });
+  const outgoing = sent ?? pendingPaneSendRef.current;
+  assert.equal(outgoing.context.workspacePath, foreign.workspacePath);
+  assert.equal(outgoing.context.sessionId, foreign.sessionId);
+}
+
 console.log(
-  "Chat grid drag state passed: exhaustive quadrants, row insertion, no eviction, invalid/stale gestures, no-op focus, stable pane identities.",
+  "Chat grid drag state passed: exhaustive placement, capacity, cross-folder persistence, production focus/add/drop/send callbacks and stable pane identities.",
 );

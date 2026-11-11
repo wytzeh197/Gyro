@@ -410,6 +410,8 @@ fn live_plan_reaches_the_model_as_a_checklist_that_normal_turns_can_advance() {
     // Normal-mode turns are the ones that finish steps, so they get the marker.
     assert!(context.contains("GYRO_PLAN_UPDATE:"));
     assert!(context.contains("update-items"));
+    assert!(context.contains("Before starting a step"));
+    assert!(context.contains("before your next tool call; do not wait for the final answer"));
     assert!(context.contains("Before the final reply, reconcile the checklist"));
     assert!(context.contains("external acceptance blocked"));
 
@@ -999,6 +1001,16 @@ fn resumed_turns_skip_standing_guidance_but_keep_turn_state() {
     assert!(!resumed.contains("![short description](/absolute/path.png)"));
     assert!(resumed.contains(browser_knowledge::RESUMED_REVEAL_GUIDANCE));
     assert!(!resumed.contains("never end with a promise to report later"));
+    assert!(!resumed.contains("do not ask the user to paste files you can read"));
+    assert!(!resumed.contains("a bare filename names a root file"));
+    for guard in [
+        "preserve user-supplied paths exactly",
+        "a failed read never authorizes creation",
+        "Read-only and edit-path limits also cover proposals",
+        "rootId",
+    ] {
+        assert!(resumed.contains(guard), "Resume lost {guard}");
+    }
     assert!(resumed.contains("configured approval policy"));
     assert!(resumed.ends_with("User message:\nRename the browser module"));
     // Naming browser code is not a browse request.
@@ -2417,6 +2429,8 @@ fn stale_resume_binding_is_cleared_and_retried_without_cursor() {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        workflow_run_id: None,
+        project_memory: None,
         internal_purpose: None,
     };
     let mut attempts = Vec::new();
@@ -2498,6 +2512,8 @@ fn model_handoff_skips_incompatible_provider_binding() {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        workflow_run_id: None,
+        project_memory: None,
         internal_purpose: None,
     };
     assert!(compatible_provider_session_binding(binding.clone(), &request).is_none());
@@ -2900,6 +2916,8 @@ fn provider_status_event_stores_run_metadata_without_tokens() {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        workflow_run_id: None,
+        project_memory: None,
         internal_purpose: None,
     };
 
@@ -2990,6 +3008,8 @@ fn native_provider_binding_owns_execution_authority() {
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        workflow_run_id: None,
+        project_memory: None,
         internal_purpose: None,
     };
 
@@ -3489,6 +3509,7 @@ fn automation_notifications_are_private_and_only_cover_actionable_outcomes() {
             stop_condition: None,
             next_run_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
             execution: gyro_core::AutomationExecutionContext {
+                workflow_binding: None,
                 calendar: None,
                 workspace_path: Some("/secret/workspace".into()),
                 ..Default::default()

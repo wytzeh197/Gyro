@@ -1,3 +1,138 @@
+/* Inline annotation uses the existing browser blue; it is selection, not status. */
+.gyro-browser-preview {
+  --gyro-annotation-outline: #0874df;
+}
+.gyro-browser-preview-toolbar > .gyro-browser-annotate-button {
+  display: inline-flex;
+  align-self: center;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gyro-space-standard);
+  flex-shrink: 0;
+  height: var(--gyro-control-height);
+  min-width: var(--gyro-control-height);
+  padding: 0 var(--gyro-space-comfortable);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  background: transparent;
+  box-shadow: none;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+.gyro-browser-preview-toolbar > .gyro-browser-annotate-button > svg {
+  flex-shrink: 0;
+}
+.gyro-browser-preview-toolbar > .gyro-browser-annotate-button:hover:not(:disabled) {
+  background: var(--gyro-control-hover);
+  border-color: var(--gyro-border);
+  color: var(--gyro-text);
+}
+.gyro-browser-preview-toolbar > .gyro-browser-annotate-button[aria-pressed="true"] {
+  color: var(--gyro-blue-action-text);
+  border-color: transparent;
+  background: var(--gyro-blue);
+}
+.gyro-browser-preview-toolbar > .gyro-browser-annotate-button[aria-pressed="true"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-blue) 88%, var(--gyro-text));
+}
+.gyro-browser-preview-toolbar > .gyro-browser-annotate-button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+@container gyro-browser (max-width: 470px) {
+  .gyro-browser-preview-toolbar > .gyro-browser-annotate-button {
+    width: var(--gyro-control-height);
+    padding: 0;
+  }
+  .gyro-browser-annotate-button > span {
+    display: none;
+  }
+}
+.gyro-browser-page {
+  position: relative;
+}
+.gyro-browser-annotation-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--gyro-code-bg);
+  z-index: 5;
+}
+.gyro-annotation-backdrop,
+.gyro-annotation-outline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: top center;
+  pointer-events: none;
+}
+.gyro-annotation-outline path {
+  fill: none;
+  stroke: var(--gyro-annotation-outline);
+  stroke-width: 2;
+}
+.gyro-browser-annotation-form.is-bubble {
+  position: absolute;
+  width: min(300px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  box-sizing: border-box;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  box-shadow: 0 6px 16px var(--gyro-shadow);
+}
+.gyro-annotation-heading {
+  align-items: center;
+  justify-content: space-between;
+}
+.gyro-browser-annotation-form .gyro-annotation-heading > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--gyro-control-height);
+  height: var(--gyro-control-height);
+  padding: 0;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-raised);
+  box-shadow: none;
+  color: var(--gyro-muted);
+  line-height: 1;
+}
+.gyro-browser-annotation-form .gyro-annotation-heading > button:hover:not(:disabled) {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+.gyro-browser-annotation-form .gyro-annotation-heading > button > svg {
+  display: block;
+  width: var(--gyro-font-lead);
+  height: var(--gyro-font-lead);
+  flex-shrink: 0;
+}
+.gyro-annotation-target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-annotation-footer {
+  justify-content: flex-end;
+}
+.gyro-annotation-footer > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.gyro-annotation-footer > button[type="submit"] {
+  color: var(--gyro-text);
+  border-color: var(--gyro-border);
+}
+
 .gyro-browser-capture-view {
   background: var(--gyro-code-bg);
   display: grid;
@@ -87,6 +222,23 @@
 
 .gyro-browser-feedback-form button:disabled {
   opacity: 0.45;
+}
+
+.gyro-browser-annotation-form {
+  min-width: 0;
+}
+
+.gyro-browser-annotation-form > span {
+  overflow-wrap: anywhere;
+}
+
+.gyro-browser-annotation-form > [role="alert"] {
+  color: var(--gyro-danger);
+}
+
+.gyro-browser-annotation-form :is(button, textarea):focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 2px;
 }
 
 .gyro-browser-capture-meta {

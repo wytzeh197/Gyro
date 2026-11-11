@@ -13,6 +13,7 @@
  * session, repository, or provider account.
  */
 import appearanceCss from "../../../packages/ui/src/appearance.css?inline";
+import { writeTourRecord } from "../../../packages/ui/src/first-run-tour";
 import { disconnectedCloudView } from "./cloud-connection-view";
 
 type Invoke = (command: string, args?: Record<string, unknown>) => unknown;
@@ -67,6 +68,20 @@ if (parameters.get("reset") === "1" || isReelCapture) {
   );
 }
 const isWebsiteCapture = parameters.get("presentation") === "website";
+// Exact-pixel refactor captures represent an already onboarded, settled app.
+// Use the real tour record instead of hiding its overlay with capture CSS.
+if (parameters.get("tour") === "skip") writeTourRecord(localStorage, "dismissed");
+// Chat states the render snapshot (scripts/check-chat-render-snapshot.mjs)
+// needs and no scene reaches by clicking: a run that is still working, a reply
+// with a fenced code block, and two chats side by side.
+const chatEdge = parameters.get("edge");
+const isStreamingEdge = chatEdge === "streaming";
+const isListLayoutEdge = chatEdge === "markdown-lists";
+const isCodeBlockEdge = chatEdge === "code-block" || isListLayoutEdge;
+const isStackedEdge = chatEdge === "stacked";
+const isThreeEdge = chatEdge === "three";
+const isSplitEdge = chatEdge === "split" || isStackedEdge || isThreeEdge;
+const SPLIT_SESSION_ID = "ses_capture_2";
 const supportedScenes = new Set([
   "chat",
   "welcome",
@@ -92,6 +107,24 @@ const SESSION_ID = "ses_capture_1";
 const NOW = isWebsiteCapture
   ? new Date().toISOString()
   : "2026-07-25T09:41:00.000Z";
+
+if (isStreamingEdge) {
+  // A live run shows its elapsed time. Hold the clock still so that label, and
+  // everything measured around it, is the same on every load.
+  // `new Date()` is frozen too: the sent message prints its own timestamp.
+  const frozenNow = Date.parse(NOW) + 42_000;
+  const RealDate = Date;
+  class FrozenDate extends RealDate {
+    constructor(...args: unknown[]) {
+      if (args.length === 0) super(frozenNow);
+      else super(...(args as [number]));
+    }
+    static override now() {
+      return frozenNow;
+    }
+  }
+  globalThis.Date = FrozenDate as DateConstructor;
+}
 
 function at(minutes: number, seconds = 0) {
   const base = Date.parse(NOW);
@@ -152,6 +185,17 @@ let sessions = [
     updatedAt: at(-680),
   },
 ];
+
+// Opt-in long project list for exercising the real More/Less controls.
+if (chatEdge === "sidebar-many") {
+  sessions.push(...Array.from({ length: 21 }, (_, index) => ({
+    ...session,
+    id: `ses_capture_sidebar_${index + 4}`,
+    title: `Review workspace task ${index + 4}`,
+    createdAt: at(-800 - index * 20),
+    updatedAt: at(-800 - index * 20),
+  })));
+}
 
 let sequence = 0;
 let captureSessionSequence = 0;
@@ -329,6 +373,57 @@ if (parameters.get("edge") === "inline-approval") {
   );
 }
 
+// A live run cannot be seeded: the app only treats a turn as running when its
+// own composer sent it. The thread starts empty and `run_provider_chat` below
+// holds the send open.
+if (isStreamingEdge) chatEvents.splice(0, chatEvents.length);
+
+// A finished reply that uses the markdown the plain fixture never renders.
+if (isCodeBlockEdge) {
+  chatEvents.splice(
+    chatEvents.findIndex(
+      (event) =>
+        event.kind === "assistant-message" && event.message.startsWith("Done."),
+    ),
+    1,
+    sessionEvent(
+      "assistant-message",
+      [
+        "Done. `drain()` stops after 5 attempts and backs off between them.",
+        "",
+        "```js",
+        "const MAX_ATTEMPTS = 5;",
+        "",
+        "export async function drain(queue) {",
+        "  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {",
+        "    if (await queue.flush()) return;",
+        "    await backoff(attempt);",
+        "  }",
+        "  throw queue.lastError;",
+        "}",
+        "```",
+        "",
+        "What changed:",
+        "",
+        "- The retry loop has a ceiling.",
+        "- The last error is thrown instead of swallowed.",
+        ...(isListLayoutEdge ? [
+          "",
+          "Wrapping and numbered steps:",
+          "",
+          "- A longer item should wrap onto the same text edge, with its marker kept inside the reply column even when the pane is narrow or the interface size is increased.",
+          "- The second item keeps the same rhythm and indentation.",
+          "",
+          "9. Run the focused retry test and inspect the exhausted-retry result before continuing with the next step.",
+          "10. Confirm that the final error reaches the caller and that a recovered request stops the retry loop immediately.",
+        ] : []),
+      ].join("\n"),
+      {},
+      -12,
+    ),
+  );
+}
+
 // The capture behaves like a small in-memory desktop store. A first message
 // causes the UI to refresh that session's transcript while the response is
 // arriving; returning an empty array there would erase the optimistic turn
@@ -337,6 +432,54 @@ const captureEventsBySessionId = new Map<
   string,
   Array<ReturnType<typeof sessionEvent>>
 >([[SESSION_ID, isReelCapture ? [] : chatEvents]]);
+if (isSplitEdge) {
+  // The second pane needs its own transcript, or it would open as a blank chat.
+  captureEventsBySessionId.set(
+    SPLIT_SESSION_ID,
+    [
+      sessionEvent(
+        "user-message",
+        "The editor file tree test fails about one run in ten. Find out why.",
+        {},
+        -260,
+      ),
+      sessionEvent(
+        "system-event",
+        "Codex CLI finished",
+        {
+          kind: "provider-status",
+          status: "completed",
+          providerId: "openai",
+          providerLabel: "Codex CLI",
+          modelLabel: "GPT-5.6",
+          startedAt: at(-260),
+          completedAt: at(-258),
+          durationMs: 96_000,
+        },
+        -258,
+      ),
+      activity("search", "Searched for expandFolder", "tree/*.ts", -259),
+      sessionEvent(
+        "assistant-message",
+        "The test clicks a folder before `expandFolder()` has resolved. It now waits for the row to report expanded, and passed 50 runs in a row.",
+        {},
+        -258,
+      ),
+    ].map((event) => ({
+      ...event,
+      sessionId: SPLIT_SESSION_ID,
+      turnId: "turn_split_1",
+    })),
+  );
+}
+
+// Three distinct restored sessions exercise the real one-row layout.
+if (isThreeEdge) {
+  captureEventsBySessionId.set("ses_capture_3", [
+    sessionEvent("user-message", "Audit the provider argument contracts.", {}, -5),
+    sessionEvent("assistant-message", "The model and effort arguments now follow each provider's contract.", {}, -4),
+  ].map(event => ({ ...event, sessionId: "ses_capture_3", turnId: "turn_capture_3" })));
+}
 
 // The reel driver uses the real composer and its send handler. Only the fake
 // provider completion is stepped manually, so wall-clock rendering speed
@@ -483,7 +626,7 @@ const config = {
 };
 
 // First-connection state for the Providers settings visual check.
-if (scene === "providers" && parameters.get("edge") === "disconnected") {
+if (["providers", "welcome"].includes(scene) && parameters.get("edge") === "disconnected") {
   config.modelProviders = config.modelProviders.map((provider) => ({
     ...provider,
     enabled: false,
@@ -1414,6 +1557,53 @@ const invoke: Invoke = (command, args) => {
         };
       });
     }
+    // A run that never finishes: a partial reply, one finished search and one
+    // command still running. The promise is left pending on purpose.
+    if (isStreamingEdge) {
+      const emit = (
+        kind: string,
+        message: string,
+        payload: Record<string, unknown> = {},
+      ) => {
+        const event = captureSessionEvent(
+          sessionId,
+          turnId,
+          kind,
+          message,
+          payload,
+        );
+        captureEventsBySessionId.set(sessionId, [
+          ...(captureEventsBySessionId.get(sessionId) ?? []),
+          event,
+        ]);
+        for (const [id, name] of captureListeners) {
+          if (name === "gyro://provider-capability-event")
+            callbacks.get(id)?.({ event: name, id, payload: event });
+        }
+      };
+      window.setTimeout(() => {
+        emit(
+          "assistant-message",
+          "`drain()` loops on failure with no ceiling, so a 503 spins forever. I'll cap it at 5 attempts with exponential backoff and surface the last error instead of swallowing it.",
+        );
+        emit("system-event", "Searched for retry", {
+          kind: "provider-activity",
+          activityKind: "search",
+          activityId: "capture-streaming-search",
+          label: "Searched for retry",
+          detail: "sync.js, queue/*.js",
+          status: "done",
+        });
+        emit("system-event", "npm test -- sync.test.js", {
+          kind: "provider-activity",
+          activityKind: "command",
+          activityId: "capture-streaming-command",
+          label: "npm test -- sync.test.js",
+          status: "running",
+        });
+      }, 50);
+      return new Promise(() => {});
+    }
     // Manual steps make streaming placement and the completed review card
     // reproducible without a provider, a real edit, or timing-dependent waits.
     if (parameters.get("edge") === "live-file-changes") {
@@ -1804,7 +1994,13 @@ if (scene === "companion-layout") {
 }
 
 // Start the approval preview on its seeded conversation instead of a saved draft.
-if (parameters.get("edge") === "inline-approval" || isReelCapture) {
+if (
+  parameters.get("edge") === "inline-approval" ||
+  isReelCapture ||
+  isStreamingEdge ||
+  isCodeBlockEdge ||
+  isSplitEdge
+) {
   const paneId = `session:${SESSION_ID}`;
   localStorage.setItem(
     "gyro.chat-grid-layouts-v1",
@@ -1814,6 +2010,8 @@ if (parameters.get("edge") === "inline-approval" || isReelCapture) {
         [WORKSPACE]: {
           projectKey: WORKSPACE,
           focusedPaneId: paneId,
+          ...(isStackedEdge ? { arrangement: "rows", splitDirection: "vertical" } : {}),
+          ...(isThreeEdge ? { arrangement: "columns", splitDirection: "horizontal" } : {}),
           slots: [
             {
               paneId,
@@ -1821,8 +2019,20 @@ if (parameters.get("edge") === "inline-approval" || isReelCapture) {
               sessionId: SESSION_ID,
               workspacePath: WORKSPACE,
             },
-            null,
-            null,
+            isSplitEdge
+              ? {
+                  paneId: `session:${SPLIT_SESSION_ID}`,
+                  kind: "session",
+                  sessionId: SPLIT_SESSION_ID,
+                  workspacePath: WORKSPACE,
+                }
+              : null,
+            isThreeEdge ? {
+              paneId: "session:ses_capture_3",
+              kind: "session",
+              sessionId: "ses_capture_3",
+              workspacePath: WORKSPACE,
+            } : null,
             null,
           ],
         },

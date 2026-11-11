@@ -153,10 +153,15 @@ pub(crate) fn provider_context_message_with_capabilities_for_turn(
         if let Some(workspace) = request.workspace_path.as_deref() {
             context.push(format!("Selected workspace: {workspace}"));
         }
-        // The path stays in the tail. These rules are the same on every turn,
-        // including resume, so they stay in the stable prefix.
-        stable.push("Use the selected workspace to carry out workspace requests. Inspect actual files with the available Gyro tools before making claims about them; do not ask the user to paste files you can read. Prefer Gyro Workspace tools so reads, changes, command output, and review state remain connected to this chat. For unrelated questions, answer directly without unnecessary workspace calls. Use file paths supplied by the user or observed in workspace results; discover unfamiliar filenames before narrowing a read or search to them. If a search scope does not exist, inspect an existing parent or search from the workspace root before trying another path.".into());
-        stable.push("Paths are relative to the selected workspace root, never to the last file read or listed. Preserve each user-supplied path exactly: a bare filename names a root file, even when another requested file is in a subdirectory. A failed read is not permission to create that path. Recheck the original request and use gyro_workspace_list with path \".\" to locate existing files before proposing a replacement or a new file. Create files only when the requested change calls for them. Read-only requests and explicit edit-path limits also apply to pending proposals, memory notes and housekeeping files; proposing an out-of-scope write is not a read-only action even if review would block application. Keep facts for the next reply in conversation context when file writes are forbidden. When multiple roots are configured, get their root IDs from gyro_workspace_get_context and pass rootId to root-specific tools.".into());
+        // A resumed provider thread already holds the full workspace guide.
+        // Keep a short scope reminder; live path/check/policy still travel above
+        // and below it. Fresh and request-owned API prompts retain the full guide.
+        if turn.resumed {
+            context.push("Use Gyro Workspace tools and verified files for workspace work. Paths are workspace-root-relative; preserve user-supplied paths exactly. Discover missing paths before retrying; a failed read never authorizes creation. Read-only and edit-path limits also cover proposals, memory and housekeeping. Create files only as requested; keep facts in conversation when writes are forbidden. When multiple roots are configured, get root IDs from gyro_workspace_get_context and pass rootId to root-specific tools.".into());
+        } else {
+            stable.push("Use the selected workspace to carry out workspace requests. Inspect actual files with the available Gyro tools before making claims about them; do not ask the user to paste files you can read. Prefer Gyro Workspace tools so reads, changes, command output, and review state remain connected to this chat. For unrelated questions, answer directly without unnecessary workspace calls. Use file paths supplied by the user or observed in workspace results; discover unfamiliar filenames before narrowing a read or search to them. If a search scope does not exist, inspect an existing parent or search from the workspace root before trying another path.".into());
+            stable.push("Paths are relative to the selected workspace root, never to the last file read or listed. Preserve each user-supplied path exactly: a bare filename names a root file, even when another requested file is in a subdirectory. A failed read is not permission to create that path. Recheck the original request and use gyro_workspace_list with path \".\" to locate existing files before proposing a replacement or a new file. Create files only when the requested change calls for them. Read-only requests and explicit edit-path limits also apply to pending proposals, memory notes and housekeeping files; proposing an out-of-scope write is not a read-only action even if review would block application. Keep facts for the next reply in conversation context when file writes are forbidden. When multiple roots are configured, get their root IDs from gyro_workspace_get_context and pass rootId to root-specific tools.".into());
+        }
         if request.mode == ChatMode::Normal {
             // Tool descriptions already name list, search, read, and edit.
             // Repeating that tutorial on every fresh session was paid again
@@ -235,7 +240,7 @@ pub(crate) fn provider_context_message_with_capabilities_for_turn(
     } else if request.plan.is_some() {
         // Outside Plan mode the model was never told the marker exists, so the
         // checklist sat at all-todo through the whole implementation turn.
-        context.push("The Gyro plan below is live while you work. As you finish or block steps, include one hidden line before the answer in this exact form: GYRO_PLAN_UPDATE: {\"action\":\"update-items\",\"items\":[{\"id\":\"step-id\",\"status\":\"complete\"}]}. Reuse the ids shown in the checklist, list every step whose status changed this turn, keep the JSON on one line, and use only todo, in-progress, complete, or blocked. Before the final reply, reconcile the checklist with the verified outcome: mark finished steps complete; mark steps waiting on user input or external acceptance blocked with a detail explaining what remains; return paused work to todo. Do not leave a step in-progress after stopping work, or claim the whole plan is done while required steps remain.".into());
+        context.push("Keep the Gyro plan below current while you work. Before starting a step, emit a hidden progress line in commentary marking it in-progress. Immediately after finishing or blocking a step, emit another progress line before your next tool call; do not wait for the final answer. Use this exact form: GYRO_PLAN_UPDATE: {\"action\":\"update-items\",\"items\":[{\"id\":\"step-id\",\"status\":\"complete\"}]}. Reuse the ids shown in the checklist, list only the steps whose status just changed, keep the JSON on one line, and use only todo, in-progress, complete, or blocked. Before the final reply, reconcile the checklist with the verified outcome: mark finished steps complete; mark steps waiting on user input or external acceptance blocked with a detail explaining what remains; return paused work to todo. Do not leave a step in-progress after stopping work, or claim the whole plan is done while required steps remain.".into());
     }
     // Policy can change between turns, so it is resent even on resume — once.
     if !turn.approvals_sent_separately {
@@ -250,6 +255,15 @@ pub(crate) fn provider_context_message_with_capabilities_for_turn(
     }
     if let Some(plan) = request.plan.as_ref().and_then(plan_context_line) {
         context.push(plan);
+    }
+    if let Some(memory) = &request.project_memory {
+        let (text, _) = memory.render(turn.resumed);
+        if !text.is_empty() {
+            context.push(text);
+        }
+        if memory.suggest_candidates {
+            context.push(gyro_core::project_memory::CANDIDATE_INSTRUCTION.into());
+        }
     }
     let references = request
         .attachments
@@ -325,7 +339,9 @@ pub(crate) fn provider_context_message_with_capabilities_for_turn(
             } else {
                 attribution.history += chars;
             }
-        } else if part.starts_with("Explicit user attachments:") {
+        } else if part.starts_with("Explicit user attachments:")
+            || part.starts_with("Project memory")
+        {
             attribution.source_excerpts += chars;
         } else if part.starts_with("Goal:") || part.starts_with("Gyro plan") {
             attribution.task_state += chars;
@@ -420,3 +436,7 @@ pub(crate) use gyro_core::provider_runtime::types::PromptTurn;
 pub(crate) use gyro_core::provider_runtime::prompts::claude_chat_prompt;
 #[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::prompts::openai_codex_chat_prompt;
+
+#[cfg(test)]
+#[path = "memory_prompt_tests.rs"]
+mod memory_tests;

@@ -5,8 +5,9 @@ export function resolveChatPaneClose(
   grid: ChatGridState,
   candidate: { paneId: string; sessionId?: string },
 ) {
-  const layout = Object.values(grid.layouts).find((entry) =>
-    entry.slots.some(
+  const activeLayout = grid.activeProjectKey ? grid.layouts[grid.activeProjectKey] : undefined;
+  const layout = [activeLayout, ...Object.values(grid.layouts)].find((entry) =>
+    entry?.slots.some(
       (pane) =>
         pane?.paneId === candidate.paneId &&
         (candidate.sessionId === undefined ||

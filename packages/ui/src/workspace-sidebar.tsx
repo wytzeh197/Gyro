@@ -1,9 +1,10 @@
+import { gitSetupMessage } from "./workspace-preparation";
 import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
   Box,
-  CalendarClock,
+  Workflow,
   Check,
   ChevronDown,
   ChevronRight,
@@ -62,7 +63,6 @@ import { AntigravityMark } from "./antigravity-mark";
 import { branchCommitDetail, recentBranches } from "./branch-recency";
 import { formatRunDuration } from "./chat-run";
 import "./automation-detail.css";
-import "./chat-canvas.css";
 import { startChatPointerDrag } from "./chat-pointer-drag";
 import {
   beginChatSessionDrag,
@@ -74,7 +74,6 @@ import {
 } from "./chat-session-drag";
 import { CheckWorkMenuItem } from "./check-work-context";
 import { CliSessionList } from "./cli-session-list";
-import "./companion-motion.css";
 import { confirmAction } from "./confirm-action";
 import { resolveLanguage } from "./editor/languages/registry";
 import { useOutsidePointerDismiss } from "./menu-dismiss";
@@ -783,6 +782,7 @@ export function WorkspaceSidebarContent({
   onStageAllSourceControl,
   onDiscardSourceControlFile,
   onOpenSourceControlDiff,
+  onReviewWithAgent,
   onCommitSourceControl,
   onPushSourceControl,
   onPullSourceControl,
@@ -900,6 +900,7 @@ export function WorkspaceSidebarContent({
   onStageAllSourceControl?: () => void | Promise<void>;
   onDiscardSourceControlFile?: (path: string) => void | Promise<void>;
   onOpenSourceControlDiff?: (path: string, staged: boolean) => void;
+  onReviewWithAgent?: () => void;
   onCommitSourceControl?: (message: string) => void;
   onPushSourceControl?: () => void;
   onPullSourceControl?: () => void;
@@ -2661,6 +2662,18 @@ export function WorkspaceSidebarContent({
               }
             >
               <div className="gyro-scm-panel">
+                {onReviewWithAgent ? (
+                  <button
+                    className="gyro-sidebar-action"
+                    type="button"
+                    aria-label="Get a second opinion on uncommitted changes"
+                    title="Get a second opinion on changes in this project"
+                    onClick={onReviewWithAgent}
+                  >
+                    <GitPullRequest size={14} />
+                    <span>Get a second opinion</span>
+                  </button>
+                ) : null}
                 <div
                   className="gyro-scm-repository-section"
                   style={{
@@ -2847,15 +2860,22 @@ export function WorkspaceSidebarContent({
                         {remoteCheckMessage}
                       </div>
                     ) : null}
-                    {ide?.sourceControl.error ? (
-                      <div className="gyro-sidebar-mini-copy is-error">
-                        {ide.sourceControl.error}
+                    {gitSetupMessage(ide?.sourceControl.readState) ? (
+                      <div className="gyro-sidebar-mini-copy" role="status">
+                        {gitSetupMessage(ide?.sourceControl.readState)}
                       </div>
-                    ) : null}
-                    {ide?.sourceControl.available === false &&
-                    !ide?.sourceControl.error ? (
-                      <div className="gyro-sidebar-mini-copy">
-                        Git is not ready for this workspace.
+                    ) : ide?.sourceControl.error ? (
+                      <div className="gyro-sidebar-mini-copy is-error" role="status">
+                        Couldn’t refresh Git status.
+                        {ide.sourceControl.stale ? " Showing last-known changes." : ""}
+                        <details>
+                          <summary>Details</summary>
+                          {ide.sourceControl.error}
+                        </details>
+                      </div>
+                    ) : ide?.sourceControl.available === false ? (
+                      <div className="gyro-sidebar-mini-copy" role="status">
+                        Git status is unavailable. Refresh to try again.
                       </div>
                     ) : null}
                   </div>
@@ -3009,7 +3029,7 @@ export function WorkspaceSidebarContent({
                     className="is-changes"
                     collapsed={collapsedScmGroups.has("changes")}
                     emptyCopy={
-                      ide?.sourceControl.available === false
+                      ide?.sourceControl.available !== true || ide.sourceControl.stale || ide.sourceControl.error
                         ? undefined
                         : stagedSourceControlFiles.length > 0
                           ? "Everything else is staged"
@@ -3409,9 +3429,7 @@ export function WorkspaceSidebarContent({
                       />
                       {entry.variants.length > 0 ? (
                         <details className="gyro-run-task-variants">
-                          <summary>
-                            {entry.variants.length} more
-                          </summary>
+                          <summary>{entry.variants.length} more</summary>
                           {entry.variants.map((variant) => (
                             <RunTaskRow
                               key={variant.id}
@@ -3432,10 +3450,7 @@ export function WorkspaceSidebarContent({
                   ));
                   if (group.collapsed) {
                     return (
-                      <details
-                        className="gyro-run-task-group"
-                        key={group.id}
-                      >
+                      <details className="gyro-run-task-group" key={group.id}>
                         <summary className="gyro-run-task-group-label">
                           {group.label}
                           <small>{group.tasks.length}</small>
@@ -3638,7 +3653,7 @@ export function WorkspaceSidebarContent({
 
       {isSessionsSidebar ? (
         <>
-          <div className="gyro-sidebar-actions">
+          <div className="gyro-sidebar-actions gyro-sidebar-quick-actions">
             <div className="gyro-sidebar-new-session" ref={newSessionMenuRef}>
               <button
                 aria-expanded={newSessionMenuView !== "closed"}
@@ -3652,7 +3667,7 @@ export function WorkspaceSidebarContent({
                 type="button"
               >
                 <Plus size={15} />
-                New Session
+                New session
               </button>
               {newSessionMenuView !== "closed" ? (
                 <div
@@ -3807,7 +3822,9 @@ export function WorkspaceSidebarContent({
               ) : null}
             </div>
             <button
-              className="gyro-sidebar-action"
+              aria-label="Search"
+              title={`Search (${primaryGlobalSearchShortcut("global")})`}
+              className="gyro-sidebar-action gyro-sidebar-icon-action"
               onClick={() => {
                 setNewSessionMenuView("closed");
                 onOpenCommandPalette();
@@ -3815,24 +3832,21 @@ export function WorkspaceSidebarContent({
               type="button"
             >
               <Search size={15} />
-              <span>Search</span>
-              <kbd className="gyro-sidebar-shortcut">
-                {primaryGlobalSearchShortcut("global")}
-              </kbd>
             </button>
             <button
               aria-current={
                 activeDestination === "automations" ? "page" : undefined
               }
-              className={`gyro-sidebar-action${activeDestination === "automations" ? " is-active" : ""}`}
+              aria-label="Workflows"
+              title="Workflows"
+              className={`gyro-sidebar-action gyro-sidebar-icon-action${activeDestination === "automations" ? " is-active" : ""}`}
               onClick={() => {
                 setNewSessionMenuView("closed");
                 onSelectDestination("automations");
               }}
               type="button"
             >
-              <CalendarClock size={15} />
-              <span>Automations</span>
+              <Workflow size={15} />
             </button>
           </div>
 
@@ -3870,9 +3884,17 @@ export function WorkspaceSidebarContent({
                   {pinnedSessions.map((session) => renderSessionRow(session))}
                 </>
               ) : null}
-              {projectGroups.length > 0 ? (
-                <div className="gyro-sidebar-small-title">Projects</div>
-              ) : null}
+              <div className="gyro-sidebar-small-title gyro-sidebar-projects-heading">
+                <span>Projects</span>
+                <button
+                  type="button"
+                  aria-label="Open project"
+                  title="Open project"
+                  onClick={onOpenWorkspace}
+                >
+                  <Plus size={15} />
+                </button>
+              </div>
               {projectGroups.map((project, projectIndex) => {
                 const isCollapsed = collapsedProjectIds.includes(project.key);
                 const projectDrafts = draftsByProjectKey.get(project.key) ?? [];
@@ -3955,6 +3977,62 @@ export function WorkspaceSidebarContent({
                     }}
                   >
                     <SidebarProjectCard
+                      expandedContent={
+                        !isCollapsed ? (
+                          <>
+                            {projectDrafts.map((draft) =>
+                              renderDraftRow(draft, true),
+                            )}
+                            {visibleProjectSessions.length > 0 ? (
+                              visibleProjectSessions.map((session) =>
+                                renderSessionRow(session, true),
+                              )
+                            ) : projectDrafts.length > 0 ? null : (
+                              <button
+                                className="gyro-sidebar-thread is-empty"
+                                onClick={onCreateSession}
+                                type="button"
+                              >
+                                <span>No recent sessions</span>
+                              </button>
+                            )}
+                            {hiddenCount > 0 || hasRevealedMore ? (
+                              <div className="gyro-sidebar-more-actions">
+                                {hiddenCount > 0 ? (
+                                  <button
+                                    aria-expanded={hasRevealedMore}
+                                    aria-label={`Show more chats in ${project.label}`}
+                                    className="gyro-sidebar-more-button"
+                                    onClick={() =>
+                                      showMoreProjectSessions(
+                                        project.key,
+                                        project.items.length,
+                                      )
+                                    }
+                                    type="button"
+                                  >
+                                    <ChevronDown aria-hidden="true" size={12} />
+                                    <span>more</span>
+                                  </button>
+                                ) : null}
+                                {hasRevealedMore ? (
+                                  <button
+                                    aria-label={`Show fewer chats in ${project.label}`}
+                                    className="gyro-sidebar-more-button"
+                                    onClick={() =>
+                                      showLessProjectSessions(project.key)
+                                    }
+                                    type="button"
+                                  >
+                                    <ChevronUp aria-hidden="true" size={12} />
+                                    <span>less</span>
+                                  </button>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </>
+                        ) : null
+                      }
                       path={project.key}
                       name={project.label}
                       taskCount={project.items.length}
@@ -3965,6 +4043,13 @@ export function WorkspaceSidebarContent({
                       }
                       settings={
                         project.hasWorkspace ? projectSettings : undefined
+                      }
+                      memorySessionId={
+                        (
+                          project.items.find(
+                            (item) => item.id === activeSessionId,
+                          ) ?? project.items[0]
+                        )?.id
                       }
                       onRemove={
                         project.hasWorkspace
@@ -3978,6 +4063,25 @@ export function WorkspaceSidebarContent({
                     >
                       <SidebarProjectRow
                         draggable
+                        isPinned={
+                          projectSettings?.details[project.key]?.pinned ?? false
+                        }
+                        onPin={
+                          project.hasWorkspace && projectSettings
+                            ? () => {
+                                const details =
+                                  projectSettings.details[project.key];
+                                projectSettings.save(
+                                  project.key,
+                                  project.label,
+                                  !details?.pinned,
+                                  projectSettings.folders[project.key] ?? [],
+                                  details?.primaryFolder,
+                                  details?.allowNestedFolders,
+                                );
+                              }
+                            : undefined
+                        }
                         icon={
                           project.hasWorkspace
                             ? isCollapsed
@@ -4018,58 +4122,6 @@ export function WorkspaceSidebarContent({
                         onClick={() => toggleProject(project.key)}
                       />
                     </SidebarProjectCard>
-                    {!isCollapsed ? (
-                      <>
-                        {projectDrafts.map((draft) =>
-                          renderDraftRow(draft, true),
-                        )}
-                        {visibleProjectSessions.length > 0 ? (
-                          visibleProjectSessions.map((session) =>
-                            renderSessionRow(session, true),
-                          )
-                        ) : projectDrafts.length > 0 ? null : (
-                          <button
-                            className="gyro-sidebar-thread is-empty"
-                            onClick={onCreateSession}
-                            type="button"
-                          >
-                            <span>No recent sessions</span>
-                          </button>
-                        )}
-                        {hiddenCount > 0 || hasRevealedMore ? (
-                          <div className="gyro-sidebar-more-actions">
-                            {hiddenCount > 0 ? (
-                              <button
-                                aria-expanded={hasRevealedMore}
-                                className="gyro-sidebar-more-button"
-                                onClick={() =>
-                                  showMoreProjectSessions(
-                                    project.key,
-                                    project.items.length,
-                                  )
-                                }
-                                type="button"
-                              >
-                                <ChevronDown aria-hidden="true" size={12} />
-                                <span>more</span>
-                              </button>
-                            ) : null}
-                            {hasRevealedMore ? (
-                              <button
-                                className="gyro-sidebar-more-button"
-                                onClick={() =>
-                                  showLessProjectSessions(project.key)
-                                }
-                                type="button"
-                              >
-                                <ChevronUp aria-hidden="true" size={12} />
-                                <span>less</span>
-                              </button>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </>
-                    ) : null}
                   </div>
                 );
               })}
@@ -4204,6 +4256,8 @@ export function SidebarProjectRow({
   onDragStart,
   onKeyDown,
   onRemove,
+  isPinned,
+  onPin,
 }: {
   draggable?: boolean;
   icon: IconComponent;
@@ -4216,6 +4270,8 @@ export function SidebarProjectRow({
   onDragStart?: (event: ReactDragEvent<HTMLDivElement>) => void;
   onKeyDown?: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
   onRemove?: () => void;
+  isPinned?: boolean;
+  onPin?: () => void;
 }) {
   return (
     <div
@@ -4225,6 +4281,7 @@ export function SidebarProjectRow({
         draggable ? "is-draggable" : "",
         isDragging ? "is-dragging" : "",
         onRemove ? "has-remove" : "",
+        onPin ? "has-pin" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -4244,10 +4301,29 @@ export function SidebarProjectRow({
         onClick={onClick}
         type="button"
       >
+        {isCollapsed !== undefined ? (
+          isCollapsed ? (
+            <ChevronRight className="gyro-project-chevron" size={13} />
+          ) : (
+            <ChevronDown className="gyro-project-chevron" size={13} />
+          )
+        ) : null}
         <Icon size={15} />
         <span>{label}</span>
         {isCollapsed === undefined ? meta ? <small>{meta}</small> : null : null}
       </button>
+      {onPin ? (
+        <button
+          type="button"
+          className="gyro-sidebar-project-pin"
+          aria-label={`${isPinned ? "Unpin" : "Pin"} ${label}`}
+          title={`${isPinned ? "Unpin" : "Pin"} ${label}`}
+          aria-pressed={Boolean(isPinned)}
+          onClick={onPin}
+        >
+          <Pin size={14} fill={isPinned ? "currentColor" : "none"} />
+        </button>
+      ) : null}
       {onRemove ? (
         <button
           aria-label={`Remove ${label} from Gyro app`}
@@ -4283,6 +4359,7 @@ export function DraftSidebarRow({
         isNested ? "is-nested" : "",
       ].join(" ")}
     >
+      {isNested ? <span aria-hidden="true" className="gyro-sidebar-tree-branch" /> : null}
       <button
         aria-current={isActive ? "page" : undefined}
         aria-label={title}
@@ -4388,7 +4465,6 @@ export function SessionSidebarRow({
           ? "has-idle-time"
           : "",
         approvalCount > 0 ? "is-awaiting-approval" : "",
-        isAwaitingQuestion ? "is-awaiting-question" : "",
         isNested ? "is-nested" : "",
         isPinned ? "is-pinned" : "",
         isOpen ? "is-open" : "",
@@ -4402,10 +4478,11 @@ export function SessionSidebarRow({
       onDragStart={onDragStart}
       onPointerDown={onPointerDown}
     >
+      {isNested ? <span aria-hidden="true" className="gyro-sidebar-tree-branch" /> : null}
       <button
         aria-current={isActive ? "page" : undefined}
         aria-label={ariaTitle}
-        title={session.title}
+        title={[session.title, ...badgeLabels].join(" · ")}
         className={
           sessionProviderId
             ? "gyro-sidebar-thread-main has-model-logo"
@@ -4459,8 +4536,8 @@ export function SessionSidebarRow({
           className={[
             "gyro-session-time",
             approvalCount > 0 ? "is-approval" : "",
-            isAwaitingQuestion ? "is-question" : "",
             !isAwaitingInput && isSending ? "is-working" : "",
+            isAwaitingQuestion ? "is-needs-input" : "",
             !isAwaitingInput && !isSending && isUnreadComplete
               ? "is-complete"
               : "",
@@ -4480,9 +4557,12 @@ export function SessionSidebarRow({
           }
         >
           {approvalCount > 0 ? (
-            <span>Awaiting approval</span>
+            <>
+              <PauseCircle aria-hidden="true" size={14} />
+              <span className="gyro-sr-only">Awaiting approval</span>
+            </>
           ) : isAwaitingQuestion ? (
-            <span>Needs input</span>
+            "Needs Input"
           ) : isSending ? (
             <CircleDashed aria-hidden="true" size={13} />
           ) : isUnreadComplete ? (

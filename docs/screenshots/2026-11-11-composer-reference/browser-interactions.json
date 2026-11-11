@@ -1,0 +1,42 @@
+[
+  {
+    "width": 1440,
+    "disconnected": false,
+    "bottom": 18,
+    "inputHeight": 148,
+    "menuInside": true,
+    "typing": true,
+    "send": "fixture sent",
+    "escape": true
+  },
+  {
+    "width": 1440,
+    "disconnected": true,
+    "bottom": 18,
+    "inputHeight": 148,
+    "menuInside": true,
+    "typing": true,
+    "send": "blocked",
+    "escape": true
+  },
+  {
+    "width": 900,
+    "disconnected": false,
+    "bottom": 18,
+    "inputHeight": 148,
+    "menuInside": true,
+    "typing": true,
+    "send": "fixture sent",
+    "escape": true
+  },
+  {
+    "width": 900,
+    "disconnected": true,
+    "bottom": 18,
+    "inputHeight": 148,
+    "menuInside": true,
+    "typing": true,
+    "send": "blocked",
+    "escape": true
+  }
+]

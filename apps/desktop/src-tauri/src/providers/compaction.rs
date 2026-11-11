@@ -62,6 +62,8 @@ pub(crate) fn run_compaction_summary_call(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        workflow_run_id: None,
+        project_memory: None,
         internal_purpose: Some(InternalRequestPurpose::ContextSummary),
     };
     // An auto-compaction runs inside a turn that already bound its context. A
@@ -89,7 +91,15 @@ pub(crate) fn run_compaction_summary_call(
         app,
         &summary_request,
         None,
-        UsageContext::new(UsageOrigin::ContextCompaction),
+        UsageContext::new(
+            store
+                .workflow_dispatch_origin(Uuid::parse_str(&request.session_id).map_err(to_string)?)
+                .map_err(to_string)?
+                .filter(|origin| {
+                    matches!(origin, UsageOrigin::Automation | UsageOrigin::AgentSession)
+                })
+                .unwrap_or(UsageOrigin::ContextCompaction),
+        ),
     )
     .map(|output| (output.response, output.billed_usage))
     .map_err(|error| gyro_core::security::redact_secrets(&error.to_string()))
@@ -109,7 +119,7 @@ pub(crate) fn compact_local_provider_chat(
     let fallback = local_compaction_summary(&events).ok_or_else(|| {
         "this chat needs a completed reply before context can be compacted".to_string()
     })?;
-    let params = serde_json::json!({ "turnId": run_id.to_string() });
+    let params = serde_json::json!({ "turnId": format!("{run_id}:{}", Uuid::new_v4()) });
     let label = request
         .model_label
         .as_deref()
@@ -147,7 +157,19 @@ pub(crate) fn compact_local_provider_chat(
         // rewrite, worded as the rewrite it is.
         Err(error) => (fallback, None, Some(error)),
     };
-    if let (Some(error), true) = (failure.as_deref(), resumable) {
+    let cancelled = super::streaming::provider_chat_cancelled(app, &request.session_id)
+        || failure
+            .as_deref()
+            .is_some_and(super::retry::is_provider_cancellation);
+    let failure = if cancelled {
+        Some(super::streaming::provider_stop_message(
+            app,
+            &request.session_id,
+        ))
+    } else {
+        failure
+    };
+    if let (Some(error), true) = (failure.as_deref(), resumable || cancelled) {
         let failed = ProviderActivity {
             id: running.id,
             kind: "context".into(),
@@ -157,7 +179,7 @@ pub(crate) fn compact_local_provider_chat(
             )),
             file_counts: None,
             note: None,
-            status: "failed".into(),
+            status: if cancelled { "cancelled" } else { "failed" }.into(),
         };
         emit_provider_activity_event(app, request, &failed, Some(0));
         let _ = store.append_system_events_with_turn_id(
@@ -166,12 +188,6 @@ pub(crate) fn compact_local_provider_chat(
         );
         return Err(error.to_string());
     }
-    // A new provider session starts from the saved checkpoint on the next
-    // turn. If writing the checkpoint fails, the transcript still carries the
-    // original messages and the normal handoff path can reconstruct them.
-    store
-        .clear_provider_session_binding(session_id, &request.provider_id)
-        .map_err(to_string)?;
     let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     let report = context_compaction::CompactionSummary {
         label,
@@ -212,6 +228,11 @@ pub(crate) fn compact_local_provider_chat(
     }
     let activity_events = store
         .append_system_events_with_turn_id(session_id, vec![entry])
+        .map_err(to_string)?;
+    // Persist the checkpoint before invalidating the resumable session.
+    // A failed checkpoint write must leave the previous binding usable.
+    store
+        .clear_provider_session_binding(session_id, &request.provider_id)
         .map_err(to_string)?;
     emit_provider_activity_event(app, request, &completed, Some(0));
     Ok(ProviderContextCompactionResponse { activity_events })

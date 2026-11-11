@@ -51,6 +51,33 @@ impl ProviderRunReservation {
     }
 }
 
+/// A cancellation request is not permission to run a second writer. Wait for
+/// the worker to release its own reservation; never remove it from the caller.
+/// Runs on a blocking worker, without holding the registry lock while waiting.
+pub(crate) fn wait_for_owned_run_release(
+    flags: &Mutex<HashMap<String, Arc<ProviderRunControl>>>,
+    session_id: &str,
+    control: &Arc<ProviderRunControl>,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let still_owned = flags
+            .lock()
+            .map_err(|_| "provider cancellation state is unavailable".to_string())?
+            .get(session_id)
+            .is_some_and(|current| Arc::ptr_eq(current, control));
+        if !still_owned {
+            return Ok(());
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("The current turn is still stopping; the queued message is waiting for it to release the chat.".into());
+        }
+        std::thread::sleep(remaining.min(std::time::Duration::from_millis(10)));
+    }
+}
+
 fn release_owned_run(
     flags: &Mutex<HashMap<String, Arc<ProviderRunControl>>>,
     session_id: &str,
@@ -165,6 +192,66 @@ mod tests {
     };
     use gyro_core::{GyroPaths, SessionEventKind};
     use std::time::Duration;
+
+    #[test]
+    fn steer_waits_for_worker_release_without_releasing_its_slot() {
+        let control = Arc::new(ProviderRunControl::default());
+        control.cancellation.cancel();
+        let flags = Arc::new(Mutex::new(HashMap::from([(
+            "chat".into(),
+            control.clone(),
+        )])));
+        let (sent, received) = std::sync::mpsc::channel();
+        let worker_flags = flags.clone();
+        let worker_control = control.clone();
+        let waiter = std::thread::spawn(move || {
+            sent.send(wait_for_owned_run_release(
+                &worker_flags,
+                "chat",
+                &worker_control,
+                Duration::from_secs(2),
+            ))
+            .unwrap();
+        });
+        assert!(matches!(
+            received.recv_timeout(Duration::from_millis(25)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        assert!(Arc::ptr_eq(
+            flags.lock().unwrap().get("chat").unwrap(),
+            &control
+        ));
+        release_owned_run(&flags, "chat", &control);
+        received
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        waiter.join().unwrap();
+    }
+
+    #[test]
+    fn steer_acknowledgement_never_cancels_a_replacement_run() {
+        let original = Arc::new(ProviderRunControl::default());
+        original.cancellation.cancel();
+        let replacement = Arc::new(ProviderRunControl::default());
+        let flags = Mutex::new(HashMap::from([("chat".into(), replacement.clone())]));
+        wait_for_owned_run_release(&flags, "chat", &original, Duration::ZERO).unwrap();
+        assert!(!replacement.cancellation.is_cancelled());
+        assert!(Arc::ptr_eq(
+            flags.lock().unwrap().get("chat").unwrap(),
+            &replacement
+        ));
+        wait_for_owned_run_release(&flags, "finished", &original, Duration::ZERO).unwrap();
+    }
+
+    #[test]
+    fn steer_timeout_preserves_the_active_run_reservation() {
+        let control = Arc::new(ProviderRunControl::default());
+        control.cancellation.cancel();
+        let flags = Mutex::new(HashMap::from([("chat".into(), control.clone())]));
+        assert!(wait_for_owned_run_release(&flags, "chat", &control, Duration::ZERO).is_err());
+        assert!(flags.lock().unwrap().contains_key("chat"));
+    }
 
     fn setup() -> (
         tempfile::TempDir,

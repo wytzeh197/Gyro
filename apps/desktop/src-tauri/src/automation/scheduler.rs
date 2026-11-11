@@ -79,6 +79,30 @@ pub(crate) fn start_automation_scheduler(app: tauri::AppHandle) {
                         for (automation, workspace) in
                             automation_dispatch_candidates(&paths, due, &running_workspaces)
                         {
+                            let busy = crate::stores::open_store()
+                                .ok()
+                                .and_then(|store| {
+                                    crate::features::workflow_execution::preflight::checkout_busy(
+                                        &app,
+                                        &store,
+                                        &workspace,
+                                        &[],
+                                    )
+                                    .ok()
+                                })
+                                .unwrap_or(true);
+                            if busy {
+                                continue;
+                            }
+                            let checkout =
+                                match gyro_core::workflows::WorkflowCheckoutLease::try_acquire(
+                                    &paths,
+                                    &workspace,
+                                    automation.execution.workflow_binding.is_some(),
+                                ) {
+                                    Ok(Some(lease)) => lease,
+                                    _ => continue,
+                                };
                             let admission =
                                 match AutomationRunAdmission::reserve(&app, automation.id) {
                                     Ok(Some(admission)) => admission,
@@ -112,6 +136,7 @@ pub(crate) fn start_automation_scheduler(app: tauri::AppHandle) {
                                                         &worker_paths,
                                                         claimed,
                                                         &admission,
+                                                        &checkout,
                                                     )
                                                 },
                                             )
@@ -383,7 +408,13 @@ fn execute_claimed_automation(
     paths: &GyroPaths,
     automation: &Automation,
     admission: &AutomationRunAdmission,
+    checkout: &gyro_core::workflows::WorkflowCheckoutLease,
 ) -> Result<String, String> {
+    if automation.execution.workflow_binding.is_some() {
+        return crate::features::workflow_execution::execute(
+            app, paths, automation, admission, checkout,
+        );
+    }
     let workspace_path = resolve_automation_workspace(paths, automation)?;
     let provider_id = automation
         .execution
@@ -467,6 +498,8 @@ fn execute_claimed_automation(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        workflow_run_id: None,
+        project_memory: None,
         internal_purpose: None,
     };
     // Register cancellation first, then re-read persisted state. A pause between

@@ -21,6 +21,14 @@ fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message.into()}})
 }
 
+/// A panicking tool call must not take the lock, and with it every later
+/// request, down with it; the guarded maps stay valid across a panic.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn send(output: &Mutex<impl Write>, message: &Value) -> anyhow::Result<()> {
     let mut output = output
         .lock()
@@ -56,24 +64,31 @@ where
                 };
                 let Ok((id, params)) = request else { return };
                 {
-                    let mut active = active.lock().unwrap();
+                    let mut active = lock(active);
                     if active.get(&id.to_string()) == Some(&CallState::Cancelled) {
                         active.remove(&id.to_string());
                         continue;
                     }
                     active.insert(id.to_string(), CallState::Running);
                 }
-                let result = match call(params) {
-                    Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-                    Err(failure) => error(
+                // A panic in one tool call would otherwise end this worker
+                // without an answer: the provider waits on that id until its
+                // own timeout, the pool shrinks for the rest of the run, and
+                // the scope re-raises the panic when the client disconnects.
+                let outcome =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call(params)));
+                let result = match outcome {
+                    Ok(Ok(result)) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+                    Ok(Err(failure)) => error(
                         id.clone(),
                         -32603,
                         gyro_core::sanitize_capability_summary(&failure.to_string()),
                     ),
+                    Err(_) => error(id.clone(), -32603, "Gyro tool call failed unexpectedly"),
                 };
-                active.lock().unwrap().remove(&id.to_string());
+                lock(active).remove(&id.to_string());
                 if let Err(failure) = send(output, &result) {
-                    *write_error.lock().unwrap() = Some(failure.to_string());
+                    *lock(&write_error) = Some(failure.to_string());
                     return;
                 }
             });
@@ -85,7 +100,7 @@ where
             )
             .map_err(anyhow::Error::msg)?
             {
-                if let Some(failure) = write_error.lock().unwrap().take() {
+                if let Some(failure) = lock(&write_error).take() {
                     anyhow::bail!(failure);
                 }
                 if line.iter().all(u8::is_ascii_whitespace) {
@@ -118,7 +133,7 @@ where
                 let Some(id) = id else {
                     if method == Some("notifications/cancelled") {
                         if let Some(request_id) = request.pointer("/params/requestId") {
-                            let mut active = active.lock().unwrap();
+                            let mut active = lock(&active);
                             if let Some(state) = active.get_mut(&request_id.to_string()) {
                                 if *state == CallState::Queued {
                                     *state = CallState::Cancelled;
@@ -161,7 +176,7 @@ where
                         }
                         let key = id.to_string();
                         {
-                            let mut active = active.lock().unwrap();
+                            let mut active = lock(&active);
                             if active.contains_key(&key) {
                                 send(&output, &error(id, -32600, "Request id is already in use"))?;
                                 continue;
@@ -169,7 +184,7 @@ where
                             active.insert(key.clone(), CallState::Queued);
                         }
                         if let Err(failure) = sender.try_send((id.clone(), params)) {
-                            active.lock().unwrap().remove(&key);
+                            lock(&active).remove(&key);
                             let message = match failure {
                                 mpsc::TrySendError::Full(_) => {
                                     "Gyro tool queue is full; wait for an active call to finish"
@@ -202,7 +217,7 @@ where
         drop(sender);
         result
     })?;
-    if let Some(failure) = write_error.lock().unwrap().take() {
+    if let Some(failure) = lock(&write_error).take() {
         anyhow::bail!(failure);
     }
     Ok(())
@@ -279,6 +294,52 @@ mod tests {
         );
         worker.join().unwrap().unwrap();
         assert!(output_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_panicking_tool_call_is_answered_and_leaves_every_worker_serving() {
+        // More panics than workers: each must be answered, and the call after
+        // them must still find a worker.
+        let mut input = String::new();
+        for id in 1..=TOOL_WORKERS + 2 {
+            input.push_str(&format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"tools/call\",\"params\":{{\"name\":\"fixture\",\"arguments\":{{\"panic\":true}}}}}}\n"
+            ));
+        }
+        input.push_str(
+            "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"tools/call\",\"params\":{\"name\":\"fixture\"}}\n",
+        );
+        let mut output = Vec::new();
+        serve(
+            &mut Cursor::new(input),
+            &mut output,
+            "fixture",
+            tools(),
+            |params| {
+                if params.pointer("/arguments/panic") == Some(&json!(true)) {
+                    panic!("fixture tool failure");
+                }
+                Ok(json!({"content": []}))
+            },
+        )
+        .unwrap();
+        let responses: Vec<Value> = output
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_slice(line).unwrap())
+            .collect();
+        assert_eq!(responses.len(), TOOL_WORKERS + 3);
+        for response in &responses {
+            if response["id"] == 99 {
+                assert!(response.get("result").is_some());
+            } else {
+                assert_eq!(response["error"]["code"], -32603);
+                assert!(!response["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("fixture tool failure"));
+            }
+        }
     }
 
     #[test]

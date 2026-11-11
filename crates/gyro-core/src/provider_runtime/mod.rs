@@ -1,6 +1,7 @@
 #![deny(clippy::wildcard_imports)]
 //! Shared provider execution contracts and host services.
 pub mod accounting;
+pub mod advisory;
 pub mod api_config;
 pub mod codex_client;
 mod codex_startup;
@@ -25,3 +26,6 @@ pub mod context;
 pub mod identity;
 
 pub mod registry;
+
+#[cfg(test)]
+mod advisory_transport_tests;

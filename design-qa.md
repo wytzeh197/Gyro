@@ -322,3 +322,11 @@ Sub-agent composer refinement: strip/composer edges match at regular and narrow 
 Implemented the selected option 1 and Reply in chat using the actual menu component and existing native approval-notification path. Full evidence, normalized side-by-side and focused comparisons, interaction checks, native tests, and limits are in [the menu bar review](docs/design/menu-bar-concepts-2026-11-07/implementation/design-qa.md). The approved per-chat AI logos and finished-result identity are covered by [the provider-logo review](docs/design/menu-bar-concepts-2026-11-07/implementation/provider-logos/design-qa.md). Browser preview: `http://127.0.0.1:1420/menu-bar-fixture.html`.
 
 The isolated production build and current component/type checks pass. Desktop TypeScript, menu/question checks and broad workbench smoke also pass on the clean proposed commit; unrelated dirty layout changes are excluded. Live macOS notification delivery, native tray/window interaction and live-provider resumption were not exercised, and the installed app was not replaced.
+
+---
+
+# Quiet workspace sidebar — November 11, 2026
+
+**final result: passed** (scoped browser/component review; native acceptance unverified)
+
+Implemented the approved merged sidebar concept with the hide control next to the Sessions/Workspace selector. Compact actions, project tree and pin persistence use existing production behavior. After the user correction, Project memory remains under Edit project and has no sidebar row. Detailed visual comparison, state coverage, backend paths, screenshots, checks and limits are recorded in [the sidebar review](docs/design/sidebar-implementation-review-2026-11-11.md). Full and focused light/dark captures are in `docs/screenshots/2026-11-11-sidebar-implementation/`.

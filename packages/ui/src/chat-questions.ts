@@ -12,6 +12,56 @@ export type ChatQuestionRequest = { id: string; questions: ChatQuestion[] };
 
 export const CHAT_QUESTION_REVEAL_EVENT = "gyro-reveal-chat-question";
 
+const QUESTION_DISMISSAL_PREFIX = "gyro:question-dismissed:v1:";
+const questionDismissalFallback = new Set<string>();
+const questionDismissalListeners = new Set<() => void>();
+const questionDismissalKey = (sessionId: string, requestId: string) =>
+  QUESTION_DISMISSAL_PREFIX + JSON.stringify([sessionId, requestId]);
+
+/** UI-only dismissal: no answer, provider turn, or approval is created. */
+export function isChatQuestionDismissed(sessionId: string, requestId: string) {
+  if (!requestId) return false;
+  const key = questionDismissalKey(sessionId, requestId);
+  try {
+    return window.localStorage.getItem(key) === "1" || questionDismissalFallback.has(key);
+  } catch {
+    return questionDismissalFallback.has(key);
+  }
+}
+
+export function setChatQuestionDismissed(
+  sessionId: string,
+  requestId: string,
+  dismissed: boolean,
+) {
+  if (!requestId) return;
+  const key = questionDismissalKey(sessionId, requestId);
+  if (dismissed) questionDismissalFallback.add(key);
+  else questionDismissalFallback.delete(key);
+  try {
+    if (dismissed) window.localStorage.setItem(key, "1");
+    else window.localStorage.removeItem(key);
+  } catch {
+    // Storage may be unavailable; retain dismissal across remounts this run.
+  }
+  for (const listener of questionDismissalListeners) listener();
+}
+
+export function subscribeChatQuestionDismissals(listener: () => void) {
+  questionDismissalListeners.add(listener);
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== null && !event.key.startsWith(QUESTION_DISMISSAL_PREFIX)) return;
+    if (event.key === null) questionDismissalFallback.clear();
+    else questionDismissalFallback.delete(event.key);
+    listener();
+  };
+  if (typeof window !== "undefined") window.addEventListener("storage", onStorage);
+  return () => {
+    questionDismissalListeners.delete(listener);
+    if (typeof window !== "undefined") window.removeEventListener("storage", onStorage);
+  };
+}
+
 /** Called after navigation so a dismissed question can be answered again. */
 export function revealChatQuestion(sessionId: string) {
   window.dispatchEvent(

@@ -101,6 +101,10 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     let config = GyroConfig::load(&paths).map_err(to_string)?;
     bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
+    request.project_memory = Some(gyro_core::project_memory::PreparedMemoryContext {
+        suggest_candidates: origin == UsageOrigin::Chat && session.parent_session_id.is_none(),
+        ..Default::default()
+    });
     delegated_agents::restrict_request(&app, &mut request);
     // The stored goal outranks the window's copy, which may predate a clear or
     // a completion made elsewhere; the window's copy covers a failed save.
@@ -147,7 +151,8 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
             }
         }
     }
-    let automatically_entered_plan = request.mode == ChatMode::Normal
+    let automatically_entered_plan = request.workflow_run_id.is_none()
+        && request.mode == ChatMode::Normal
         && lease.is_none()
         && normal_chat_requests_plan(&request.message);
     if automatically_entered_plan {
@@ -313,7 +318,7 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
         turn_status.as_deref(),
         binding.as_ref(),
     );
-    let runner_output = match run_provider_chat_with_retry(
+    let mut runner_output = match run_provider_chat_with_retry(
         &store,
         &app,
         &runner_request,
@@ -573,6 +578,27 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
         )
         .map_err(to_string)?;
     turn_finalizer.response_saved();
+    if origin == UsageOrigin::Chat
+        && session.parent_session_id.is_none()
+        && request.mode == ChatMode::Normal
+        && !runner_output.answer_cut_off
+        && !runner_output.paused_at_tool_budget
+    {
+        if let Err(error) = crate::features::project_memory::candidates::capture(
+            &app,
+            &store,
+            &session,
+            &request,
+            run_id,
+            &assistant_event,
+            &runner_output.response,
+        ) {
+            eprintln!(
+                "Memory suggestions unavailable: {}",
+                gyro_core::sanitize_capability_summary(&error.to_string())
+            );
+        }
+    }
     if let Err(error) = efficiency::save_checkpoint(&app, &store, &request) {
         eprintln!(
             "Checkpoint save failed: {}",
@@ -624,48 +650,49 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
             });
         plan_payloads.push(payload);
     }
-    let plan_events: Vec<_> = plan_payloads
-        .into_iter()
-        .filter_map(|mut payload| {
-            // The document belongs to the plan event. The assistant message is
-            // only the fallback for providers that emit a checklist without
-            // one, and a blank copy must not shadow the real text.
-            let has_document = ["content", "markdown"].iter().any(|key| {
-                payload
-                    .get(*key)
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|content| !content.trim().is_empty())
-            });
-            if request.mode == ChatMode::Plan
-                && !has_document
-                && !assistant_event.message.trim().is_empty()
-            {
-                let mut with_content = payload.clone();
-                if let Some(object) = with_content.as_object_mut() {
-                    object.insert(
-                        "content".into(),
-                        serde_json::Value::String(assistant_event.message.clone()),
-                    );
-                    // Keep within the event limit; the context index can use
-                    // the preceding assistant message as a content fallback.
-                    if serde_json::to_vec(&with_content)
-                        .is_ok_and(|encoded| encoded.len() <= 96 * 1024)
-                    {
-                        payload = with_content;
+    let plan_events: Vec<_> =
+        super::markers::unstreamed_plan_updates(&app, &request, plan_payloads)
+            .into_iter()
+            .filter_map(|mut payload| {
+                // The document belongs to the plan event. The assistant message is
+                // only the fallback for providers that emit a checklist without
+                // one, and a blank copy must not shadow the real text.
+                let has_document = ["content", "markdown"].iter().any(|key| {
+                    payload
+                        .get(*key)
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|content| !content.trim().is_empty())
+                });
+                if request.mode == ChatMode::Plan
+                    && !has_document
+                    && !assistant_event.message.trim().is_empty()
+                {
+                    let mut with_content = payload.clone();
+                    if let Some(object) = with_content.as_object_mut() {
+                        object.insert(
+                            "content".into(),
+                            serde_json::Value::String(assistant_event.message.clone()),
+                        );
+                        // Keep within the event limit; the context index can use
+                        // the preceding assistant message as a content fallback.
+                        if serde_json::to_vec(&with_content)
+                            .is_ok_and(|encoded| encoded.len() <= 96 * 1024)
+                        {
+                            payload = with_content;
+                        }
                     }
                 }
-            }
-            store
-                .append_event_with_turn_id(
-                    session_id,
-                    SessionEventKind::PlanUpdated,
-                    "Provider updated the plan",
-                    payload,
-                    Some(run_id),
-                )
-                .ok()
-        })
-        .collect();
+                store
+                    .append_event_with_turn_id(
+                        session_id,
+                        SessionEventKind::PlanUpdated,
+                        "Provider updated the plan",
+                        payload,
+                        Some(run_id),
+                    )
+                    .ok()
+            })
+            .collect();
 
     // The model may report that it met the goal, never that the goal changed:
     // the text stays the user's, only the status moves.
@@ -749,6 +776,45 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
     activity_events.extend(plan_events);
     if let Some(goal_event) = goal_event {
         activity_events.push(goal_event);
+    }
+    // Every adapter reaches this boundary with a durable reply and no active
+    // tool writes. Native CLIs cannot have their private context rewritten by
+    // an API loop, so compact here as well as before the next prompt.
+    // Close request admission under the same registry lock used by /compact.
+    // A click after this point waits for release and compacts independently.
+    if let Ok(flags) = app.state::<ProviderCancellationManager>().flags.lock() {
+        if let Some(control) = flags.get(&request.session_id) {
+            control
+                .context_compaction_closed
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+    if !provider_chat_cancelled(&app, &request.session_id) {
+        let binding = store
+            .get_provider_session_binding(session_id, &request.provider_id)
+            .map_err(to_string)?;
+        match super::retry::auto_compact_owned_session(
+            &store,
+            &app,
+            &request,
+            binding,
+            UsageContext::new(origin),
+        ) {
+            Ok((binding, compacted)) => {
+                if !compacted.is_empty() && binding.is_none() {
+                    runner_output.resume_cursor = None;
+                }
+                activity_events.extend(compacted);
+            }
+            Err(error) => {
+                // The answer is already saved. Keep it; a failed compaction
+                // retains the old context and is reported in its activity row.
+                eprintln!(
+                    "Post-response context compaction failed: {}",
+                    gyro_core::security::redact_secrets(&error.to_string())
+                );
+            }
+        }
     }
     let status_event = append_provider_status_event(
         &store,
@@ -863,6 +929,8 @@ pub(crate) fn compact_provider_chat_blocking(
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,
+        workflow_run_id: None,
+        project_memory: None,
         internal_purpose: None,
     };
     bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
@@ -881,7 +949,7 @@ pub(crate) fn compact_provider_chat_blocking(
     let Some(resume_cursor) = resume_cursor else {
         return compact_local_provider_chat(&app, &store, &request, session_uuid, run_id);
     };
-    let activity_params = serde_json::json!({ "turnId": run_id.to_string() });
+    let activity_params = serde_json::json!({ "turnId": format!("{run_id}:{}", Uuid::new_v4()) });
     let running =
         context_compaction::codex_context_compaction_activity(&activity_params, "running");
     emit_provider_activity_event(&app, &request, &running, Some(0));

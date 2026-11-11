@@ -409,59 +409,6 @@
 
 /* The suggestion belongs to the top of the canvas, outside the welcome stack.
    Showing or dismissing it must never change the logo or composer's position. */
-.gyro-chat-surface.is-empty > .gyro-project-import-callout {
-  left: 50%;
-  margin: 0;
-  /* An explicit width avoids shrink-to-fit measuring only the half of the
-     canvas after left: 50%, which squeezes the copy into a vertical strip. */
-  width: min(calc(580px * var(--gyro-ui-scale, 1)), calc(100% - 48px));
-  position: absolute;
-  top: clamp(48px, 8vh, 88px);
-  transform: translateX(-50%);
-  z-index: 66;
-}
-
-@media (max-height: 650px) {
-  .gyro-chat-surface.is-empty > .gyro-project-import-callout {
-    top: 38px;
-  }
-
-  .gyro-chat-surface.is-empty
-    > .gyro-project-import-callout
-    .gyro-import-callout-copy
-    > span {
-    display: none;
-  }
-
-  .gyro-chat-surface.is-empty
-    > .gyro-project-import-callout
-    .gyro-import-callout-open {
-    padding: 6px;
-  }
-
-  .gyro-chat-surface.is-empty
-    > .gyro-project-import-callout
-    .gyro-import-callout-providers
-    > .gyro-import-provider-mark,
-  .gyro-chat-surface.is-empty
-    > .gyro-project-import-callout
-    .gyro-import-callout-gyro {
-    height: 28px;
-    width: 28px;
-  }
-}
-
-@media (max-height: 440px) {
-  .gyro-chat-surface.is-empty > .gyro-project-import-callout {
-    top: 12px;
-  }
-
-  .gyro-chat-surface.is-empty
-    > .gyro-project-import-callout
-    .gyro-import-callout-marks {
-    display: none;
-  }
-}
 
 .gyro-import-callout-open {
   align-items: center;
@@ -562,11 +509,6 @@
 
 /* Match the resizable IDE pane rather than the desktop window width. */
 @container workspace-chat (max-width: 620px) {
-  .gyro-sidebar-ai-chat
-    .gyro-chat-surface.is-empty
-    > .gyro-project-import-callout {
-    width: calc(100% - 24px);
-  }
 
   .gyro-sidebar-ai-chat .gyro-import-callout-open {
     gap: 10px;

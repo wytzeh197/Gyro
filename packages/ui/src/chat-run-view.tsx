@@ -52,8 +52,6 @@ import {
   fileMatchesPathUndo,
   WorkspacePathUndoContext,
 } from "./workspace-path-undo";
-import "./chat-recovery.css";
-import "./chat-run-minimal.css";
 import { MotionDisclosure } from "./motion-disclosure";
 
 /**

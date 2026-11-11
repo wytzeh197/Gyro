@@ -1,6 +1,8 @@
 import type { BrowserViewportMode } from "@gyro-dev/ui";
 import {
   askTextValue,
+  reconcileGitPreparation,
+  hasOnlyGitWarnings,
   browserConfirm,
   ChatFileActionsContext,
   ChatFileScopeContext,
@@ -190,6 +192,7 @@ import {
 } from "./browser-capture";
 import { createBrowserHostVisibility } from "./browser-host-visibility";
 import { sessionBrowserNative } from "./session-browser-native";
+import { requestBrowserAnnotation } from "./browser-annotations";
 import type { SessionBrowserSnapshot } from "./session-browser-queue";
 import {
   browserLiveStatusMessage,
@@ -328,7 +331,7 @@ import { readBoundedLocalStorage, safeSetLocalStorage } from "./ui-storage";
 import { useUsageActions } from "./usage-actions";
 import { useAppearanceSaveFeedback } from "./use-appearance-save-feedback";
 import { useAutomaticChatBackup } from "./use-automatic-chat-backup";
-import { chatSendAccepted, queuedDeliveryDisposition, type ChatSendOutcome } from "./chat-send-outcome";
+import { chatSendAccepted, queuedDeliveryDisposition, shouldPauseQueueAfterSendError, type ChatSendOutcome } from "./chat-send-outcome";
 import { useChatAutoRetry } from "./use-chat-auto-retry";
 import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
 import { useCheckReminders } from "./use-check-reminders";
@@ -360,6 +363,9 @@ import {
   type SessionModelSelection,
 } from "./use-session-model-save";
 import { useSubagents } from "./use-subagents";
+import { projectMemoryClient } from "./project-memory-client";
+import { codeReviewClient } from "./code-review-client";
+import { workflowClient } from "./workflow-client";
 import { useTaskHandoff } from "./use-task-handoff";
 import { useWorkbenchAppearance } from "./use-workbench-appearance";
 import {
@@ -382,6 +388,8 @@ import {
   applyProviderCapabilityManifest,
   askAboutFilePrompt,
   AutomationsSurface,
+  WorkflowDestination,
+  type WorkflowExtractionRequest,
   CHAT_GRID_MAX_SLOTS,
   ChatCloseConfirmOverlay,
   chatCompanionPane,
@@ -455,6 +463,7 @@ import {
   type AppDestination,
   type Automation,
   type BrowserFeedback,
+  type BrowserScreenshotAction,
   type BrowserPreviewCapture,
   type CapabilityActivity,
   type CapabilityApprovalDecision,
@@ -750,6 +759,8 @@ export function App() {
     "idle" | "loading" | "ready" | "error"
   >("idle");
   const [draftResetToken, setDraftResetToken] = useState(0);
+  const [workflowExtractionRequest,setWorkflowExtractionRequest]=useState<WorkflowExtractionRequest>();
+  const [workspaceReviewEntry,setWorkspaceReviewEntry]=useState<{sessionId:string;token:number;rootId?:string;scope:{kind:"uncommitted"};paths?:string[]}>();
   const [automationCreateRequestToken, setAutomationCreateRequestToken] =
     useState(0);
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>(() =>
@@ -850,6 +861,7 @@ export function App() {
   const ideSourceControlRootRef = useRef<string | undefined>(undefined);
   const ideSourceControlInFlightRef = useRef(new Set<string>());
   const ideSourceControlQueuedRef = useRef(new Set<string>());
+  const ideSourceControlPromiseRef = useRef(new Map<string, Promise<void>>());
   const ideServicesRequestRef = useRef(0);
   const workspaceSearchRequestRef = useRef(0);
   const workspaceTreeRequestRef = useRef(0);
@@ -902,6 +914,7 @@ export function App() {
   const queuedChatDispatchesRef = useRef(new Set<string>());
   const stoppedChatSessionsRef = useRef(new Set<string>());
   const steeringChatSessionsRef = useRef(new Set<string>());
+  const pendingSteerStopsRef = useRef(new Set<string>());
   const queuedChatDispatchMessageIdsRef = useRef(new Map<string, string>());
   const persistedChatTurnIdsRef = useRef(new Set<string>());
   const [queueRetryTick, setQueueRetryTick] = useState(0);
@@ -996,7 +1009,6 @@ export function App() {
   const [workspaceChangeGeneration, setWorkspaceChangeGeneration] = useState(0);
   const workspacePreparationRunRef = useRef("");
   const workspacePreparationPathRef = useRef("");
-  const workspacePreparationReadyTimerRef = useRef<number>();
   const openGlobalSearch = useCallback(
     (mode: "commands" | "files" | "global" = "global") => {
       setCommandPaletteMode(mode);
@@ -1694,6 +1706,10 @@ export function App() {
     };
   };
   const companionSurfaceProps = (paneId: string) => ({
+    onSaveWorkflow: isTauriRuntime() && (paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId)) ? (turnId?:string)=>{setWorkflowExtractionRequest({sessionId:(paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId))!,turnId,token:Date.now()});dispatchWorkbench({type:"select-destination",destination:"automations"});} : undefined,
+    codeReviewEntry: workspaceReviewEntry?.sessionId === (paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId)) ? workspaceReviewEntry : undefined,
+    codeReviews: isTauriRuntime() && (paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId)) ? codeReviewClient((paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId))!) : undefined,
+    projectMemory: isTauriRuntime() && (paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId)) ? projectMemoryClient((paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId))!) : undefined,
     dailyPaceWarning: workbench.preferences.dailyPaceWarning,
     providerLedgerById,
     sideChat: sideChatFor(paneId),
@@ -1878,8 +1894,9 @@ export function App() {
   // Goal mode selected, and a dismissal stays off for that draft. The editor
   // itself also reads as selected, so opening Goal always shows the chip.
   const activeGoalMode =
-    isGoalComposerActive ||
-    (chatDraftGoalModes[activeDraftKey] ?? Boolean(activeSessionGoal?.text));
+    selectedDraftMode !== "plan" &&
+    (isGoalComposerActive ||
+      (chatDraftGoalModes[activeDraftKey] ?? Boolean(activeSessionGoal?.text)));
   const closeGoalComposer = useCallback(() => {
     setIsGoalComposerActive(false);
     // Saving or starting a goal selects Goal mode again, even if the user had
@@ -1981,7 +1998,8 @@ export function App() {
         if (
           pane?.kind === "session" &&
           (!session ||
-            chatProjectKey(session.workspacePath) !== layout.projectKey)
+            chatProjectKey(session.workspacePath) !== chatProjectKey(pane.workspacePath) ||
+            removedProjectPaths.some((path) => chatProjectKey(path) === chatProjectKey(pane.workspacePath)))
         ) {
           dispatchChatGrid({
             type: "remove-session-pane",
@@ -3959,14 +3977,14 @@ export function App() {
     [isShellOptimizing, notify],
   );
 
-  const refreshIdeSourceControl = useCallback(function refresh(root?: string) {
+  const refreshIdeSourceControl = useCallback(function refresh(root?: string): Promise<void> | undefined {
     ideSourceControlRootRef.current = root;
     if (!root) {
       return;
     }
     if (ideSourceControlInFlightRef.current.has(root)) {
       ideSourceControlQueuedRef.current.add(root);
-      return;
+      return ideSourceControlPromiseRef.current.get(root);
     }
     if (!isTauriRuntime()) {
       dispatchWorkbench({
@@ -3988,7 +4006,8 @@ export function App() {
     }
 
     ideSourceControlInFlightRef.current.add(root);
-    void invoke<SourceControlState>("git_status", { workspacePath: root })
+    const runId = workspacePreparationRunRef.current;
+    const pending = invoke<SourceControlState>("git_status", { workspacePath: root })
       .then((sourceControl) => {
         if (ideSourceControlRootRef.current !== root) {
           return;
@@ -3997,6 +4016,9 @@ export function App() {
           type: "ide-set-source-control",
           sourceControl,
         });
+        setWorkspacePreparation((current) => reconcileGitPreparation(
+          current, { workspacePath: root, runId, check: "status" }, sourceControl,
+        ));
       })
       .catch((error) => {
         if (ideSourceControlRootRef.current !== root) {
@@ -4014,12 +4036,18 @@ export function App() {
             deletions: 0,
             statsPartial: false,
             files: [],
+            readState: "failed",
             error: String(error),
           },
         });
+        setWorkspacePreparation((current) => reconcileGitPreparation(
+          current, { workspacePath: root, runId, check: "status" },
+          { available: false, readState: "failed", error: String(error) },
+        ));
       })
       .finally(() => {
         ideSourceControlInFlightRef.current.delete(root);
+        ideSourceControlPromiseRef.current.delete(root);
         // Collapse refresh bursts into one follow-up. Mutations during a read
         // still get fresh status without spawning overlapping Git processes, so
         // a queued refresh always re-runs while this root is the one on screen.
@@ -4027,13 +4055,17 @@ export function App() {
           ideSourceControlQueuedRef.current.delete(root) &&
           ideSourceControlRootRef.current === root
         ) {
-          refresh(root);
+          return refresh(root);
         }
+        return undefined;
       });
+    ideSourceControlPromiseRef.current.set(root, pending);
+    return pending;
   }, []);
 
   const refreshWorkspaceBranches = useCallback(async (root?: string) => {
     const requestId = branchCatalogRequestRef.current + 1;
+    const runId = workspacePreparationRunRef.current;
     branchCatalogRequestRef.current = requestId;
     if (!root) {
       setBranchCatalog(undefined);
@@ -4056,14 +4088,22 @@ export function App() {
       });
       if (branchCatalogRequestRef.current === requestId) {
         setBranchCatalog(catalog);
+        setWorkspacePreparation((current) => reconcileGitPreparation(
+          current, { workspacePath: root, runId, check: "branches" }, catalog,
+        ));
       }
     } catch (error) {
       if (branchCatalogRequestRef.current === requestId) {
         setBranchCatalog({
           available: false,
           branches: [],
+          readState: "failed",
           error: String(error),
         });
+        setWorkspacePreparation((current) => reconcileGitPreparation(
+          current, { workspacePath: root, runId, check: "branches" },
+          { available: false, readState: "failed", error: String(error) },
+        ));
       }
     } finally {
       if (branchCatalogRequestRef.current === requestId) {
@@ -4517,20 +4557,21 @@ export function App() {
     (progress: WorkspacePreparationProgress) => {
       if (progress.runId !== workspacePreparationRunRef.current) return;
       setWorkspacePreparation(progress);
-      if (workspacePreparationReadyTimerRef.current !== undefined) {
-        window.clearTimeout(workspacePreparationReadyTimerRef.current);
-        workspacePreparationReadyTimerRef.current = undefined;
-      }
-      if (progress.status === "ready") {
-        workspacePreparationReadyTimerRef.current = window.setTimeout(() => {
-          if (workspacePreparationRunRef.current === progress.runId) {
-            setWorkspacePreparation(undefined);
-          }
-        }, 1500);
-      }
     },
     [],
   );
+
+  useEffect(() => {
+    if (workspacePreparation?.status !== "ready" || workspacePreparation.gitRetrying) return;
+    const runId = workspacePreparation.runId;
+    const timer = window.setTimeout(() => {
+      setWorkspacePreparation((current) =>
+        current?.runId === runId && current.status === "ready" && !current.gitRetrying
+          ? undefined : current,
+      );
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [workspacePreparation]);
 
   const prepareWorkspace = useCallback(
     async (root: string) => {
@@ -4609,6 +4650,7 @@ export function App() {
         dispatchWorkbench({ type: "ide-set-test-tree", tests: snapshot.tests });
         settleWorkspacePreparation(snapshot);
         refreshIdeSourceControl(root);
+        void refreshWorkspaceBranches(root);
       } catch (error) {
         if (workspacePreparationRunRef.current !== runId) return;
         settleWorkspacePreparation({
@@ -4623,7 +4665,7 @@ export function App() {
         });
       }
     },
-    [refreshIdeSourceControl, settleWorkspacePreparation, workspaceRoots],
+    [refreshIdeSourceControl, refreshWorkspaceBranches, settleWorkspacePreparation, workspaceRoots],
   );
 
   useEffect(() => {
@@ -4668,15 +4710,6 @@ export function App() {
       unlistenWorkspace?.();
     };
   }, [settleWorkspacePreparation, workspaceRoots]);
-
-  useEffect(
-    () => () => {
-      if (workspacePreparationReadyTimerRef.current !== undefined) {
-        window.clearTimeout(workspacePreparationReadyTimerRef.current);
-      }
-    },
-    [],
-  );
 
   const refreshSourceControl = useCallback(() => {
     refreshIdeServices(workspaceActionRoot);
@@ -6147,8 +6180,8 @@ export function App() {
   );
 
   const loadInlineChangeDiff = useCallback(
-    async (path: string) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+    async (path: string, workspaceOverride?: string) => {
+      const root = workspaceOverride ?? activeSession?.workspacePath ?? workspacePath;
       if (!root) {
         throw new Error("Open a workspace to inspect this change.");
       }
@@ -6161,7 +6194,7 @@ export function App() {
       const relativePath = normalizedPath.startsWith(`${normalizedRoot}/`)
         ? normalizedPath.slice(normalizedRoot.length + 1)
         : normalizedPath;
-      const file = scopedIde.sourceControl.files.find((item) => {
+      const file = sourceControlForWorkspace(workbench.ide.sourceControl, root)?.files.find((item) => {
         const candidate = item.path.replaceAll("\\", "/");
         return candidate === normalizedPath || candidate === relativePath;
       });
@@ -6197,7 +6230,7 @@ export function App() {
     [
       activeSession?.workspacePath,
       workspacePath,
-      scopedIde.sourceControl.files,
+      workbench.ide.sourceControl,
     ],
   );
 
@@ -6339,6 +6372,14 @@ export function App() {
     sessions,
     workspacePath,
   ]);
+
+  const reviewWorkspaceWithAgent = useCallback((path?:string)=>{
+    if(!isTauriRuntime()||!activeSession)return;
+    const root=activeSession.workspaceIdentity?.roots.find(root=>root.path===workspaceActionRoot);
+    if(!root && activeSession.workspacePath!==workspaceActionRoot){notify("command-failed","Choose a chat for this project","The Workspace review root must belong to the implementing chat.");return;}
+    setWorkspaceReviewEntry({sessionId:activeSession.id,rootId:root?.id,scope:{kind:"uncommitted"},paths:path?[path]:undefined,token:Date.now()});
+    dispatchWorkbench({type:"select-sessions"});openCompanionTab("review",SOLO_CHAT_PANE_ID);
+  },[activeSession,workspaceActionRoot,notify,openCompanionTab]);
 
   const reviewTerminalChanges = useCallback(
     (file?: SourceControlState["files"][number]) => {
@@ -7858,9 +7899,14 @@ export function App() {
       suppressSessionAutoSelectRef.current = false;
       const session = sessions.find((item) => item.id === sessionId);
       if (session) {
+        const grid = chatGridRef.current;
+        const activeLayout = grid.activeProjectKey ? grid.layouts[grid.activeProjectKey] : undefined;
+        const visiblePane = activeLayout?.slots.some(
+          (pane) => pane?.kind === "session" && pane.sessionId === sessionId,
+        );
         dispatchChatGrid({
           type: "select-pane",
-          projectKey: chatProjectKey(session.workspacePath),
+          projectKey: visiblePane ? activeLayout!.projectKey : chatProjectKey(session.workspacePath),
           mode: "replace",
           pane: chatPaneForSession(session),
         });
@@ -8068,8 +8114,13 @@ export function App() {
 
   const focusChatPane = useCallback(
     (pane: ChatPaneRef) => {
-      const projectKey = chatProjectKey(pane.workspacePath);
-      const layout = chatGrid.layouts[projectKey];
+      const grid = chatGridRef.current;
+      const activeLayout = grid.activeProjectKey ? grid.layouts[grid.activeProjectKey] : undefined;
+      const layout = [activeLayout, ...Object.values(grid.layouts)].find(
+        (entry) => entry?.slots.some((item) => item?.paneId === pane.paneId),
+      );
+      if (!layout) return;
+      const projectKey = layout.projectKey;
       const alreadyFocused = layout?.focusedPaneId === pane.paneId;
       const alreadyActiveSession =
         pane.kind === "session" &&
@@ -8148,8 +8199,9 @@ export function App() {
     (sessionId: string) => {
       const session = sessions.find((item) => item.id === sessionId);
       if (!session) return;
-      const projectKey = chatProjectKey(session.workspacePath);
-      const layout = chatGrid.layouts[projectKey];
+      const grid = chatGridRef.current;
+      const projectKey = grid.activeProjectKey ?? chatProjectKey(session.workspacePath);
+      const layout = grid.layouts[projectKey];
       const existingPane = layout?.slots.find(
         (pane) => pane?.kind === "session" && pane.sessionId === sessionId,
       );
@@ -8170,12 +8222,15 @@ export function App() {
       dispatchChatGrid({
         type: "select-pane",
         projectKey,
-        mode: "replace",
+        mode: "drop",
         slotIndex: targetSlot,
         pane: chatPaneForSession(session),
       });
+      suppressSessionAutoSelectRef.current = false;
+      activeSessionIdRef.current = sessionId;
       setWorkspacePath(session.workspacePath);
       setActiveSessionId(sessionId);
+      void refreshEvents(sessionId);
       dispatchWorkbench({ type: "set-chat-panel" });
       dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
     },
@@ -8184,6 +8239,7 @@ export function App() {
       chatGrid.layouts,
       focusChatPane,
       notify,
+      refreshEvents,
       sessions,
     ],
   );
@@ -10297,6 +10353,10 @@ export function App() {
 
   const changeChatMode = useCallback(
     (mode: ChatMode, draftKey = activeDraftKey) => {
+      if (mode === "plan") {
+        setChatDraftGoalModes((current) => ({ ...current, [draftKey]: false }));
+        if (draftKey === activeDraftKey) setIsGoalComposerActive(false);
+      }
       if ((chatDraftModesRef.current[draftKey] ?? "normal") === mode)
         return true;
       const next = { ...chatDraftModesRef.current };
@@ -10310,6 +10370,12 @@ export function App() {
     },
     [activeDraftKey],
   );
+
+  const selectGoalComposer = useCallback((draftKey = activeDraftKey) => {
+    changeChatMode("normal", draftKey);
+    setChatDraftGoalModes((current) => ({ ...current, [draftKey]: true }));
+    setIsGoalComposerActive(true);
+  }, [activeDraftKey, changeChatMode]);
 
   const consumeDraftMode = useCallback(
     (draftKey: string, revision: number) => {
@@ -10709,9 +10775,8 @@ export function App() {
           startNewChat({ workspacePath: "" });
           break;
         case "add-goal":
-          // Setting an outcome no longer drops the user out of Plan mode.
           dispatchWorkbench({ type: "set-chat-panel" });
-          setIsGoalComposerActive(true);
+          selectGoalComposer(draftKey);
           break;
         case "add-plan":
           dispatchWorkbench({ type: "set-chat-panel", panel: "plan" });
@@ -10844,11 +10909,17 @@ export function App() {
             break;
           }
           if (sendingSessionIdsRef.current.has(compactSessionId)) {
-            notify(
-              "command-failed",
-              "Wait for the current response",
-              "Context can be compacted after the active turn finishes.",
-            );
+            if (!isTauriRuntime()) break;
+            // Keep the live run's ownership and transcript intact. The backend
+            // coalesces requests and compacts at the next safe boundary.
+            void invoke<ProviderContextCompactionResponse>("compact_provider_chat", {
+              sessionId: compactSessionId,
+            }).then(() => {
+              notify("terminal", "Context compaction requested",
+                "Compaction will run at the next safe tool or response boundary.");
+            }).catch((error) => {
+              notify("command-failed", "Context compaction failed", String(error));
+            });
             break;
           }
           if (!isTauriRuntime()) {
@@ -10929,6 +11000,9 @@ export function App() {
         case "open-terminal-panel":
           openToolPanel("terminal");
           break;
+        case "open-memory":
+          openCompanionTab("memory");
+          break;
         case "open-browser-panel":
           openToolPanel("browser");
           break;
@@ -10945,6 +11019,7 @@ export function App() {
     [
       attachEditorSnapshot,
       attachBrowserSnapshot,
+      selectGoalComposer,
       activeDraftKey,
       activeChatMode,
       activeSession?.workspacePath,
@@ -10959,6 +11034,7 @@ export function App() {
       openGlobalSearch,
       openSettingsSection,
       openToolPanel,
+      openCompanionTab,
       openWorkspace,
       persistConfig,
       refreshEvents,
@@ -11236,12 +11312,13 @@ export function App() {
         return outcome;
       }
       if (overrideContext?.retryDispatchGuard?.() === false) return outcome;
-      // Every mode carries the goal, Plan included: planning toward a stated
-      // outcome is the case the goal exists for.
-      const turnGoal =
+      // Plan is a read-only turn, not a goal run. Keep the saved goal on the
+      // session while excluding it from this request (including queued sends).
+      const turnGoal = turnMode === "plan" ? undefined : (
         overrideContext && "goal" in overrideContext
           ? overrideContext.goal
-          : activeSessionGoal;
+          : activeSessionGoal
+      );
       const turnPlan =
         overrideContext && "plan" in overrideContext
           ? (overrideContext.plan ?? { title: "Plan", items: [] })
@@ -11450,6 +11527,7 @@ export function App() {
           "Message queued",
           "It will send when this chat's current response finishes, even after you switch chats.",
         );
+        overrideContext?.onAccepted?.();
         return { ...outcome, kind: "queued" };
       }
       const isCouncilTurn = turnMode === "council";
@@ -11602,6 +11680,13 @@ export function App() {
           );
         }
         let sendingSessionId = session.id;
+        // Annotation sends own their payload; carry the untouched composer
+        // into the session created for this previously unsent draft.
+        if (overrideContext?.preserveDraft && overrideContext.onAccepted) {
+          setChatDrafts(current => ({...current, [session.id]: current[draftModeKey] ?? ""}));
+          setChatAttachments(current => ({...current, [session.id]: current[draftModeKey] ?? []}));
+          setChatDraftModes(current => ({...current, [session.id]: current[draftModeKey] ?? "normal"}));
+        }
         optimisticEventsRef.current.set(
           session.id,
           limitOptimisticSessionEvents(optimisticEvents),
@@ -11709,6 +11794,11 @@ export function App() {
             workspacePath: persistedSession.workspacePath,
           });
           replaceSendingSessionId(session.id, persistedSession.id);
+          if (overrideContext?.preserveDraft && overrideContext.onAccepted) {
+            setChatDrafts(current => ({...current, [persistedSession.id]: current[session.id] ?? ""}));
+            setChatAttachments(current => ({...current, [persistedSession.id]: current[session.id] ?? []}));
+            setChatDraftModes(current => ({...current, [persistedSession.id]: current[session.id] ?? "normal"}));
+          }
           setChatMessageQueues((current) => {
             const queued = current[session.id];
             if (!queued?.length) {
@@ -11845,6 +11935,7 @@ export function App() {
           });
           persistedChatTurnIdsRef.current.add(turnId);
           outcome.persisted = true;
+          overrideContext?.onAccepted?.();
           if (
             liveEditorEvidence &&
             liveEditorEvidence.workspaceKey !== persistedSession.workspacePath
@@ -11950,12 +12041,8 @@ export function App() {
           restoreUnsentMode(optimisticSessionId);
           const errorMessage = String(error);
           const wasCancelled = isProviderStop(errorMessage);
-          if (outcome.persisted)
-            stoppedChatSessionsRef.current.add(optimisticSessionId);
-          if (
-            wasCancelled &&
-            !steeringChatSessionsRef.current.has(optimisticSessionId)
-          ) {
+          const isSteering = steeringChatSessionsRef.current.has(optimisticSessionId);
+          if (shouldPauseQueueAfterSendError(outcome.persisted, wasCancelled, isSteering)) {
             stoppedChatSessionsRef.current.add(optimisticSessionId);
           }
           if (!wasCancelled && providerFailureBlocksReadiness(errorMessage))
@@ -11974,7 +12061,9 @@ export function App() {
             errorMessage,
           );
           if (optimisticSessionId !== session.id) {
-            await refreshEvents(optimisticSessionId);
+            const refresh = refreshEvents(optimisticSessionId);
+            if (isSteering) void refresh.catch(() => {});
+            else await refresh;
           }
           const failureNotice = providerFailureNotice(
             errorMessage,
@@ -12133,6 +12222,7 @@ export function App() {
           });
           persistedChatTurnIdsRef.current.add(turnId);
           outcome.persisted = true;
+          overrideContext?.onAccepted?.();
         }
         if (
           liveEditorEvidence &&
@@ -12233,12 +12323,8 @@ export function App() {
         restoreUnsentMode(targetSessionId);
         const errorMessage = String(error);
         const wasCancelled = isProviderStop(errorMessage);
-        if (outcome.persisted)
-          stoppedChatSessionsRef.current.add(targetSessionId);
-        if (
-          wasCancelled &&
-          !steeringChatSessionsRef.current.has(targetSessionId)
-        ) {
+        const isSteering = steeringChatSessionsRef.current.has(targetSessionId);
+        if (shouldPauseQueueAfterSendError(outcome.persisted, wasCancelled, isSteering)) {
           stoppedChatSessionsRef.current.add(targetSessionId);
         }
         if (!wasCancelled && providerFailureBlocksReadiness(errorMessage))
@@ -12256,7 +12342,10 @@ export function App() {
           wasCancelled ? "cancelled" : "failed",
           errorMessage,
         );
-        await refreshEvents(targetSessionId);
+        // Refresh the interrupted transcript without delaying an explicit Steer.
+        const refresh = refreshEvents(targetSessionId);
+        if (isSteering) void refresh.catch(() => {});
+        else await refresh;
         const failureNotice = providerFailureNotice(
           errorMessage,
           wasCancelled,
@@ -12494,6 +12583,7 @@ export function App() {
       // from the goal it is about to gain.
       if (!activeSessionId) goalModeCarryRef.current = activeDraftKey;
       void sendDraft(goal, {
+        mode: "normal",
         goal: { text: goal, status: "active" },
         preserveDraft: false,
         consumeDraftMode: true,
@@ -12569,7 +12659,10 @@ export function App() {
       dispatchingSessionIds: queuedChatDispatchesRef.current,
       pausedSessionIds: stoppedChatSessionsRef.current,
       now,
-      sendingSessionIds: sendingSessionIdsRef.current,
+      sendingSessionIds: new Set([
+        ...sendingSessionIdsRef.current,
+        ...pendingSteerStopsRef.current,
+      ]),
     });
     if (!next) return undefined;
     if (next.kind === "waiting") {
@@ -13267,18 +13360,24 @@ export function App() {
       // Pause synchronously, before cancellation releases the sender.
       // Steer skips this so the promoted queued turn can send once Stop
       // finishes; a plain Stop still holds the rest of the queue.
-      if (options?.pauseQueue !== false) {
+      const isSteering = options?.pauseQueue === false;
+      if (isSteering) {
+        pendingSteerStopsRef.current.add(sessionId);
+      } else {
+        steeringChatSessionsRef.current.delete(sessionId);
         stoppedChatSessionsRef.current.add(sessionId);
       }
       chatAutoRetry.cancelSession(sessionId);
       retryDispatchRef.current.cancelSession(sessionId);
-      void invoke("stop_provider_chat", { sessionId }).catch((error) => {
-        if (options?.pauseQueue !== false) {
-          stoppedChatSessionsRef.current.delete(sessionId);
-        }
-        setQueueRetryTick((current) => current + 1);
-        notify("command-failed", "Stop failed", String(error));
-      });
+      void invoke("stop_provider_chat", { sessionId, waitForStop: isSteering })
+        .catch((error) => {
+          if (!isSteering) stoppedChatSessionsRef.current.delete(sessionId);
+          notify("command-failed", "Stop failed", String(error));
+        })
+        .finally(() => {
+          if (isSteering) pendingSteerStopsRef.current.delete(sessionId);
+          setQueueRetryTick((current) => current + 1);
+        });
     },
     [chatAutoRetry.cancelSession, notify],
   );
@@ -13343,6 +13442,8 @@ export function App() {
         };
       });
       stoppedChatSessionsRef.current.delete(sessionId);
+      // Steer during the normal post-response cooldown is also immediate.
+      queuedDeliveryNotBeforeRef.current.delete(sessionId);
       if (sendingSessionIdsRef.current.has(sessionId)) {
         // Keep the queue live and skip its settle delay: Stop would otherwise
         // park it until a manual send.
@@ -15424,13 +15525,67 @@ export function App() {
     },
     [],
   );
+  const annotationContextRef = useRef({ activeDraftKey, activeSessionId, chatDraftModels,
+    sessionContextEventsById, sessionEventsById, pendingNewChatPlan, pendingNewChatGoal });
+  annotationContextRef.current = { activeDraftKey, activeSessionId, chatDraftModels,
+    sessionContextEventsById, sessionEventsById, pendingNewChatPlan, pendingNewChatGoal };
   const captureBrowserPreview = useCallback(
     async (
-      action: "capture" | "reveal" | "feedback" = "capture",
+      action: BrowserScreenshotAction = "capture",
       feedback?: BrowserFeedback,
       owner: BrowserOwner = activeBrowserOwner,
     ) => {
       const preview = previewForBrowser(owner);
+      if (action.startsWith("annotate-")) {
+        const result = await requestBrowserAnnotation({
+          action, feedback, capture: preview.latestCapture, sessionId: owner.sessionId,
+        });
+        if (action === "annotate-send") {
+          if (result.error || !result.message || !result.attachments) return result;
+          const current = annotationContextRef.current;
+          const isDraft = owner.sessionId === "workbench" || owner.sessionId.startsWith("workbench:");
+          if (isDraft && (current.activeDraftKey !== owner.draftKey || current.activeSessionId))
+            return { error: "Return to the originating draft to send this annotation." };
+          const context = isDraft
+            ? { plan: current.pendingNewChatPlan, goal: current.pendingNewChatGoal }
+            : deriveSessionContext(current.sessionContextEventsById[owner.sessionId] ?? [], current.sessionEventsById[owner.sessionId] ?? []);
+          return await new Promise<{sent?:boolean;error?:string}>((resolve) => {
+            void sendDraftRef.current(result.message, {
+              sessionId: isDraft ? undefined : owner.sessionId,
+              workspacePath: owner.workspaceKey,
+              draftModeKey: owner.draftKey,
+              mode: chatDraftModesRef.current[owner.draftKey] ?? "normal",
+              consumeDraftMode: false,
+              sessionModel: current.chatDraftModels[owner.draftKey],
+              attachments: result.attachments,
+              plan: context.plan,
+              goal: context.goal,
+              preserveDraft: true,
+              onAccepted: () => resolve({sent:true}),
+            }).then(outcome => resolve(
+              outcome.persisted || chatSendAccepted(outcome) ? {sent:true} :
+                {error:"The message was not sent. Check the chat's model and connection, then try again."},
+            )).catch(error => resolve({error:String(error)}));
+          });
+        }
+        if (result.attachment) {
+          const attachment = result.attachment;
+          setChatAttachments((current) => ({
+            ...current,
+            [owner.draftKey]: [...(current[owner.draftKey] ?? []), attachment],
+          }));
+        }
+        if (result.note) {
+          setChatDrafts((current) => ({
+            ...current,
+            [owner.draftKey]: appendFeedback(current[owner.draftKey], result.note!),
+          }));
+        }
+        if (result.fallback) {
+          notify("terminal", "Annotation added as text", "The attachment could not be saved; the element details are in your draft.");
+        }
+        return result;
+      }
       if (action === "feedback") {
         const draft = browserFeedbackDraft({
           capture: preview.latestCapture,
@@ -17251,6 +17406,7 @@ export function App() {
       onReviewTerminalChanges={reviewTerminalChanges}
       onSendTerminalErrorToChat={sendTerminalErrorToChat}
       onRunGitReviewAction={(actionId) => void runGitReviewAction(actionId)}
+      onReviewWorkspaceWithAgent={isTauriRuntime() && activeSession ? reviewWorkspaceWithAgent : undefined}
       onRunCommandProfile={runCommandProfile}
       onRunProfile={runProfile}
       onSelectDiffFile={(path) =>
@@ -17630,6 +17786,14 @@ export function App() {
       pane.kind === "session"
         ? sessions.find((session) => session.id === pane.sessionId)
         : undefined;
+    const paneWorkspace = normalizeProjectPath(pane.workspacePath);
+    const branchRoot = normalizeProjectPath(branchCatalog?.repoRoot ?? "");
+    const paneBranchCatalog = branchRoot &&
+      (paneWorkspace === branchRoot || paneWorkspace.startsWith(branchRoot + "/"))
+      ? branchCatalog : undefined;
+    const paneFiles = files.filter((file) =>
+      normalizeProjectPath(file.workspacePath ?? workspacePath) === paneWorkspace,
+    );
     const paneEvents =
       pane.kind === "session" ? (sessionEventsById[pane.sessionId] ?? []) : [];
     const paneContext =
@@ -17681,15 +17845,20 @@ export function App() {
       message: string,
       context?: ChatTurnContextSnapshot,
     ) => {
+      const targetContext = {
+        ...context,
+        sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+        workspacePath: pane.workspacePath,
+      };
       if (isFocused) {
-        void sendDraft(message, context);
+        void sendDraft(message, targetContext);
         return;
       }
       pendingPaneSendRef.current = {
         paneId: pane.paneId,
         message,
         context: {
-          ...context,
+          ...targetContext,
           mode: context?.mode ?? paneMode,
           draftModeKey: paneDraftKey,
           draftModeRevision:
@@ -17779,7 +17948,7 @@ export function App() {
           onSelectChatPanel={selectPanePanel}
           {...paneCompanionProps}
           backupReview={backupReviewFor(paneSession?.id)}
-          railDiffTools={railDiffTools}
+          railDiffTools={isFocused ? railDiffTools : undefined}
           railTerminalTools={railTerminalTools}
           browserPreview={previewForBrowser(paneBrowserOwner)}
           browserNativeHost={browserNativeHost}
@@ -17825,7 +17994,7 @@ export function App() {
             ]
           }
           config={config}
-          files={files}
+          files={paneFiles}
           onOpenCompanionFile={openEditorFile}
           modelFocus={
             pane.kind === "session" &&
@@ -17843,16 +18012,16 @@ export function App() {
           attachments={chatAttachments[paneDraftKey] ?? []}
           chatMode={paneMode}
           submittedChatMode={paneContext?.mode ?? "normal"}
-          diffReview={workbench.diffReview}
+          diffReview={isFocused ? workbench.diffReview : undefined}
           draftResetToken={draftResetToken}
           draft={chatDrafts[paneDraftKey] ?? ""}
           events={paneEvents}
           branchName={
             workbench.workspaceMode === "local"
-              ? (branchCatalog?.current ?? paneSession?.branch)
+              ? (paneBranchCatalog?.current ?? paneSession?.branch)
               : paneSession?.branch
           }
-          branchCatalog={branchCatalog}
+          branchCatalog={paneBranchCatalog}
           isEnvironmentRailOpen={panePanel === "environment"}
           isGoalComposerActive={isFocused && isGoalComposerActive}
           isGoalModeActive={isFocused && activeGoalMode}
@@ -17898,6 +18067,7 @@ export function App() {
             notify("command-failed", "Image could not be attached", message)
           }
           onComposerAction={(action) => {
+            if (action === "open-memory") { paneCompanionProps.onOpenCompanionTab("memory"); return; }
             focusChatPane(pane);
             handleComposerAction(action, paneDraftKey, {
               draftKey: paneDraftKey,
@@ -17998,8 +18168,10 @@ export function App() {
               ? fileReviewTools
               : undefined
           }
-          onLoadChangeDiff={loadInlineChangeDiff}
-          onLoadComparisonDiff={loadComparisonDiff}
+          onLoadChangeDiff={(path) => loadInlineChangeDiff(path, pane.workspacePath)}
+          onLoadComparisonDiff={(file, comparison) =>
+            loadGitComparisonDiff(pane.workspacePath, file, comparison, isTauriRuntime())
+          }
           onEditQueuedMessage={(messageId) => {
             focusChatPane(pane);
             editQueuedChatMessage(messageId);
@@ -18417,7 +18589,17 @@ export function App() {
       }
       onRetryWorkspacePreparation={() => {
         const root = activeSession?.workspacePath ?? workspacePath;
-        if (root) void prepareWorkspace(root);
+        if (!root || workspacePreparation?.gitRetrying) return;
+        if (!hasOnlyGitWarnings(workspacePreparation)) {
+          void prepareWorkspace(root);
+          return;
+        }
+        const runId = workspacePreparationRunRef.current;
+        setWorkspacePreparation((current) => current?.runId === runId
+          ? { ...current, gitRetrying: true } : current);
+        void Promise.all([refreshIdeSourceControl(root), refreshWorkspaceBranches(root)])
+          .finally(() => setWorkspacePreparation((current) => current?.runId === runId
+            ? { ...current, gitRetrying: false } : current));
       }}
       onExpandedWorkspaceDirectoriesChange={onExpandedDirectoriesChange}
       onOpenWorkspaceFile={openEditorLocation}
@@ -18432,6 +18614,7 @@ export function App() {
       onAskWorkspacePath={(path) => askWorkspacePath(path)}
       onOpenToolPanel={openToolPanel}
       onOpenSourceControlDiff={openSourceControlDiff}
+      onReviewWithAgent={isTauriRuntime() && activeSession ? reviewWorkspaceWithAgent : undefined}
       onCommitSourceControl={commitSourceControl}
       onPullSourceControl={() => void pullSourceControl()}
       onPushSourceControl={() => void pushSourceControl()}
@@ -18485,6 +18668,7 @@ export function App() {
           : undefined
       }
       projectSettings={{
+        memory: isTauriRuntime() ? projectMemoryClient : undefined,
         details: workbench.preferences.projectDetails ?? {},
         folders: workbench.preferences.workspaceFolders,
         pickFolder: async () => {
@@ -18580,57 +18764,19 @@ export function App() {
                     (item) => item.id === sessionId,
                   );
                   if (!session) return false;
-                  // Resolve the real session's project; a native payload cannot
-                  // choose which saved layout gets edited.
-                  const projectKey = chatProjectKey(session.workspacePath);
-                  if (chatProjectKey(sourceProjectKey) !== projectKey)
+                  // Validate the source against the saved session, then place it
+                  // in the visible layout without changing its workspace.
+                  if (chatProjectKey(sourceProjectKey) !== chatProjectKey(session.workspacePath))
                     return false;
-                  const switchingProject =
-                    projectKey !== displayedChatLayout.projectKey;
-                  const existingPane = chatGridRef.current.layouts[
-                    projectKey
-                  ]?.slots.find(
-                    (pane) =>
-                      pane?.kind === "session" && pane.sessionId === session.id,
-                  );
                   const action = {
                     type: "select-pane" as const,
-                    projectKey,
-                    mode:
-                      switchingProject && existingPane
-                        ? ("replace" as const)
-                        : ("drop" as const),
-                    // The old project's slot/arrangement has no meaning in the
-                    // destination. Focus its existing pane or append safely.
-                    slotIndex: switchingProject ? undefined : slotIndex,
-                    arrangement: switchingProject
-                      ? undefined
-                      : placement?.arrangement,
-                    insertPosition: switchingProject
-                      ? undefined
-                      : placement?.insertPosition,
-                    splitDirection: switchingProject
-                      ? undefined
-                      : placement?.splitDirection,
+                    projectKey: displayedChatLayout.projectKey,
+                    mode: "drop" as const,
+                    slotIndex,
+                    ...placement,
                     pane: chatPaneForSession(session),
                   };
-                  if (!dispatchChatGrid(action)) {
-                    if (switchingProject && !existingPane) {
-                      notify(
-                        "terminal",
-                        "Chat layout is full",
-                        "Close a chat in that project before adding another.",
-                      );
-                    }
-                    return false;
-                  }
-                  if (switchingProject) {
-                    notify(
-                      "terminal",
-                      "Chat project switched",
-                      workspaceName(session.workspacePath),
-                    );
-                  }
+                  if (!dispatchChatGrid(action)) return false;
                   activeSessionIdRef.current = session.id;
                   setActiveSessionId(session.id);
                   setWorkspacePath(session.workspacePath);
@@ -18951,6 +19097,7 @@ export function App() {
                 onRunGitReviewAction={(actionId) =>
                   void runGitReviewAction(actionId)
                 }
+                onReviewWorkspaceWithAgent={isTauriRuntime() && activeSession ? reviewWorkspaceWithAgent : undefined}
                 onRestartTerminalPane={restartTerminalPane}
                 onSelectDiffFile={(path) =>
                   dispatchWorkbench({ type: "select-diff-file", path })
@@ -19405,7 +19552,8 @@ export function App() {
         </div>
       ) : null}
       {activeDestination === "automations" ? (
-        <AutomationsSurface
+        <WorkflowDestination runtime={isTauriRuntime()?workflowClient:undefined} initialSessionId={activeSessionId} onOpenSession={id=>{void refreshSessions().then(()=>selectSession(id));}} openSchedulesToken={automationCreateRequestToken} extractionRequest={workflowExtractionRequest} onExtractionHandled={()=>setWorkflowExtractionRequest(undefined)}>
+        <AutomationsSurface embedded
           providerChoices={providersForConfig(config)
             .filter(
               (provider) =>
@@ -19433,7 +19581,7 @@ export function App() {
             });
             return typeof path === "string" ? path : undefined;
           }}
-          automations={workbench.automations}
+          automations={workbench.automations.filter(item=>!item.execution?.workflowBinding)}
           createRequestToken={automationCreateRequestToken}
           creationWorkspace={workspaceRootForPath(workspaceRoots, selectedFile)}
           creationWorkspaceMode={workbench.workspaceMode}
@@ -19541,6 +19689,7 @@ export function App() {
           onToggleAutomation={toggleAutomation}
           selectedAutomationId={workbench.selectedAutomationId}
         />
+        </WorkflowDestination>
       ) : null}
       {activeDestination === "onboarding" ? (
         <ChatSurface

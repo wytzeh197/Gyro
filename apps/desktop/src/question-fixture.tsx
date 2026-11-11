@@ -48,7 +48,6 @@ function Preview() {
         {open ? (
           <ChatQuestionPopup
             request={{ id: "preview", questions: parseChatQuestions(sample) }}
-            draft=""
             onSend={setResponse}
             onDismiss={() => setOpen(false)}
           />

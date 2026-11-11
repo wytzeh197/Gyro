@@ -42,6 +42,8 @@ pub enum UsageOrigin {
     /// so a user can see what the review card costs rather than finding it
     /// folded into their chat total.
     ChangeSummary,
+    CodeReview,
+    WorkflowExtraction,
     /// The one model call a manual `/compact` spends on a provider that has no
     /// compact command of its own, to write the checkpoint the next turn
     /// starts from.
@@ -64,6 +66,8 @@ impl UsageOrigin {
             Self::CouncilSynthesis => "council-synthesis",
             Self::CouncilResynthesis => "council-resynthesis",
             Self::ChangeSummary => "change-summary",
+            Self::CodeReview => "code-review",
+            Self::WorkflowExtraction => "workflow-extraction",
             Self::ContextCompaction => "context-compaction",
             Self::SessionTitle => "session-title",
             Self::SubAgent => "sub-agent",
@@ -79,6 +83,8 @@ impl UsageOrigin {
             "council-synthesis" => Self::CouncilSynthesis,
             "council-resynthesis" => Self::CouncilResynthesis,
             "change-summary" => Self::ChangeSummary,
+            "code-review" => Self::CodeReview,
+            "workflow-extraction" => Self::WorkflowExtraction,
             "context-compaction" => Self::ContextCompaction,
             "session-title" => Self::SessionTitle,
             "sub-agent" => Self::SubAgent,
@@ -97,6 +103,8 @@ impl UsageOrigin {
             Self::CouncilSynthesis => "Council synthesis",
             Self::CouncilResynthesis => "Council re-synthesis",
             Self::ChangeSummary => "Change summaries",
+            Self::CodeReview => "Code reviews",
+            Self::WorkflowExtraction => "Workflow extraction",
             Self::ContextCompaction => "Context compaction",
             Self::SessionTitle => "Chat titles",
             Self::SubAgent => "Sub-agents",
@@ -591,16 +599,13 @@ pub struct UsageGuardConfig {
     /// switching this off leaves the turn finite and still rate-limited.
     #[serde(default = "default_max_tool_rounds")]
     pub max_tool_rounds: usize,
-    /// Share of the model's context window at which a tool loop compacts what
-    /// it is carrying. Zero switches it off.
-    ///
-    /// Measured from what the provider reported for the previous request, so
-    /// it only fires for a model whose window Gyro knows. The compaction is
-    /// local — the oldest tool exchanges are replaced by one note — so it
-    /// costs no provider call, and the turn's later requests stop re-sending
-    /// results it has already moved past. A vendor CLI keeps its own context,
-    /// so this governs Gyro's own API and local-model runners only.
-    #[serde(default = "default_auto_compact_percent")]
+    /// Compact at 80–90% of a known model window, defaulting to 85%.
+    /// API/local loops compact between tool rounds; native sessions compact
+    /// at response boundaries. Old disabled/out-of-range settings are migrated.
+    #[serde(
+        default = "default_auto_compact_percent",
+        deserialize_with = "deserialize_auto_compact_percent"
+    )]
     pub auto_compact_percent: u32,
     /// Denominator for the usage percentages when no budget is configured.
     ///
@@ -643,7 +648,21 @@ fn default_max_tool_rounds() -> usize {
 }
 
 fn default_auto_compact_percent() -> u32 {
-    80
+    85
+}
+
+fn normalized_auto_compact_percent(percent: u32) -> u32 {
+    if percent == 0 {
+        default_auto_compact_percent()
+    } else {
+        percent.clamp(80, 90)
+    }
+}
+
+fn deserialize_auto_compact_percent<'de, D: serde::Deserializer<'de>>(
+    value: D,
+) -> Result<u32, D::Error> {
+    Ok(normalized_auto_compact_percent(u32::deserialize(value)?))
 }
 
 fn default_max_resyntheses_per_window() -> u32 {
@@ -840,10 +859,9 @@ pub fn set_provider_budget(
 
 /// Set the share of the window at which a tool loop compacts what it carries.
 ///
-/// Zero is the documented "off". Above the whole window the setting would ask
-/// to compact a request that cannot exist, so the stored value stops at 100.
+/// Keep automatic compaction inside the supported 80–90% operating range.
 pub fn set_auto_compact_percent(guard: &mut UsageGuardConfig, percent: u32) {
-    guard.auto_compact_percent = percent.min(100);
+    guard.auto_compact_percent = normalized_auto_compact_percent(percent);
 }
 
 /// How close a budget is to its cap.
@@ -1673,26 +1691,31 @@ mod tests {
     }
 
     #[test]
-    fn auto_compaction_defaults_to_eighty_and_clamps_at_the_whole_window() {
-        assert_eq!(UsageGuardConfig::default().auto_compact_percent, 80);
-        // A guard block written before the setting existed still gets the
-        // default, rather than zero (off) or a missing-key parse failure.
-        let guard: UsageGuardConfig = serde_json::from_value(serde_json::json!({
+    fn auto_compaction_defaults_to_85_and_migrates_to_the_80_to_90_range() {
+        assert_eq!(UsageGuardConfig::default().auto_compact_percent, 85);
+        let missing: UsageGuardConfig = serde_json::from_value(serde_json::json!({
             "enabled": true,
         }))
-        .expect("a guard block without the setting still parses");
-        assert_eq!(guard.auto_compact_percent, 80);
-
-        let mut guard = UsageGuardConfig::default();
-        set_auto_compact_percent(&mut guard, 95);
-        assert_eq!(guard.auto_compact_percent, 95);
-        set_auto_compact_percent(&mut guard, 0);
-        assert_eq!(
-            guard.auto_compact_percent, 0,
-            "zero is how the setting is switched off"
-        );
-        set_auto_compact_percent(&mut guard, 1_000);
-        assert_eq!(guard.auto_compact_percent, 100);
+        .unwrap();
+        assert_eq!(missing.auto_compact_percent, 85);
+        for (input, expected) in [
+            (0, 85),
+            (50, 80),
+            (80, 80),
+            (85, 85),
+            (90, 90),
+            (95, 90),
+            (1_000, 90),
+        ] {
+            let loaded: UsageGuardConfig = serde_json::from_value(serde_json::json!({
+                "autoCompactPercent": input,
+            }))
+            .unwrap();
+            assert_eq!(loaded.auto_compact_percent, expected);
+            let mut guard = UsageGuardConfig::default();
+            set_auto_compact_percent(&mut guard, input);
+            assert_eq!(guard.auto_compact_percent, expected);
+        }
     }
 
     #[test]

@@ -18,7 +18,12 @@ export function withSessionContextEvents(
   return [
     ...contextEvents.filter((event) => !recentIds.has(event.id)),
     ...recentEvents,
-  ];
+  ].sort((first, second) =>
+    new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime()
+    // Native timestamps retain sub-millisecond precision. Do not reorder
+    // progress emitted in the same millisecond by random event IDs.
+    || first.createdAt.localeCompare(second.createdAt),
+  );
 }
 
 export function turnIdFromSessionEvent(

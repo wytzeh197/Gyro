@@ -125,7 +125,8 @@ try {
       if (!source) throw Error('Missing source '+id);
       this.source=source;
       this.transfer=new DataTransfer();
-      source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:this.transfer}));
+      if (pane) window.__chatDragFixture.startPaneDrag(id,this.transfer);
+      else source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:this.transfer}));
     },
     event(type,x=.5,y=.5,hidden=false,outside=false) {
       const grid=document.querySelector('.gyro-chat-grid');
@@ -375,13 +376,15 @@ try {
     "rows",
   );
 
-  // Resizing under a stationary pointer can change row intent into a corner.
+  // Resize the owning workspace: the grid now flexes to fill it, so setting
+  // the flex child's width alone does not resize the rendered surface.
+  // A stationary pointer must change row intent into a corner.
   await setLayout(["alpha", "beta"]);
   await evaluate("__dragTest.start('gamma');__dragTest.event('dragover',.6,.85,true)");
   await until(()=>evaluate("document.querySelector('.gyro-chat-grid-drop-overlay')?.dataset.layout==='row'"),"row intent before resize");
-  await evaluate("document.querySelector('.gyro-chat-grid').style.width='70%'");
+  await evaluate("document.querySelector('.gyro-chat-workspace').style.width='70%'");
   await until(()=>evaluate("document.querySelector('[data-position=position-4]')?.classList.contains('is-drop-target')"),"corner intent after resize");
-  await evaluate("document.querySelector('.gyro-chat-grid').style.width=''");
+  await evaluate("document.querySelector('.gyro-chat-workspace').style.width=''");
   await until(()=>evaluate("document.querySelector('.gyro-chat-grid-drop-overlay')?.dataset.layout==='row'"),"row intent after restoring size");
   await evaluate("__dragTest.end()");
   await noFeedback();
@@ -398,7 +401,7 @@ try {
       ),
     "row seam lights",
   );
-  await evaluate("document.querySelector('.gyro-chat-grid').style.width='70%'");
+  await evaluate("document.querySelector('.gyro-chat-workspace').style.width='70%'");
   await until(
     () =>
       evaluate(
@@ -407,7 +410,7 @@ try {
     "stationary resized preview",
   );
   await evaluate(
-    "document.querySelector('.gyro-chat-grid').style.width=''; window.dispatchEvent(new Event('blur'))",
+    "document.querySelector('.gyro-chat-workspace').style.width=''; window.dispatchEvent(new Event('blur'))",
   );
   await noFeedback();
   await quickDrop("gamma", 0.5);
@@ -505,27 +508,29 @@ try {
   await assertOrder(["alpha", "beta", "delta"]);
   await noFeedback();
 
-  // A foreign project's switch target stays valid even over a full grid.
+  // Cross-folder drops obey the same capacity and placement as local chats.
   await setLayout(["alpha", "beta", "gamma", "delta"], "grid");
-  await evaluate(
-    "__dragTest.start('zeta');__dragTest.event('dragover',.1,.1,true)",
-  );
-  await until(
-    () =>
-      evaluate(
-        "Boolean(document.querySelector('[data-position=full].is-drop-target'))",
-      ),
-    "foreign project target over full layout",
-  );
+  await evaluate("__dragTest.start('zeta');__dragTest.event('dragover',.1,.1,true)");
+  await pause();
+  assert.equal(await evaluate("document.querySelectorAll('.gyro-chat-grid-drop-zone').length"), 0);
   await evaluate("__dragTest.event('drop',.1,.1,true);__dragTest.end()");
-  await assertOrder(["zeta"]);
-  assert.equal((await state()).grid.activeProjectKey, "/fixture/Other");
-  assert.deepEqual(
-    (await state()).grid.layouts["/fixture/Gyro"].slots
-      .filter(Boolean)
-      .map((p) => p.sessionId),
-    ["alpha", "beta", "gamma", "delta"],
-  );
+  await assertOrder(["alpha", "beta", "gamma", "delta"]);
+  assert.equal((await state()).grid.activeProjectKey, "/fixture/Gyro");
+
+  await setLayout(["alpha"], "columns");
+  await evaluate("__dragTest.start('zeta');__dragTest.event('dragover',.98,.5,true)");
+  await until(() => evaluate("document.querySelectorAll('.gyro-chat-grid-drop-zone').length > 0"), "cross-folder split targets");
+  await evaluate("__dragTest.event('drop',.98,.5,true);__dragTest.end()");
+  await assertOrder(["alpha", "zeta"]);
+  assert.equal((await state()).grid.activeProjectKey, "/fixture/Gyro");
+  assert.deepEqual((await state()).grid.layouts["/fixture/Gyro"].slots.filter(Boolean).map(p => p.workspacePath),
+    ["/fixture/Gyro", "/fixture/Other"]);
+  await screenshot("cross-folder-split.png");
+  await evaluate("__dragTest.start('zeta');__dragTest.event('dragover',.01,.5)");
+  await pause();
+  await evaluate("__dragTest.event('drop',.01,.5);__dragTest.end()");
+  await assertOrder(["zeta", "alpha"]);
+  await noFeedback();
 
   // Complete real mouse gestures through production source handlers. These
   // reproduce the recording's release over Environment > Processes and prove
@@ -632,10 +637,10 @@ try {
       ),
     "left preview follows mouse",
   );
-  const processes = await pointOf(
-    "Array.from(document.querySelectorAll('.gyro-chat-environment-popover-rows button')).find(button=>button.textContent.includes('Processes'))",
+  const environmentRow = await pointOf(
+    "Array.from(document.querySelectorAll('.gyro-chat-environment-popover button')).find(button=>button.textContent.trim().startsWith('Changes'))",
   );
-  await mouseMove(processes);
+  await mouseMove(environmentRow);
   await until(
     () =>
       evaluate(
@@ -644,7 +649,7 @@ try {
     "right preview over nested Environment row",
   );
   await screenshot("pointer-environment-preview.png");
-  await mouseRelease(processes);
+  await mouseRelease(environmentRow);
   await assertOrder(["alpha", "beta"]);
   await noFeedback();
   assert.equal(

@@ -1,0 +1,31 @@
+{
+  "date": "2026-11-10",
+  "scope": "User-directed chat design correction: list gutter, hanging text, reading rhythm and response actions",
+  "css": {
+    "path": "packages/ui/src/chat.css",
+    "sha256": "5e657c98a08d538582a5af24af9344c9029a5130d8006de6e920bc44a5115acb",
+    "rules": 2804,
+    "important": 0
+  },
+  "checks": {
+    "renderedStates": 112,
+    "failures": [],
+    "sourceSmoke": "passed",
+    "typecheck": "passed",
+    "browserVisual": [
+      "finished reply at default desktop",
+      "light/narrow/large wrapped items",
+      "two-digit ordered markers 9–10",
+      "Copy response keyboard focus: 2px chosen accent"
+    ],
+    "productionBundle": "passed: lists-narrow-light-large"
+  },
+  "limits": {
+    "backend": "fixture data with real React components",
+    "installedAppChanged": false,
+    "nativeReverified": false,
+    "committed": false
+  },
+  "review": "docs/design/chat-design-pass-2026-11-10.md",
+  "screenshot": "mockups/chat-thread/screenshots/design-pass-2026-11-10/02-after.jpg"
+}

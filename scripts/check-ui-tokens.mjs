@@ -1,11 +1,14 @@
 #!/usr/bin/env node
+import { postcss } from "./css-parser.mjs";
+import { readUiStyleSources } from "./ui-style-sources.mjs";
+import { checkChatStyles } from "./check-chat-styles.mjs";
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const failures = [];
+const failures = [...checkChatStyles()];
 
 function expect(condition, message) {
   if (!condition) failures.push(message);
@@ -15,24 +18,7 @@ function read(path) {
   return readFileSync(resolve(repoRoot, path), "utf8");
 }
 
-const styleFiles = [
-  "styles-foundation.css",
-  "styles.css",
-  "settings-polish.css",
-  "chat-design.css",
-  "ui-upgrade.css",
-  "chat-file-card.css",
-  "settings-design.css",
-  "composer-effort-selector.css",
-  "interaction-motion.css",
-  "press-feedback.css",
-  "navigation-design.css",
-  "detail-design.css",
-  "scheduled-work.css",
-].map((file) => ({
-  path: `packages/ui/src/${file}`,
-  source: read(`packages/ui/src/${file}`),
-}));
+const styleFiles = readUiStyleSources();
 const styles = styleFiles.map(({ source }) => source).join("\n");
 
 // Line n of the joined `styles` text, as the file and line it came from.
@@ -50,13 +36,13 @@ const earlyShell = read("apps/desktop/src/early-shell.css");
 const brand = read("packages/ui/src/brand.css");
 
 expect(
-  /\.gyro-chat-start:not\(\.is-mission\)\s*\{[^}]*justify-content:\s*center;/.test(
+  /\.gyro-chat-surface\.is-empty\s*>\s*\.gyro-chat-start:not\(\.is-mission\)\s*\{[^}]*justify-content:\s*flex-end;/.test(
     styles,
   ) &&
-    /\.gyro-chat-start:not\(\.is-mission\)\s*>\s*\.gyro-composer-shell\s*\{[^}]*margin-top:\s*24px;/.test(
+    /\.gyro-composer-shell\s*>\s*\.gyro-composer-context-row\s*\{[^}]*justify-content:\s*flex-start;/.test(
       styles,
     ),
-  "Before the first message, the composer must stay with the centered quick actions, not bottom-dock.",
+  "New chats must dock the composer at the bottom with workspace context above it on the left.",
 );
 
 expect(
@@ -97,7 +83,9 @@ expect(
 // hardcoded amber that never responded to the light theme. The real token is
 // --gyro-warn; keep the typo unrepresentable.
 expect(
-  !styles.includes("--gyro-warning"),
+  !/var\(\s*--gyro-warning[),]|--gyro-warning\s*:/.test(
+    styles.replace(/\/\*[\s\S]*?\*\//g, ""),
+  ),
   "Agent-state amber is --gyro-warn. --gyro-warning is undefined and has no light-theme value.",
 );
 
@@ -130,49 +118,41 @@ const allowedGradient = [
   /linear-gradient\(\s*90deg,\s*var\(--gyro-theme-preview-dark-canvas\)/, // The thread composer's scrim fades messages out above the dock; it covers
   // content with the canvas colour rather than tinting a surface.
   /transparent 0%,\s*var\(--gyro-composer-scrim\)/,
+  // Media captions and the transcript dock fade content rather than paint a wash.
+  /transparent,\s*color-mix\(in srgb, var\(--gyro-chat-(?:media-shade|raised)\)/,
 ];
 
-const styleLines = styles.split("\n");
-const gradientLines = styleLines
-  .map((line, index) => ({ line, n: index + 1 }))
-  .filter(({ line }) => /(?:linear|radial)-gradient\s*\(/.test(line));
-
-for (const { line, n } of gradientLines) {
-  const window = styleLines.slice(n - 1, n + 4).join("\n");
-  // Effort fills use a blue ramp, with a distinct maximum-effort treatment.
-  // Keep this exception confined to the control, not general surfaces.
-  const rulePrefix = styles.slice(0, styleLines.slice(0, n).join("\n").length);
-  const selector = rulePrefix
-    .slice(rulePrefix.lastIndexOf("}") + 1)
-    .split("{")[0]
-    .trim();
-  const isEffortIndicator =
-    selector === ".gyro-effort-slider-fill" ||
-    /^\.gyro-effort-slider-popover\[data-max-effort="true"\]\s+\.gyro-effort-slider-(?:fill|track::after)$/.test(
-      selector,
+// Parse declarations so continuation lines of geometry masks remain masks,
+// and moving a rule never changes which source file the check understands.
+for (const { path, source } of styleFiles) {
+  postcss.parse(source, { from: path }).walkDecls((declaration) => {
+    if (!/(?:linear|radial)-gradient\s*\(/.test(declaration.value)) return;
+    if (/^(?:-webkit-)?mask(?:-image)?$/.test(declaration.prop)) return;
+    const selector =
+      declaration.parent.selector?.replace(/\s+/g, " ").trim() ?? "";
+    const isEffortIndicator =
+      selector === ".gyro-effort-slider-fill" ||
+      /^\.gyro-effort-slider-popover\[data-max-effort="true"\]\s+\.gyro-effort-slider-(?:fill|track::after)$/.test(
+        selector,
+      );
+    const isStartBeam =
+      /\.gyro-chat-surface\.is-empty/.test(selector) &&
+      /var\(--gyro-beam-drift\)/.test(declaration.value);
+    expect(
+      isEffortIndicator ||
+        isStartBeam ||
+        allowedGradient.some((pattern) => pattern.test(declaration.value)),
+      `Decorative gradient at ${path}:${declaration.source.start.line} is not on the content allowlist: ${declaration.value}`,
     );
-  // Masks fade text or content out at an edge; they never paint a gradient
-  // onto a UI surface.
-  const isMask = /^(?:-webkit-)?mask-image:/.test(line.trim());
-  const allowed =
-    isEffortIndicator ||
-    isMask ||
-    allowedGradient.some((pattern) => pattern.test(window));
-  expect(
-    allowed,
-    `Decorative gradient at ${styleLocation(n)} is not on the content allowlist: ${line.trim()}`,
-  );
+  });
 }
 
 // Design-drift budget. Every Gyro stylesheet is counted, so moving rules
 // between files cannot hide them. A count may fall but never rise: lower
 // scripts/ui-token-budget.json with --update-budget once a cleanup lands.
 const budgetPath = resolve(repoRoot, "scripts/ui-token-budget.json");
-const uiDirectory = resolve(repoRoot, "packages/ui/src");
-const allStyles = readdirSync(uiDirectory)
-  .filter((file) => file.endsWith(".css"))
-  .sort()
-  .map((file) => readFileSync(resolve(uiDirectory, file), "utf8"))
+const allStyles = styleFiles
+  .map(({ source }) => source)
   .join("\n")
   .replace(/\/\*[\s\S]*?\*\//g, "");
 const declarations = [

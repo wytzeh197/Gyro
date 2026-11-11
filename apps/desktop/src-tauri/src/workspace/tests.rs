@@ -182,7 +182,18 @@ fn workspace_guidance_survives_resume_and_respects_tool_access() {
         };
         let context = provider_context_message_for_turn(&request, None, turn);
         assert!(context.contains("Selected workspace: /tmp/gyro-workspace"));
-        assert!(context.contains("do not ask the user to paste files you can read"));
+        if resumed {
+            for guard in [
+                "Use Gyro Workspace tools and verified files",
+                "preserve user-supplied paths exactly",
+                "a failed read never authorizes creation",
+                "Read-only and edit-path limits also cover proposals",
+            ] {
+                assert!(context.contains(guard), "Resume lost {guard}");
+            }
+        } else {
+            assert!(context.contains("do not ask the user to paste files you can read"));
+        }
         // The edit tutorial is standing guidance for the opening turn.
         // A resumed turn keeps the workspace rules and skips that repeat.
         if resumed {
@@ -628,6 +639,7 @@ fn scheduler_dispatches_distinct_workspaces_and_defers_conflicts() {
                 stop_condition: None,
                 next_run_at: Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
                 execution: gyro_core::AutomationExecutionContext {
+                    workflow_binding: None,
                     workspace_path: Some(workspace.display().to_string()),
                     ..Default::default()
                 },

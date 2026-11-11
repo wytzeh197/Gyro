@@ -42,7 +42,7 @@ function cssRules(source, selector) {
 }
 
 const surfaces = read("packages/ui/src/surfaces.tsx");
-const styles = read("packages/ui/src/styles.css");
+const styles = read("packages/ui/src/styles.css") + "\n" + read("packages/ui/src/chat.css");
 const app = read("apps/desktop/src/App.tsx");
 const liveTerminal = read("apps/desktop/src/live-terminal-pane.tsx");
 

@@ -703,6 +703,21 @@ function preserveFirstSeenTimelineMetadata(
 ): SessionEvent {
   const firstPayload = recordFromUnknown(firstSeen.payload) ?? {};
   const updatedPayload = { ...recordFromUnknown(updated.payload) };
+  // A stale durable page or delayed start frame cannot reopen an operation
+  // that already finished. New invocations have their own activity identity.
+  if (
+    firstSeen.sessionId === updated.sessionId &&
+    firstSeen.turnId === updated.turnId &&
+    firstPayload.kind === "provider-activity" &&
+    updatedPayload.kind === "provider-activity" &&
+    (firstSeen.id === updated.id ||
+      (typeof firstPayload.activityId === "string" &&
+        firstPayload.activityId === updatedPayload.activityId)) &&
+    ["done", "completed", "failed", "cancelled", "denied", "stopped"].includes(String(firstPayload.status)) &&
+    ["running", "queued", "requested", "waiting"].includes(String(updatedPayload.status))
+  ) {
+    updatedPayload.status = firstPayload.status;
+  }
   // Status-only frames and durable snapshots can omit counts already measured
   // for this operation. Carry them only within the same chat, turn and file.
   const fileKinds = ["file", "create", "edit", "delete", "move"];

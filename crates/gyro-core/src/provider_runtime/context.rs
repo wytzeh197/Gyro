@@ -161,16 +161,18 @@ pub fn auto_compact_messages(
     // A provider that reports no counts still resends this list on every
     // round, so the text it carries is the size to watch. Without it, the
     // rewrite silently covered only adapters that measure themselves.
-    let input_tokens = match input_tokens {
-        Some(measured) => Some(measured),
-        None => {
-            let characters = messages
-                .iter()
-                .map(|message| message_size(message).0)
-                .sum::<u64>();
-            Some(estimated_tokens(characters)).filter(|tokens| *tokens > 0)
-        }
-    };
+    // The latest tool results were not in the previous request's usage.
+    // Account for that growth as well as providers that omit usage entirely.
+    let characters = messages
+        .iter()
+        .map(|message| message_size(message).0)
+        .sum::<u64>();
+    let input_tokens = Some(
+        input_tokens
+            .unwrap_or_default()
+            .max(estimated_tokens(characters)),
+    )
+    .filter(|tokens| *tokens > 0);
     let fill = auto_compaction_fill(input_tokens, output_tokens, Some(window), percent)?;
     let percent = percent.clamp(1, 100);
     if messages.len() < 3 {

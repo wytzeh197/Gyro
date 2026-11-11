@@ -364,6 +364,8 @@ assert.equal(
 const stoppedChatSessionsRef = { current: new Set() };
 let resolveStop;
 const stopChat = callback("stopChatSession", {
+  steeringChatSessionsRef: { current: new Set() },
+  pendingSteerStopsRef: { current: new Set() },
   stoppedChatSessionsRef,
   chatAutoRetry: { cancelSession: () => {} },
   retryDispatchRef: { current: { cancelSession: () => {} } },

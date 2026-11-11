@@ -27,6 +27,10 @@ import { sessionBrowserNative } from "./session-browser-native";
 import type { SessionBrowserSnapshot } from "./session-browser-queue";
 import { createBrowserHostVisibility } from "./browser-host-visibility";
 import { captureChatBrowserPage } from "./browser-capture";
+import { requestBrowserAnnotation } from "./browser-annotations";
+let annotationToken = "";
+let annotationSent = false;
+let annotationCaptureSize: {width:number;height:number} | undefined;
 import "@gyro-dev/ui/styles.css";
 
 type Owner = { id: string; workspaceKey: string };
@@ -341,8 +345,22 @@ function Fixture() {
               fail,
             );
           }}
-          onScreenshot={() => {
-            void screenshot();
+          onScreenshot={async (action, feedback) => {
+            if (action?.startsWith("annotate-")) {
+              if(action === "annotate-start") annotationToken=feedback?.annotationToken ?? "";
+              const result=await requestBrowserAnnotation({action,feedback,sessionId:first,capture:preview()?.latestCapture});
+              if(result.capture) annotationCaptureSize={width:result.capture.width,height:result.capture.height};
+              if(action==="annotate-send" && result.attachments) {
+                assert(result.attachments.some(item=>item.kind==="image"),"Native annotation prepares the PNG attachment");
+                assert(result.attachments.some(item=>item.kind==="browser-snapshot"),"Native annotation prepares immutable element context");
+                annotationSent=true;
+                // Submission acknowledgement is simulated; no provider is called by this fixture.
+                return {sent:true};
+              }
+              return result;
+            }
+            await screenshot();
+            return undefined;
           }}
           onReload={() => {
             dispatch({type:"browser-session",sessionId:first,action:{type:"browser-reload"}});
@@ -404,6 +422,40 @@ async function run() {
     state().preferences.activeChatPanel === undefined,
     "Normal browser events do not reveal the active panel",
   );
+  // Exercise production selection/capture UI with real WebKit + attachment IPC.
+  document.querySelector<HTMLButtonElement>('[aria-label="Annotatie"]')!.click();
+  await until(()=>Boolean(annotationToken),"annotation picker did not start");
+  await flushReact();
+  const annotationSource=await captureChatBrowserPage({
+    sessionId:first,nativeHost:true,device:preview()!.device,url:preview()!.url,
+  });
+  assert(Boolean(annotationSource.annotationState),"Native capture records stable element context");
+  const picked=await call<{annotation?:unknown;error?:string}>("session_browser_annotate",{
+    sessionId:first,options:{action:"point",token:annotationToken,
+      captureState:annotationSource.annotationState,
+      x:annotationSource.annotationState!.viewport.width/2,y:60},
+  });
+  assert(Boolean(picked.annotation),`Native element hit test succeeds (${picked.error??"no error"})`);
+  await until(()=>Boolean(document.querySelector(".gyro-browser-annotation-form.is-bubble")),
+    "native annotation bubble did not appear");
+  assert(Boolean(annotationCaptureSize?.width && annotationCaptureSize.height),
+    "Native selected-region PNG decodes and crops");
+  const annotationForm=document.querySelector<HTMLFormElement>(".gyro-browser-annotation-form.is-bubble")!;
+  const annotationStage=document.querySelector<HTMLElement>(".gyro-browser-annotation-stage")!;
+  const ab=annotationForm.getBoundingClientRect(),sb=annotationStage.getBoundingClientRect();
+  assert(ab.left>=sb.left && ab.right<=sb.right+1 && ab.top>=sb.top && ab.bottom<=sb.bottom+1,
+    "Native bubble remains within the browser panel");
+  const field=annotationForm.querySelector<HTMLTextAreaElement>("textarea")!;
+  assert(document.activeElement===field,"Native captured bubble focuses its comment field");
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value")!.set!.call(field,"Make this heading clearer.");
+  field.dispatchEvent(new Event("input",{bubbles:true}));
+  await flushReact();
+  annotationForm.requestSubmit();
+  await until(()=>annotationSent,"native annotation attachment send did not complete");
+  await until(()=>!document.querySelector(".gyro-browser-annotation-stage"),"native annotation did not restore Live");
+  assert(true,"Native bubble closes after simulated chat acceptance and restores Live");
+  await flushReact();
+
   const input = document.querySelector<HTMLInputElement>(
     '[aria-label="Browser URL"]',
   )!;

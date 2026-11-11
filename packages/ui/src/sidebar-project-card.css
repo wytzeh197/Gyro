@@ -18,3 +18,185 @@
 .gyro-project-nested-toggle:hover {
   color: var(--gyro-text);
 }
+
+.gyro-project-settings-views {
+  margin-bottom: var(--gyro-space-panel);
+}
+
+/* Project memory uses the same dialog shell and control surfaces as General.
+   Only its body scrolls, keeping the project tabs and close action in reach. */
+.gyro-project-edit-dialog.is-memory[open] {
+  display: flex;
+  flex-direction: column;
+  max-height: min(640px, calc(100dvh - var(--gyro-space-section) * 2));
+  overflow: hidden;
+}
+
+.gyro-project-edit-dialog.is-memory > header,
+.gyro-project-edit-dialog.is-memory > .gyro-project-settings-views {
+  flex-shrink: 0;
+}
+
+.gyro-project-settings-memory {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.gyro-project-settings-memory .gyro-memory-panel {
+  height: auto;
+  overflow: visible;
+  padding: 0;
+  gap: var(--gyro-space-comfortable);
+}
+
+.gyro-project-settings-memory .gyro-memory-root {
+  flex-wrap: nowrap;
+  align-items: flex-end;
+}
+
+.gyro-project-settings-memory .gyro-memory-project {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-raised);
+}
+
+.gyro-memory-project > svg {
+  box-sizing: content-box;
+  padding: var(--gyro-space-comfortable);
+  border-right: 1px solid var(--gyro-border);
+  flex-shrink: 0;
+}
+
+.gyro-memory-project > span {
+  padding-inline: var(--gyro-space-group);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-project-settings-memory .gyro-memory-root > button {
+  flex-shrink: 0;
+  width: var(--gyro-control-comfortable);
+  height: var(--gyro-control-comfortable);
+  margin-bottom: var(--gyro-space-compact);
+}
+
+.gyro-project-settings-memory
+  .gyro-memory-panel
+  :is(input:not([type="checkbox"]), select, textarea) {
+  box-sizing: border-box;
+  background: var(--gyro-surface-raised);
+  border-radius: var(--gyro-radius-md);
+  padding: var(--gyro-space-comfortable);
+}
+
+.gyro-project-settings-memory .gyro-memory-tabs {
+  align-self: flex-start;
+  flex-wrap: nowrap;
+  gap: var(--gyro-space-compact);
+  padding: var(--gyro-space-compact);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-raised);
+}
+
+.gyro-project-settings-memory .gyro-memory-tabs button {
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  padding: var(--gyro-space-standard) var(--gyro-space-comfortable);
+}
+
+.gyro-project-settings-memory .gyro-memory-tabs button[aria-pressed="true"] {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+
+.gyro-project-settings-memory .gyro-memory-toolbar label {
+  position: relative;
+}
+
+.gyro-project-settings-memory .gyro-memory-toolbar label > svg {
+  position: absolute;
+  left: var(--gyro-space-comfortable);
+  color: var(--gyro-muted);
+  pointer-events: none;
+}
+
+.gyro-project-settings-memory .gyro-memory-panel .gyro-memory-toolbar input {
+  padding-left: calc(var(--gyro-space-comfortable) * 3);
+}
+
+.gyro-project-settings-memory .gyro-memory-panel .gyro-primary-button {
+  flex-shrink: 0;
+  min-height: var(--gyro-control-comfortable);
+  padding: var(--gyro-space-standard) var(--gyro-space-panel);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-text);
+  color: var(--gyro-surface);
+}
+
+.gyro-project-settings-memory
+  .gyro-memory-panel
+  .gyro-primary-button:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.gyro-project-settings-memory .gyro-memory-list ul {
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-raised);
+  overflow: hidden;
+}
+
+.gyro-project-settings-memory .gyro-memory-list li:last-child {
+  border-bottom: 0;
+}
+
+.gyro-project-settings-memory .gyro-memory-list li > button {
+  position: relative;
+  padding: var(--gyro-space-comfortable);
+  padding-right: calc(var(--gyro-space-comfortable) * 3);
+  line-height: 1.5;
+}
+
+.gyro-project-settings-memory .gyro-memory-note-preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.gyro-memory-note-arrow {
+  position: absolute;
+  right: var(--gyro-space-comfortable);
+  top: var(--gyro-space-panel);
+  color: var(--gyro-muted);
+}
+
+.gyro-project-settings-memory .gyro-memory-list button:focus-visible {
+  outline-offset: -2px;
+}
+
+.gyro-project-settings-memory .gyro-memory-history {
+  display: block;
+  padding-top: 0;
+}
+
+.gyro-project-settings-memory .gyro-memory-settings {
+  margin-top: 0;
+}
+
+.gyro-project-settings-memory .gyro-memory-settings label {
+  flex-wrap: wrap;
+}
+
+.gyro-project-settings-memory .gyro-memory-panel summary {
+  color: var(--gyro-text);
+  padding-block: var(--gyro-space-comfortable);
+}

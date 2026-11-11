@@ -423,10 +423,13 @@ pub fn check_workspace_with_timeout(
     let layout_truncated = project.layout_truncated;
 
     let remaining = timeout.saturating_sub(started.elapsed());
-    let git = if remaining >= MIN_GIT_BUDGET {
-        inspect_git(&canonical, remaining.min(GIT_CHECK_TIMEOUT))
-    } else {
-        GitInspection::Skipped
+    let git = match git_repository_present(&canonical) {
+        Ok(false) => GitInspection::Missing,
+        Ok(true) if remaining >= MIN_GIT_BUDGET => {
+            inspect_git(&canonical, remaining.min(GIT_CHECK_TIMEOUT))
+        }
+        Ok(true) => GitInspection::Skipped,
+        Err(error) => GitInspection::Failed(format!("Could not inspect Git setup: {error}")),
     };
 
     let mut status = if home_workspace {
@@ -445,6 +448,7 @@ pub fn check_workspace_with_timeout(
             dirty_count: 0,
             conflicted: false,
         }),
+        GitInspection::Unavailable => None,
         GitInspection::Failed(message) => {
             status = WorkspaceCheckStatus::Degraded;
             error = Some(message);
@@ -646,9 +650,60 @@ fn detect_project(root: &Path) -> ProjectScan {
     })
 }
 
+/// Local Git state, independent of any hosted account or remote.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GitReadState {
+    Ready,
+    NotRepository,
+    Unavailable,
+    TimedOut,
+    Failed,
+}
+
+impl GitReadState {
+    pub fn is_optional(self) -> bool {
+        matches!(self, Self::NotRepository | Self::Unavailable)
+    }
+}
+
+/// Missing executables are optional setup; permission and other I/O failures
+/// remain errors. Call only for a command started in an already checked folder.
+pub fn git_command_error_state(error: &anyhow::Error) -> GitReadState {
+    if error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    }) {
+        GitReadState::Unavailable
+    } else {
+        GitReadState::Failed
+    }
+}
+
+/// Establish absence without invoking Git. An unreadable or malformed marker
+/// must not be mistaken for a folder that simply has not opted into Git.
+pub fn git_repository_present(root: &Path) -> std::io::Result<bool> {
+    let mut directory = root.canonicalize()?;
+    for _ in 0..64 {
+        match fs::symlink_metadata(directory.join(".git")) {
+            Ok(_) => return Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        if !directory.pop() {
+            return Ok(false);
+        }
+    }
+    Err(std::io::Error::other(
+        "Git repository discovery exceeded its depth limit",
+    ))
+}
+
 enum GitInspection {
     Present(WorkspaceGitBrief),
     Missing,
+    Unavailable,
     Failed(String),
     Skipped,
 }
@@ -690,10 +745,7 @@ fn inspect_git(root: &Path, timeout: Duration) -> GitInspection {
     match run_command(request, CancellationToken::default(), |_| {}) {
         Ok(output) if output.succeeded() => GitInspection::Present(parse_git_brief(&output.stdout)),
         Ok(output) => {
-            let combined = format!("{}\n{}", output.stderr, output.stdout).to_ascii_lowercase();
-            if combined.contains("not a git repository") {
-                GitInspection::Missing
-            } else if matches!(
+            if matches!(
                 output.termination,
                 ExecutionTermination::TimedOut | ExecutionTermination::Inactive
             ) {
@@ -703,6 +755,9 @@ fn inspect_git(root: &Path, timeout: Duration) -> GitInspection {
                     "Git status was unavailable during the workspace check.".into(),
                 )
             }
+        }
+        Err(error) if git_command_error_state(&error) == GitReadState::Unavailable => {
+            GitInspection::Unavailable
         }
         Err(_) => GitInspection::Failed("Git was unavailable during the workspace check.".into()),
     }
@@ -744,6 +799,34 @@ fn parse_git_brief(output: &str) -> WorkspaceGitBrief {
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn git_readiness_absent_repository_does_not_need_a_command_budget() {
+        let root = tempfile::tempdir().unwrap();
+        let report = check_workspace_with_timeout(root.path(), Duration::ZERO);
+        assert_eq!(report.status, WorkspaceCheckStatus::Ready);
+        assert!(report.error.is_none());
+        assert!(!report.git.unwrap().available);
+        assert!(!git_repository_present(root.path()).unwrap());
+        fs::write(root.path().join(".git"), "invalid metadata").unwrap();
+        assert!(git_repository_present(root.path()).unwrap());
+        assert!(matches!(
+            inspect_git(root.path(), Duration::from_secs(2)),
+            GitInspection::Failed(_)
+        ));
+    }
+
+    #[test]
+    fn git_readiness_missing_executable_is_optional_but_permission_errors_are_not() {
+        let request = ExecutionRequest::new("/gyro-test-nonexistent/git");
+        let error = run_command(request, CancellationToken::default(), |_| {}).unwrap_err();
+        assert_eq!(git_command_error_state(&error), GitReadState::Unavailable);
+        let denied = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert_eq!(git_command_error_state(&denied), GitReadState::Failed);
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("missing");
+        assert!(git_repository_present(&missing).is_err());
+    }
 
     #[test]
     fn missing_folder_is_unavailable_and_not_a_retry() {

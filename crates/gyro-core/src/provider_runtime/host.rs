@@ -143,6 +143,11 @@ pub trait RunnerHost: Send + Sync {
     fn emit(&self, request: &ProviderChatRequest, event: RunEvent<'_>);
     fn conversation_history(&self, request: &ProviderChatRequest) -> Option<String>;
     fn save_checkpoint(&self, request: &ProviderChatRequest);
+    /// Manual compaction is consumed only at a completed tool/response boundary.
+    fn context_compaction_requested(&self, _request: &ProviderChatRequest) -> bool {
+        false
+    }
+    fn complete_context_compaction_request(&self, _request: &ProviderChatRequest) {}
     fn start_heartbeat(
         &self,
         request: ProviderChatRequest,

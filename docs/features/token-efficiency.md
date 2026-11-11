@@ -5,6 +5,66 @@ history and internal loops remain provider-owned. API runners own their messages
 and Gyro tools. Subscription allowance is not represented as a monetary token
 bucket.
 
+## Provider-path audit and upgrades (2026-11-11)
+
+This audit covers Gyro's six executable adapter families at source and local-test
+level. It does not measure a live account's subscription allowance.
+
+| Path | Evidence and boundary |
+| --- | --- |
+| OpenAI-compatible API, including custom endpoints | Shared host capability dispatch and model-result serializer; bounded tool loops, request usage and cumulative turn usage remain separate. |
+| Ollama native tools and JSON compatibility | Same shared result serializer; tool recovery is bounded and local history is explicitly assembled. |
+| Codex | Gyro tools enter the desktop broker through MCP. Successful resumes reuse the provider thread; full local history is only for fresh/recovery starts. |
+| Claude | Same MCP tool boundary and fresh/resumed distinction. Native tool schemas and provider-owned history remain outside Gyro result compaction. |
+| ACP (Grok, Kimi, Gemini) | Gyro MCP tools use the same broker. ACP receives fresh and resumed prompt forms and chooses after determining whether the cursor can reopen. |
+| Antigravity | Fresh/resumed prompts avoid replaying history on a successful resume. Its native command stream is not the Gyro terminal-result path. |
+
+Confirmed fixes and checks:
+
+- Terminal replies omit the repeated command and pane presentation fields before
+  applying their byte budget. The backing terminal keeps the original snapshot.
+  Exit codes, ownership, output revisions and retrieval offsets stay available.
+  The long-command regression fixture shrank from 48,374 to 404 serialized bytes;
+  that is a synthetic payload measurement, not an overall token-saving estimate.
+- Nested terminal logs use recoverable previews on both API and MCP paths.
+- Fresh reads retain up to 8 KiB by default. A 6.5 KB source fixture now arrives
+  whole through both serializers; a 26 KB fixture still produces a bounded preview.
+  This trades a larger first observation for fewer forced recovery calls.
+- Explicit reads of saved spill evidence are already paged and now bypass
+  re-spilling. Previously an 8.8 KB recovery window lost its middle while its
+  offsets still advanced across the omitted bytes. Regression tests reproduce
+  that failure and check exact content and offsets through both serializers for
+  read, range-read and editor-read capabilities.
+- Existing resumed-prompt reduction is preserved. The workspace regression now
+  checks its concise path, verified-file and edit-scope guards instead of requiring
+  the opening guide verbatim.
+- Tool catalog constraints, permission enforcement, bounded retry recovery,
+  history handoffs, cache/usage accounting and compaction are covered by the
+  existing Rust suites and focused frontend state checks. Experimental catalog,
+  repeated-work and API-prefix policies remain opt-in.
+
+These source changes require a rebuilt application. Provider-native tools,
+reasoning effort, provider-owned histories and subscription-limit calculations
+are not claimed as fixed or measured by this audit. A live before/after comparison
+must use the same model, effort, task, account, starting history and cache conditions,
+and report task correctness as well as usage.
+
+### Local validation
+
+- Latest full desktop library run: 1,009 passed, 12 ignored.
+- Latest full core library run: 1,085 passed, 4 ignored, one failure in
+  `project_memory::selection_tests::compact_context_preserves_unicode_and_whole_entries_at_the_budget_boundary`.
+  The project-memory files changed concurrently during the audit and were not
+  edited by this task. This prevents a clean whole-workspace test claim.
+- An earlier ACP two-second timing assertion failed under full concurrency and
+  passed in isolation; it passed in the later four-thread core run.
+- Standalone CLI: `cargo check -p gyro-cli` passed.
+- Five focused Node checks passed: turn tokens, context compaction, usage ledger,
+  live model context (11 providers / 40 model entries), and chat-history efficiency.
+- Rust formatting and scoped Git whitespace checks passed.
+- No live provider generations or subscription-allowance benchmark were run.
+  No running application was replaced.
+
 ## Current behavior
 
 Usage Limits contains an Efficiency group. Numeric attribution and immutable API
@@ -110,12 +170,13 @@ Internal change summaries, context summaries and title repairs receive only thei
 purpose-specific instructions and input. `fullContextInternalRequests: true`
 restores their preceding full-chat behavior. Ordinary chat context is preserved.
 
-The following opt-ins keep the selected model and reasoning effort:
+The following controls keep the selected model and reasoning effort:
 
-- `freshReadInlineBytes`: zero preserves the existing spill threshold; a positive
-  value gives fresh workspace reads a clamped 4-16 KiB inline window. Search and
-  command output retain their existing limits. Spill persistence and recovery
-  remain required before text is omitted.
+- `freshReadInlineBytes`: zero now selects an 8 KiB inline window for fresh
+  workspace reads; a positive value overrides it within 4-16 KiB. With Context
+  efficiency disabled, the legacy ~2.2 KB preview remains. Search and command
+  output retain their existing limits. Spill persistence and recovery remain
+  required before text is omitted.
 - `repeatedWorkDetection`: runs repeated-work detection without enabling the
   other experimental policies. Existing wait/poll exemptions still apply.
 - `stableApiPrefix`: direct native-tool OpenAI-compatible requests retire older
@@ -124,8 +185,12 @@ The following opt-ins keep the selected model and reasoning effort:
   compaction and recovery may shorten a request sooner. This switch does not
   change native CLI sessions, Ollama, tool catalogs, or cache API parameters.
 
-These three opt-ins require `enabled` and default off. Set a switch back to its
-default to roll it back independently. None has qualified for default promotion.
+These controls require `enabled`. Repeated-work detection and stable API prefixes
+remain opt-in and have not qualified for default promotion. The fresh-read
+default was increased on 2026-11-11 to avoid fragmenting ordinary source reads;
+this is a bounded payload policy, not a measured provider-cost reduction.
+Existing nonzero read-window overrides are preserved. Zero stays omitted from
+saved configuration, preserving compatibility with older builds.
 
 The paired harness includes `fresh-read-4k`, `fresh-read-8k`, `fresh-read-16k`,
 `repeated-work` and `stable-api-prefix`. Read-size and prefix variants are

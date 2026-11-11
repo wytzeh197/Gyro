@@ -115,12 +115,14 @@ fn elapsed_label(elapsed_ms: u64) -> String {
 pub async fn set_auto_compact_percent(percent: u32) -> Result<u32, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let paths = GyroPaths::for_current_user().map_err(to_string)?;
+        let mut stored = 85;
         GyroConfig::update(&paths, |persisted| {
             gyro_core::set_auto_compact_percent(&mut persisted.usage_guard, percent);
+            stored = persisted.usage_guard.auto_compact_percent;
             Ok(())
         })
         .map_err(to_string)?;
-        Ok(percent.min(100))
+        Ok(stored)
     })
     .await
     .map_err(|error| format!("auto-compaction worker failed: {error}"))?

@@ -20,7 +20,6 @@ import {
 import { ComposerEffortSelector } from "./composer-effort-selector";
 import { ComposerModelRail, type ModelRailProvider } from "./composer-model-rail";
 import type { SessionEvent } from "./types";
-import "./chat-task-suggestions.css";
 
 /** One task a reply suggests moving to a chat of its own (GYRO_TASKS line). */
 export type ChatTaskSuggestion = {

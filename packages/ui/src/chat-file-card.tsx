@@ -10,7 +10,6 @@ import { createPortal } from "react-dom";
 import { FileText, Image, Music2, Video, X } from "lucide-react";
 import { workspaceFileBadge } from "./workspace-file-icons";
 import { chatFileKind, type ChatFileLink } from "./chat-file-links";
-import "./chat-file-card.css";
 
 export type ChatFileScope = {
   sessionId?: string;

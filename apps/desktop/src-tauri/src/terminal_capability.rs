@@ -294,9 +294,21 @@ pub(super) fn execute(
 }
 
 pub(super) fn bound_terminal_result(
-    data: serde_json::Value,
+    mut data: serde_json::Value,
     arguments: &serde_json::Value,
 ) -> anyhow::Result<serde_json::Value> {
+    // The model already sent the command. Replaying it on open/read/wait/stop
+    // grows provider history and can exhaust the result budget before any
+    // output fits. Strip only duplicated input and pane presentation fields
+    // from this model-facing copy; the terminal's backing snapshot is intact.
+    if let Some(pane) = data
+        .get_mut("pane")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for field in ["command", "cols", "rows", "profileId", "title"] {
+            pane.remove(field);
+        }
+    }
     capability_output_budget::text_result(
         data,
         &[capability_output_budget::TextField {
@@ -360,6 +372,123 @@ pub(super) fn bound_command_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_replies_are_compact_on_api_and_mcp_for_every_operation() {
+        use gyro_core::{CapabilityResponse, CapabilityResult, GyroPaths};
+        let paths = GyroPaths::from_base_dir(std::env::temp_dir().join("gyro-terminal-wire-test"));
+        for id in [
+            CapabilityId::TerminalOpen,
+            CapabilityId::TerminalRead,
+            CapabilityId::TerminalWait,
+            CapabilityId::TerminalStop,
+        ] {
+            let data = bound_terminal_result(json!({
+                "completed":true, "exitCode":1,
+                "pane":{"command":"script ".repeat(8000), "output":format!("{}FINAL FAILURE", "log\n".repeat(3000)),
+                    "outputRevision":17, "status":"done", "exitCode":1}
+            }), &json!({})).unwrap();
+            let response = CapabilityResponse::completed(
+                "test",
+                CapabilityResult {
+                    call_id: uuid::Uuid::new_v4(),
+                    capability_id: id,
+                    summary: "Command finished".into(),
+                    data,
+                    resource: None,
+                },
+            );
+            let api: serde_json::Value = serde_json::from_str(
+                &gyro_core::provider_runtime::tool_batch::model_response_text(&response).unwrap(),
+            )
+            .unwrap();
+            let mcp =
+                crate::capabilities::mcp_server::capability_mcp_response(&paths, response, false)
+                    .unwrap();
+            let native: serde_json::Value =
+                serde_json::from_str(mcp["content"][0]["text"].as_str().unwrap()).unwrap();
+            for actual in [&api["result"]["data"], &native["data"]] {
+                let output = actual["pane"]["output"].as_str().unwrap();
+                assert!(output.len() < 2400 && output.contains("spill://"));
+                assert!(output.ends_with("FINAL FAILURE"));
+                assert!(actual["pane"].get("command").is_none());
+                assert_eq!(actual["exitCode"], 1);
+                assert_eq!(actual["pane"]["outputRevision"], 17);
+                assert!(actual["outputWindow"].is_object());
+            }
+        }
+    }
+
+    #[test]
+    fn terminal_reply_does_not_replay_command_or_pane_chrome() {
+        let snapshot = json!({
+            "completed": true, "exitCode": 1,
+            "owner": {"kind": "model", "sessionId": "session"},
+            "pane": {
+                "command": format!("python3 -c '{}'", "script body ".repeat(4000)),
+                "cols": 120, "rows": 32, "profileId": null, "title": "Model · python3",
+                "output": "FAILED: exact diagnostic 🦀\n", "outputRevision": 42,
+                "outputComplete": true, "status": "done", "exitCode": 1,
+                "workingDirectory": "/workspace", "paneId": "model:session",
+                "hasForegroundJob": false
+            }
+        });
+        let bounded = bound_terminal_result(snapshot.clone(), &json!({})).unwrap();
+        for field in ["command", "cols", "rows", "profileId", "title"] {
+            assert!(bounded["pane"].get(field).is_none(), "{field}");
+        }
+        for field in [
+            "output",
+            "outputRevision",
+            "outputComplete",
+            "status",
+            "exitCode",
+            "workingDirectory",
+            "paneId",
+            "hasForegroundJob",
+        ] {
+            assert_eq!(bounded["pane"][field], snapshot["pane"][field], "{field}");
+        }
+        assert_eq!(bounded["owner"], snapshot["owner"]);
+        assert_eq!(bounded["completed"], true);
+        assert_eq!(bounded["exitCode"], 1);
+        assert_eq!(bounded["outputWindow"]["truncated"], false);
+        let before = serde_json::to_vec(&snapshot).unwrap().len();
+        let after = serde_json::to_vec(&bounded).unwrap().len();
+        println!("terminal command fixture: {before} -> {after} serialized bytes");
+        assert!(after * 20 < before);
+        assert!(snapshot["pane"]["command"].as_str().unwrap().len() > 40_000);
+    }
+
+    #[test]
+    fn terminal_reply_keeps_output_pages_recoverable() {
+        let output = "🦀 exact line\n".repeat(1000);
+        let snapshot = json!({
+            "pane": {"command": "large command ".repeat(4000), "output": output,
+                "outputRevision": 7, "status": "done", "exitCode": 0},
+            "completed": true, "exitCode": 0
+        });
+        let tail = bound_terminal_result(snapshot.clone(), &json!({"maxBytes": 2048})).unwrap();
+        assert_eq!(tail["outputWindow"]["truncated"], true);
+        assert!(tail["outputWindow"]["previousOffset"].is_number());
+        let mut offset = 0;
+        let mut restored = String::new();
+        loop {
+            let page = bound_terminal_result(
+                snapshot.clone(),
+                &json!({"maxBytes": 2048, "outputOffset": offset}),
+            )
+            .unwrap();
+            restored.push_str(page["pane"]["output"].as_str().unwrap());
+            assert_eq!(page["pane"]["outputRevision"], 7);
+            let Some(next) = page["outputWindow"]["nextOffset"].as_u64() else {
+                break;
+            };
+            assert!(next > offset);
+            offset = next;
+        }
+        assert_eq!(restored, output);
+    }
 
     #[test]
     fn clipped_ui_refresh_keeps_full_output_and_other_channels_untouched() {

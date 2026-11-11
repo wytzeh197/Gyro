@@ -23,7 +23,19 @@ jobs:
       - run: pnpm test
       # Compared against scripts/workbench-smoke-baseline.json, so this fails
       # only on a check that was passing when the baseline was recorded.
+      # Also boots Vite and checks machine-independent chat layout contracts;
+      # same-machine font/pixel baselines remain a local refactoring tool.
       - run: pnpm smoke:workbench
+      - name: Preserve chat rendering evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-render-failure
+          path: |
+            artifacts/chat-consolidation/render-contract.json
+            artifacts/screenshots/chat-render/
+          if-no-files-found: ignore
+          retention-days: 7
       # Drives the Canvas preview in a headless Chromium against the dev
       # server; scripts/run-canvas-preview-browser.mjs boots Vite itself.
       - run: pnpm test:canvas-browser

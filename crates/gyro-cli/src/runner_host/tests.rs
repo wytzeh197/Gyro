@@ -35,6 +35,139 @@ fn fixture(approved: bool, mode: CapabilityRunMode) -> (tempfile::TempDir, CliRu
 }
 
 #[test]
+fn project_memory_is_shared_with_desktop_documents_and_uses_terminal_approvals() {
+    let (_root, host) = fixture(true, CapabilityRunMode::Normal);
+    std::fs::create_dir(host.session.workspace_path.join(".gyro")).unwrap();
+    std::fs::write(
+        host.session
+            .workspace_path
+            .join(gyro_core::project_memory::MEMORY_PATH),
+        "# Project memory\r\n\r\n- Use pnpm for frontend tests\r\n<!-- user prose -->\r\n",
+    )
+    .unwrap();
+    let read =
+        local_tools::invoke(&host, CapabilityId::MemoryRead, json!({"query":"frontend"})).unwrap();
+    assert_eq!(read.status, CapabilityStatus::Completed, "{:?}", read.error);
+    assert_eq!(read.result.unwrap().data["total"], 1);
+    let append = local_tools::invoke(
+        &host,
+        CapabilityId::MemoryWrite,
+        json!({"action":"append","text":"Shared runtime uses cargo tests"}),
+    )
+    .unwrap();
+    assert_eq!(
+        append.status,
+        CapabilityStatus::Completed,
+        "{:?}",
+        append.error
+    );
+    assert_eq!(append.result.unwrap().data["applied"], true);
+    let source = gyro_core::project_memory::read_project_memory(&host.session.workspace_path)
+        .unwrap()
+        .unwrap();
+    assert!(source.contains("<!-- user prose -->\r\n"));
+    assert_eq!(
+        gyro_core::project_memory::MemoryDocument::parse(&source)
+            .unwrap()
+            .entries
+            .len(),
+        2
+    );
+    let forget = local_tools::invoke(
+        &host,
+        CapabilityId::MemoryWrite,
+        json!({"action":"forget","match":"frontend"}),
+    )
+    .unwrap();
+    assert_eq!(forget.result.unwrap().data["applied"], true);
+    let (_root, gated) = fixture(false, CapabilityRunMode::Normal);
+    let declined = local_tools::invoke(
+        &gated,
+        CapabilityId::MemoryWrite,
+        json!({"action":"append","text":"not approved"}),
+    )
+    .unwrap();
+    assert_eq!(declined.result.unwrap().data["applied"], false);
+    assert!(
+        gyro_core::project_memory::read_project_memory(&gated.session.workspace_path)
+            .unwrap()
+            .is_none()
+    );
+    let (_root, plan) = fixture(true, CapabilityRunMode::Plan);
+    assert_eq!(
+        local_tools::invoke(
+            &plan,
+            CapabilityId::MemoryWrite,
+            json!({"action":"append","text":"not allowed"})
+        )
+        .unwrap()
+        .status,
+        CapabilityStatus::Failed
+    );
+    assert!(plan
+        .tool_catalog()
+        .descriptors(CapabilityRunMode::Plan)
+        .any(|descriptor| descriptor.id == CapabilityId::MemoryRead));
+}
+
+#[test]
+fn terminal_prompt_receives_shared_memory_even_without_a_model_tool_call() {
+    let (_root, host) = fixture(true, CapabilityRunMode::Normal);
+    std::fs::create_dir(host.session.workspace_path.join(".gyro")).unwrap();
+    std::fs::write(
+        host.session
+            .workspace_path
+            .join(gyro_core::project_memory::MEMORY_PATH),
+        "- Use pnpm for frontend tests\n",
+    )
+    .unwrap();
+    for provider in gyro_core::provider_registry()
+        .iter()
+        .filter(|provider| gyro_core::provider_is_executable(provider.id))
+        .map(|provider| provider.id)
+        .chain(["custom:memory-fixture"])
+    {
+        let mut request: ProviderChatRequest = serde_json::from_value(json!({
+            "sessionId":host.session.id,"turnId":host.turn,"providerId":provider,
+            "message":"Run frontend tests"
+        }))
+        .unwrap();
+        request.project_memory = Some(
+            gyro_core::project_memory::prepare_memory_context(
+                &host.store().unwrap(),
+                &host.session,
+                &request,
+                None,
+            )
+            .unwrap(),
+        );
+        for resumed in [false, true] {
+            let prompt = host.context_message(
+                &request,
+                None,
+                PromptTurn {
+                    resumed,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                prompt.matches("Use pnpm for frontend tests").count(),
+                1,
+                "{provider}/{resumed}"
+            );
+            assert!(prompt.find("Project memory").unwrap() < prompt.find("User message:").unwrap());
+            assert!(!prompt.contains("documentHash"));
+        }
+        let (_, dynamic) = host.context_sections(&request, false, false);
+        assert_eq!(
+            dynamic.matches("Use pnpm for frontend tests").count(),
+            1,
+            "API/Ollama path: {provider}"
+        );
+    }
+}
+
+#[test]
 fn headless_proposals_apply_only_the_observed_file_version_and_record_decisions() {
     let (_root, host) = fixture(true, CapabilityRunMode::Normal);
     let path = host.session.workspace_path.join("file.txt");

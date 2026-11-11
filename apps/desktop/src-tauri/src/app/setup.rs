@@ -188,7 +188,11 @@ pub fn run() {
                 Err(error) => eprintln!("could not open the session store at launch: {error}"),
             }
             start_cli_ipc_listener(app.handle().clone());
+            crate::features::workflow_execution::recover(app.handle().clone());
+            crate::features::workflow_extraction::recover(app.handle());
             start_automation_scheduler(app.handle().clone());
+            crate::features::code_reviews::execution::recover(app.handle().clone());
+            crate::features::code_reviews::fix_queue::recover(app.handle());
             agent_session_worker::start(app.handle().clone());
             goal_runner::recover(app.handle().clone());
             #[cfg(all(debug_assertions, feature = "native-browser-shell-review"))]
@@ -233,6 +237,11 @@ pub fn run() {
             crate::local_check::list_local_checks,
             crate::local_check::delete_local_check,
             crate::efficiency::set_efficiency_config,
+            crate::features::project_memory::commands::project_memory_request,
+            crate::features::code_reviews::commands::code_review_request,
+            crate::features::workflows::workflow_definition_request,
+            crate::features::workflow_execution::commands::workflow_run_request,
+            crate::features::workflow_extraction::commands::workflow_extraction_request,
             crate::efficiency::get_efficiency_task_totals,
             crate::efficiency::route_efficiency_phase,
             crate::quit_confirmation::get_quit_confirmation,
@@ -284,6 +293,7 @@ pub fn run() {
             crate::session_browser::session_browser_history,
             crate::session_browser::session_browser_close,
             crate::session_browser::session_browser_snapshot,
+            crate::session_browser::session_browser_annotate,
             crate::automation::commands::complete_automation_lease,
             crate::terminal::panes::close_terminal_pane,
             crate::automation::commands::create_automation,

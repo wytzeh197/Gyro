@@ -1,7 +1,7 @@
 class Gyro < Formula
   desc "Open-source local-first coding agent workspace CLI"
   homepage "https://github.com/wytzeh197/Gyro"
-  version "0.1.1"
+  version "0.1.2"
   license "Apache-2.0"
 
   # The tagged release workflow generates gyro.rb with the real immutable
@@ -10,12 +10,12 @@ class Gyro < Formula
   # CLI-only Homebrew tap.
   on_macos do
     on_arm do
-      url "https://github.com/wytzeh197/Gyro/releases/download/v0.1.1/gyro-cli-#{version}-aarch64-apple-darwin.tar.gz"
+      url "https://github.com/wytzeh197/Gyro/releases/download/v0.1.2/gyro-cli-#{version}-aarch64-apple-darwin.tar.gz"
       sha256 "REPLACE_WITH_AARCH64_CLI_SHA256"
     end
 
     on_intel do
-      url "https://github.com/wytzeh197/Gyro/releases/download/v0.1.1/gyro-cli-#{version}-x86_64-apple-darwin.tar.gz"
+      url "https://github.com/wytzeh197/Gyro/releases/download/v0.1.2/gyro-cli-#{version}-x86_64-apple-darwin.tar.gz"
       sha256 "REPLACE_WITH_X86_64_CLI_SHA256"
     end
   end
