@@ -3224,13 +3224,40 @@ fn normalize_mutation_path(path: String) -> Result<String> {
 }
 
 fn validate_session_event_payload(payload: Value) -> Result<Value> {
-    let encoded = serde_json::to_vec(&payload)?;
-    if encoded.len() > MAX_SESSION_EVENT_PAYLOAD_BYTES {
+    if json_byte_len(&payload) > MAX_SESSION_EVENT_PAYLOAD_BYTES {
         return Err(anyhow!(
             "session event payload cannot exceed {MAX_SESSION_EVENT_PAYLOAD_BYTES} bytes"
         ));
     }
     Ok(payload)
+}
+
+/// Compact JSON length of `value`.
+///
+/// Every session append used to build this encoding with `serde_json::to_vec`
+/// and drop it, then encode the whole event for the log. The counter reports
+/// the same length and keeps none of the buffer. `Value` serialization does
+/// not fail for a writer that accepts every buffer; if it does, `Display` is
+/// the same compact JSON.
+fn json_byte_len(value: &Value) -> usize {
+    struct ByteCounter(usize);
+
+    impl Write for ByteCounter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.saturating_add(buf.len());
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut counter = ByteCounter(0);
+    match serde_json::to_writer(&mut counter, value) {
+        Ok(()) => counter.0,
+        Err(_) => value.to_string().len(),
+    }
 }
 
 /// Cut `text` to at most `max_chars` characters, ending with the truncation
@@ -3257,8 +3284,7 @@ fn truncate_session_event_message(message: String) -> String {
 /// until it fits, and mark it `payloadTruncated`. A payload whose bulk is not
 /// in strings keeps only its small top-level fields.
 fn fit_session_event_payload(payload: Value) -> Result<Value> {
-    let encoded_len = serde_json::to_vec(&payload)?.len();
-    if encoded_len <= MAX_SESSION_EVENT_PAYLOAD_BYTES {
+    if json_byte_len(&payload) <= MAX_SESSION_EVENT_PAYLOAD_BYTES {
         return Ok(payload);
     }
     // Short strings (ids, kinds, statuses) are never cut: a payload that only
@@ -3272,21 +3298,21 @@ fn fit_session_event_payload(payload: Value) -> Result<Value> {
         let mut candidate = payload.clone();
         cap_json_strings(&mut candidate, cap);
         mark_payload_truncated(&mut candidate);
-        if serde_json::to_vec(&candidate)?.len() <= MAX_SESSION_EVENT_PAYLOAD_BYTES {
+        if json_byte_len(&candidate) <= MAX_SESSION_EVENT_PAYLOAD_BYTES {
             return Ok(candidate);
         }
     }
     let mut reduced = serde_json::Map::new();
     if let Value::Object(object) = &payload {
         for (key, value) in object {
-            if serde_json::to_vec(value)?.len() <= 1024 {
+            if json_byte_len(value) <= 1024 {
                 reduced.insert(key.clone(), value.clone());
             }
         }
     }
     let mut reduced = Value::Object(reduced);
     mark_payload_truncated(&mut reduced);
-    if serde_json::to_vec(&reduced)?.len() <= MAX_SESSION_EVENT_PAYLOAD_BYTES {
+    if json_byte_len(&reduced) <= MAX_SESSION_EVENT_PAYLOAD_BYTES {
         return Ok(reduced);
     }
     Ok(serde_json::json!({ "payloadTruncated": true }))
@@ -4752,6 +4778,37 @@ mod tests {
             vec![store.read_events(session.id).unwrap()[0].id, mentions.id]
         );
         assert!(!all.has_more_before);
+    }
+
+    #[test]
+    fn json_byte_len_matches_the_compact_payload_encoding() {
+        let payloads = [
+            serde_json::json!(null),
+            serde_json::json!(true),
+            serde_json::json!(0),
+            serde_json::json!("quote \" and emoji 🦀\n"),
+            serde_json::json!({
+                "kind": "provider-activity",
+                "detail": "é".repeat(4_096),
+                "n": [1, null, false]
+            }),
+            serde_json::json!([{"a": "b"}, "c"]),
+        ];
+        for payload in payloads {
+            assert_eq!(
+                json_byte_len(&payload),
+                serde_json::to_vec(&payload).unwrap().len(),
+                "{payload}"
+            );
+        }
+        let over = serde_json::json!({
+            "detail": "x".repeat(MAX_SESSION_EVENT_PAYLOAD_BYTES)
+        });
+        assert!(json_byte_len(&over) > MAX_SESSION_EVENT_PAYLOAD_BYTES);
+        assert!(validate_session_event_payload(over).is_err());
+        let under = serde_json::json!({"detail": "ok"});
+        let kept = validate_session_event_payload(under.clone()).unwrap();
+        assert_eq!(kept, under);
     }
 
     #[test]
