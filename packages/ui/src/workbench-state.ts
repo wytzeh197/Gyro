@@ -1,3 +1,4 @@
+import { retainGitSnapshot } from "./workspace-preparation.ts";
 import { normalizedInterfaceSize, normalizedMotionSpeed } from "./appearance.ts";
 import {
   mergeDiscoveredTaskRuns,
@@ -347,9 +348,6 @@ export function sanitizeStoredChatGridState(value: unknown): ChatGridState {
           }
         }
         if (!result) return null;
-        if (chatProjectKey(result.workspacePath) !== projectKey) {
-          return null;
-        }
         const identity = chatPaneIdentity(result);
         if (seen.has(identity)) return null;
         seen.add(identity);
@@ -548,11 +546,7 @@ export function chatGridReducer(
     state.layouts[projectKey] ?? createChatProjectLayout(projectKey);
   let next = current;
   if (action.type === "select-pane") {
-    // A chat never enters another project's grid. Accepting it here and
-    // evicting it later would first replace the pane the user had open.
-    if (chatProjectKey(action.pane.workspacePath) !== projectKey) {
-      return state;
-    }
+    // The layout owns placement; each pane retains its own workspace.
     const requestedIndex = normalizedChatSlotIndex(action.slotIndex);
     // An invalid explicit position is a rejected gesture, not an invitation
     // to insert at the focused pane or another fallback position.
@@ -596,7 +590,10 @@ export function chatGridReducer(
       // reuses an id already on screen — a sent draft keeps its draft pane id —
       // would either merge into the chat it replaces or share focus with
       // another cell, so give it an id nothing in the layout uses.
-      const incoming = chatPaneWithFreeId(action.pane, current.slots);
+      const incoming = chatPaneWithFreeId(
+        action.pane,
+        Object.values(state.layouts).flatMap((layout) => layout.slots),
+      );
       const focusedIndex = current.slots.findIndex(
         (pane) => pane?.paneId === current.focusedPaneId,
       );
@@ -3442,18 +3439,19 @@ export function workbenchReducer(
         ...state,
         ide: { ...state.ide, diagnostics: action.diagnostics },
       };
-    case "ide-set-source-control":
+    case "ide-set-source-control": {
+      const sourceControl = retainGitSnapshot(state.ide.sourceControl, action.sourceControl);
       // Status polls return a fresh object every few seconds; an identical
       // snapshot must not re-render the workbench. Git stamps `lastCheckedAt`
       // on every read, so it is left out of the comparison: counting it made
       // every poll re-render the app and reload the open diff, which showed up
       // as a hitch every few seconds while scrolling an editor.
       if (
-        state.ide.sourceControl === action.sourceControl ||
+        state.ide.sourceControl === sourceControl ||
         JSON.stringify({
           ...state.ide.sourceControl,
           lastCheckedAt: undefined,
-        }) === JSON.stringify({ ...action.sourceControl, lastCheckedAt: undefined })
+        }) === JSON.stringify({ ...sourceControl, lastCheckedAt: undefined })
       ) {
         return state;
       }
@@ -3461,13 +3459,14 @@ export function workbenchReducer(
         ...state,
         ide: {
           ...state.ide,
-          sourceControl: action.sourceControl,
-          fileDecorations: decorationsFromSourceControl(action.sourceControl),
+          sourceControl,
+          fileDecorations: decorationsFromSourceControl(sourceControl),
         },
         // Push/commit availability is derived from source control, so a fresh
         // status has to re-settle the action bar.
-        diffReview: normalizeDiffReview(state.diffReview, action.sourceControl),
+        diffReview: normalizeDiffReview(state.diffReview, sourceControl),
       };
+    }
     case "github-reset":
       return { ...state, ide: { ...state.ide, github: defaultGithubState() } };
     case "github-loading":

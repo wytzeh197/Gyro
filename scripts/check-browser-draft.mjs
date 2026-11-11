@@ -223,6 +223,9 @@ for (const [name, layout, paneId, expected] of [
     const closed = [],
       actions = [];
     const props = callback("companionSurfaceProps", {
+      workspaceReviewEntry: undefined,
+      codeReviewClient: () => ({}),
+      projectMemoryClient: () => ({}),
       workbench: { preferences: {} },
       providerLedgerById: {},
       sideChatFor() {},

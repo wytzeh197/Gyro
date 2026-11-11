@@ -90,6 +90,7 @@ mod commit_suggestion;
 mod delegated_agents;
 mod desktop_notifications;
 mod dictation_access;
+mod features;
 #[cfg(test)]
 mod gyro_cloud;
 mod launch_integrity;
@@ -109,6 +110,8 @@ mod task_suggestions;
 mod terminal_capability;
 mod terminal_process;
 mod terminal_wait;
+#[cfg(test)]
+mod tests;
 mod web_fetch_capability;
 mod workspace_capability_list;
 mod workspace_capability_read;
@@ -117,6 +120,3 @@ mod workspace_mutations;
 mod workspace_open_capability;
 mod workspace_path_capability;
 mod workspace_path_history;
-
-#[cfg(test)]
-mod tests;

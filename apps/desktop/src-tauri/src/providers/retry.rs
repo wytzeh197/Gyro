@@ -47,23 +47,23 @@ pub(crate) fn auto_compact_owned_session(
     request: &ProviderChatRequest,
     binding: Option<ProviderSessionBinding>,
     usage_context: UsageContext,
-) -> anyhow::Result<Option<ProviderSessionBinding>> {
+) -> anyhow::Result<(Option<ProviderSessionBinding>, Vec<gyro_core::SessionEvent>)> {
     // A summary of the conversation must not compact the conversation first.
     if usage_context.origin == UsageOrigin::ContextCompaction
         || isolated_internal_purpose(request).is_some()
         || request.message.trim() == "/compact"
     {
-        return Ok(binding);
+        return Ok((binding, Vec::new()));
     }
     let percent = match load_config_blocking() {
         Ok(config) => config.usage_guard.auto_compact_percent,
-        Err(_) => return Ok(binding),
+        Err(_) => return Ok((binding, Vec::new())),
     };
     let Ok(session_id) = parse_uuid(&request.session_id) else {
-        return Ok(binding);
+        return Ok((binding, Vec::new()));
     };
     let Ok(events) = store.read_events(session_id) else {
-        return Ok(binding);
+        return Ok((binding, Vec::new()));
     };
     let signals = events
         .iter()
@@ -73,31 +73,45 @@ pub(crate) fn auto_compact_owned_session(
         &request.provider_id,
         request.model_id.as_deref(),
     );
-    if !provider_context::should_auto_compact_session(
-        percent,
-        &request.provider_id,
-        request.model_id.as_deref(),
-        catalog_window,
-        &signals,
-    ) {
-        return Ok(binding);
+    let control = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(&request.session_id).cloned());
+    let requested = control
+        .as_ref()
+        .is_some_and(|control| control.context_compaction_requested.load(Ordering::Acquire));
+    if !requested
+        && !provider_context::should_auto_compact_session(
+            percent,
+            &request.provider_id,
+            request.model_id.as_deref(),
+            catalog_window,
+            &signals,
+        )
+    {
+        return Ok((binding, Vec::new()));
     }
     let run_id = request
         .turn_id
         .as_deref()
         .and_then(|value| Uuid::parse_str(value).ok())
         .unwrap_or_else(Uuid::new_v4);
-    // Codex compacts inside the resumed session. Everyone else drops the
-    // binding so the following prompt starts from the checkpoint instead of
-    // reopening the full transcript.
-    let keeps_resume = binding.as_ref().is_some_and(|binding| {
-        provider_resume_cursor_from_binding(binding)
-            .is_some_and(|cursor| cursor.kind == "codex-session")
-    });
+    if let Some(control) = &control {
+        control
+            .context_compaction_requested
+            .store(false, Ordering::Release);
+    }
     loop {
         provider_retry_recovery::wait_for_shared_cooldown(app, request)?;
         match compact_provider_chat_blocking(app.clone(), request.session_id.clone(), run_id) {
-            Ok(_) => return Ok(if keeps_resume { binding } else { None }),
+            Ok(response) => {
+                return Ok((
+                    store.get_provider_session_binding(session_id, &request.provider_id)?,
+                    response.activity_events,
+                ))
+            }
             Err(error) if provider_reliability::is_rate_limit_error(&error) => {
                 let hint = gyro_core::provider_retry::provider_cooldown_hint(&error)
                     .unwrap_or(Duration::from_secs(30));
@@ -131,6 +145,8 @@ pub(crate) fn run_provider_chat_with_retry(
     binding: Option<ProviderSessionBinding>,
     usage_context: UsageContext,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    validate_workflow_request(store, request)?;
+    let _checkout_lease = ordinary_checkout_lease(store, request)?;
     let _budget = gyro_core::provider_retry::RetryScope::start();
     let _cycle = provider_retry_recovery::Cycle::start();
     let _cooldown = gyro_core::provider_cooldown::Scope::enter(
@@ -162,7 +178,7 @@ pub(crate) fn run_provider_chat_with_retry(
     provider_retry_recovery::wait_for_shared_cooldown(app, request)?;
     let profiled = efficiency::profile(request);
     let request = &profiled;
-    let binding = auto_compact_owned_session(store, app, request, binding, usage_context)?;
+    let (binding, _) = auto_compact_owned_session(store, app, request, binding, usage_context)?;
     let mut output =
         run_provider_chat_with_retry_inner(store, app, request, binding, usage_context)?;
     let mut continuation = request.clone();
@@ -479,13 +495,125 @@ pub(crate) fn run_provider_chat_once(
     )?;
     timing::attempt();
     let runner = runner_for(provider_adapter_for(&request.provider_id).kind);
-    let expanded = with_browser_attachment_images(request, runner.supports_images(request))?;
-    runner.run(
+    let mut expanded = with_browser_attachment_images(request, runner.supports_images(request))?;
+    let memory_store = crate::stores::open_store().map_err(anyhow::Error::msg)?;
+    validate_workflow_request(&memory_store, request)?;
+    let _checkout_lease = ordinary_checkout_lease(&memory_store, request)?;
+    let memory_session = memory_store
+        .get_session(uuid::Uuid::parse_str(&request.session_id)?)?
+        .ok_or_else(|| anyhow::anyhow!("memory session no longer exists"))?;
+    expanded.project_memory =
+        if request.internal_purpose.is_none() && request.workflow_run_id.is_none() {
+            Some(gyro_core::project_memory::prepare_memory_context(
+                &memory_store,
+                &memory_session,
+                request,
+                crate::provider_context::provider_model_context_window(
+                    &request.provider_id,
+                    request.model_id.as_deref(),
+                ),
+            )?)
+        } else {
+            None
+        };
+    if let Some(memory) = expanded.project_memory.as_mut() {
+        memory.suggest_candidates &= request
+            .project_memory
+            .as_ref()
+            .is_some_and(|memory| memory.suggest_candidates);
+    }
+    if expanded.project_memory.is_some() {
+        memory_store.invalidate_project_memory_receipt(memory_session.id, &request.provider_id)?;
+    }
+    let output = runner.run(
         &TauriRunnerHost::new(app),
         &expanded,
         resume_cursor,
         attempt,
-    )
+    )?;
+    if !output.answer_cut_off {
+        if let (Some(turn), Some(cursor)) =
+            (request.turn_id.as_deref(), output.resume_cursor.as_ref())
+        {
+            // Only acknowledged successful attempts can suppress later input.
+            if let Some(memory) = &expanded.project_memory {
+                if let Err(error) = memory_store.acknowledge_project_memory_receipt(
+                    memory_session.id,
+                    uuid::Uuid::parse_str(turn)?,
+                    &request.provider_id,
+                    &serde_json::to_value(cursor)?,
+                    &memory.render(output.resumed).1,
+                ) {
+                    eprintln!(
+                        "Memory context acknowledgement unavailable: {}",
+                        gyro_core::sanitize_capability_summary(&error.to_string())
+                    );
+                }
+            }
+        }
+    }
+    Ok(output)
 }
 
 pub(crate) use gyro_core::provider_runtime::reliability::is_provider_cancellation;
+
+fn validate_workflow_request(
+    store: &SessionStore,
+    request: &ProviderChatRequest,
+) -> anyhow::Result<()> {
+    if request.internal_purpose.is_none() {
+        if let Some(root) = request
+            .workspace_path
+            .as_deref()
+            .map(std::path::Path::new)
+            .and_then(|root| root.canonicalize().ok())
+        {
+            if let Some(id) = request.workflow_run_id {
+                store.validate_workflow_dispatch(
+                    id,
+                    Uuid::parse_str(&request.session_id)?,
+                    &request.provider_id,
+                    request.model_id.as_deref(),
+                    &root.to_string_lossy(),
+                )?;
+            } else {
+                anyhow::ensure!(
+                    store
+                        .active_workflow_for_root(&root.to_string_lossy())?
+                        .is_none(),
+                    "A workflow owns this checkout; stop it or use another worktree"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ordinary_checkout_lease(
+    store: &SessionStore,
+    request: &ProviderChatRequest,
+) -> anyhow::Result<Option<gyro_core::workflows::WorkflowCheckoutLease>> {
+    if request.workflow_run_id.is_some() || request.internal_purpose.is_some() {
+        return Ok(None);
+    }
+    #[cfg(not(unix))]
+    {
+        return Ok(None);
+    }
+    let session = store
+        .get_session(Uuid::parse_str(&request.session_id)?)?
+        .ok_or_else(|| anyhow::anyhow!("source session is unavailable"))?;
+    if session.workspace_path.as_os_str().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(
+        gyro_core::workflows::WorkflowCheckoutLease::try_acquire(
+            store.paths(),
+            &session.workspace_path,
+            false,
+        )?
+        .ok_or_else(|| {
+            anyhow::anyhow!("A workflow owns this checkout; stop it or choose another worktree")
+        })?,
+    ))
+}

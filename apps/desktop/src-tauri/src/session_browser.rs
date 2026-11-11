@@ -504,22 +504,81 @@ impl SessionBrowserManager {
         ))
     }
 
+    /// Wait only for read-only observations. Actions retain fail-fast document
+    /// leases so a delayed click can never land in a different document.
+    fn observe_document(
+        &self,
+        session_id: &str,
+        method: &str,
+        args: Value,
+        mut evaluate: impl FnMut(
+            BrowserDocumentLease,
+            SessionBrowserSnapshot,
+            &str,
+            Value,
+        ) -> Result<Value, String>,
+    ) -> Result<Value, String> {
+        if !matches!(
+            method,
+            "status" | "readPage" | "find" | "console" | "network" | "checkRead"
+        ) {
+            return Err("browser observation cannot dispatch a page action".into());
+        }
+        let pending = PendingCall::new(
+            AGENT_CALL_TIMEOUT,
+            "browser document is not ready for observation; inspect the browser for navigation status",
+        )?;
+        let guard = pending.guard();
+        let snapshot = self.wait_for_document(session_id)?;
+        let lease = BrowserDocumentLease {
+            resource: BrowserLease::from_snapshot(&snapshot),
+            navigation_id: snapshot.navigation_id,
+        };
+        loop {
+            guard.check()?;
+            lease.validate(self)?;
+            match evaluate(
+                lease.clone(),
+                snapshot.clone(),
+                "status",
+                serde_json::json!({}),
+            ) {
+                Ok(status) => {
+                    guard.check()?;
+                    lease.validate(self)?;
+                    // DOMContentLoaded is sufficient. Images, analytics, and
+                    // long-lived requests must not block observing usable pages.
+                    if matches!(
+                        status.get("readyState").and_then(Value::as_str),
+                        Some("interactive" | "complete")
+                    ) {
+                        return if method == "status" {
+                            Ok(status)
+                        } else {
+                            evaluate(lease, snapshot, method, args)
+                        };
+                    }
+                }
+                Err(error) if error == "browser agent is not ready" => {}
+                Err(error) => return Err(error),
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
     fn wait_for_document(&self, session_id: &str) -> Result<SessionBrowserSnapshot, String> {
         let (resource, initial) = self.capture_resource(session_id)?;
         let pending = PendingCall::new(
             AGENT_CALL_TIMEOUT,
-            "browser navigation did not commit before the screenshot deadline",
+            "browser navigation did not commit before the observation deadline; inspect the browser for navigation status",
         )?;
         let guard = pending.guard();
         loop {
             guard.check()?;
-            resource.validate(self)?;
-            let current = self
-                .get_snapshot(session_id)?
-                .ok_or("browser closed while waiting for its document")?;
+            let current = self.with_resource_mut(&resource, |slot| Self::snapshot_locked(slot))?;
             if current.navigation_id != initial.navigation_id {
                 return Err(
-                    "browser navigation changed while waiting for the screenshot document".into(),
+                    "browser navigation changed while waiting for the observation document".into(),
                 );
             }
             if let Some(error) = &current.navigation_error {
@@ -814,41 +873,33 @@ impl SessionBrowserManager {
     }
 }
 
-/// A child webview shares the window with the chat UI, so the browser steals
-/// the keyboard while it is being driven: AppKit makes a newly shown webview
-/// first responder and leaves first responder on a view that is hidden. The
-/// user keeps typing in a chat the model is not working in, so those keystrokes
-/// disappear into a native view nobody is looking at. Give the keyboard back to
-/// the app webview whenever a browser visibility change moved it.
-fn restore_main_webview_focus<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(main) = app.get_webview(MAIN_WINDOW_LABEL) {
-        let _ = main.set_focus();
-    }
-}
-
-/// A hidden chat's browser can still end up holding the keyboard: WebKit moves
-/// first responder while the model types into a field, takes a snapshot, or
-/// loads a page with autofocus, and a child created hidden never handed it
-/// back. The person is meanwhile typing in another chat, and every keystroke
-/// lands in a view nobody can see. Unlike `restore_main_webview_focus`, this
-/// only acts when the keyboard is stranded — on a hidden view, on the window
-/// itself, or nowhere — so it never takes focus from a browser on screen.
+/// Recover typing only when the active window's responder is stranded.
+/// Browser creation and visibility updates must never reset a valid responder:
+/// it may be the user's editor, another visible browser, or a native control.
 fn reclaim_stranded_keyboard<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(target_os = "macos")]
     if let Some(main) = app.get_webview(MAIN_WINDOW_LABEL) {
         let _ = main.with_webview(|platform| unsafe {
-            use objc2_app_kit::NSView;
+            use objc2_app_kit::{NSView, NSWindow};
             let main_view: &NSView = &*platform.inner().cast();
             let Some(window) = main_view.window() else {
                 return;
             };
+            // Background operations must not change another window's typing
+            // target or prepare a different target for when the user returns.
+            if !window.isKeyWindow() {
+                return;
+            }
             let stranded = match window.firstResponder() {
                 None => true,
-                // The window itself, the one non-view responder here, takes no
-                // typing either.
-                Some(responder) => responder
-                    .downcast_ref::<NSView>()
-                    .is_none_or(|view| view.isHiddenOrHasHiddenAncestor()),
+                Some(responder) => {
+                    responder
+                        .downcast_ref::<NSView>()
+                        .is_some_and(|view| view.isHiddenOrHasHiddenAncestor())
+                        || responder
+                            .downcast_ref::<NSWindow>()
+                            .is_some_and(|candidate| std::ptr::eq(candidate, &*window))
+                }
             };
             if stranded {
                 window.makeFirstResponder(Some(main_view));
@@ -984,6 +1035,9 @@ fn sanitize_text(value: &str) -> String {
 fn agent_initialization_script(bridge_nonce: &str) -> String {
     let nonce = serde_json::to_string(bridge_nonce).unwrap_or_else(|_| "\"\"".into());
     let background_pointer = include_str!("browser_background_pointer.js")
+        .trim()
+        .trim_end_matches(';');
+    let annotations = include_str!("browser_annotations.js")
         .trim()
         .trim_end_matches(';');
     let pointer_feedback = include_str!("browser_pointer_feedback.js")
@@ -1338,7 +1392,9 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
   const clearHighlight = () => pointerFeedback.clear();
   const flashTarget = (el, options = {{}}) => pointerFeedback.show(el, options);
 
+  const annotations = {annotations}(window, document, {{ assignRef, resolveRef, roleOf, nameOf, isCredentialField, isVisible, pageState, pointerFeedback, epoch: refPrefix }});
   window.__gyroBrowserAgent = {{
+    annotate(options) {{ return annotations.request(options); }},
     clearHighlight() {{
       clearHighlight();
       return {{ ok: true }};
@@ -1553,7 +1609,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", entries, offset, total: networkBuf.length, order: "newest-first" }};
     }},
     status() {{
-      return Object.assign({{ ok: true }}, pageState());
+      return Object.assign({{ ok: true, annotationState: annotations.state() }}, pageState());
     }},
   }};
   window.__gyroBrowserAgent.backgroundPointer = {background_pointer}(window.__gyroBrowserAgent, window, document);
@@ -1914,15 +1970,14 @@ fn open_browser_resource<R: Runtime>(
             )?;
             let visible =
                 browser_visibility(background_only, request.visible.unwrap_or(existing.visible));
-            let was_visible = existing.visible;
-            if visible {
-                let _ = webview.show();
-            } else {
-                let _ = webview.hide();
-            }
-            manager.set_visible_flag(&request.session_id, visible)?;
-            if visibility_moves_keyboard_focus(was_visible, visible) {
-                restore_main_webview_focus(app);
+            if visibility_moves_keyboard_focus(existing.visible, visible) {
+                if visible {
+                    webview.show().map_err(|error| error.to_string())?;
+                } else {
+                    webview.hide().map_err(|error| error.to_string())?;
+                }
+                manager.set_visible_flag(&request.session_id, visible)?;
+                reclaim_stranded_keyboard(app);
             }
             let _ = manager.approve_origin(&request.session_id, &origin);
             return manager
@@ -1983,6 +2038,10 @@ fn open_browser_resource<R: Runtime>(
     let geometry = browser_viewport::geometry(viewport_request, url.as_str(), &bounds)?;
 
     let mut builder = tauri::WebviewBuilder::new(&webview_label, WebviewUrl::External(url.clone()))
+        // Child views are created before they can be hidden. The default focus
+        // also activates the application on macOS, interrupting typing in other
+        // windows even when this browser is only needed for a background capture.
+        .focused(false)
         .initialization_script(script)
         .incognito(true)
         .devtools(false)
@@ -2141,10 +2200,6 @@ fn open_browser_resource<R: Runtime>(
             .hide()
             .map_err(|error| format!("could not hide browser: {error}"))?;
         reclaim_stranded_keyboard(app);
-    } else if !background_only {
-        // A child webview created visible becomes first responder, so a model
-        // opening a page must not pull the keyboard out of the user's chat.
-        restore_main_webview_focus(app);
     }
 
     let mut approved = HashSet::new();
@@ -2240,6 +2295,11 @@ pub fn set_session_browser_visible<R: Runtime>(
         .get_webview(&label)
         .ok_or_else(|| "browser webview is not available".to_string())?;
     let was_visible = manager.visible_flag(session_id)?;
+    // Resize/capture host reports can repeat the current visibility. Do not
+    // touch the native view (or its responder chain) when nothing changed.
+    if !visibility_moves_keyboard_focus(was_visible, visible) {
+        return Ok(());
+    }
     if visible {
         webview
             .show()
@@ -2250,9 +2310,7 @@ pub fn set_session_browser_visible<R: Runtime>(
             .map_err(|error| format!("could not hide browser: {error}"))?;
     }
     manager.set_visible_flag(session_id, visible)?;
-    if visibility_moves_keyboard_focus(was_visible, visible) {
-        restore_main_webview_focus(app);
-    }
+    reclaim_stranded_keyboard(app);
     Ok(())
 }
 
@@ -2485,6 +2543,20 @@ fn close_browser_webview<R: Runtime>(webview: &tauri::Webview<R>) -> Result<(), 
 ))]
 pub(crate) fn navigation_observer_counts() -> Value {
     navigation_observer::counts()
+}
+
+pub(crate) fn observe_agent<R: Runtime>(
+    app: &AppHandle<R>,
+    session_id: &str,
+    method: &str,
+    args: Value,
+) -> Result<Value, String> {
+    app.state::<SessionBrowserManager>().observe_document(
+        session_id,
+        method,
+        args,
+        |lease, snapshot, method, args| call_agent_for(app, lease, snapshot, method, args),
+    )
 }
 
 pub fn call_agent<R: Runtime>(
@@ -2824,8 +2896,10 @@ pub(crate) fn wait_for_screenshot_document<R: Runtime>(
     app: &AppHandle<R>,
     session_id: &str,
 ) -> Result<SessionBrowserSnapshot, String> {
+    observe_agent(app, session_id, "status", serde_json::json!({}))?;
     app.state::<SessionBrowserManager>()
-        .wait_for_document(session_id)
+        .get_snapshot(session_id)?
+        .ok_or_else(|| "browser closed while waiting for its document".into())
 }
 
 pub fn capture_session_browser_png<R: Runtime>(
@@ -3033,6 +3107,125 @@ pub async fn session_browser_snapshot(
 ) -> Result<Option<SessionBrowserSnapshot>, String> {
     app.state::<SessionBrowserManager>()
         .get_snapshot(&session_id)
+}
+
+/// User-driven, read-only element selection in the session's current document.
+#[tauri::command]
+pub async fn session_browser_annotate(
+    app: AppHandle,
+    session_id: String,
+    options: Value,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager = app.state::<SessionBrowserManager>();
+        let (lease, snapshot) = manager.capture_document(&session_id)?;
+        if serde_json::to_vec(&options)
+            .map_err(|e| e.to_string())?
+            .len()
+            > 16_384
+        {
+            return Err("annotation request is too large".into());
+        }
+        let capturing = options.get("action").and_then(Value::as_str) == Some("capture");
+        if matches!(
+            options.get("action").and_then(Value::as_str),
+            Some("validate" | "capture")
+        ) && (options
+            .pointer("/annotation/resourceId")
+            .and_then(Value::as_str)
+            != Some(snapshot.resource_id.as_str())
+            || options
+                .pointer("/annotation/navigationId")
+                .and_then(Value::as_u64)
+                != Some(snapshot.navigation_id))
+        {
+            return Err(
+                "This annotation belongs to a different browser document; select the element again"
+                    .into(),
+            );
+        }
+        let starting = options.get("action").and_then(Value::as_str) == Some("start");
+        let mut options = options;
+        if capturing {
+            options["action"] = Value::String("capture".into());
+        }
+        let mut result = call_agent_for(
+            &app,
+            lease.clone(),
+            snapshot.clone(),
+            "annotate",
+            options.clone(),
+        )?;
+        lease.validate(&manager)?;
+        if capturing {
+            if result.get("ok") != Some(&Value::Bool(true)) {
+                return Ok(result);
+            }
+            // Capture only this leased document; recheck geometry and privacy
+            // masks after the native snapshot before exposing any pixels.
+            let screenshot = capture_session_browser_png(&app, &session_id)?;
+            lease.validate(&manager)?;
+            options["action"] = Value::String("validate".into());
+            let after = call_agent_for(&app, lease.clone(), snapshot.clone(), "annotate", options)?;
+            let before_annotation = result.get("annotation");
+            let after_annotation = after.get("annotation");
+            let stable = [
+                "documentEpoch",
+                "revision",
+                "url",
+                "viewport",
+                "rect",
+                "outline",
+                "protectedRects",
+            ]
+            .iter()
+            .all(|key| {
+                before_annotation.and_then(|a| a.get(key))
+                    == after_annotation.and_then(|a| a.get(key))
+            });
+            if after.get("ok") != Some(&Value::Bool(true)) || !stable {
+                return Err("The page changed during capture. Select the element again.".into());
+            }
+            if screenshot.png.len() > crate::app::limits::MAX_BROWSER_PREVIEW_CAPTURE_BYTES {
+                return Err("The annotation screenshot is too large.".into());
+            }
+            use base64::Engine;
+            result["image"] = Value::String(format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(&screenshot.png)
+            ));
+            result["width"] = Value::from(screenshot.width);
+            result["height"] = Value::from(screenshot.height);
+        }
+        // Only this explicit user interaction moves focus. Polling an active
+        // picker, stale cleanup, and hidden/background browsers never do.
+        let visible = manager
+            .get_snapshot(&session_id)?
+            .is_some_and(|current| current.visible && !current.background_only);
+        let foreground = app
+            .get_window(MAIN_WINDOW_LABEL)
+            .is_some_and(|window| window.is_focused().unwrap_or(false));
+        if visible && foreground {
+            let focus_label = if starting {
+                Some(snapshot.label.as_str())
+            } else if result.get("selectionEnded") == Some(&Value::Bool(true)) {
+                Some(MAIN_WINDOW_LABEL)
+            } else {
+                None
+            };
+            if let Some(view) = focus_label.and_then(|label| app.get_webview(label)) {
+                view.set_focus()
+                    .map_err(|error| format!("could not focus annotation surface: {error}"))?;
+            }
+        }
+        if let Some(annotation) = result.get_mut("annotation").and_then(Value::as_object_mut) {
+            annotation.insert("resourceId".into(), Value::String(snapshot.resource_id));
+            annotation.insert("navigationId".into(), Value::from(snapshot.navigation_id));
+        }
+        Ok(result)
+    })
+    .await
+    .map_err(|error| format!("annotation worker failed: {error}"))?
 }
 
 /// The element a browser interaction touched, as the page names it.

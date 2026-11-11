@@ -17,7 +17,6 @@ import {
 } from "./subagents";
 import type { SessionEvent } from "./types";
 import { useChatTranscriptScroll } from "./use-chat-transcript-scroll";
-import "./subagents.css";
 const EMPTY_EVENTS: SessionEvent[] = [];
 
 /** Keeps delegated work visible while the detailed process rail is closed. */

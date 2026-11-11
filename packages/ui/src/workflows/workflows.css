@@ -1,0 +1,664 @@
+.gyro-workflows-destination {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--gyro-app);
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-sans);
+  font-size: var(--gyro-font-support);
+}
+.gyro-workflows-destination > nav {
+  display: flex;
+  gap: var(--gyro-space-compact);
+  padding: 12px 24px;
+  min-height: 52px;
+  box-sizing: border-box;
+  align-items: center;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  flex-shrink: 0;
+}
+.gyro-workflows-destination
+  :where(.gyro-workflows-content, .gyro-workflow-scheduled, .gyro-workflow-nav)
+  button {
+  font: inherit;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  background: var(--gyro-control-bg);
+  color: var(--gyro-text);
+  padding: 7px 12px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  cursor: pointer;
+}
+.gyro-workflows-destination
+  :where(.gyro-workflows-content, .gyro-workflow-scheduled, .gyro-workflow-nav)
+  button[aria-pressed="true"] {
+  background: var(--gyro-surface-raised);
+  border-color: var(--gyro-text);
+}
+.gyro-workflows-destination
+  :where(.gyro-workflows-content, .gyro-workflow-scheduled, .gyro-workflow-nav)
+  button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.gyro-workflows-destination
+  :is(button, input, textarea, select, summary):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+.gyro-workflows-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 36px max(24px, calc((100% - 960px) / 2)) 64px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.gyro-workflows-content > *,
+.gyro-workflow-scheduled > * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.gyro-workflows-content section {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+}
+.gyro-workflows-content :is(h1, h2, h3, p) {
+  margin: 0 0 var(--gyro-space-comfortable);
+}
+.gyro-workflows-content h1 {
+  font-size: var(--gyro-font-heading);
+}
+.gyro-workflows-content h2,
+.gyro-workflow-scheduled h2 {
+  font-size: var(--gyro-font-lead);
+}
+.gyro-workflows-content h3 {
+  font-size: var(--gyro-font-body);
+  margin-top: var(--gyro-space-panel);
+}
+.gyro-workflows-content label {
+  display: grid;
+  gap: var(--gyro-space-compact);
+  margin-bottom: var(--gyro-space-comfortable);
+}
+.gyro-workflows-content :is(input, textarea, select) {
+  font: inherit;
+  color: var(--gyro-text);
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  padding: var(--gyro-space-standard);
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+.gyro-workflows-content textarea {
+  resize: vertical;
+  min-height: 90px;
+}
+.gyro-workflows-content fieldset {
+  min-width: 0;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  padding: var(--gyro-space-comfortable);
+  margin: var(--gyro-space-comfortable) 0;
+  display: grid;
+  gap: var(--gyro-space-standard);
+}
+.gyro-workflows-content .gyro-workflow-check {
+  display: flex;
+  align-items: start;
+  gap: var(--gyro-space-standard);
+}
+.gyro-workflows-content input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--gyro-accent);
+  flex-shrink: 0;
+}
+.gyro-workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-standard);
+  margin: var(--gyro-space-comfortable) 0;
+}
+.gyro-workflow-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--gyro-space-comfortable) 0;
+}
+.gyro-workflow-list > li {
+  border-bottom: 1px solid var(--gyro-border-soft);
+  padding: var(--gyro-space-comfortable) 0;
+  overflow-wrap: anywhere;
+}
+.gyro-workflows-destination .gyro-workflow-row {
+  border: 0;
+  border-radius: 0;
+  display: grid;
+  gap: var(--gyro-space-compact);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+}
+.gyro-workflow-row span,
+.gyro-workflow-muted {
+  color: var(--gyro-muted);
+}
+.gyro-workflow-steps {
+  padding-left: var(--gyro-space-panel);
+}
+.gyro-workflow-steps > li {
+  padding: var(--gyro-space-standard) 0;
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-workflows-content pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+  max-height: 400px;
+  padding: var(--gyro-space-standard);
+  background: var(--gyro-control-bg);
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-workflows-content code {
+  overflow-wrap: anywhere;
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-workflows-content summary {
+  cursor: pointer;
+  padding: var(--gyro-space-standard) 0;
+}
+.gyro-workflow-check small {
+  display: block;
+  color: var(--gyro-muted);
+}
+.gyro-workflows-schedules {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 36px max(24px, calc((100% - 960px) / 2)) 64px;
+}
+.gyro-workflow-scheduled {
+  margin-bottom: 32px;
+}
+.gyro-workflow-legacy-schedules {
+  min-width: 0;
+}
+/* The workbench's global list layout must not flatten ordered step evidence. */
+.gyro-workflows-destination ol.gyro-workflow-steps {
+  list-style: decimal;
+}
+.gyro-workflows-destination .gyro-workflow-steps > li {
+  display: list-item;
+}
+.gyro-workflows-destination .gyro-workflow-steps > li > strong {
+  display: block;
+  margin-bottom: var(--gyro-space-standard);
+}
+.gyro-workflows-destination
+  :where(.gyro-workflows-content, .gyro-workflow-scheduled, .gyro-workflow-nav)
+  button.gyro-primary-button {
+  background: var(--gyro-ink-bg);
+  border-color: var(--gyro-ink-bg);
+  color: var(--gyro-ink-text);
+  box-shadow: none;
+}
+.gyro-workflows-destination
+  :where(.gyro-workflows-content, .gyro-workflow-scheduled, .gyro-workflow-nav)
+  button.gyro-primary-button:hover:not(:disabled) {
+  background: var(--gyro-ink-hover);
+  border-color: var(--gyro-ink-hover);
+}
+
+/* One page frame across the library, schedules and run history. */
+.gyro-workflows-destination > .gyro-workflow-nav button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--gyro-muted);
+  padding: 6px 14px;
+  font-weight: 500;
+}
+.gyro-workflows-destination > .gyro-workflow-nav button[aria-pressed="true"] {
+  background: var(--gyro-surface-raised);
+  color: var(--gyro-text);
+  border-color: var(--gyro-border-soft);
+}
+.gyro-workflows-destination button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.gyro-workflow-page-heading {
+  margin-bottom: 28px;
+}
+.gyro-workflow-page-heading h1 {
+  margin: 0 0 8px;
+  font-size: var(--gyro-font-heading);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.3;
+}
+.gyro-workflow-page-heading p,
+.gyro-workflows-content .gyro-workflow-page-heading p {
+  margin: 0;
+  color: var(--gyro-muted);
+  line-height: 1.6;
+}
+.gyro-workflow-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.gyro-workflow-heading-actions > button {
+  flex-shrink: 0;
+}
+.gyro-workflows-content .gyro-workflow-project {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  margin-bottom: 20px;
+}
+.gyro-workflow-project select {
+  flex: 0 1 420px;
+  text-overflow: ellipsis;
+}
+.gyro-workflow-library-toolbar {
+  margin: 0 0 var(--gyro-space-panel);
+  align-items: center;
+}
+.gyro-workflow-library-toolbar > button:last-child {
+  margin-left: auto;
+}
+.gyro-workflow-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 64px 24px;
+  min-height: 280px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+  background: color-mix(in srgb, var(--gyro-surface-raised) 30%, transparent);
+}
+.gyro-workflow-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 20px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 14px;
+  color: var(--gyro-muted);
+  background: var(--gyro-control-bg);
+}
+.gyro-workflows-content .gyro-workflow-empty h2 {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.gyro-workflow-empty p {
+  max-width: 380px;
+  color: var(--gyro-muted);
+  line-height: 1.6;
+}
+.gyro-workflow-empty small {
+  margin-top: 20px;
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-workflow-scheduled h2,
+.gyro-workflow-legacy-schedules .gyro-scheduled-heading h2 {
+  font-size: var(--gyro-font-body);
+  font-weight: 600;
+  margin: 0 0 14px;
+}
+.gyro-workflow-schedule-empty {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+}
+.gyro-workflow-schedule-empty > svg {
+  color: var(--gyro-muted);
+  flex-shrink: 0;
+}
+.gyro-workflow-schedule-empty > div {
+  flex: 1;
+}
+.gyro-workflow-schedule-empty strong {
+  font-weight: 500;
+}
+.gyro-workflow-schedule-empty p {
+  color: var(--gyro-muted);
+  margin: 5px 0 0;
+  line-height: 1.5;
+}
+.gyro-workflow-feedback {
+  padding: 12px 24px;
+  border-top: 1px solid var(--gyro-border-soft);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-workflow-feedback p {
+  margin: 0;
+}
+/* Embedded automations share this page's scroll and alignment. Their controls
+   retain their own styles instead of inheriting workflow form button rules. */
+.gyro-workflow-legacy-schedules .gyro-scheduled-page,
+.gyro-workflow-legacy-schedules .gyro-scheduled-page.has-detail {
+  height: auto;
+  overflow: visible;
+  background: transparent;
+}
+.gyro-workflow-legacy-schedules .gyro-scheduled-body,
+.gyro-workflow-legacy-schedules
+  .gyro-scheduled-page.has-detail
+  .gyro-scheduled-body {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+.gyro-workflow-legacy-schedules .gyro-scheduled-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 16px;
+}
+.gyro-workflow-legacy-schedules .gyro-scheduled-heading h2 {
+  margin: 0;
+}
+.gyro-workflow-legacy-schedules .gyro-scheduled-heading button {
+  padding: 7px 12px;
+  min-height: 32px;
+  font-size: var(--gyro-font-micro);
+}
+.gyro-workflow-legacy-schedules
+  .gyro-scheduled-page.has-detail
+  .gyro-scheduled-index {
+  padding-left: 0;
+}
+@media (max-width: 650px) {
+  .gyro-workflows-content,
+  .gyro-workflows-schedules {
+    padding: 24px 20px 40px;
+  }
+  .gyro-workflow-heading-actions {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .gyro-workflow-empty {
+    padding: 40px 20px;
+    min-height: 240px;
+  }
+  .gyro-workflow-schedule-empty {
+    flex-wrap: wrap;
+  }
+  .gyro-workflow-schedule-empty > div {
+    flex-basis: calc(100% - 40px);
+  }
+  .gyro-workflow-schedule-empty > button {
+    margin-left: 36px;
+  }
+}
+
+/* The workflow library shares Sessions' quiet surfaces and clear hierarchy. */
+.gyro-workflows-destination .gyro-workflow-project select {
+  min-height: var(--gyro-control-height);
+  padding: var(--gyro-space-standard) var(--gyro-space-comfortable);
+  border-radius: var(--gyro-radius-sm);
+  border: 1px solid var(--gyro-border-soft);
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
+  font: inherit;
+}
+.gyro-workflows-destination .gyro-workflow-project {
+  gap: var(--gyro-space-comfortable);
+  padding-bottom: var(--gyro-space-panel);
+  margin-bottom: var(--gyro-space-panel);
+}
+.gyro-workflows-destination button:hover:not(:disabled) {
+  filter: none;
+  background: var(--gyro-surface-soft);
+}
+.gyro-workflow-library-toolbar button:last-child {
+  color: var(--gyro-muted);
+}
+.gyro-workflows-content .gyro-workflow-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.gyro-workflow-search > svg {
+  position: absolute;
+  left: var(--gyro-space-comfortable);
+  color: var(--gyro-muted);
+  pointer-events: none;
+}
+.gyro-workflows-content .gyro-workflow-search input {
+  padding-left: calc(var(--gyro-space-panel) * 2);
+}
+.gyro-workflow-get-started {
+  display: grid;
+  gap: var(--gyro-space-panel);
+}
+.gyro-workflow-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gyro-space-comfortable);
+  padding-top: var(--gyro-space-panel);
+}
+.gyro-workflow-intro > svg {
+  color: var(--gyro-muted);
+  flex: none;
+}
+.gyro-workflows-content .gyro-workflow-intro h2 {
+  margin-bottom: var(--gyro-space-standard);
+}
+.gyro-workflows-content .gyro-workflow-intro p {
+  color: var(--gyro-muted);
+  margin: 0;
+  line-height: 1.6;
+}
+.gyro-workflows-destination ol.gyro-workflow-how {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--gyro-space-panel);
+  list-style: none;
+  margin: 0;
+  padding: var(--gyro-space-panel) 0;
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-workflow-how li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gyro-space-standard);
+}
+.gyro-workflow-how li > span {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--gyro-control-compact);
+  height: var(--gyro-control-compact);
+  background: var(--gyro-surface-soft);
+  border-radius: var(--gyro-radius-pill);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+}
+.gyro-workflow-how strong, .gyro-workflow-starters strong {
+  font-weight: 500;
+}
+.gyro-workflow-how small {
+  display: block;
+  margin-top: var(--gyro-space-compact);
+  color: var(--gyro-muted);
+  line-height: 1.5;
+  font-size: var(--gyro-font-micro);
+}
+.gyro-workflows-content .gyro-workflow-get-started h3 {
+  margin: 0;
+  font-size: var(--gyro-font-support);
+}
+.gyro-workflow-starters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--gyro-space-comfortable);
+}
+.gyro-workflows-destination .gyro-workflow-starters > button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  text-align: left;
+  padding: var(--gyro-space-panel);
+  gap: var(--gyro-space-standard);
+  background: var(--gyro-surface-soft);
+  border-color: var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+}
+.gyro-workflow-starters > button > span {
+  color: var(--gyro-muted);
+  line-height: 1.5;
+}
+.gyro-workflow-starters small {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  margin-top: auto;
+  padding-top: var(--gyro-space-comfortable);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-workflows-destination .gyro-workflow-starters > button:hover {
+  border-color: var(--gyro-border);
+  background: var(--gyro-surface-raised);
+}
+.gyro-workflow-list > li {
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+  padding: var(--gyro-space-panel);
+  margin-bottom: var(--gyro-space-comfortable);
+}
+.gyro-workflow-list > li > strong {
+  display: block;
+  font-size: var(--gyro-font-lead);
+  margin-bottom: var(--gyro-space-standard);
+}
+.gyro-workflow-list > li > p {
+  color: var(--gyro-muted);
+}
+.gyro-workflow-list details {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-workflows-content .gyro-workflow-editor-body {
+  padding: 0;
+  border: 0;
+  margin: 0;
+  gap: var(--gyro-space-comfortable);
+}
+.gyro-workflows-content .gyro-workflow-section-title {
+  margin: var(--gyro-space-panel) 0 0;
+  font-size: var(--gyro-font-support);
+}
+.gyro-workflows-content .gyro-workflow-editor label > small {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  font-weight: 400;
+  line-height: 1.5;
+}
+.gyro-workflows-content .gyro-workflow-step-fields {
+  margin: 0;
+  padding: var(--gyro-space-panel);
+  border: 0;
+}
+.gyro-workflow-step-fields legend {
+  font-weight: 600;
+  padding-top: var(--gyro-space-panel);
+}
+.gyro-workflows-destination .gyro-workflow-editor ol.gyro-workflow-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.gyro-workflows-destination .gyro-workflow-editor .gyro-workflow-steps > li {
+  display: block;
+  padding: 0;
+  margin-bottom: var(--gyro-space-comfortable);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+  background: var(--gyro-surface-soft);
+}
+.gyro-workflow-editor .gyro-workflow-steps > li > .gyro-workflow-actions {
+  padding: 0 var(--gyro-space-panel) var(--gyro-space-comfortable);
+  margin: 0;
+}
+.gyro-workflow-advanced {
+  border-top: 1px solid var(--gyro-border-soft);
+  padding-top: var(--gyro-space-standard);
+}
+.gyro-workflow-advanced > summary {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+.gyro-workflow-advanced[open] > summary {
+  margin-bottom: var(--gyro-space-comfortable);
+}
+.gyro-workflows-content:has(.gyro-workflow-editor) {
+  padding-bottom: 0;
+  scroll-padding-bottom: calc(var(--gyro-control-height) * 3);
+}
+.gyro-workflow-actions.gyro-workflow-editor-footer {
+  margin-bottom: 0;
+  position: sticky;
+  bottom: 0;
+  align-items: center;
+  background: var(--gyro-app);
+  border-top: 1px solid var(--gyro-border-soft);
+  padding-block: var(--gyro-space-comfortable);
+  z-index: 1;
+}
+.gyro-workflow-editor-footer > span {
+  margin-right: auto;
+  font-size: var(--gyro-font-micro);
+}
+.gyro-workflows-content .gyro-workflow-field-error {
+  color: var(--gyro-danger);
+  margin: 0;
+  font-size: var(--gyro-font-micro);
+}
+.gyro-workflows-content [aria-invalid="true"] {
+  border-color: var(--gyro-danger);
+}
+@media (max-width: 650px) {
+  .gyro-workflow-starters,
+  .gyro-workflows-destination ol.gyro-workflow-how {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gyro-workflows-content .gyro-workflow-project {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .gyro-workflow-project select {
+    flex-basis: auto;
+    width: 100%;
+  }
+  .gyro-workflow-editor-footer > span {
+    flex-basis: 100%;
+  }
+}

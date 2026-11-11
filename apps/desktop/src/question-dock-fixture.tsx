@@ -44,7 +44,8 @@ const answer =
   "- **C** — Something else (e.g. you handle `App.tsx` holistically and I only " +
   "move my feature's module).";
 
-const sessionId = "question-fixture";
+const fixtureParams = new URLSearchParams(location.search);
+const sessionId = fixtureParams.get("session") ?? "question-fixture";
 const events: SessionEvent[] = [
   {
     id: "asked",
@@ -56,7 +57,7 @@ const events: SessionEvent[] = [
     payload: {},
   },
   {
-    id: "question",
+    id: fixtureParams.get("question") ?? "question",
     sessionId,
     turnId: "turn-1",
     kind: "assistant-message",
@@ -68,16 +69,18 @@ const events: SessionEvent[] = [
 
 function Fixture() {
   const [draft, setDraft] = useState("");
+  const [revision, setRevision] = useState(0);
+  const [sends, setSends] = useState(0);
   return (
     <div className="gyro-workspace-route is-thread">
-      <button
-        style={{ position: "fixed", top: 12, right: 16, zIndex: 1000 }}
-        onClick={() => revealChatQuestion(sessionId)}
-      >
-        Simulate Reply in chat
-      </button>
+      <div style={{ position: "fixed", top: 12, right: 16, zIndex: 1000 }}>
+        <button onClick={() => revealChatQuestion(sessionId)}>Simulate Reply in chat</button>
+        <button onClick={() => setRevision((value) => value + 1)}>Remount chat</button>
+        <output aria-label="Messages sent">{sends}</output>
+      </div>
       <section className="gyro-workspace-primary" aria-label="Question card">
         <ChatSurface
+          key={revision}
           config={config}
           events={events}
           sessionTitle="Line counts across models"
@@ -93,7 +96,7 @@ function Fixture() {
           draft={draft}
           onDraftChange={setDraft}
           onComposerAction={() => {}}
-          onSend={() => {}}
+          onSend={() => setSends((value) => value + 1)}
           onStopChat={() => {}}
         />
       </section>

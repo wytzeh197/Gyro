@@ -128,7 +128,8 @@ pub struct Config {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub full_context_internal_requests: bool,
     /// Inline window, in bytes, for fresh workspace reads before they spill.
-    /// Zero keeps the universal ~2.2KB threshold; other values clamp to 4-16KB.
+    /// Zero selects the 8KiB default; explicit values clamp to 4-16KiB.
+    /// Command output still uses the smaller universal preview.
     #[serde(skip_serializing_if = "is_zero")]
     pub fresh_read_inline_bytes: u32,
     /// Repeated-work detection on its own, without `experimental` and the
@@ -191,9 +192,13 @@ impl Config {
     /// The widened inline window for this capability's fresh result, if any.
     /// Independent of `experimental`, so it can be measured on its own.
     pub fn fresh_read_window(&self, capability: &str) -> Option<usize> {
-        (self.enabled && self.fresh_read_inline_bytes > 0)
-            .then_some(self.fresh_read_inline_bytes as usize)
-            .filter(|_| FRESH_READ_CAPABILITIES.contains(&capability))
+        (self.enabled && FRESH_READ_CAPABILITIES.contains(&capability)).then_some(
+            if self.fresh_read_inline_bytes == 0 {
+                8 * 1024
+            } else {
+                self.fresh_read_inline_bytes as usize
+            },
+        )
     }
     /// Tight wins over recoverable because it also spills the complete JSON.
     pub fn evidence_policy(&self) -> context::EvidencePolicy {
@@ -297,6 +302,33 @@ mod tests {
         assert_eq!(saved["freshReadInlineBytes"], 8192);
         assert_eq!(serde_json::from_value::<Config>(saved).unwrap(), reads);
     }
+    #[test]
+    fn default_read_window_is_bounded_and_preserves_config_compatibility() {
+        for config in [
+            Config::default(),
+            serde_json::from_str::<Config>("{}").unwrap(),
+        ] {
+            for capability in FRESH_READ_CAPABILITIES {
+                assert_eq!(config.fresh_read_window(capability), Some(8192));
+            }
+            for capability in ["terminal.read", "workspace.search", "workspace.edit"] {
+                assert_eq!(config.fresh_read_window(capability), None);
+            }
+            assert!(!config.policies());
+            assert!(serde_json::to_value(config)
+                .unwrap()
+                .get("freshReadInlineBytes")
+                .is_none());
+        }
+        let explicit: Config = serde_json::from_str(r#"{"freshReadInlineBytes":4096}"#).unwrap();
+        assert_eq!(explicit.fresh_read_window("workspace.read"), Some(4096));
+        let disabled = Config {
+            enabled: false,
+            ..Config::default()
+        };
+        assert_eq!(disabled.fresh_read_window("workspace.read"), None);
+    }
+
     #[test]
     fn evidence_policy_needs_experiments_and_tight_wins() {
         use context::EvidencePolicy as P;

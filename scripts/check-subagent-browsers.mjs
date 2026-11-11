@@ -385,6 +385,18 @@ const injected = browser
       .trim()
       .replace(/;$/, ""),
   )
+  .replaceAll(
+    "{annotations}",
+    readFileSync(
+      new URL(
+        "../apps/desktop/src-tauri/src/browser_annotations.js",
+        import.meta.url,
+      ),
+      "utf8",
+    )
+      .trim()
+      .replace(/;$/, ""),
+  )
   .replaceAll("{nonce}", '"test-nonce"')
   .replace(
     /\{(MAX_[A-Z_]+)\}/g,
@@ -409,6 +421,7 @@ const installedTarget = {
   },
 };
 const installedWindow = {
+  addEventListener() {},
   fetch: async () => ({}),
   innerWidth: 1280,
   innerHeight: 800,
@@ -420,6 +433,12 @@ const quietConsole = Object.fromEntries(
 );
 vm.runInNewContext(injected, {
   window: installedWindow,
+  MutationObserver: class {
+    observe() {}
+    takeRecords() {
+      return [];
+    }
+  },
   document: { elementFromPoint: () => installedTarget },
   console: quietConsole,
   addEventListener() {},

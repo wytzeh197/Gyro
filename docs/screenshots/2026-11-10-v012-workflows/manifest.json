@@ -1,0 +1,23 @@
+{
+  "status": "passed",
+  "evidence": "synthetic production components; no native/provider execution",
+  "captures": [
+    "workflow-empty-dark",
+    "workflow-keyboard-focus",
+    "workflow-editor-dark",
+    "workflow-library-dark",
+    "workflow-setup-dark",
+    "workflow-queued-dark",
+    "workflow-schedules-dark",
+    "workflow-schedule-created-light-compact",
+    "workflow-stale-light",
+    "workflow-save-conflict",
+    "workflow-extraction-narrow",
+    "workflow-extracted-editor-narrow",
+    "workflow-extraction-cancelled",
+    "workflow-waiting-dark",
+    "workflow-retry-inspection-dark",
+    "workflow-attention-light",
+    "workflow-unavailable"
+  ]
+}

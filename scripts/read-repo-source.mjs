@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 const companions = {
   "apps/desktop/src/App.tsx": ["app-state.tsx"],
   "packages/ui/src/surfaces.tsx": ["workspace-sidebar.tsx"],
-  "packages/ui/src/styles.css": ["settings-polish.css"],
+  "packages/ui/src/styles.css": ["settings-polish.css", "chat.css"],
   "apps/desktop/src-tauri/src/lib.rs": ["tests.rs"],
 };
 export function readRepoSource(path, encoding = "utf8") {

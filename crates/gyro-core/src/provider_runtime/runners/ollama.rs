@@ -162,6 +162,11 @@ pub fn run_ollama_chat(
     host: &dyn RunnerHost,
     request: &ProviderChatRequest,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    crate::provider_runtime::advisory::validate_advisory_request(
+        crate::provider_runtime::types::ProviderAdapterKind::Ollama,
+        request,
+        None,
+    )?;
     let catalog = host.tool_catalog();
     if request.attachments.iter().any(|attachment| {
         !matches!(
@@ -285,16 +290,17 @@ pub fn run_ollama_chat(
         messages[1]["images"] = serde_json::json!(browser_images);
     }
     let allow_delegation = host.allow_delegation(request);
-    let mut tools = if discovered.supports_tools {
-        provider_tool_batch::model_tools_for(
-            catalog,
-            run_mode,
-            allow_delegation,
-            &config.efficiency,
-        )
-    } else {
-        Vec::new()
-    };
+    let mut tools =
+        if discovered.supports_tools && !crate::provider_runtime::advisory::is_advisory(request) {
+            provider_tool_batch::model_tools_for(
+                catalog,
+                run_mode,
+                allow_delegation,
+                &config.efficiency,
+            )
+        } else {
+            Vec::new()
+        };
     let heartbeat_stop = Arc::new(AtomicBool::new(false));
     let heartbeat = host.start_heartbeat(
         request.clone(),
@@ -343,7 +349,14 @@ pub fn run_ollama_chat(
             // rounds stop re-sending results the turn has moved past. It costs
             // no provider call -- the message list itself is what shrinks --
             // which is what makes it safe to leave on by default.
-            if let Some((input_tokens, output_tokens)) = last_measured {
+            {
+                let (input_tokens, output_tokens) = last_measured.unwrap_or((None, None));
+                let requested = host.context_compaction_requested(request);
+                let input_tokens = if requested {
+                    context_window
+                } else {
+                    input_tokens
+                };
                 if let Some(compaction) = provider_context::auto_compact_messages(
                     &mut messages,
                     input_tokens,
@@ -352,6 +365,8 @@ pub fn run_ollama_chat(
                     auto_compact_percent,
                 ) {
                     host.save_checkpoint(request);
+                    host.complete_context_compaction_request(request);
+                    last_measured = None;
                     let activity = provider_context::activity(auto_compactions.len(), &compaction);
                     emit_provider_activity_event(
                         host,

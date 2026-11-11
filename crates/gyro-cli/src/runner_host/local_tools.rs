@@ -1,4 +1,6 @@
 //! Headless workspace tools. The catalog exposes only implemented operations.
+#[path = "memory_tools.rs"]
+mod memory_tools;
 use super::CliRunnerHost;
 use anyhow::{anyhow, ensure, Context, Result};
 use gyro_core::provider_runtime::catalog::ToolCatalog;
@@ -27,6 +29,8 @@ fn supported(id: CapabilityId) -> bool {
             | CapabilityId::WorkspaceRead
             | CapabilityId::WorkspaceReadRange
             | CapabilityId::WorkspaceProposeEdit
+            | CapabilityId::MemoryRead
+            | CapabilityId::MemoryWrite
     )
 }
 impl ToolCatalog for CliToolCatalog {
@@ -44,6 +48,9 @@ impl ToolCatalog for CliToolCatalog {
             .clamp(1024, RESULT_BYTES as u64) as usize)
     }
     fn schema(&self, id: CapabilityId) -> Value {
+        if let Some(schema) = memory_tools::schema(id) {
+            return schema;
+        }
         let (props, required) = match id {
             CapabilityId::WorkspaceList => (
                 json!({"path":{"type":"string","description":"Workspace-relative directory, default root. Symlinks are not traversed."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":200},"maxBytes":{"type":"integer","minimum":1024,"maximum":RESULT_BYTES}}),
@@ -208,6 +215,9 @@ pub(super) fn invoke(
                     json!({"source":"spill","path":address,"content":text[start..end],"offset":start,"nextOffset":(end<text.len()).then_some(end),"totalBytes":text.len(),"truncated":end<text.len()}),
                 );
             }
+        }
+        if matches!(id, CapabilityId::MemoryRead | CapabilityId::MemoryWrite) {
+            return memory_tools::invoke(host, id, &args);
         }
         let relative = relative_path(&args, id == CapabilityId::WorkspaceList)?;
         let budget = CATALOG.observation_byte_limit(&args)?;

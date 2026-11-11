@@ -1,15 +1,5 @@
 /* Codex-style effort control: the whole track is a pill, with native range
    keyboard/pointer behavior. Insets align the stops with the thumb's travel. */
-:root .gyro-composer-popover.gyro-effort-slider-popover {
-  display: block;
-  background: var(--gyro-surface);
-  width: var(--gyro-model-popover-width);
-  min-width: 0;
-  max-width: none;
-  padding: var(--gyro-space-card);
-  border-radius: var(--gyro-radius-xl);
-  overflow: visible;
-}
 /* The level reads on the left; Fast mode is a named toggle on the right, so
    neither floats alone above a centred label. */
 .gyro-effort-slider-header {
@@ -212,111 +202,6 @@
 }
 
 /* Model and effort are independent chips, each with its own menu anchor. */
-:root[data-theme]
-  .gyro-composer-bar
-  .gyro-composer-control
-  > button.gyro-composer-chip:is(
-    .gyro-composer-model-trigger,
-    .gyro-composer-effort-trigger
-  ),
-:root[data-theme]
-  .gyro-composer-bar
-  .gyro-composer-control.gyro-composer-control-approval
-  > button.gyro-composer-chip {
-  border-radius: var(--gyro-radius-pill);
-}
-:root[data-theme]
-  .gyro-composer-bar
-  button:is(.gyro-composer-model-trigger, .gyro-composer-effort-trigger) {
-  min-height: calc(28px * var(--gyro-ui-scale, 1));
-  padding-inline: calc(8px * var(--gyro-ui-scale, 1));
-  gap: calc(7px * var(--gyro-ui-scale, 1));
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--gyro-text);
-  font-weight: 500;
-  transition:
-    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
-}
-:root[data-theme]
-  .gyro-composer-bar
-  button:is(.gyro-composer-model-trigger, .gyro-composer-effort-trigger):is(
-    :hover,
-    [aria-expanded="true"]
-  ) {
-  background: var(--gyro-control-hover);
-  border-color: color-mix(in srgb, var(--gyro-text) 18%, transparent);
-}
-:root[data-theme] .gyro-composer-bar .gyro-model-chip .gyro-provider-logo {
-  width: calc(15px * var(--gyro-ui-scale, 1));
-  height: calc(15px * var(--gyro-ui-scale, 1));
-  opacity: 1;
-}
-:root[data-theme]
-  .gyro-composer-bar
-  .gyro-model-chip
-  .gyro-provider-logo.is-anthropic {
-  color: var(--gyro-provider-anthropic);
-}
-:root[data-theme]
-  .gyro-composer-bar
-  button:is(.gyro-composer-model-trigger, .gyro-composer-effort-trigger)
-  > svg {
-  color: var(--gyro-muted);
-  width: calc(12px * var(--gyro-ui-scale, 1));
-  height: calc(12px * var(--gyro-ui-scale, 1));
-}
-.gyro-composer-control-effort {
-  --gyro-model-popover-width: min(
-    calc(280px * var(--gyro-ui-scale, 1)),
-    calc(100vw - 24px)
-  );
-}
-.gyro-composer-control-effort > .gyro-composer-popover[data-placement="down"] {
-  top: calc(100% + 6px);
-}
-.gyro-composer-control-effort > .gyro-composer-popover[data-placement="up"] {
-  bottom: calc(100% + 6px);
-}
-.gyro-effort-chip-label {
-  color: inherit;
-}
-.gyro-effort-chip-label[data-max-effort="true"] {
-  color: var(--gyro-effort-max);
-}
-.gyro-composer-effort-trigger > svg,
-.gyro-composer-model-trigger > svg:last-child {
-  flex: none;
-  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
-}
-.gyro-composer-effort-trigger[aria-expanded="true"]
-  > svg:not(.gyro-composer-effort-compact) {
-  transform: rotate(180deg);
-}
-.gyro-composer-effort-compact {
-  display: none;
-}
-@container (max-width: 470px) {
-  :root[data-theme] .gyro-composer-bar button.gyro-composer-model-trigger {
-    gap: calc(5px * var(--gyro-ui-scale, 1));
-    padding-inline: calc(6px * var(--gyro-ui-scale, 1));
-  }
-  :root[data-theme]
-    .gyro-composer-bar
-    .gyro-effort-chip
-    > .gyro-composer-effort-compact {
-    width: calc(14px * var(--gyro-ui-scale, 1));
-    height: calc(14px * var(--gyro-ui-scale, 1));
-  }
-  .gyro-effort-chip .gyro-composer-effort-compact {
-    display: block;
-  }
-  .gyro-effort-chip > .gyro-effort-chip-label,
-  .gyro-effort-chip > svg:not(.gyro-composer-effort-compact) {
-    display: none;
-  }
-}
 
 .gyro-effort-icon-button svg {
   width: 16.15px;

@@ -17,6 +17,8 @@ const ast = ts.createSourceFile(
 );
 let callback;
 let consumeCallback;
+let selectGoalCallback;
+let activeGoalMode;
 let turnGoal;
 let loadDraftModes;
 function visit(node) {
@@ -30,6 +32,10 @@ function visit(node) {
     node.name.getText(ast) === "consumeDraftMode"
   )
     consumeCallback = node.initializer.arguments[0].getText(ast);
+  if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "selectGoalComposer")
+    selectGoalCallback = node.initializer.arguments[0].getText(ast);
+  if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "activeGoalMode")
+    activeGoalMode = node.initializer.getText(ast);
   if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "turnGoal")
     turnGoal = node.initializer.getText(ast);
   if (
@@ -48,7 +54,7 @@ const js = ts.transpileModule(
   "globalThis.changeMode = " +
     callback +
     "; globalThis.consumeMode = " +
-    consumeCallback,
+    consumeCallback + "; globalThis.selectGoal = " + selectGoalCallback,
   {
     compilerOptions: {
       target: ts.ScriptTarget.ES2022,
@@ -58,12 +64,16 @@ const js = ts.transpileModule(
 ).outputText;
 const updates = [];
 const goal = { text: "Ship the outcome", status: "active" };
+let goalSelections = { draft: true, "session-a": true };
+let goalEditorOpen = true;
 const context = {
   activeDraftKey: "draft",
   activeSessionGoal: goal,
   chatDraftModesRef: { current: {} },
   chatDraftModeRevisionsRef: { current: {} },
   setChatDraftModes: (modes) => updates.push(modes),
+  setChatDraftGoalModes: (update) => { goalSelections = update(goalSelections); },
+  setIsGoalComposerActive: (value) => { goalEditorOpen = value; },
   setPendingNewChatGoal: () => assert.fail("Mode change cleared pending goal"),
   setEvents: () =>
     assert.fail("Choosing a draft mode changed the running turn"),
@@ -75,6 +85,25 @@ assert.equal(context.changeMode("plan", "session-a"), true);
 assert.equal(context.chatDraftModesRef.current["session-a"], "plan");
 assert.equal(context.chatDraftModesRef.current.draft, undefined);
 assert.equal(context.activeSessionGoal, goal);
+assert.equal(goalSelections["session-a"], false);
+assert.equal(goalSelections.draft, true, "other drafts keep their selection");
+assert.equal(goalEditorOpen, true, "a background mode change leaves the active editor alone");
+context.changeMode("plan");
+assert.equal(goalEditorOpen, false);
+assert.equal(goalSelections.draft, false);
+context.selectGoal();
+assert.equal(context.chatDraftModesRef.current.draft, undefined);
+assert.equal(goalEditorOpen, true);
+assert.equal(goalSelections.draft, true);
+context.changeMode("plan");
+context.changeMode("plan");
+assert.equal(goalEditorOpen, false, "reselecting Plan still closes Goal");
+context.changeMode("normal");
+assert.equal(goalSelections.draft, false, "removing Plan does not resurrect Goal");
+assert.equal(vm.runInNewContext(activeGoalMode, {
+  selectedDraftMode: "plan", isGoalComposerActive: true,
+  chatDraftGoalModes: { draft: true }, activeDraftKey: "draft", activeSessionGoal: goal,
+}), false, "restored conflicting state must not select both modes");
 const revision = context.chatDraftModeRevisionsRef.current["session-a"];
 context.consumeMode("session-a", revision);
 assert.equal(context.chatDraftModesRef.current["session-a"], undefined);
@@ -123,7 +152,7 @@ for (const mode of ["normal", "plan", "council"]) {
       activeSessionGoal: saved,
       turnMode: mode,
     }),
-    saved,
+    mode === "plan" ? undefined : saved,
   );
   assert.equal(
     vm.runInNewContext(turnGoal, {
@@ -131,7 +160,7 @@ for (const mode of ["normal", "plan", "council"]) {
       activeSessionGoal: saved,
       turnMode: mode,
     }),
-    override,
+    mode === "plan" ? undefined : override,
   );
   assert.equal(
     vm.runInNewContext(turnGoal, {
@@ -143,5 +172,5 @@ for (const mode of ["normal", "plan", "council"]) {
   );
 }
 console.log(
-  "Goal and draft-only mode checks passed: no event on selection, one-shot consumption, restart restoration, and outgoing goals.",
+  "Goal/Plan checks passed: exclusive selections, draft isolation, saved goals preserved, one-shot consumption, restoration and outgoing requests.",
 );

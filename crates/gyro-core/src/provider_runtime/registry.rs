@@ -21,6 +21,7 @@ macro_rules! runner {
                 resume: Option<&ProviderResumeCursor>,
                 attempt: &mut ProviderRunAttempt,
             ) -> anyhow::Result<ProviderRunnerOutput> {
+                super::advisory::validate_advisory_request(self.kind(),request,resume)?;
                 ($run)(host, request, resume, attempt)
             }
             $($extra)*
@@ -43,6 +44,7 @@ impl ProviderRunner for CodexRunner {
         resume: Option<&ProviderResumeCursor>,
         attempt: &mut ProviderRunAttempt,
     ) -> anyhow::Result<ProviderRunnerOutput> {
+        super::advisory::validate_advisory_request(self.kind(), request, resume)?;
         super::runners::codex::run_openai_codex_chat(host, request, resume, attempt)
     }
     fn compact(

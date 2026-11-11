@@ -1,7 +1,7 @@
 use crate::{
     app::limits::MAX_CONCURRENT_PROVIDER_RUNS,
     goal_runner,
-    provider_run_cleanup::ProviderRunReservation,
+    provider_run_cleanup::{wait_for_owned_run_release, ProviderRunReservation},
     providers::{
         chat_types::{
             ProviderChatRequest, ProviderChatResponse, ProviderContextCompactionResponse,
@@ -10,7 +10,7 @@ use crate::{
     },
     state::{
         managers::ProviderCancellationManager,
-        provider_run::{stop_provider_run, ProviderRunControl, ProviderStopReason},
+        provider_run::{cancel_provider_run, ProviderRunControl, ProviderStopReason},
     },
     stores::parse_uuid,
     text::validate_chat_message,
@@ -55,21 +55,54 @@ pub(crate) async fn compact_provider_chat(
         .map(parse_uuid)
         .transpose()?
         .unwrap_or_else(Uuid::new_v4);
-    {
+    let finishing = {
         let manager = app.state::<ProviderCancellationManager>();
         let mut flags = manager
             .flags
             .lock()
             .map_err(|_| "provider cancellation state is unavailable".to_string())?;
-        if flags.contains_key(&session_id) {
-            return Err("a provider turn is already running for this session".into());
+        if let Some(control) = flags.get(&session_id) {
+            if control.cancellation.is_cancelled() {
+                return Err("the current response is stopping; compact after it finishes".into());
+            }
+            if control
+                .context_compaction_closed
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
+                Some(control.clone())
+            } else {
+                // Coalesce clicks; never start a second provider or interrupt a write.
+                control
+                    .context_compaction_requested
+                    .store(true, std::sync::atomic::Ordering::Release);
+                return Ok(ProviderContextCompactionResponse {
+                    activity_events: Vec::new(),
+                });
+            }
+        } else {
+            if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
+                return Err(format!(
+                    "Gyro can run at most {MAX_CONCURRENT_PROVIDER_RUNS} provider turns at once"
+                ));
+            }
+            flags.insert(session_id.clone(), Arc::new(ProviderRunControl::default()));
+            None
         }
-        if flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
-            return Err(format!(
-                "Gyro can run at most {MAX_CONCURRENT_PROVIDER_RUNS} provider turns at once"
-            ));
-        }
-        flags.insert(session_id.clone(), Arc::new(ProviderRunControl::default()));
+    };
+    if let Some(control) = finishing {
+        let worker_app = app.clone();
+        let worker_session = session_id.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            wait_for_owned_run_release(
+                &worker_app.state::<ProviderCancellationManager>().flags,
+                &worker_session,
+                &control,
+                std::time::Duration::from_secs(10),
+            )
+        })
+        .await
+        .map_err(|error| format!("context compaction handoff failed: {error}"))??;
+        return Box::pin(compact_provider_chat(app, session_id, turn_id)).await;
     }
     let worker_app = app.clone();
     let worker_session_id = session_id.clone();
@@ -90,8 +123,29 @@ pub(crate) async fn compact_provider_chat(
 pub(crate) async fn stop_provider_chat(
     app: tauri::AppHandle,
     session_id: String,
+    wait_for_stop: Option<bool>,
 ) -> Result<(), String> {
-    stop_provider_run(&app, &session_id, ProviderStopReason::User)
-        .then_some(())
-        .ok_or_else(|| "no provider turn is running for this session".to_string())
+    let wait_for_stop = wait_for_stop.unwrap_or(false);
+    let Some(control) = cancel_provider_run(&app, &session_id, ProviderStopReason::User)? else {
+        // Steer can race natural completion. The queue should proceed when the
+        // old run already released the session.
+        return if wait_for_stop {
+            Ok(())
+        } else {
+            Err("no provider turn is running for this session".into())
+        };
+    };
+    if !wait_for_stop {
+        return Ok(());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        wait_for_owned_run_release(
+            &app.state::<ProviderCancellationManager>().flags,
+            &session_id,
+            &control,
+            std::time::Duration::from_secs(10),
+        )
+    })
+    .await
+    .map_err(|error| format!("provider stop worker failed: {error}"))?
 }

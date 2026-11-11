@@ -57,6 +57,40 @@ const timelineModels = [
   ),
   { providerId: "custom:timeline-test", modelId: "user-defined-model" },
 ];
+// A completed operation must never regain a spinner during later live work,
+// a delayed start frame, or a refresh from an older durable snapshot.
+for (const identity of timelineModels) {
+  for (const finalStatus of ["done", "failed", "cancelled"]) {
+    const ref = { current: new Map() };
+    const frame = (sequence, activityId, activityStatus) => ({
+      ...identity, sessionId: "sticky-status", turnId: "turn",
+      sequence, eventId: `frame-${sequence}`, phase: "activity",
+      activityId, activityKind: "read", activityLabel: "Reading src/a.ts",
+      activityDetail: "src/a.ts", activityStatus,
+    });
+    applyProviderChatStreamActivity(ref, () => {}, frame(1, "read-a", "running"));
+    const stale = structuredClone(ref.current.get("sticky-status"));
+    applyProviderChatStreamActivity(ref, () => {}, frame(2, "read-a", finalStatus));
+    const completed = structuredClone(ref.current.get("sticky-status"));
+    applyProviderChatStreamActivity(ref, () => {}, frame(3, "read-a", "running"));
+    assert.equal(ref.current.get("sticky-status")[0].payload.status, finalStatus,
+      `${identity.providerId}: late start must not revive a finished operation`);
+    const refreshed = mergePersistedAndOptimisticEvents(stale, completed);
+    assert.equal(refreshed[0].payload.status, finalStatus,
+      "an older durable snapshot must not revive a finished operation");
+    const replay = buildRunModel([...completed, ...stale], { isRunning: true });
+    assert.ok(replay.steps.filter((step) => step.kind === "work")
+      .every((step) => step.item.status !== "running"),
+      "cold replay of stale activity must not restore its spinner");
+    applyProviderChatStreamActivity(ref, () => {}, frame(4, "read-b", "running"));
+    const next = buildRunModel(ref.current.get("sticky-status"), { isRunning: true });
+    const work = next.steps.filter((step) => step.kind === "work");
+    assert.equal(work.length, 2, "a new invocation cannot reopen the old row");
+    assert.notEqual(work[0].item.status, "running");
+    assert.equal(work[1].item.status, "running", "new work still shows progress");
+  }
+}
+
 for (const identity of timelineModels) {
   const ref = { current: new Map() };
   const sessionId = "model-ordering";

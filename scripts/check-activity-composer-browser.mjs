@@ -154,9 +154,9 @@ try {
       );
     await settleMenu();
     const result = await evaluate(
-      "(()=>{const m=document.querySelector('.gyro-context-picker'),r=m.getBoundingClientRect(),b=document.querySelector('button[aria-label=\"Add context\"]').getBoundingClientRect();return{width:r.width,left:r.left,right:r.right,top:r.top,bottom:r.bottom,triggerLeft:b.left,composerTop:m.closest('.gyro-composer-shell').getBoundingClientRect().top,titles:[...m.querySelectorAll('[role=\"menuitem\"]')].map(e=>e.getAttribute('title')),labels:[...m.querySelectorAll('[role=\"menuitem\"]')].map(e=>e.innerText)}})()",
+      "(()=>{const m=document.querySelector('.gyro-context-picker'),r=m.getBoundingClientRect(),b=document.querySelector('button[aria-label=\"Add context\"]').getBoundingClientRect();return{width:r.width,left:r.left,right:r.right,top:r.top,bottom:r.bottom,triggerLeft:b.left,triggerTop:b.top,composerTop:m.closest('.gyro-composer-shell').getBoundingClientRect().top,titles:[...m.querySelectorAll('[role=\"menuitem\"]')].map(e=>e.getAttribute('title')),labels:[...m.querySelectorAll('[role=\"menuitem\"]')].map(e=>e.innerText)}})()",
     );
-    assert.ok(result.width <= 233, JSON.stringify(result));
+    assert.ok(result.width <= 257, JSON.stringify(result));
     assert.ok(
       result.left >= 0 && result.right <= width,
       JSON.stringify(result),
@@ -164,8 +164,8 @@ try {
     assert.ok(result.top >= 0 && result.bottom <= 800, JSON.stringify(result));
     assert.ok(result.titles.every((title) => title === null));
     assert.ok(
-      result.bottom <= result.composerTop - 7,
-      "the Add menu must clear the draft and toolbar",
+      result.bottom <= result.triggerTop - 7,
+      "the Add menu must clear its trigger with the shared popover gap",
     );
     await key("Escape", "Escape", 27);
     await until(

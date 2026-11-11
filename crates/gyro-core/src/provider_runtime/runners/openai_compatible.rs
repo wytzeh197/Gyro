@@ -113,6 +113,11 @@ pub fn run_openai_compatible_chat(
     host: &dyn RunnerHost,
     request: &ProviderChatRequest,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    crate::provider_runtime::advisory::validate_advisory_request(
+        crate::provider_runtime::types::ProviderAdapterKind::OpenAiCompatible,
+        request,
+        None,
+    )?;
     let catalog = host.tool_catalog();
     let label = request.provider_label.as_deref().unwrap_or("This provider");
     let supports_images = supports_images(request);
@@ -222,7 +227,7 @@ pub fn run_openai_compatible_chat(
         serde_json::json!({ "role": "user", "content": user_content(&user, &request.attachments)? }),
     ];
     let allow_delegation = host.allow_delegation(request);
-    let mut tools = if compatibility {
+    let mut tools = if crate::provider_runtime::advisory::is_advisory(request) || compatibility {
         Vec::new()
     } else {
         provider_tool_batch::model_tools_for(
@@ -287,7 +292,14 @@ pub fn run_openai_compatible_chat(
             let context_window = host
                 .model_context_window(&request.provider_id, Some(model))
                 .or(context_window);
-            if let Some((input_tokens, output_tokens)) = last_measured {
+            {
+                let (input_tokens, output_tokens) = last_measured.unwrap_or((None, None));
+                let requested = host.context_compaction_requested(request);
+                let input_tokens = if requested {
+                    context_window
+                } else {
+                    input_tokens
+                };
                 if let Some(compaction) = provider_context::auto_compact_messages(
                     &mut messages,
                     input_tokens,
@@ -296,6 +308,8 @@ pub fn run_openai_compatible_chat(
                     auto_compact_percent,
                 ) {
                     host.save_checkpoint(request);
+                    host.complete_context_compaction_request(request);
+                    last_measured = None;
                     let activity = provider_context::activity(auto_compactions.len(), &compaction);
                     emit_provider_activity_event(
                         host,

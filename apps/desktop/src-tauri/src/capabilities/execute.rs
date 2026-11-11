@@ -1,7 +1,10 @@
 use crate::{
     app::{config::load_config_blocking, limits::PROVIDER_CAPABILITY_RESOURCE_EVENT},
     app_preview,
-    browser::preview::persist_browser_preview_capture,
+    browser::{
+        preview::persist_browser_preview_capture,
+        types::{BROWSER_OBSERVATION_FRAMING, BROWSER_OBSERVATION_SCHEMA_V1},
+    },
     browser_pointer, browser_viewport,
     capabilities::{
         access::{
@@ -713,15 +716,57 @@ pub(crate) fn execute_provider_capability(
             ("Observed selected app preview".into(), data, None)
         }
         CapabilityId::BrowserViewport => browser_viewport::execute_capability(app, bound, request)?,
-        CapabilityId::BrowserInspect => {
+        CapabilityId::BrowserInspect => 'inspection: {
             let owned = require_model_browser_resource(app, bound)?;
+            // Inspection remains useful while navigation is pending or the
+            // renderer is unresponsive. Never fabricate page/screenshot evidence.
             let status = session_browser::call_agent(
                 app,
                 &bound.session_id,
                 "status",
                 serde_json::json!({}),
-            )
-            .map_err(anyhow::Error::msg)?;
+            );
+            let status = match status {
+                Ok(status) => status,
+                Err(error) => {
+                    if session_browser::operation_was_cancelled(&error) {
+                        return Err(anyhow::Error::msg(error));
+                    }
+                    let snapshot = app
+                        .state::<session_browser::SessionBrowserManager>()
+                        .require_owned(&bound.session_id, &bound.workspace_key)
+                        .map_err(anyhow::Error::msg)?;
+                    if snapshot.resource_id != owned.resource_id {
+                        anyhow::bail!("browser resource changed while inspecting; inspect the current browser again");
+                    }
+                    let resource = CapabilityResourceRef {
+                        id: owned.resource_id,
+                        kind: "browser".into(),
+                        label: snapshot.url.clone(),
+                    };
+                    break 'inspection (
+                        "Inspected browser navigation; page evidence unavailable".into(),
+                        serde_json::json!({
+                            "schema": BROWSER_OBSERVATION_SCHEMA_V1,
+                            "resourceId": snapshot.resource_id,
+                            "url": snapshot.url,
+                            "title": snapshot.title,
+                            "visible": snapshot.visible,
+                            "readyState": null,
+                            "navigation": {
+                                "id": snapshot.navigation_id,
+                                "loading": snapshot.loading,
+                                "documentCommitted": snapshot.document_committed,
+                                "error": snapshot.navigation_error,
+                            },
+                            "diagnostics": { "statusError": error },
+                            "evidence": { "structuredPage": false, "screenshotCaptured": false, "screenshotModelVisible": false },
+                            "framing": BROWSER_OBSERVATION_FRAMING,
+                        }),
+                        Some(resource),
+                    );
+                }
+            };
             let console = Vec::new();
             let network = Vec::new();
             let observation =
@@ -853,7 +898,7 @@ pub(crate) fn execute_provider_capability(
                 .get("maxDepth")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(4);
-            let result = session_browser::call_agent(
+            let result = session_browser::observe_agent(
                 app,
                 &bound.session_id,
                 "readPage",
@@ -885,7 +930,7 @@ pub(crate) fn execute_provider_capability(
         }
         CapabilityId::BrowserFind => {
             let owned = require_model_browser_resource(app, bound)?;
-            let result = session_browser::call_agent(
+            let result = session_browser::observe_agent(
                 app,
                 &bound.session_id,
                 "find",

@@ -1,0 +1,91 @@
+{
+  "pageOverflow": false,
+  "panes": [
+    {
+      "composerOverflow": false,
+      "elements": {
+        ".gyro-chat-environment-popover": null,
+        ".gyro-chat-run-change-summary": null,
+        ".gyro-chat-thread-topbar": null,
+        ".gyro-chat-turn": null,
+        ".gyro-composer-chip": {
+          "background": "rgba(0, 0, 0, 0)",
+          "border": "1px solid rgba(0, 0, 0, 0)",
+          "color": "rgb(198, 198, 202)",
+          "font": "14.95px",
+          "height": 32.19,
+          "left": 277.09,
+          "line": "normal",
+          "padding": "0px 9.2px",
+          "radius": "999px",
+          "right": 449.98,
+          "top": 412.91,
+          "width": 172.89,
+          "zoom": "1"
+        },
+        ".gyro-composer-shell": {
+          "background": "rgb(28, 28, 30)",
+          "border": "1px solid color(srgb 1 1 1 / 0.09)",
+          "color": "rgb(246, 246, 247)",
+          "font": "16.1px",
+          "height": 122.09,
+          "left": 217.59,
+          "line": "normal",
+          "padding": "0px",
+          "radius": "18px",
+          "right": 866.41,
+          "top": 337.16,
+          "width": 648.81,
+          "zoom": "1"
+        },
+        ".gyro-composer-shell textarea": {
+          "background": "rgba(0, 0, 0, 0)",
+          "border": "0px none rgb(246, 246, 247)",
+          "color": "rgb(246, 246, 247)",
+          "font": "14.95px",
+          "height": 73.59,
+          "left": 218.59,
+          "line": "22.425px",
+          "padding": "18.4px 18.4px 8px",
+          "radius": "14px 14px 0px 0px",
+          "right": 865.41,
+          "top": 338.16,
+          "width": 646.81,
+          "zoom": "1"
+        },
+        ".gyro-response": null,
+        ".gyro-response-actions": null,
+        ".gyro-response-body": null,
+        ".gyro-response-code-block": null,
+        ".gyro-run-call-verb": null,
+        ".gyro-run-row.is-say .gyro-run-row-label": null,
+        ".gyro-user-message-bubble": null
+      },
+      "overlap": false,
+      "tiny": []
+    }
+  ],
+  "ready": "true",
+  "sidebar": {
+    "background": "rgba(0, 0, 0, 0)",
+    "border": "",
+    "color": "rgb(226, 226, 228)",
+    "font": "16.1px",
+    "height": 700,
+    "left": 0,
+    "line": "normal",
+    "padding": "0px 8px",
+    "radius": "0px",
+    "right": 190,
+    "top": 0,
+    "width": 190,
+    "zoom": "1"
+  },
+  "size": "large",
+  "theme": "dark",
+  "variant": "proposal",
+  "viewport": [
+    900,
+    700
+  ]
+}

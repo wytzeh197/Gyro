@@ -76,4 +76,17 @@ assert.equal(closeUnfocused.nextPane, draft);
 const closeDraft = resolveChatPaneClose(grid, draft);
 assert.equal(closeDraft.nextPane, first);
 
+// One session can appear in its own layout and in a mixed-folder split.
+// A delayed close still owns its specific pane, even after changing layouts.
+const mixedGrid = chatGridReducer(grid, {
+  type: "select-pane", projectKey: "/project/a", pane: other,
+  slotIndex: 3, mode: "drop",
+});
+const mixedPane = mixedGrid.layouts["/project/a"].slots[3];
+assert.notEqual(mixedPane.paneId, other.paneId);
+assert.equal(resolveChatPaneClose(mixedGrid, mixedPane).projectKey, "/project/a");
+const navigated = chatGridReducer(mixedGrid, { type: "activate-project", projectKey: "/project/b" });
+assert.equal(resolveChatPaneClose(navigated, mixedPane).projectKey, "/project/a");
+assert.equal(resolveChatPaneClose(navigated, other).projectKey, "/project/b");
+
 console.log("chat close target checks passed");

@@ -16,6 +16,7 @@ const ast = ts.createSourceFile(
 );
 const names = new Set([
   "deriveSessionPlan",
+  "withSessionContextEvents",
   "normalizePlanItem",
   "normalizePlanStatus",
   "turnIdFromSessionEvent",
@@ -136,4 +137,75 @@ const blocked = derive([eightStepPlan, event("plan-updated", {
 }, "", "turn-2")]);
 assert.equal(blocked.items[7].status, "blocked");
 assert.equal(blocked.items[7].detail, "Requires native packaged-app acceptance");
-console.log("Plan document regression checks passed.");
+// Run the actual hook's subscription while the turn remains active. No final
+// assistant message or polling refresh is required to advance the checklist.
+const hookSource = readFileSync(
+  new URL("../apps/desktop/src/use-session-context-events.ts", import.meta.url), "utf8",
+);
+let contextState = {};
+let onPlan;
+let cleanup;
+let unsubscribed = false;
+const hookExports = {};
+vm.runInNewContext(ts.transpileModule(hookSource, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+}).outputText, {
+  exports: hookExports,
+  require(name) {
+    if (name === "react") return {
+      useState: () => [contextState, (update) => { contextState = update(contextState); }],
+      useCallback: (callback) => callback,
+      useMemo: (callback) => callback(),
+      useEffect: (effect) => { cleanup = effect(); },
+    };
+    if (name === "@tauri-apps/api/event") return {
+      listen: async (channel, callback) => {
+        assert.equal(channel, "gyro://session-plan-updated");
+        onPlan = callback;
+        return () => { unsubscribed = true; };
+      },
+    };
+    if (name === "./tauri-runtime") return { isTauriRuntime: () => true };
+    if (name === "./session-context-events") return { ...context,
+      deriveSessionGoal: () => undefined, deriveChatMode: () => "normal",
+    };
+    throw new Error("Unexpected import " + name);
+  },
+});
+const hook = hookExports.useSessionContextEvents();
+await Promise.resolve();
+const liveEvent = (id, status, fraction) => ({
+  id, sessionId: "chat-a", kind: "plan-updated", turnId: "working-turn",
+  createdAt: "2026-11-11T12:00:00." + fraction + "Z", message: "",
+  payload: { action: "update-items", items: [{ id: "one", status }] },
+});
+const initialPlan = {
+  ...liveEvent("initial-plan", "todo", "000000"),
+  payload: { action: "replace", content: "# Live plan",
+    items: [{ id: "one", title: "Implement", status: "todo" }] },
+};
+hook.replace("chat-a", [initialPlan]);
+const startedLive = liveEvent("started", "in-progress", "100100");
+const finishedLive = liveEvent("finished", "complete", "100200");
+onPlan({ payload: startedLive });
+assert.equal(hookExports.deriveSessionContext(contextState["chat-a"], [], "chat-a").plan.items[0].status, "in-progress");
+onPlan({ payload: finishedLive });
+let livePlan = hookExports.deriveSessionContext(contextState["chat-a"], [startedLive], "chat-a").plan;
+assert.equal(livePlan.items.filter(item => item.status === "complete").length, 1);
+// A stale fetch finishing after the live event cannot rewind the count.
+hook.replace("chat-a", [initialPlan, startedLive]);
+onPlan({ payload: finishedLive });
+livePlan = hookExports.deriveSessionContext(contextState["chat-a"], [startedLive], "chat-a").plan;
+assert.equal(livePlan.items[0].status, "complete");
+assert.equal(livePlan.content, "# Live plan");
+assert.equal(contextState["chat-a"].filter(item => item.id === "finished").length, 1);
+onPlan({ payload: { ...startedLive, sessionId: "chat-b", id: "other-chat" } });
+assert.equal(contextState["chat-a"].length, 3);
+assert.equal(contextState["chat-b"].length, 1);
+onPlan({ payload: { ...startedLive, kind: "tool-output", id: "untrusted" } });
+assert.equal(contextState["chat-a"].length, 3);
+cleanup();
+assert.equal(unsubscribed, true);
+onPlan({ payload: liveEvent("after-unmount", "todo", "200000") });
+assert.equal(contextState["chat-a"].length, 3);
+console.log("Plan document and live progress checks passed: active-turn updates, stale refreshes, duplicate frames, per-chat isolation and cleanup.");

@@ -184,7 +184,7 @@
         // Native input is already complete. Highlight now and pulse at arrival.
         pendingPulse = { x: px, y: py, revision: currentRevision };
         const box = targetBox;
-        targetTimer = window.setTimeout(() => {
+        if (options.action !== "annotate") targetTimer = window.setTimeout(() => {
           if (targetBox !== box) return;
           targetBox?.remove();
           targetBox = null;
@@ -196,7 +196,7 @@
       if (position) paint(position.x, position.y);
       // Match the browser presence strip's linger, rather than disappearing
       // before the person watching can locate the pointer.
-      cursorTimer = window.setTimeout(() => {
+      if (options.action !== "annotate") cursorTimer = window.setTimeout(() => {
         if (revision === currentRevision) clear();
       }, 6000);
     } catch {

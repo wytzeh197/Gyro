@@ -13,7 +13,10 @@ use crate::{
     ide::task_discovery::content_hash,
     workspace::files::workspace_root,
 };
-use gyro_core::CapabilityId;
+use gyro_core::{
+    workspace_check::{git_command_error_state, GitReadState},
+    CapabilityId,
+};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Weak};
@@ -30,6 +33,7 @@ type BranchResult = Result<GitBranchCatalog, ReadError>;
 enum ReadError {
     Changed,
     BudgetExpired,
+    Unavailable,
     Failed(String),
 }
 
@@ -38,6 +42,7 @@ impl std::fmt::Display for ReadError {
         match self {
             Self::Changed => f.write_str("Branch data changed during inspection; retry to refresh"),
             Self::BudgetExpired => f.write_str("Git branch inspection timed out; retry to refresh"),
+            Self::Unavailable => f.write_str("Git is unavailable on this device"),
             Self::Failed(message) => f.write_str(message),
         }
     }
@@ -171,20 +176,35 @@ pub(crate) fn git_branch_catalog_before(
     );
     let workspace = workspace_root(workspace)?;
     let Some(root) = git_read::repo_root(&workspace, deadline)? else {
-        return Ok(GitBranchCatalog {
-            available: false,
-            repo_root: None,
-            current: None,
-            branches: Vec::new(),
-            last_commit_at: HashMap::new(),
-            tips: Vec::new(),
-            latest_commit_at: None,
-            checked_at: chrono::Utc::now().to_rfc3339(),
-            worktrees: Vec::new(),
-            error: Some("The selected folder is not a Git repository.".into()),
-        });
+        return Ok(optional_catalog(GitReadState::NotRepository));
     };
-    shared_catalog(&root, deadline, read_catalog)
+    match shared_catalog(&root, deadline, read_catalog) {
+        Err(error)
+            if matches!(
+                error.downcast_ref::<ReadError>(),
+                Some(ReadError::Unavailable)
+            ) =>
+        {
+            Ok(optional_catalog(GitReadState::Unavailable))
+        }
+        result => result,
+    }
+}
+
+fn optional_catalog(read_state: GitReadState) -> GitBranchCatalog {
+    GitBranchCatalog {
+        read_state,
+        available: false,
+        repo_root: None,
+        current: None,
+        branches: Vec::new(),
+        last_commit_at: HashMap::new(),
+        tips: Vec::new(),
+        latest_commit_at: None,
+        checked_at: chrono::Utc::now().to_rfc3339(),
+        worktrees: Vec::new(),
+        error: None,
+    }
 }
 
 fn shared_catalog(
@@ -206,6 +226,8 @@ fn shared_catalog(
                 }
                 if Instant::now() >= deadline {
                     ReadError::BudgetExpired
+                } else if git_command_error_state(&error) == GitReadState::Unavailable {
+                    ReadError::Unavailable
                 } else {
                     ReadError::Failed(error.to_string())
                 }
@@ -317,6 +339,7 @@ fn read_catalog(root: &Path, deadline: Instant) -> anyhow::Result<GitBranchCatal
         .collect::<Vec<_>>();
     sort_branch_catalog_entries(&mut local);
     Ok(GitBranchCatalog {
+        read_state: GitReadState::Ready,
         available: true,
         repo_root: Some(root.to_string_lossy().into_owned()),
         current,

@@ -215,6 +215,7 @@ function GoalPane({
         isGoalComposerActive={editing}
         isGoalModeActive={Boolean(goal)}
         onComposerAction={(action) => {
+          setLastAction(action);
           if (action === "add-goal") setEditing(true);
         }}
         onCancelGoalComposer={() => setEditing(false)}

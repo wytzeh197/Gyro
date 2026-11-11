@@ -4,17 +4,11 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type MutableRefObject,
   type ReactNode,
+  type RefObject,
 } from "react";
-import "./chat-question-popup.css";
-import {
-  ArrowRight,
-  ArrowUp,
-  ChevronLeft,
-  ChevronRight,
-  PenLine,
-  X,
-} from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, X } from "lucide-react";
 import {
   formatChatAnswers,
   type ChatQuestionAnswer,
@@ -47,26 +41,67 @@ const plainText = (text: string) =>
   text.replace(/\*\*(.+?)\*\*|`([^`]+)`/g, "$1$2");
 
 /** Number keys pick, Return takes the recommended pick, Esc closes. */
-function isPlainKey(event: KeyboardEvent) {
+function isPlainKey(event: { altKey: boolean; ctrlKey: boolean; metaKey: boolean }) {
   return !event.metaKey && !event.ctrlKey && !event.altKey;
 }
 
+/** Set by a card in the composer; the composer's send hands its text here. */
+export type ComposerAnswerRef = MutableRefObject<
+  ((text: string) => void) | null
+>;
+
 /**
- * Questions take the composer's place one at a time: the composer stays
- * mounted underneath so a draft survives, and returns once every question is
- * answered or skipped. Answering moves to the next open question; the last one
+ * A card that sits in the composer is answered from the composer's own text
+ * box: sending typed text goes to the card instead of the chat, and while the
+ * box is empty the number keys pick an option.
+ */
+export function useComposerAnswer(
+  answerRef: ComposerAnswerRef | undefined,
+  rootRef: RefObject<HTMLElement | null>,
+  onAnswer: (text: string) => void,
+  onPick: (index: number) => boolean,
+) {
+  const latest = useRef({ onAnswer, onPick });
+  latest.current = { onAnswer, onPick };
+  useEffect(() => {
+    if (!answerRef) return;
+    const handler = (text: string) => latest.current.onAnswer(text);
+    answerRef.current = handler;
+    return () => {
+      if (answerRef.current === handler) answerRef.current = null;
+    };
+  }, [answerRef]);
+  useEffect(() => {
+    const field = rootRef.current
+      ?.closest(".gyro-composer-input")
+      ?.querySelector("textarea");
+    if (!field) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (field.value || event.isComposing || !isPlainKey(event)) return;
+      if (!/^[1-9]$/.test(event.key)) return;
+      if (latest.current.onPick(Number(event.key) - 1)) event.preventDefault();
+    };
+    field.addEventListener("keydown", onKeyDown);
+    return () => field.removeEventListener("keydown", onKeyDown);
+  }, [rootRef]);
+}
+
+/**
+ * Questions open upward out of the composer's text box, one at a time. Typing
+ * in the box and sending gives your own answer; the box returns to normal once
+ * every question is answered or skipped. Answering moves to the next open question; the last one
  * sends everything as a single message.
  */
 export function ChatQuestionPopup({
   request,
   onSend,
   onDismiss,
-  draft,
+  answerRef,
 }: {
   request: ChatQuestionRequest;
   onSend: (answer: string) => void;
   onDismiss: () => void;
-  draft: string;
+  answerRef?: ComposerAnswerRef;
 }) {
   const total = request.questions.length;
   const [page, setPage] = useState(0);
@@ -74,10 +109,17 @@ export function ChatQuestionPopup({
   const [answers, setAnswers] = useState<(string | null | undefined)[]>(() =>
     request.questions.map(() => undefined),
   );
-  const [custom, setCustom] = useState("");
   const [error, setError] = useState("");
   const rootRef = useRef<HTMLFormElement>(null);
   const question = request.questions[page];
+  const recordRef = useRef<(value: string | null) => void>(() => {});
+  const chooseRef = useRef<(index: number) => boolean>(() => false);
+  useComposerAnswer(
+    answerRef,
+    rootRef,
+    (text) => recordRef.current(text),
+    (index) => chooseRef.current(index),
+  );
 
   // The composer this replaces had focus a moment ago; hand it to the card so
   // the number keys keep working instead of falling back to the page.
@@ -87,13 +129,6 @@ export function ChatQuestionPopup({
     rootRef.current?.focus({ preventScroll: true });
   }, []);
 
-  useEffect(() => {
-    const current = answers[page];
-    const picked =
-      current && question ? question.options.map(plainText) : undefined;
-    setCustom(current && picked && !picked.includes(current) ? current : "");
-    // Only a page change resets the field, never a keystroke in it.
-  }, [page]);
 
   if (!question) return null;
 
@@ -110,6 +145,12 @@ export function ChatQuestionPopup({
       setPage(target);
       return;
     }
+    // Skipping every question just closes the card; there is nothing to tell
+    // the model, so no message goes out.
+    if (next.every((answer) => answer === null)) {
+      onDismiss();
+      return;
+    }
     try {
       const result: ChatQuestionAnswer[] = request.questions.map(
         (item, index) => ({
@@ -117,7 +158,7 @@ export function ChatQuestionPopup({
           answer: next[index] ?? undefined,
         }),
       );
-      onSend(formatChatAnswers(result, draft));
+      onSend(formatChatAnswers(result));
       onDismiss();
     } catch {
       setError("Could not send. Your answers are still here.");
@@ -126,22 +167,21 @@ export function ChatQuestionPopup({
 
   const choose = (index: number) => {
     const option = question.options[index];
-    if (option) record(plainText(option));
+    if (!option) return false;
+    record(plainText(option));
+    return true;
   };
 
+  recordRef.current = record;
+  chooseRef.current = choose;
+
   const onKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
-    const inField = event.target instanceof HTMLInputElement;
     if (event.key === "Escape") {
       event.stopPropagation();
-      if (inField && custom) {
-        setCustom("");
-        rootRef.current?.focus();
-        return;
-      }
       onDismiss();
       return;
     }
-    if (inField || !isPlainKey(event)) return;
+    if (!isPlainKey(event)) return;
     if (/^[1-9]$/.test(event.key)) {
       const index = Number(event.key) - 1;
       if (index < question.options.length) {
@@ -183,10 +223,7 @@ export function ChatQuestionPopup({
       aria-label={total > 1 ? `Question ${page + 1} of ${total}` : "Question"}
       className="gyro-question-dock"
       onKeyDown={onKeyDown}
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (custom.trim()) record(custom.trim());
-      }}
+      onSubmit={(event) => event.preventDefault()}
       ref={rootRef}
       tabIndex={-1}
     >
@@ -217,6 +254,14 @@ export function ChatQuestionPopup({
             </button>
           </span>
         ) : null}
+        <button
+          className="gyro-question-dock-skip"
+          onClick={() => record(null)}
+          title="Skip this question"
+          type="button"
+        >
+          Skip
+        </button>
         <button
           aria-label="Dismiss questions"
           className="gyro-question-dock-close"
@@ -269,38 +314,6 @@ export function ChatQuestionPopup({
         })}
       </div>
 
-      <div className="gyro-question-dock-other">
-        <PenLine aria-hidden="true" size={13} />
-        <input
-          aria-label={"Your own answer to: " + plainText(question.title)}
-          onChange={(event) => setCustom(event.target.value)}
-          placeholder="No, and tell Gyro what to do instead"
-          value={custom}
-        />
-        {custom.trim() ? (
-          <button
-            aria-label="Send this answer"
-            className="gyro-question-dock-send"
-            type="submit"
-          >
-            <ArrowUp size={13} />
-          </button>
-        ) : (
-          <button
-            className="gyro-question-dock-skip"
-            onClick={() => record(null)}
-            type="button"
-          >
-            Skip
-          </button>
-        )}
-      </div>
-
-      {draft.trim() ? (
-        <p className="gyro-question-dock-note">
-          Your draft is sent with the answers.
-        </p>
-      ) : null}
       {error ? (
         <p className="gyro-question-dock-note is-error" role="alert">
           {error}

@@ -281,8 +281,26 @@ fn run(
             &format!("cycle {cycle}: background pointer cannot act on the previous document"),
             pointer.is_err(),
         );
-        control(base, "release-document")?;
-        let interactive = wait_page(app, session, &target, false)?;
+        // Exercise the same bounded observation used by model tools, starting
+        // while response headers are still held by the fixture server.
+        let interactive = std::thread::scope(|threads| {
+            let release = threads.spawn(|| {
+                std::thread::sleep(Duration::from_millis(150));
+                control(base, "release-document")
+            });
+            let observed = browser::observe_agent(app, session, "readPage", json!({"maxDepth":4}));
+            release
+                .join()
+                .map_err(|_| "document release worker panicked".to_string())??;
+            observed
+        })?;
+        record(
+            checks,
+            &format!(
+                "cycle {cycle}: one observation waits for delayed headers and returns the new page"
+            ),
+            interactive["url"] == target && interactive["readyState"] == "interactive",
+        );
         let new_ref = find_button(app, session)?;
         let current = app
             .state::<SessionBrowserManager>()

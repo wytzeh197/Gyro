@@ -24,6 +24,31 @@ pub(crate) struct TauriRunnerHost {
 }
 
 impl TauriRunnerHost {
+    fn record_memory_context(&self, request: &ProviderChatRequest, resumed: bool) {
+        let Some(memory) = &request.project_memory else {
+            return;
+        };
+        let result = (|| -> anyhow::Result<()> {
+            let (_, receipt) = memory.render(resumed);
+            let Some(turn) = &request.turn_id else {
+                return Ok(());
+            };
+            let store = open_store().map_err(anyhow::Error::msg)?;
+            store.record_project_memory_receipt(
+                Uuid::parse_str(&request.session_id)?,
+                Uuid::parse_str(turn)?,
+                &request.provider_id,
+                &receipt,
+            )
+        })();
+        if let Err(error) = result {
+            eprintln!(
+                "Memory context receipt unavailable: {}",
+                gyro_core::sanitize_capability_summary(&error.to_string())
+            );
+        }
+    }
+
     pub(crate) fn new(app: &tauri::AppHandle) -> Self {
         Self {
             app: app.clone(),
@@ -42,6 +67,7 @@ impl RunnerHost for TauriRunnerHost {
         tools: bool,
         images: bool,
     ) -> (String, String) {
+        self.record_memory_context(request, false);
         crate::efficiency::capture_prompt(|| {
             super::prompt::provider_context_message_with_capabilities(
                 request,
@@ -109,6 +135,7 @@ impl RunnerHost for TauriRunnerHost {
         history: Option<&str>,
         turn: gyro_core::provider_runtime::types::PromptTurn,
     ) -> String {
+        self.record_memory_context(request, turn.resumed);
         super::prompt::provider_context_message_for_turn(request, history, turn)
     }
     fn reasoning_efforts(&self, provider_id: &str, model_id: Option<&str>) -> Option<Vec<String>> {
@@ -144,9 +171,22 @@ impl RunnerHost for TauriRunnerHost {
                 delta,
                 message,
                 error,
-            } => super::events::emit_provider_chat_event(
-                &self.app, request, phase, status, delta, message, error,
-            ),
+            } => {
+                if matches!(
+                    request.internal_purpose,
+                    Some(
+                        super::chat_types::InternalRequestPurpose::CodeReview
+                            | super::chat_types::InternalRequestPurpose::WorkflowExtraction
+                    )
+                ) {
+                    if let Some(delta) = delta.as_deref() {
+                        crate::features::code_reviews::output::append(&request.session_id, delta);
+                    }
+                }
+                super::events::emit_provider_chat_event(
+                    &self.app, request, phase, status, delta, message, error,
+                )
+            }
             RunEvent::Activity { activity, sequence } => {
                 super::events::emit_provider_activity_event(&self.app, request, activity, sequence)
             }
@@ -179,6 +219,35 @@ impl RunnerHost for TauriRunnerHost {
         }
     }
 
+    fn context_compaction_requested(&self, request: &ProviderChatRequest) -> bool {
+        request.internal_purpose.is_none()
+            && self
+                .app
+                .state::<ProviderCancellationManager>()
+                .flags
+                .lock()
+                .ok()
+                .and_then(|flags| flags.get(&request.session_id).cloned())
+                .is_some_and(|control| {
+                    control
+                        .context_compaction_requested
+                        .load(std::sync::atomic::Ordering::Acquire)
+                })
+    }
+    fn complete_context_compaction_request(&self, request: &ProviderChatRequest) {
+        if let Some(control) = self
+            .app
+            .state::<ProviderCancellationManager>()
+            .flags
+            .lock()
+            .ok()
+            .and_then(|flags| flags.get(&request.session_id).cloned())
+        {
+            control
+                .context_compaction_requested
+                .store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
     fn start_heartbeat(
         &self,
         request: ProviderChatRequest,

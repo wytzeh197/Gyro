@@ -92,6 +92,19 @@ export function ComposerEffortSelector({
       const pad = 12;
       const zoom = effortViewportRect(panel).zoom;
       panel.style.maxWidth = `${Math.max(0, bounds.right - bounds.left - pad * 2) / zoom}px`;
+      const anchor = effortViewportRect(panel.parentElement!);
+      const gap = 8 * zoom;
+      const above = Math.max(0, anchor.top - bounds.top - pad - gap);
+      const below = Math.max(0, bounds.bottom - anchor.bottom - pad - gap);
+      const up = above >= panel.offsetHeight * zoom || above >= below;
+      panel.style.bottom = up
+        ? `${(anchor.bottom - anchor.top + gap) / zoom}px`
+        : "auto";
+      panel.style.top = up
+        ? "auto"
+        : `${(anchor.bottom - anchor.top + gap) / zoom}px`;
+      panel.style.maxHeight = `${(up ? above : below) / zoom}px`;
+      panel.style.overflowY = "auto";
       const rect = effortViewportRect(panel);
       const shift = Math.max(
         bounds.left + pad - rect.left,
