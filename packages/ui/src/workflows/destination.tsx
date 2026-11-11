@@ -1,3 +1,4 @@
+import { CalendarClock } from "lucide-react";
 import { WorkflowLibraryPanel } from "./library";
 import {
   useCallback,
@@ -306,7 +307,7 @@ export function WorkflowDestination({
   }
   return (
     <div className="gyro-workflows-destination">
-      <nav aria-label="Workflow views">
+      <nav className="gyro-workflow-nav" aria-label="Workflow views">
         {(["workflows", "schedules", "runs"] as const).map((tab) => (
           <button
             key={tab}
@@ -319,6 +320,10 @@ export function WorkflowDestination({
       </nav>
       {view === "schedules" ? (
         <div className="gyro-workflows-schedules">
+          <header className="gyro-workflow-page-heading">
+            <h1>Schedules</h1>
+            <p>Manage recurring workflows and project automations.</p>
+          </header>
           <section className="gyro-workflow-scheduled">
             <h2>Workflow schedules</h2>
             {jobs.filter((job) => job.schedule !== "manual").length ? (
@@ -355,10 +360,16 @@ export function WorkflowDestination({
                   ))}
               </ul>
             ) : (
-              <p>
-                No workflow schedules yet. Open a saved workflow and choose a
-                schedule in its run options.
-              </p>
+              <div className="gyro-workflow-schedule-empty">
+                <CalendarClock size={20} aria-hidden="true" />
+                <div>
+                  <strong>No workflow schedules yet</strong>
+                  <p>Choose a saved workflow, then set when it runs.</p>
+                </div>
+                <button onClick={() => changeView("workflows")}>
+                  Browse workflows
+                </button>
+              </div>
             )}
           </section>
           <div className="gyro-workflow-legacy-schedules">{children}</div>
@@ -374,14 +385,15 @@ export function WorkflowDestination({
               jobs={jobs}
               onOpenSession={onOpenSession}
               onRefresh={() => void refresh()}
+              onBrowseWorkflows={() => changeView("workflows")}
             />
           ) : (
             <>
-              <header>
+              <header className="gyro-workflow-page-heading">
                 <h1>Workflows</h1>
                 <p>Save a task’s steps and use them again in this project.</p>
               </header>
-              <label>
+              <label className="gyro-workflow-project">
                 Project
                 <select
                   disabled={
@@ -390,6 +402,7 @@ export function WorkflowDestination({
                     Boolean(setup) ||
                     Boolean(extraction)
                   }
+                  title={project?.path}
                   value={project?.sessionId ?? ""}
                   onChange={(event) => {
                     setProjectId(event.target.value);
@@ -399,7 +412,9 @@ export function WorkflowDestination({
                 >
                   {projects.map((project) => (
                     <option key={project.sessionId} value={project.sessionId}>
-                      {project.path} · {project.title}
+                      {project.path.split(/[\\/]/).filter(Boolean).pop() ??
+                        project.path}{" "}
+                      · {project.title}
                     </option>
                   ))}
                 </select>
@@ -487,10 +502,14 @@ export function WorkflowDestination({
               )}
             </>
           )}
+        </div>
+      )}
+      {notice || (error && !editor) ? (
+        <div className="gyro-workflow-feedback">
           {notice ? <p role="status">{notice}</p> : null}
           {error && !editor ? <p role="alert">{error}</p> : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -628,9 +628,9 @@
 }
 
 :root[data-theme] .gyro-sidebar .gyro-sidebar-small-title {
-  padding: var(--gyro-space-standard);
+  padding: var(--gyro-space-compact) var(--gyro-space-standard);
   margin: 0;
-  min-height: 32px;
+  min-height: 28px;
 }
 
 :root[data-theme] .gyro-sidebar .gyro-sidebar-projects-heading {
@@ -662,7 +662,7 @@
 }
 
 :root[data-theme] .gyro-sidebar .gyro-sidebar-project-row {
-  min-height: calc(34px * var(--gyro-ui-scale, 1));
+  min-height: calc(30px * var(--gyro-ui-scale, 1));
   padding: 0 var(--gyro-space-compact);
   margin-bottom: var(--gyro-space-compact);
 }
@@ -678,7 +678,7 @@
   padding: 0;
   font-weight: 600;
   min-width: 0;
-  min-height: 32px;
+  min-height: 28px;
 }
 
 :root[data-theme] .gyro-sidebar .gyro-project-chevron {
@@ -689,7 +689,7 @@
 }
 
 :root[data-theme] .gyro-sidebar .gyro-sidebar-project-group {
-  margin-bottom: var(--gyro-space-comfortable);
+  margin-bottom: var(--gyro-space-compact);
 }
 
 :root[data-theme] .gyro-sidebar-project-children {
@@ -779,4 +779,20 @@
   .gyro-sidebar-project-chat-list
   .gyro-session-row:is(.is-active, :hover, :focus-within) {
   border-radius: var(--gyro-radius-sm);
+}
+
+/* A quieter default rail; visual glyphs shrink while action targets stay intact. */
+:root[data-theme] .gyro-sidebar :is(
+  .gyro-sidebar-action, .gyro-sidebar-thread-main,
+  .gyro-sidebar-project-toggle, .gyro-footer-button
+) {
+  font-size: var(--gyro-font-support);
+}
+
+:root[data-theme] .gyro-sidebar :is(
+  .gyro-sidebar-action, .gyro-sidebar-project-toggle, .gyro-footer-button
+) > svg:not(.gyro-project-chevron),
+:root[data-theme] .gyro-sidebar .gyro-sidebar-model-logo .gyro-provider-logo {
+  width: calc(14px * var(--gyro-ui-scale, 1));
+  height: calc(14px * var(--gyro-ui-scale, 1));
 }

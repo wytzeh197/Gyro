@@ -1,3 +1,4 @@
+import { History, RefreshCw } from "lucide-react";
 import { FeatureUsageLine } from "../feature-usage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
@@ -12,12 +13,14 @@ export function WorkflowRuns({
   jobs,
   onOpenSession,
   onRefresh,
+  onBrowseWorkflows,
 }: {
   runtime: WorkflowRuntime;
   runs: WorkflowRunSummary[];
   jobs: WorkflowJob[];
   onOpenSession?: (id: string) => void;
   onRefresh: () => void;
+  onBrowseWorkflows: () => void;
 }) {
   const [selected, setSelected] = useState<string>();
   const [detail, setDetail] = useState<WorkflowRun>();
@@ -323,13 +326,28 @@ export function WorkflowRuns({
     );
   return (
     <section aria-label="Workflow runs">
-      <h2>Workflow runs</h2>
-      <button onClick={onRefresh}>Refresh runs</button>
+      <header className="gyro-workflow-page-heading gyro-workflow-heading-actions">
+        <div>
+          <h1>Runs</h1>
+          <p>Follow progress and review the results of your workflows.</p>
+        </div>
+        <button onClick={onRefresh}>
+          <RefreshCw size={14} aria-hidden="true" /> Refresh runs
+        </button>
+      </header>
       {!runs.length && !pending.length ? (
-        <p>
-          No workflow runs yet. Save a recipe, review its setup, then launch it
-          explicitly.
-        </p>
+        <div className="gyro-workflow-empty">
+          <span className="gyro-workflow-empty-icon">
+            <History size={24} aria-hidden="true" />
+          </span>
+          <h2>No workflow runs yet</h2>
+          <p>
+            Run a saved workflow to see its progress, results, and history here.
+          </p>
+          <button className="gyro-primary-button" onClick={onBrowseWorkflows}>
+            Browse workflows
+          </button>
+        </div>
       ) : null}
       <ul className="gyro-workflow-list">
         {pending.map((job) => (

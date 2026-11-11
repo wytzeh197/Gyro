@@ -19091,7 +19091,8 @@ button.gyro-response-changed-files:hover {
 
 /* Composer: workspace context, rounded input, then an independent toolbar. */
 :root[data-theme] .gyro-chat-surface .gyro-composer-shell {
-  --gyro-composer-action-size: calc(var(--gyro-space-panel) * 2);
+  --gyro-composer-action-size: calc(28px * var(--gyro-ui-scale, 1));
+  max-width: min(100%, 720px);
   background: transparent;
   border: 0;
   box-shadow: none;
@@ -19114,19 +19115,19 @@ button.gyro-response-changed-files:hover {
   border: 0;
   border-radius: inherit;
   box-sizing: border-box;
-  font: var(--gyro-chat-text-size)/1.5 var(--gyro-font-sans);
-  min-height: calc(var(--gyro-space-panel) * 3.5);
+  font: var(--gyro-font-body)/1.5 var(--gyro-font-sans);
+  min-height: calc(44px * var(--gyro-ui-scale, 1));
   max-height: calc(var(--gyro-space-panel) * 10);
-  padding: var(--gyro-space-panel);
+  padding: var(--gyro-space-comfortable);
 }
 :root[data-theme] .gyro-chat-surface .gyro-composer-shell > .gyro-composer-bar {
   background: transparent;
   border: 0;
-  column-gap: var(--gyro-space-comfortable);
+  column-gap: var(--gyro-space-standard);
   min-height: calc(
-    var(--gyro-composer-action-size) + var(--gyro-chat-block-gap)
+    var(--gyro-composer-action-size) + var(--gyro-chat-space-2)
   );
-  padding: var(--gyro-chat-block-gap) var(--gyro-chat-space-2) 0;
+  padding: var(--gyro-chat-space-2) var(--gyro-chat-space-1) 0;
 }
 :root[data-theme]
   .gyro-chat-surface
@@ -19139,7 +19140,7 @@ button.gyro-response-changed-files:hover {
   justify-content: flex-start;
   margin: 0;
   min-height: 0;
-  padding: 0 var(--gyro-space-compact) var(--gyro-space-comfortable);
+  padding: 0 var(--gyro-space-compact) var(--gyro-space-standard);
   position: relative;
   inset: auto;
 }

@@ -14036,6 +14036,7 @@ function isValidAutomationTimeZone(timezone: string) {
 }
 
 export function AutomationsSurface({
+  embedded = false,
   automations = [],
   providerChoices = [],
   onChooseProject,
@@ -14056,6 +14057,7 @@ export function AutomationsSurface({
   onSelectAutomation,
   onToggleAutomation,
 }: {
+  embedded?: boolean;
   automations?: Automation[];
   providerChoices?: Array<{
     id: string;
@@ -14267,21 +14269,39 @@ export function AutomationsSurface({
     <div
       className={`gyro-scheduled-page${isCreating || detailOpen ? " has-detail" : ""}`}
     >
-      <div className="gyro-scheduled-titlebar" data-tauri-drag-region>
-        <button
-          className="gyro-primary-button"
-          type="button"
-          disabled={isSaving}
-          onClick={() => beginCreate()}
-        >
-          Create automation
-        </button>
-      </div>
+      {!embedded && (
+        <div className="gyro-scheduled-titlebar" data-tauri-drag-region>
+          <button
+            className="gyro-primary-button"
+            type="button"
+            disabled={isSaving}
+            onClick={() => beginCreate()}
+          >
+            Create automation
+          </button>
+        </div>
+      )}
       <div className="gyro-scheduled-body">
         <section className="gyro-scheduled-index" aria-label="Scheduled work">
           <header className="gyro-scheduled-heading">
-            <h1>Automations</h1>
-            <p>Schedule project checks and follow-ups.</p>
+            {embedded ? (
+              <>
+                <h2>Automations</h2>
+                <button
+                  className="gyro-primary-button"
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => beginCreate()}
+                >
+                  Create automation
+                </button>
+              </>
+            ) : (
+              <>
+                <h1>Automations</h1>
+                <p>Schedule project checks and follow-ups.</p>
+              </>
+            )}
           </header>
           <label className="gyro-scheduled-search-field">
             <Search size={14} aria-hidden="true" />

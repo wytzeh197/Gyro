@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Workflow } from "lucide-react";
 import type { WorkflowLibrary, WorkflowDraft, WorkflowListing } from "./types";
 export function WorkflowLibraryPanel({
   library,
@@ -25,11 +25,13 @@ export function WorkflowLibraryPanel({
   const [query, setQuery] = useState("");
   return (
     <>
-      <div className="gyro-workflow-actions">
+      <div className="gyro-workflow-actions gyro-workflow-library-toolbar">
         <button className="gyro-primary-button" onClick={onNew}>
           New workflow
         </button>
-        <button onClick={onExtract}>Create from a chat</button>
+        {library?.definitions.length ? (
+          <button onClick={onExtract}>Create from a chat</button>
+        ) : null}
         <button
           onClick={onRefresh}
           aria-label="Refresh workflows"
@@ -51,10 +53,18 @@ export function WorkflowLibraryPanel({
       {!library ? (
         <p role="status">Loading workflows…</p>
       ) : !library.definitions.length ? (
-        <p>
-          No workflows saved in this project. Create one here, or choose “Save
-          as workflow” on a completed chat task.
-        </p>
+        <div className="gyro-workflow-empty">
+          <span className="gyro-workflow-empty-icon">
+            <Workflow size={24} aria-hidden="true" />
+          </span>
+          <h2>Your next repeatable task starts here</h2>
+          <p>
+            Save a workflow to reuse its steps, or turn a completed chat into
+            one.
+          </p>
+          <button onClick={onExtract}>Create from a chat</button>
+          <small>No workflows saved in this project yet.</small>
+        </div>
       ) : (
         <ul className="gyro-workflow-list">
           {library.definitions

@@ -19434,7 +19434,7 @@ export function App() {
       ) : null}
       {activeDestination === "automations" ? (
         <WorkflowDestination runtime={isTauriRuntime()?workflowClient:undefined} initialSessionId={activeSessionId} onOpenSession={id=>{void refreshSessions().then(()=>selectSession(id));}} openSchedulesToken={automationCreateRequestToken} extractionRequest={workflowExtractionRequest} onExtractionHandled={()=>setWorkflowExtractionRequest(undefined)}>
-        <AutomationsSurface
+        <AutomationsSurface embedded
           providerChoices={providersForConfig(config)
             .filter(
               (provider) =>

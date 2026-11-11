@@ -1,7 +1,11 @@
 // Isolated production-component fixtures. No native/provider execution.
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { WorkflowDestination, applyAppearancePreferences } from "@gyro-dev/ui";
+import {
+  AutomationsSurface,
+  WorkflowDestination,
+  applyAppearancePreferences,
+} from "@gyro-dev/ui";
 import type {
   WorkflowRuntime,
   WorkflowDefinition,
@@ -447,11 +451,54 @@ if (import.meta.env.DEV)
         initialSessionId={project.sessionId}
         onOpenSession={(id) => (window as any).workflowFixture.opened.push(id)}
       >
-        <section aria-label="Legacy schedules">
-          <h2>Existing prompt schedules</h2>
-          <p>Legacy scheduled prompts stay available.</p>
-          <button>New prompt schedule</button>
-        </section>
+        {params.has("integrated") ? (
+          <AutomationsSurface
+            embedded
+            automations={[
+              {
+                id: "readme",
+                title: "Update readme",
+                prompt: "Update the project readme.",
+                schedule: "weekly-at",
+                status: "paused",
+                project: "Gyro",
+                provider: "Fixture",
+                branch: "main",
+                workspaceMode: "local",
+                triageState: "needs-review",
+                lastResult: "README updated.",
+                unreadResults: 2,
+                runHistory: [],
+                execution: {
+                  workspacePath: project.path,
+                  providerId: "cli-fixture",
+                  modelId: "cli-model",
+                  calendar: {
+                    weekday: 4,
+                    time: "09:00",
+                    timezone: "Europe/Amsterdam",
+                  },
+                },
+              },
+            ]}
+            providerChoices={[
+              {
+                id: "cli-fixture",
+                label: "Fixture",
+                ready: true,
+                models: [{ id: "cli-model", label: "Fixture model" }],
+              },
+            ]}
+            creationWorkspace={project.path}
+            onCreateAutomation={async () => true}
+          />
+        ) : (
+          <section aria-label="Legacy schedules">
+            <h2>Existing prompt schedules</h2>
+            <p>Legacy scheduled prompts stay available.</p>
+            <button>New prompt schedule</button>
+          </section>
+        )}
       </WorkflowDestination>
     </main>,
   );
