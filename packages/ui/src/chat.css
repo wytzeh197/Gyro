@@ -1,3 +1,14 @@
+:root[data-theme]
+  .gyro-chat-companion
+  .gyro-browser-preview.is-chat:has(.gyro-browser-annotate-button)
+  .gyro-browser-preview-toolbar {
+  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto var(
+      --gyro-companion-control-height,
+      28px
+    );
+}
+
 /* Chat design contract: docs/design/chat-consolidation-plan-2026-11-10.md.
    Shared values have one authority; state and pane geometry stay with their rules. */
 :root {
@@ -899,10 +910,6 @@
   filter: none;
 }
 
-:root[data-theme="light"] .gyro-chat-message-queue {
-  background: var(--gyro-surface);
-}
-
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   :is(.gyro-chat-start, .gyro-chat-composer-dock)
@@ -1035,14 +1042,6 @@
   text-transform: none;
 }
 
-:root[data-theme]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-chat-message-queue
-  article
-  p {
-  font-size: var(--gyro-chat-meta-size);
-  line-height: 1.45;
-}
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   > .gyro-chat-environment-popover {
@@ -1207,14 +1206,6 @@
   background: var(--gyro-accent);
 }
 
-:root[data-theme]
-  .gyro-chat-environment-popover
-  .gyro-environment-section.is-plan.is-live
-  .gyro-environment-plan-steps
-  > li.is-in-progress {
-  background: color-mix(in srgb, var(--gyro-accent) 9%, transparent);
-  border-radius: var(--gyro-radius-sm);
-}
 :root[data-theme]
   .gyro-chat-environment-popover.is-focus-working
   .gyro-environment-identity
@@ -4881,9 +4872,11 @@
   width: var(--gyro-composer-action-size);
 }
 
-.gyro-chat-start .gyro-composer-shell button:focus-visible {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gyro-shadow) 18%, transparent);
-  outline: 0;
+:root[data-theme]
+  :is(.gyro-composer-shell button, .gyro-composer-context-row button):focus-visible {
+  box-shadow: none;
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 1px;
 }
 
 .gyro-composer-chip:hover,
@@ -6762,6 +6755,28 @@
   width: 28px;
 }
 
+.gyro-message-copy {
+  position: relative;
+}
+
+.gyro-message-copy-confirmation:not(:empty) {
+  position: absolute;
+  bottom: calc(100% + var(--gyro-chat-space-1));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--gyro-chat-space-1) var(--gyro-chat-space-2);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  background: var(--gyro-surface);
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-sans);
+  font-size: var(--gyro-chat-meta-size);
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1;
+}
+
 .gyro-response-actions button:hover {
   background: color-mix(in srgb, var(--gyro-chat-media-text) 6%, transparent);
   color: var(--gyro-text);
@@ -8428,9 +8443,6 @@
 :root .gyro-composer-shell.has-goal-caption {
   margin-top: calc(var(--gyro-chat-space-1) * 10);
 }
-.gyro-chat-composer-dock:has(> .has-goal-caption) .gyro-chat-message-queue {
-  border-radius: var(--gyro-radius-xl);
-}
 
 .gyro-chat-start .gyro-session-goal-status {
   margin: 0 auto calc(var(--gyro-chat-space-1) * 3.5);
@@ -9572,20 +9584,21 @@ button.gyro-response-changed-files:hover {
      the composer, the queue and the focus strip share the turns' edges. */
 }
 
+/* Queued messages are the top of the text box: quiet one-line rows on the
+   box's own surface, actions on hover, a hairline before the typing area. */
+.gyro-composer-input > .gyro-chat-message-queue {
+  grid-row: 1;
+}
 .gyro-chat-message-queue {
-  background: color-mix(in srgb, var(--gyro-surface) 94%, var(--gyro-text) 6%);
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-bottom-color: var(--gyro-premium-hairline-soft);
-  border-radius: var(--gyro-radius-xl) var(--gyro-radius-xl) 0 0;
+  border-bottom: 1px solid var(--gyro-chat-hairline);
   box-sizing: border-box;
   color: var(--gyro-text);
-  margin-bottom: 0;
+  margin: 0 calc(var(--gyro-chat-space-1) * 2.5);
   max-height: 132px;
-  max-width: var(--gyro-chat-content-width);
+  min-width: 0;
   overflow: auto;
-  padding: var(--gyro-chat-space-1) calc(var(--gyro-chat-space-1) * 2.5);
-  width: min(var(--gyro-chat-content-width), 100%);
-  z-index: 1;
+  padding: calc(var(--gyro-chat-space-1) * 1.5) 0 var(--gyro-chat-space-1);
+  scrollbar-width: none;
 }
 
 .gyro-chat-message-queue:has(.gyro-chat-message-queue-menu) {
@@ -9595,83 +9608,97 @@ button.gyro-response-changed-files:hover {
 
 .gyro-chat-message-queue-list {
   display: grid;
-  gap: calc(var(--gyro-chat-space-1) * 0.5);
+  gap: 0;
 }
 
 .gyro-chat-message-queue article {
   align-items: center;
-  background: transparent;
   border-radius: var(--gyro-radius-md);
   display: grid;
-  gap: calc(var(--gyro-chat-space-1) * 1.5);
-  grid-template-columns: 15px minmax(0, 1fr) auto;
-  min-height: 34px;
-  padding: calc(var(--gyro-chat-space-1) * 0.25)
-    calc(var(--gyro-chat-space-1) * 0.5);
+  gap: var(--gyro-chat-space-1);
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  min-height: 26px;
+  padding: 0 calc(var(--gyro-chat-space-1) * 0.5) 0 var(--gyro-chat-space-1);
   position: relative;
 }
 
-.gyro-chat-message-queue article p {
+.gyro-chat-message-queue article:hover,
+.gyro-chat-message-queue article:focus-within,
+.gyro-chat-message-queue article.is-menu-open {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+}
+
+.gyro-chat-message-queue article > .gyro-chat-message-queue-text {
+  background: transparent;
+  border: 0;
+  color: var(--gyro-muted);
+  cursor: text;
+  display: block;
+  font: inherit;
   font-size: var(--gyro-chat-meta-size);
-  line-height: 1.3;
-  margin: 0;
+  height: auto;
+  line-height: 1.45;
+  min-width: 0;
   overflow: hidden;
+  padding: calc(var(--gyro-chat-space-1) * 0.5) 0;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.gyro-chat-message-queue article.is-failed {
-  background: color-mix(in srgb, var(--gyro-danger) 7%, transparent);
-  box-shadow: inset 2px 0 0
-    color-mix(in srgb, var(--gyro-danger) 72%, transparent);
+.gyro-chat-message-queue article > .gyro-chat-message-queue-text:hover:not(:disabled) {
+  background: transparent;
+  color: var(--gyro-text);
 }
 
-.gyro-chat-message-queue article.is-failed p,
-.gyro-chat-message-queue article.is-failed .gyro-chat-message-queue-icon {
-  color: color-mix(in srgb, var(--gyro-danger) 68%, var(--gyro-text));
+.gyro-chat-message-queue article.is-dispatching > .gyro-chat-message-queue-text {
+  cursor: default;
+  opacity: 0.6;
 }
 
+.gyro-chat-message-queue article.is-failed .gyro-chat-message-queue-text,
+.gyro-chat-message-queue article.is-failed .gyro-chat-message-queue-icon,
 .gyro-chat-message-queue article.is-failed .gyro-chat-message-queue-steer {
-  color: var(--gyro-danger);
+  color: color-mix(in srgb, var(--gyro-danger) 72%, var(--gyro-text));
 }
 
 .gyro-chat-message-queue-icon {
-  color: var(--gyro-muted);
+  color: var(--gyro-faint);
   height: 12px;
   width: 12px;
 }
 
+/* Keep queue actions visible so Steer and options are always discoverable. */
 .gyro-chat-message-queue-actions {
   align-items: center;
   display: flex;
   gap: calc(var(--gyro-chat-space-1) * 0.5);
 }
 
-.gyro-chat-message-queue article button {
+.gyro-chat-message-queue-actions > button {
   align-items: center;
   background: transparent;
   border: 0;
   border-radius: var(--gyro-radius-md);
   color: var(--gyro-muted);
   display: inline-flex;
-  gap: var(--gyro-chat-space-1);
-  height: 24px;
+  gap: calc(var(--gyro-chat-space-1) * 0.75);
+  height: 22px;
   justify-content: center;
-  padding: 0 var(--gyro-chat-space-1);
+  padding: 0 calc(var(--gyro-chat-space-1) * 0.75);
 }
 
-.gyro-chat-message-queue article button:hover:not(:disabled) {
+.gyro-chat-message-queue-actions > button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
   color: var(--gyro-text);
 }
 
-.gyro-chat-message-queue article button svg {
+.gyro-chat-message-queue-actions > button svg {
   height: 12px;
   width: 12px;
 }
 
-.gyro-chat-message-queue article button:disabled {
-  background: transparent;
+.gyro-chat-message-queue-actions > button:disabled {
   color: var(--gyro-faint);
   cursor: default;
 }
@@ -9680,8 +9707,25 @@ button.gyro-response-changed-files:hover {
   font-size: var(--gyro-chat-meta-size);
 }
 
+.gyro-chat-message-queue-more {
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-faint);
+  font: inherit;
+  font-size: var(--gyro-chat-meta-size);
+  height: 24px;
+  justify-self: start;
+  /* Lines up with the row text: row inset + icon + gap. */
+  padding: 0 var(--gyro-chat-space-1) 0 calc(var(--gyro-chat-space-1) * 5);
+}
+
+.gyro-chat-message-queue-more:hover {
+  color: var(--gyro-text);
+}
+
 .gyro-chat-message-queue-menu {
-  background: color-mix(in srgb, var(--gyro-surface-raised) 97%, transparent);
+  background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
   border-radius: var(--gyro-radius-md);
   box-shadow:
@@ -9689,10 +9733,10 @@ button.gyro-response-changed-files:hover {
     inset 0 1px 0 var(--gyro-premium-inset-highlight);
   display: grid;
   gap: calc(var(--gyro-chat-space-1) * 0.5);
-  min-width: 124px;
+  min-width: calc(160px * var(--gyro-ui-scale, 1));
   padding: var(--gyro-chat-space-1);
   position: absolute;
-  right: 2px;
+  right: 0;
   z-index: 12;
 }
 
@@ -9701,56 +9745,46 @@ button.gyro-response-changed-files:hover {
 }
 
 .gyro-chat-message-queue-menu.is-up {
-  bottom: calc(100% + 2px);
+  bottom: calc(100% + var(--gyro-chat-space-2));
+  transform-origin: bottom right;
 }
 
 .gyro-chat-message-queue article .gyro-chat-message-queue-menu > button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text);
   display: grid;
-  font-size: var(--gyro-chat-meta-size);
+  font: inherit;
+  font-size: var(--gyro-font-support);
   gap: var(--gyro-chat-space-2);
   grid-template-columns: 16px minmax(0, 1fr);
-  height: 30px;
+  min-height: var(--gyro-control-height);
   justify-content: stretch;
   padding: 0 var(--gyro-chat-space-2);
   text-align: left;
   width: 100%;
 }
 
-.gyro-chat-message-queue-menu > button.is-danger,
-.gyro-chat-message-queue-menu > button.is-danger svg {
+.gyro-chat-message-queue article .gyro-chat-message-queue-menu > button:is(:hover, :focus-visible) {
+  background: var(--gyro-control-hover);
+}
+
+.gyro-chat-message-queue-menu > button svg {
+  height: 14px;
+  width: 14px;
+}
+
+.gyro-chat-message-queue article .gyro-chat-message-queue-menu > button.is-danger {
   color: var(--gyro-danger);
 }
-.gyro-composer-shell.has-overlay > :not(.gyro-question-dock) {
-  display: none;
-}
-.gyro-composer-shell.has-overlay {
-  display: flex;
-  flex-direction: column;
-  overflow: visible;
-}
-
-.gyro-composer-shell.has-overlay > .gyro-composer-bar {
-  align-items: center;
-  border-bottom: 1px solid var(--gyro-border-soft);
-  border-top: 0;
-  display: flex;
-  min-height: 0;
-  order: -1;
-  padding: calc(var(--gyro-chat-space-1) * 2.5)
-    calc(var(--gyro-chat-space-1) * 2.5) calc(var(--gyro-chat-space-1) * 2.5);
-}
-
-.gyro-composer-shell.has-overlay > .gyro-composer-bar > * {
-  display: none;
-}
-
+/* While a question or plan decision is open, the bar under the text box keeps
+   only what serves the answer: model, effort, voice and send. */
 .gyro-composer-shell.has-overlay
   > .gyro-composer-bar
-  > .gyro-composer-control-model,
-.gyro-composer-shell.has-overlay
-  > .gyro-composer-bar
-  > .gyro-composer-control-effort {
-  display: flex;
+  > :is(.gyro-composer-control-context, .gyro-composer-control-approval) {
+  display: none;
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell {
@@ -9759,10 +9793,6 @@ button.gyro-response-changed-files:hover {
 }
 
 @media (max-width: 620px) {
-  .gyro-chat-message-queue article {
-    grid-template-columns: 15px minmax(0, 1fr) auto;
-  }
-
   .gyro-chat-message-queue-steer {
     font-size: 0;
     gap: 0;
@@ -10333,7 +10363,11 @@ button.gyro-response-changed-files:hover {
 }
 
 .gyro-composer-context-progress {
-  stroke: var(--gyro-premium-text);
+  stroke: var(--gyro-blue);
+}
+
+.gyro-composer-usage-progress {
+  stroke: var(--gyro-ink-bg);
 }
 .gyro-chat-run .gyro-response-body h3 {
   font-size: var(--gyro-font-body);
@@ -10354,8 +10388,7 @@ button.gyro-response-changed-files:hover {
   font-size: var(--gyro-font-support);
 }
 
-:root[data-theme="light"] .gyro-composer-context-track,
-:root[data-theme="light"] .gyro-composer-context-progress {
+:root[data-theme="light"] .gyro-composer-context-track {
   stroke: var(--gyro-border);
 }
 .gyro-chat-surface.is-thread.has-plan > .gyro-plan-rail {
@@ -10608,7 +10641,6 @@ button.gyro-response-changed-files:hover {
 .gyro-chat-grid-sash:focus-visible::after,
 .gyro-chat-grid.is-split-resizing > .gyro-chat-grid-sash::after {
   background: var(--gyro-accent);
-  width: 2px;
 }
 .gyro-chat-grid-sash:focus-visible {
   outline: 0;
@@ -11410,7 +11442,6 @@ button.gyro-response-changed-files:hover {
   align-self: stretch;
 }
 
-.gyro-chat-composer-dock > .gyro-chat-message-queue,
 .gyro-chat-composer-dock > .gyro-model-focus-strip,
 .gyro-chat-composer-dock > .gyro-model-focus-peek {
   align-self: stretch;
@@ -13771,24 +13802,6 @@ button.gyro-response-changed-files:hover {
     align-self: flex-start;
   }
 }
-.gyro-chat-message-queue-wrap {
-  align-self: stretch;
-  box-sizing: border-box;
-  margin-bottom: 0;
-  margin-inline: auto;
-  max-width: min(100%, var(--gyro-chat-content-width));
-  min-width: 0;
-  width: min(100%, var(--gyro-chat-content-width));
-  z-index: 1;
-}
-
-.gyro-chat-message-queue-wrap > .gyro-chat-message-queue {
-  margin-bottom: 0;
-  margin-inline: auto;
-  max-width: none;
-  width: 90%;
-}
-
 .gyro-chat-surface,
 .gyro-chat-surface.is-empty,
 .gyro-chat-transcript,
@@ -14480,11 +14493,11 @@ button.gyro-response-changed-files:hover {
   color: var(--gyro-text);
 }
 .gyro-chat-surface.is-empty > .gyro-chat-start:not(.is-mission) {
-  --gyro-welcome-composer-surface: var(--gyro-text);
+  --gyro-welcome-composer-surface: var(--gyro-hero-composer);
   --gyro-welcome-composer-outline: var(--gyro-border);
-  --gyro-welcome-composer-divider: var(--gyro-text);
+  --gyro-welcome-composer-divider: var(--gyro-border);
   --gyro-welcome-composer-muted: var(--gyro-muted);
-  --gyro-welcome-composer-hover: var(--gyro-text);
+  --gyro-welcome-composer-hover: var(--gyro-control-hover);
   --gyro-welcome-composer-shadow: color-mix(
     in srgb,
     var(--gyro-shadow) 6%,
@@ -14530,11 +14543,6 @@ button.gyro-response-changed-files:hover {
   background: var(--gyro-welcome-composer-hover);
   color: var(--gyro-text);
 }
-:is(.gyro-sidebar-ai-chat, .gyro-ide-assistant-chat)
-  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled) {
-  --gyro-environment-popover-gutter: 0px;
-}
-
 :is(.gyro-sidebar-ai-chat, .gyro-ide-assistant-chat)
   .gyro-chat-surface.is-thread
   > .gyro-chat-thread-canvas {
@@ -14704,6 +14712,50 @@ button.gyro-response-changed-files:hover {
     calc(var(--gyro-chat-space-1) * 1.5);
 }
 
+/* Workspace task controls follow the shared navigation styles. Keep these
+   selectors with the run styles so there is one owner for task presentation. */
+:root[data-theme] .is-workspace-chrome-active .gyro-run-task-group-label {
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  padding-block: var(--gyro-space-compact);
+}
+
+:root[data-theme] .is-workspace-chrome-active .gyro-run-task-main {
+  border-radius: var(--gyro-radius-sm);
+  font-size: var(--gyro-font-support);
+  min-height: var(--gyro-control-height);
+  box-shadow: none;
+}
+
+:root[data-theme] .is-workspace-chrome-active .gyro-run-task-main:hover {
+  background: var(--gyro-shell-row-hover);
+}
+
+:root[data-theme] .is-workspace-chrome-active :is(
+  .gyro-run-command-filter,
+  .gyro-run-command-form input
+) {
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+  min-height: var(--gyro-control-height);
+}
+
+:root[data-theme] .is-workspace-chrome-active :is(
+  .gyro-run-task-main,
+  .gyro-run-command-filter,
+  .gyro-run-command-form input
+):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+
 .gyro-run-task-group > summary.gyro-run-task-group-label {
   cursor: pointer;
 }
@@ -14775,29 +14827,6 @@ button.gyro-response-changed-files:hover {
 .gyro-chat-surface.is-thread > .gyro-chat-thread-topbar {
   border-bottom: 1px solid var(--gyro-border-soft);
 }
-@media (min-width: 981px) {
-  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled) {
-    --gyro-environment-popover-gutter: 342px;
-  }
-
-  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled)
-    > .gyro-chat-thread-canvas {
-    box-sizing: border-box;
-    /* Give both transcript and absolute dock the same containing width. */
-    justify-self: start;
-    margin-inline: 0;
-    padding-right: 0;
-    width: calc(100% - var(--gyro-environment-popover-gutter));
-  }
-
-  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled)
-    > .gyro-chat-thread-canvas
-    > .gyro-chat-composer-dock {
-    right: 0;
-    width: 100%;
-  }
-}
-
 .gyro-chat-environment-popover .gyro-environment-branch-menu {
   position: static;
   width: 100%;
@@ -15427,8 +15456,7 @@ button.gyro-response-changed-files:hover {
   margin: 0;
 }
 
-.gyro-composer-context-section.is-warning .gyro-composer-context-value > b,
-.gyro-composer-context-wheel.is-warning .gyro-composer-context-progress {
+.gyro-composer-context-section.is-warning .gyro-composer-context-value > b {
   color: var(--gyro-warn);
   stroke: var(--gyro-warn);
 }
@@ -15437,8 +15465,7 @@ button.gyro-response-changed-files:hover {
   background: var(--gyro-warn);
 }
 
-.gyro-composer-context-section.is-critical .gyro-composer-context-value > b,
-.gyro-composer-context-wheel.is-critical .gyro-composer-context-progress {
+.gyro-composer-context-section.is-critical .gyro-composer-context-value > b {
   color: var(--gyro-danger);
   stroke: var(--gyro-danger);
 }
@@ -15483,35 +15510,6 @@ button.gyro-response-changed-files:hover {
 .gyro-composer-limit-row.is-critical .gyro-composer-limit-heading b {
   color: var(--gyro-danger);
 }
-.gyro-sidebar-ai-chat
-  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled) {
-  grid-template-rows: var(--gyro-chat-header-height, 48px) auto minmax(0, 1fr);
-}
-
-.gyro-sidebar-ai-chat
-  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled)
-  > .gyro-chat-thread-canvas {
-  grid-column: 1;
-  grid-row: 3;
-  padding-right: 0;
-  width: 100%;
-}
-
-.gyro-sidebar-ai-chat
-  .gyro-chat-surface.is-thread.has-environment-popover:not(.is-tiled)
-  > .gyro-chat-environment-popover {
-  align-self: start;
-  grid-column: 1;
-  grid-row: 2;
-  inset: auto;
-  justify-self: stretch;
-  margin: var(--gyro-chat-space-2) var(--gyro-chat-block-gap) 0;
-  max-height: min(40vh, 340px);
-  max-width: none;
-  position: relative;
-  width: auto;
-}
-
 :root[data-theme="light"] .gyro-composer-context-section > header strong,
 :root[data-theme="light"] .gyro-composer-limit-title > span {
   color: var(--gyro-text);
@@ -16411,10 +16409,10 @@ button.gyro-response-changed-files:hover {
     > .gyro-project-import-callout {
     width: calc(100% - 24px);
   }
-} /* Questions and the plan decision take the composer's place: they render inside
-   the composer shell (whose other children hide), so they share its surface,
-   border, corners and width instead of stacking a second sheet on top. One
-   question shows at a time; options are rows you click or number-key. */
+} /* Questions and the plan decision open upward out of the text box: they render
+   inside it, so they share its surface, border and corners, and the box below
+   takes a typed answer. One question shows at a time; options are rows you
+   click or number-key. */
 .gyro-question-dock {
   box-sizing: border-box;
   color: var(--gyro-text);
@@ -16424,9 +16422,37 @@ button.gyro-response-changed-files:hover {
   max-height: min(560px, 64vh);
   min-width: 0;
   outline: none;
-  padding: var(--gyro-chat-space-1) calc(var(--gyro-chat-space-1) * 2.5)
-    calc(var(--gyro-chat-space-1) * 2.5);
+  padding: calc(var(--gyro-chat-space-1) * 2.5) calc(var(--gyro-chat-space-1) * 2.5)
+    0;
   position: relative;
+}
+/* The card is the top of the text box: first row, then any attachments, then
+   the text itself, all on the box's one surface. */
+.gyro-composer-input > .gyro-question-dock {
+  grid-row: 1;
+}
+.gyro-composer-input:has(> .gyro-question-dock) > .gyro-composer-attachments {
+  grid-row: 2;
+}
+.gyro-composer-input:has(> .gyro-question-dock)
+  > .gyro-composer-attachment-preview {
+  grid-row: 3;
+}
+/* A queue above them pushes everything down one row. */
+.gyro-composer-input:has(> .gyro-chat-message-queue) > .gyro-question-dock,
+.gyro-composer-input:has(> .gyro-chat-message-queue)
+  > .gyro-composer-attachments {
+  grid-row: 2;
+}
+.gyro-composer-input:has(> .gyro-chat-message-queue)
+  > .gyro-composer-attachment-preview,
+.gyro-composer-input:has(> .gyro-chat-message-queue):has(> .gyro-question-dock)
+  > .gyro-composer-attachments {
+  grid-row: 3;
+}
+.gyro-composer-input:has(> .gyro-chat-message-queue):has(> .gyro-question-dock)
+  > .gyro-composer-attachment-preview {
+  grid-row: 4;
 } /* The card takes focus only so number keys work; the shell already frames
    it, so no second ring is drawn around the whole card. */
 :root .gyro-question-dock:focus,
@@ -16621,46 +16647,6 @@ button.gyro-response-changed-files:hover {
 .gyro-question-dock strong {
   font-weight: 600;
 }
-.gyro-question-dock-other {
-  align-items: center;
-  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-faint);
-  display: flex;
-  flex-shrink: 0;
-  gap: calc(var(--gyro-chat-space-1) * 2.5);
-  margin-top: calc(var(--gyro-chat-space-1) * 1.5);
-  min-height: 36px;
-  padding: calc(var(--gyro-chat-space-1) * 0.75) var(--gyro-chat-space-1)
-    calc(var(--gyro-chat-space-1) * 0.75) var(--gyro-chat-space-2);
-  transition: box-shadow var(--gyro-premium-motion-fast)
-    var(--gyro-premium-ease);
-}
-.gyro-question-dock-other > svg {
-  flex: none;
-  margin: 0 calc(var(--gyro-chat-space-1) * 0.875);
-}
-.gyro-question-dock-other:focus-within {
-  box-shadow: inset 0 0 0 1px var(--gyro-border-strong);
-} /* Scoped past the composer's own field rules, which reach this card because
-   it sits inside the shell. */
-.gyro-composer-shell .gyro-question-dock-other input,
-.gyro-question-dock-other input {
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  color: var(--gyro-text);
-  flex: 1 1 auto;
-  font: inherit;
-  font-size: var(--gyro-font-support);
-  height: 28px;
-  min-width: 0;
-  outline: none;
-  padding: 0;
-}
-.gyro-question-dock-other input::placeholder {
-  color: var(--gyro-faint);
-}
 .gyro-question-dock-skip {
   background: transparent;
   border: 0;
@@ -16671,7 +16657,7 @@ button.gyro-response-changed-files:hover {
   font: inherit;
   font-size: var(--gyro-chat-meta-size);
   font-weight: 500;
-  height: 28px;
+  height: 24px;
   padding: 0 calc(var(--gyro-chat-space-1) * 2.5);
   white-space: nowrap;
 }
@@ -16680,27 +16666,6 @@ button.gyro-response-changed-files:hover {
   background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
   color: var(--gyro-text);
   outline: none;
-}
-.gyro-question-dock-send {
-  align-items: center;
-  background: var(--gyro-text);
-  border: 0;
-  border-radius: var(--gyro-radius-pill);
-  color: var(--gyro-app);
-  cursor: pointer;
-  display: inline-flex;
-  flex: none;
-  height: 28px;
-  justify-content: center;
-  padding: 0;
-  width: 28px;
-}
-.gyro-question-dock-send:hover {
-  opacity: 0.88;
-}
-.gyro-question-dock-send:focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 2px;
 }
 .gyro-question-dock-note {
   color: var(--gyro-muted);
@@ -16718,7 +16683,7 @@ button.gyro-response-changed-files:hover {
   color: var(--gyro-muted);
 } /* Implementing starts a new turn; a thin running bar says the click landed. */
 .gyro-question-dock-progress {
-  border-radius: 0 0 var(--gyro-radius-composer) var(--gyro-radius-composer);
+  border-radius: var(--gyro-radius-pill);
   bottom: 0;
   height: 2px;
   left: 12px;
@@ -17781,9 +17746,6 @@ button.gyro-response-changed-files:hover {
 }
 .gyro-environment-plan-steps > li.is-complete > span {
   color: var(--gyro-muted);
-}
-.gyro-environment-plan-steps > li.is-in-progress > span {
-  font-weight: 600;
 }
 .gyro-environment-plan-steps > li > small {
   background: var(--gyro-warn-soft);
@@ -18950,18 +18912,18 @@ button.gyro-response-changed-files:hover {
   color: var(--gyro-ink-text);
   border-color: transparent;
 }
-.gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion) {
+.gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion, .is-tiled) {
   /* Reserve the scaled card width plus breathing room at every pane width. */
   grid-template-columns:
     minmax(0, 1fr)
     min(calc(340px * var(--gyro-ui-scale, 1)), 40%);
   column-gap: var(--gyro-chat-block-gap);
 }
-.gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion)
+.gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion, .is-tiled)
   > .gyro-chat-thread-topbar {
   grid-column: 1 / -1;
 }
-.gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion)
+.gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion, .is-tiled)
   > .gyro-chat-thread-canvas {
   grid-column: 1;
   grid-row: 2;
@@ -18970,7 +18932,7 @@ button.gyro-response-changed-files:hover {
   padding-right: 0;
   width: 100%;
 }
-.gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion)
+.gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion, .is-tiled)
   > .gyro-chat-environment-popover {
   box-sizing: border-box;
   min-width: 0;
@@ -19317,6 +19279,9 @@ button.gyro-response-changed-files:hover {
   border-radius: var(--gyro-radius-sm);
   font-size: var(--gyro-chat-small-size);
 }
+:root .gyro-composer-shell .gyro-approval-picker .gyro-composer-menu-item {
+  border-radius: var(--gyro-radius-md);
+}
 :root
   .gyro-composer-shell
   .gyro-composer-popover
@@ -19328,4 +19293,47 @@ button.gyro-response-changed-files:hover {
 :root .gyro-composer-shell .gyro-context-picker {
   width: calc(var(--gyro-space-panel) * 16);
   max-width: calc(100vw - var(--gyro-space-panel) * 2);
+}
+
+/* Images a reply cites sit in one row of small tiles after its text; a tile
+   opens the shared preview dialog. */
+.gyro-reply-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gyro-chat-space-2);
+  margin-top: var(--gyro-chat-block-gap);
+}
+.gyro-reply-images .gyro-chat-file-card.is-tile {
+  --gyro-reply-image-height: calc(72px * var(--gyro-ui-scale, 1));
+  border-color: var(--gyro-chat-hairline);
+  border-radius: var(--gyro-radius-md);
+  flex: none;
+  height: var(--gyro-reply-image-height);
+  margin: 0;
+  position: relative;
+  width: calc(var(--gyro-reply-image-height) * 4 / 3);
+}
+.gyro-reply-images .gyro-chat-file-card.is-tile:hover {
+  border-color: var(--gyro-border-strong);
+}
+.gyro-reply-images .gyro-chat-file-card.is-tile .gyro-chat-file-thumbnail {
+  aspect-ratio: auto;
+  height: 100%;
+  padding: 0;
+}
+.gyro-reply-images
+  .gyro-chat-file-card.is-tile
+  .gyro-chat-file-thumbnail
+  > img {
+  object-fit: cover;
+}
+.gyro-reply-images
+  .gyro-chat-file-card.is-tile
+  .gyro-chat-file-placeholder-note {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gyro-reply-images .gyro-chat-file-card.is-tile .gyro-chat-file-caption {
+    transition: none;
+  }
 }

@@ -1,4 +1,6 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { isTauriRuntime } from "./tauri-runtime";
 import type { SessionEvent } from "@gyro-dev/ui";
 import {
   deriveChatMode,
@@ -38,8 +40,30 @@ export function useSessionContextEvents() {
   >({});
 
   const replace = useCallback((sessionId: string, events: SessionEvent[]) => {
-    setEventsBySession((current) => ({ ...current, [sessionId]: events }));
+    // A disk read may have started before a live progress event arrived.
+    // Merge immutable durable events so that response cannot erase it.
+    setEventsBySession((current) => ({
+      ...current,
+      [sessionId]: withSessionContextEvents(current[sessionId] ?? [], events),
+    }));
   }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listen<SessionEvent>("gyro://session-plan-updated", ({ payload }) => {
+      if (disposed || payload.kind !== "plan-updated") return;
+      replace(payload.sessionId, [payload]);
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else stop = unlisten;
+    });
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, [replace]);
 
   const forget = useCallback((sessionId: string) => {
     setEventsBySession((current) => {

@@ -2,8 +2,28 @@ import {
   formatDetailedTokenCount as formatTokenCount,
   isTokenCount as validCount,
 } from "./token-count.ts";
-import type { SessionEvent } from "./types";
+import type { ModelProviderConfig, SessionEvent } from "./types";
 export { formatTokenCount };
+
+/** Display usage only for the provider that ran this turn, never the picker. */
+export function showTurnTokenCount(
+  events: readonly SessionEvent[],
+  providers: readonly Pick<ModelProviderConfig, "id" | "authMode">[],
+): boolean {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const payload = events[index]?.payload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) continue;
+    const record = payload as Record<string, unknown>;
+    if (!["provider-run", "provider-response", "provider-turn-tokens"].includes(String(record.kind)))
+      continue;
+    if (typeof record.providerId !== "string") continue;
+    // Direct API runs remain identifiable even if their connection was removed.
+    if (record.runner === "openai-compatible-api") return true;
+    const provider = providers.find((item) => item.id === record.providerId);
+    if (provider) return provider.authMode === "env";
+  }
+  return false;
+}
 
 /** Provider observations for a turn. Input/output are inclusive of cache/reasoning. */
 export type UsageAccounting = {

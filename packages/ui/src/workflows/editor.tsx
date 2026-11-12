@@ -1,5 +1,5 @@
 import type { WorkflowDefinition, WorkflowStep } from "./types";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { WorkflowInputEditor, WorkflowStepEditor } from "./editor-fields";
 import { uniqueName, newAgent } from "./editor-model";
 export { emptyWorkflow } from "./editor-model";
@@ -19,8 +19,19 @@ export function WorkflowEditor({
   error?: string;
 }) {
   const [definition, setDefinition] = useState(() => structuredClone(initial));
-  const [autoId, setAutoId] = useState(!existing && !initial.id);
+  const [autoId, setAutoId] = useState(!existing);
   const steps = definition.steps;
+  const editorRef = useRef<HTMLElement>(null);
+  const [showErrors, setShowErrors] = useState(false);
+  const incomplete = !definition.name.trim() || steps.some((step) => !step.instructions.trim());
+  function save() {
+    setShowErrors(true);
+    if (incomplete) {
+      requestAnimationFrame(() => editorRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus());
+      return;
+    }
+    onSave(definition);
+  }
   function setSteps(next: WorkflowStep[]) {
     setDefinition((current) => ({
       ...current,
@@ -68,16 +79,20 @@ export function WorkflowEditor({
     );
   };
   return (
-    <section className="gyro-workflow-editor" aria-label="Workflow editor">
+    <section ref={editorRef} className="gyro-workflow-editor" aria-label="Workflow editor">
       <h2>{existing ? "Edit workflow" : "New workflow"}</h2>
       <p>
         Describe the steps you want to reuse. Choose models and project commands
         when you run it.
       </p>
-      <fieldset disabled={busy}>
+      <fieldset className="gyro-workflow-editor-body" disabled={busy}>
+        <h3 className="gyro-workflow-section-title">1. Name your workflow</h3>
         <label>
           Name
           <input
+            autoFocus
+            placeholder="e.g. Review my changes"
+            aria-invalid={showErrors && !definition.name.trim() || undefined}
             value={definition.name}
             onChange={(event) =>
               setDefinition((current) => ({
@@ -110,9 +125,12 @@ export function WorkflowEditor({
             />
           </label>
         </details>
+        {showErrors && !definition.name.trim() ? <p className="gyro-workflow-field-error">Give your workflow a name.</p> : null}
         <label>
-          Description
+          Description (optional)
           <textarea
+            aria-label="Description"
+            placeholder="When should you use this workflow?"
             value={definition.description}
             onChange={(event) =>
               setDefinition((current) => ({
@@ -122,57 +140,14 @@ export function WorkflowEditor({
             }
           />
         </label>
-        <h3>Inputs</h3>
-        {definition.inputs.map((input, index) => (
-          <WorkflowInputEditor
-            key={index}
-            input={input}
-            onChange={(next) =>
-              setDefinition((current) => ({
-                ...current,
-                inputs: current.inputs.map((input, position) =>
-                  position === index ? next : input,
-                ),
-              }))
-            }
-            onRemove={() =>
-              setDefinition((current) => ({
-                ...current,
-                inputs: current.inputs.filter(
-                  (_, position) => position !== index,
-                ),
-              }))
-            }
-          />
-        ))}
-        <button
-          disabled={definition.inputs.length >= 20}
-          onClick={() =>
-            setDefinition((current) => ({
-              ...current,
-              inputs: [
-                ...current.inputs,
-                {
-                  id: uniqueName(
-                    "input",
-                    current.inputs.map((input) => input.id),
-                  ),
-                  label: "",
-                  type: "string",
-                  required: true,
-                },
-              ],
-            }))
-          }
-        >
-          Add input
-        </button>
-        <h3>Steps</h3>
+        <h3 className="gyro-workflow-section-title">2. Arrange the steps</h3>
+        <p className="gyro-workflow-muted">Steps run in order. Keep each one focused on a clear outcome.</p>
         <ol className="gyro-workflow-steps">
           {steps.map((step, index) => (
             <li key={index}>
               <WorkflowStepEditor
                 step={step}
+                showErrors={showErrors}
                 earlier={steps.slice(0, index)}
                 onChange={(next) => changeStep(index, next)}
               />
@@ -235,7 +210,56 @@ export function WorkflowEditor({
         >
           Add step
         </button>
-        <h3>Completion requirements</h3>
+        <details className="gyro-workflow-advanced" open={definition.inputs.length > 0 || undefined}>
+          <summary>Inputs · values you provide each time ({definition.inputs.length})</summary>
+          <p className="gyro-workflow-muted">Add inputs for details that change between runs, such as a URL or a problem to investigate.</p>
+        {definition.inputs.map((input, index) => (
+          <WorkflowInputEditor
+            key={index}
+            input={input}
+            onChange={(next) =>
+              setDefinition((current) => ({
+                ...current,
+                inputs: current.inputs.map((input, position) =>
+                  position === index ? next : input,
+                ),
+              }))
+            }
+            onRemove={() =>
+              setDefinition((current) => ({
+                ...current,
+                inputs: current.inputs.filter(
+                  (_, position) => position !== index,
+                ),
+              }))
+            }
+          />
+        ))}
+        <button
+          disabled={definition.inputs.length >= 20}
+          onClick={() =>
+            setDefinition((current) => ({
+              ...current,
+              inputs: [
+                ...current.inputs,
+                {
+                  id: uniqueName(
+                    "input",
+                    current.inputs.map((input) => input.id),
+                  ),
+                  label: "",
+                  type: "string",
+                  required: true,
+                },
+              ],
+            }))
+          }
+        >
+          Add input
+        </button>
+        </details>
+        <details className="gyro-workflow-advanced">
+        <summary>Completion requirements</summary>
         <label className="gyro-workflow-check">
           <input
             type="checkbox"
@@ -270,13 +294,16 @@ export function WorkflowEditor({
           />
           Require successful verification
         </label>
+        </details>
       </fieldset>
+      {showErrors && incomplete ? <p role="alert">Add a name and instructions for every step before saving.</p> : null}
       {error ? <p role="alert">{error}</p> : null}
-      <div className="gyro-workflow-actions">
+      <div className="gyro-workflow-actions gyro-workflow-editor-footer">
+        <span className="gyro-workflow-muted">Saving does not start a run.</span>
         <button
           className="gyro-primary-button"
           disabled={busy}
-          onClick={() => onSave(definition)}
+          onClick={save}
         >
           {busy ? "Saving…" : "Save workflow"}
         </button>

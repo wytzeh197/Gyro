@@ -32,6 +32,8 @@ pub(crate) struct BrowserPreviewCapture {
     pub(crate) resource_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) viewport: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) annotation_state: Option<serde_json::Value>,
 }
 
 pub(crate) const BROWSER_OBSERVATION_SCHEMA_V1: &str = "gyro.browser-observation.v1";

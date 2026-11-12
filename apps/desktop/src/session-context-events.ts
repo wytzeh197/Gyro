@@ -18,7 +18,12 @@ export function withSessionContextEvents(
   return [
     ...contextEvents.filter((event) => !recentIds.has(event.id)),
     ...recentEvents,
-  ];
+  ].sort((first, second) =>
+    new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime()
+    // Native timestamps retain sub-millisecond precision. Do not reorder
+    // progress emitted in the same millisecond by random event IDs.
+    || first.createdAt.localeCompare(second.createdAt),
+  );
 }
 
 export function turnIdFromSessionEvent(
@@ -66,11 +71,32 @@ export function deriveSessionPlan(
     items: [],
   };
 
+  let executionTurnId: string | undefined;
+  const settledTurns = new Set<string>();
   for (const event of events) {
+    const payload = recordFromUnknown(event.payload);
+    const eventTurnId = turnIdFromSessionEvent(event);
+    if (
+      eventTurnId &&
+      ((event.kind === "assistant-message" && payload?.kind === "provider-response") ||
+        (payload?.kind === "provider-status" && payload.status === "done"))
+    ) {
+      settledTurns.add(eventTurnId);
+    }
+    // Clear the current-task summary at the optimistic send, not after another
+    // response/refresh. Keep the saved document and its honest item statuses.
+    // Mode events retain this boundary when the transcript window is trimmed.
+    if (
+      (event.kind === "user-message" || event.kind === "chat-mode-changed") &&
+      eventTurnId && executionTurnId && eventTurnId !== executionTurnId &&
+      (settledTurns.has(executionTurnId) ||
+        (plan.items.length > 0 && plan.items.every((item) => item.status === "complete")))
+    ) {
+      plan = { ...plan, environmentDismissed: true };
+    }
     if (event.kind !== "plan-updated") {
       continue;
     }
-    const payload = recordFromUnknown(event.payload);
     const action = stringFromRecord(payload, "action") ?? "replace";
     const sourceTurnId =
       turnIdFromSessionEvent(event) ?? stringFromRecord(payload, "turnId");
@@ -84,6 +110,20 @@ export function deriveSessionPlan(
       !stringFromRecord(payload, "markdown")
     ) {
       continue;
+    }
+    if (action === "replace") {
+      plan = { ...plan, environmentDismissed: false };
+      executionTurnId = undefined;
+    }
+    const progressItems = Array.isArray(payload?.items) ? payload.items : [payload?.item];
+    if (
+      sourceTurnId &&
+      progressItems.some((item) => {
+        const status = recordFromUnknown(item)?.status;
+        return status === "in-progress" || status === "complete" || status === "blocked";
+      })
+    ) {
+      executionTurnId = sourceTurnId;
     }
     if (!plan.createdAt) {
       plan = { ...plan, createdAt: event.createdAt };

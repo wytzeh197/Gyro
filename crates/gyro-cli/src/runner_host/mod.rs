@@ -712,10 +712,17 @@ pub(super) fn execute(
     turn: Uuid,
     attempt_id: Uuid,
 ) -> Result<super::CliRunOutput> {
-    ensure!(store.advisory_session_purpose(session.id)?.is_none(),"this session is managed by an advisory feature; start a normal chat instead");
-    let checkout=session.workspace_path.canonicalize()?;
+    ensure!(
+        store.advisory_session_purpose(session.id)?.is_none(),
+        "this session is managed by an advisory feature; start a normal chat instead"
+    );
+    let checkout = session.workspace_path.canonicalize()?;
     #[cfg(unix)]
-    let _checkout_lease=gyro_core::workflows::WorkflowCheckoutLease::try_acquire(store.paths(),&checkout,false)?.ok_or_else(||anyhow::anyhow!("a workflow owns this checkout; stop it or choose another worktree"))?;
+    let _checkout_lease =
+        gyro_core::workflows::WorkflowCheckoutLease::try_acquire(store.paths(), &checkout, false)?
+            .ok_or_else(|| {
+                anyhow::anyhow!("a workflow owns this checkout; stop it or choose another worktree")
+            })?;
     ensure!(store.active_workflow_for_root(&checkout.to_string_lossy())?.is_none(),"a workflow owns this checkout; stop it or choose another worktree before starting a CLI agent");
     let provider = profile.provider_id.as_deref().ok_or_else(|| {
         super::cli_failure(

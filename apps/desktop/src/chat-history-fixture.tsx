@@ -49,7 +49,20 @@ function event(index: number): SessionEvent {
 }
 const saved = Array.from({ length: 3100 }, (_, i) => event(i));
 function Fixture() {
-  const [events, setEvents] = useState(saved);
+  const paged = new URLSearchParams(location.search).has("paged");
+  const [firstIndex, setFirstIndex] = useState(paged ? saved.length - 2 : 0);
+  const [events, setEvents] = useState(paged ? saved.slice(-2) : saved);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const loadEarlier = () => {
+    if (loadingEarlier || firstIndex === 0) return;
+    setLoadingEarlier(true);
+    const start = Math.max(0, firstIndex - 400);
+    window.setTimeout(() => {
+      setEvents((current) => mergeSessionHistoryPages(saved.slice(start, firstIndex), current));
+      setFirstIndex(start);
+      setLoadingEarlier(false);
+    }, 80);
+  };
   const streamCosts = useRef<number[]>([]);
   const streamActive = useRef(false);
   const [streamCost, setStreamCost] = useState(0);
@@ -151,6 +164,9 @@ function Fixture() {
             key={mount}
             config={config}
             events={events}
+            hasMoreBefore={firstIndex > 0}
+            isLoadingEarlier={loadingEarlier}
+            onLoadEarlier={loadEarlier}
             paneKey="history-fixture"
             sessionTitle="Complete saved conversation"
             workspacePath="/fixture/Gyro"

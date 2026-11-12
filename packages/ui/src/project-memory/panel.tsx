@@ -3,7 +3,7 @@ import { MemoryEntryDetail } from "./entry";
 import { MemoryContextReceipts } from "./receipts";
 import { ProjectMemorySettings } from "./settings";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Search, RefreshCw } from "lucide-react";
+import { ChevronRight, Folder, Plus, Search, RefreshCw } from "lucide-react";
 import type {
   MemoryDraft,
   MemoryEntry,
@@ -24,15 +24,17 @@ const emptyDraft = (): MemoryDraft => ({
  * The existing companion owns width, focus, tabs, close and overlay behavior. */
 export function ProjectMemoryPanel({
   runtime,
+  embedded = false,
 }: {
   runtime?: ProjectMemoryRuntime;
+  embedded?: boolean;
 }) {
   const [snapshot, setSnapshot] = useState<MemorySnapshot>();
   const [rootId, setRootId] = useState<string>();
   const [query, setQuery] = useState("");
   const [receipts, setReceipts] = useState<MemoryReceipt[]>([]);
   const [candidates, setCandidates] = useState<MemoryCandidate[]>([]);
-  const [tab, setTab] = useState<"entries" | "used" | "suggestions">("entries");
+  const [tab, setTab] = useState<"entries" | "suggestions">("entries");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -173,7 +175,7 @@ export function ProjectMemoryPanel({
   };
   if (!runtime)
     return (
-      <div className="gyro-memory-panel">
+      <div className={embedded ? "gyro-memory-panel" : "gyro-memory-panel is-companion"}>
         <p className="gyro-memory-empty">
           Start a chat in a project to use project memory.
         </p>
@@ -182,10 +184,11 @@ export function ProjectMemoryPanel({
   const selectedRoot = snapshot?.roots.find(
     (root) => root.id === snapshot.rootId,
   );
+  const History = embedded ? "details" : "section";
   return (
     <section
       ref={panel}
-      className="gyro-memory-panel"
+      className={embedded ? "gyro-memory-panel" : "gyro-memory-panel is-companion"}
       aria-label="Project memory"
       onKeyDown={(event) => {
         if (event.key === "Escape" && editor) {
@@ -196,30 +199,37 @@ export function ProjectMemoryPanel({
       }}
     >
       <header className="gyro-memory-root">
-        <label>
-          Project
-          <select
-            aria-label="Memory project root"
-            title={
-              editor
-                ? "Save or discard edits before switching projects"
-                : undefined
-            }
-            value={snapshot?.rootId ?? ""}
-            disabled={Boolean(editor) || saving}
-            onChange={(event) => {
-              setRootId(event.target.value);
-              setSelected(undefined);
-              setNotice("");
-            }}
-          >
-            {snapshot?.roots.map((root) => (
-              <option key={root.id} value={root.id}>
-                {root.path.split("/").filter(Boolean).at(-1) || root.path}
-              </option>
-            ))}
-          </select>
-        </label>
+        {embedded && snapshot?.roots.length === 1 ? (
+          <div className="gyro-memory-project" title={selectedRoot?.path}>
+            <Folder size={18} aria-hidden="true" />
+            <span>{selectedRoot?.path.split("/").filter(Boolean).at(-1)}</span>
+          </div>
+        ) : (
+          <label>
+            {embedded ? "Source folder" : "Project"}
+            <select
+              aria-label="Memory project root"
+              title={
+                editor
+                  ? "Save or discard edits before switching projects"
+                  : undefined
+              }
+              value={snapshot?.rootId ?? ""}
+              disabled={Boolean(editor) || saving}
+              onChange={(event) => {
+                setRootId(event.target.value);
+                setSelected(undefined);
+                setNotice("");
+              }}
+            >
+              {snapshot?.roots.map((root) => (
+                <option key={root.id} value={root.id}>
+                  {root.path.split("/").filter(Boolean).at(-1) || root.path}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <button
           className="gyro-icon-button"
           aria-label="Refresh project memory"
@@ -231,7 +241,7 @@ export function ProjectMemoryPanel({
       </header>
       {!editor && !selected ? (
         <header>
-          <h3>Project memory</h3>
+          {!embedded ? <h3>Project memory</h3> : null}
           <p className="gyro-memory-hint">
             Notes Gyro can use in future chats about this project.
           </p>
@@ -312,12 +322,6 @@ export function ProjectMemoryPanel({
                 ? ` (${candidates.filter((candidate) => candidate.status === "pending" || candidate.status === "accepting").length})`
                 : ""}
             </button>
-            <button
-              aria-pressed={tab === "used"}
-              onClick={() => setTab("used")}
-            >
-              Used this turn
-            </button>
           </div>
           {tab === "entries" ? (
             <>
@@ -364,7 +368,9 @@ export function ProjectMemoryPanel({
                             setSelected(entry);
                           }}
                         >
-                          <span>{entry.text}</span>
+                          <span className="gyro-memory-note-preview">
+                            {entry.text}
+                          </span>
                           <small>
                             {entry.kind.replace("-", " ")}
                             {entry.status !== "active"
@@ -374,6 +380,13 @@ export function ProjectMemoryPanel({
                               ? " · source text changed"
                               : ""}
                           </small>
+                          {embedded ? (
+                            <ChevronRight
+                              className="gyro-memory-note-arrow"
+                              size={14}
+                              aria-hidden="true"
+                            />
+                          ) : null}
                         </button>
                       </li>
                     ))}
@@ -391,7 +404,7 @@ export function ProjectMemoryPanel({
                 ) : null}
               </div>
             </>
-          ) : tab === "suggestions" ? (
+          ) : (
             <div className="gyro-memory-suggestions">
               {candidates.length ? (
                 candidates.map((candidate) => (
@@ -457,9 +470,11 @@ export function ProjectMemoryPanel({
                 </p>
               )}
             </div>
-          ) : (
-            <MemoryContextReceipts receipts={receipts} snapshot={snapshot} />
           )}
+          <History className="gyro-memory-history" aria-label="Memory history">
+            {embedded ? <summary>History</summary> : <h4>History</h4>}
+            <MemoryContextReceipts receipts={receipts} snapshot={snapshot} />
+          </History>
           {snapshot ? (
             <ProjectMemorySettings
               snapshot={snapshot}

@@ -1,0 +1,650 @@
+/* Approved settings concepts: open sections, aligned controls and quiet dividers.
+   Uses Gyro's existing theme, density and interface-size tokens. */
+:root[data-theme] .gyro-settings-surface.is-minimal-settings {
+  --gyro-settings-card: var(--gyro-pane);
+  --gyro-settings-title-size: calc(var(--gyro-font-heading) * 1.45);
+  --gyro-settings-row-height: calc(
+    var(--gyro-control-standard) + var(--gyro-space-panel)
+  );
+  padding: calc(var(--gyro-space-section) * 2)
+    calc(var(--gyro-space-section) * 2) calc(var(--gyro-space-section) * 3);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-content {
+  width: min(100%, 860px);
+  max-width: 860px;
+  margin-inline: auto;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  :is(.gyro-settings-section, .gyro-workspace-settings-editor)
+  > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gyro-space-panel);
+  padding: 0 0 calc(var(--gyro-space-section) * 2);
+  margin: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  :is(.gyro-settings-section, .gyro-workspace-settings-editor)
+  > header
+  h1 {
+  font-size: var(--gyro-settings-title-size);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-settings-editor
+  > header {
+  display: block;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-section-body {
+  display: grid;
+  gap: calc(var(--gyro-space-section) * 2);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-group.is-open-section {
+  display: block;
+  min-width: 0;
+  margin: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-group-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gyro-space-panel);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  padding-bottom: var(--gyro-space-card);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-group-heading
+  h2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gyro-space-standard);
+  margin: 0;
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-lead);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-group-heading
+  :is(p, small) {
+  margin: var(--gyro-space-compact) 0 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  font-weight: 400;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-group-rows {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  padding: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 44%);
+  align-items: center;
+  gap: var(--gyro-space-section);
+  min-height: var(--gyro-settings-row-height);
+  padding: var(--gyro-space-card) 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-row
+  > div:first-child
+  strong {
+  font-size: var(--gyro-font-chrome);
+  font-weight: 500;
+  line-height: 1.4;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-row
+  > div:first-child
+  > span {
+  margin-top: var(--gyro-space-compact);
+  font-size: var(--gyro-font-support);
+  line-height: 1.5;
+  max-width: none;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-control-column {
+  min-width: 0;
+  max-width: 100%;
+  justify-self: stretch;
+  width: 100%;
+  margin-left: 0;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-control-column
+  .gyro-settings-select-field {
+  width: 100%;
+  min-width: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-control-column
+  select {
+  width: 100%;
+  min-width: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-row.is-danger
+  .gyro-secondary-button {
+  color: var(--gyro-danger);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-disclosure-group {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--gyro-border-soft);
+  border-radius: 0;
+  background: transparent;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-disclosure-heading {
+  --gyro-disclosure-inline: 0px;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-disclosure-heading
+  > h2
+  > button {
+  min-height: var(--gyro-control-comfortable);
+  padding-block: var(--gyro-space-panel);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-disclosure-heading
+  strong {
+  font-size: var(--gyro-font-lead);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-disclosure-body {
+  padding: var(--gyro-space-standard) 0 var(--gyro-space-panel);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--gyro-space-card);
+  padding: calc(var(--gyro-space-section) * 2) var(--gyro-space-panel);
+  color: var(--gyro-muted);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-empty-state
+  strong {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-lead);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-empty-state
+  p {
+  margin: 0;
+  max-width: 56ch;
+  font-size: var(--gyro-font-chrome);
+  line-height: 1.5;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-appearance-settings {
+  gap: calc(var(--gyro-space-section) * 2);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-theme-picker {
+  padding: var(--gyro-space-panel) 0 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-settings-editor {
+  display: grid;
+  gap: var(--gyro-space-section);
+  max-width: none;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-settings-list,
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-keybindings
+  > div,
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-cli-launch-preset {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-settings-list {
+  width: 100%;
+  max-width: none;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-settings-list
+  > label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 44%);
+  align-items: center;
+  gap: var(--gyro-space-section);
+  padding: var(--gyro-space-panel) 0;
+  border: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-settings-list
+  > label
+  > :is(input, .gyro-settings-select-field) {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-settings-list
+  > label
+  strong {
+  font-size: var(--gyro-font-chrome);
+  font-weight: 500;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-keybindings {
+  padding: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-subheading {
+  margin: var(--gyro-space-section) 0 var(--gyro-space-standard);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  [data-settings-page="keyboard"]
+  .gyro-settings-row {
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-cli-profile-list,
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-provider-table {
+  border-inline: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-cli-launch-preset {
+  padding: var(--gyro-space-panel) 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-help-group-list
+  > article,
+:root[data-theme] .gyro-settings-surface.is-minimal-settings .gyro-usage-empty {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+:root[data-theme] .gyro-app-shell .gyro-sidebar-actions.is-settings-pages {
+  gap: var(--gyro-space-section);
+}
+:root[data-theme]
+  .gyro-app-shell
+  .gyro-sidebar-action.is-settings-page.is-active {
+  background: var(--gyro-accent-soft);
+  color: var(--gyro-text);
+  box-shadow: inset 2px 0 var(--gyro-accent);
+}
+:root[data-theme] .gyro-settings-sidebar-search .gyro-settings-topbar-search {
+  border: 1px solid var(--gyro-border-soft);
+  background: var(--gyro-control-bg);
+}
+:root[data-theme] .gyro-settings-account-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--gyro-border-soft);
+  padding-block: var(--gyro-space-standard);
+}
+:root[data-theme] .gyro-settings-surface.is-minimal-settings .gyro-copy-value {
+  max-width: 100%;
+  min-width: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-copy-value
+  code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  text-align: start;
+}
+@container gyro-settings (max-width: 700px) {
+  :root[data-theme]
+    .gyro-settings-surface.is-minimal-settings
+    .gyro-settings-row,
+  :root[data-theme]
+    .gyro-settings-surface.is-minimal-settings
+    .gyro-workspace-settings-list
+    > label {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--gyro-space-standard);
+  }
+  :root[data-theme]
+    .gyro-settings-surface.is-minimal-settings
+    .gyro-settings-control-column {
+    justify-content: flex-start;
+  }
+  :root[data-theme]
+    .gyro-settings-surface.is-minimal-settings
+    .gyro-settings-group-heading,
+  :root[data-theme]
+    .gyro-settings-surface.is-minimal-settings
+    .gyro-settings-section
+    > header {
+    flex-wrap: wrap;
+  }
+}
+
+/* Remove legacy card insets inside the open section layout. */
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-group-rows
+  > .gyro-settings-row {
+  padding-inline: 0;
+  border: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-row
+  > .gyro-settings-control-column {
+  width: 100%;
+  margin-left: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-row:has(.gyro-settings-switch)
+  > .gyro-settings-control-column {
+  justify-self: end;
+  width: auto;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  :is(.gyro-workspace-services, .gyro-workspace-contributions) {
+  max-width: none;
+  width: 100%;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-services
+  > div {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-shortcut-search {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  padding: var(--gyro-space-card);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-control-bg);
+  color: var(--gyro-muted);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-shortcut-search
+  input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  outline: none;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-shortcut-search:focus-within {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-account-identity {
+  padding-inline: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-group-rows
+  > p {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-chrome);
+  line-height: 1.5;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-group-rows
+  > p
+  strong {
+  color: var(--gyro-text);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-appearance-scope {
+  position: static;
+  background: transparent;
+  border: 0;
+  min-height: 0;
+  padding: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-content[data-settings-page="appearance"]
+  .gyro-settings-section-body {
+  gap: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-theme-picker {
+  max-width: 560px;
+  margin-left: auto;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-theme-preview {
+  aspect-ratio: 1.65;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-provider-table.is-native-list {
+  border-inline: 0;
+  border-radius: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-help-answers {
+  gap: calc(var(--gyro-space-section) * 2);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-help-topic {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-help-topic
+  summary {
+  padding-block: var(--gyro-space-panel);
+  font-size: var(--gyro-font-chrome);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-settings-scopes {
+  width: 100%;
+  margin: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-settings-scopes
+  button {
+  flex: 1;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-settings-editor
+  > header
+  + * {
+  margin-top: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .is-open-section.is-search-target {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-space-standard);
+}
+:root[data-theme] .gyro-settings-account-footer:empty {
+  display: none;
+}
+@container gyro-settings (max-width: 700px) {
+  :root[data-theme]
+    .gyro-settings-surface.is-minimal-settings
+    .gyro-settings-row:has(.gyro-settings-switch) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  :root[data-theme]
+    .gyro-settings-surface.is-minimal-settings
+    .gyro-settings-row
+    > .gyro-settings-control-column {
+    justify-self: stretch;
+    width: 100%;
+  }
+}
+
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-cli-profiles-table
+  table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: var(--gyro-font-chrome);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-cli-profiles-table
+  :is(th, td) {
+  padding: var(--gyro-space-panel) var(--gyro-space-standard);
+  text-align: left;
+  font-weight: 400;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  overflow-wrap: anywhere;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-cli-profiles-table
+  th:first-child {
+  padding-left: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-cli-profiles-table
+  thead {
+  color: var(--gyro-muted);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-cli-profiles-table
+  code {
+  font: inherit;
+  font-family: var(--gyro-font-mono);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-search-hint {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-project-import-settings {
+  gap: calc(var(--gyro-space-section) * 2);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-import-source {
+  border-inline: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-group-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--gyro-space-standard);
+  min-width: 0;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-group-summary {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+@media (max-width: 1000px) {
+  :root[data-theme] .gyro-settings-surface.is-minimal-settings {
+    padding-inline: var(--gyro-space-section);
+  }
+}

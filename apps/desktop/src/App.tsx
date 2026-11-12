@@ -1,6 +1,8 @@
 import type { BrowserViewportMode } from "@gyro-dev/ui";
 import {
   askTextValue,
+  reconcileGitPreparation,
+  hasOnlyGitWarnings,
   browserConfirm,
   ChatFileActionsContext,
   ChatFileScopeContext,
@@ -18,6 +20,8 @@ import {
   sessionApprovalCounts,
   sessionQuestionCounts,
   revealChatQuestion,
+  chatQuestionDismissalVersion,
+  subscribeChatQuestionDismissals,
   setConfirmActionHandler,
   setChatMediaUrlDownloader,
   setOpenDroppedWorkspaceHandler,
@@ -191,6 +195,7 @@ import {
 } from "./browser-capture";
 import { createBrowserHostVisibility } from "./browser-host-visibility";
 import { sessionBrowserNative } from "./session-browser-native";
+import { requestBrowserAnnotation } from "./browser-annotations";
 import type { SessionBrowserSnapshot } from "./session-browser-queue";
 import {
   browserLiveStatusMessage,
@@ -330,7 +335,7 @@ import { readBoundedLocalStorage, safeSetLocalStorage } from "./ui-storage";
 import { useUsageActions } from "./usage-actions";
 import { useAppearanceSaveFeedback } from "./use-appearance-save-feedback";
 import { useAutomaticChatBackup } from "./use-automatic-chat-backup";
-import { chatSendAccepted, queuedDeliveryDisposition, type ChatSendOutcome } from "./chat-send-outcome";
+import { chatSendAccepted, queuedDeliveryDisposition, shouldPauseQueueAfterSendError, type ChatSendOutcome } from "./chat-send-outcome";
 import { useChatAutoRetry } from "./use-chat-auto-retry";
 import { useChatKeepAliveSupervisor } from "./use-chat-keep-alive";
 import { useCheckReminders } from "./use-check-reminders";
@@ -462,6 +467,7 @@ import {
   type AppDestination,
   type Automation,
   type BrowserFeedback,
+  type BrowserScreenshotAction,
   type BrowserPreviewCapture,
   type CapabilityActivity,
   type CapabilityApprovalDecision,
@@ -553,6 +559,7 @@ import {
   useReducer,
   useRef,
   useState,
+  useSyncExternalStore,
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -859,6 +866,7 @@ export function App() {
   const ideSourceControlRootRef = useRef<string | undefined>(undefined);
   const ideSourceControlInFlightRef = useRef(new Set<string>());
   const ideSourceControlQueuedRef = useRef(new Set<string>());
+  const ideSourceControlPromiseRef = useRef(new Map<string, Promise<void>>());
   const ideServicesRequestRef = useRef(0);
   const workspaceSearchRequestRef = useRef(0);
   const workspaceTreeRequestRef = useRef(0);
@@ -904,6 +912,12 @@ export function App() {
             ),
         }
       : undefined;
+  // Skipping a question card clears its sidebar badge as well.
+  const questionDismissals = useSyncExternalStore(
+    subscribeChatQuestionDismissals,
+    chatQuestionDismissalVersion,
+    () => 0,
+  );
   const questionCountsBySessionId = useMemo(
     () =>
       sessionQuestionCounts(
@@ -917,6 +931,7 @@ export function App() {
       sessionEventsById,
       sendingSessionIds,
       resolvedQuestionIdsBySessionId,
+      questionDismissals,
     ],
   );
   const queuedDeliveryNotBeforeRef = useRef(new Map<string, number>());
@@ -936,6 +951,7 @@ export function App() {
   const queuedChatDispatchesRef = useRef(new Set<string>());
   const stoppedChatSessionsRef = useRef(new Set<string>());
   const steeringChatSessionsRef = useRef(new Set<string>());
+  const pendingSteerStopsRef = useRef(new Set<string>());
   const queuedChatDispatchMessageIdsRef = useRef(new Map<string, string>());
   const persistedChatTurnIdsRef = useRef(new Set<string>());
   const [queueRetryTick, setQueueRetryTick] = useState(0);
@@ -1030,7 +1046,6 @@ export function App() {
   const [workspaceChangeGeneration, setWorkspaceChangeGeneration] = useState(0);
   const workspacePreparationRunRef = useRef("");
   const workspacePreparationPathRef = useRef("");
-  const workspacePreparationReadyTimerRef = useRef<number>();
   const openGlobalSearch = useCallback(
     (mode: "commands" | "files" | "global" = "global") => {
       setCommandPaletteMode(mode);
@@ -1916,8 +1931,9 @@ export function App() {
   // Goal mode selected, and a dismissal stays off for that draft. The editor
   // itself also reads as selected, so opening Goal always shows the chip.
   const activeGoalMode =
-    isGoalComposerActive ||
-    (chatDraftGoalModes[activeDraftKey] ?? Boolean(activeSessionGoal?.text));
+    selectedDraftMode !== "plan" &&
+    (isGoalComposerActive ||
+      (chatDraftGoalModes[activeDraftKey] ?? Boolean(activeSessionGoal?.text)));
   const closeGoalComposer = useCallback(() => {
     setIsGoalComposerActive(false);
     // Saving or starting a goal selects Goal mode again, even if the user had
@@ -2019,7 +2035,8 @@ export function App() {
         if (
           pane?.kind === "session" &&
           (!session ||
-            chatProjectKey(session.workspacePath) !== layout.projectKey)
+            chatProjectKey(session.workspacePath) !== chatProjectKey(pane.workspacePath) ||
+            removedProjectPaths.some((path) => chatProjectKey(path) === chatProjectKey(pane.workspacePath)))
         ) {
           dispatchChatGrid({
             type: "remove-session-pane",
@@ -2814,9 +2831,9 @@ export function App() {
         );
         return;
       }
-      let fullHistory =
-        !completeHistorySessionsRef.current.has(sessionId) ||
-        !sessionEventsByIdRef.current[sessionId]?.length;
+      const initialHistory = !sessionEventsByIdRef.current[sessionId]?.length;
+      if (initialHistory) completeHistorySessionsRef.current.delete(sessionId);
+      let recoveringGap = false;
       try {
         type HistoryPage = {
           events: SessionEvent[];
@@ -2827,57 +2844,56 @@ export function App() {
         };
         let page = await invoke<HistoryPage>("read_session_events", {
           sessionId,
-          fullHistory,
-          knownRevision: fullHistory
+          fullHistory: false,
+          knownRevision: initialHistory
             ? undefined
             : historyRevisionsRef.current[sessionId],
         });
         if (sessionEventsRequestRef.current[sessionId] !== requestId) return;
-        // A sleeping/backgrounded chat may have advanced beyond the refresh
-        // window. Recover the entire gap instead of silently losing its middle.
+        // Opening a chat fetches only its recent page. Older messages remain
+        // available through loadEarlierEvents instead of delaying first paint.
+        // On refresh, bridge a sleeping chat's gap only as far as known history.
         const knownIds = new Set(
-          !fullHistory && page.hasMoreBefore
-            ? (sessionEventsByIdRef.current[sessionId] ?? []).map(
-                (event) => event.id,
-              )
-            : [],
+          initialHistory
+            ? []
+            : (sessionEventsByIdRef.current[sessionId] ?? [])
+                .filter((event) => event.kind !== "session-created")
+                .map((event) => event.id),
         );
-        if (
-          !fullHistory &&
-          page.hasMoreBefore &&
-          !page.events.some(
-            (event) =>
-              event.kind !== "session-created" && knownIds.has(event.id),
-          )
-        ) {
-          fullHistory = true;
-          page = await invoke<HistoryPage>("read_session_events", {
-            sessionId,
-            fullHistory: true,
-          });
-        }
-        // Older desktop runtimes may ignore fullHistory while the frontend
-        // updates. Walk their bounded pages automatically until nothing remains.
         let cursor = page.events.find(
           (event) => event.kind !== "session-created",
         );
-        while (fullHistory && page.hasMoreBefore) {
+        let overlaps = page.events.some((event) => knownIds.has(event.id));
+        const cursors = new Set<string>();
+        while (
+          !page.unchanged &&
+          knownIds.size > 0 &&
+          page.hasMoreBefore &&
+          !overlaps
+        ) {
+          recoveringGap = true;
           if (sessionEventsRequestRef.current[sessionId] !== requestId) return;
-          if (!cursor)
-            throw new Error("Chat history returned no earlier cursor");
-          const earlier = await invoke<HistoryPage>("read_session_events", {
-            sessionId,
-            beforeEventId: cursor.id,
-            limit: MAX_CHAT_EVENT_RENDER_COUNT,
-          });
+          if (!cursor || cursors.has(cursor.id))
+            throw new Error("Chat history pagination made no progress");
+          cursors.add(cursor.id);
+          const earlier: HistoryPage = await invoke<HistoryPage>(
+            "read_session_events",
+            {
+              sessionId,
+              beforeEventId: cursor.id,
+              limit: MAX_CHAT_EVENT_RENDER_COUNT,
+            },
+          );
+          if (sessionEventsRequestRef.current[sessionId] !== requestId) return;
           const nextCursor = earlier.events.find(
             (event) => event.kind !== "session-created",
           );
           if (
             earlier.hasMoreBefore &&
-            (!nextCursor || nextCursor.id === cursor.id)
+            (!nextCursor || cursors.has(nextCursor.id))
           )
             throw new Error("Chat history pagination made no progress");
+          overlaps = earlier.events.some((event) => knownIds.has(event.id));
           page = {
             ...page,
             events: mergeSessionHistoryPages(earlier.events, page.events),
@@ -2887,7 +2903,7 @@ export function App() {
         }
         if (sessionEventsRequestRef.current[sessionId] === requestId) {
           historyRevisionsRef.current[sessionId] = page.revision ?? undefined;
-          if (!page.hasMoreBefore)
+          if (!page.unchanged && !page.hasMoreBefore)
             completeHistorySessionsRef.current.add(sessionId);
           // Streaming can continue during the read; use the latest buffer.
           const latestOptimisticEvents =
@@ -2897,11 +2913,12 @@ export function App() {
           const hasMoreBefore =
             !completeHistorySessionsRef.current.has(sessionId) &&
             page.hasMoreBefore;
-          setHasMoreBeforeBySession((current) =>
-            current[sessionId] === hasMoreBefore
-              ? current
-              : { ...current, [sessionId]: hasMoreBefore },
-          );
+          if (!page.unchanged)
+            setHasMoreBeforeBySession((current) =>
+              current[sessionId] === hasMoreBefore
+                ? current
+                : { ...current, [sessionId]: hasMoreBefore },
+            );
           setEventsForSession(sessionId, (current) => {
             const next = preserveDeliveredResponses(
               markInactiveCapabilityResources(
@@ -2925,7 +2942,7 @@ export function App() {
               mergePersistedAndOptimisticEvents(current, optimisticEvents),
             );
           }
-          if (fullHistory)
+          if (initialHistory || recoveringGap)
             notify(
               "command-failed",
               "Could not load chat history",
@@ -2977,6 +2994,8 @@ export function App() {
           beforeEventId: cursor.id,
           limit: MAX_CHAT_EVENT_RENDER_COUNT,
         });
+        if (!page.hasMoreBefore)
+          completeHistorySessionsRef.current.add(sessionId);
         setHasMoreBeforeBySession((current) => ({
           ...current,
           [sessionId]: page.hasMoreBefore,
@@ -3997,14 +4016,14 @@ export function App() {
     [isShellOptimizing, notify],
   );
 
-  const refreshIdeSourceControl = useCallback(function refresh(root?: string) {
+  const refreshIdeSourceControl = useCallback(function refresh(root?: string): Promise<void> | undefined {
     ideSourceControlRootRef.current = root;
     if (!root) {
       return;
     }
     if (ideSourceControlInFlightRef.current.has(root)) {
       ideSourceControlQueuedRef.current.add(root);
-      return;
+      return ideSourceControlPromiseRef.current.get(root);
     }
     if (!isTauriRuntime()) {
       dispatchWorkbench({
@@ -4026,7 +4045,8 @@ export function App() {
     }
 
     ideSourceControlInFlightRef.current.add(root);
-    void invoke<SourceControlState>("git_status", { workspacePath: root })
+    const runId = workspacePreparationRunRef.current;
+    const pending = invoke<SourceControlState>("git_status", { workspacePath: root })
       .then((sourceControl) => {
         if (ideSourceControlRootRef.current !== root) {
           return;
@@ -4035,6 +4055,9 @@ export function App() {
           type: "ide-set-source-control",
           sourceControl,
         });
+        setWorkspacePreparation((current) => reconcileGitPreparation(
+          current, { workspacePath: root, runId, check: "status" }, sourceControl,
+        ));
       })
       .catch((error) => {
         if (ideSourceControlRootRef.current !== root) {
@@ -4052,12 +4075,18 @@ export function App() {
             deletions: 0,
             statsPartial: false,
             files: [],
+            readState: "failed",
             error: String(error),
           },
         });
+        setWorkspacePreparation((current) => reconcileGitPreparation(
+          current, { workspacePath: root, runId, check: "status" },
+          { available: false, readState: "failed", error: String(error) },
+        ));
       })
       .finally(() => {
         ideSourceControlInFlightRef.current.delete(root);
+        ideSourceControlPromiseRef.current.delete(root);
         // Collapse refresh bursts into one follow-up. Mutations during a read
         // still get fresh status without spawning overlapping Git processes, so
         // a queued refresh always re-runs while this root is the one on screen.
@@ -4065,13 +4094,17 @@ export function App() {
           ideSourceControlQueuedRef.current.delete(root) &&
           ideSourceControlRootRef.current === root
         ) {
-          refresh(root);
+          return refresh(root);
         }
+        return undefined;
       });
+    ideSourceControlPromiseRef.current.set(root, pending);
+    return pending;
   }, []);
 
   const refreshWorkspaceBranches = useCallback(async (root?: string) => {
     const requestId = branchCatalogRequestRef.current + 1;
+    const runId = workspacePreparationRunRef.current;
     branchCatalogRequestRef.current = requestId;
     if (!root) {
       setBranchCatalog(undefined);
@@ -4094,14 +4127,22 @@ export function App() {
       });
       if (branchCatalogRequestRef.current === requestId) {
         setBranchCatalog(catalog);
+        setWorkspacePreparation((current) => reconcileGitPreparation(
+          current, { workspacePath: root, runId, check: "branches" }, catalog,
+        ));
       }
     } catch (error) {
       if (branchCatalogRequestRef.current === requestId) {
         setBranchCatalog({
           available: false,
           branches: [],
+          readState: "failed",
           error: String(error),
         });
+        setWorkspacePreparation((current) => reconcileGitPreparation(
+          current, { workspacePath: root, runId, check: "branches" },
+          { available: false, readState: "failed", error: String(error) },
+        ));
       }
     } finally {
       if (branchCatalogRequestRef.current === requestId) {
@@ -4555,20 +4596,21 @@ export function App() {
     (progress: WorkspacePreparationProgress) => {
       if (progress.runId !== workspacePreparationRunRef.current) return;
       setWorkspacePreparation(progress);
-      if (workspacePreparationReadyTimerRef.current !== undefined) {
-        window.clearTimeout(workspacePreparationReadyTimerRef.current);
-        workspacePreparationReadyTimerRef.current = undefined;
-      }
-      if (progress.status === "ready") {
-        workspacePreparationReadyTimerRef.current = window.setTimeout(() => {
-          if (workspacePreparationRunRef.current === progress.runId) {
-            setWorkspacePreparation(undefined);
-          }
-        }, 1500);
-      }
     },
     [],
   );
+
+  useEffect(() => {
+    if (workspacePreparation?.status !== "ready" || workspacePreparation.gitRetrying) return;
+    const runId = workspacePreparation.runId;
+    const timer = window.setTimeout(() => {
+      setWorkspacePreparation((current) =>
+        current?.runId === runId && current.status === "ready" && !current.gitRetrying
+          ? undefined : current,
+      );
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [workspacePreparation]);
 
   const prepareWorkspace = useCallback(
     async (root: string) => {
@@ -4647,6 +4689,7 @@ export function App() {
         dispatchWorkbench({ type: "ide-set-test-tree", tests: snapshot.tests });
         settleWorkspacePreparation(snapshot);
         refreshIdeSourceControl(root);
+        void refreshWorkspaceBranches(root);
       } catch (error) {
         if (workspacePreparationRunRef.current !== runId) return;
         settleWorkspacePreparation({
@@ -4661,7 +4704,7 @@ export function App() {
         });
       }
     },
-    [refreshIdeSourceControl, settleWorkspacePreparation, workspaceRoots],
+    [refreshIdeSourceControl, refreshWorkspaceBranches, settleWorkspacePreparation, workspaceRoots],
   );
 
   useEffect(() => {
@@ -4706,15 +4749,6 @@ export function App() {
       unlistenWorkspace?.();
     };
   }, [settleWorkspacePreparation, workspaceRoots]);
-
-  useEffect(
-    () => () => {
-      if (workspacePreparationReadyTimerRef.current !== undefined) {
-        window.clearTimeout(workspacePreparationReadyTimerRef.current);
-      }
-    },
-    [],
-  );
 
   const refreshSourceControl = useCallback(() => {
     refreshIdeServices(workspaceActionRoot);
@@ -6185,8 +6219,8 @@ export function App() {
   );
 
   const loadInlineChangeDiff = useCallback(
-    async (path: string) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+    async (path: string, workspaceOverride?: string) => {
+      const root = workspaceOverride ?? activeSession?.workspacePath ?? workspacePath;
       if (!root) {
         throw new Error("Open a workspace to inspect this change.");
       }
@@ -6199,7 +6233,7 @@ export function App() {
       const relativePath = normalizedPath.startsWith(`${normalizedRoot}/`)
         ? normalizedPath.slice(normalizedRoot.length + 1)
         : normalizedPath;
-      const file = scopedIde.sourceControl.files.find((item) => {
+      const file = sourceControlForWorkspace(workbench.ide.sourceControl, root)?.files.find((item) => {
         const candidate = item.path.replaceAll("\\", "/");
         return candidate === normalizedPath || candidate === relativePath;
       });
@@ -6235,7 +6269,7 @@ export function App() {
     [
       activeSession?.workspacePath,
       workspacePath,
-      scopedIde.sourceControl.files,
+      workbench.ide.sourceControl,
     ],
   );
 
@@ -7684,31 +7718,38 @@ export function App() {
    * means to send. Choosing a folder starts a chat under a new draft key, so
    * the composer would re-bind to an empty draft and the prompt and its images
    * would look discarded. Carry that unsent draft onto the chat the folder
-   * starts; an existing draft for the target chat always wins.
+   * starts; an existing draft for the target chat always wins. Switching the
+   * composer's folder names the draft being written as `switchedFrom`, so its
+   * prompt and images follow the composer to the new folder too.
    */
-  const carryFolderlessDraft = useCallback((targetDraftKey: string) => {
-    // Only a project draft (`new:<project>`) can receive the prompt. A session
-    // id names a live chat whose composer belongs to that conversation, and
-    // `NEW_CHAT_DRAFT_KEY` is the folderless composer itself.
-    if (!targetDraftKey.startsWith("new:")) return;
-    const sources = [NEW_CHAT_DRAFT_KEY, `new:${chatProjectKey()}`].filter(
-      (key) => key !== targetDraftKey,
-    );
-    setChatDrafts((current) => {
-      if (current[targetDraftKey]?.trim()) return current;
-      const source = sources.find((key) => current[key]?.trim());
-      const carried = source ? current[source] : undefined;
-      if (!source || !carried) return current;
-      return { ...current, [source]: "", [targetDraftKey]: carried };
-    });
-    setChatAttachments((current) => {
-      if ((current[targetDraftKey]?.length ?? 0) > 0) return current;
-      const source = sources.find((key) => (current[key]?.length ?? 0) > 0);
-      const carried = source ? current[source] : undefined;
-      if (!source || !carried || carried.length === 0) return current;
-      return { ...current, [source]: [], [targetDraftKey]: carried };
-    });
-  }, []);
+  const carryFolderlessDraft = useCallback(
+    (targetDraftKey: string, switchedFrom?: string) => {
+      // Only a project draft (`new:<project>`) can receive the prompt. A session
+      // id names a live chat whose composer belongs to that conversation, and
+      // `NEW_CHAT_DRAFT_KEY` is the folderless composer itself.
+      if (!targetDraftKey.startsWith("new:")) return;
+      const sources = [
+        ...(switchedFrom ? [switchedFrom] : []),
+        NEW_CHAT_DRAFT_KEY,
+        `new:${chatProjectKey()}`,
+      ].filter((key) => key !== targetDraftKey);
+      setChatDrafts((current) => {
+        if (current[targetDraftKey]?.trim()) return current;
+        const source = sources.find((key) => current[key]?.trim());
+        const carried = source ? current[source] : undefined;
+        if (!source || !carried) return current;
+        return { ...current, [source]: "", [targetDraftKey]: carried };
+      });
+      setChatAttachments((current) => {
+        if ((current[targetDraftKey]?.length ?? 0) > 0) return current;
+        const source = sources.find((key) => (current[key]?.length ?? 0) > 0);
+        const carried = source ? current[source] : undefined;
+        if (!source || !carried || carried.length === 0) return current;
+        return { ...current, [source]: [], [targetDraftKey]: carried };
+      });
+    },
+    [],
+  );
 
   // Whichever handler binds the composer to a project's draft — starting a
   // chat for a chosen folder, or restoring a layout — the prompt typed with no
@@ -7737,6 +7778,8 @@ export function App() {
         draftKey?: string;
         initialDraft?: string;
         preserveOpenPanes?: boolean;
+        /** The draft whose composer switched folder; its contents follow. */
+        carryDraftFrom?: string;
       } = {},
     ) => {
       suppressSessionAutoSelectRef.current = true;
@@ -7749,7 +7792,8 @@ export function App() {
       // Picking a folder moves the composer to this project's draft. Carry a
       // prompt (and its images) typed while no folder was open so the message
       // the user already wrote is not silently discarded.
-      if (options.initialDraft === undefined) carryFolderlessDraft(draftKey);
+      if (options.initialDraft === undefined)
+        carryFolderlessDraft(draftKey, options.carryDraftFrom);
       else
         setChatDrafts((current) => ({
           ...current,
@@ -7865,6 +7909,9 @@ export function App() {
    */
   const selectChatWorkspace = useCallback(
     async (savedPath?: string) => {
+      // The unsent prompt and images belong to the message being written, not
+      // to the folder, so they move with the composer to the chosen folder.
+      const switchedFrom = activeDraftKey;
       const selected = savedPath ? savedPath : await openWorkspace();
       if (!selected) {
         return false;
@@ -7872,10 +7919,10 @@ export function App() {
       if (savedPath) {
         await activateWorkspacePath(selected, "Project selected");
       }
-      startNewChat({ workspacePath: selected });
+      startNewChat({ workspacePath: selected, carryDraftFrom: switchedFrom });
       return true;
     },
-    [activateWorkspacePath, openWorkspace, startNewChat],
+    [activateWorkspacePath, activeDraftKey, openWorkspace, startNewChat],
   );
 
   const acknowledgeFinishedChat = useCallback(
@@ -7913,9 +7960,14 @@ export function App() {
       suppressSessionAutoSelectRef.current = false;
       const session = sessions.find((item) => item.id === sessionId);
       if (session) {
+        const grid = chatGridRef.current;
+        const activeLayout = grid.activeProjectKey ? grid.layouts[grid.activeProjectKey] : undefined;
+        const visiblePane = activeLayout?.slots.some(
+          (pane) => pane?.kind === "session" && pane.sessionId === sessionId,
+        );
         dispatchChatGrid({
           type: "select-pane",
-          projectKey: chatProjectKey(session.workspacePath),
+          projectKey: visiblePane ? activeLayout!.projectKey : chatProjectKey(session.workspacePath),
           mode: "replace",
           pane: chatPaneForSession(session),
         });
@@ -8123,8 +8175,13 @@ export function App() {
 
   const focusChatPane = useCallback(
     (pane: ChatPaneRef) => {
-      const projectKey = chatProjectKey(pane.workspacePath);
-      const layout = chatGrid.layouts[projectKey];
+      const grid = chatGridRef.current;
+      const activeLayout = grid.activeProjectKey ? grid.layouts[grid.activeProjectKey] : undefined;
+      const layout = [activeLayout, ...Object.values(grid.layouts)].find(
+        (entry) => entry?.slots.some((item) => item?.paneId === pane.paneId),
+      );
+      if (!layout) return;
+      const projectKey = layout.projectKey;
       const alreadyFocused = layout?.focusedPaneId === pane.paneId;
       const alreadyActiveSession =
         pane.kind === "session" &&
@@ -8203,8 +8260,9 @@ export function App() {
     (sessionId: string) => {
       const session = sessions.find((item) => item.id === sessionId);
       if (!session) return;
-      const projectKey = chatProjectKey(session.workspacePath);
-      const layout = chatGrid.layouts[projectKey];
+      const grid = chatGridRef.current;
+      const projectKey = grid.activeProjectKey ?? chatProjectKey(session.workspacePath);
+      const layout = grid.layouts[projectKey];
       const existingPane = layout?.slots.find(
         (pane) => pane?.kind === "session" && pane.sessionId === sessionId,
       );
@@ -8225,12 +8283,15 @@ export function App() {
       dispatchChatGrid({
         type: "select-pane",
         projectKey,
-        mode: "replace",
+        mode: "drop",
         slotIndex: targetSlot,
         pane: chatPaneForSession(session),
       });
+      suppressSessionAutoSelectRef.current = false;
+      activeSessionIdRef.current = sessionId;
       setWorkspacePath(session.workspacePath);
       setActiveSessionId(sessionId);
+      void refreshEvents(sessionId);
       dispatchWorkbench({ type: "set-chat-panel" });
       dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
     },
@@ -8239,6 +8300,7 @@ export function App() {
       chatGrid.layouts,
       focusChatPane,
       notify,
+      refreshEvents,
       sessions,
     ],
   );
@@ -10306,17 +10368,23 @@ export function App() {
               // Uploads are stored by content hash, so a repeated path is the
               // same file arriving twice (a doubled drop event, or drop plus
               // paste). A placeholder already sent or removed stays gone.
+              // The draft may have moved to another folder's composer while
+              // the upload ran, so replace the placeholder wherever it is now.
               setChatAttachments((current) => {
-                const draft = current[attachmentDraftKey] ?? [];
-                if (!draft.some((item) => item.id === placeholder.id)) {
-                  return current;
-                }
+                const draftKey = [
+                  attachmentDraftKey,
+                  ...Object.keys(current),
+                ].find((key) =>
+                  current[key]?.some((item) => item.id === placeholder.id),
+                );
+                if (!draftKey) return current;
+                const draft = current[draftKey] ?? [];
                 const keep =
                   attachment &&
                   !draft.some((item) => item.path === attachment.path);
                 return {
                   ...current,
-                  [attachmentDraftKey]: draft.flatMap((item) =>
+                  [draftKey]: draft.flatMap((item) =>
                     item.id !== placeholder.id
                       ? [item]
                       : keep
@@ -10352,6 +10420,10 @@ export function App() {
 
   const changeChatMode = useCallback(
     (mode: ChatMode, draftKey = activeDraftKey) => {
+      if (mode === "plan") {
+        setChatDraftGoalModes((current) => ({ ...current, [draftKey]: false }));
+        if (draftKey === activeDraftKey) setIsGoalComposerActive(false);
+      }
       if ((chatDraftModesRef.current[draftKey] ?? "normal") === mode)
         return true;
       const next = { ...chatDraftModesRef.current };
@@ -10365,6 +10437,12 @@ export function App() {
     },
     [activeDraftKey],
   );
+
+  const selectGoalComposer = useCallback((draftKey = activeDraftKey) => {
+    changeChatMode("normal", draftKey);
+    setChatDraftGoalModes((current) => ({ ...current, [draftKey]: true }));
+    setIsGoalComposerActive(true);
+  }, [activeDraftKey, changeChatMode]);
 
   const consumeDraftMode = useCallback(
     (draftKey: string, revision: number) => {
@@ -10761,12 +10839,11 @@ export function App() {
           setFiles([]);
           setSelectedFile(undefined);
           setBranchCatalog(undefined);
-          startNewChat({ workspacePath: "" });
+          startNewChat({ workspacePath: "", carryDraftFrom: activeDraftKey });
           break;
         case "add-goal":
-          // Setting an outcome no longer drops the user out of Plan mode.
           dispatchWorkbench({ type: "set-chat-panel" });
-          setIsGoalComposerActive(true);
+          selectGoalComposer(draftKey);
           break;
         case "add-plan":
           dispatchWorkbench({ type: "set-chat-panel", panel: "plan" });
@@ -10899,11 +10976,17 @@ export function App() {
             break;
           }
           if (sendingSessionIdsRef.current.has(compactSessionId)) {
-            notify(
-              "command-failed",
-              "Wait for the current response",
-              "Context can be compacted after the active turn finishes.",
-            );
+            if (!isTauriRuntime()) break;
+            // Keep the live run's ownership and transcript intact. The backend
+            // coalesces requests and compacts at the next safe boundary.
+            void invoke<ProviderContextCompactionResponse>("compact_provider_chat", {
+              sessionId: compactSessionId,
+            }).then(() => {
+              notify("terminal", "Context compaction requested",
+                "Compaction will run at the next safe tool or response boundary.");
+            }).catch((error) => {
+              notify("command-failed", "Context compaction failed", String(error));
+            });
             break;
           }
           if (!isTauriRuntime()) {
@@ -11003,6 +11086,7 @@ export function App() {
     [
       attachEditorSnapshot,
       attachBrowserSnapshot,
+      selectGoalComposer,
       activeDraftKey,
       activeChatMode,
       activeSession?.workspacePath,
@@ -11295,12 +11379,13 @@ export function App() {
         return outcome;
       }
       if (overrideContext?.retryDispatchGuard?.() === false) return outcome;
-      // Every mode carries the goal, Plan included: planning toward a stated
-      // outcome is the case the goal exists for.
-      const turnGoal =
+      // Plan is a read-only turn, not a goal run. Keep the saved goal on the
+      // session while excluding it from this request (including queued sends).
+      const turnGoal = turnMode === "plan" ? undefined : (
         overrideContext && "goal" in overrideContext
           ? overrideContext.goal
-          : activeSessionGoal;
+          : activeSessionGoal
+      );
       const turnPlan =
         overrideContext && "plan" in overrideContext
           ? (overrideContext.plan ?? { title: "Plan", items: [] })
@@ -11509,6 +11594,7 @@ export function App() {
           "Message queued",
           "It will send when this chat's current response finishes, even after you switch chats.",
         );
+        overrideContext?.onAccepted?.();
         return { ...outcome, kind: "queued" };
       }
       const isCouncilTurn = turnMode === "council";
@@ -11661,6 +11747,13 @@ export function App() {
           );
         }
         let sendingSessionId = session.id;
+        // Annotation sends own their payload; carry the untouched composer
+        // into the session created for this previously unsent draft.
+        if (overrideContext?.preserveDraft && overrideContext.onAccepted) {
+          setChatDrafts(current => ({...current, [session.id]: current[draftModeKey] ?? ""}));
+          setChatAttachments(current => ({...current, [session.id]: current[draftModeKey] ?? []}));
+          setChatDraftModes(current => ({...current, [session.id]: current[draftModeKey] ?? "normal"}));
+        }
         optimisticEventsRef.current.set(
           session.id,
           limitOptimisticSessionEvents(optimisticEvents),
@@ -11768,6 +11861,11 @@ export function App() {
             workspacePath: persistedSession.workspacePath,
           });
           replaceSendingSessionId(session.id, persistedSession.id);
+          if (overrideContext?.preserveDraft && overrideContext.onAccepted) {
+            setChatDrafts(current => ({...current, [persistedSession.id]: current[session.id] ?? ""}));
+            setChatAttachments(current => ({...current, [persistedSession.id]: current[session.id] ?? []}));
+            setChatDraftModes(current => ({...current, [persistedSession.id]: current[session.id] ?? "normal"}));
+          }
           setChatMessageQueues((current) => {
             const queued = current[session.id];
             if (!queued?.length) {
@@ -11904,6 +12002,7 @@ export function App() {
           });
           persistedChatTurnIdsRef.current.add(turnId);
           outcome.persisted = true;
+          overrideContext?.onAccepted?.();
           if (
             liveEditorEvidence &&
             liveEditorEvidence.workspaceKey !== persistedSession.workspacePath
@@ -12009,12 +12108,8 @@ export function App() {
           restoreUnsentMode(optimisticSessionId);
           const errorMessage = String(error);
           const wasCancelled = isProviderStop(errorMessage);
-          if (outcome.persisted)
-            stoppedChatSessionsRef.current.add(optimisticSessionId);
-          if (
-            wasCancelled &&
-            !steeringChatSessionsRef.current.has(optimisticSessionId)
-          ) {
+          const isSteering = steeringChatSessionsRef.current.has(optimisticSessionId);
+          if (shouldPauseQueueAfterSendError(outcome.persisted, wasCancelled, isSteering)) {
             stoppedChatSessionsRef.current.add(optimisticSessionId);
           }
           if (!wasCancelled && providerFailureBlocksReadiness(errorMessage))
@@ -12033,7 +12128,9 @@ export function App() {
             errorMessage,
           );
           if (optimisticSessionId !== session.id) {
-            await refreshEvents(optimisticSessionId);
+            const refresh = refreshEvents(optimisticSessionId);
+            if (isSteering) void refresh.catch(() => {});
+            else await refresh;
           }
           const failureNotice = providerFailureNotice(
             errorMessage,
@@ -12192,6 +12289,7 @@ export function App() {
           });
           persistedChatTurnIdsRef.current.add(turnId);
           outcome.persisted = true;
+          overrideContext?.onAccepted?.();
         }
         if (
           liveEditorEvidence &&
@@ -12292,12 +12390,8 @@ export function App() {
         restoreUnsentMode(targetSessionId);
         const errorMessage = String(error);
         const wasCancelled = isProviderStop(errorMessage);
-        if (outcome.persisted)
-          stoppedChatSessionsRef.current.add(targetSessionId);
-        if (
-          wasCancelled &&
-          !steeringChatSessionsRef.current.has(targetSessionId)
-        ) {
+        const isSteering = steeringChatSessionsRef.current.has(targetSessionId);
+        if (shouldPauseQueueAfterSendError(outcome.persisted, wasCancelled, isSteering)) {
           stoppedChatSessionsRef.current.add(targetSessionId);
         }
         if (!wasCancelled && providerFailureBlocksReadiness(errorMessage))
@@ -12315,7 +12409,10 @@ export function App() {
           wasCancelled ? "cancelled" : "failed",
           errorMessage,
         );
-        await refreshEvents(targetSessionId);
+        // Refresh the interrupted transcript without delaying an explicit Steer.
+        const refresh = refreshEvents(targetSessionId);
+        if (isSteering) void refresh.catch(() => {});
+        else await refresh;
         const failureNotice = providerFailureNotice(
           errorMessage,
           wasCancelled,
@@ -12553,6 +12650,7 @@ export function App() {
       // from the goal it is about to gain.
       if (!activeSessionId) goalModeCarryRef.current = activeDraftKey;
       void sendDraft(goal, {
+        mode: "normal",
         goal: { text: goal, status: "active" },
         preserveDraft: false,
         consumeDraftMode: true,
@@ -12628,7 +12726,10 @@ export function App() {
       dispatchingSessionIds: queuedChatDispatchesRef.current,
       pausedSessionIds: stoppedChatSessionsRef.current,
       now,
-      sendingSessionIds: sendingSessionIdsRef.current,
+      sendingSessionIds: new Set([
+        ...sendingSessionIdsRef.current,
+        ...pendingSteerStopsRef.current,
+      ]),
     });
     if (!next) return undefined;
     if (next.kind === "waiting") {
@@ -13326,18 +13427,24 @@ export function App() {
       // Pause synchronously, before cancellation releases the sender.
       // Steer skips this so the promoted queued turn can send once Stop
       // finishes; a plain Stop still holds the rest of the queue.
-      if (options?.pauseQueue !== false) {
+      const isSteering = options?.pauseQueue === false;
+      if (isSteering) {
+        pendingSteerStopsRef.current.add(sessionId);
+      } else {
+        steeringChatSessionsRef.current.delete(sessionId);
         stoppedChatSessionsRef.current.add(sessionId);
       }
       chatAutoRetry.cancelSession(sessionId);
       retryDispatchRef.current.cancelSession(sessionId);
-      void invoke("stop_provider_chat", { sessionId }).catch((error) => {
-        if (options?.pauseQueue !== false) {
-          stoppedChatSessionsRef.current.delete(sessionId);
-        }
-        setQueueRetryTick((current) => current + 1);
-        notify("command-failed", "Stop failed", String(error));
-      });
+      void invoke("stop_provider_chat", { sessionId, waitForStop: isSteering })
+        .catch((error) => {
+          if (!isSteering) stoppedChatSessionsRef.current.delete(sessionId);
+          notify("command-failed", "Stop failed", String(error));
+        })
+        .finally(() => {
+          if (isSteering) pendingSteerStopsRef.current.delete(sessionId);
+          setQueueRetryTick((current) => current + 1);
+        });
     },
     [chatAutoRetry.cancelSession, notify],
   );
@@ -13402,6 +13509,8 @@ export function App() {
         };
       });
       stoppedChatSessionsRef.current.delete(sessionId);
+      // Steer during the normal post-response cooldown is also immediate.
+      queuedDeliveryNotBeforeRef.current.delete(sessionId);
       if (sendingSessionIdsRef.current.has(sessionId)) {
         // Keep the queue live and skip its settle delay: Stop would otherwise
         // park it until a manual send.
@@ -15483,13 +15592,67 @@ export function App() {
     },
     [],
   );
+  const annotationContextRef = useRef({ activeDraftKey, activeSessionId, chatDraftModels,
+    sessionContextEventsById, sessionEventsById, pendingNewChatPlan, pendingNewChatGoal });
+  annotationContextRef.current = { activeDraftKey, activeSessionId, chatDraftModels,
+    sessionContextEventsById, sessionEventsById, pendingNewChatPlan, pendingNewChatGoal };
   const captureBrowserPreview = useCallback(
     async (
-      action: "capture" | "reveal" | "feedback" = "capture",
+      action: BrowserScreenshotAction = "capture",
       feedback?: BrowserFeedback,
       owner: BrowserOwner = activeBrowserOwner,
     ) => {
       const preview = previewForBrowser(owner);
+      if (action.startsWith("annotate-")) {
+        const result = await requestBrowserAnnotation({
+          action, feedback, capture: preview.latestCapture, sessionId: owner.sessionId,
+        });
+        if (action === "annotate-send") {
+          if (result.error || !result.message || !result.attachments) return result;
+          const current = annotationContextRef.current;
+          const isDraft = owner.sessionId === "workbench" || owner.sessionId.startsWith("workbench:");
+          if (isDraft && (current.activeDraftKey !== owner.draftKey || current.activeSessionId))
+            return { error: "Return to the originating draft to send this annotation." };
+          const context = isDraft
+            ? { plan: current.pendingNewChatPlan, goal: current.pendingNewChatGoal }
+            : deriveSessionContext(current.sessionContextEventsById[owner.sessionId] ?? [], current.sessionEventsById[owner.sessionId] ?? []);
+          return await new Promise<{sent?:boolean;error?:string}>((resolve) => {
+            void sendDraftRef.current(result.message, {
+              sessionId: isDraft ? undefined : owner.sessionId,
+              workspacePath: owner.workspaceKey,
+              draftModeKey: owner.draftKey,
+              mode: chatDraftModesRef.current[owner.draftKey] ?? "normal",
+              consumeDraftMode: false,
+              sessionModel: current.chatDraftModels[owner.draftKey],
+              attachments: result.attachments,
+              plan: context.plan,
+              goal: context.goal,
+              preserveDraft: true,
+              onAccepted: () => resolve({sent:true}),
+            }).then(outcome => resolve(
+              outcome.persisted || chatSendAccepted(outcome) ? {sent:true} :
+                {error:"The message was not sent. Check the chat's model and connection, then try again."},
+            )).catch(error => resolve({error:String(error)}));
+          });
+        }
+        if (result.attachment) {
+          const attachment = result.attachment;
+          setChatAttachments((current) => ({
+            ...current,
+            [owner.draftKey]: [...(current[owner.draftKey] ?? []), attachment],
+          }));
+        }
+        if (result.note) {
+          setChatDrafts((current) => ({
+            ...current,
+            [owner.draftKey]: appendFeedback(current[owner.draftKey], result.note!),
+          }));
+        }
+        if (result.fallback) {
+          notify("terminal", "Annotation added as text", "The attachment could not be saved; the element details are in your draft.");
+        }
+        return result;
+      }
       if (action === "feedback") {
         const draft = browserFeedbackDraft({
           capture: preview.latestCapture,
@@ -17690,6 +17853,14 @@ export function App() {
       pane.kind === "session"
         ? sessions.find((session) => session.id === pane.sessionId)
         : undefined;
+    const paneWorkspace = normalizeProjectPath(pane.workspacePath);
+    const branchRoot = normalizeProjectPath(branchCatalog?.repoRoot ?? "");
+    const paneBranchCatalog = branchRoot &&
+      (paneWorkspace === branchRoot || paneWorkspace.startsWith(branchRoot + "/"))
+      ? branchCatalog : undefined;
+    const paneFiles = files.filter((file) =>
+      normalizeProjectPath(file.workspacePath ?? workspacePath) === paneWorkspace,
+    );
     const paneEvents =
       pane.kind === "session" ? (sessionEventsById[pane.sessionId] ?? []) : [];
     const paneContext =
@@ -17741,15 +17912,20 @@ export function App() {
       message: string,
       context?: ChatTurnContextSnapshot,
     ) => {
+      const targetContext = {
+        ...context,
+        sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+        workspacePath: pane.workspacePath,
+      };
       if (isFocused) {
-        void sendDraft(message, context);
+        void sendDraft(message, targetContext);
         return;
       }
       pendingPaneSendRef.current = {
         paneId: pane.paneId,
         message,
         context: {
-          ...context,
+          ...targetContext,
           mode: context?.mode ?? paneMode,
           draftModeKey: paneDraftKey,
           draftModeRevision:
@@ -17840,7 +18016,7 @@ export function App() {
           onSelectChatPanel={selectPanePanel}
           {...paneCompanionProps}
           backupReview={backupReviewFor(paneSession?.id)}
-          railDiffTools={railDiffTools}
+          railDiffTools={isFocused ? railDiffTools : undefined}
           railTerminalTools={railTerminalTools}
           browserPreview={previewForBrowser(paneBrowserOwner)}
           browserNativeHost={browserNativeHost}
@@ -17886,7 +18062,7 @@ export function App() {
             ]
           }
           config={config}
-          files={files}
+          files={paneFiles}
           onOpenCompanionFile={openEditorFile}
           modelFocus={
             pane.kind === "session" &&
@@ -17904,16 +18080,16 @@ export function App() {
           attachments={chatAttachments[paneDraftKey] ?? []}
           chatMode={paneMode}
           submittedChatMode={paneContext?.mode ?? "normal"}
-          diffReview={workbench.diffReview}
+          diffReview={isFocused ? workbench.diffReview : undefined}
           draftResetToken={draftResetToken}
           draft={chatDrafts[paneDraftKey] ?? ""}
           events={paneEvents}
           branchName={
             workbench.workspaceMode === "local"
-              ? (branchCatalog?.current ?? paneSession?.branch)
+              ? (paneBranchCatalog?.current ?? paneSession?.branch)
               : paneSession?.branch
           }
-          branchCatalog={branchCatalog}
+          branchCatalog={paneBranchCatalog}
           isEnvironmentRailOpen={panePanel === "environment"}
           isGoalComposerActive={isFocused && isGoalComposerActive}
           isGoalModeActive={isFocused && activeGoalMode}
@@ -18060,8 +18236,10 @@ export function App() {
               ? fileReviewTools
               : undefined
           }
-          onLoadChangeDiff={loadInlineChangeDiff}
-          onLoadComparisonDiff={loadComparisonDiff}
+          onLoadChangeDiff={(path) => loadInlineChangeDiff(path, pane.workspacePath)}
+          onLoadComparisonDiff={(file, comparison) =>
+            loadGitComparisonDiff(pane.workspacePath, file, comparison, isTauriRuntime())
+          }
           onEditQueuedMessage={(messageId) => {
             focusChatPane(pane);
             editQueuedChatMessage(messageId);
@@ -18480,7 +18658,17 @@ export function App() {
       }
       onRetryWorkspacePreparation={() => {
         const root = activeSession?.workspacePath ?? workspacePath;
-        if (root) void prepareWorkspace(root);
+        if (!root || workspacePreparation?.gitRetrying) return;
+        if (!hasOnlyGitWarnings(workspacePreparation)) {
+          void prepareWorkspace(root);
+          return;
+        }
+        const runId = workspacePreparationRunRef.current;
+        setWorkspacePreparation((current) => current?.runId === runId
+          ? { ...current, gitRetrying: true } : current);
+        void Promise.all([refreshIdeSourceControl(root), refreshWorkspaceBranches(root)])
+          .finally(() => setWorkspacePreparation((current) => current?.runId === runId
+            ? { ...current, gitRetrying: false } : current));
       }}
       onExpandedWorkspaceDirectoriesChange={onExpandedDirectoriesChange}
       onOpenWorkspaceFile={openEditorLocation}
@@ -18645,57 +18833,19 @@ export function App() {
                     (item) => item.id === sessionId,
                   );
                   if (!session) return false;
-                  // Resolve the real session's project; a native payload cannot
-                  // choose which saved layout gets edited.
-                  const projectKey = chatProjectKey(session.workspacePath);
-                  if (chatProjectKey(sourceProjectKey) !== projectKey)
+                  // Validate the source against the saved session, then place it
+                  // in the visible layout without changing its workspace.
+                  if (chatProjectKey(sourceProjectKey) !== chatProjectKey(session.workspacePath))
                     return false;
-                  const switchingProject =
-                    projectKey !== displayedChatLayout.projectKey;
-                  const existingPane = chatGridRef.current.layouts[
-                    projectKey
-                  ]?.slots.find(
-                    (pane) =>
-                      pane?.kind === "session" && pane.sessionId === session.id,
-                  );
                   const action = {
                     type: "select-pane" as const,
-                    projectKey,
-                    mode:
-                      switchingProject && existingPane
-                        ? ("replace" as const)
-                        : ("drop" as const),
-                    // The old project's slot/arrangement has no meaning in the
-                    // destination. Focus its existing pane or append safely.
-                    slotIndex: switchingProject ? undefined : slotIndex,
-                    arrangement: switchingProject
-                      ? undefined
-                      : placement?.arrangement,
-                    insertPosition: switchingProject
-                      ? undefined
-                      : placement?.insertPosition,
-                    splitDirection: switchingProject
-                      ? undefined
-                      : placement?.splitDirection,
+                    projectKey: displayedChatLayout.projectKey,
+                    mode: "drop" as const,
+                    slotIndex,
+                    ...placement,
                     pane: chatPaneForSession(session),
                   };
-                  if (!dispatchChatGrid(action)) {
-                    if (switchingProject && !existingPane) {
-                      notify(
-                        "terminal",
-                        "Chat layout is full",
-                        "Close a chat in that project before adding another.",
-                      );
-                    }
-                    return false;
-                  }
-                  if (switchingProject) {
-                    notify(
-                      "terminal",
-                      "Chat project switched",
-                      workspaceName(session.workspacePath),
-                    );
-                  }
+                  if (!dispatchChatGrid(action)) return false;
                   activeSessionIdRef.current = session.id;
                   setActiveSessionId(session.id);
                   setWorkspacePath(session.workspacePath);

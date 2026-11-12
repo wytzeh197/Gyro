@@ -815,7 +815,7 @@ mod tests {
         assert_eq!(config.fresh_read_window("workspace.search"), None);
         assert_eq!(
             gyro_core::efficiency::Config::default().fresh_read_window("workspace.read"),
-            None
+            Some(8 * 1024)
         );
     }
 

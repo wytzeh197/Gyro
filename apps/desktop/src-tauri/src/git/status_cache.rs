@@ -14,7 +14,10 @@ use crate::{
     ide::task_discovery::content_hash,
     workspace::files::workspace_root,
 };
-use gyro_core::ExecutionTermination;
+use gyro_core::{
+    workspace_check::{git_command_error_state, GitReadState},
+    ExecutionTermination,
+};
 use std::{
     collections::HashMap,
     fs,
@@ -143,6 +146,8 @@ pub(crate) fn git_status_read_failure(
     transient: bool,
 ) -> SourceControlStatus {
     let unavailable = |error: String| SourceControlStatus {
+        read_state: GitReadState::Failed,
+        stale: false,
         provider: "git".into(),
         workspace_path: None,
         available: false,
@@ -169,12 +174,31 @@ pub(crate) fn git_status_read_failure(
     if transient {
         if let Some(last) = repo_root.and_then(last_git_status) {
             return SourceControlStatus {
+                read_state: GitReadState::Failed,
+                stale: true,
                 error: Some(format!("{error} — showing the last known changes")),
                 ..last
             };
         }
     }
     unavailable(error)
+}
+
+pub(crate) fn git_status_optional(state: GitReadState) -> SourceControlStatus {
+    debug_assert!(state.is_optional());
+    let mut status = parse_git_status_v2("");
+    status.read_state = state;
+    status.available = false;
+    status
+}
+
+fn git_status_failure(root: &Path, error: String, state: GitReadState) -> SourceControlStatus {
+    if state.is_optional() {
+        return git_status_optional(state);
+    }
+    let mut status = git_status_read_failure(Some(root), error, true);
+    status.read_state = state;
+    status
 }
 
 pub(crate) fn git_status_impl(workspace_path: &str) -> anyhow::Result<SourceControlStatus> {
@@ -230,7 +254,8 @@ fn inspect_git_status_before_inner(
     // The repository is resolved before the read so that a read which cannot
     // finish can still be answered with what the last one saw.
     let (repo_root, prefix) = match git_read::repo_root_and_prefix(&root, deadline) {
-        Ok(found) => found.unwrap_or_else(|| (root.clone(), String::new())),
+        Ok(Some(found)) => found,
+        Ok(None) => return Ok(git_status_optional(GitReadState::NotRepository)),
         Err(error) => {
             return Ok(git_status_read_failure(
                 Some(&root),
@@ -263,23 +288,25 @@ fn inspect_git_status_before_inner(
     let output = match git_read::run(&command, deadline, 4 * 1024 * 1024) {
         Ok(output) => output,
         Err(error) => {
-            return Ok(git_status_read_failure(
-                Some(&root),
-                error.to_string(),
-                true,
-            ));
+            let state = if Instant::now() >= deadline {
+                GitReadState::TimedOut
+            } else {
+                git_command_error_state(&error)
+            };
+            return Ok(git_status_failure(&root, error.to_string(), state));
         }
     };
     if !output.succeeded() || output.stdout_truncated {
         let error = bounded_command_error("could not inspect Git status", &output).to_string();
-        // Running out of budget is a read failure; a non-zero exit is an answer.
-        let transient = matches!(
-            &output.termination,
-            ExecutionTermination::TimedOut
-                | ExecutionTermination::Inactive
-                | ExecutionTermination::OutputLimit
-        );
-        return Ok(git_status_read_failure(Some(&root), error, transient));
+        let state = if matches!(
+            output.termination,
+            ExecutionTermination::TimedOut | ExecutionTermination::Inactive
+        ) {
+            GitReadState::TimedOut
+        } else {
+            GitReadState::Failed
+        };
+        return Ok(git_status_failure(&root, error, state));
     }
     let mut status = parse_git_status_v2(&output.stdout);
     relativize_git_status_paths(&mut status.files, &prefix);
@@ -345,6 +372,8 @@ fn relativize_git_status_paths(files: &mut Vec<SourceControlFile>, prefix: &str)
 
 pub(crate) fn parse_git_status_v2(output: &str) -> SourceControlStatus {
     let mut status = SourceControlStatus {
+        read_state: GitReadState::Ready,
+        stale: false,
         provider: "git".into(),
         workspace_path: None,
         available: true,
@@ -767,6 +796,58 @@ mod tests {
             .iter()
             .find(|file| file.path == path)
             .unwrap_or_else(|| panic!("{path} missing from {:?}", status.files))
+    }
+
+    #[test]
+    fn git_readiness_distinguishes_optional_setup_from_corrupt_metadata() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().to_str().unwrap();
+        let absent = git_status_for_preparation(path).unwrap();
+        assert_eq!(absent.read_state, GitReadState::NotRepository);
+        assert!(!absent.available);
+        assert!(absent.error.is_none());
+        assert!(!absent.stale);
+        assert_eq!(absent.workspace_path.as_deref(), Some(path));
+        let branches = crate::git::branches::git_branch_catalog_impl(path).unwrap();
+        assert_eq!(branches.read_state, GitReadState::NotRepository);
+        assert!(branches.error.is_none());
+
+        fs::write(folder.path().join(".git"), "broken metadata").unwrap();
+        let broken = git_status_for_preparation(path).unwrap();
+        assert_eq!(broken.read_state, GitReadState::Failed);
+        assert!(broken.error.is_some());
+        assert!(crate::git::branches::git_branch_catalog_impl(path).is_err());
+
+        let unavailable = git_status_failure(
+            folder.path(),
+            "missing executable".into(),
+            GitReadState::Unavailable,
+        );
+        assert_eq!(unavailable.read_state, GitReadState::Unavailable);
+        assert!(!unavailable.available);
+        assert!(unavailable.error.is_none());
+    }
+
+    #[test]
+    fn git_readiness_timeout_retains_changes_then_recovers_without_github() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        init_git_repo(root);
+        fs::write(root.join("pending.txt"), "local only").unwrap();
+        let path = root.to_str().unwrap();
+        let first = git_status_for_preparation(path).unwrap();
+        assert_eq!(first.read_state, GitReadState::Ready);
+        assert_eq!(first.files[0].path, "pending.txt");
+        let timed_out = inspect_git_status_before(path, false, Instant::now()).unwrap();
+        assert_eq!(timed_out.read_state, GitReadState::TimedOut);
+        assert!(timed_out.stale);
+        assert_eq!(timed_out.files[0].path, "pending.txt");
+        assert_eq!(timed_out.last_checked_at, first.last_checked_at);
+        let recovered = git_status_for_preparation(path).unwrap();
+        assert_eq!(recovered.read_state, GitReadState::Ready);
+        assert!(!recovered.stale);
+        assert!(recovered.error.is_none());
+        assert!(git(root, &["remote"]).stdout.is_empty());
     }
 
     #[test]

@@ -201,10 +201,22 @@ export function measureChatContract() {
               }))
           : [],
       pageOverflow: document.documentElement.scrollWidth > innerWidth + 1,
-      focusBorder: find(".gyro-composer-input")
-        ? getComputedStyle(find(".gyro-composer-input")).outlineColor
-        : null,
-      expectedFocusBorder: color("--gyro-focus-ring"),
+      composerFocus: (() => {
+        const input = find(".gyro-composer-input");
+        if (!input) return null;
+        const swatch = document.createElement("span");
+        swatch.style.cssText =
+          "display:none;color:color-mix(in srgb,var(--gyro-text) 22%,var(--gyro-chat-hairline))";
+        input.append(swatch);
+        const expectedBorder = getComputedStyle(swatch).color;
+        swatch.remove();
+        return {
+          border: getComputedStyle(input).borderTopColor,
+          expectedBorder,
+          keyboardFocus: composerInput?.matches(":focus-visible") ?? false,
+          shellFilter: getComputedStyle(composer).filter,
+        };
+      })(),
       lists: [
         ...surface.querySelectorAll(".gyro-response-body :is(ul, ol)"),
       ].map((list) => {
@@ -392,7 +404,10 @@ export function checkChatContract(state, panes) {
         `${label}: new-chat composer must stay at the bottom of its pane`,
       );
 
-    const expectedWidth = Math.min(760, pane.canvas.width - 48 * pane.scale);
+    const expectedWidth = Math.min(
+      pane.isThread ? 760 : 720,
+      pane.canvas.width - 48 * pane.scale,
+    );
     if (!near(composer.width, expectedWidth))
       failures.push(
         `${label}: composer width ${composer.width.toFixed(2)}, expected ${expectedWidth.toFixed(2)}`,
@@ -446,10 +461,20 @@ export function checkChatContract(state, panes) {
         `${label}: Environment must leave a reading gap beside the canvas`,
       );
     if (
-      state.includes("interaction-composer-focus-visible") &&
-      pane.focusBorder !== pane.expectedFocusBorder
+      pane.environment &&
+      (pane.environment.left < chrome.surface.left - 1 ||
+        pane.environment.right > chrome.surface.right + 1 ||
+        pane.environment.top < chrome.surface.top - 1 ||
+        pane.environment.bottom > chrome.surface.bottom + 1)
     )
-      failures.push(`${label}: composer focus must use the chosen accent ring`);
+      failures.push(`${label}: Environment popover escapes its chat pane`);
+    if (
+      state.includes("interaction-composer-focus-visible") &&
+      (!pane.composerFocus?.keyboardFocus ||
+        pane.composerFocus.border !== pane.composerFocus.expectedBorder ||
+        pane.composerFocus.shellFilter !== "none")
+    )
+      failures.push(`${label}: keyboard focus must lift the input border without a shell filter`);
     for (const action of pane.inkActions)
       if (
         action.background !==

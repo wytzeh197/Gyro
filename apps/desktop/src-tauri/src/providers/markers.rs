@@ -58,6 +58,367 @@ pub(crate) fn completed_plan_updates(
         .collect()
 }
 
+/// Incremental plan progress from model-authored text only. Keep a bounded
+/// partial marker, not a second copy of the growing transcript.
+#[derive(Default)]
+pub(crate) struct PlanProgressStream {
+    hold: String,
+    commentary_counts: std::collections::HashMap<String, usize>,
+    persisted: std::collections::HashMap<String, usize>,
+}
+
+impl PlanProgressStream {
+    fn push(&mut self, delta: &str) -> Vec<serde_json::Value> {
+        self.hold.push_str(delta);
+        let mut updates = Vec::new();
+        loop {
+            let Some(at) = self.hold.find(GYRO_PLAN_UPDATE_MARKER) else {
+                let keep = (1..GYRO_PLAN_UPDATE_MARKER.len())
+                    .rev()
+                    .find(|len| self.hold.ends_with(&GYRO_PLAN_UPDATE_MARKER[..*len]))
+                    .unwrap_or(0);
+                self.hold.drain(..self.hold.len() - keep);
+                break;
+            };
+            self.hold.drain(..at);
+            let after = self.hold[GYRO_PLAN_UPDATE_MARKER.len()..].trim_start();
+            if let Some((value, rest)) = take_leading_json_value(after) {
+                let consumed = self.hold.len() - rest.len();
+                if consumed <= 96 * 1024 {
+                    updates.push(value);
+                }
+                self.hold.drain(..consumed);
+                continue;
+            }
+            // Malformed/oversized markers cannot pin an unbounded transcript.
+            if let Some(end) = after.find('\n') {
+                let consumed = self.hold.len() - after.len() + end + 1;
+                self.hold.drain(..consumed);
+                continue;
+            }
+            if self.hold.len() > 96 * 1024 {
+                self.hold.clear();
+            }
+            break;
+        }
+        updates
+    }
+
+    fn commentary(&mut self, activity: &ProviderActivity) -> Vec<serde_json::Value> {
+        if activity.kind != "commentary" {
+            return Vec::new();
+        }
+        let updates = strip_hidden_control_markers(&activity.label).plan_updates;
+        // Commentary frames are cumulative snapshots, not deltas.
+        if !self.commentary_counts.contains_key(&activity.id)
+            && self.commentary_counts.len() >= 2048
+        {
+            return Vec::new();
+        }
+        let count = self
+            .commentary_counts
+            .entry(activity.id.clone())
+            .or_default();
+        let unseen = updates.iter().skip(*count).cloned().collect();
+        *count = (*count).max(updates.len());
+        unseen
+    }
+
+    fn record(&mut self, payload: &serde_json::Value) {
+        *self.persisted.entry(payload.to_string()).or_default() += 1;
+    }
+
+    fn remaining(
+        &self,
+        plan: &serde_json::Value,
+        updates: Vec<serde_json::Value>,
+    ) -> Vec<serde_json::Value> {
+        let mut persisted = self.persisted.clone();
+        updates
+            .into_iter()
+            .filter(|payload| {
+                let Some(progress) = plan_progress_payload(plan, payload) else {
+                    return true;
+                };
+                let Some(count) = persisted.get_mut(&progress.to_string()) else {
+                    return true;
+                };
+                if *count == 0 {
+                    return true;
+                }
+                *count -= 1;
+                false
+            })
+            .collect()
+    }
+}
+
+/// Live execution changes only known steps. A tool's result, a reasoning block,
+/// or an unrelated/internal request must never become plan progress.
+fn plan_progress_payload(
+    plan: &serde_json::Value,
+    payload: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    // Document revisions retain the completed-response path and its content
+    // fallback; only execution progress is consumed by the live stream.
+    if ["title", "content", "markdown"]
+        .iter()
+        .any(|key| payload.get(*key).is_some())
+    {
+        return None;
+    }
+    let known = plan.get("items")?.as_array()?;
+    let items = match payload.get("action")?.as_str()? {
+        "update-items" => payload.get("items")?.as_array()?.clone(),
+        "update-item" => vec![payload.get("item")?.clone()],
+        _ => return None,
+    };
+    if items.is_empty() || items.len() > 256 {
+        return None;
+    }
+    let mut updates = Vec::new();
+    for item in items {
+        let id = item.get("id")?.as_str()?;
+        let status = item.get("status")?.as_str()?;
+        if !known
+            .iter()
+            .any(|step| step.get("id").and_then(serde_json::Value::as_str) == Some(id))
+            || !matches!(status, "todo" | "in-progress" | "complete" | "blocked")
+        {
+            return None;
+        }
+        let mut update = serde_json::json!({ "id": id, "status": status });
+        for key in ["detail", "title", "label"] {
+            if let Some(value) = item.get(key).and_then(serde_json::Value::as_str) {
+                update[key] = serde_json::json!(value);
+            }
+        }
+        updates.push(update);
+    }
+    Some(serde_json::json!({ "action": "update-items", "items": updates }))
+}
+
+pub(crate) fn publish_live_plan_progress(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    delta: Option<&str>,
+    activity: Option<&ProviderActivity>,
+) {
+    if request.internal_purpose.is_some() {
+        return;
+    }
+    let Some(plan) = request.plan.as_ref() else {
+        return;
+    };
+    let Some(control) = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(&request.session_id).cloned())
+    else {
+        return;
+    };
+    if control.cancellation.is_cancelled()
+        || !control.request.lock().ok().is_some_and(|active| {
+            active
+                .as_ref()
+                .is_some_and(|active| active.turn_id == request.turn_id)
+        })
+    {
+        return;
+    }
+    let Ok(mut stream) = control.plan_progress.lock() else {
+        return;
+    };
+    let updates = if let Some(activity) = activity {
+        stream.commentary(activity)
+    } else {
+        stream.push(delta.unwrap_or_default())
+    };
+    let updates: Vec<_> = updates
+        .iter()
+        .filter_map(|payload| plan_progress_payload(plan, payload))
+        .collect();
+    if updates.is_empty() {
+        return;
+    }
+    let Ok(store) = open_store() else { return };
+    let Ok(session_id) = parse_uuid(&request.session_id) else {
+        return;
+    };
+    let Some(turn_id) = request
+        .turn_id
+        .as_deref()
+        .and_then(|id| parse_uuid(id).ok())
+    else {
+        return;
+    };
+    for payload in updates {
+        if let Ok(event) = store.append_event_with_turn_id(
+            session_id,
+            gyro_core::SessionEventKind::PlanUpdated,
+            "Provider updated plan progress",
+            payload.clone(),
+            Some(turn_id),
+        ) {
+            stream.record(&payload);
+            let _ = app.emit("gyro://session-plan-updated", event);
+        }
+    }
+}
+
+/// Completed responses often repeat their streamed commentary. Do not replay
+/// those older statuses over the latest live progress or a user's correction.
+pub(crate) fn unstreamed_plan_updates(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    updates: Vec<serde_json::Value>,
+) -> Vec<serde_json::Value> {
+    let Some(plan) = request.plan.as_ref() else {
+        return updates;
+    };
+    let Some(control) = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .ok()
+        .and_then(|flags| flags.get(&request.session_id).cloned())
+    else {
+        return updates;
+    };
+    let Ok(stream) = control.plan_progress.lock() else {
+        return updates;
+    };
+    stream.remaining(plan, updates)
+}
+
+#[cfg(test)]
+mod live_plan_tests {
+    use super::*;
+
+    fn progress(status: &str) -> serde_json::Value {
+        serde_json::json!({"action":"update-items","items":[{"id":"one","status":status}]})
+    }
+
+    fn plan() -> serde_json::Value {
+        serde_json::json!({"items":[{"id":"one","title":"Build","status":"todo"}]})
+    }
+
+    #[test]
+    fn publishes_complete_json_at_every_chunk_boundary_before_the_turn_ends() {
+        let update = progress("in-progress");
+        let text = format!("Starting now. {GYRO_PLAN_UPDATE_MARKER} {update}");
+        for split in 0..=text.len() {
+            let mut stream = PlanProgressStream::default();
+            let mut updates = stream.push(&text[..split]);
+            updates.extend(stream.push(&text[split..]));
+            assert_eq!(updates, vec![update.clone()], "split {split}");
+            assert!(stream.push("\nMore work").is_empty());
+        }
+    }
+
+    #[test]
+    fn partial_json_does_not_change_progress_and_later_markers_recover() {
+        let mut stream = PlanProgressStream::default();
+        assert!(stream.push("GYRO_PLAN_UP").is_empty());
+        assert!(stream
+            .push("DATE: {\"action\":\"update-items\",\"items\":[")
+            .is_empty());
+        assert!(stream
+            .push("{\"id\":\"one\",\"status\":\"complete\"}")
+            .is_empty());
+        assert_eq!(stream.push("]}"), vec![progress("complete")]);
+        assert!(stream.push("GYRO_PLAN_UPDATE: {broken\n").is_empty());
+        let blocked = progress("blocked");
+        assert_eq!(
+            stream.push(&format!("GYRO_PLAN_UPDATE: {blocked}")),
+            vec![blocked]
+        );
+        stream.push(&format!(
+            "GYRO_PLAN_UPDATE: {{\"data\":\"{}",
+            "x".repeat(100 * 1024)
+        ));
+        assert!(stream.hold.is_empty());
+        stream.push(&"plain narration 🦀".repeat(10000));
+        assert!(stream.hold.is_empty());
+    }
+
+    #[test]
+    fn cumulative_commentary_is_applied_once_and_tools_cannot_update_the_plan() {
+        let mut stream = PlanProgressStream::default();
+        let first = progress("in-progress");
+        let done = progress("complete");
+        let mut activity = ProviderActivity {
+            id: "message-one".into(),
+            kind: "commentary".into(),
+            label: format!("GYRO_PLAN_UPDATE: {first}"),
+            detail: None,
+            note: None,
+            file_counts: None,
+            status: "running".into(),
+        };
+        assert_eq!(stream.commentary(&activity), vec![first]);
+        assert!(stream.commentary(&activity).is_empty());
+        activity
+            .label
+            .push_str(&format!("\nGYRO_PLAN_UPDATE: {done}"));
+        assert_eq!(stream.commentary(&activity), vec![done.clone()]);
+        activity.status = "complete".into();
+        assert!(stream.commentary(&activity).is_empty());
+        activity.id = "tool-output".into();
+        for kind in ["tool", "command", "reasoning"] {
+            activity.kind = kind.into();
+            assert!(stream.commentary(&activity).is_empty());
+        }
+        activity.kind = "commentary".into();
+        activity.label = format!("GYRO_PLAN_UPDATE: {done}");
+        assert_eq!(stream.commentary(&activity), vec![done]);
+    }
+
+    #[test]
+    fn final_replay_does_not_undo_live_progress_but_new_updates_survive() {
+        let mut stream = PlanProgressStream::default();
+        let started = progress("in-progress");
+        let done = progress("complete");
+        stream.record(&started);
+        stream.record(&done);
+        assert!(stream
+            .remaining(&plan(), vec![started.clone(), done.clone()])
+            .is_empty());
+        let blocked = progress("blocked");
+        assert_eq!(
+            stream.remaining(&plan(), vec![started.clone(), done, blocked.clone()]),
+            vec![blocked]
+        );
+        // Explicitly starting the same step again is a new occurrence.
+        assert_eq!(
+            stream.remaining(&plan(), vec![started.clone(), started.clone()]),
+            vec![started]
+        );
+        // Live progress never consumes a replacement plan's document.
+        let replacement = serde_json::json!({"action":"replace","content":"# Plan","items":[]});
+        assert_eq!(
+            stream.remaining(&plan(), vec![replacement.clone()]),
+            vec![replacement]
+        );
+    }
+
+    #[test]
+    fn only_known_steps_and_real_statuses_are_published() {
+        for status in ["todo", "in-progress", "complete", "blocked"] {
+            assert_eq!(
+                plan_progress_payload(&plan(), &progress(status)),
+                Some(progress(status))
+            );
+        }
+        assert!(plan_progress_payload(&plan(), &progress("almost-done")).is_none());
+        let unknown = serde_json::json!({"action":"update-items","items":[{"id":"other","status":"complete"}]});
+        assert!(plan_progress_payload(&plan(), &unknown).is_none());
+        assert!(plan_progress_payload(&plan(), &serde_json::json!({"action":"clear"})).is_none());
+    }
+}
+
 /// Retain intermediate artifacts and their latest revision without promoting
 /// their commentary to the closing reply. Final-message revisions win.
 pub(crate) fn completed_chat_artifacts(

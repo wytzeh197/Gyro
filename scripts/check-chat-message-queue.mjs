@@ -1,4 +1,17 @@
 import assert from "node:assert/strict";
+import {
+  shouldPauseQueueAfterSendError,
+  queuedDeliveryDisposition,
+} from "../apps/desktop/src/chat-send-outcome.ts";
+
+// A saved interrupted turn used to pause the queue again after Steer.
+for (const persisted of [false, true]) {
+  assert.equal(shouldPauseQueueAfterSendError(persisted, true, true), false);
+  assert.equal(shouldPauseQueueAfterSendError(persisted, true, false), true);
+  assert.equal(shouldPauseQueueAfterSendError(persisted, false, false), persisted);
+  assert.equal(queuedDeliveryDisposition({ kind: "cancelled", persisted }), "settled",
+    "the interrupted queue entry cannot be requeued ahead of the steered message");
+}
 
 import {
   promoteQueuedMessage,
@@ -116,6 +129,31 @@ assert.equal(
   undefined,
   "an unknown queued id must not invent a queue",
 );
+
+// Steer promotes only the selected message and dispatches exactly once after
+// both the old sender and backend stop acknowledgement have completed.
+const steeringQueues = { chat: promoteQueuedMessage(
+  [message("first"), message("selected"), message("last")], "selected",
+) };
+const steeringOptions = {
+  dispatchingSessionIds: new Set(),
+  sendingSessionIds: new Set(["chat"]),
+  pausedSessionIds: new Set(),
+  deliveryNotBefore: new Map(),
+  now: 0,
+};
+assert.equal(selectQueuedMessageDelivery(steeringQueues, steeringOptions), undefined,
+  "no overlap while the old run or its stop acknowledgement is outstanding");
+steeringOptions.sendingSessionIds.delete("chat");
+assert.equal(selectQueuedMessageDelivery(steeringQueues, steeringOptions)?.message.id, "selected",
+  "Steer sends at once without the automatic delivery cooldown");
+steeringOptions.dispatchingSessionIds.add("chat");
+assert.equal(selectQueuedMessageDelivery(steeringQueues, steeringOptions), undefined,
+  "rerenders and repeated clicks cannot send the message twice");
+steeringOptions.pausedSessionIds.add("chat");
+steeringOptions.dispatchingSessionIds.clear();
+assert.equal(selectQueuedMessageDelivery(steeringQueues, steeringOptions), undefined,
+  "a subsequent plain Stop overrides Steer");
 
 console.log("chat message queue checks passed");
 

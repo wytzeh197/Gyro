@@ -120,10 +120,13 @@ pub(crate) struct ProviderRunControl {
     pub(crate) timeline: Mutex<provider_timeline::ProviderTimeline>,
     pub(crate) suggested_title: Mutex<(Option<String>, bool)>,
     pub(crate) title_stream: Mutex<session_title_stream::SessionTitleStream>,
+    pub(crate) plan_progress: Mutex<crate::providers::markers::PlanProgressStream>,
     pub(crate) approval_nonce: String,
     pub(crate) capability_context: Mutex<Option<BoundProviderCapabilityContext>>,
     pub(crate) capability_calls: Mutex<HashSet<Uuid>>,
     pub(crate) completed_mutations: AtomicBool,
+    pub(crate) context_compaction_requested: AtomicBool,
+    pub(crate) context_compaction_closed: AtomicBool,
     pub(crate) timing: Mutex<timing::Handle>,
     pub(crate) process_owner: Mutex<Option<gyro_core::process_guard::ProcessOwner>>,
     pub(crate) request: Mutex<Option<ProviderChatRequest>>,
@@ -144,10 +147,13 @@ impl Default for ProviderRunControl {
             timeline: Mutex::new(provider_timeline::ProviderTimeline::default()),
             suggested_title: Mutex::new((None, false)),
             title_stream: Mutex::new(Default::default()),
+            plan_progress: Mutex::new(Default::default()),
             approval_nonce: Uuid::new_v4().to_string(),
             capability_context: Mutex::new(None),
             capability_calls: Mutex::new(HashSet::new()),
             completed_mutations: AtomicBool::new(false),
+            context_compaction_requested: AtomicBool::new(false),
+            context_compaction_closed: AtomicBool::new(false),
             timing: Mutex::new(timing::Handle::default()),
             process_owner: Mutex::new(None),
             request: Mutex::new(None),
@@ -232,18 +238,32 @@ pub(crate) fn stop_provider_run(
     session_id: &str,
     reason: ProviderStopReason,
 ) -> bool {
+    cancel_provider_run(app, session_id, reason)
+        .ok()
+        .flatten()
+        .is_some()
+}
+
+/// Capture the exact run being stopped so a delayed acknowledgement cannot
+/// cancel or release a replacement run for the same chat.
+pub(crate) fn cancel_provider_run(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    reason: ProviderStopReason,
+) -> Result<Option<std::sync::Arc<ProviderRunControl>>, String> {
     let manager = app.state::<ProviderCancellationManager>();
-    let Ok(flags) = manager.flags.lock() else {
-        return false;
-    };
+    let flags = manager
+        .flags
+        .lock()
+        .map_err(|_| "provider cancellation state is unavailable".to_string())?;
     let Some(control) = flags.get(session_id) else {
-        return false;
+        return Ok(None);
     };
     if let Ok(mut stop_reason) = control.stop_reason.lock() {
         stop_reason.get_or_insert(reason);
     }
     control.cancellation.cancel();
-    true
+    Ok(Some(control.clone()))
 }
 
 pub(crate) use gyro_core::provider_runtime::types::ProviderApprovalDecision;

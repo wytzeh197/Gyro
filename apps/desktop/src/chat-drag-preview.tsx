@@ -427,19 +427,14 @@ function Preview() {
           onDropSession={(sessionId, _source, slotIndex, placement) => {
             const session = sessions.find((item) => item.id === sessionId);
             if (!session) return false;
-            const targetProject = chatProjectKey(session.workspacePath);
-            const switching = targetProject !== activeProjectKey;
-            const existing = gridRef.current.layouts[targetProject]?.slots.some(
-              (pane) =>
-                pane?.kind === "session" && pane.sessionId === sessionId,
-            );
+            if (chatProjectKey(_source) !== chatProjectKey(session.workspacePath)) return false;
             const accepted = dispatch({
               type: "select-pane",
-              projectKey: targetProject,
+              projectKey: activeProjectKey,
               pane: paneFor(sessionId, session.workspacePath),
-              mode: switching && existing ? "replace" : "drop",
-              slotIndex: switching ? undefined : slotIndex,
-              ...(switching ? {} : placement),
+              mode: "drop",
+              slotIndex,
+              ...placement,
             });
             if (accepted) setActive(sessionId);
             return accepted;

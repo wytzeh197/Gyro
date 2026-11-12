@@ -245,6 +245,12 @@
 .gyro-scheduled-suggestions {
   margin-top: 24px;
 }
+.gyro-scheduled-empty-lead {
+  margin: 0 0 14px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  line-height: 1.5;
+}
 .gyro-scheduled-suggestions h2 {
   font-size: var(--gyro-font-micro);
   color: var(--gyro-muted);

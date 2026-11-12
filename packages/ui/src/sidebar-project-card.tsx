@@ -332,7 +332,7 @@ function ProjectEditDialog({
   return createPortal(
     <dialog
       ref={dialog}
-      className="gyro-project-edit-dialog"
+      className={`gyro-project-edit-dialog${view === "memory" ? " is-memory" : ""}`}
       aria-labelledby="gyro-project-edit-title"
       onCancel={onClose}
       onClick={(event) => {
@@ -349,9 +349,7 @@ function ProjectEditDialog({
       }}
     >
       <header>
-        <h2 id="gyro-project-edit-title">
-          {view === "memory" ? "Project memory" : "Edit project"}
-        </h2>
+        <h2 id="gyro-project-edit-title">Edit project</h2>
         <button type="button" aria-label="Close edit project" onClick={onClose}>
           <X size={17} />
         </button>
@@ -544,7 +542,7 @@ function ProjectEditDialog({
           hidden={view !== "memory"}
           className="gyro-project-settings-memory"
         >
-          <ProjectMemoryPanel runtime={memory} />
+          <ProjectMemoryPanel runtime={memory} embedded />
         </div>
       ) : null}
     </dialog>,

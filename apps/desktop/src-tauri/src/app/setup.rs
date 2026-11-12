@@ -293,6 +293,7 @@ pub fn run() {
             crate::session_browser::session_browser_history,
             crate::session_browser::session_browser_close,
             crate::session_browser::session_browser_snapshot,
+            crate::session_browser::session_browser_annotate,
             crate::automation::commands::complete_automation_lease,
             crate::terminal::panes::close_terminal_pane,
             crate::automation::commands::create_automation,

@@ -113,3 +113,113 @@ fn repeated_turn_payload_is_smaller_without_changing_receipt_identity() {
     assert!(second.is_empty());
     assert_eq!(reused.roots, receipt.roots);
 }
+
+#[test]
+fn longer_requests_do_not_pay_for_single_word_matches() {
+    let source = "- Model terminal panes follow the selected chat\n- Release tags are published only after manual acceptance; never push a release unprompted\n- Settings colors use semantic tokens\n";
+    for request in [
+        "when one chat, no splitview, it should push the chat a little left",
+        "optimize project memory retrieval and reduce tokens",
+    ] {
+        let (text, receipt) = context(source, request, MemoryBudget::default()).render(false);
+        assert!(text.is_empty(), "{request}: {text}");
+        assert_eq!(receipt.supplied_bytes, 0);
+    }
+    let (text, _) = context(
+        source,
+        "release publication requires manual acceptance",
+        MemoryBudget::default(),
+    )
+    .render(false);
+    assert!(
+        text.contains("never push a release unprompted"),
+        "keep the full relevant constraint"
+    );
+    assert!(!text.contains("terminal") && !text.contains("Settings"));
+}
+
+#[test]
+fn focused_topics_and_exact_identifiers_still_retrieve_complete_facts() {
+    let source = "- Memory retrieval uses bounded local context\n- Register ProviderRunControl before dispatch; otherwise cancellation fails\n- Use run_provider_chat_blocking only after registration\n";
+    for (request, expected) in [
+        ("memory", "Memory retrieval uses bounded local context"),
+        (
+            "explain ProviderRunControl ownership",
+            "Register ProviderRunControl before dispatch; otherwise cancellation fails",
+        ),
+        (
+            "inspect run_provider_chat_blocking ownership",
+            "Use run_provider_chat_blocking only after registration",
+        ),
+    ] {
+        let (text, receipt) = context(source, request, MemoryBudget::default()).render(false);
+        assert!(text.contains(expected), "{request}: {text}");
+        assert_eq!(receipt.roots[0].entries.len(), 1);
+        assert_eq!(receipt.supplied_bytes, text.len());
+        assert_eq!(receipt.estimated_tokens, text.len().div_ceil(3));
+    }
+}
+
+#[test]
+fn scoped_paths_and_explicit_ids_bypass_lexical_threshold_without_sibling_leakage() {
+    let source = "- Keep invariant intact\n  <!-- gyro-memory:{\"v\":2,\"id\":\"scoped\",\"paths\":[\"src/runtime\"]} -->\n";
+    let document = MemoryDocument::parse(source).unwrap();
+    for (paths, ids, expected) in [
+        (vec!["src/runtime/cancel.rs".into()], vec![], 1),
+        (vec!["src/runtime-extra/cancel.rs".into()], vec![], 0),
+        (vec![], vec!["scoped".into()], 1),
+    ] {
+        let selected = select_memory(
+            &document,
+            MemoryQuery {
+                root_id: "root-a",
+                root_label: "Gyro",
+                request: "unrelated topic",
+                paths: &paths,
+                requested_ids: &ids,
+                budget: MemoryBudget::default(),
+            },
+        );
+        assert_eq!(selected.entries.len(), expected);
+    }
+}
+
+#[test]
+fn selection_upgrade_resets_old_refs_once_then_reuses_confirmed_context() {
+    let source = "- Frontend tests require pnpm\n";
+    let mut prepared = context(source, "frontend tests", MemoryBudget::default());
+    let (_, mut old) = prepared.render(false);
+    old.selection_version = selection::SELECTION_VERSION - 1;
+    prepared.previous = Some(old);
+    let (text, receipt) = prepared.render(true);
+    assert!(text.contains("disregard all earlier"));
+    assert!(text.contains("Frontend tests require pnpm"));
+    assert!(text.len() <= DEFAULT_CONTEXT_BYTES);
+    assert_eq!(receipt.reused_count, 0);
+    assert_eq!(receipt.selection_version, selection::SELECTION_VERSION);
+    prepared.previous = Some(receipt);
+    assert!(prepared.render(true).0.is_empty());
+}
+
+#[test]
+fn compact_context_preserves_unicode_and_whole_entries_at_the_budget_boundary() {
+    let source = "- Frontend tests: café 日本語; preserve every qualifier\n";
+    let budget = MemoryBudget::default();
+    let (full, _) = context(source, "frontend tests", budget).render(false);
+    let exact = MemoryBudget {
+        max_bytes: full.len(),
+        ..budget
+    };
+    assert_eq!(
+        context(source, "frontend tests", exact).render(false).0,
+        full
+    );
+    let too_small = MemoryBudget {
+        max_bytes: full.len() - 1,
+        ..budget
+    };
+    assert!(context(source, "frontend tests", too_small)
+        .render(false)
+        .0
+        .is_empty());
+}

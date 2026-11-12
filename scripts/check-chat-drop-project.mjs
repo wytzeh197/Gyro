@@ -165,86 +165,76 @@ function assertAccepted(app, id, path) {
   );
 }
 
-// All destination occupancy shapes must either append into their first free
-// slot or refuse at capacity. The displayed project's quadrant/row placement
-// must never address that destination.
+// Foreign chats land in the displayed layout while retaining their source
+// workspace. Exercise every occupancy shape, valid slot, and invalid target.
 for (let mask = 0; mask < 16; mask += 1) {
   const destination = Array.from({ length: 4 }, (_, index) =>
-    mask & (1 << index) ? pane("b-" + index, B) : null,
+    mask & (1 << index) ? pane("a-" + index, A) : null,
   );
   const initial = {
     activeProjectKey: A,
-    maximizedPaneId: "session:a",
+    maximizedPaneId: destination.find(Boolean)?.paneId,
     layouts: {
-      [A]: layout(A, [pane("a", A), null, null, null]),
-      [B]: layout(B, destination),
+      [A]: layout(A, destination),
+      [B]: layout(B, [pane("b", B), null, null, null]),
     },
   };
   const incoming = session("incoming", B);
   for (const displayedSlot of [0, 1, 2, 3, 99]) {
     const app = harness(initial, [incoming]);
-    const invoke = () =>
-      app.drop(incoming.id, B, displayedSlot, {
-        insertPosition: "before",
-        arrangement: "rows",
-        splitDirection: "vertical",
-      });
-    if (mask === 15) {
+    const invoke = () => app.drop(incoming.id, B, displayedSlot);
+    if (mask === 15 || displayedSlot === 99) {
       assertRejected(app, initial, invoke);
-      assert.ok(
-        app.effects.some(
-          ([type, , title]) =>
-            type === "notify" && title === "Chat layout is full",
-        ),
-      );
     } else {
       assert.equal(invoke(), true);
       assertAccepted(app, incoming.id, B);
       const next = app.state();
-      assert.equal(next.activeProjectKey, B);
-      assert.equal(next.maximizedPaneId, undefined);
-      assert.equal(next.layouts[A], initial.layouts[A]);
-      const freeSlot = destination.findIndex((item) => item === null);
-      assert.equal(next.layouts[B].slots[freeSlot].sessionId, incoming.id);
-      assert.equal(next.layouts[B].arrangement, "columns");
-      destination.forEach((item, index) => {
-        if (item) assert.equal(next.layouts[B].slots[index], item);
-      });
+      assert.equal(next.activeProjectKey, A);
+      // ChatGridSurface clears maximization after an accepted drop; this
+      // callback preserves it so the surface does not toggle it back on.
+      assert.equal(next.maximizedPaneId, initial.maximizedPaneId);
+      assert.equal(next.layouts[B], initial.layouts[B]);
+      const inserted = next.layouts[A].slots.find((item) => item?.sessionId === incoming.id);
+      assert.ok(inserted);
+      assert.equal(next.layouts[A].slots.filter(Boolean).length, destination.filter(Boolean).length + 1);
+      assert.equal(next.layouts[A].focusedPaneId, inserted.paneId);
+      assert.equal(inserted.workspacePath, B);
+      for (const item of destination.filter(Boolean)) {
+        assert.ok(next.layouts[A].slots.includes(item), "no existing chat is evicted");
+      }
       const dispatched = app.effects.find(([type]) => type === "grid")[1];
-      assert.equal(dispatched.projectKey, B);
-      assert.equal(dispatched.slotIndex, undefined);
-      assert.equal(dispatched.insertPosition, undefined);
-      assert.equal(dispatched.arrangement, undefined);
+      assert.equal(dispatched.projectKey, A);
+      assert.equal(dispatched.slotIndex, displayedSlot);
+      assert.equal(incoming.workspacePath, B);
     }
   }
 }
 
-// A foreign chat already open in a full layout is focused there, with its
-// original pane key/order preserved. No extra pane or eviction is permitted.
+// A chat already open in its source layout can also be displayed elsewhere.
+// Its source pane identity/order stay intact; the displayed layout owns placement.
 {
-  const destination = [0, 1, 2, 3].map((index) => pane("b-" + index, B));
-  destination[2] = { ...destination[2], paneId: "draft:migrated" };
+  const sourceSlots = [0, 1, 2, 3].map((index) => pane("b-" + index, B));
+  sourceSlots[2] = { ...sourceSlots[2], paneId: "draft:migrated" };
   const initial = {
     activeProjectKey: A,
     layouts: {
       [A]: layout(A, [pane("a", A), null, null, null]),
-      [B]: layout(B, destination),
+      [B]: layout(B, sourceSlots),
     },
   };
   const app = harness(initial, [session("b-2", B)]);
-  assert.equal(
-    app.drop("b-2", B, 0, { insertPosition: "before", arrangement: "rows" }),
-    true,
-  );
+  assert.equal(app.drop("b-2", B, 0, {
+    insertPosition: "before", arrangement: "rows",
+  }), true);
   assertAccepted(app, "b-2", B);
-  assert.equal(app.state().activeProjectKey, B);
-  assert.equal(app.state().layouts[B].slots, destination);
-  assert.equal(app.state().layouts[B].focusedPaneId, "draft:migrated");
-  assert.equal(app.state().layouts[A], initial.layouts[A]);
+  assert.equal(app.state().activeProjectKey, A);
+  assert.equal(app.state().layouts[B], initial.layouts[B]);
+  assert.equal(app.state().layouts[A].slots[0].sessionId, "b-2");
+  assert.equal(app.state().layouts[A].slots[0].workspacePath, B);
+  assert.equal(app.state().layouts[A].arrangement, "rows");
 }
 
-// Same-project rejection cases cannot change active session, workspace or
-// maximization, even when an incoming session still exists in the provider.
+// Rejected drops cannot change active session, workspace, or maximization.
 {
   const slots = [0, 1, 2, 3].map((index) => pane("a-" + index, A));
   const initial = {
@@ -269,52 +259,40 @@ for (let mask = 0; mask < 16; mask += 1) {
   }
 }
 
-// Projectless chats get their own durable layout, never the displayed project
-// or a path supplied in native drag bytes.
+// Projectless chats can share the displayed layout without acquiring its path.
 {
   const initial = {
     activeProjectKey: A,
     layouts: { [A]: layout(A, [pane("a", A), null, null, null]) },
   };
-  const app = harness(initial, [session("folderless", "")]);
-  assert.equal(
-    app.drop("folderless", "", 3, {
-      insertPosition: "before",
-      arrangement: "rows",
-    }),
-    true,
-  );
-  const key = chatProjectKey("");
-  assert.equal(app.state().activeProjectKey, key);
-  assert.equal(app.state().layouts[key].slots[0].sessionId, "folderless");
-  assert.equal(app.state().layouts[A], initial.layouts[A]);
+  const incoming = session("folderless", "");
+  const app = harness(initial, [incoming]);
+  assert.equal(app.drop("folderless", "", 3), true);
+  assert.equal(app.state().activeProjectKey, A);
+  assert.equal(app.state().layouts[A].slots[3].sessionId, "folderless");
+  assert.equal(app.state().layouts[A].slots[3].workspacePath, "");
+  assert.equal(incoming.workspacePath, "");
   assertAccepted(app, "folderless", "");
 }
 
-// Two drop callbacks can run against the same rendered closure while React
-// is batching updates. Acceptance must track already-queued mutations so a
-// second chat cannot steal focus after the first consumed the final free slot.
+// Batched callbacks observe already-queued mutations, preventing a second drop
+// from stealing focus after the first consumes the visible layout's final slot.
 {
-  const destination = [pane("b-0", B), pane("b-1", B), pane("b-2", B), null];
+  const destination = [pane("a-0", A), pane("a-1", A), pane("a-2", A), null];
   const initial = {
     activeProjectKey: A,
-    layouts: {
-      [A]: layout(A, [pane("a", A), null, null, null]),
-      [B]: layout(B, destination),
-    },
+    layouts: { [A]: layout(A, destination) },
   };
   const app = harness(initial, [session("first", B), session("second", B)]);
-  assert.equal(app.drop("first", B, 0), true);
+  assert.equal(app.drop("first", B, 3), true);
   const full = app.state();
-  assert.equal(full.layouts[B].slots[3].sessionId, "first");
+  assert.equal(full.layouts[A].slots[3].sessionId, "first");
   assertRejected(app, full, () => app.drop("second", B, 0));
   assert.equal(app.activeSessionIdRef.current, "first");
-  assert.equal(full.layouts[B].focusedPaneId, "session:first");
+  assert.equal(full.layouts[A].focusedPaneId, "session:first");
 }
 
-// A native project hint must agree with the actual session. If it disagrees,
-// the foreign-project preview no longer describes the drop. Empty hints name
-// projectless chats; they cannot claim a chat that belongs to a project.
+// Native drag hints must agree with the saved source session.
 {
   const initial = {
     activeProjectKey: A,
@@ -328,11 +306,12 @@ for (let mask = 0; mask < 16; mask += 1) {
   for (const hint of [B, B + "///"]) {
     const app = harness(initial, [session("foreign", B)]);
     assert.equal(app.drop("foreign", hint, 3), true);
-    assert.equal(app.state().activeProjectKey, B);
+    assert.equal(app.state().activeProjectKey, A);
+    assert.equal(app.state().layouts[A].slots[3].workspacePath, B);
     assertAccepted(app, "foreign", B);
   }
 }
 
 console.log(
-  "Chat project drop checks passed: real App callback and dispatch, rejected focus invariants, foreign-project safe append/existing focus, capacity, projectless chats, untrusted hints, queued drops.",
+  "Chat project drop checks passed: actual App callback, visible-layout placement, source ownership, all occupancy patterns, rejected focus invariants, projectless chats, untrusted hints, and queued drops.",
 );

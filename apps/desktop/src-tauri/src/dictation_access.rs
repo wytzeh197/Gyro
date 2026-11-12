@@ -87,6 +87,88 @@ fn speech_failure(code: isize) -> &'static str {
     }
 }
 
+/// Joins the utterances of one dictation session into a single transcript.
+///
+/// After a pause, Speech.framework starts a new utterance and its partials
+/// carry only the words spoken since. The composer rewrites its dictated span
+/// with every update, so earlier words must be carried forward here.
+#[derive(Default)]
+struct Transcript {
+    /// Utterances the recognizer has already moved past.
+    earlier: String,
+    /// Latest text of the utterance in progress.
+    current: String,
+    /// The recognizer marked `current` as a finished utterance.
+    sealed: bool,
+}
+
+impl Transcript {
+    /// Record one result and return the whole session's text.
+    fn update(&mut self, text: &str, utterance_ended: bool) -> String {
+        let text = text.trim();
+        if !text.is_empty() {
+            if self.starts_new_utterance(text) {
+                self.earlier = join_utterances(&self.earlier, &self.current);
+            }
+            self.current = text.to_string();
+            self.sealed = utterance_ended;
+        } else if utterance_ended {
+            self.sealed = true;
+        }
+        self.text()
+    }
+
+    fn text(&self) -> String {
+        join_utterances(&self.earlier, &self.current)
+    }
+
+    fn starts_new_utterance(&self, text: &str) -> bool {
+        if self.current.is_empty() {
+            return false;
+        }
+        // Some systems keep the transcript cumulative after a pause.
+        if starts_with_words(text, &self.current) {
+            return false;
+        }
+        if self.sealed {
+            return true;
+        }
+        // Without an end-of-utterance mark, only a transcript that collapses
+        // to a different start counts as a reset, not an ordinary revision.
+        let before = self.current.split_whitespace().count();
+        let after = text.split_whitespace().count();
+        before >= 3 && after * 2 <= before && first_word(text) != first_word(&self.current)
+    }
+}
+
+fn join_utterances(earlier: &str, current: &str) -> String {
+    match (earlier.is_empty(), current.is_empty()) {
+        (true, _) => current.to_string(),
+        (_, true) => earlier.to_string(),
+        _ => format!("{earlier} {current}"),
+    }
+}
+
+fn normalized_words(text: &str) -> Vec<String> {
+    text.split_whitespace()
+        .map(|word| {
+            word.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .filter(|word| !word.is_empty())
+        .collect()
+}
+
+fn first_word(text: &str) -> Option<String> {
+    normalized_words(text).into_iter().next()
+}
+
+fn starts_with_words(text: &str, prefix: &str) -> bool {
+    let text = normalized_words(text);
+    let prefix = normalized_words(prefix);
+    !prefix.is_empty() && text.len() >= prefix.len() && text[..prefix.len()] == prefix[..]
+}
+
 #[cfg(not(target_os = "macos"))]
 const UNSUPPORTED: DictationAccess = DictationAccess {
     microphone: "unsupported",
@@ -533,6 +615,7 @@ fn build_session(app: &AppHandle, id: u64) -> Result<EngineSession, String> {
     let handler = {
         let latest = Arc::clone(&latest);
         let closed = Arc::clone(&closed);
+        let transcript = Mutex::new(Transcript::default());
         RcBlock::new(move |result: *mut AnyObject, error: *mut NSError| {
             if closed.load(Ordering::SeqCst)
                 || !accept_results().load(Ordering::SeqCst)
@@ -543,9 +626,13 @@ fn build_session(app: &AppHandle, id: u64) -> Result<EngineSession, String> {
             let mut text = String::new();
             let mut is_final = false;
             if !result.is_null() {
-                text = transcription(result);
+                let utterance = transcription(result);
                 let final_value: Bool = unsafe { msg_send![result, isFinal] };
                 is_final = final_value.as_bool();
+                let ended = utterance_ended(result);
+                if let Ok(mut transcript) = transcript.lock() {
+                    text = transcript.update(&utterance, ended);
+                }
                 if !text.is_empty() {
                     if let Ok(mut stored) = latest.lock() {
                         *stored = text.clone();
@@ -693,6 +780,21 @@ fn transcription(result: *mut objc2::runtime::AnyObject) -> String {
     unsafe { &*text }.to_string()
 }
 
+/// Speech.framework attaches metadata to the result that closes an utterance,
+/// which is the last result before a pause resets the transcript.
+#[cfg(target_os = "macos")]
+fn utterance_ended(result: *mut objc2::runtime::AnyObject) -> bool {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyObject, Bool};
+    let responds: Bool =
+        unsafe { msg_send![result, respondsToSelector: objc2::sel!(speechRecognitionMetadata)] };
+    if !responds.as_bool() {
+        return false;
+    }
+    let metadata: *mut AnyObject = unsafe { msg_send![result, speechRecognitionMetadata] };
+    !metadata.is_null()
+}
+
 #[cfg(target_os = "macos")]
 fn emit_update(app: &AppHandle, kind: &'static str, text: String) {
     let _ = app.emit(DICTATION_EVENT, DictationUpdate { kind, text });
@@ -702,8 +804,58 @@ fn emit_update(app: &AppHandle, kind: &'static str, text: String) {
 mod tests {
     use super::{
         access_error, av_authorization_label, speech_authorization_label, speech_failure,
-        speech_label, DictationAccess, NETWORK_NEEDED,
+        speech_label, DictationAccess, Transcript, NETWORK_NEEDED,
     };
+
+    #[test]
+    fn a_pause_keeps_the_words_spoken_before_it() {
+        let mut transcript = Transcript::default();
+        assert_eq!(transcript.update("So I", false), "So I");
+        assert_eq!(
+            transcript.update("So I think we should", true),
+            "So I think we should"
+        );
+        assert_eq!(
+            transcript.update("Ship it", false),
+            "So I think we should Ship it"
+        );
+        assert_eq!(
+            transcript.update("Ship it today", false),
+            "So I think we should Ship it today"
+        );
+    }
+
+    #[test]
+    fn a_cumulative_transcript_after_a_pause_is_not_repeated() {
+        let mut transcript = Transcript::default();
+        transcript.update("So I think", true);
+        assert_eq!(
+            transcript.update("So I think we should", false),
+            "So I think we should"
+        );
+    }
+
+    #[test]
+    fn an_unmarked_reset_still_keeps_earlier_words() {
+        let mut transcript = Transcript::default();
+        transcript.update("Let me think about this", false);
+        assert_eq!(
+            transcript.update("Okay", false),
+            "Let me think about this Okay"
+        );
+    }
+
+    #[test]
+    fn revisions_replace_the_current_utterance() {
+        let mut transcript = Transcript::default();
+        transcript.update("I scream", false);
+        assert_eq!(transcript.update("Ice cream", false), "Ice cream");
+        transcript.update("Hello there my friend", false);
+        assert_eq!(
+            transcript.update("Hello there, my friend.", false),
+            "Hello there, my friend."
+        );
+    }
 
     #[test]
     fn speech_statuses_match_the_system_sheet() {

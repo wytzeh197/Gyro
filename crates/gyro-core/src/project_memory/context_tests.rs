@@ -433,3 +433,46 @@ fn council_memory_remains_read_only_and_internal_helpers_stay_isolated() {
         assert!(!memory.suggest_candidates);
     }
 }
+
+#[test]
+fn old_selection_receipts_are_not_retained_after_a_retrieval_upgrade() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join(".gyro")).unwrap();
+    std::fs::write(
+        temp.path().join(MEMORY_PATH),
+        "- Run frontend tests with pnpm test\n",
+    )
+    .unwrap();
+    let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("private"))).unwrap();
+    let session = store
+        .create_session(temp.path(), SessionOrigin::Desktop, "memory")
+        .unwrap();
+    let (_, mut old) = prepare_memory_context(&store, &session, &request(&session), None)
+        .unwrap()
+        .render(false);
+    old.selection_version = selection::SELECTION_VERSION - 1;
+    let turn = uuid::Uuid::new_v4();
+    let cursor = json!({"kind":"codex-session","sessionId":"provider-thread"});
+    store
+        .record_project_memory_receipt(session.id, turn, "openai", &old)
+        .unwrap();
+    store
+        .acknowledge_project_memory_receipt(session.id, turn, "openai", &cursor, &old)
+        .unwrap();
+    store
+        .upsert_provider_session_binding(
+            session.id, "openai", None, None, None, cursor, "ready", None,
+        )
+        .unwrap();
+    let mut next = request(&session);
+    next.message = "continue".into();
+    let prepared = prepare_memory_context(&store, &session, &next, None).unwrap();
+    assert!(prepared
+        .selections
+        .iter()
+        .all(|root| root.entries.is_empty()));
+    let (text, receipt) = prepared.render(true);
+    assert!(text.contains("disregard all earlier"));
+    assert!(!text.contains("pnpm"));
+    assert_eq!(receipt.selection_version, selection::SELECTION_VERSION);
+}

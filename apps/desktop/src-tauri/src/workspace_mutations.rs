@@ -130,7 +130,7 @@ fn create_file_mutation_proposal_with_base(
         }
         None
     };
-    let proposal = store.create_mutation_proposal_at_root(
+    let proposal = store.create_mutation_proposal_at_root_with_approval(
         session_id,
         turn_id,
         root_id,
@@ -138,13 +138,13 @@ fn create_file_mutation_proposal_with_base(
         request.content,
         expected_hash,
         base_exists,
+        !apply_immediately,
     )?;
     // Full access authorizes this write, but it still goes through the same
     // hash guard, atomic replacement and durable decision as a reviewed edit.
     // Do not emit a pending approval for an already authorized operation.
     if apply_immediately {
         let result = decide_mutation_proposal(store, proposal.id, MutationDecision::Approve)?;
-        let _ = store.mark_mutation_proposal_surfaced(proposal.id);
         return Ok(result.proposal);
     }
     let payload = mutation_approval_payload(&proposal, None);

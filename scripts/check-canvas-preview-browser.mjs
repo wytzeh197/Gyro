@@ -52,12 +52,11 @@ async function until(check) {
 }
 let ws;
 try {
-  const pages = await until(async () =>
-    (await fetch(`http://127.0.0.1:${port}/json/list`)).json(),
-  );
-  ws = new WebSocket(
-    pages.find((page) => page.type === "page").webSocketDebuggerUrl,
-  );
+  const page = await until(async () => {
+    const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+    return pages.find((candidate) => candidate.type === "page" && candidate.webSocketDebuggerUrl);
+  });
+  ws = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {
     ws.onopen = resolve;
     ws.onerror = reject;

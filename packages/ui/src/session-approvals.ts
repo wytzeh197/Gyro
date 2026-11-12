@@ -1,5 +1,8 @@
 import { pendingSubagentApprovals } from "./subagents.ts";
-import { latestChatQuestions } from "./chat-questions.ts";
+import {
+  isChatQuestionDismissed,
+  latestChatQuestions,
+} from "./chat-questions.ts";
 import type { Session, SessionEvent } from "./types";
 
 function payloadOf(event: SessionEvent): Record<string, unknown> {
@@ -77,7 +80,12 @@ export function sessionQuestionCounts(
     const request = pendingSessionQuestions(
       eventsBySessionId[session.id] ?? [],
     );
-    if (request && request.id !== resolvedQuestionIdsBySessionId[session.id]) {
+    // A skipped question no longer waits on the user, so it shows no badge.
+    if (
+      request &&
+      request.id !== resolvedQuestionIdsBySessionId[session.id] &&
+      !isChatQuestionDismissed(session.id, request.id)
+    ) {
       counts[session.id] = request.questions.length;
     }
   }

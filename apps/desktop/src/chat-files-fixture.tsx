@@ -18,6 +18,21 @@ const theme =
 document.documentElement.dataset.theme = theme;
 const composerFixture = new URLSearchParams(location.search).has("composer");
 const mentionsFixture = new URLSearchParams(location.search).has("mentions");
+const imagesFixture = new URLSearchParams(location.search).has("images");
+const captures = "/Users/me/Library/Application%20Support/Gyro/browser-captures";
+const imagesReply = [
+  "Here are the redesigned pages.",
+  "",
+  `**Workflows, dark** ![Workflows dark](${captures}/workflows-dark.png)`,
+  "",
+  `**Schedules, light** ![Schedules light](${captures}/schedules-light.png)`,
+  "",
+  `![Runs](${captures}/runs-dark.png)`,
+  "",
+  `- ![Narrow](${captures}/narrow.png)`,
+  "",
+  "Everything passes the browser check.",
+].join("\n");
 const baseConfig: GyroConfig = {
   commandProfiles: [],
   modelProviders: [],
@@ -113,7 +128,11 @@ function Fixture() {
   return (
     <ChatFileActionsContext.Provider
       value={{
-        preview: async (path) => (path.endsWith(".mov") ? clip : screenshot),
+        preview: async (path) => {
+          // A path still carrying `%20` would miss the file on disk.
+          if (imagesFixture && path.includes("%")) throw new Error("missing");
+          return path.endsWith(".mov") ? clip : screenshot;
+        },
         open: (path) => setAction(`Revealed ${path}`),
       }}
     >
@@ -121,10 +140,10 @@ function Fixture() {
         aria-live="polite"
         style={{ position: "fixed", top: 14, right: 48, zIndex: 10001, fontSize: 11, color: "var(--gyro-muted)", background: "var(--gyro-app)", padding: "4px 8px", borderRadius: 6 }}
       >
-        Fixture · {mentionsFixture ? "Inline file mentions" : composerFixture ? "Compact composer" : "Compact user messages"} {action ? `· ${action}` : ""}
+        Fixture · {imagesFixture ? "Reply images" : mentionsFixture ? "Inline file mentions" : composerFixture ? "Compact composer" : "Compact user messages"} {action ? `· ${action}` : ""}
       </output>
       <ChatSurface
-        events={mentionsFixture ? events.slice(0, 2).map((event) => ({ ...event, payload: {}, message: event.kind === "user-message" ? "Show file mentions as normal text links." : "Start with [theme foundations](/workspace/packages/ui/src/styles-foundation.css), [chat styling](/workspace/packages/ui/src/chat.css), and [existing corner treatment](/workspace/docs/corner-treatment.md).\n\nOpen the [product plan](/tmp/plan.pdf) or the [budget spreadsheet](/tmp/budget.xlsx) to review them. These filenames should match the surrounding text size." })) : composerFixture ? events.slice(0, 2).map((event) => ({ ...event, payload: {}, message: event.kind === "user-message" ? "Make the composer 5% smaller." : "Use the composer below to check typing and controls." })) : new URLSearchParams(location.search).has("compact")
+        events={imagesFixture ? events.slice(0, 2).map((event) => ({ ...event, payload: {}, message: event.kind === "user-message" ? "show me images" : imagesReply })) : mentionsFixture ? events.slice(0, 2).map((event) => ({ ...event, payload: {}, message: event.kind === "user-message" ? "Show file mentions as normal text links." : "Start with [theme foundations](/workspace/packages/ui/src/styles-foundation.css), [chat styling](/workspace/packages/ui/src/chat.css), and [existing corner treatment](/workspace/docs/corner-treatment.md).\n\nOpen the [product plan](/tmp/plan.pdf) or the [budget spreadsheet](/tmp/budget.xlsx) to review them. These filenames should match the surrounding text size." })) : composerFixture ? events.slice(0, 2).map((event) => ({ ...event, payload: {}, message: event.kind === "user-message" ? "Make the composer 5% smaller." : "Use the composer below to check typing and controls." })) : new URLSearchParams(location.search).has("compact")
           ? events.map((event, index) => index === 0
             ? { ...event, message: "Is that the official place of the traffic light buttons?", payload: { attachments: [{ id: "image", kind: "image", name: "Screenshot.png", path: "/tmp/screenshot.png", size: 243_000, previewUrl: screenshot }] } }
             : index === 1

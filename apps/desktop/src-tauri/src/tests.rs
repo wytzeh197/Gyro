@@ -275,7 +275,6 @@ use std::{
 };
 use uuid::Uuid;
 
-
 fn bound_capability_context(request: &ProviderChatRequest) -> BoundProviderCapabilityContext {
     let workspace_key = request.workspace_path.clone().unwrap();
     let policy = ProjectCapabilityPolicy::defaults(workspace_key.clone());
@@ -402,7 +401,6 @@ fn every_provider_chat_arg_vector() -> Vec<(&'static str, String, Vec<String>)> 
     }
     vectors
 }
-
 
 fn create_due_stop_condition_automation(paths: &GyroPaths) -> Automation {
     AutomationStore::open(paths.clone())
@@ -538,6 +536,6 @@ mod sessions_titles_tests;
 #[path = "app/tests.rs"]
 mod app_tests;
 
-#[path="tests/provider_requests.rs"]
+#[path = "tests/provider_requests.rs"]
 mod provider_requests;
-use provider_requests::{anthropic_provider_request,provider_chat_request_for};
+use provider_requests::{anthropic_provider_request, provider_chat_request_for};

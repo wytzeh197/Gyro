@@ -22,8 +22,8 @@ applyAppearancePreferences(
   document.documentElement,
   {
     interfaceSize: params.get("scale") === "large" ? "large" : "default",
-    mainColor: "#0874df",
-    secondaryColor: "#8b6fcb",
+    mainColor: "#ffffff",
+    secondaryColor: "#ffffff",
     motionSpeed: "default",
   },
   theme,
@@ -64,6 +64,8 @@ let snapshot: MemorySnapshot = {
   diagnostics: [],
   settings: { enabled: true, suggestions: true, maxBytes: 768, maxEntries: 4 },
 };
+if (params.get("root") === "single")
+  snapshot.roots = snapshot.roots.slice(0, 1);
 let revision = 1;
 let candidates: MemoryCandidate[] =
   params.get("state") === "suggestions"

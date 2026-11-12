@@ -56,11 +56,11 @@ pub mod timing;
 pub mod usage;
 pub mod usage_receipts;
 pub mod web_fetch;
+pub mod workflows;
 pub mod workspace_check;
 pub mod workspace_roots;
 pub mod workspace_sandbox;
 pub mod worktrees;
-pub mod workflows;
 
 pub use account::{
     generate_pkce_flow, logout_account, refresh_account_session, start_account_login,

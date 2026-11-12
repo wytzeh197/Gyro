@@ -1,6 +1,6 @@
 import type { SessionEvent } from "./types.ts";
 
-const terminal = new Set(["completed", "failed", "denied", "cancelled"]);
+const terminal = new Set(["done", "completed", "failed", "denied", "cancelled", "stopped"]);
 
 function payload(event: SessionEvent): Record<string, unknown> {
   const value = event.payload;
@@ -12,6 +12,17 @@ function payload(event: SessionEvent): Record<string, unknown> {
 function key(event: SessionEvent): string | undefined {
   const value = payload(event);
   if (
+    value.kind === "provider-activity" &&
+    typeof value.activityId === "string" &&
+    value.activityId &&
+    !["commentary", "reasoning"].includes(String(value.activityKind))
+  ) {
+    return JSON.stringify([
+      event.sessionId, event.turnId ?? value.turnId ?? "",
+      "provider-activity", value.activityId,
+    ]);
+  }
+  if (
     value.kind !== "capability-call" ||
     (value.schema !== undefined && value.schema !== "gyro.capability.v1") ||
     typeof value.callId !== "string" ||
@@ -22,6 +33,7 @@ function key(event: SessionEvent): string | undefined {
   return JSON.stringify([
     event.sessionId,
     event.turnId ?? value.turnId ?? "",
+    "capability-call",
     value.callId,
   ]);
 }

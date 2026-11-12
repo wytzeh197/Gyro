@@ -169,9 +169,25 @@
 }
 
 :root[data-theme] .gyro-command-palette.is-global-search > header {
-  min-height: calc(52px * var(--gyro-ui-scale, 1));
-  gap: var(--gyro-space-standard);
+  min-height: calc(60px * var(--gyro-ui-scale, 1));
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: var(--gyro-space-comfortable);
+  padding-inline: var(--gyro-space-panel);
   border-bottom-color: var(--gyro-border-soft);
+}
+:root[data-theme] .gyro-global-search-glyph {
+  width: 20px;
+}
+:root[data-theme] .gyro-command-palette.is-global-search .gyro-command-list {
+  max-height: min(480px, calc(100dvh - 180px));
+  padding: var(--gyro-space-standard);
+  scrollbar-width: thin;
+  scrollbar-color: var(--gyro-border) transparent;
+}
+:root[data-theme] .gyro-global-search-group + .gyro-global-search-group {
+  margin-top: var(--gyro-space-standard);
+  padding-top: var(--gyro-space-standard);
+  border-top: 1px solid var(--gyro-border-soft);
 }
 
 :root[data-theme] .gyro-global-search-heading {
@@ -179,15 +195,45 @@
   font-size: var(--gyro-font-micro);
   font-weight: 500;
   letter-spacing: 0;
-  padding-top: var(--gyro-space-comfortable);
+  padding: var(--gyro-space-standard) var(--gyro-space-comfortable);
+  gap: var(--gyro-space-standard);
+}
+:root[data-theme] .gyro-global-search-count {
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-caption);
+  font-weight: 400;
 }
 
 :root[data-theme]
   .gyro-command-palette.is-global-search
   .gyro-command-list
   button {
-  min-height: max(36px, calc(var(--gyro-control-height) + 14px));
-  gap: var(--gyro-space-standard);
+  min-height: calc(44px * var(--gyro-ui-scale, 1));
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: var(--gyro-space-comfortable);
+  padding: var(--gyro-space-compact) var(--gyro-space-comfortable);
+  border-radius: var(--gyro-radius-sm);
+}
+:root[data-theme] .gyro-command-palette.is-global-search
+  .gyro-command-list button.is-active {
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  border-color: transparent;
+}
+:root[data-theme] .gyro-global-search-icon {
+  width: 20px;
+  height: 20px;
+  border: 0;
+}
+:root[data-theme] .gyro-command-list button.is-active .gyro-global-search-icon {
+  background: transparent;
+  border-color: transparent;
+  color: var(--gyro-text);
+}
+:root[data-theme] .gyro-global-search-copy {
+  gap: calc(var(--gyro-space-compact) * 0.5);
+}
+:root[data-theme] .gyro-global-search-copy small {
+  color: var(--gyro-muted);
 }
 
 :root[data-theme] .gyro-global-search-copy strong {
@@ -195,13 +241,20 @@
 }
 
 :root[data-theme] .gyro-command-palette.is-global-search kbd {
+  background: color-mix(in srgb, var(--gyro-text) 3%, transparent);
+  border-color: var(--gyro-border-soft);
   font-size: var(--gyro-font-caption);
-  font-weight: 500;
+  font-weight: 400;
   border-radius: var(--gyro-radius-xs);
 }
 
 :root[data-theme] .gyro-global-search-footer {
+  min-height: calc(38px * var(--gyro-ui-scale, 1));
+  padding-inline: var(--gyro-space-panel);
   border-top-color: var(--gyro-border-soft);
+}
+:root[data-theme] .gyro-global-search-footer > span:last-child {
+  gap: var(--gyro-space-standard);
 }
 
 /* Navigation rows keep their rhythm and still show the complete page name:
@@ -416,6 +469,33 @@
   color: var(--gyro-faint);
   font-size: var(--gyro-font-caption);
   font-weight: 400;
+}
+
+/* Questions keep a readable status at the right edge, separate from unread dots. */
+:root[data-theme] .gyro-sidebar .gyro-session-row:has(.is-needs-input)
+  .gyro-sidebar-thread-main {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  padding-right: var(--gyro-space-standard);
+}
+:root[data-theme] .gyro-sidebar .gyro-session-row .gyro-session-time.is-needs-input {
+  position: static;
+  justify-self: end;
+  width: auto;
+  max-width: none;
+  padding: calc(var(--gyro-space-compact) * 0.5) var(--gyro-space-standard);
+  border: 1px solid color-mix(in srgb, var(--gyro-success) 16%, transparent);
+  border-radius: var(--gyro-radius-pill);
+  background: color-mix(in srgb, var(--gyro-success) 10%, transparent);
+  color: color-mix(in srgb, var(--gyro-success) 75%, var(--gyro-muted));
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  opacity: 1;
+}
+:root[data-theme] .gyro-sidebar .gyro-session-row:is(:hover, :focus-within, .is-menu-open)
+  .gyro-session-time.is-needs-input {
+  opacity: 0;
 }
 
 /* Idle ages yield their width to the title. Hover and keyboard focus expose
@@ -667,6 +747,18 @@
   margin-bottom: var(--gyro-space-compact);
 }
 
+/* Pin control stays out of the way until its project row is hovered or focused. */
+:root[data-theme] .gyro-sidebar-project-row > .gyro-sidebar-project-pin {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+:root[data-theme] .gyro-sidebar-project-row:hover > .gyro-sidebar-project-pin,
+:root[data-theme] .gyro-sidebar-project-row:focus-within > .gyro-sidebar-project-pin,
+:root[data-theme] .gyro-sidebar-project-row > .gyro-sidebar-project-pin[aria-pressed="true"] {
+  opacity: 1;
+}
+
 :root[data-theme] .gyro-sidebar .gyro-sidebar-project-row.has-pin {
   grid-template-columns: minmax(0, 1fr) 28px;
 }
@@ -676,9 +768,37 @@
   grid-template-columns: 12px 16px minmax(0, 1fr);
   gap: var(--gyro-space-standard);
   padding: 0;
-  font-weight: 600;
+  /* Folder names lead their chats by icon and indent, not by heavy type. */
+  font-weight: 500;
   min-width: 0;
   min-height: 28px;
+}
+
+/* Folder glyphs sit back with the chevron and come forward on hover. */
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-project-toggle[aria-expanded]
+  > svg:not(.gyro-project-chevron) {
+  color: var(--gyro-muted);
+  transition: color 120ms ease;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-project-row:is(:hover, :focus-within)
+  .gyro-sidebar-project-toggle
+  > svg {
+  color: var(--gyro-text);
+}
+
+/* Folder rows share the chat-row rhythm: one height, no extra gap below. */
+:root[data-theme] .gyro-sidebar .gyro-sidebar-project-row.is-draggable {
+  margin-bottom: 0;
+  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  padding-block: calc(1px * var(--gyro-ui-scale, 1));
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 :root[data-theme] .gyro-sidebar .gyro-project-chevron {
@@ -795,4 +915,194 @@
 :root[data-theme] .gyro-sidebar .gyro-sidebar-model-logo .gyro-provider-logo {
   width: calc(14px * var(--gyro-ui-scale, 1));
   height: calc(14px * var(--gyro-ui-scale, 1));
+}
+
+/* Workspace uses the Sessions navigation vocabulary. Keep editor geometry and
+   semantic file/status colors owned by their existing components. */
+:root[data-theme] .gyro-app-shell.is-workspace-chrome-active {
+  --gyro-shell-row-hover: color-mix(
+    in srgb,
+    var(--gyro-text) 4%,
+    var(--gyro-sidebar)
+  );
+}
+
+:root[data-theme] .is-workspace-chrome-active .gyro-sidebar :is(
+  .gyro-sidebar-section-toggle,
+  .gyro-sidebar-scm-group-label
+) {
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+:root[data-theme] .is-workspace-chrome-active .gyro-sidebar :is(
+  .gyro-sidebar-section-heading,
+  .gyro-sidebar-scm-group-label
+) {
+  padding-block: var(--gyro-space-compact);
+}
+
+:root[data-theme] .is-workspace-chrome-active .gyro-sidebar :is(
+  .gyro-sidebar-explorer-row,
+  .gyro-workspace-search-file-heading > button
+) {
+  border-radius: var(--gyro-radius-sm);
+  font-size: var(--gyro-font-support);
+  min-height: var(--gyro-control-height);
+  height: auto;
+  box-shadow: none;
+}
+
+:root[data-theme] .is-workspace-chrome-active .gyro-sidebar :is(
+  .gyro-sidebar-explorer-row > span,
+  .gyro-sidebar-scm-filename,
+  .gyro-workspace-search-file-heading > button
+) {
+  font-size: var(--gyro-font-support);
+}
+
+:root[data-theme] .is-workspace-chrome-active .gyro-sidebar :is(
+  .gyro-sidebar-explorer-row,
+  .gyro-workspace-search-file-heading > button
+):hover {
+  background: var(--gyro-shell-row-hover);
+}
+
+/* Inputs and quiet actions use the same surface and control radius. */
+:root[data-theme] .is-workspace-chrome-active :is(
+  .gyro-sidebar-search-form,
+  .gyro-scm-panel .gyro-sidebar-commit-form input,
+  .gyro-ide-assistant-composer textarea
+) {
+  background: var(--gyro-surface-soft);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+  min-height: var(--gyro-control-height);
+}
+
+:root[data-theme] .is-workspace-chrome-active :is(
+  .gyro-sidebar-explorer-toolbar button,
+  .gyro-sidebar-section-actions button,
+  .gyro-editor-tab-actions > button,
+  .gyro-workspace-tool-panel-head button,
+  .gyro-terminal-toolbar button
+) {
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
+}
+
+:root[data-theme] .is-workspace-chrome-active :is(
+  .gyro-sidebar-explorer-toolbar button,
+  .gyro-sidebar-section-actions button,
+  .gyro-editor-tab-actions > button
+) {
+  width: calc(var(--gyro-control-compact) * var(--gyro-ui-scale, 1));
+  height: calc(var(--gyro-control-compact) * var(--gyro-ui-scale, 1));
+}
+
+:root[data-theme] .is-workspace-chrome-active :is(
+  .gyro-sidebar-explorer-toolbar button,
+  .gyro-sidebar-section-actions button,
+  .gyro-editor-tab-actions > button,
+  .gyro-workspace-activity-rail button
+):hover:not(:disabled) {
+  background: var(--gyro-shell-row-hover);
+  color: var(--gyro-text);
+}
+
+:root[data-theme] .is-workspace-chrome-active
+  .gyro-workspace-activity-rail button.is-active {
+  background: var(--gyro-shell-row-hover);
+  color: var(--gyro-text);
+}
+
+:root[data-theme] .is-workspace-chrome-active
+  .gyro-workspace-activity-rail button.is-active::before {
+  background: var(--gyro-muted);
+}
+
+/* One tab treatment from the editor through the drawer. Dirty markers,
+   terminal status, and file identity keep their own semantic colors. */
+:root[data-theme] .is-workspace-chrome-active :is(
+  .gyro-editor-tabs,
+  .gyro-workspace-tool-panel-head,
+  .gyro-terminal-toolbar
+) {
+  background: var(--gyro-pane);
+  border-color: var(--gyro-border-soft);
+  box-shadow: none;
+}
+
+:root[data-theme] .is-workspace-chrome-active :is(
+  .gyro-editor-tab-strip > button,
+  .gyro-pane-tabs > button,
+  .gyro-terminal-tab > button[role="tab"]
+) {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  font-weight: 400;
+  box-shadow: none;
+}
+
+:root[data-theme] .is-workspace-chrome-active :is(
+  .gyro-editor-tab-strip > button.is-active,
+  .gyro-pane-tabs > button.is-active,
+  .gyro-terminal-tab.is-active > button[role="tab"]
+) {
+  background: var(--gyro-shell-row-hover);
+  color: var(--gyro-text);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+:root[data-theme] .is-workspace-chrome-active :is(
+  .gyro-editor-tab-strip > button:not(.is-empty),
+  .gyro-pane-tabs > button,
+  .gyro-terminal-tab > button[role="tab"]
+):hover {
+  background: var(--gyro-shell-row-hover);
+  color: var(--gyro-text);
+}
+
+/* Terminal tabs include a separate close control; tint the whole tab once. */
+:root[data-theme] .is-workspace-chrome-active
+  .gyro-terminal-workspace .gyro-terminal-tab.is-active {
+  background: var(--gyro-shell-row-hover);
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
+}
+
+:root[data-theme] .is-workspace-chrome-active
+  .gyro-terminal-workspace .gyro-terminal-tab.is-active > button[role="tab"] {
+  background: transparent;
+}
+
+/* The same visible focus treatment works across keyboard-only workflows. */
+:root[data-theme] .is-workspace-chrome-active :is(
+  .gyro-sidebar-explorer-row,
+  .gyro-workspace-search-file-heading > button,
+  .gyro-sidebar-explorer-toolbar button,
+  .gyro-sidebar-section-actions button,
+  .gyro-editor-tab-strip > button,
+  .gyro-editor-tab-actions > button,
+  .gyro-pane-tabs > button,
+  .gyro-terminal-tab > button,
+  .gyro-workspace-activity-rail button
+):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+
+:root[data-theme] .is-workspace-chrome-active :is(
+  .gyro-sidebar-search-form,
+  .gyro-scm-panel .gyro-sidebar-commit-form input,
+  .gyro-ide-assistant-composer textarea
+):focus-within {
+  border-color: var(--gyro-focus-ring);
 }

@@ -446,6 +446,9 @@ pub(crate) fn emit_provider_chat_frame(
         return;
     }
     session_title_stream::observe(app, request, phase, text_delta.as_deref());
+    if phase == "delta" {
+        super::markers::publish_live_plan_progress(app, request, text_delta.as_deref(), None);
+    }
     if phase == "delta" && text_delta.as_ref().is_some_and(|text| !text.is_empty()) {
         timing::mark(TimingStage::FirstActivity);
         timing::mark(TimingStage::FirstToken);
@@ -552,6 +555,7 @@ pub(crate) fn emit_provider_activity_event(
     if context_compaction::summary_stream_muted(&request.session_id) {
         return;
     }
+    super::markers::publish_live_plan_progress(app, request, None, Some(activity));
     timing::mark(TimingStage::FirstActivity);
     if !matches!(activity.kind.as_str(), "commentary" | "reasoning") {
         timing::tool(&activity.id, &activity.status);

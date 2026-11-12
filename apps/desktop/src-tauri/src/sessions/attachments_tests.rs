@@ -184,7 +184,8 @@ fn prepares_and_revalidates_workspace_chat_attachments() {
         workspace_check: None,
         side_chat_context: None,
         workflow_run_id: None,
-        project_memory: None,        internal_purpose: None,
+        project_memory: None,
+        internal_purpose: None,
     };
     validate_chat_context(&request).unwrap();
     std::fs::write(&file, "changed\n").unwrap();

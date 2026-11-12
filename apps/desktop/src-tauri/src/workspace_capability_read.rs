@@ -252,6 +252,104 @@ mod spill_read_tests {
     }
 
     #[test]
+    fn fresh_reads_use_the_same_bounded_window_on_api_and_mcp() {
+        use gyro_core::{CapabilityResponse, CapabilityResult, GyroPaths};
+        let paths = GyroPaths::from_base_dir(std::env::temp_dir().join("gyro-read-wire-test"));
+        for id in [
+            CapabilityId::WorkspaceRead,
+            CapabilityId::WorkspaceReadRange,
+            CapabilityId::WorkspaceReadEditor,
+        ] {
+            for lines in [500, 2000] {
+                let text = "fn line() {}\n".repeat(lines);
+                let data = json!({"path":"source.rs", "source":"disk", "contentHash":"version",
+                    "line":1, "endLine":lines, "content":text});
+                let response = CapabilityResponse::completed(
+                    "test",
+                    CapabilityResult {
+                        call_id: uuid::Uuid::new_v4(),
+                        capability_id: id,
+                        summary: "Read source".into(),
+                        data,
+                        resource: None,
+                    },
+                );
+                let api: Value = serde_json::from_str(
+                    &gyro_core::provider_runtime::tool_batch::model_response_text(&response)
+                        .unwrap(),
+                )
+                .unwrap();
+                let mcp = crate::capabilities::mcp_server::capability_mcp_response(
+                    &paths, response, false,
+                )
+                .unwrap();
+                let native: Value =
+                    serde_json::from_str(mcp["content"][0]["text"].as_str().unwrap()).unwrap();
+                for actual in [&api["result"]["data"], &native["data"]] {
+                    let content = actual["content"].as_str().unwrap();
+                    if lines == 500 {
+                        assert!(content == text, "{id:?} fragmented a 6.5KB fresh read");
+                    } else {
+                        assert!(content.contains("spill://") && content.len() <= 8192);
+                    }
+                    assert_eq!(actual["contentHash"], "version");
+                    assert_eq!(actual["endLine"], lines);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn recovered_windows_stay_exact_through_api_and_mcp_serializers() {
+        use gyro_core::{CapabilityResponse, CapabilityResult, GyroPaths};
+        let paths = GyroPaths::from_base_dir(std::env::temp_dir().join("gyro-spill-wire-test"));
+        let text = format!(
+            "{}MIDDLE MUST SURVIVE{}",
+            "α".repeat(2200),
+            "β".repeat(2200)
+        );
+        for id in [
+            CapabilityId::WorkspaceRead,
+            CapabilityId::WorkspaceReadRange,
+            CapabilityId::WorkspaceReadEditor,
+        ] {
+            for offset in [0, 1234] {
+                let (summary, data) =
+                    spill_payload(&window(offset, &text, offset + text.len() + 321));
+                let response = CapabilityResponse::completed(
+                    "test",
+                    CapabilityResult {
+                        call_id: uuid::Uuid::new_v4(),
+                        capability_id: id,
+                        summary,
+                        data: data.clone(),
+                        resource: None,
+                    },
+                );
+                let api: Value = serde_json::from_str(
+                    &gyro_core::provider_runtime::tool_batch::model_response_text(&response)
+                        .unwrap(),
+                )
+                .unwrap();
+                let mcp = crate::capabilities::mcp_server::capability_mcp_response(
+                    &paths, response, false,
+                )
+                .unwrap();
+                let native: Value =
+                    serde_json::from_str(mcp["content"][0]["text"].as_str().unwrap()).unwrap();
+                for (route, actual) in [("api", &api["result"]["data"]), ("mcp", &native["data"])] {
+                    assert!(
+                        actual == &data,
+                        "{id:?} {route} re-spilled an explicitly recovered window"
+                    );
+                    assert_eq!(actual["bytes"], text.len());
+                    assert_eq!(actual["nextOffset"], offset + text.len());
+                }
+            }
+        }
+    }
+
+    #[test]
     fn an_address_with_no_copy_reports_absence_not_a_workspace_miss() {
         let error = read_spill(
             "session",

@@ -123,8 +123,8 @@ assert.ok(
   !turn.includes("useNetworkOnline("),
   "turns must not install their own listeners",
 );
-assert.match(parent, /<ChatTurn\s+isOnline=\{isOnline\}/);
-assert.match(parent, /\[\s*subagents,\s*isOnline,/);
+assert.match(parent, /<ChatTurn\b[\s\S]*?\bisOnline=\{isOnline\}/);
+assert.match(parent, /\[[^\]]*\bsubagents,\s*isOnline,/);
 assert.match(turn, /isOnline: boolean/);
 assert.match(
   turn,

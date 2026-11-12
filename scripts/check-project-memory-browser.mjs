@@ -220,10 +220,13 @@ try {
   );
   await screenshot("memory-conflict");
   await click("Discard edits");
-  await click("Used this turn");
+  assert.ok(
+    await evaluate("Boolean(document.querySelector('.gyro-memory-history'))"),
+    "memory history section",
+  );
   assert.ok(
     (await text()).includes("Prepared for this turn") ||
-      (await text()).includes("entries ·"),
+      /\d+ entr(y|ies) ·/.test(await text()),
   );
   await screenshot("memory-receipts");
   await load("theme=light&width=320&density=compact&scale=large", 480, 800);
@@ -383,7 +386,7 @@ try {
     true,
     "closing restores project folder focus",
   );
-  await load("shell=1&chat=1", 900, 800);
+  await load("shell=1&chat=1&root=single", 900, 800);
   await evaluate(
     "document.querySelector('.gyro-sidebar-project-toggle').focus()",
   );
@@ -420,7 +423,75 @@ try {
       ),
     "dark project settings memory loads",
   );
+  assert.equal(
+    await evaluate("Boolean(document.querySelector('.gyro-memory-project'))"),
+    true,
+    "single-folder projects use the same folder surface as General",
+  );
+  const longNote =
+    "Keep project conventions close to the code they describe. " +
+    "When a module moves, update its source checks and documentation together. " +
+    "Verify the actual files before relying on a saved note, preserve unrelated edits, " +
+    "and keep the full decision available when its compact preview is opened.";
+  for (let index = 1; index <= 3; index++) {
+    await click("Add note");
+    await setText(`Example decision ${index}. ${longNote}`);
+    await click("Save memory");
+    await until(
+      () => evaluate("!document.querySelector('.gyro-memory-editor')"),
+      "long note saved",
+    );
+  }
+  await evaluate(
+    "document.querySelector('.gyro-project-settings-memory').scrollTop = 0",
+  );
+  const layout = await evaluate(`(() => {
+    const dialog = document.querySelector('.gyro-project-edit-dialog');
+    const body = document.querySelector('.gyro-project-settings-memory');
+    const preview = [...document.querySelectorAll('.gyro-memory-note-preview')].at(-1);
+    return {height: dialog.getBoundingClientRect().height,
+      scrollable: body.scrollHeight > body.clientHeight,
+      clamped: preview.scrollHeight > preview.clientHeight,
+      title: document.querySelector('#gyro-project-edit-title').textContent};
+  })()`);
+  assert.ok(layout.height <= 640, "long notes keep the dialog bounded");
+  assert.ok(
+    layout.scrollable && layout.clamped,
+    "long notes have compact previews in a scrollable body",
+  );
+  assert.equal(
+    layout.title,
+    "Edit project",
+    "both tabs keep the same dialog title",
+  );
   await screenshot("memory-project-settings-dark");
+  await evaluate(
+    "[...document.querySelectorAll('.gyro-memory-list li > button')].at(-1).click()",
+  );
+  assert.ok(
+    (await text()).includes(longNote),
+    "opening a compact preview reveals the complete note",
+  );
+  await click("All entries");
+  await evaluate(
+    "document.querySelector('.gyro-project-settings-memory').scrollTop = 0",
+  );
+  const headerTop = await evaluate(
+    "document.querySelector('.gyro-project-edit-dialog > header').getBoundingClientRect().top",
+  );
+  await evaluate(
+    "document.querySelector('.gyro-project-settings-memory').scrollTop = 10000",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.gyro-project-edit-dialog > header').getBoundingClientRect().top",
+    ),
+    headerTop,
+    "scrolling notes keeps the title and close action fixed",
+  );
+  await evaluate(
+    "document.querySelector('.gyro-project-settings-memory').scrollTop = 0",
+  );
   await call("Emulation.setDeviceMetricsOverride", {
     width: 480,
     height: 700,

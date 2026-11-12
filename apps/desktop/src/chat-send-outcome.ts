@@ -12,6 +12,16 @@ export function chatSendAccepted(outcome: ChatSendOutcome): boolean {
   return ["completed", "queued", "cancelled"].includes(outcome.kind);
 }
 
+/** Steer explicitly authorizes the next queued instruction after cancellation.
+ * Saving the interrupted turn must not turn that handoff into a queue pause. */
+export function shouldPauseQueueAfterSendError(
+  persisted: boolean,
+  cancelled: boolean,
+  steering: boolean,
+): boolean {
+  return !steering && (persisted || cancelled);
+}
+
 export function queuedDeliveryDisposition(outcome: ChatSendOutcome) {
   if (outcome.persisted || ["completed", "cancelled"].includes(outcome.kind))
     return "settled" as const;

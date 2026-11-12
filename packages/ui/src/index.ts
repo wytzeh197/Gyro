@@ -1,3 +1,4 @@
+export { reconcileGitPreparation, hasOnlyGitWarnings } from "./workspace-preparation";
 export { applyGoogleModelDiscovery } from "./google-models";
 export { ProjectMemoryPanel } from "./project-memory/panel";
 export type { ProjectMemoryRuntime, MemorySnapshot, MemoryEntry, MemoryDraft, MemorySettings, MemoryReceipt, MemoryCandidate } from "./project-memory/types";
@@ -23,7 +24,7 @@ export {
   SettingsStatus,
   UsageCard,
 } from "./settings-presentation";
-export { SettingsGroup, SettingsMore, SettingsRow } from "./settings-controls";
+export { SettingsEmptyState, SettingsGroup, SettingsMore, SettingsRow } from "./settings-controls";
 export {
   Check as CheckIcon,
   ArrowRight as ArrowRightIcon,
@@ -102,6 +103,12 @@ export type {
   BrowserPreviewCapture,
   BrowserPreviewCaptureStatus,
   BrowserFeedback,
+  BrowserAnnotationCapture,
+  BrowserAnnotationPageState,
+  BrowserElementAnnotation,
+  BrowserAnnotationResult,
+  BrowserScreenshotAction,
+  BrowserScreenshotHandler,
   BrowserPreviewDiagnostic,
   BrowserPreviewDevice,
   BrowserViewportMode,
@@ -702,9 +709,11 @@ export {
   WorkspaceHeader,
 } from "./surfaces";
 export {
+  chatQuestionDismissalVersion,
   formatChatAnswers,
   latestChatQuestions,
   revealChatQuestion,
+  subscribeChatQuestionDismissals,
   parseChatAnswers,
   parseChatQuestions,
   questionsFromPayload,

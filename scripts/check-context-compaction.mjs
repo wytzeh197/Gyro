@@ -14,13 +14,9 @@ const action = ts.transpileModule(
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
 ).outputText;
 
-for (const [providerId, outcome] of [
-  "openai",
-  "anthropic",
-  "gemini",
-  "xai",
-  "ollama",
-].flatMap((provider) =>
+const { providerCatalog } = await import("../packages/ui/src/provider-catalog.ts");
+const providers = [...new Set([...providerCatalog.map(provider => provider.id), "custom:compaction"])];
+for (const [providerId, outcome] of providers.flatMap((provider) =>
   ["success", "failure", "cancelled", "append-failure"].map((result) => [
     provider,
     result,
@@ -75,6 +71,11 @@ for (const [providerId, outcome] of [
     "a second compaction cannot race the first",
   );
   await new Promise(setImmediate);
+  if (outcome !== "append-failure") assert.equal(
+    calls.filter(c => c === "compact_provider_chat").length, 2,
+    "a request during work reaches the backend without stopping or starting another turn",
+  );
+  assert(!calls.includes("stop_provider_chat"), "compaction must not interrupt in-flight writes");
   if (outcome === "success") finish.resolve({});
   else if (outcome !== "append-failure")
     finish.reject(
@@ -98,4 +99,4 @@ for (const [providerId, outcome] of [
         : "failed",
   );
 }
-console.log("Context compaction lifecycle: 5 providers × 4 outcomes passed");
+console.log(`Context compaction lifecycle: ${providers.length} providers × 4 outcomes, including requests during work, passed`);

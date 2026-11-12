@@ -185,6 +185,8 @@ export type TurnSourceControlBaselines = Record<
 >;
 
 export type ChatTurnContextSnapshot = {
+  /** UI acknowledgement after durable insertion or queue acceptance; never serialized. */
+  onAccepted?: () => void;
   /** Scheduler delivery may wait, but must never enqueue another copy. */
   queuedDelivery?: boolean;
   mode?: ChatMode;

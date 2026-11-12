@@ -191,5 +191,15 @@
 .gyro-memory-status:empty {
   display: none;
 }
-.gyro-memory-context-hint { justify-self: start; align-self: start; border: 0; background: transparent; color: var(--gyro-muted); font: inherit; font-size: var(--gyro-font-micro); padding: var(--gyro-space-compact) 0; cursor: pointer; }
-.gyro-memory-context-hint:focus-visible { outline: 2px solid var(--gyro-focus-ring); outline-offset: 2px; }
+.gyro-memory-history {
+  display: grid;
+  gap: var(--gyro-space-compact);
+  padding-top: var(--gyro-space-comfortable);
+  border-top: 1px solid var(--gyro-border-soft);
+}
+.gyro-memory-history > h4 {
+  margin: 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  font-weight: 600;
+}

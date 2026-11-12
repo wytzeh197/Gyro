@@ -267,6 +267,35 @@ mod tests {
     }
 
     #[test]
+    fn auto_compaction_catches_new_tool_growth_and_missing_usage() {
+        for measured in [None, Some(0), Some(100)] {
+            let mut messages = loop_with_exchanges(8, 4_000);
+            assert!(
+                auto_compact_messages(&mut messages, measured, None, Some(8_000), 85).is_some(),
+                "large tool results must not wait for another billed request"
+            );
+            assert_calls_and_results_stay_paired(&messages);
+        }
+    }
+
+    #[test]
+    fn auto_compaction_respects_80_85_and_90_percent_boundaries() {
+        for percent in [80, 85, 90] {
+            let threshold = u64::from(percent) * 100;
+            assert!(
+                auto_compaction_fill(Some(threshold - 1), Some(0), Some(10_000), percent).is_none()
+            );
+            assert!(
+                auto_compaction_fill(Some(threshold), Some(0), Some(10_000), percent).is_some()
+            );
+        }
+        assert!(
+            auto_compaction_fill(Some(100_000), None, None, 85).is_none(),
+            "an unknown window cannot be claimed to be 85 percent full"
+        );
+    }
+
+    #[test]
     fn auto_compaction_replaces_the_oldest_exchanges_and_keeps_pairs_intact() {
         let mut messages = loop_with_exchanges(6, 4_000);
         let compaction =

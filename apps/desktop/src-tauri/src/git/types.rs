@@ -26,6 +26,8 @@ pub(crate) struct MainComparisonStats {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SourceControlStatus {
+    pub(crate) read_state: gyro_core::workspace_check::GitReadState,
+    pub(crate) stale: bool,
     pub(crate) provider: String,
     /// The requested workspace, whose relative paths this snapshot describes.
     pub(crate) workspace_path: Option<String>,
@@ -58,6 +60,7 @@ pub(crate) struct SourceControlStatus {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GitBranchCatalog {
+    pub(crate) read_state: gyro_core::workspace_check::GitReadState,
     pub(crate) available: bool,
     pub(crate) repo_root: Option<String>,
     pub(crate) current: Option<String>,

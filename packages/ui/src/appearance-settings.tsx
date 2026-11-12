@@ -49,7 +49,7 @@ export function AppearanceSettings({
   const rememberEditedSection = (event: SyntheticEvent) => {
     const target = event.target;
     if (!(target instanceof HTMLElement) || target.closest("button[aria-expanded]")) return;
-    const section = target.closest<HTMLElement>("[data-settings-disclosure]")?.dataset.settingsDisclosure;
+    const section = target.closest<HTMLElement>("[data-settings-group]")?.dataset.settingsGroup;
     if (section) setLastEditedSection(section);
   };
   return (
@@ -97,9 +97,9 @@ export function AppearanceSettings({
         >
           {(
             [
-              { mode: "system", label: "System" },
               { mode: "light", label: "Light" },
               { mode: "dark", label: "Dark" },
+              { mode: "system", label: "System" },
             ] as const
           ).map(({ mode, label }) => (
             <button
@@ -203,17 +203,17 @@ export function AppearanceSettings({
       </SettingsGroup>
       <SettingsGroup
         attention={saveStatus === "error" && lastEditedSection === "colors"} id="colors" label="Accent colors" summary={`${mainColor} · ${secondaryColor}`}
-        description="Choose colors for selection, actions, and supporting highlights."
+        description="Default white accents adapt to black in light mode. Choose a color for custom highlights."
         actions={
           <AppearanceReset
             label="Reset colors"
-            detail="Restore Gyro blue and violet. Theme, size, spacing, and motion stay as you chose them."
+            detail="Restore white highlights in dark mode and black highlights in light mode. Other appearance preferences stay as chosen."
             disabled={
               !onAppearanceColorsChange ||
-              (mainColor.toLowerCase() === "#0874df" &&
-                secondaryColor.toLowerCase() === "#8b6fcb")
+              (mainColor.toLowerCase() === "#ffffff" &&
+                secondaryColor.toLowerCase() === "#ffffff")
             }
-            onClick={() => onAppearanceColorsChange?.("#0874df", "#8b6fcb")}
+            onClick={() => onAppearanceColorsChange?.("#ffffff", "#ffffff")}
           />
         }
       >

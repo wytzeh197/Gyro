@@ -877,7 +877,8 @@ mod tests {
             workspace_check: None,
             side_chat_context: None,
             workflow_run_id: None,
-        project_memory: None,            internal_purpose: None,
+            project_memory: None,
+            internal_purpose: None,
         };
         (temp, store, request)
     }

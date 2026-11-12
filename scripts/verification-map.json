@@ -1,4 +1,15 @@
 {
+  "check-chat-render-snapshot.mjs": { "kind": "behavioral" },
+  "check-chat-styles.mjs": { "kind": "source-text", "reason": "Checks stylesheet ownership and cascade constraints after chat CSS extraction." },
+  "check-code-reviews-browser.mjs": { "kind": "behavioral" },
+  "check-project-memory-browser.mjs": { "kind": "behavioral" },
+  "check-workflows-browser.mjs": { "kind": "behavioral" },
+  "check-browser-annotations.mjs": { "kind": "behavioral" },
+  "check-browser-annotations-ui.mjs": { "kind": "behavioral" },
+  "check-git-readiness.mjs": { "kind": "behavioral" },
+  "check-git-readiness-browser.mjs": { "kind": "behavioral" },
+  "check-plan-live-browser.mjs": { "kind": "behavioral" },
+  "check-sidebar-design-browser.mjs": { "kind": "behavioral" },
   "check-resource-scheduling.mjs": {
     "kind": "behavioral",
     "note": "Executes the production usage, editor and explorer hooks with controlled visibility and cached IPC readings. Protects stable polling, foreground catch-up, idle timers and manager cleanup; does not measure native CPU or RAM."
@@ -34,6 +45,10 @@
   },
   "check-appearance-persistence.mjs": {
     "kind": "behavioral"
+  },
+  "check-theme-parity-browser.mjs": {
+    "kind": "behavioral",
+    "note": "Headless production React fixtures across both themes, density and text sizes, including contrast, focus and system preference changes."
   },
   "check-chat-history-efficiency.mjs": {
     "kind": "behavioral"
