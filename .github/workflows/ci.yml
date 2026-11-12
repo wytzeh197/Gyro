@@ -41,6 +41,10 @@ jobs:
       - run: pnpm test:canvas-browser
       - run: pnpm test:activity-composer-browser
       - run: pnpm test:theme-parity:browser
+      - run: pnpm test:workflows:browser
+      - run: pnpm test:settings-redesign:browser
+      - run: pnpm test:companion-redesign:browser
+      - run: pnpm test:command-failure:browser
       - run: pnpm release:check
         # Source validation checks the intended signed preview notes. The tagged
         # release job resolves the actual signing mode and verifies the artifacts.

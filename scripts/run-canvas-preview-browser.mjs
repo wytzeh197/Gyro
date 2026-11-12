@@ -9,18 +9,18 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const origin = process.env.GYRO_TEST_ORIGIN || "http://127.0.0.1:1420";
-const activityComposer = process.argv.includes("--activity-composer");
-const themeParity = process.argv.includes("--theme-parity");
-const fixture = themeParity
-  ? "capture.html"
-  : activityComposer
-    ? "goal-composer-fixture.html"
-    : "canvas-fixture.html";
-const guard = themeParity
-  ? "scripts/check-theme-parity-browser.mjs"
-  : activityComposer
-    ? "scripts/check-activity-composer-browser.mjs"
-    : "scripts/check-canvas-preview-browser.mjs";
+const browserChecks = [
+  ["--theme-parity", "capture.html", "scripts/check-theme-parity-browser.mjs"],
+  ["--activity-composer", "goal-composer-fixture.html", "scripts/check-activity-composer-browser.mjs"],
+  ["--workflows", "v012-workflow-fixture.html", "scripts/check-workflows-browser.mjs"],
+  ["--settings-redesign", "settings-preview.html", "scripts/check-settings-redesign.mjs"],
+  ["--companion-redesign", "companion-polish-fixture.html", "scripts/check-companion-redesign.mjs"],
+  ["--command-failure", "command-failure-fixture.html", "scripts/check-command-failure-browser.mjs"],
+];
+const selectedCheck = browserChecks.find(([flag]) => process.argv.includes(flag));
+const [, fixture, guard] = selectedCheck ?? [
+  "", "canvas-fixture.html", "scripts/check-canvas-preview-browser.mjs",
+];
 
 const browserPath = [
   process.env.GYRO_CAPTURE_BROWSER,
@@ -49,7 +49,10 @@ const reachable = async () => {
 let devServer;
 if (!(await reachable())) {
   console.log(`Starting the desktop dev server for ${origin}...`);
-  devServer = spawn("pnpm", ["--filter", "@gyro-dev/desktop", "dev"], {
+  devServer = spawn("pnpm", [
+    "--filter", "@gyro-dev/desktop", "exec", "vite",
+    "--host", "127.0.0.1", "--port", new URL(origin).port || "1420", "--strictPort",
+  ], {
     cwd: repoRoot,
     stdio: ["ignore", "ignore", "inherit"],
   });

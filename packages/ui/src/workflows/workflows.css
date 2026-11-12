@@ -1166,8 +1166,8 @@
     color-mix(in srgb, var(--gyro-danger) 25%, transparent);
   color: var(--gyro-text);
 }
-.gyro-workflow-callout {
-  margin: 16px 0 !important;
+.gyro-workflows-content .gyro-workflow-callout {
+  margin: var(--gyro-space-panel) 0;
   padding: 16px;
   border: 1px solid var(--gyro-border-soft);
   border-radius: var(--gyro-radius-lg);

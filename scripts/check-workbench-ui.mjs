@@ -4634,7 +4634,8 @@ expect(
     runSource.includes("`Worked for ${elapsedLabel}`") &&
     runSource.includes("export function formatRunDuration") &&
     sourceIncludes(surfaceSource, "formatMessageTime(event.createdAt)") &&
-    sourceIncludes(surfaceSource, 'aria-label="Copy message"') &&
+    sourceIncludes(surfaceSource, 'label="Copy message"') &&
+    sourceIncludes(surfaceSource, 'aria-label={copied ? "Copied" : label}') &&
     runSource.includes("`${hours}h`") &&
     runSource.includes("`${minutes}m`") &&
     runSource.includes("`${seconds}s`") &&
@@ -6054,7 +6055,7 @@ expect(
   settingsSidebarSource.includes('aria-label="Hide sidebar"') &&
     settingsSidebarSource.includes("onToggleSidebar") &&
     settingsSidebarSource.includes("aria-label={`Back to ${backLabel}`}") &&
-    settingsSidebarSource.includes("<span>Back to app</span>") &&
+    settingsSidebarSource.includes("<span>Back to {backLabel}</span>") &&
     !settingsSidebarSource.includes('aria-label="Forward"'),
   "Settings should offer Back to app with the originating surface in its accessible label.",
 );
@@ -6546,7 +6547,7 @@ expect(
     ) &&
     sourceIncludes(surfaceSource, "function AssistantResponse") &&
     sourceIncludes(surfaceSource, "gyro-response-body") &&
-    sourceIncludes(surfaceSource, 'aria-label="Copy response"') &&
+    sourceIncludes(surfaceSource, '<MessageCopyButton label="Copy response" message={visibleMessage} />') &&
     styleSource.includes(".gyro-chat-transcript .gyro-message.is-user") &&
     styleSource.includes("justify-items: end") &&
     styleSource.includes("width: min(100%, var(--gyro-chat-content-width))") &&
@@ -6580,10 +6581,10 @@ expect(
   surfaceSource.includes("function isLoadedTranscriptClipped") &&
     surfaceSource.includes("OVERFLOW_SLACK") &&
     surfaceSource.includes(
-      "hasMoreBefore && onLoadEarlier && isLoadedChatClipped",
+      "hasMoreBefore && onLoadEarlier ? (",
     ) &&
     surfaceSource.includes("setIsLoadedChatClipped(isLoadedTranscriptClipped"),
-  "Load earlier messages should appear only when loaded chat messages do not fit on screen.",
+  "Load earlier messages should remain available whenever older durable history exists, even when the loaded page fits on screen.",
 );
 expect(
   surfaceSource.includes("function safeAssistantLinkUrl") &&
@@ -7920,8 +7921,8 @@ expect(
     !sourceIncludes(surfaceSource, 'action: "toggle-access"') &&
     !sourceIncludes(surfaceSource, "Codex settings") &&
     !sourceIncludes(surfaceSource, "Claude settings") &&
-    sourceIncludes(surfaceSource, "Command policy") &&
-    sourceIncludes(surfaceSource, "File edit policy") &&
+    sourceIncludes(surfaceSource, "Ask before running commands") &&
+    sourceIncludes(surfaceSource, "Ask before editing files") &&
     sourceIncludes(surfaceSource, "approvalChipClassName") &&
     sourceIncludes(surfaceSource, 'approvalMode === "direct"') &&
     sourceIncludes(surfaceSource, 'approvalMode === "auto"') &&
@@ -8052,7 +8053,7 @@ expect(
     sourceIncludes(surfaceSource, "const transcriptState = useMemo") &&
     sourceIncludes(
       surfaceSource,
-      "const isEmptyStart = turns.length === 0 && looseEvents.length === 0",
+      "const isEmptyStart = !hasMoreBefore && turns.length === 0 && looseEvents.length === 0",
     ) &&
     sourceIncludes(surfaceSource, "if (isEmptyStart)") &&
     sourceIncludes(surfaceSource, 'aria-label="New Chat"') &&
