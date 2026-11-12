@@ -8625,6 +8625,14 @@ function ChatContextSection({
   );
   const popoverBaseId = useId();
   const hasUserWorkspace = Boolean(isUserSelectedWorkspacePath(workspacePath));
+  // Branches are local Git, not GitHub: offer the chip only once the folder
+  // reads as a repository, so a plain folder never shows an invented "main".
+  const hasGitBranches = hasUserWorkspace && Boolean(branchCatalog?.available);
+  useEffect(() => {
+    if (!hasGitBranches) {
+      setActivePopover((current) => (current === "branch" ? null : current));
+    }
+  }, [hasGitBranches]);
   const projectLabel = composerProjectLabel(workspacePath);
   const modeChipLabel = workspaceModeLabel(workspaceMode);
   const branchLabel =
@@ -8741,7 +8749,11 @@ function ChatContextSection({
               "Workspace mode",
               modeChipLabel,
             ],
-            ["branch", GitBranch, branchLabel, "Branch", branchLabel],
+            ...(hasGitBranches
+              ? ([
+                  ["branch", GitBranch, branchLabel, "Branch", branchLabel],
+                ] as const)
+              : []),
           ] as const
         ).map(([popover, Icon, label, name, title]) => (
           <button
