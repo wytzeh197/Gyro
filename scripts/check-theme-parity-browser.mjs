@@ -2,7 +2,8 @@
 // Real React capture fixtures; no native session or provider calls.
 // Start the desktop Vite server, then run: node scripts/check-theme-parity-browser.mjs
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -200,8 +201,19 @@ try {
   console.log(`${results.length} theme cases, ${failures.length} failures; screenshots: ${output}`);
   if (failures.length) { console.error(JSON.stringify(failures, null, 2)); process.exitCode = 1; }
 } finally {
+  if (browser.pid && browser.exitCode === null && browser.signalCode === null) {
+    const stopped = new Promise(done => browser.once("exit", done));
+    // Let Chrome flush its profile and stop its children before removing it.
+    if (socket?.readyState === WebSocket.OPEN)
+      socket.send(JSON.stringify({ id: 0, method: "Browser.close" }));
+    else browser.kill("SIGTERM");
+    const timer = setTimeout(() => browser.kill("SIGKILL"), 5000);
+    try {
+      await stopped;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   socket?.close();
-  browser.kill("SIGTERM");
-  await Promise.race([new Promise(done => browser.once("exit", done)), pause(2000)]);
-  if (browser.exitCode !== null || browser.signalCode !== null) rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
