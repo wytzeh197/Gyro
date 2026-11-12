@@ -19236,6 +19236,11 @@ button.gyro-response-changed-files:hover {
   padding-inline: var(--gyro-chat-gutter);
 }
 .gyro-composer-bar > .gyro-dictation-button::before {
+/* The composer a dragged image will land in, so a drop never feels blind. */
+.gyro-composer-shell[data-media-drop-target] .gyro-composer-input {
+  border-color: var(--gyro-focus-ring);
+  box-shadow: 0 0 0 1px var(--gyro-focus-ring);
+}
   background: var(--gyro-border-strong);
   content: "";
   height: 50%;

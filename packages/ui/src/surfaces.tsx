@@ -4423,6 +4423,8 @@ type MediaDropTarget = {
   reportError: (message: string) => void;
   paneKey: string;
   rect: () => DOMRect;
+  /** The composer that shows it will take the drop while a drag is over it. */
+  composer?: () => HTMLElement | null;
 };
 
 const mediaDropTargets = new Map<string, MediaDropTarget[]>();
@@ -4467,6 +4469,72 @@ function registerMediaDropTarget(target: MediaDropTarget) {
     // The armed key is left alone on purpose: a surface that unmounts between
     // the drag-over and the drop must not retarget a drop already in flight.
   };
+}
+
+/**
+ * Where a drop off every chat goes: the focused pane's composer, then any
+ * composer on screen. Before, the last composer to re-register won, which in a
+ * split was an arbitrary pane rather than the one being worked in.
+ */
+function fallbackMediaDropTarget() {
+  const visible = anyMediaDropTarget().filter((target) => {
+    const bounds = target.rect();
+    return bounds.width > 0 && bounds.height > 0;
+  });
+  return (
+    visible.find((target) =>
+      target.composer?.()?.closest(".gyro-chat-grid-slot.is-current-pane"),
+    ) ??
+    visible.at(-1) ??
+    localMediaDrop
+  );
+}
+
+/**
+ * The one composer a drop at this point will reach, so the highlight shown
+ * during the drag and the routing of the drop can never disagree.
+ */
+function resolveMediaDropTarget(
+  point: { x: number; y: number },
+  lastHovered: string,
+) {
+  return (
+    mediaDropTargetAt(point) ??
+    mediaTargetsFor(lastHovered).at(-1) ??
+    fallbackMediaDropTarget()
+  );
+}
+
+let highlightedMediaDropComposer: HTMLElement | null = null;
+
+/** Mark the composer that will receive the dragged media; `undefined` clears it. */
+function highlightMediaDropTarget(target: MediaDropTarget | undefined) {
+  const next = target?.composer?.() ?? null;
+  if (next === highlightedMediaDropComposer) return;
+  if (highlightedMediaDropComposer) {
+    delete highlightedMediaDropComposer.dataset.mediaDropTarget;
+  }
+  highlightedMediaDropComposer = next;
+  if (next) next.dataset.mediaDropTarget = "";
+}
+
+let mediaDropHighlightCleanupInstalled = false;
+/** A drag that ends anywhere, or leaves the window, takes the highlight with it. */
+function installMediaDropHighlightCleanup() {
+  if (mediaDropHighlightCleanupInstalled || typeof window === "undefined") {
+    return;
+  }
+  mediaDropHighlightCleanupInstalled = true;
+  const clear = () => highlightMediaDropTarget(undefined);
+  window.addEventListener("drop", clear, true);
+  window.addEventListener("dragend", clear, true);
+  window.addEventListener(
+    "dragleave",
+    (event) => {
+      if (!event.relatedTarget) clear();
+    },
+    true,
+  );
 }
 
 /** The chat surface a drop landed on, when the pointer is inside one. */
@@ -5193,6 +5261,10 @@ export function ChatSurface({
       if (
         chatDragSource(event.dataTransfer) ||
         !isMediaDrag(event.dataTransfer)
+      installMediaDropHighlightCleanup();
+      highlightMediaDropTarget(
+        resolveMediaDropTarget(point, mediaDropTargetUnderPointer),
+      );
       )
         return;
       event.preventDefault();
@@ -5206,11 +5278,9 @@ export function ChatSurface({
       const underPointer = mediaDropTargetUnderPointer;
       mediaDropTargetUnderPointer = "";
       const target =
-        mediaDropTargetAt(point) ??
-        mediaTargetsFor(underPointer).at(-1) ??
-        localMediaDrop ??
-        NO_MEDIA_DROP_TARGET;
+        resolveMediaDropTarget(point, underPointer) ?? NO_MEDIA_DROP_TARGET;
       // Park the event only when this pass really took it: with no target the
+      highlightMediaDropTarget(undefined);
       // surface's own capture handler is still the one that can attach.
       if (target === NO_MEDIA_DROP_TARGET) return;
       handledMediaDrops.add(event);
@@ -22586,6 +22656,7 @@ function Composer({
       rect: () => {
         const shell = composerShellRef.current;
         const surface = shell?.closest(".gyro-chat-surface");
+      composer: () => composerShellRef.current,
         return (surface ?? shell)?.getBoundingClientRect() ?? new DOMRect();
       },
     });
@@ -22600,6 +22671,7 @@ function Composer({
     chatMode !== "council" && !isCliUpdating &&
     (!hasUserWorkspace || needsProviderSetup || !hasSelectedProvider);
 
+      composer: () => composerShellRef.current,
   const hasGoalCaption = Boolean(
     sessionGoal?.status === "active" &&
     sessionGoal.text &&

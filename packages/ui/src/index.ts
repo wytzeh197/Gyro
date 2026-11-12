@@ -731,9 +731,11 @@ export {
 } from "./chat-task-suggestions";
 export { ChatQuestionAnswers, ImplementPlanDock, PlanCard } from "./plan-mode";
 export {
+  assetUrlToPath,
   droppedFileUrls,
   fileUrlToPath,
   sendableChatImage,
+  setChatMediaUrlDownloader,
   setOpenDroppedWorkspaceHandler,
   workspaceDropFromTransfer,
 } from "./chat-media-transfer";

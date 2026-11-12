@@ -19,6 +19,7 @@ import {
   sessionQuestionCounts,
   revealChatQuestion,
   setConfirmActionHandler,
+  setChatMediaUrlDownloader,
   setOpenDroppedWorkspaceHandler,
   terminalLaunchProfiles,
   validateWorkspaceEntryName,
@@ -245,6 +246,7 @@ import {
 import { AccountNavigation, AccountSettings } from "./native-account-settings";
 import { newChatDefaultSelection } from "./new-chat-defaults";
 import {
+  downloadDroppedMediaUrl,
   pendingMediaAttachment,
   queueMediaUpload,
   settlePendingMedia,
@@ -7269,6 +7271,15 @@ export function App() {
       disposeEditorModels(affectedPaths);
       setFiles((current) =>
         current.filter(
+  useEffect(() => {
+    setChatMediaUrlDownloader((url) =>
+      downloadDroppedMediaUrl(url, (target) =>
+        invoke("download_chat_media_url", { url: target }),
+      ),
+    );
+    return () => setChatMediaUrlDownloader(undefined);
+  }, []);
+
           (file) =>
             !file.workspacePath ||
             normalizeProjectPath(file.workspacePath) !==
