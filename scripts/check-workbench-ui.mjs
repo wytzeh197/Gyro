@@ -1079,7 +1079,7 @@ expect(
   ) &&
     cssRules(
       styleSource,
-      ".gyro-composer-shell > .gyro-composer-attachments",
+      ".gyro-composer-input > .gyro-composer-attachments",
     ).some(
       (rule) =>
         rule.includes("overflow-x: auto") &&
