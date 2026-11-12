@@ -8,7 +8,9 @@ on:
 jobs:
   node:
     name: Node
-    runs-on: macos-26
+    # Keep browser/source checks off the capacity-constrained ARM pool.
+    # Native ARM coverage remains in Rust and Tauri; releases also use this Intel image.
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
