@@ -19054,8 +19054,11 @@ button.gyro-response-changed-files:hover {
   border-color: transparent;
 }
 .gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion) {
-  grid-template-columns: minmax(0, 1fr) min(320px, 38%);
-  column-gap: 0;
+  /* Reserve the scaled card width plus breathing room at every pane width. */
+  grid-template-columns:
+    minmax(0, 1fr)
+    min(calc(340px * var(--gyro-ui-scale, 1)), 40%);
+  column-gap: var(--gyro-chat-block-gap);
 }
 .gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion)
   > .gyro-chat-thread-topbar {
@@ -19065,11 +19068,15 @@ button.gyro-response-changed-files:hover {
   > .gyro-chat-thread-canvas {
   grid-column: 1;
   grid-row: 2;
+  min-width: 0;
+  max-width: 100%;
   padding-right: 0;
   width: 100%;
 }
 .gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion)
   > .gyro-chat-environment-popover {
+  box-sizing: border-box;
+  min-width: 0;
   position: relative;
   grid-column: 2;
   grid-row: 2;
@@ -19229,6 +19236,11 @@ button.gyro-response-changed-files:hover {
   outline: 2px solid var(--gyro-focus-ring);
   outline-offset: 2px;
 }
+/* The composer a dragged image will land in, so a drop never feels blind. */
+.gyro-composer-shell[data-media-drop-target] .gyro-composer-input {
+  border-color: var(--gyro-focus-ring);
+  box-shadow: 0 0 0 1px var(--gyro-focus-ring);
+}
 
 :root[data-theme]
   .gyro-chat-surface.is-empty.is-tiled
@@ -19236,11 +19248,6 @@ button.gyro-response-changed-files:hover {
   padding-inline: var(--gyro-chat-gutter);
 }
 .gyro-composer-bar > .gyro-dictation-button::before {
-/* The composer a dragged image will land in, so a drop never feels blind. */
-.gyro-composer-shell[data-media-drop-target] .gyro-composer-input {
-  border-color: var(--gyro-focus-ring);
-  box-shadow: 0 0 0 1px var(--gyro-focus-ring);
-}
   background: var(--gyro-border-strong);
   content: "";
   height: 50%;

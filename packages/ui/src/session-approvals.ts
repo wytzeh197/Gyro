@@ -69,14 +69,17 @@ export function sessionQuestionCounts(
   sessions: Session[],
   eventsBySessionId: Record<string, SessionEvent[]>,
   sendingSessionIds: string[] = [],
+  resolvedQuestionIdsBySessionId: Record<string, string> = {},
 ): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const session of sessions) {
     if (sendingSessionIds.includes(session.id)) continue;
-    const count =
-      pendingSessionQuestions(eventsBySessionId[session.id] ?? [])?.questions
-        .length ?? 0;
-    if (count) counts[session.id] = count;
+    const request = pendingSessionQuestions(
+      eventsBySessionId[session.id] ?? [],
+    );
+    if (request && request.id !== resolvedQuestionIdsBySessionId[session.id]) {
+      counts[session.id] = request.questions.length;
+    }
   }
   return counts;
 }

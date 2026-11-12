@@ -255,6 +255,35 @@ assert.deepEqual(
   { "question-chat": 2 },
   "prose questions use the same parser and retain their question count",
 );
+// Resolving a popup clears attention immediately, before the answer's user
+// event arrives. Resolution belongs to one request in one session.
+const resolved = { "question-chat": sidebarQuestion.id };
+assert.deepEqual(
+  sessionQuestionCounts(
+    sidebarSessions,
+    { "question-chat": sidebarEvents },
+    [],
+    resolved,
+  ),
+  {},
+  "skipping clears Needs input while the answer is still being dispatched",
+);
+assert.deepEqual(
+  sessionQuestionCounts(
+    sidebarSessions,
+    {
+      "question-chat": [
+        sidebarUser,
+        { ...sidebarQuestion, id: "next-question" },
+      ],
+      "other-chat": sidebarEvents,
+    },
+    [],
+    resolved,
+  ),
+  { "question-chat": 1, "other-chat": 1 },
+  "a resolved question cannot hide a later request or another chat's question",
+);
 console.log(
-  "Sidebar question checks passed: session scope, streaming, answers, stale turns, and imported history.",
+  "Sidebar question checks passed: session scope, streaming, answers, skips, stale turns, and imported history.",
 );

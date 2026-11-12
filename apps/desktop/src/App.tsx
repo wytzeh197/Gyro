@@ -890,9 +890,34 @@ export function App() {
     () => sessionApprovalCounts(sessions, sessionEventsById),
     [sessions, sessionEventsById],
   );
+  const [resolvedQuestionIdsBySessionId, setResolvedQuestionIdsBySessionId] =
+    useState<Record<string, string>>({});
+  const questionStateForSession = (sessionId?: string) =>
+    sessionId
+      ? {
+          resolvedId: resolvedQuestionIdsBySessionId[sessionId],
+          onResolve: (questionId: string) =>
+            setResolvedQuestionIdsBySessionId((current) =>
+              current[sessionId] === questionId
+                ? current
+                : { ...current, [sessionId]: questionId },
+            ),
+        }
+      : undefined;
   const questionCountsBySessionId = useMemo(
-    () => sessionQuestionCounts(sessions, sessionEventsById, sendingSessionIds),
-    [sessions, sessionEventsById, sendingSessionIds],
+    () =>
+      sessionQuestionCounts(
+        sessions,
+        sessionEventsById,
+        sendingSessionIds,
+        resolvedQuestionIdsBySessionId,
+      ),
+    [
+      sessions,
+      sessionEventsById,
+      sendingSessionIds,
+      resolvedQuestionIdsBySessionId,
+    ],
   );
   const queuedDeliveryNotBeforeRef = useRef(new Map<string, number>());
   const {
@@ -7246,6 +7271,15 @@ export function App() {
     return () => setOpenDroppedWorkspaceHandler(undefined);
   }, [openDroppedWorkspaceFolders]);
 
+  useEffect(() => {
+    setChatMediaUrlDownloader((url) =>
+      downloadDroppedMediaUrl(url, (target) =>
+        invoke("download_chat_media_url", { url: target }),
+      ),
+    );
+    return () => setChatMediaUrlDownloader(undefined);
+  }, []);
+
   const removeWorkspaceFolder = useCallback(
     (path: string) => {
       if (!activeWorkspaceRoot) return;
@@ -7271,15 +7305,6 @@ export function App() {
       disposeEditorModels(affectedPaths);
       setFiles((current) =>
         current.filter(
-  useEffect(() => {
-    setChatMediaUrlDownloader((url) =>
-      downloadDroppedMediaUrl(url, (target) =>
-        invoke("download_chat_media_url", { url: target }),
-      ),
-    );
-    return () => setChatMediaUrlDownloader(undefined);
-  }, []);
-
           (file) =>
             !file.workspacePath ||
             normalizeProjectPath(file.workspacePath) !==
@@ -17809,6 +17834,7 @@ export function App() {
         <ChatSurface
           {...projectImport.chatProps(paneSession)}
           {...taskHandoff.chatProps(paneSession)}
+          questionState={questionStateForSession(paneSession?.id)}
           activeChatPanel={panePanel}
           paneKey={paneDraftKey}
           onSelectChatPanel={selectPanePanel}
@@ -18212,6 +18238,7 @@ export function App() {
     <ChatSurface
       {...projectImport.chatProps(activeSession)}
       {...taskHandoff.chatProps(activeSession)}
+      questionState={questionStateForSession(activeSessionId)}
       chatSwitcher={workspaceChatSwitcher}
       paneKey={activeDraftKey}
       activeChatPanel={activeChatPanel}
@@ -18698,6 +18725,7 @@ export function App() {
                   <ChatSurface
                     {...projectImport.chatProps(activeSession)}
                     {...taskHandoff.chatProps(activeSession)}
+                    questionState={questionStateForSession(activeSessionId)}
                     activeChatPanel={activeChatPanel}
                     paneKey={activeDraftKey}
                     onSelectChatPanel={selectSoloChatPanel}
@@ -19587,6 +19615,7 @@ export function App() {
         <ChatSurface
           {...projectImport.chatProps(activeSession)}
           {...taskHandoff.chatProps(activeSession)}
+          questionState={questionStateForSession(activeSessionId)}
           activeChatPanel={activeChatPanel}
           paneKey={activeDraftKey}
           onSelectChatPanel={selectSoloChatPanel}

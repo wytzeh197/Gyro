@@ -4811,6 +4811,11 @@ type ChatSurfaceProps = {
     action: CouncilActionRequest,
   ) => void | Promise<string | void>;
   onSend: (message: string) => void;
+  /** Share completed question requests with navigation before send finishes. */
+  questionState?: {
+    resolvedId?: string;
+    onResolve: (questionId: string) => void;
+  };
   onComposerAction?: (action: string) => void;
   onMutationApprovalAction?: (
     proposalId: string,
@@ -5065,6 +5070,7 @@ export function ChatSurface({
   onLoadEarlier,
   onCouncilAction,
   onSend,
+  questionState,
   onComposerAction,
   onMutationApprovalAction,
   onProviderApprovalAction,
@@ -5255,16 +5261,16 @@ export function ChatSurface({
       const point = { x: event.clientX, y: event.clientY };
       const under = mediaDropTargetAt(point);
       if (under) mediaDropTargetUnderPointer = under.paneKey;
+      installMediaDropHighlightCleanup();
+      highlightMediaDropTarget(
+        resolveMediaDropTarget(point, mediaDropTargetUnderPointer),
+      );
     };
     const onDrop = (event: DragEvent) => {
       if (handledMediaDrops.has(event)) return;
       if (
         chatDragSource(event.dataTransfer) ||
         !isMediaDrag(event.dataTransfer)
-      installMediaDropHighlightCleanup();
-      highlightMediaDropTarget(
-        resolveMediaDropTarget(point, mediaDropTargetUnderPointer),
-      );
       )
         return;
       event.preventDefault();
@@ -5277,10 +5283,10 @@ export function ChatSurface({
       // that took the first one, whichever chat was being hovered.
       const underPointer = mediaDropTargetUnderPointer;
       mediaDropTargetUnderPointer = "";
+      highlightMediaDropTarget(undefined);
       const target =
         resolveMediaDropTarget(point, underPointer) ?? NO_MEDIA_DROP_TARGET;
       // Park the event only when this pass really took it: with no target the
-      highlightMediaDropTarget(undefined);
       // surface's own capture handler is still the one that can attach.
       if (target === NO_MEDIA_DROP_TARGET) return;
       handledMediaDrops.add(event);
@@ -5312,7 +5318,10 @@ export function ChatSurface({
   }, []);
 
   const [dismissedQuestionId, setDismissedQuestionId] = useState<string>();
-  const questionRequest = useMemo(() => latestChatQuestions(events), [events]);
+  const questionRequest = useMemo(() => {
+    const request = latestChatQuestions(events);
+    return request?.id === questionState?.resolvedId ? undefined : request;
+  }, [events, questionState?.resolvedId]);
   useLayoutEffect(() => {
     const reveal = (event: Event) => {
       const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail
@@ -6549,7 +6558,10 @@ export function ChatSurface({
                   key={questionRequest.id}
                   request={questionRequest}
                   draft={localDraft}
-                  onSend={onSend}
+                  onSend={(message) => {
+                    onSend(message);
+                    questionState?.onResolve(questionRequest.id);
+                  }}
                   onDismiss={() => setDismissedQuestionId(questionRequest.id)}
                 />
               ) : isPlanReadyForDecision &&
@@ -22644,6 +22656,7 @@ function Composer({
       reportError,
       paneKey: draftKey,
       rect: () => new DOMRect(),
+      composer: () => composerShellRef.current,
     };
     // Any mounted composer can take a drop that landed off every chat, so there
     // is always somewhere for it to go.
@@ -22656,9 +22669,9 @@ function Composer({
       rect: () => {
         const shell = composerShellRef.current;
         const surface = shell?.closest(".gyro-chat-surface");
-      composer: () => composerShellRef.current,
         return (surface ?? shell)?.getBoundingClientRect() ?? new DOMRect();
       },
+      composer: () => composerShellRef.current,
     });
     return () => {
       deregister();
@@ -22671,7 +22684,6 @@ function Composer({
     chatMode !== "council" && !isCliUpdating &&
     (!hasUserWorkspace || needsProviderSetup || !hasSelectedProvider);
 
-      composer: () => composerShellRef.current,
   const hasGoalCaption = Boolean(
     sessionGoal?.status === "active" &&
     sessionGoal.text &&
