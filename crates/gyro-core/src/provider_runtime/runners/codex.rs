@@ -1296,19 +1296,153 @@ pub fn codex_item_activity(
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(fallback_label)
         .to_string();
-    let status = item
+    let mut status = item
         .get("status")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("done")
         .to_string();
+    let exit_code = item.get("exitCode").and_then(serde_json::Value::as_i64);
+    if kind == "command"
+        && !matches!(status.as_str(), "running" | "in_progress" | "inProgress")
+        && exit_code.is_some_and(|code| code != 0)
+    {
+        status = "failed".into();
+    }
+    // The existing note travels through both live and saved activity events.
+    // Failed commands use it for diagnostics rather than losing the result at
+    // the adapter boundary. Successful/running commands keep their old shape.
+    let note = (kind == "command" && status == "failed")
+        .then(|| codex_command_failure_note(item, exit_code));
     ProviderActivity {
         id,
         kind: kind.into(),
         label,
         detail: None,
         file_counts: None,
-        note: None,
+        note,
         status,
+    }
+}
+
+fn codex_command_failure_note(item: &serde_json::Value, exit_code: Option<i64>) -> String {
+    let header = exit_code.map_or_else(
+        || "Command failed; exit code unavailable.".to_string(),
+        |code| format!("Exit code: {code}"),
+    );
+    let output = item
+        .get("aggregatedOutput")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    if output.is_empty() {
+        return header;
+    }
+    // Redact before shortening so a cut cannot expose a partial credential.
+    let output = crate::security::redact_secrets(output);
+    let excerpt = if output.chars().count() > 4_000 {
+        let head: String = output.chars().take(2_000).collect();
+        let tail: String = output
+            .chars()
+            .rev()
+            .take(2_000)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        format!("{head}\n[output truncated]\n{tail}")
+    } else {
+        output
+    };
+    format!("{header}\n{excerpt}")
+}
+
+#[cfg(test)]
+mod command_failure_tests {
+    use super::*;
+
+    #[test]
+    fn completed_command_with_nonzero_exit_keeps_failure_evidence() {
+        let activity = codex_item_activity(
+            &serde_json::json!({
+                "id": "command-1", "command": "node check.mjs", "status": "completed",
+                "exitCode": 1, "aggregatedOutput": "Error: browser unavailable"
+            }),
+            "command",
+            "Ran command",
+        );
+        assert_eq!(activity.status, "failed");
+        assert_eq!(activity.label, "node check.mjs");
+        assert_eq!(
+            activity.note.as_deref(),
+            Some("Exit code: 1\nError: browser unavailable")
+        );
+    }
+
+    #[test]
+    fn failure_excerpt_is_redacted_bounded_and_keeps_both_ends() {
+        let output = format!(
+            "password=private-fixture-value\nSTART {} END",
+            "界".repeat(8_000)
+        );
+        let activity = codex_item_activity(
+            &serde_json::json!({
+                "status": "failed", "exitCode": 2, "aggregatedOutput": output
+            }),
+            "command",
+            "Ran command",
+        );
+        let note = activity.note.unwrap();
+        assert!(!note.contains("private-fixture-value"));
+        assert!(note.contains("START"));
+        assert!(note.ends_with("END"));
+        assert!(note.contains("[output truncated]"));
+        assert!(note.chars().count() < 4_100);
+    }
+
+    #[test]
+    fn successful_running_and_unknown_outcomes_are_not_invented_failures() {
+        for status in ["completed", "inProgress", "in_progress", "running"] {
+            let activity = codex_item_activity(
+                &serde_json::json!({
+                    "status": status, "exitCode": 0, "aggregatedOutput": "ok"
+                }),
+                "command",
+                "Ran command",
+            );
+            assert_eq!(activity.status, status);
+            assert_eq!(activity.note, None);
+        }
+        let running = codex_item_activity(
+            &serde_json::json!({
+                "status": "inProgress", "exitCode": 1
+            }),
+            "command",
+            "Ran command",
+        );
+        assert_eq!(running.status, "inProgress");
+        assert_eq!(running.note, None);
+        let unknown = codex_item_activity(
+            &serde_json::json!({"status": "completed"}),
+            "command",
+            "Ran command",
+        );
+        assert_eq!(unknown.note, None);
+        let failed = codex_item_activity(
+            &serde_json::json!({"status": "failed"}),
+            "command",
+            "Ran command",
+        );
+        assert_eq!(
+            failed.note.as_deref(),
+            Some("Command failed; exit code unavailable.")
+        );
+        let tool = codex_item_activity(
+            &serde_json::json!({"status": "completed", "exitCode": 1}),
+            "tool",
+            "Tool",
+        );
+        assert_eq!(tool.status, "completed");
+        assert_eq!(tool.note, None);
     }
 }
 

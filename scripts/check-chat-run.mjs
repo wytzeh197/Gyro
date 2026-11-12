@@ -1417,6 +1417,40 @@ const capabilityCall = (capabilityId, extra = {}, minutes = 0) =>
     },
     minutes,
   );
+// Failure evidence survives rendering and a later identical successful attempt.
+const editFailure = "oldString was not found in src/app.ts; re-read the file";
+const failedEditItem = workItemFromEvent(capabilityCall("workspace-edit", {
+  status: "failed", summary: editFailure,
+}));
+assert.equal(failedEditItem.error, editFailure, "failed edits keep their recorded reason");
+assert.equal(failedEditItem.kind, "tool", "failed edits are not changed files");
+
+const commandFailure = "Exit code: 1\nError: Chromium executable was not found";
+const failedCommand = activity("command", "node scripts/check-theme.mjs", {
+  status: "failed", note: commandFailure,
+});
+const failedCommandItem = workItemFromEvent(failedCommand);
+assert.equal(failedCommandItem.error, commandFailure, "command diagnostics survive the event adapter");
+assert.equal(failedCommandItem.intent, undefined, "failure output is not command intent");
+for (const command of ["cat missing.ts", "rg needle missing.ts"]) {
+  assert.equal(workItemFromEvent(activity("command", command, {
+    status: "failed", note: commandFailure,
+  })).error, commandFailure, "reclassified reads/searches retain command diagnostics");
+}
+for (const events of [
+  [failedCommand, activity("command", "node scripts/check-theme.mjs")],
+  [capabilityCall("workspace-edit", { status: "failed", summary: editFailure }),
+   capabilityCall("workspace-edit", { summary: "Applied edit" })],
+  [failedCommand, activity("command", "node scripts/check-theme.mjs", {
+    status: "failed", note: "Exit code: 1\nA different failure",
+  })],
+]) {
+  const work = buildRunModel(events).steps.filter(step => step.kind === "work");
+  assert.equal(work.length, 2, "separate failed attempts must not be folded away");
+  assert.equal(work[0].item.status, "failed");
+  assert.equal(partitionSegmentCalls(work).visible[0].item.status, "failed");
+}
+
 const page = {
   id: "browser-1",
   kind: "browser",
