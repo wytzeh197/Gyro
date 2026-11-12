@@ -55,6 +55,8 @@ export type WorkItem =
       id: string;
       status: WorkStatus;
       command: string;
+      /** Recorded failure details; never inferred from assistant narration. */
+      error?: string;
       category?: CommandCategory;
       /** What the command was for, when the provider says. Falls back to the command. */
       intent?: string;
@@ -126,6 +128,7 @@ export type WorkItem =
       status: WorkStatus;
       tool: string;
       server?: string;
+      error?: string;
       /**
        * What the tool ran on, when the provider sent a machine identity as the
        * tool name (Bash, Skill, mcp__…). Shown muted next to the bright label.
@@ -864,6 +867,7 @@ function coalesceAdjacentToolSteps(steps: RunStep[]): RunStep[] {
       previous?.kind === "work" &&
       previous.item.kind === "tool" &&
       !(previous.item.status !== "running" && step.item.status === "running") &&
+      previous.item.status !== "failed" && step.item.status !== "failed" &&
       toolIdentity(previous.item) === toolIdentity(step.item)
     ) {
       // Keep the latest status/label (failed wins over done only if last).
@@ -1159,11 +1163,13 @@ function classifyCommandActivity({
   id,
   intent,
   status,
+  error,
 }: {
   command: string;
   id: string;
   intent?: string;
   status: WorkStatus;
+  error?: string;
 }): WorkItem {
   const shape = parseShellCommand(displayCommand(command));
   const words = withoutEnvAssignments(shape.segments[0] ?? []);
@@ -1179,6 +1185,7 @@ function classifyCommandActivity({
       status,
       scope: "project",
       query: commandSearchQuery(words),
+      ...(error ? { error } : {}),
     };
   }
   if (
@@ -1194,6 +1201,7 @@ function classifyCommandActivity({
       status,
       path,
       media: isImagePath(path) ? "image" : "file",
+      ...(error ? { error } : {}),
     };
   }
   const programs = shape.segments.map((segment) =>
@@ -1210,7 +1218,7 @@ function classifyCommandActivity({
       : onlyLooks && INSPECT_COMMAND.test(programs[0] ?? "")
         ? "inspect"
         : undefined;
-  return { kind: "command", id, status, command, intent, category };
+  return { kind: "command", id, status, command, intent, category, ...(error ? { error } : {}) };
 }
 
 const READ_PROGRAMS = new Set(["sed", "head", "tail", "cat", "awk"]);
@@ -1495,7 +1503,8 @@ export function workItemFromEvent(event: SessionEvent): WorkItem | undefined {
       return classifyCommandActivity({
         command: text(payload, "command") ?? detail ?? label,
         id,
-        intent: text(payload, "intent") ?? text(payload, "note"),
+        intent: text(payload, "intent") ?? (status === "failed" ? undefined : text(payload, "note")),
+        error: status === "failed" ? text(payload, "error") ?? text(payload, "note") : undefined,
         status,
       });
     case "file":
@@ -1717,6 +1726,7 @@ function workItemFromCapabilityCall(
         command: summary ?? resourceLabel ?? label,
         id,
         intent: summary,
+        error: status === "failed" ? summary : undefined,
         status,
       });
 
@@ -1772,7 +1782,7 @@ function workItemFromCapabilityCall(
   }
 
   // Everything else is a single tool beat with the table's own title.
-  return { kind: "tool", id, status, tool: label };
+  return { kind: "tool", id, status, tool: label, ...(status === "failed" && summary ? { error: summary } : {}) };
 }
 
 function pathLifecycleForCapability(
@@ -2395,6 +2405,11 @@ function absorbRepeatedWork(
       ? findLastWorkStep(steps, identity)
       : matchingLastStep(steps, identity);
   if (!target) {
+    return false;
+  }
+  // A failed attempt is evidence, even if an identical later attempt succeeds.
+  // Invocation lifecycle updates are already reconciled before display folding.
+  if (target.item.status === "failed" || item.status === "failed") {
     return false;
   }
   // Finished rows never regain a spinner. A new invocation gets a new row

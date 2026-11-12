@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import {
+  assetUrlToPath,
   chatMediaFiles,
   chatMediaFilesFromDrop,
+  deliverChatMediaDrop,
   isMediaDrag,
+  setChatMediaUrlDownloader,
   chatImageCanvasSize,
   sendableChatImage,
 } from "../packages/ui/src/chat-media-transfer.ts";
@@ -149,6 +152,79 @@ try {
   );
 } finally {
   globalThis.fetch = originalFetch;
+}
+
+// The desktop CSP limits the webview's `fetch` to IPC, so a dropped `data:`
+// image is decoded locally and a web image downloads through the native
+// side. Neither may touch `fetch`, or every browser image drop fails.
+try {
+  globalThis.fetch = async () => {
+    throw new TypeError("Load failed");
+  };
+  const [decoded] = await chatMediaFilesFromDrop(urlDrop);
+  assert.equal(decoded.type, "image/png");
+  assert.equal(decoded.size, 8);
+  const [svg] = await chatMediaFilesFromDrop({
+    ...urlDrop,
+    getData: () => "data:image/svg+xml," + encodeURIComponent("<svg/>"),
+  });
+  assert.equal(svg.name, "image.svg");
+  await assert.rejects(
+    chatMediaFilesFromDrop({ ...urlDrop, getData: () => "data:text/plain,hi" }),
+    /not an image/,
+  );
+  const requested = [];
+  setChatMediaUrlDownloader(async (url) => {
+    requested.push(url);
+    return new Blob([new Uint8Array([0xff, 0xd8, 0xff])], {
+      type: "image/jpeg",
+    });
+  });
+  const [downloaded] = await chatMediaFilesFromDrop(remoteDrop);
+  assert.deepEqual(requested, ["https://example.test/bad%name.png"]);
+  assert.equal(downloaded.name, "bad_name.jpg");
+  assert.equal(downloaded.type, "image/jpeg");
+  setChatMediaUrlDownloader(async () => new Blob(["<html>"], { type: "text/html" }));
+  await assert.rejects(chatMediaFilesFromDrop(remoteDrop), /did not return an image/);
+  setChatMediaUrlDownloader(async () => {
+    throw new Error("Image download failed (404)");
+  });
+  await assert.rejects(chatMediaFilesFromDrop(remoteDrop), /\(404\)/);
+} finally {
+  setChatMediaUrlDownloader(undefined);
+  globalThis.fetch = originalFetch;
+}
+
+// An image dragged from earlier in a chat is Gyro's own stored file behind an
+// asset URL the webview cannot fetch; it is attached by path instead.
+assert.equal(
+  assetUrlToPath("asset://localhost/%2FUsers%2Fme%2Fshot%20one.png"),
+  "/Users/me/shot one.png",
+);
+assert.equal(
+  assetUrlToPath("http://asset.localhost/C%3A%5CUsers%5Cme%5Cshot.png"),
+  "C:\\Users\\me\\shot.png",
+);
+assert.equal(assetUrlToPath("https://example.test/shot.png"), undefined);
+assert.equal(assetUrlToPath("asset://evil/%2Ftmp%2Fa.png"), undefined);
+assert.equal(assetUrlToPath(undefined), undefined);
+{
+  const attachedPaths = [];
+  deliverChatMediaDrop(
+    {
+      types: types("text/uri-list"),
+      files: [],
+      items: [],
+      getData: (type) =>
+        type === "text/uri-list"
+          ? "asset://localhost/%2FUsers%2Fme%2Fstore%2Fabc.png"
+          : "",
+    },
+    () => assert.fail("a stored image must not be re-downloaded"),
+    (message) => assert.fail(message),
+    (paths) => attachedPaths.push(...paths),
+  );
+  assert.deepEqual(attachedPaths, ["/Users/me/store/abc.png"]);
 }
 
 // Even identical names, sizes and timestamps do not prove equal bytes.

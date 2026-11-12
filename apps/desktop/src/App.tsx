@@ -20,7 +20,10 @@ import {
   sessionApprovalCounts,
   sessionQuestionCounts,
   revealChatQuestion,
+  chatQuestionDismissalVersion,
+  subscribeChatQuestionDismissals,
   setConfirmActionHandler,
+  setChatMediaUrlDownloader,
   setOpenDroppedWorkspaceHandler,
   terminalLaunchProfiles,
   validateWorkspaceEntryName,
@@ -248,6 +251,7 @@ import {
 import { AccountNavigation, AccountSettings } from "./native-account-settings";
 import { newChatDefaultSelection } from "./new-chat-defaults";
 import {
+  downloadDroppedMediaUrl,
   pendingMediaAttachment,
   queueMediaUpload,
   settlePendingMedia,
@@ -555,6 +559,7 @@ import {
   useReducer,
   useRef,
   useState,
+  useSyncExternalStore,
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -893,9 +898,41 @@ export function App() {
     () => sessionApprovalCounts(sessions, sessionEventsById),
     [sessions, sessionEventsById],
   );
+  const [resolvedQuestionIdsBySessionId, setResolvedQuestionIdsBySessionId] =
+    useState<Record<string, string>>({});
+  const questionStateForSession = (sessionId?: string) =>
+    sessionId
+      ? {
+          resolvedId: resolvedQuestionIdsBySessionId[sessionId],
+          onResolve: (questionId: string) =>
+            setResolvedQuestionIdsBySessionId((current) =>
+              current[sessionId] === questionId
+                ? current
+                : { ...current, [sessionId]: questionId },
+            ),
+        }
+      : undefined;
+  // Skipping a question card clears its sidebar badge as well.
+  const questionDismissals = useSyncExternalStore(
+    subscribeChatQuestionDismissals,
+    chatQuestionDismissalVersion,
+    () => 0,
+  );
   const questionCountsBySessionId = useMemo(
-    () => sessionQuestionCounts(sessions, sessionEventsById, sendingSessionIds),
-    [sessions, sessionEventsById, sendingSessionIds],
+    () =>
+      sessionQuestionCounts(
+        sessions,
+        sessionEventsById,
+        sendingSessionIds,
+        resolvedQuestionIdsBySessionId,
+      ),
+    [
+      sessions,
+      sessionEventsById,
+      sendingSessionIds,
+      resolvedQuestionIdsBySessionId,
+      questionDismissals,
+    ],
   );
   const queuedDeliveryNotBeforeRef = useRef(new Map<string, number>());
   const {
@@ -2794,9 +2831,9 @@ export function App() {
         );
         return;
       }
-      let fullHistory =
-        !completeHistorySessionsRef.current.has(sessionId) ||
-        !sessionEventsByIdRef.current[sessionId]?.length;
+      const initialHistory = !sessionEventsByIdRef.current[sessionId]?.length;
+      if (initialHistory) completeHistorySessionsRef.current.delete(sessionId);
+      let recoveringGap = false;
       try {
         type HistoryPage = {
           events: SessionEvent[];
@@ -2807,57 +2844,56 @@ export function App() {
         };
         let page = await invoke<HistoryPage>("read_session_events", {
           sessionId,
-          fullHistory,
-          knownRevision: fullHistory
+          fullHistory: false,
+          knownRevision: initialHistory
             ? undefined
             : historyRevisionsRef.current[sessionId],
         });
         if (sessionEventsRequestRef.current[sessionId] !== requestId) return;
-        // A sleeping/backgrounded chat may have advanced beyond the refresh
-        // window. Recover the entire gap instead of silently losing its middle.
+        // Opening a chat fetches only its recent page. Older messages remain
+        // available through loadEarlierEvents instead of delaying first paint.
+        // On refresh, bridge a sleeping chat's gap only as far as known history.
         const knownIds = new Set(
-          !fullHistory && page.hasMoreBefore
-            ? (sessionEventsByIdRef.current[sessionId] ?? []).map(
-                (event) => event.id,
-              )
-            : [],
+          initialHistory
+            ? []
+            : (sessionEventsByIdRef.current[sessionId] ?? [])
+                .filter((event) => event.kind !== "session-created")
+                .map((event) => event.id),
         );
-        if (
-          !fullHistory &&
-          page.hasMoreBefore &&
-          !page.events.some(
-            (event) =>
-              event.kind !== "session-created" && knownIds.has(event.id),
-          )
-        ) {
-          fullHistory = true;
-          page = await invoke<HistoryPage>("read_session_events", {
-            sessionId,
-            fullHistory: true,
-          });
-        }
-        // Older desktop runtimes may ignore fullHistory while the frontend
-        // updates. Walk their bounded pages automatically until nothing remains.
         let cursor = page.events.find(
           (event) => event.kind !== "session-created",
         );
-        while (fullHistory && page.hasMoreBefore) {
+        let overlaps = page.events.some((event) => knownIds.has(event.id));
+        const cursors = new Set<string>();
+        while (
+          !page.unchanged &&
+          knownIds.size > 0 &&
+          page.hasMoreBefore &&
+          !overlaps
+        ) {
+          recoveringGap = true;
           if (sessionEventsRequestRef.current[sessionId] !== requestId) return;
-          if (!cursor)
-            throw new Error("Chat history returned no earlier cursor");
-          const earlier = await invoke<HistoryPage>("read_session_events", {
-            sessionId,
-            beforeEventId: cursor.id,
-            limit: MAX_CHAT_EVENT_RENDER_COUNT,
-          });
+          if (!cursor || cursors.has(cursor.id))
+            throw new Error("Chat history pagination made no progress");
+          cursors.add(cursor.id);
+          const earlier: HistoryPage = await invoke<HistoryPage>(
+            "read_session_events",
+            {
+              sessionId,
+              beforeEventId: cursor.id,
+              limit: MAX_CHAT_EVENT_RENDER_COUNT,
+            },
+          );
+          if (sessionEventsRequestRef.current[sessionId] !== requestId) return;
           const nextCursor = earlier.events.find(
             (event) => event.kind !== "session-created",
           );
           if (
             earlier.hasMoreBefore &&
-            (!nextCursor || nextCursor.id === cursor.id)
+            (!nextCursor || cursors.has(nextCursor.id))
           )
             throw new Error("Chat history pagination made no progress");
+          overlaps = earlier.events.some((event) => knownIds.has(event.id));
           page = {
             ...page,
             events: mergeSessionHistoryPages(earlier.events, page.events),
@@ -2867,7 +2903,7 @@ export function App() {
         }
         if (sessionEventsRequestRef.current[sessionId] === requestId) {
           historyRevisionsRef.current[sessionId] = page.revision ?? undefined;
-          if (!page.hasMoreBefore)
+          if (!page.unchanged && !page.hasMoreBefore)
             completeHistorySessionsRef.current.add(sessionId);
           // Streaming can continue during the read; use the latest buffer.
           const latestOptimisticEvents =
@@ -2877,11 +2913,12 @@ export function App() {
           const hasMoreBefore =
             !completeHistorySessionsRef.current.has(sessionId) &&
             page.hasMoreBefore;
-          setHasMoreBeforeBySession((current) =>
-            current[sessionId] === hasMoreBefore
-              ? current
-              : { ...current, [sessionId]: hasMoreBefore },
-          );
+          if (!page.unchanged)
+            setHasMoreBeforeBySession((current) =>
+              current[sessionId] === hasMoreBefore
+                ? current
+                : { ...current, [sessionId]: hasMoreBefore },
+            );
           setEventsForSession(sessionId, (current) => {
             const next = preserveDeliveredResponses(
               markInactiveCapabilityResources(
@@ -2905,7 +2942,7 @@ export function App() {
               mergePersistedAndOptimisticEvents(current, optimisticEvents),
             );
           }
-          if (fullHistory)
+          if (initialHistory || recoveringGap)
             notify(
               "command-failed",
               "Could not load chat history",
@@ -2957,6 +2994,8 @@ export function App() {
           beforeEventId: cursor.id,
           limit: MAX_CHAT_EVENT_RENDER_COUNT,
         });
+        if (!page.hasMoreBefore)
+          completeHistorySessionsRef.current.add(sessionId);
         setHasMoreBeforeBySession((current) => ({
           ...current,
           [sessionId]: page.hasMoreBefore,
@@ -7266,6 +7305,15 @@ export function App() {
     return () => setOpenDroppedWorkspaceHandler(undefined);
   }, [openDroppedWorkspaceFolders]);
 
+  useEffect(() => {
+    setChatMediaUrlDownloader((url) =>
+      downloadDroppedMediaUrl(url, (target) =>
+        invoke("download_chat_media_url", { url: target }),
+      ),
+    );
+    return () => setChatMediaUrlDownloader(undefined);
+  }, []);
+
   const removeWorkspaceFolder = useCallback(
     (path: string) => {
       if (!activeWorkspaceRoot) return;
@@ -7670,31 +7718,38 @@ export function App() {
    * means to send. Choosing a folder starts a chat under a new draft key, so
    * the composer would re-bind to an empty draft and the prompt and its images
    * would look discarded. Carry that unsent draft onto the chat the folder
-   * starts; an existing draft for the target chat always wins.
+   * starts; an existing draft for the target chat always wins. Switching the
+   * composer's folder names the draft being written as `switchedFrom`, so its
+   * prompt and images follow the composer to the new folder too.
    */
-  const carryFolderlessDraft = useCallback((targetDraftKey: string) => {
-    // Only a project draft (`new:<project>`) can receive the prompt. A session
-    // id names a live chat whose composer belongs to that conversation, and
-    // `NEW_CHAT_DRAFT_KEY` is the folderless composer itself.
-    if (!targetDraftKey.startsWith("new:")) return;
-    const sources = [NEW_CHAT_DRAFT_KEY, `new:${chatProjectKey()}`].filter(
-      (key) => key !== targetDraftKey,
-    );
-    setChatDrafts((current) => {
-      if (current[targetDraftKey]?.trim()) return current;
-      const source = sources.find((key) => current[key]?.trim());
-      const carried = source ? current[source] : undefined;
-      if (!source || !carried) return current;
-      return { ...current, [source]: "", [targetDraftKey]: carried };
-    });
-    setChatAttachments((current) => {
-      if ((current[targetDraftKey]?.length ?? 0) > 0) return current;
-      const source = sources.find((key) => (current[key]?.length ?? 0) > 0);
-      const carried = source ? current[source] : undefined;
-      if (!source || !carried || carried.length === 0) return current;
-      return { ...current, [source]: [], [targetDraftKey]: carried };
-    });
-  }, []);
+  const carryFolderlessDraft = useCallback(
+    (targetDraftKey: string, switchedFrom?: string) => {
+      // Only a project draft (`new:<project>`) can receive the prompt. A session
+      // id names a live chat whose composer belongs to that conversation, and
+      // `NEW_CHAT_DRAFT_KEY` is the folderless composer itself.
+      if (!targetDraftKey.startsWith("new:")) return;
+      const sources = [
+        ...(switchedFrom ? [switchedFrom] : []),
+        NEW_CHAT_DRAFT_KEY,
+        `new:${chatProjectKey()}`,
+      ].filter((key) => key !== targetDraftKey);
+      setChatDrafts((current) => {
+        if (current[targetDraftKey]?.trim()) return current;
+        const source = sources.find((key) => current[key]?.trim());
+        const carried = source ? current[source] : undefined;
+        if (!source || !carried) return current;
+        return { ...current, [source]: "", [targetDraftKey]: carried };
+      });
+      setChatAttachments((current) => {
+        if ((current[targetDraftKey]?.length ?? 0) > 0) return current;
+        const source = sources.find((key) => (current[key]?.length ?? 0) > 0);
+        const carried = source ? current[source] : undefined;
+        if (!source || !carried || carried.length === 0) return current;
+        return { ...current, [source]: [], [targetDraftKey]: carried };
+      });
+    },
+    [],
+  );
 
   // Whichever handler binds the composer to a project's draft — starting a
   // chat for a chosen folder, or restoring a layout — the prompt typed with no
@@ -7723,6 +7778,8 @@ export function App() {
         draftKey?: string;
         initialDraft?: string;
         preserveOpenPanes?: boolean;
+        /** The draft whose composer switched folder; its contents follow. */
+        carryDraftFrom?: string;
       } = {},
     ) => {
       suppressSessionAutoSelectRef.current = true;
@@ -7735,7 +7792,8 @@ export function App() {
       // Picking a folder moves the composer to this project's draft. Carry a
       // prompt (and its images) typed while no folder was open so the message
       // the user already wrote is not silently discarded.
-      if (options.initialDraft === undefined) carryFolderlessDraft(draftKey);
+      if (options.initialDraft === undefined)
+        carryFolderlessDraft(draftKey, options.carryDraftFrom);
       else
         setChatDrafts((current) => ({
           ...current,
@@ -7851,6 +7909,9 @@ export function App() {
    */
   const selectChatWorkspace = useCallback(
     async (savedPath?: string) => {
+      // The unsent prompt and images belong to the message being written, not
+      // to the folder, so they move with the composer to the chosen folder.
+      const switchedFrom = activeDraftKey;
       const selected = savedPath ? savedPath : await openWorkspace();
       if (!selected) {
         return false;
@@ -7858,10 +7919,10 @@ export function App() {
       if (savedPath) {
         await activateWorkspacePath(selected, "Project selected");
       }
-      startNewChat({ workspacePath: selected });
+      startNewChat({ workspacePath: selected, carryDraftFrom: switchedFrom });
       return true;
     },
-    [activateWorkspacePath, openWorkspace, startNewChat],
+    [activateWorkspacePath, activeDraftKey, openWorkspace, startNewChat],
   );
 
   const acknowledgeFinishedChat = useCallback(
@@ -10307,17 +10368,23 @@ export function App() {
               // Uploads are stored by content hash, so a repeated path is the
               // same file arriving twice (a doubled drop event, or drop plus
               // paste). A placeholder already sent or removed stays gone.
+              // The draft may have moved to another folder's composer while
+              // the upload ran, so replace the placeholder wherever it is now.
               setChatAttachments((current) => {
-                const draft = current[attachmentDraftKey] ?? [];
-                if (!draft.some((item) => item.id === placeholder.id)) {
-                  return current;
-                }
+                const draftKey = [
+                  attachmentDraftKey,
+                  ...Object.keys(current),
+                ].find((key) =>
+                  current[key]?.some((item) => item.id === placeholder.id),
+                );
+                if (!draftKey) return current;
+                const draft = current[draftKey] ?? [];
                 const keep =
                   attachment &&
                   !draft.some((item) => item.path === attachment.path);
                 return {
                   ...current,
-                  [attachmentDraftKey]: draft.flatMap((item) =>
+                  [draftKey]: draft.flatMap((item) =>
                     item.id !== placeholder.id
                       ? [item]
                       : keep
@@ -10772,7 +10839,7 @@ export function App() {
           setFiles([]);
           setSelectedFile(undefined);
           setBranchCatalog(undefined);
-          startNewChat({ workspacePath: "" });
+          startNewChat({ workspacePath: "", carryDraftFrom: activeDraftKey });
           break;
         case "add-goal":
           dispatchWorkbench({ type: "set-chat-panel" });
@@ -17943,6 +18010,7 @@ export function App() {
         <ChatSurface
           {...projectImport.chatProps(paneSession)}
           {...taskHandoff.chatProps(paneSession)}
+          questionState={questionStateForSession(paneSession?.id)}
           activeChatPanel={panePanel}
           paneKey={paneDraftKey}
           onSelectChatPanel={selectPanePanel}
@@ -18348,6 +18416,7 @@ export function App() {
     <ChatSurface
       {...projectImport.chatProps(activeSession)}
       {...taskHandoff.chatProps(activeSession)}
+      questionState={questionStateForSession(activeSessionId)}
       chatSwitcher={workspaceChatSwitcher}
       paneKey={activeDraftKey}
       activeChatPanel={activeChatPanel}
@@ -18806,6 +18875,7 @@ export function App() {
                   <ChatSurface
                     {...projectImport.chatProps(activeSession)}
                     {...taskHandoff.chatProps(activeSession)}
+                    questionState={questionStateForSession(activeSessionId)}
                     activeChatPanel={activeChatPanel}
                     paneKey={activeDraftKey}
                     onSelectChatPanel={selectSoloChatPanel}
@@ -19695,6 +19765,7 @@ export function App() {
         <ChatSurface
           {...projectImport.chatProps(activeSession)}
           {...taskHandoff.chatProps(activeSession)}
+          questionState={questionStateForSession(activeSessionId)}
           activeChatPanel={activeChatPanel}
           paneKey={activeDraftKey}
           onSelectChatPanel={selectSoloChatPanel}

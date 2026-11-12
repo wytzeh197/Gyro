@@ -2318,10 +2318,10 @@ export function workbenchReducer(
         ...state,
         preferences: {
           ...state.preferences,
-          mainColor: normalizeAppearanceColor(action.mainColor, "#0874df"),
+          mainColor: normalizeAppearanceColor(action.mainColor, "#ffffff"),
           secondaryColor: normalizeAppearanceColor(
             action.secondaryColor,
-            "#8b6fcb",
+            "#ffffff",
           ),
         },
       };
@@ -5248,10 +5248,10 @@ function normalizeWorkbenchPreferences(
       preferences?.theme === "system"
         ? preferences.theme
         : "system",
-    mainColor: normalizeAppearanceColor(preferences?.mainColor, "#0874df"),
+    mainColor: normalizeAppearanceColor(preferences?.mainColor, "#ffffff"),
     secondaryColor: normalizeAppearanceColor(
       preferences?.secondaryColor,
-      "#8b6fcb",
+      "#ffffff",
     ),
     usageProviderId: preferences?.usageProviderId,
     usageVisualization:

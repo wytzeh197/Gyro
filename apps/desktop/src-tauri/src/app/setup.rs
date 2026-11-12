@@ -375,6 +375,7 @@ pub fn run() {
             crate::sessions::attachments::read_cited_chat_image,
             crate::sessions::attachments::resolve_cited_chat_image,
             crate::chat_media_upload::prepare_chat_media_upload,
+            crate::chat_media_upload::download_chat_media_url,
             crate::sessions::attachments::prepare_browser_attachment,
             crate::workspace::preparation::prepare_workspace,
             crate::app::commands::restart_app,

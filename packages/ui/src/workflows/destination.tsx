@@ -1,4 +1,12 @@
-import { CalendarClock } from "lucide-react";
+import {
+  CalendarClock,
+  FolderOpen,
+  History,
+  MessageSquare,
+  Plus,
+  RefreshCw,
+  Workflow,
+} from "lucide-react";
 import { WorkflowLibraryPanel } from "./library";
 import {
   useCallback,
@@ -297,6 +305,10 @@ export function WorkflowDestination({
       setError(String(error));
     }
   }
+  const scheduledJobs = jobs.filter((job) => job.schedule !== "manual");
+  const showingLibrary = Boolean(
+    runtime && project && !editor && !setup && !extraction,
+  );
   function changeView(view: "workflows" | "schedules" | "runs") {
     if (editor) {
       setNotice("Save or discard your workflow edits before switching views.");
@@ -308,67 +320,119 @@ export function WorkflowDestination({
   return (
     <div className="gyro-workflows-destination">
       <nav className="gyro-workflow-nav" aria-label="Workflow views">
-        {(["workflows", "schedules", "runs"] as const).map((tab) => (
-          <button
-            key={tab}
-            aria-pressed={view === tab}
-            onClick={() => changeView(tab)}
-          >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-          </button>
-        ))}
+        <div className="gyro-workflow-tabs">
+          {(
+            [
+              ["workflows", Workflow],
+              ["schedules", CalendarClock],
+              ["runs", History],
+            ] as const
+          ).map(([tab, Icon]) => (
+            <button
+              key={tab}
+              aria-pressed={view === tab}
+              onClick={() => changeView(tab)}
+            >
+              <Icon size={14} aria-hidden="true" />
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
+        </div>
       </nav>
       {view === "schedules" ? (
         <div className="gyro-workflows-schedules">
           <header className="gyro-workflow-page-heading">
             <h1>Schedules</h1>
-            <p>Manage recurring workflows and project automations.</p>
+            <p>
+              Run saved workflows and project automations on a regular rhythm.
+            </p>
           </header>
-          <section className="gyro-workflow-scheduled">
-            <h2>Workflow schedules</h2>
-            {jobs.filter((job) => job.schedule !== "manual").length ? (
-              <ul className="gyro-workflow-list">
-                {jobs
-                  .filter((job) => job.schedule !== "manual")
-                  .map((job) => (
-                    <li key={job.id}>
-                      <strong>{job.title}</strong>
-                      <p>
-                        {job.status} · {job.schedule} ·{" "}
+          <section
+            className="gyro-workflow-scheduled"
+            aria-label="Workflow schedules"
+          >
+            <div className="gyro-workflow-section-head is-row">
+              <h2>
+                Workflow schedules
+                {scheduledJobs.length ? (
+                  <span className="gyro-workflow-count">
+                    {scheduledJobs.length}
+                  </span>
+                ) : null}
+              </h2>
+              {scheduledJobs.length ? null : (
+                <button onClick={() => changeView("workflows")}>
+                  Browse workflows
+                </button>
+              )}
+            </div>
+            {scheduledJobs.length ? (
+              <ul className="gyro-workflow-rows">
+                {scheduledJobs.map((job) => (
+                  <li key={job.id}>
+                    <span className="gyro-workflow-icon-tile">
+                      <CalendarClock size={16} aria-hidden="true" />
+                    </span>
+                    <div className="gyro-workflow-row-body">
+                      <strong>
+                        {job.title}
+                        <em
+                          className={`gyro-workflow-pill is-${job.status === "current" ? "success" : job.status === "paused" ? "warning" : "neutral"}`}
+                        >
+                          {job.status === "current"
+                            ? "Active"
+                            : job.status === "paused"
+                              ? "Paused"
+                              : "Completed"}
+                        </em>
+                      </strong>
+                      <small>
+                        {job.schedule} ·{" "}
                         {job.execution.calendar?.timezone ?? "local time"}
-                      </p>
-                      <p>{job.execution.workspacePath}</p>
-                      <p>
+                        {job.execution.workspacePath
+                          ? ` · ${job.execution.workspacePath}`
+                          : ""}
+                      </small>
+                      <small>
                         Pinned version{" "}
-                        {job.execution.workflowBinding.binding.definitionHash.slice(
-                          0,
-                          12,
-                        )}
-                      </p>
-                      <p>{job.lastResult}</p>
-                      <div className="gyro-workflow-actions">
-                        <button onClick={() => void updateJob(job)}>
-                          Review or update setup
-                        </button>
-                        <button onClick={() => void toggle(job)}>
-                          {job.status === "paused"
-                            ? "Resume schedule"
-                            : "Pause schedule and stop current run"}
-                        </button>
-                      </div>
-                    </li>
-                  ))}
+                        <code>
+                          {job.execution.workflowBinding.binding.definitionHash.slice(
+                            0,
+                            12,
+                          )}
+                        </code>
+                      </small>
+                      {job.lastResult ? <p>{job.lastResult}</p> : null}
+                    </div>
+                    <div className="gyro-workflow-row-actions">
+                      <button onClick={() => void updateJob(job)}>
+                        Review or update setup
+                      </button>
+                      <button
+                        onClick={() => void toggle(job)}
+                        title={
+                          job.status === "paused"
+                            ? undefined
+                            : "Pausing also stops a run that is in progress."
+                        }
+                      >
+                        {job.status === "paused"
+                          ? "Resume schedule"
+                          : "Pause schedule"}
+                      </button>
+                    </div>
+                  </li>
+                ))}
               </ul>
             ) : (
               <div className="gyro-workflow-schedule-empty">
-                <CalendarClock size={20} aria-hidden="true" />
+                <span className="gyro-workflow-icon-tile">
+                  <CalendarClock size={16} aria-hidden="true" />
+                </span>
                 <div>
                   <strong>No workflow schedules yet</strong>
                   <p>Choose a saved workflow, then set when it runs.</p>
                 </div>
-                <button onClick={() => changeView("workflows")}>
-                  Browse workflows
-                </button>
               </div>
             )}
           </section>
@@ -389,36 +453,76 @@ export function WorkflowDestination({
             />
           ) : (
             <>
-              <header className="gyro-workflow-page-heading">
-                <h1>Workflows</h1>
-                <p>Save a task’s steps and use them again in this project.</p>
+              <header className="gyro-workflow-page-heading gyro-workflow-heading-actions">
+                <div>
+                  <h1>Workflows</h1>
+                  <p>Save a task’s steps and use them again in this project.</p>
+                </div>
+                {showingLibrary ? (
+                  <div className="gyro-workflow-header-actions">
+                    <button disabled={busy} onClick={() => setExtraction({})}>
+                      <MessageSquare size={14} aria-hidden="true" />
+                      Create from a chat
+                    </button>
+                    <button
+                      className="gyro-primary-button"
+                      disabled={busy}
+                      onClick={() =>
+                        setEditor({
+                          definition: emptyWorkflow(),
+                          hash: null,
+                          existing: false,
+                          key: crypto.randomUUID(),
+                        })
+                      }
+                    >
+                      <Plus size={14} aria-hidden="true" /> New workflow
+                    </button>
+                  </div>
+                ) : null}
               </header>
-              <label className="gyro-workflow-project">
-                Project
-                <select
-                  disabled={
-                    Boolean(editor) ||
-                    busy ||
-                    Boolean(setup) ||
-                    Boolean(extraction)
-                  }
-                  title={project?.path}
-                  value={project?.sessionId ?? ""}
-                  onChange={(event) => {
-                    setProjectId(event.target.value);
-                    setError("");
-                    setNotice("");
-                  }}
-                >
-                  {projects.map((project) => (
-                    <option key={project.sessionId} value={project.sessionId}>
-                      {project.path.split(/[\\/]/).filter(Boolean).pop() ??
-                        project.path}{" "}
-                      · {project.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="gyro-workflow-context">
+                <label className="gyro-workflow-project">
+                  <FolderOpen size={14} aria-hidden="true" />
+                  Project
+                  <select
+                    disabled={
+                      Boolean(editor) ||
+                      busy ||
+                      Boolean(setup) ||
+                      Boolean(extraction)
+                    }
+                    title={project?.path}
+                    value={project?.sessionId ?? ""}
+                    onChange={(event) => {
+                      setProjectId(event.target.value);
+                      setError("");
+                      setNotice("");
+                    }}
+                  >
+                    {projects.map((project) => (
+                      <option key={project.sessionId} value={project.sessionId}>
+                        {project.path.split(/[\\/]/).filter(Boolean).pop() ??
+                          project.path}{" "}
+                        · {project.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {showingLibrary ? (
+                  <button
+                    className="gyro-workflow-icon-button"
+                    onClick={() => {
+                      void refresh();
+                      void refreshLibrary();
+                    }}
+                    aria-label="Refresh workflows"
+                    title="Refresh workflows"
+                  >
+                    <RefreshCw size={14} aria-hidden="true" />
+                  </button>
+                ) : null}
+              </div>
               {!project ? (
                 <p>
                   No project session is available. Open a project chat first.
@@ -490,11 +594,6 @@ export function WorkflowDestination({
                       key: crypto.randomUUID(),
                     })
                   }
-                  onExtract={() => setExtraction({})}
-                  onRefresh={() => {
-                    void refresh();
-                    void refreshLibrary();
-                  }}
                   onEdit={(item) => void edit(item)}
                   onSetup={(listing) => setSetup({ listing })}
                   onDraft={(draft) => void openDraft(draft)}

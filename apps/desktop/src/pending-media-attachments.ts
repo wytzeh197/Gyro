@@ -135,3 +135,22 @@ export function withoutPendingMedia(
     ]),
   );
 }
+
+type DownloadedChatMedia = { mimeType: string; data: string };
+
+/**
+ * Download an image URL dropped from a browser through the native side. The
+ * webview's CSP and the host's missing CORS headers rule out `fetch` here.
+ */
+export async function downloadDroppedMediaUrl(
+  url: string,
+  download: (url: string) => Promise<DownloadedChatMedia>,
+): Promise<Blob> {
+  const media = await download(url);
+  const binary = atob(media.data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: media.mimeType });
+}

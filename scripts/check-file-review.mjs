@@ -432,6 +432,33 @@ const surfaces = readRepoSource(
   new URL("../packages/ui/src/surfaces.tsx", import.meta.url),
   "utf8",
 );
+// Render the real mutation-card function's props for every durable state.
+const surfaceAst = ts.createSourceFile("surfaces.tsx", surfaces, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const mutationCardNode = surfaceAst.statements.find(
+  (node) => ts.isFunctionDeclaration(node) && node.name?.text === "MutationApprovalCard",
+);
+assert.ok(mutationCardNode);
+const mutationModule = { exports: {} };
+new Function("require", "module", "exports", "InlineApprovalCard", "FileCode2",
+  ts.transpileModule("export " + mutationCardNode.getText(surfaceAst), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText,
+)(requireUi, mutationModule, mutationModule.exports, () => null, () => null);
+for (const operation of ["create", "update"]) {
+  for (const status of ["pending", "applied", "rejected", "failed"]) {
+    const props = mutationModule.exports.MutationApprovalCard({
+      approval: { proposalId: "edit", operation, path: "src/a.ts", status,
+        effect: "Replace this file with the reviewed content", risk: "Writes one file" },
+    }).props;
+    assert.equal(props.title.endsWith("?"), status === "pending",
+      "only a pending mutation asks the user for permission");
+    assert.equal(props.status, status);
+    if (status === "applied") {
+      assert.equal(props.title, operation === "create" ? "File created" : "File updated");
+      assert.equal(props.description, "", "a completed edit has no future-tense approval instructions");
+    }
+  }
+}
 const cardStart = surfaces.indexOf("function ChatRunChangeSummary(");
 assert.doesNotMatch(surfaces, /additions: file\.additions \?\? 0/);
 const turnSource = surfaces.slice(

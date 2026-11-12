@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   CloudIcon,
   SettingsGroup,
+  SettingsEmptyState,
   SettingsRow,
   SettingsSection,
   UserRoundIcon,
@@ -86,30 +87,13 @@ export function AccountNavigation({
           ) : null}
         </span>
       </button>
-      {status?.signedIn && (
-        <button
-          type="button"
-          className={`is-compact${selected === "cloud" ? " is-active" : ""}`}
-          aria-current={selected === "cloud" ? "page" : undefined}
-          onClick={() => onSelect("cloud")}
-        >
-          <CloudIcon aria-hidden="true" size={15} />
-          <strong>Cloud</strong>
-          <small>
-            {status.unlocked
-              ? "Ready"
-              : status.backupExists
-                ? "Locked"
-                : "Set up"}
-          </small>
-        </button>
-      )}
+
     </div>
   );
 }
 
 function UnloadedAccount({ account }: { account: Account }) {
-  if (!account.error) return null;
+  if (!account.error) return <p className="gyro-settings-page-status" role="status">Loading account…</p>;
   return (
     <SettingsGroup id="account-connection" label="Connection" defaultOpen>
       <SettingsRow label="Couldn’t load your account" detail={account.error}>
@@ -236,7 +220,7 @@ export function AccountSettings({ account }: { account: Account }) {
       description={
         status?.enabled && !status.signedIn
           ? "Optional. Use it to back up and restore chats with Gyro Cloud."
-          : undefined
+          : "Manage your Gyro profile and sign-in."
       }
     >
       {!status ? (
@@ -386,13 +370,13 @@ export function CloudSettings({
   return (
     <SettingsSection
       icon={CloudIcon}
-      title="Cloud"
-      description="Back up selected chats and restore them on another device."
+      title="Gyro Cloud"
+      description="Optional cloud services, separate from your local workspace."
     >
       {!status ? (
         <UnloadedAccount account={account} />
       ) : !status.enabled ? (
-        unavailable
+        <SettingsEmptyState icon={<CloudIcon size={40} />} title="Cloud is not enabled in this build" description="Your local workspace remains available." />
       ) : !status.signedIn ? (
         <SettingsGroup id="cloud-sign-in" label="Chat backup" defaultOpen>
           <SettingsRow

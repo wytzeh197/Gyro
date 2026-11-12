@@ -9,7 +9,14 @@ import {
 import { createPortal } from "react-dom";
 import { FileText, Image, Music2, Video, X } from "lucide-react";
 import { workspaceFileBadge } from "./workspace-file-icons";
-import { chatFileKind, type ChatFileLink } from "./chat-file-links";
+import {
+  chatFileKind,
+  chatInlineTokenPattern,
+  isCitedImageTarget,
+  linkedChatFile,
+  parseChatMarkdownLink,
+  type ChatFileLink,
+} from "./chat-file-links";
 
 export type ChatFileScope = {
   sessionId?: string;
@@ -43,6 +50,8 @@ export type ChatImageHint = {
   providerId?: string;
   providerSessionId?: string;
   markdownImages?: ReadonlySet<string>;
+  /** Markdown images render in a row under the reply instead of inline. */
+  imagesBelow?: boolean;
 };
 
 export const ChatImageHintContext = createContext<ChatImageHint | undefined>(
@@ -60,8 +69,11 @@ export function ChatFileCard({
   previewUrl?: string;
   detail?: string;
   onOpen?: (target: string) => void;
-  /** Mentions are inline links; sent screenshots use a compact preview. */
-  variant?: "card" | "thumbnail" | "inline";
+  /**
+   * Mentions are inline links; sent screenshots use a compact preview. A tile
+   * is a fixed square in the image row under a reply, placeholder included.
+   */
+  variant?: "card" | "thumbnail" | "tile" | "inline";
 }) {
   const actions = useContext(ChatFileActionsContext);
   const scope = useContext(ChatFileScopeContext);
@@ -170,11 +182,13 @@ export function ChatFileCard({
     file: badge.icon,
   }[file.kind];
   const hasPreview = Boolean(src && !failed);
+  const tile = variant === "tile";
   const thumbnail =
-    variant === "thumbnail" &&
-    file.kind === "image" &&
-    hasPreview &&
-    detail !== "File no longer available";
+    tile ||
+    (variant === "thumbnail" &&
+      file.kind === "image" &&
+      hasPreview &&
+      detail !== "File no longer available");
   const inline = variant === "inline";
   const inlineName = inline
     ? (file.local
@@ -186,7 +200,7 @@ export function ChatFileCard({
     : file.name;
   const className = inline
     ? "gyro-chat-file-link"
-    : `gyro-chat-file-card is-${file.kind}${thumbnail ? " is-thumbnail" : ""}`;
+    : `gyro-chat-file-card is-${file.kind}${thumbnail ? " is-thumbnail" : ""}${tile ? " is-tile" : ""}`;
   const open = () => {
     if (media && hasPreview) setExpanded(true);
     else if (file.local && file.kind === "image" && actions?.preview)
@@ -208,7 +222,10 @@ export function ChatFileCard({
     <>
       {media &&
       file.kind !== "audio" &&
-      (variant !== "thumbnail" || file.kind !== "image" || hasPreview) ? (
+      (tile ||
+        variant !== "thumbnail" ||
+        file.kind !== "image" ||
+        hasPreview) ? (
         <span
           className={
             hasPreview
@@ -345,11 +362,13 @@ export function CitedChatImage({
   alt,
   fallback,
   skipWhenMarkdownImage = false,
+  variant = "card",
 }: {
   target: string;
   alt?: string;
   fallback: ReactNode;
   skipWhenMarkdownImage?: boolean;
+  variant?: "card" | "tile";
 }) {
   const actions = useContext(ChatFileActionsContext);
   const scope = useContext(ChatFileScopeContext);
@@ -404,8 +423,83 @@ export function CitedChatImage({
   return (
     <ChatFileCard
       file={{ target: path, name, kind: "image", local: true }}
-      variant="card"
+      variant={variant}
     />
+  );
+}
+
+export type ReplyImage = { label: string; target: string };
+
+/** A markdown image that belongs in the row under a reply; video stays inline. */
+export function isReplyRowImage(label: string, target: string) {
+  const file = linkedChatFile(label, target, true);
+  return file ? file.kind === "image" : isCitedImageTarget(target);
+}
+
+function replyImageLink(part: string) {
+  const link = parseChatMarkdownLink(part);
+  return link?.image && isReplyRowImage(link.label, link.target)
+    ? link
+    : undefined;
+}
+
+/** Markdown images in reply text, in reading order and once each. */
+export function replyImageLinks(texts: readonly string[]): ReplyImage[] {
+  const seen = new Set<string>();
+  const images: ReplyImage[] = [];
+  for (const text of texts) {
+    for (const part of text.split(chatInlineTokenPattern)) {
+      const link = replyImageLink(part);
+      const target = link?.target.trim();
+      if (!link || !target || seen.has(target)) continue;
+      seen.add(target);
+      images.push({ label: link.label, target });
+    }
+  }
+  return images;
+}
+
+/** Text with nothing left once its images move to the row under the reply. */
+export function isOnlyReplyImages(text: string) {
+  const parts = text
+    .split(chatInlineTokenPattern)
+    .filter((part) => part.trim());
+  return parts.length > 0 && parts.every((part) => replyImageLink(part));
+}
+
+/** Hides an inline markdown image when the reply shows its images below. */
+export function ReplyImageSlot({ children }: { children: ReactNode }) {
+  const hint = useContext(ChatImageHintContext);
+  return hint?.imagesBelow ? null : <>{children}</>;
+}
+
+/**
+ * The images a reply cites, as a row of small tiles after its text. A tile
+ * opens the same preview dialog as a sent screenshot.
+ */
+export function ReplyImages({ images }: { images: readonly ReplyImage[] }) {
+  if (images.length === 0) return null;
+  return (
+    <div
+      aria-label={images.length === 1 ? "Image" : `${images.length} images`}
+      className="gyro-reply-images"
+      role="group"
+    >
+      {images.map(({ label, target }) => {
+        const file = linkedChatFile(label, target, true);
+        return file ? (
+          <ChatFileCard file={file} key={target} variant="tile" />
+        ) : (
+          <CitedChatImage
+            alt={label}
+            fallback={null}
+            key={target}
+            target={target}
+            variant="tile"
+          />
+        );
+      })}
+    </div>
   );
 }
 

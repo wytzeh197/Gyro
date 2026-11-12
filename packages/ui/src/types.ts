@@ -1261,6 +1261,8 @@ export type SessionPlanItem = {
 };
 
 export type SessionPlan = {
+  /** Retain the document, but omit its progress from the current task's card. */
+  environmentDismissed?: boolean;
   sessionId?: string;
   title: string;
   content?: string;

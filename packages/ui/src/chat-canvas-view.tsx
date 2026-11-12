@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FileText } from "lucide-react";
 import { CanvasPreview } from "./canvas-preview-view";
 import { ChatArtifactContent } from "./chat-artifacts";
 import type { CanvasArtifact } from "./chat-canvas";
@@ -38,12 +39,10 @@ export function ChatCanvas({
   return (
     <section className="gyro-canvas" aria-label="Canvas">
       {!artifact ? (
-        <div className="gyro-thread-empty">
-          <strong>A place to work beside chat</strong>
-          <p>
-            Build an interface, try an idea, or work on a document here. Ask the
-            model to create something, then refine it together.
-          </p>
+        <div className="gyro-companion-empty">
+          <FileText aria-hidden="true" size={24} />
+          <strong>Your canvas starts here</strong>
+          <span>Ask in chat to create a document or interface, then refine it here.</span>
         </div>
       ) : (
         <>

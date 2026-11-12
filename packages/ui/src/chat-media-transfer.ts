@@ -49,6 +49,12 @@ export function deliverChatMediaDrop(
   const paths = droppedFileUrls(transfer).filter((path) =>
     CHAT_MEDIA_PATH.test(path),
   );
+  // An image dragged from earlier in a chat is Gyro's own stored file; its
+  // `asset:` URL is not fetchable from the webview, but its path is.
+  if (!paths.length) {
+    const stored = assetUrlToPath(droppedImageSource(transfer));
+    if (stored && CHAT_MEDIA_PATH.test(stored)) paths.push(stored);
+  }
   if (paths.length && attachPaths) {
     attachPaths(paths);
     return;
@@ -85,6 +91,36 @@ export function droppedFileUrls(
     if (typeof path === "string") push(fileUrlToPath(path) ?? (path.startsWith("/") ? path : undefined));
   }
   return paths;
+}
+
+/**
+ * The local file behind a Tauri asset URL (`asset://localhost/<path>` on
+ * macOS and Linux, `http://asset.localhost/<path>` on Windows).
+ */
+export function assetUrlToPath(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return undefined;
+  }
+  const isAsset =
+    (url.protocol === "asset:" && url.hostname === "localhost") ||
+    (url.protocol === "http:" && url.hostname === "asset.localhost");
+  if (!isAsset) return undefined;
+  try {
+    const path = decodeURIComponent(url.pathname.replace(/^\/+/, "/"));
+    if (path.includes("\0")) return undefined;
+    const absolute = path.startsWith("//") ? path.slice(1) : path;
+    // Windows: `/C:\Users\…` names the drive path after the slash.
+    const drive = absolute.slice(1);
+    if (/^[A-Za-z]:[\\/]/.test(drive)) return drive;
+    return absolute.startsWith("/") ? absolute : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function fileUrlToPath(value: string): string | undefined {
@@ -243,30 +279,7 @@ export async function chatMediaFilesFromDrop(
 ): Promise<File[]> {
   const files = chatMediaFiles(transfer);
   if (files.length) return files;
-  const read = (type: string) => {
-    try {
-      return transfer.getData?.(type).trim() ?? "";
-    } catch {
-      return "";
-    }
-  };
-  const html = read("text/html");
-  const imageUrl =
-    html && typeof DOMParser !== "undefined"
-      ? new DOMParser()
-          .parseFromString(html, "text/html")
-          .querySelector("img")
-          ?.getAttribute("src")
-      : undefined;
-  const uri =
-    imageUrl ||
-    read("text/uri-list")
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line && !line.startsWith("#")) ||
-    read("image/png") ||
-    read("image/jpeg") ||
-    read("image/webp");
+  const uri = droppedImageSource(transfer);
   if (!uri)
     throw new Error("This image drag did not provide a readable file or URL");
   let url: URL;
@@ -275,18 +288,17 @@ export async function chatMediaFilesFromDrop(
   } catch {
     throw new Error("This image drag did not provide a valid image URL");
   }
-  if (!["http:", "https:", "data:"].includes(url.protocol)) {
+  if (url.protocol === "data:") return [dataUrlImage(uri)];
+  if (!["http:", "https:"].includes(url.protocol)) {
     throw new Error(
       "This image source cannot be attached. Save the image and drop its file instead.",
     );
   }
-  const limit = 32 * 1024 * 1024;
-  if (
-    url.protocol === "data:" &&
-    uri.length > Math.ceil((limit * 4) / 3) + 1024
-  ) {
-    throw new Error("The dropped image is too large to download");
+  if (mediaUrlDownloader) {
+    const blob = await mediaUrlDownloader(url.href);
+    return [droppedImageFile(blob, url)];
   }
+  const limit = MAX_DROPPED_IMAGE_DOWNLOAD_BYTES;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20_000);
   try {
@@ -333,23 +345,7 @@ export async function chatMediaFilesFromDrop(
       if (blob.size > limit)
         throw new Error("The dropped image is too large to download");
     }
-    if (!blob.size) throw new Error("The dropped image is empty");
-    const extension =
-      type === "image/jpeg"
-        ? "jpg"
-        : type.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "png";
-    let candidate =
-      url.protocol === "data:"
-        ? "image"
-        : url.pathname.split("/").at(-1) || "image";
-    try {
-      candidate = decodeURIComponent(candidate);
-    } catch {
-      /* Keep malformed URL names usable. */
-    }
-    const base =
-      candidate.replace(/\.[^.]*$/, "").replace(/[^\w. -]/g, "_") || "image";
-    return [new File([blob], base + "." + extension, { type })];
+    return [droppedImageFile(blob, url)];
   } catch (error) {
     if (controller.signal.aborted)
       throw new Error(
@@ -359,6 +355,123 @@ export async function chatMediaFilesFromDrop(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Remote images above this are refused before they reach the converter. */
+const MAX_DROPPED_IMAGE_DOWNLOAD_BYTES = 32 * 1024 * 1024;
+
+type MediaUrlDownloader = (url: string) => Promise<Blob>;
+let mediaUrlDownloader: MediaUrlDownloader | undefined;
+
+/**
+ * The desktop app downloads dropped image URLs natively: its CSP keeps the
+ * webview's `fetch` to IPC, and most image hosts send no CORS headers, so a
+ * browser image dropped into a chat could never download from here.
+ */
+export function setChatMediaUrlDownloader(
+  downloader: MediaUrlDownloader | undefined,
+) {
+  mediaUrlDownloader = downloader;
+}
+
+/**
+ * The image a browser or in-app drag points at. The `<img>` in the HTML
+ * flavour wins over the URI list, which is the surrounding link when the
+ * image sits inside one. A relative `src` resolves against that link.
+ * Read synchronously: the drag data store closes after the event.
+ */
+function droppedImageSource(transfer: MediaTransfer): string {
+  const read = (type: string) => {
+    try {
+      return transfer.getData?.(type).trim() ?? "";
+    } catch {
+      return "";
+    }
+  };
+  const listed = read("text/uri-list")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line && !line.startsWith("#"));
+  const html = read("text/html");
+  const imageSrc =
+    html && typeof DOMParser !== "undefined"
+      ? new DOMParser()
+          .parseFromString(html, "text/html")
+          .querySelector("img")
+          ?.getAttribute("src")
+          ?.trim()
+      : undefined;
+  if (imageSrc) {
+    try {
+      return new URL(imageSrc, listed || undefined).href;
+    } catch {
+      /* Fall through to the listed URL. */
+    }
+  }
+  return (
+    listed ||
+    read("image/png") ||
+    read("image/jpeg") ||
+    read("image/webp") ||
+    ""
+  );
+}
+
+/** Decode a `data:` image locally; the webview CSP forbids fetching one. */
+function dataUrlImage(uri: string): File {
+  const comma = uri.indexOf(",");
+  const header = comma > 0 ? uri.slice(5, comma) : "";
+  const type = (header.split(";")[0] || "").trim().toLowerCase();
+  if (comma < 0 || !type.startsWith("image/")) {
+    throw new Error("The dropped data is not an image");
+  }
+  const payload = uri.slice(comma + 1);
+  if (payload.length > Math.ceil((MAX_DROPPED_IMAGE_DOWNLOAD_BYTES * 4) / 3) + 4) {
+    throw new Error("The dropped image is too large to download");
+  }
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    if (/;base64$/i.test(header)) {
+      const binary = atob(payload.replace(/\s+/g, ""));
+      bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+    } else {
+      bytes = new TextEncoder().encode(decodeURIComponent(payload));
+    }
+  } catch {
+    throw new Error("The dropped image data is unreadable");
+  }
+  if (!bytes.length) throw new Error("The dropped image is empty");
+  return droppedImageFile(new Blob([bytes], { type }), new URL("data:,"));
+}
+
+/** Name a downloaded image after its URL, with an extension matching its type. */
+function droppedImageFile(blob: Blob, url: URL): File {
+  if (!blob.size) throw new Error("The dropped image is empty");
+  const type = blob.type.toLowerCase();
+  if (!type.startsWith("image/")) {
+    throw new Error("The dropped URL did not return an image");
+  }
+  const extension =
+    type === "image/jpeg"
+      ? "jpg"
+      : type === "image/svg+xml"
+        ? "svg"
+        : type.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "png";
+  let candidate =
+    url.protocol === "data:"
+      ? "image"
+      : url.pathname.split("/").at(-1) || "image";
+  try {
+    candidate = decodeURIComponent(candidate);
+  } catch {
+    /* Keep malformed URL names usable. */
+  }
+  const base =
+    candidate.replace(/\.[^.]*$/, "").replace(/[^\w. -]/g, "_") || "image";
+  return new File([blob], base + "." + extension, { type });
 }
 
 const SENDABLE_IMAGE = /\.(?:png|jpe?g|webp)$/i;

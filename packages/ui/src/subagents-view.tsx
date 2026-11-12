@@ -207,8 +207,9 @@ export function SubagentPanel({
   });
   if (!state || !agent)
     return (
-      <div className="gyro-subagent-empty">
-        Select a sub-agent from Environment or the composer.
+      <div className="gyro-companion-empty">
+        <strong>No agent selected</strong>
+        <span>Select an agent from Environment or the composer to follow its work here.</span>
       </div>
     );
   const runIds = [

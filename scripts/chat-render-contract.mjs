@@ -450,6 +450,16 @@ export function checkChatContract(state, panes) {
       failures.push(
         `${label}: ${pane.tooSmall.length} text elements below metadata floor`,
       );
+    if (state.startsWith("environment-") && !pane.environment)
+      failures.push(`${label}: Environment regression fixture must stay open`);
+    if (
+      pane.environment &&
+      pane.environment.left < pane.canvas.right + 12 * pane.scale - 1 &&
+      pane.environment.right > pane.canvas.left + 1
+    )
+      failures.push(
+        `${label}: Environment must leave a reading gap beside the canvas`,
+      );
     if (
       pane.environment &&
       (pane.environment.left < chrome.surface.left - 1 ||

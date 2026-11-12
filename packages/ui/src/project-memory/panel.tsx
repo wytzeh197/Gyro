@@ -175,7 +175,7 @@ export function ProjectMemoryPanel({
   };
   if (!runtime)
     return (
-      <div className="gyro-memory-panel">
+      <div className={embedded ? "gyro-memory-panel" : "gyro-memory-panel is-companion"}>
         <p className="gyro-memory-empty">
           Start a chat in a project to use project memory.
         </p>
@@ -188,7 +188,7 @@ export function ProjectMemoryPanel({
   return (
     <section
       ref={panel}
-      className="gyro-memory-panel"
+      className={embedded ? "gyro-memory-panel" : "gyro-memory-panel is-companion"}
       aria-label="Project memory"
       onKeyDown={(event) => {
         if (event.key === "Escape" && editor) {

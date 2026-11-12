@@ -20,7 +20,10 @@ const initial = {id:"seed",sessionId:"live-plan",kind:"plan-updated",createdAt:"
 function Fixture() {
  const state=useSessionContextEvents();
  React.useEffect(()=>{state.replace("live-plan",[initial]);window.staleRefresh=()=>state.replace("live-plan",[initial]);},[state.replace]);
- const {plan}=useDerivedSessionContext(state.eventsBySession,"live-plan",[]);
+ const [recent,setRecent]=React.useState([]);
+ window.setRecent=setRecent;
+ const {plan}=useDerivedSessionContext(state.eventsBySession,"live-plan",recent);
+ window.savedPlan=plan;
  return React.createElement("div",{style:{width:320,margin:20}}, React.createElement(ChatEnvironmentPopover,{
  attachments:[],branchLabel:"test",branchItems:[],isRunning:true,workspacePath:"/fixture/Gyro",plan,
  onPlanItemStatusChange:()=>{},onOpenPlan:()=>{}
@@ -142,7 +145,29 @@ try {
   await emit("two", "complete", 5);
   await until(async () => await counter() === "2 / 2", "all done");
   assert.equal(await evaluate('document.querySelectorAll(".gyro-plan-step-status.is-in-progress").length'), 0);
-  console.log("Live plan browser checks passed: 0/2 -> 1/2 -> 2/2 during an active turn; working, complete and blocked marks; stale refresh preserved. Simulated native events, production hook and panel.");
+  const nextTask = {id:"next-task",sessionId:"live-plan",turnId:"next-turn",kind:"user-message",
+    createdAt:"2026-11-11T12:00:07Z",message:"Start another task",payload:{optimistic:true}};
+  await evaluate("window.setRecent(" + JSON.stringify([nextTask]) + ")");
+  await until(async () => !(await counter()), "first new send clears the plan section");
+  assert.equal(await evaluate('document.querySelector(".gyro-environment-plan-steps")'), null);
+  assert.equal(await evaluate("window.savedPlan.content"), "# Plan");
+  await evaluate("window.staleRefresh()");
+  await pause(100);
+  assert.equal(await counter(), undefined);
+  // Reproduce the reported unfinished final marker, then a settled response and
+  // a new user task. The existing component must clear without remounting it.
+  await emit("two", "in-progress", 6);
+  const settled = {id:"settled",sessionId:"live-plan",turnId:"active-turn",kind:"assistant-message",
+    createdAt:"2026-11-11T12:00:06.500Z",message:"Implemented",payload:{kind:"provider-response"}};
+  await evaluate("window.setRecent(" + JSON.stringify([settled, nextTask]) + ")");
+  await until(async () => !(await counter()), "settled partial plan clears");
+  assert.equal(await evaluate("window.savedPlan.items[1].status"), "in-progress");
+  const replacement = {id:"new-plan",sessionId:"live-plan",turnId:"next-turn",kind:"plan-updated",
+    createdAt:"2026-11-11T12:00:08Z",message:"",payload:{action:"replace",content:"# Next plan",
+      items:[{id:"new",title:"New task step",status:"todo"}]}};
+  await evaluate("window.deliverPlan(" + JSON.stringify(replacement) + ")");
+  await until(async () => await counter() === "0 / 1", "new task plan appears");
+  console.log("Live plan browser checks passed: progress, blocked/completed marks, first-send clearing for completed and stale partial plans, saved document retention, stale refresh, and replacement plan. Simulated native events, production hook and panel.");
 } finally {
   ws?.close();
   const stopped = browser && browser.exitCode === null && browser.signalCode === null

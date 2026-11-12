@@ -768,9 +768,37 @@
   grid-template-columns: 12px 16px minmax(0, 1fr);
   gap: var(--gyro-space-standard);
   padding: 0;
-  font-weight: 600;
+  /* Folder names lead their chats by icon and indent, not by heavy type. */
+  font-weight: 500;
   min-width: 0;
   min-height: 28px;
+}
+
+/* Folder glyphs sit back with the chevron and come forward on hover. */
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-project-toggle[aria-expanded]
+  > svg:not(.gyro-project-chevron) {
+  color: var(--gyro-muted);
+  transition: color 120ms ease;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-project-row:is(:hover, :focus-within)
+  .gyro-sidebar-project-toggle
+  > svg {
+  color: var(--gyro-text);
+}
+
+/* Folder rows share the chat-row rhythm: one height, no extra gap below. */
+:root[data-theme] .gyro-sidebar .gyro-sidebar-project-row.is-draggable {
+  margin-bottom: 0;
+  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  padding-block: calc(1px * var(--gyro-ui-scale, 1));
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 :root[data-theme] .gyro-sidebar .gyro-project-chevron {

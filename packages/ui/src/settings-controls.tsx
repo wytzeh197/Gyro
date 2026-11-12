@@ -99,7 +99,7 @@ export function SettingsRow({
 
   return (
     <div
-      className="gyro-settings-row"
+      className={`gyro-settings-row${tone ? ` is-${tone}` : ""}`}
       data-setting-key={settingsSearchKey(label)}
       tabIndex={-1}
     >
@@ -108,12 +108,101 @@ export function SettingsRow({
   );
 }
 
-export function SettingsGroup({ label, id, icon, badge, description, summary, actions, attention, defaultOpen, children }: {
-  label: string; id?: string; icon?: ReactNode; badge?: string; description?: string; summary?: string; actions?: ReactNode; attention?: boolean; defaultOpen?: boolean; children: ReactNode;
+export function SettingsGroup({
+  label,
+  id,
+  icon,
+  badge,
+  description,
+  summary,
+  actions,
+  attention,
+  defaultOpen,
+  collapsible = false,
+  children,
+}: {
+  label: string;
+  id?: string;
+  icon?: ReactNode;
+  badge?: string;
+  description?: string;
+  summary?: string;
+  actions?: ReactNode;
+  attention?: boolean;
+  defaultOpen?: boolean;
+  collapsible?: boolean;
+  children: ReactNode;
 }) {
-  return <SettingsDisclosure id={id ?? settingsSearchKey(label)} title={label} icon={icon} description={description} summary={badge ?? summary} actions={actions} attention={attention} defaultOpen={defaultOpen}>
-    {badge ? <p>{badge}</p> : null}<div className="gyro-settings-group-rows">{children}</div>
-  </SettingsDisclosure>;
+  const headingId = useId();
+  const key = id ?? settingsSearchKey(label);
+  if (collapsible) {
+    return (
+      <SettingsDisclosure
+        id={key}
+        title={label}
+        icon={icon}
+        description={description}
+        summary={badge ?? summary}
+        actions={actions}
+        attention={attention}
+        defaultOpen={defaultOpen ?? false}
+      >
+        <div className="gyro-settings-group-rows">{children}</div>
+      </SettingsDisclosure>
+    );
+  }
+  return (
+    <section
+      className="gyro-settings-group is-open-section"
+      id={key}
+      data-settings-group={key}
+      data-setting-key={settingsSearchKey(label)}
+      aria-labelledby={headingId}
+      tabIndex={-1}
+    >
+      <div className="gyro-settings-group-heading">
+        <div>
+          <h2 id={headingId}>
+            {label}
+            {badge ? <small>{badge}</small> : null}
+          </h2>
+          {description ? (
+            <p className="gyro-settings-group-description">{description}</p>
+          ) : null}
+        </div>
+        {summary || actions ? (
+          <div className="gyro-settings-group-actions">
+            {summary && summary !== badge ? (
+              <span className="gyro-settings-group-summary">{summary}</span>
+            ) : null}
+            {actions}
+          </div>
+        ) : null}
+      </div>
+      <div className="gyro-settings-group-rows">{children}</div>
+    </section>
+  );
+}
+
+export function SettingsEmptyState({
+  icon,
+  title,
+  description,
+  children,
+}: {
+  icon?: ReactNode;
+  title: string;
+  description?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="gyro-settings-empty-state">
+      {icon ? <span aria-hidden="true">{icon}</span> : null}
+      <strong>{title}</strong>
+      {description ? <p>{description}</p> : null}
+      {children}
+    </div>
+  );
 }
 
 /**

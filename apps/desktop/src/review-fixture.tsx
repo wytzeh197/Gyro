@@ -127,6 +127,35 @@ function Fixture() {
   const [chatPanel, setChatPanel] = useState<ChatSidePanelId | undefined>(
     "review",
   );
+  const [approvalDecision, setApprovalDecision] = useState<string>();
+  if (params.has("approval")) {
+    const status = approvalDecision ?? params.get("approval") ?? "pending";
+    const base = { sessionId: "approval-fixture", turnId: "edit-turn",
+      createdAt: "2026-11-12T12:00:00Z", payload: {} };
+    const payload = { schema: "gyro.mutation.v1", kind: "mutation-approval",
+      proposalId: "edit", operation: "update", path: "src/example.ts",
+      effect: "Replace this file with the reviewed content", risk: "Writes one file inside the selected project" };
+    const events: SessionEvent[] = [
+      { ...base, id: "user", kind: "user-message", message: "Update this file." },
+      ...(status === "automatic" ? [] : [{
+        ...base, id: "request", kind: "approval-requested" as const,
+        message: "Review changes", payload: { ...payload, status: "pending" },
+      }]),
+      ...(status === "pending" ? [] : [{
+        ...base, id: "decision", kind: "system-event" as const,
+        message: "Edit decision", payload: { ...payload, status: status === "automatic" ? "applied" : status,
+          fileChanges: [{ path: "src/example.ts", additions: 2, deletions: 1 }] },
+      }]),
+    ];
+    return <ChatSurface
+      config={{ commandProfiles: [], modelProviders: [], telemetryEnabled: false,
+        fullAccess: true, requireCommandApproval: false, requireFileEditApproval: false }}
+      events={events}
+      onMutationApprovalAction={(_id, decision) => setApprovalDecision(decision === "approve" ? "applied" : "rejected")}
+      onSend={() => {}}
+      shellReady
+    />;
+  }
   if (params.get("mode") === "chat") {
     const base = {
       sessionId: "review-chat",

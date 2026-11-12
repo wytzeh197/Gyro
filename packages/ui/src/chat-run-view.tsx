@@ -712,7 +712,7 @@ function RunCallRow({
     </>
   );
 
-  if ((item?.kind === "read" || item?.kind === "search") && item.error) {
+  if (item?.status === "failed" && "error" in item && item.error) {
     return <details className="gyro-import-tool-details">
       <summary className={`${className} gyro-import-tool-summary`}>{body}<ChevronRight aria-hidden="true" className="gyro-import-tool-chevron" size={12} /></summary>
       <div className="gyro-import-tool-content">
@@ -889,7 +889,7 @@ function RunRow({
     </>
   );
 
-  if ((item?.kind === "read" || item?.kind === "search") && item.error) {
+  if (item?.status === "failed" && "error" in item && item.error) {
     return <details className="gyro-import-tool-details">
       <summary className={`${className} gyro-import-tool-summary`}>{body}<ChevronRight aria-hidden="true" className="gyro-import-tool-chevron" size={12} /></summary>
       <div className="gyro-import-tool-content">

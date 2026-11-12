@@ -1044,8 +1044,8 @@ function Fixture() {
       document.documentElement,
       {
         interfaceSize: "default",
-        mainColor: "#0874df",
-        secondaryColor: "#8b6fcb",
+        mainColor: "#ffffff",
+        secondaryColor: "#ffffff",
         motionSpeed: "default",
       },
       theme,

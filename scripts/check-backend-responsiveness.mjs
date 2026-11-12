@@ -190,21 +190,22 @@ const callback = runInNewContext(callbackSource, {
 await callback("preview-history");
 assert.equal(rpc.length, 0, "preview history never requests a backend UUID");
 const reopen = callback(sessionId);
-assert.equal(rpc[0].args.fullHistory, true, "opening requests every event");
+assert.equal(rpc[0].args.fullHistory, false, "opening requests only a bounded page");
 rpc.shift().resolve({
-  events: Array.from({ length: 3101 }, (_, i) => event(i)),
+  events: [event(0), ...Array.from({ length: 400 }, (_, i) => event(i + 2701))],
   contextEvents: [],
-  hasMoreBefore: false,
+  hasMoreBefore: true,
   revision: "revision-1",
 });
 // A stream frame arriving during disk IO must survive the initial load.
 optimisticEventsRef.current.set(sessionId, [event(3101)]);
 await reopen;
-assert.equal(rendered.length, 3102);
-assert.equal(rendered[1].id, "event-1");
+assert.equal(rendered.length, 402);
+assert.equal(rendered[1].id, "event-2701");
 assert.equal(rendered.at(-1).id, "event-3101");
-assert.equal(hasMoreBefore, false);
-assert.ok(completeHistorySessionsRef.current.has(sessionId));
+assert.equal(hasMoreBefore, true);
+assert.equal(rpc.length, 0, "opening does not fetch unseen history");
+assert.ok(!completeHistorySessionsRef.current.has(sessionId));
 
 const unchangedRead = callback(sessionId);
 assert.equal(rpc[0].args.knownRevision, "revision-1");
@@ -223,9 +224,57 @@ assert.equal(
 );
 assert.equal(
   rendered.length,
-  3102,
-  "metadata-only refresh preserves the complete transcript",
+  402,
+  "metadata-only refresh preserves the loaded page",
 );
+assert.equal(hasMoreBefore, true, "unchanged refresh preserves access to older messages");
+
+// Execute the real older-history callback: every page remains accessible,
+// streaming messages survive, and reaching the beginning marks completeness.
+let earlierInitializer;
+function findEarlier(node) {
+  if (ts.isVariableDeclaration(node) && node.name.getText(tree) === "loadEarlierEvents")
+    earlierInitializer = node.initializer;
+  ts.forEachChild(node, findEarlier);
+}
+findEarlier(tree);
+assert.ok(earlierInitializer);
+const loadEarlier = runInNewContext(ts.transpileModule(
+  `const callback = ${earlierInitializer.getText(tree)}; callback;`,
+  { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } },
+).outputText, {
+  useCallback: (fn) => fn,
+  isTauriRuntime: () => true,
+  loadingEarlierSessionIds: [],
+  sessionEventsById: sessionEventsByIdRef.current,
+  completeHistorySessionsRef,
+  setLoadingEarlierSessionIds: () => {},
+  setHasMoreBeforeBySession: (update) => { hasMoreBefore = update({})[sessionId]; },
+  setEventsForSession: (_id, update) => {
+    rendered = update(rendered);
+    sessionEventsByIdRef.current[sessionId] = rendered;
+  },
+  limitEventsForSession: (_id, events) => events,
+  compareSessionEventsForHistory,
+  MAX_CHAT_EVENT_RENDER_COUNT,
+  notify: () => assert.fail("older-history read failed"),
+  invoke: (_command, args) => new Promise((resolve, reject) => rpc.push({ resolve, reject, args })),
+});
+while (hasMoreBefore) {
+  const loading = loadEarlier(sessionId);
+  const request = rpc.shift();
+  const before = Number(request.args.beforeEventId.slice(6));
+  const start = Math.max(0, before - 400);
+  request.resolve({
+    events: Array.from({ length: before - start }, (_, i) => event(start + i)),
+    hasMoreBefore: start > 0,
+  });
+  await loading;
+}
+assert.equal(rendered.length, 3102);
+assert.equal(rendered[1].id, "event-1");
+assert.equal(rendered.at(-1).id, "event-3101");
+assert.ok(completeHistorySessionsRef.current.has(sessionId));
 
 const refresh = callback(sessionId);
 assert.equal(rpc[0].args.fullHistory, false, "ordinary refresh stays cheap");
@@ -261,12 +310,15 @@ rpc.shift().resolve({
   hasMoreBefore: true,
 });
 await flush();
-assert.equal(rpc[0].args.fullHistory, true, "session-created is not overlap");
-rpc.shift().resolve({
-  events: Array.from({ length: 4400 }, (_, i) => event(i)),
-  contextEvents: [],
-  hasMoreBefore: false,
-});
+for (const start of [3600, 3200, 2800]) {
+  assert.equal(rpc[0].args.beforeEventId, `event-${start + 400}`, "gap uses bounded older pages");
+  rpc.shift().resolve({
+    events: Array.from({ length: 400 }, (_, i) => event(start + i)),
+    hasMoreBefore: true,
+  });
+  await flush();
+}
+assert.equal(rpc.length, 0, "recovery stops as soon as known history overlaps");
 await sleepRecovery;
 assert.equal(rendered.length, 4400);
 assert.equal(rendered[3500].id, "event-3500", "background gap recovered");
@@ -293,7 +345,7 @@ assert.ok(
 );
 
 // A frontend hot reload can precede the native upgrade. An older runtime's
-// bounded response must still automatically produce the entire conversation.
+// bounded response must remain a single page with older history available.
 completeHistorySessionsRef.current.delete(sessionId);
 optimisticEventsRef.current.clear();
 rendered = [];
@@ -304,24 +356,19 @@ rpc.shift().resolve({
   contextEvents: [],
   hasMoreBefore: true,
 });
-await flush();
-assert.equal(rpc[0].args.beforeEventId, "event-401");
-rpc.shift().resolve({
-  events: Array.from({ length: 401 }, (_, i) => event(i)),
-  hasMoreBefore: false,
-});
 await legacyOpen;
-assert.equal(rendered.length, 801, "old runtimes automatically load all pages");
-assert.equal(rendered[1].id, "event-1");
-assert.equal(hasMoreBefore, false);
+assert.equal(rpc.length, 0, "older runtimes also open with one bounded page");
+assert.equal(rendered.length, 400);
+assert.equal(rendered[0].id, "event-401");
+assert.equal(hasMoreBefore, true);
 
-// A metadata revision is useful only while its corresponding full transcript
-// is still in memory; an evicted/reopened chat must fetch all data again.
+// A metadata revision is useful only while its corresponding page is still
+// in memory; an evicted/reopened chat must fetch a fresh recent page.
 rendered = [];
 sessionEventsByIdRef.current[sessionId] = [];
 historyRevisionsRef.current[sessionId] = "cached-revision";
 const evictedOpen = callback(sessionId);
-assert.equal(rpc[0].args.fullHistory, true);
+assert.equal(rpc[0].args.fullHistory, false);
 assert.equal(rpc[0].args.knownRevision, undefined);
 rpc.shift().resolve({
   events: Array.from({ length: 801 }, (_, i) => event(i)),
@@ -527,7 +574,7 @@ assert.equal(
   "completed history must not evict duplicate protection on a live background turn",
 );
 console.log(
-  "Backend responsiveness passed: bounded/coalesced RPCs, independent chats, trailing recovery, retained history, failed and superseded reads, complete reopening and background gap recovery.",
+  "Backend responsiveness passed: bounded/coalesced RPCs, independent chats, trailing recovery, retained history, failed and superseded reads, bounded reopening, accessible older pages and background gap recovery.",
 );
 console.log(
   "Stream gap recovery passed: sparse timed recovery, reordering grace, no replay after gaps or completion, one timer, cleanup.",

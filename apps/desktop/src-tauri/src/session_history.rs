@@ -1,4 +1,4 @@
-//! Complete display history and bounded refresh reads, including approval recovery.
+//! Bounded display-history pages and refresh reads, including approval recovery.
 use crate::{
     app::limits::MAX_DESKTOP_SESSION_EVENTS_READ,
     stores::{open_store, parse_uuid, to_string},
@@ -78,32 +78,14 @@ fn read_session_events_with_revision(
             unchanged: true,
         });
     }
-    let mut result = if full_history {
-        read_complete_session_events_from_store(store, session_id)?
-    } else {
-        read_session_events_from_store(store, session_id, page_limit)?
-    };
+    // Legacy full_history callers force a fresh page, never an unbounded
+    // transcript allocation. Older events remain accessible by cursor.
+    let mut result = read_session_events_from_store(store, session_id, page_limit)?;
     // Never certify an append that arrived after our transcript snapshot.
     if store.transcript_revision(session_id)? == before {
         result.revision = Some(before);
     }
     Ok(result)
-}
-
-fn read_complete_session_events_from_store(
-    store: &SessionStore,
-    session_id: Uuid,
-) -> anyhow::Result<SessionEventsReadResult> {
-    let context_events = store.read_context_events(session_id)?;
-    let mut events = store.read_transcript_events(session_id)?;
-    recover_pending_approvals(store, session_id, &mut events)?;
-    Ok(SessionEventsReadResult {
-        events,
-        context_events,
-        has_more_before: false,
-        revision: None,
-        unchanged: false,
-    })
 }
 
 fn read_session_events_from_store(
@@ -181,7 +163,7 @@ mod tests {
     use gyro_core::{GyroPaths, SessionOrigin};
 
     #[test]
-    fn complete_chat_history_exceeds_display_and_provider_windows() {
+    fn bounded_history_pages_preserve_every_event_beyond_provider_windows() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
         let session = store
@@ -204,14 +186,45 @@ mod tests {
                 .unwrap();
         assert!(recent.has_more_before);
         assert!(recent.events.len() <= MAX_DESKTOP_SESSION_EVENTS_READ + 1);
-        let complete = read_complete_session_events_from_store(&store, session.id).unwrap();
-        assert!(!complete.has_more_before);
-        assert_eq!(complete.events.len(), 3_101);
-        assert_eq!(complete.events[1].message, "history message 0");
-        assert_eq!(
-            complete.events.last().unwrap().message,
-            "history message 3099"
-        );
+        // Even a legacy full-history request is bounded. Walk older pages
+        // to prove that the bound does not discard any durable history.
+        let first = read_session_events_with_revision(
+            &store,
+            session.id,
+            MAX_DESKTOP_SESSION_EVENTS_READ,
+            true,
+            None,
+        )
+        .unwrap();
+        assert!(first.has_more_before);
+        assert!(first.events.len() <= MAX_DESKTOP_SESSION_EVENTS_READ + 1);
+        let mut ids = first
+            .events
+            .iter()
+            .map(|event| event.id)
+            .collect::<HashSet<_>>();
+        let mut cursor = first
+            .events
+            .iter()
+            .find(|event| event.kind != SessionEventKind::SessionCreated)
+            .unwrap()
+            .id;
+        let mut more = true;
+        while more {
+            let page = store
+                .read_events_before(session.id, cursor, MAX_DESKTOP_SESSION_EVENTS_READ)
+                .unwrap();
+            assert!(page.events.len() <= MAX_DESKTOP_SESSION_EVENTS_READ);
+            more = page.has_more_before;
+            if let Some(first) = page.events.first() {
+                assert_ne!(first.id, cursor);
+                cursor = first.id;
+            } else {
+                assert!(!more);
+            }
+            ids.extend(page.events.iter().map(|event| event.id));
+        }
+        assert_eq!(ids.len(), 3_101);
         // UI history must not change the separately bounded provider read.
         assert!(store.read_events(session.id).unwrap().len() <= 1_001);
     }

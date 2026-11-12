@@ -38,6 +38,7 @@ import {
   useGyroAccount,
 } from "./account-settings";
 import { GyroCloud } from "./gyro-cloud";
+import { AccountSettings as NativeAccountSettings } from "./native-account-settings";
 import { useAppearanceSaveFeedback } from "./use-appearance-save-feedback";
 
 const params = new URLSearchParams(location.search);
@@ -61,8 +62,8 @@ function loadPreviewAppearance(): PreviewAppearance {
     density: "comfortable",
     interfaceSize: "default",
     motionSpeed: "default",
-    mainColor: params.get("accent") ?? "#0874df",
-    secondaryColor: params.get("secondary") ?? "#8b6fcb",
+    mainColor: params.get("accent") ?? "#ffffff",
+    secondaryColor: params.get("secondary") ?? "#ffffff",
   };
   try {
     const stored = JSON.parse(
@@ -476,8 +477,8 @@ function Preview() {
       >
         {section === "billing" ? billing.accountForm : null}
         <SettingsSurface
-          accountSettings={<AccountSettings account={account} />}
-          cloudSettings={accountScene ? (
+          accountSettings={params.has("nativeAccount") ? <NativeAccountSettings account={{snapshot: params.has("cloudUnavailable") ? {status: "unavailable", availability: "coming-soon"} : billing.snapshot, actions: billing.actions}} /> : <AccountSettings account={account} />}
+          cloudSettings={accountScene && !params.has("cloudUnavailable") ? (
             <CloudSettings
               account={account}
               onAccount={() => setSection("account")}
@@ -486,7 +487,7 @@ function Preview() {
           preferences={{ ...extraPreferences, theme, density, interfaceSize, motionSpeed, mainColor: colors[0]!, secondaryColor: colors[1]!, desktopNotifications: notifications, launchView, showMenuBarIcon: menu, modelFollow: follow, defaultWorkspaceMode }}
           onSettingsPreferencesChange={patch => setExtraPreferences(current=>({...current,...patch}))}
           onImportSettings={settings => { setExtraPreferences(current=>({...current,...settings})); if(settings.theme)setTheme(settings.theme); if(settings.density)setDensity(settings.density); if(settings.interfaceSize)setInterfaceSize(settings.interfaceSize); if(settings.motionSpeed)setMotionSpeed(settings.motionSpeed); if(settings.mainColor||settings.secondaryColor)setColors([settings.mainColor??colors[0]!,settings.secondaryColor??colors[1]!]); if(settings.desktopNotifications)setNotifications(settings.desktopNotifications); if(settings.launchView)setLaunchView(settings.launchView); if(settings.showMenuBarIcon!==undefined)setMenu(settings.showMenuBarIcon); if(settings.modelFollow)setFollow(settings.modelFollow); }}
-          billingSnapshot={billing.snapshot}
+          billingSnapshot={params.has("cloudUnavailable") ? { status: "unavailable", availability: "coming-soon" } : billing.snapshot}
           billingActions={billing.actions}
           systemAccess={[{id:"documents",label:"Documents",reason:"Fixture access status",status:"granted",path:"/fixture/Documents",canPrompt:false,settingsUrl:""},{id:"full-disk",label:"Full Disk Access",reason:"Fixture access status",status:"unavailable",canPrompt:false,settingsUrl:""}]}
           onRecheckSystemAccess={()=>setResult("Simulated access check; no macOS permission request.")}

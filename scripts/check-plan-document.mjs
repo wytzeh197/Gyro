@@ -137,6 +137,37 @@ const blocked = derive([eightStepPlan, event("plan-updated", {
 }, "", "turn-2")]);
 assert.equal(blocked.items[7].status, "blocked");
 assert.equal(blocked.items[7].detail, "Requires native packaged-app acceptance");
+// A new task clears the environment summary at send time, retaining history.
+const draftPlan = event("plan-updated", {
+  action: "replace", content: "# Saved plan",
+  items: [{ id: "one", title: "Implement", status: "todo" }],
+}, "", "planning");
+const implement = event("user-message", {}, "Implement the approved plan.", "implementation");
+const working = event("plan-updated", {
+  action: "update-items", items: [{ id: "one", status: "in-progress" }],
+}, "", "implementation");
+const settled = event("assistant-message", { kind: "provider-response" }, "Implemented.", "implementation");
+const nextTask = event("user-message", { optimistic: true }, "Now improve another screen.", "next-task");
+const sequence = [draftPlan, implement, working];
+assert.notEqual(derive([draftPlan, implement]).environmentDismissed, true, "approval retains the draft");
+assert.notEqual(derive([...sequence, nextTask]).environmentDismissed, true, "live steering retains progress");
+assert.notEqual(derive([...sequence, settled, implement]).environmentDismissed, true, "same-turn retry retains progress");
+const archived = derive([...sequence, settled, nextTask]);
+assert.equal(archived.environmentDismissed, true, "first new send hides stale unfinished steps");
+assert.equal(archived.content, "# Saved plan");
+assert.equal(archived.items[0].status, "in-progress", "do not invent completion");
+const staleProgress = event("plan-updated", {
+  action: "update-items", items: [{ id: "one", status: "complete" }],
+}, "", "next-task");
+assert.equal(derive([...sequence, settled, nextTask, staleProgress]).environmentDismissed, true);
+assert.equal(derive([...sequence, staleProgress, event("chat-mode-changed", {
+  mode: "normal",
+}, "", "later-task")]).environmentDismissed, true, "retained mode boundary clears completed history");
+assert.notEqual(derive([...sequence, settled, nextTask, event("plan-updated", {
+  action: "replace", content: "# New task plan",
+  items: [{ id: "new", title: "New work", status: "todo" }],
+}, "", "next-task")]).environmentDismissed, true, "new plan appears");
+assert.equal(derive(JSON.parse(JSON.stringify([...sequence, settled, nextTask]))).environmentDismissed, true);
 // Run the actual hook's subscription while the turn remains active. No final
 // assistant message or polling refresh is required to advance the checklist.
 const hookSource = readFileSync(

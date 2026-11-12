@@ -24,7 +24,7 @@ export {
   SettingsStatus,
   UsageCard,
 } from "./settings-presentation";
-export { SettingsGroup, SettingsMore, SettingsRow } from "./settings-controls";
+export { SettingsEmptyState, SettingsGroup, SettingsMore, SettingsRow } from "./settings-controls";
 export {
   Check as CheckIcon,
   ArrowRight as ArrowRightIcon,
@@ -709,9 +709,11 @@ export {
   WorkspaceHeader,
 } from "./surfaces";
 export {
+  chatQuestionDismissalVersion,
   formatChatAnswers,
   latestChatQuestions,
   revealChatQuestion,
+  subscribeChatQuestionDismissals,
   parseChatAnswers,
   parseChatQuestions,
   questionsFromPayload,
@@ -738,9 +740,11 @@ export {
 } from "./chat-task-suggestions";
 export { ChatQuestionAnswers, ImplementPlanDock, PlanCard } from "./plan-mode";
 export {
+  assetUrlToPath,
   droppedFileUrls,
   fileUrlToPath,
   sendableChatImage,
+  setChatMediaUrlDownloader,
   setOpenDroppedWorkspaceHandler,
   workspaceDropFromTransfer,
 } from "./chat-media-transfer";

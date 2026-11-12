@@ -19,8 +19,8 @@
   --gyro-traffic-light-zoom: #28c840;
   /* Neutral surface ramps keep dark mode free of blue casts and light mode
      free of cream casts. Accent hues belong to actions and semantic states. */
-  --gyro-user-main: #0874df;
-  --gyro-user-secondary: #8b6fcb;
+  --gyro-user-main: #ffffff;
+  --gyro-user-secondary: #ffffff;
   --gyro-app: #141415;
   --gyro-sidebar: #1c1c1e;
   --gyro-sidebar-soft: #262628;
@@ -590,21 +590,23 @@
   /* Lighter than muted so meta text keeps a step of hierarchy, while staying
      above 7:1 on the app canvas. */
   --gyro-faint: #55555d;
-  --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 82%, #10203b 18%);
+  --gyro-user-main: #000000;
+  --gyro-user-secondary: #000000;
+  --gyro-accent: color-mix(in srgb, var(--gyro-user-main) 82%, black 18%);
   --gyro-accent-strong: color-mix(
     in srgb,
     var(--gyro-user-main) 70%,
-    #08182f 30%
+    black 30%
   );
   --gyro-secondary-accent: color-mix(
     in srgb,
     var(--gyro-user-secondary) 80%,
-    #26163d 20%
+    black 20%
   );
   --gyro-secondary-accent-strong: color-mix(
     in srgb,
     var(--gyro-user-secondary) 68%,
-    #201033 32%
+    black 32%
   );
   --gyro-cobalt: #2056ee;
   --gyro-cobalt-strong: #2056ee;

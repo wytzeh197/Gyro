@@ -4,12 +4,48 @@ import { formatTokenCount as ledgerTokenCount } from "../packages/ui/src/usage-l
 import { estimateComposerContextUsage } from "../packages/ui/src/context-usage.ts";
 import {
   formatTokenCount,
+  showTurnTokenCount,
   turnTokenReadingForResponse,
   turnTokensDetail,
   turnTokensFromEvents,
   turnTokensFromValue,
   turnTokensLabel,
 } from "../packages/ui/src/turn-tokens.ts";
+
+// Visibility follows the turn's connection, including mixed-provider history.
+const connections = [
+  { id: "openai", authMode: "cli" },
+  { id: "anthropic", authMode: "env" },
+  { id: "deepseek", authMode: "env" },
+  { id: "ollama", authMode: "sdk" },
+];
+const connectionEvent = (providerId, kind = "provider-run", extra = {}) => ({
+  payload: { kind, providerId, ...extra },
+});
+for (const kind of ["provider-run", "provider-response", "provider-turn-tokens"]) {
+  assert.equal(showTurnTokenCount([connectionEvent("openai", kind)], connections), false);
+  assert.equal(showTurnTokenCount([connectionEvent("anthropic", kind)], connections), true);
+  assert.equal(showTurnTokenCount([connectionEvent("deepseek", kind)], connections), true);
+  assert.equal(showTurnTokenCount([connectionEvent("ollama", kind)], connections), false);
+}
+assert.equal(showTurnTokenCount([], connections), false);
+assert.equal(showTurnTokenCount([connectionEvent("unknown")], connections), false);
+assert.equal(showTurnTokenCount([{ payload: null }], connections), false);
+assert.equal(showTurnTokenCount([
+  connectionEvent("deepseek"),
+  connectionEvent("openai", "provider-response"),
+], connections), false);
+assert.equal(showTurnTokenCount([
+  connectionEvent("openai"),
+  connectionEvent("deepseek", "provider-response"),
+], connections), true);
+assert.equal(showTurnTokenCount([
+  connectionEvent("removed-custom", "provider-response", { runner: "openai-compatible-api" }),
+], []), true);
+assert.equal(showTurnTokenCount([
+  connectionEvent("openai", "provider-response"),
+  connectionEvent("deepseek", "capability-completed"),
+], connections), false);
 
 const metadata = (coverage = "complete", overrides = {}) => ({
   source: "provider",

@@ -70,7 +70,7 @@ class Transcript {
     return null;
   }
 }
-function mount(sessionId, ids = ["first"], height = 1000) {
+function mount(sessionId, ids = ["first"], height = 1000, paging = {}) {
   const layouts = [],
     effects = [],
     frames = new Map();
@@ -106,6 +106,7 @@ function mount(sessionId, ids = ["first"], height = 1000) {
     hasMoreBefore: false,
     isLoadingEarlier: false,
     liveChangesTarget: null,
+    ...paging,
   });
   const node = new Transcript(height);
   hook.transcriptRef.current = node;
@@ -215,6 +216,24 @@ assert.equal(
   "restoration does not resume following",
 );
 smallRestored.unmount();
+let olderRequests = 0;
+const shortPage = mount("short-page", ["recent"], 150, {
+  hasMoreBefore: true,
+  onLoadEarlier: () => olderRequests++,
+});
+shortPage.hook.requestEarlierMessages(false);
+assert.equal(olderRequests, 0, "short pages cannot auto-fetch the entire history");
+shortPage.hook.requestEarlierMessages(true);
+assert.equal(olderRequests, 1, "manual paging works even when recent activity fits on screen");
+shortPage.unmount();
+const busyPage = mount("busy-page", ["recent"], 150, {
+  hasMoreBefore: true,
+  isLoadingEarlier: true,
+  onLoadEarlier: () => olderRequests++,
+});
+busyPage.hook.requestEarlierMessages(true);
+assert.equal(olderRequests, 1, "loading blocks another page request");
+busyPage.unmount();
 console.log(
   "Chat scroll: small wheel/touch/key/pointer gestures, activity updates, remount, reader/following state, older-page geometry, sibling isolation and bounded memory passed.",
 );

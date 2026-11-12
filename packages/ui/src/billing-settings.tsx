@@ -489,16 +489,30 @@ export function BillingSettings({
   snapshot = { status: "unavailable" },
   actions = {},
   onOpenCloud,
+  onOpenProviders,
 }: {
   snapshot?: BillingSnapshot;
   actions?: BillingActions;
   onOpenCloud?: () => void;
+  onOpenProviders?: () => void;
 }) {
   if (snapshot.availability === "coming-soon") actions = {};
   const [paymentRefresh, setPaymentRefresh] = useState(0);
   const [planChangeMessage, setPlanChangeMessage] = useState("");
   const [changingPlan, setChangingPlan] = useState(false);
   const [pendingPlan, setPendingPlan] = useState<"plus" | "premium">();
+  if (snapshot.availability === "coming-soon" || snapshot.status === "unavailable") {
+    return <SettingsSection title="Plan & billing" description="Manage optional Gyro services.">
+      <SettingsGroup id="subscription" label="Subscription">
+        <p><strong>Billing is not available in this build</strong></p>
+        <p>Gyro works locally without a subscription.</p>
+      </SettingsGroup>
+      <SettingsGroup id="provider-billing" label="Provider billing">
+        <p>AI provider charges are managed separately.</p>
+        {onOpenProviders ? <SettingsRow label="Open Models & accounts" onClick={onOpenProviders} value="→" /> : null}
+      </SettingsGroup>
+    </SettingsSection>;
+  }
   const modernCloud = snapshot.cloudV2 || snapshot.productionCloud;
   const currentPlan = paidStates.includes(snapshot.status)
     ? snapshot.plan

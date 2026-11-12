@@ -15,6 +15,11 @@ export const CHAT_QUESTION_REVEAL_EVENT = "gyro-reveal-chat-question";
 const QUESTION_DISMISSAL_PREFIX = "gyro:question-dismissed:v1:";
 const questionDismissalFallback = new Set<string>();
 const questionDismissalListeners = new Set<() => void>();
+/** Bumped on every dismissal change so derived views, like sidebar badges, recompute. */
+let questionDismissalVersion = 0;
+export function chatQuestionDismissalVersion() {
+  return questionDismissalVersion;
+}
 const questionDismissalKey = (sessionId: string, requestId: string) =>
   QUESTION_DISMISSAL_PREFIX + JSON.stringify([sessionId, requestId]);
 
@@ -44,6 +49,7 @@ export function setChatQuestionDismissed(
   } catch {
     // Storage may be unavailable; retain dismissal across remounts this run.
   }
+  questionDismissalVersion += 1;
   for (const listener of questionDismissalListeners) listener();
 }
 
@@ -53,6 +59,7 @@ export function subscribeChatQuestionDismissals(listener: () => void) {
     if (event.key !== null && !event.key.startsWith(QUESTION_DISMISSAL_PREFIX)) return;
     if (event.key === null) questionDismissalFallback.clear();
     else questionDismissalFallback.delete(event.key);
+    questionDismissalVersion += 1;
     listener();
   };
   if (typeof window !== "undefined") window.addEventListener("storage", onStorage);

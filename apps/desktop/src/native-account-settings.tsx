@@ -1,5 +1,4 @@
 import {
-  CloudIcon,
   SettingsGroup,
   SettingsRow,
   SettingsSection,
@@ -58,17 +57,7 @@ export function AccountNavigation({
           </small>
         </span>
       </button>
-      {(signedIn || account.snapshot.availability === "coming-soon") && (
-        <button
-          type="button"
-          className={`is-compact${selected === "cloud" ? " is-active" : ""}`}
-          aria-current={selected === "cloud" ? "page" : undefined}
-          onClick={() => onSelect("cloud")}
-        >
-          <CloudIcon aria-hidden="true" size={15} />
-          <strong>Cloud</strong>
-        </button>
-      )}
+
     </div>
   );
 }

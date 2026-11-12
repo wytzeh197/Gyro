@@ -132,7 +132,7 @@ function expect(condition, message) {
   before.preferences.missionSessionIds = ["active-mission"];
   const after = workbenchReducer(before, { type: "reset-ui-preferences" });
   expect(
-    after.preferences.mainColor === "#0874df",
+    after.preferences.mainColor === "#ffffff",
     "UI reset restores the default palette.",
   );
   expect(
@@ -2174,9 +2174,9 @@ expect(
   "Chat environment is the rail's resting state, so a fresh chat shows it.",
 );
 expect(
-  initialState.preferences.mainColor === "#0874df" &&
-    initialState.preferences.secondaryColor === "#8b6fcb",
-  "Appearance colors should start with Gyro's blue and violet palette.",
+  initialState.preferences.mainColor === "#ffffff" &&
+    initialState.preferences.secondaryColor === "#ffffff",
+  "Appearance colors should start with the theme-adaptive monochrome palette.",
 );
 expect(
   initialState.preferences.dailyPaceWarning === true,
@@ -2303,6 +2303,13 @@ for (const theme of ["dark", "light"]) {
     "#888888",
   ]) {
     const palette = appearanceAccentProperties(color, color, theme);
+    if (color === "#ffffff") {
+      for (const role of ["--gyro-accent", "--gyro-accent-strong",
+        "--gyro-secondary-accent", "--gyro-secondary-accent-strong", "--gyro-primary-bg"]) {
+        expect(palette[role] === (theme === "dark" ? "#ffffff" : "#000000"),
+          `Default ${role} must be white in dark mode and black in light mode.`);
+      }
+    }
     for (const surface of theme === "dark"
       ? ["#181818", "#383c41"]
       : ["#ffffff", "#e7ebf0"]) {
@@ -4627,7 +4634,8 @@ expect(
     runSource.includes("`Worked for ${elapsedLabel}`") &&
     runSource.includes("export function formatRunDuration") &&
     sourceIncludes(surfaceSource, "formatMessageTime(event.createdAt)") &&
-    sourceIncludes(surfaceSource, 'aria-label="Copy message"') &&
+    sourceIncludes(surfaceSource, 'label="Copy message"') &&
+    sourceIncludes(surfaceSource, 'aria-label={copied ? "Copied" : label}') &&
     runSource.includes("`${hours}h`") &&
     runSource.includes("`${minutes}m`") &&
     runSource.includes("`${seconds}s`") &&
@@ -4823,7 +4831,7 @@ expect(
     ) &&
     runViewSource.includes("renderSay(step.text)") &&
     sourceIncludes(surfaceSource, "stripHiddenSessionTitleMarker") &&
-    sourceIncludes(surfaceSource, "isHiddenSessionTitleActivity") &&
+    sourceIncludes(surfaceSource, "isHiddenControlMarkerActivity") &&
     sourceIncludes(surfaceSource, "const shouldUsePlainText") &&
     sourceIncludes(
       surfaceSource,
@@ -5705,13 +5713,14 @@ expect(
       (rule) => rule.includes("position: absolute") && rule.includes("z-index: 100"),
     ) &&
     !styleSource.includes("--gyro-environment-popover-gutter") &&
-    !styleSource.includes(
-      ".gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion) {",
-    ) &&
+    cssRules(
+      styleSource,
+      ".gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion, .is-tiled)",
+    ).some((rule) => rule.includes("grid-template-columns:") && rule.includes("column-gap:")) &&
     !styleSource.includes(
       ".gyro-sidebar-ai-chat\n  .gyro-chat-surface.is-thread.has-environment-popover",
     ),
-  "The Environment popover should remain a floating card without a reserved side column or sidebar strip.",
+  "The Environment panel should reserve space beside a single chat, overlay split panes, and add no sidebar strip.",
 );
 
 expect(
@@ -6046,7 +6055,7 @@ expect(
   settingsSidebarSource.includes('aria-label="Hide sidebar"') &&
     settingsSidebarSource.includes("onToggleSidebar") &&
     settingsSidebarSource.includes("aria-label={`Back to ${backLabel}`}") &&
-    settingsSidebarSource.includes("<span>Back to app</span>") &&
+    settingsSidebarSource.includes("<span>Back to {backLabel}</span>") &&
     !settingsSidebarSource.includes('aria-label="Forward"'),
   "Settings should offer Back to app with the originating surface in its accessible label.",
 );
@@ -6538,7 +6547,7 @@ expect(
     ) &&
     sourceIncludes(surfaceSource, "function AssistantResponse") &&
     sourceIncludes(surfaceSource, "gyro-response-body") &&
-    sourceIncludes(surfaceSource, 'aria-label="Copy response"') &&
+    sourceIncludes(surfaceSource, '<MessageCopyButton label="Copy response" message={visibleMessage} />') &&
     styleSource.includes(".gyro-chat-transcript .gyro-message.is-user") &&
     styleSource.includes("justify-items: end") &&
     styleSource.includes("width: min(100%, var(--gyro-chat-content-width))") &&
@@ -6572,10 +6581,10 @@ expect(
   surfaceSource.includes("function isLoadedTranscriptClipped") &&
     surfaceSource.includes("OVERFLOW_SLACK") &&
     surfaceSource.includes(
-      "hasMoreBefore && onLoadEarlier && isLoadedChatClipped",
+      "hasMoreBefore && onLoadEarlier ? (",
     ) &&
     surfaceSource.includes("setIsLoadedChatClipped(isLoadedTranscriptClipped"),
-  "Load earlier messages should appear only when loaded chat messages do not fit on screen.",
+  "Load earlier messages should remain available whenever older durable history exists, even when the loaded page fits on screen.",
 );
 expect(
   surfaceSource.includes("function safeAssistantLinkUrl") &&
@@ -6796,7 +6805,7 @@ expect(
       '"Council needs a folder before starting a chat."',
     ) &&
     sourceIncludes(appSource, 'case "select-no-folder":') &&
-    sourceIncludes(appSource, 'startNewChat({ workspacePath: "" })') &&
+    sourceIncludes(appSource, 'startNewChat({ workspacePath: "", carryDraftFrom: activeDraftKey })') &&
     sourceIncludes(appSource, "void openWorkspace();") &&
     sourceIncludes(
       appSource,
@@ -7912,8 +7921,8 @@ expect(
     !sourceIncludes(surfaceSource, 'action: "toggle-access"') &&
     !sourceIncludes(surfaceSource, "Codex settings") &&
     !sourceIncludes(surfaceSource, "Claude settings") &&
-    sourceIncludes(surfaceSource, "Command policy") &&
-    sourceIncludes(surfaceSource, "File edit policy") &&
+    sourceIncludes(surfaceSource, "Ask before running commands") &&
+    sourceIncludes(surfaceSource, "Ask before editing files") &&
     sourceIncludes(surfaceSource, "approvalChipClassName") &&
     sourceIncludes(surfaceSource, 'approvalMode === "direct"') &&
     sourceIncludes(surfaceSource, 'approvalMode === "auto"') &&
@@ -8044,7 +8053,7 @@ expect(
     sourceIncludes(surfaceSource, "const transcriptState = useMemo") &&
     sourceIncludes(
       surfaceSource,
-      "const isEmptyStart = turns.length === 0 && looseEvents.length === 0",
+      "const isEmptyStart = !hasMoreBefore && turns.length === 0 && looseEvents.length === 0",
     ) &&
     sourceIncludes(surfaceSource, "if (isEmptyStart)") &&
     sourceIncludes(surfaceSource, 'aria-label="New Chat"') &&
@@ -8388,8 +8397,8 @@ expect(
     styleSource.includes("--gyro-app: #141415") &&
     styleSource.includes("--gyro-pane: #141415") &&
     styleSource.includes("--gyro-hero-composer: var(--gyro-surface)") &&
-    styleSource.includes("--gyro-user-main: #0874df") &&
-    styleSource.includes("--gyro-user-secondary: #8b6fcb") &&
+    styleSource.includes("--gyro-user-main: #ffffff") &&
+    styleSource.includes("--gyro-user-secondary: #ffffff") &&
     styleSource.includes("var(--gyro-user-main) 86%") &&
     styleSource.includes(':root[data-theme="light"]') &&
     styleSource.includes("--gyro-app: #fbfbfb") &&

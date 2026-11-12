@@ -385,6 +385,8 @@ fn git_branch_catalog_creates_a_session_branch_from_the_selected_base() {
     run_git(repo.path(), &["branch", "release/base"]);
     fs::write(&tracked, "main head\n").unwrap();
     run_git(repo.path(), &["commit", "-am", "main head"]);
+    // A same-named release tag points at a different commit from the branch.
+    run_git(repo.path(), &["tag", "release/base"]);
     fs::write(repo.path().join("scratch.txt"), "keep me\n").unwrap();
 
     let catalog = git_create_branch_impl(&GitCreateBranchRequest {

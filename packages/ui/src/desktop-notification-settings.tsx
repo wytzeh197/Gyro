@@ -81,7 +81,7 @@ export function DesktopNotificationSettings({
   const needsPermission =
     permission === "prompt" || permission === "prompt-with-rationale";
   return (
-    <SettingsGroup id="macos-notifications" label="macOS notifications" description="Choose what needs your attention while work runs in the background.">
+    <SettingsGroup id="macos-notifications" label="Notifications">
       <SettingsRow label="Notifications" detail={permissionDetail(permission)}>
         <SettingsSwitch
           checked={preferences.enabled}

@@ -257,6 +257,23 @@ const scenes = navigation
 if (extended && !navigation)
   scenes.push(
     {
+      name: "environment",
+      scene: "active-chat",
+      edge: "code-block",
+      clicks: ["?Skip tour"],
+      probes: threadProbes,
+      openEnvironment: true,
+    },
+    {
+      name: "environment-streaming",
+      scene: "active-chat",
+      edge: "streaming",
+      clicks: ["?Skip tour"],
+      send: "Check the chat layout while this response is running.",
+      probes: streamingProbes,
+      openEnvironment: true,
+    },
+    {
       name: "lists",
       scene: "active-chat",
       edge: "markdown-lists",
@@ -289,7 +306,14 @@ const themes = ["dark", "light"];
 const sizes = ["default", "small", "large"];
 
 let states = scenes.flatMap((scene) =>
-  viewports.flatMap((viewport) =>
+  (scene.openEnvironment
+    ? [
+        ...viewports,
+        { name: "laptop", width: 1280, height: 800 },
+        { name: "compact", width: 1024, height: 768 },
+      ]
+    : viewports
+  ).flatMap((viewport) =>
     themes.flatMap((theme) =>
       (extended ? sizes : (scene.sizes ?? sizes)).map((size) => ({
         ...scene,
@@ -595,6 +619,18 @@ try {
         });
       }
       await pause(1200);
+    }
+    if (state.openEnvironment) {
+      await waitFor(
+        () =>
+          evaluate(`(() => {
+          if (document.querySelector(".gyro-chat-environment-popover")) return true;
+          document.querySelector('button[aria-label="Environment"]')?.click();
+          return Boolean(document.querySelector(".gyro-chat-environment-popover"));
+        })()`),
+        `${state.name} open Environment`,
+      );
+      await pause(700);
     }
     if (state.draft) {
       await evaluate(

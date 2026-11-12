@@ -414,7 +414,9 @@ pub(crate) fn git_create_branch_impl(
         .filter(|value| !value.is_empty())
     {
         gyro_core::validate_branch_name(start_point)?;
-        command.arg(start_point);
+        // The picker selects local branches. Qualify the ref so a release tag
+        // with the same name cannot make checkout ambiguous or select its tip.
+        command.arg(format!("refs/heads/{start_point}"));
     }
     let output = run_bounded_command(
         &command,

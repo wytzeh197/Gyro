@@ -10,7 +10,6 @@
 @import "./first-run-tour.css";
 @import "./model-default-suggestion.css";
 @import "./chat-shell-design.css";
-@import "./companion-design.css";
 @import "./chat-context-popovers.css";
 @import "./browser-panel-design.css";
 
@@ -8546,8 +8545,8 @@ textarea:focus-visible {
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar {
-  background: #151619;
-  border-right-color: #292c31;
+  background: var(--gyro-sidebar);
+  border-right-color: var(--gyro-border);
   gap: 6px;
   padding: 8px 8px;
 }
@@ -8560,7 +8559,7 @@ textarea:focus-visible {
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--gyro-radius-sm);
-  color: #9a9fa7;
+  color: var(--gyro-muted);
   flex: 1 1 0;
   font-size: var(--gyro-font-support);
   height: 22px;
@@ -8581,9 +8580,9 @@ textarea:focus-visible {
 
 .gyro-app-shell.is-chat-shell .gyro-surface-row.is-active,
 .gyro-app-shell.is-chat-shell .gyro-surface-row:hover {
-  background: #23262b;
-  border-color: #30343a;
-  color: #efede8;
+  background: var(--gyro-control-hover);
+  border-color: var(--gyro-border);
+  color: var(--gyro-text);
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar-actions {
@@ -8597,7 +8596,7 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main {
   border-radius: var(--gyro-radius-sm);
-  color: #d7d4cf;
+  color: var(--gyro-text);
   font-size: var(--gyro-font-body);
   gap: calc(7px * var(--gyro-ui-scale, 1));
   min-height: calc(28px * var(--gyro-ui-scale, 1));
@@ -8609,14 +8608,14 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-project-row svg,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread svg,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main svg {
-  color: #9da3ab;
+  color: var(--gyro-muted);
   height: calc(13px * var(--gyro-ui-scale, 1));
   width: 13px;
 }
 
 .gyro-app-shell.is-chat-shell .gyro-nav-label,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-section-toggle {
-  color: #8f949d;
+  color: var(--gyro-faint);
   font-size: var(--gyro-font-micro);
   font-weight: 600;
   min-height: 24px;
@@ -8631,7 +8630,7 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread small,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-thread-main small,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-project-row small {
-  color: #8a8f98;
+  color: var(--gyro-faint);
   font-size: var(--gyro-font-micro);
 }
 
@@ -8648,8 +8647,8 @@ textarea:focus-visible {
 .gyro-app-shell.is-chat-shell .gyro-sidebar-action:hover,
 .gyro-app-shell.is-chat-shell .gyro-sidebar-row:hover,
 .gyro-app-shell.is-chat-shell .gyro-session-row:hover {
-  background: #202329;
-  border-color: #2a2e35;
+  background: var(--gyro-sidebar-soft);
+  border-color: var(--gyro-border);
 }
 
 .gyro-app-shell.is-chat-shell .gyro-session-actions {
@@ -8668,8 +8667,8 @@ textarea:focus-visible {
 }
 
 .gyro-app-shell.is-chat-shell .gyro-sidebar-footer {
-  background: #151619;
-  border-top-color: #292c31;
+  background: var(--gyro-sidebar);
+  border-top-color: var(--gyro-border);
   margin: auto -7px -8px;
   padding: 6px 8px 8px;
 }
@@ -8682,15 +8681,15 @@ textarea:focus-visible {
 }
 
 .gyro-app-shell.is-chat-shell .gyro-account-button:hover {
-  background: #202329;
+  background: var(--gyro-sidebar-soft);
 }
 
 .gyro-app-shell.is-chat-shell .gyro-main {
-  background: #0b0c0e;
+  background: var(--gyro-pane);
 }
 
 .gyro-workspace-route {
-  background: #0b0c0e;
+  background: var(--gyro-pane);
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   height: 100vh;
@@ -8710,7 +8709,7 @@ textarea:focus-visible {
 }
 
 .gyro-workspace-tool-panel {
-  border-top: 1px solid #2b2f35;
+  border-top: 1px solid var(--gyro-border);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   max-height: min(42vh, 430px);
@@ -8761,7 +8760,7 @@ textarea:focus-visible {
 }
 
 .gyro-tool-panel-resize-handle span {
-  background: #7b818a;
+  background: var(--gyro-faint);
   border-radius: var(--gyro-radius-pill);
   display: block;
   height: 3px;
@@ -8772,14 +8771,14 @@ textarea:focus-visible {
 .gyro-tool-panel-resize-handle:hover span,
 .gyro-tool-panel-resize-handle:focus-visible span,
 .gyro-workspace-tool-panel.is-resizing .gyro-tool-panel-resize-handle span {
-  background: #d8d4cc;
+  background: var(--gyro-text);
   opacity: 0.82;
 }
 
 .gyro-workspace-tool-panel-head {
   align-items: center;
-  background: #14161a;
-  border-bottom: 1px solid #252a31;
+  background: var(--gyro-surface-soft);
+  border-bottom: 1px solid var(--gyro-border);
   display: flex;
   gap: 8px;
   min-height: 38px;
@@ -8983,13 +8982,13 @@ textarea:focus-visible {
 }
 
 .gyro-slash-command-menu {
-  background: #15171a;
-  border: 1px solid #30343a;
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-xl);
   bottom: calc(100% + 10px);
   box-shadow:
-    0 22px 52px rgba(0, 0, 0, 0.52),
-    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    0 22px 52px var(--gyro-shadow),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
   left: 0;
   max-height: min(390px, calc(100vh - 40px));
   overflow: hidden;
@@ -9000,7 +8999,7 @@ textarea:focus-visible {
 
 .gyro-slash-command-menu > header {
   align-items: center;
-  color: #8e949d;
+  color: var(--gyro-faint);
   display: flex;
   font-size: var(--gyro-font-micro);
   justify-content: space-between;
@@ -9009,7 +9008,7 @@ textarea:focus-visible {
 }
 
 .gyro-slash-command-menu > header strong {
-  color: #aeb3bb;
+  color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
   font-weight: 600;
 }
@@ -9027,7 +9026,7 @@ textarea:focus-visible {
   background: transparent;
   border: 0;
   border-radius: var(--gyro-radius-md);
-  color: #dfe2e6;
+  color: var(--gyro-text);
   display: grid;
   gap: 10px;
   grid-template-columns: 18px minmax(0, 1fr) auto;
@@ -9039,11 +9038,11 @@ textarea:focus-visible {
 
 .gyro-slash-command-list button:hover,
 .gyro-slash-command-list button.is-selected {
-  background: #242a33;
+  background: var(--gyro-control-hover);
 }
 
 .gyro-slash-command-list button > svg {
-  color: #9da5af;
+  color: var(--gyro-muted);
 }
 
 .gyro-slash-command-list button > span {
@@ -9065,15 +9064,15 @@ textarea:focus-visible {
 }
 
 .gyro-slash-command-list small {
-  color: #858c96;
+  color: var(--gyro-faint);
   font-size: var(--gyro-font-caption);
 }
 
 .gyro-slash-command-list kbd {
-  background: #24272c;
-  border: 1px solid #30343a;
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-sm);
-  color: #969da7;
+  color: var(--gyro-faint);
   font-family: inherit;
   font-size: var(--gyro-font-tiny);
   padding: 3px 6px;
@@ -9081,8 +9080,8 @@ textarea:focus-visible {
 
 .gyro-slash-command-menu > footer {
   align-items: center;
-  border-top: 1px solid #292d32;
-  color: #757c86;
+  border-top: 1px solid var(--gyro-border);
+  color: var(--gyro-faint);
   display: flex;
   font-size: var(--gyro-font-micro);
   gap: 14px;
@@ -10301,8 +10300,8 @@ body {
 
 /* Simplified live terminal workbench */
 .gyro-workspace-tool-panel.is-resizable {
-  background: #111214;
-  border-top: 1px solid rgba(255, 255, 255, 0.095);
+  background: var(--gyro-pane);
+  border-top: 1px solid var(--gyro-border);
   box-shadow: none;
 }
 
@@ -10312,15 +10311,15 @@ body {
 }
 
 .gyro-workspace-tool-panel.is-resizable .gyro-tool-panel-resize-handle span {
-  background: #696d74;
+  background: var(--gyro-faint);
   height: 2px;
   opacity: 0.5;
   width: 44px;
 }
 
 .gyro-workspace-tool-panel.is-resizable .gyro-workspace-tool-panel-head {
-  background: #151619;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--gyro-sidebar);
+  border-bottom: 1px solid var(--gyro-border);
   min-height: 34px;
   padding: 3px 8px;
 }
@@ -10340,15 +10339,15 @@ body {
   background: transparent;
   border: 0;
   border-radius: var(--gyro-radius-md);
-  color: #8f949d;
+  color: var(--gyro-faint);
   height: calc(26px * var(--gyro-ui-scale, 1));
   min-width: 26px;
   padding: 0 calc(8px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-workspace-tool-panel.is-resizable .gyro-pane-tabs button.is-active {
-  background: #25272b;
-  color: #e7e2da;
+  background: var(--gyro-segment-active);
+  color: var(--gyro-text);
 }
 
 .gyro-workspace-tool-panel.is-resizable .gyro-pane-tabs .gyro-pane-add,
@@ -10363,13 +10362,13 @@ body {
 .gyro-workspace-tool-panel.is-resizable
   .gyro-workspace-tool-panel-head
   .gyro-icon-button:hover {
-  background: rgba(255, 255, 255, 0.055);
-  color: #f2eee7;
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
 }
 
 .gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
   .gyro-terminal-workspace {
-  background: #08090b;
+  background: var(--gyro-code-bg);
   grid-template-rows: minmax(0, 1fr);
 }
 
@@ -10383,7 +10382,7 @@ body {
 
 .gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
   .gyro-terminal-pane {
-  background: #08090b;
+  background: var(--gyro-code-bg);
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -10411,7 +10410,7 @@ body {
    one quiet shell beside the chat, not a terminal nested inside a terminal. */
 
 .gyro-terminal-workspace {
-  color: #dbe2eb;
+  color: var(--gyro-text);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
@@ -10420,7 +10419,7 @@ body {
 
 .gyro-terminal-toolbar {
   align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  border-bottom: 1px solid var(--gyro-border);
   display: grid;
 }
 
@@ -10452,10 +10451,10 @@ body {
 }
 
 .gyro-agent-launcher-menu {
-  background: #20242a;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-md);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);
+  box-shadow: 0 14px 36px var(--gyro-shadow);
   display: grid;
   gap: 2px;
   left: 0;
@@ -10507,7 +10506,7 @@ body {
 }
 
 .gyro-agent-launcher-menu button.is-active {
-  background: #2b3139;
+  background: var(--gyro-control-hover);
 }
 
 .gyro-terminal-toolbar-spacer {
@@ -10515,7 +10514,7 @@ body {
 }
 
 .gyro-terminal-toolbar select {
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-sm);
   font: inherit;
   height: 30px;
@@ -10526,7 +10525,7 @@ body {
 .gyro-terminal-toolbar button,
 .gyro-terminal-drag-handle {
   align-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-sm);
   display: inline-flex;
   height: 30px;
@@ -10564,10 +10563,10 @@ body {
 }
 
 .gyro-terminal-actions-menu {
-  background: #20242a;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-md);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);
+  box-shadow: 0 14px 36px var(--gyro-shadow);
   display: grid;
   gap: 2px;
   min-width: 170px;
@@ -10589,7 +10588,7 @@ body {
 }
 
 .gyro-terminal-actions-menu button.is-danger {
-  color: #ff9b9b;
+  color: var(--gyro-danger);
 }
 
 .gyro-terminal-actions-separator {
@@ -10599,7 +10598,7 @@ body {
 }
 
 .gyro-terminal-search {
-  color: #b7c0cc;
+  color: var(--gyro-muted);
 }
 
 .gyro-terminal-grid {
@@ -10620,7 +10619,7 @@ body {
 }
 
 .gyro-terminal-pane.is-drop-target {
-  outline: 2px solid rgba(126, 213, 188, 0.72);
+  outline: 2px solid var(--gyro-focus-ring);
   outline-offset: -2px;
 }
 
@@ -10630,8 +10629,8 @@ body {
 
 .gyro-terminal-pane header {
   align-items: center;
-  background: #0b0d10;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.058);
+  background: var(--gyro-surface-soft);
+  border-bottom: 1px solid var(--gyro-border);
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -10664,14 +10663,14 @@ body {
 }
 
 .gyro-terminal-pane-title strong {
-  color: #eef2f6;
+  color: var(--gyro-text);
   font-size: var(--gyro-font-support);
   font-weight: 600;
 }
 
 .gyro-terminal-pane-title > span:last-child,
 .gyro-terminal-pane header small {
-  color: #88919d;
+  color: var(--gyro-faint);
   font-size: var(--gyro-font-caption);
 }
 
@@ -10720,11 +10719,11 @@ body {
 
 .gyro-terminal-reconnect {
   align-items: center;
-  background: rgba(20, 23, 28, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-sm);
   bottom: 10px;
-  color: #dce3ec;
+  color: var(--gyro-text);
   display: inline-flex;
   font-size: var(--gyro-font-micro);
   height: 28px;
@@ -10735,9 +10734,9 @@ body {
 }
 
 .gyro-terminal-reconnect:hover {
-  background: rgba(38, 43, 51, 0.96);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #ffffff;
+  background: var(--gyro-control-hover);
+  border-color: var(--gyro-border);
+  color: var(--gyro-text);
 }
 
 .gyro-xterm-host .xterm {
@@ -10754,7 +10753,7 @@ body {
   background: transparent;
   border: 0;
   box-shadow: none;
-  color: #656d78;
+  color: var(--gyro-faint);
   display: flex;
   font-size: var(--gyro-font-micro);
   gap: 6px;
@@ -10773,8 +10772,8 @@ body {
 }
 
 .gyro-cli-launch-preset {
-  background: #15181d;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-md);
   display: grid;
   gap: 10px;
@@ -10802,7 +10801,7 @@ body {
 
 .gyro-cli-launch-preset header span,
 .gyro-cli-launch-preset header small {
-  color: #8d96a3;
+  color: var(--gyro-faint);
   font-size: var(--gyro-font-micro);
 }
 
@@ -10816,10 +10815,10 @@ body {
 }
 
 .gyro-cli-launch-preset-row select {
-  background: #0d1014;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-sm);
-  color: #dfe5ee;
+  color: var(--gyro-text);
   flex: 1;
   font: inherit;
   height: 30px;
@@ -10829,8 +10828,8 @@ body {
 
 .gyro-cli-launch-stepper,
 .gyro-cli-launch-focus {
-  background: #0d1014;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-sm);
   overflow: hidden;
 }
@@ -10840,7 +10839,7 @@ body {
   align-items: center;
   background: transparent;
   border: 0;
-  color: #c9d1dc;
+  color: var(--gyro-muted);
   display: inline-flex;
   height: 28px;
   justify-content: center;
@@ -10849,14 +10848,14 @@ body {
 }
 
 .gyro-cli-launch-stepper span {
-  color: #f1f4f8;
+  color: var(--gyro-text);
   min-width: 24px;
   text-align: center;
 }
 
 .gyro-cli-launch-focus button.is-active {
-  background: #2b313a;
-  color: #ffffff;
+  background: var(--gyro-segment-active);
+  color: var(--gyro-text);
 }
 
 @media (max-width: 880px) {
@@ -11899,7 +11898,7 @@ textarea,
 .gyro-project-remove-overlay {
   align-items: center;
   backdrop-filter: blur(6px);
-  background: rgba(0, 0, 0, 0.58);
+  background: var(--gyro-scrim);
   display: grid;
   inset: 0;
   justify-items: center;
@@ -11908,13 +11907,13 @@ textarea,
 }
 
 .gyro-project-remove-card {
-  background: #202124;
-  border: 1px solid #34363b;
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-md);
   box-shadow:
-    0 28px 88px rgba(0, 0, 0, 0.48),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  color: #f1eee9;
+    0 28px 88px var(--gyro-shadow),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+  color: var(--gyro-text);
   display: grid;
   gap: 12px;
   padding: 16px;
@@ -11929,25 +11928,25 @@ textarea,
 }
 
 .gyro-project-remove-card p {
-  color: #c8c4bd;
+  color: var(--gyro-muted);
   font-size: var(--gyro-font-support);
   line-height: 1.5;
   margin: 0;
 }
 
 .gyro-project-remove-note {
-  color: #9da3ad;
+  color: var(--gyro-faint);
 }
 
 .gyro-project-remove-card strong {
-  color: #f1eee9;
+  color: var(--gyro-text);
   font-weight: 600;
 }
 
 .gyro-project-remove-card code {
-  background: #292a2e;
+  background: var(--gyro-code-bg);
   border-radius: var(--gyro-radius-md);
-  color: #aeb3bb;
+  color: var(--gyro-muted);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: var(--gyro-font-caption);
   overflow-wrap: anywhere;
@@ -11968,15 +11967,15 @@ textarea,
 }
 
 .gyro-project-remove-keep {
-  background: #2b2d31;
-  border: 1px solid #3d4047;
-  color: #e2dfd8;
+  background: var(--gyro-control-bg);
+  border: 1px solid var(--gyro-border);
+  color: var(--gyro-text);
 }
 
 .gyro-project-remove-keep:hover,
 .gyro-project-remove-keep:focus-visible {
-  background: #34363b;
-  color: #f5f2ec;
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
 }
 
 .gyro-project-remove-confirm {
@@ -12096,15 +12095,15 @@ textarea,
 
 .gyro-provider-hero {
   border: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--gyro-border);
   border-radius: 0;
   min-height: 0;
   padding: 0 0 20px;
 }
 
 .gyro-provider-hero .gyro-live-pill {
-  background: rgba(255, 255, 255, 0.035);
-  border-color: rgba(255, 255, 255, 0.07);
+  background: var(--gyro-surface-soft);
+  border-color: var(--gyro-border);
 }
 
 .gyro-provider-boundary {
@@ -12116,12 +12115,12 @@ textarea,
 }
 
 .gyro-provider-card {
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--gyro-surface);
   border-color: transparent;
   border-radius: var(--gyro-radius-md);
   box-shadow:
-    inset 0 0 0 0.5px rgba(255, 255, 255, 0.085),
-    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    inset 0 0 0 0.5px var(--gyro-premium-inset-highlight),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
 }
 
 .gyro-provider-card:hover {
@@ -12129,7 +12128,7 @@ textarea,
 }
 
 .gyro-provider-card-head {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  border-bottom: 1px solid var(--gyro-border);
   gap: 12px;
   grid-template-columns: 34px minmax(0, 1fr) auto;
 }
@@ -12137,8 +12136,8 @@ textarea,
 .gyro-provider-icon {
   border-radius: var(--gyro-radius-md);
   box-shadow:
-    inset 0 0 0 0.5px rgba(255, 255, 255, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    inset 0 0 0 0.5px var(--gyro-premium-inset-highlight),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
   height: 34px;
   width: 34px;
 }
@@ -12153,18 +12152,18 @@ textarea,
 }
 
 .gyro-provider-state {
-  background: rgba(255, 255, 255, 0.025);
-  border-color: rgba(255, 255, 255, 0.07);
+  background: var(--gyro-surface);
+  border-color: var(--gyro-border);
   border-radius: var(--gyro-radius-pill);
-  color: #8d929a;
+  color: var(--gyro-faint);
   font-size: var(--gyro-font-tiny);
   line-height: 1;
   padding: 5px 8px;
 }
 
 .gyro-provider-state.is-enabled {
-  background: rgba(127, 210, 182, 0.07);
-  border-color: rgba(127, 210, 182, 0.18);
+  background: color-mix(in srgb, var(--gyro-success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--gyro-success) 24%, transparent);
   color: var(--gyro-provider-openai);
 }
 
@@ -12176,7 +12175,7 @@ textarea,
 .gyro-provider-card-body .gyro-settings-row {
   background: transparent;
   border: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  border-bottom: 1px solid var(--gyro-border);
   border-radius: 0;
   box-shadow: none;
   grid-template-columns: minmax(0, 1fr) minmax(88px, max-content);
@@ -12186,14 +12185,14 @@ textarea,
 
 .gyro-provider-card-body .gyro-settings-row strong,
 .gyro-provider-health strong {
-  color: #e8e4dc;
+  color: var(--gyro-text);
   font-size: var(--gyro-font-micro);
   font-weight: 600;
 }
 
 .gyro-provider-card-body .gyro-settings-row span,
 .gyro-provider-health small {
-  color: #a9a69f;
+  color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
   line-height: 1.35;
 }
@@ -12202,7 +12201,7 @@ textarea,
   background: transparent;
   border: 0;
   box-shadow: none;
-  color: #d4d0c8;
+  color: var(--gyro-text);
   font-size: var(--gyro-font-micro);
   justify-self: end;
   max-width: min(220px, 34vw);
@@ -12229,7 +12228,7 @@ textarea,
 }
 
 .gyro-provider-health em {
-  color: #9d9a93;
+  color: var(--gyro-faint);
   font-size: var(--gyro-font-tiny);
 }
 
@@ -12241,7 +12240,7 @@ textarea,
 .gyro-provider-health-meta span {
   background: transparent;
   border: 0;
-  color: #8f949c;
+  color: var(--gyro-faint);
   font-size: var(--gyro-font-tiny);
   padding: 0;
 }
@@ -12253,23 +12252,23 @@ textarea,
 }
 
 .gyro-provider-actions .gyro-secondary-button {
-  background: rgba(255, 255, 255, 0.025);
-  border-color: rgba(255, 255, 255, 0.075);
+  background: var(--gyro-surface);
+  border-color: var(--gyro-border);
   border-radius: var(--gyro-radius-md);
-  color: #d8d4cc;
+  color: var(--gyro-text);
   font-size: var(--gyro-font-caption);
   min-height: calc(32px * var(--gyro-ui-scale, 1));
 }
 
 .gyro-provider-actions .gyro-secondary-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.11);
+  background: var(--gyro-control-hover);
+  border-color: var(--gyro-border);
 }
 
 .gyro-settings-surface .gyro-provider-list {
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--gyro-surface);
   border-radius: var(--gyro-radius-md);
-  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 0.5px var(--gyro-premium-inset-highlight);
   gap: 0;
   overflow: hidden;
 }
@@ -12277,7 +12276,7 @@ textarea,
 .gyro-settings-surface .gyro-provider-row {
   background: transparent;
   border: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  border-bottom: 1px solid var(--gyro-border);
   border-radius: 0;
   box-shadow: none;
   min-height: 62px;
@@ -12300,7 +12299,7 @@ textarea,
 .gyro-settings-surface .gyro-settings-provider-actions code {
   background: transparent;
   border: 0;
-  color: #9ea39d;
+  color: var(--gyro-faint);
   padding: 0;
 }
 
@@ -12337,11 +12336,11 @@ textarea,
 
 :root[data-theme="light"] .gyro-agent-run-card.gyro-agent-run-card,
 :root[data-theme="light"] .gyro-provider-status-row {
-  border-top-color: #dfe2e8;
+  border-top-color: var(--gyro-border);
 }
 
 :root[data-theme="light"] .gyro-provider-status-icon {
-  background: #e8ebf0;
+  background: var(--gyro-control-bg);
 }
 
 /* The docked composer's tools carry no resting fill, matching the hero
@@ -12349,50 +12348,50 @@ textarea,
    marks the hit target. */
 
 :root[data-theme="light"] .gyro-workspace-tool-panel.is-resizable {
-  background: #f5f7fa;
-  border-top-color: rgba(32, 34, 38, 0.12);
+  background: var(--gyro-surface-soft);
+  border-top-color: var(--gyro-border);
 }
 
 :root[data-theme="light"]
   .gyro-workspace-tool-panel.is-resizable
   .gyro-workspace-tool-panel-head,
 :root[data-theme="light"] .gyro-terminal-toolbar {
-  background: #ececea;
-  border-color: rgba(32, 34, 38, 0.1);
+  background: var(--gyro-surface-soft);
+  border-color: var(--gyro-border);
 }
 
 :root[data-theme="light"]
   .gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
   .gyro-terminal-workspace,
 :root[data-theme="light"] .gyro-terminal-workspace {
-  background: #f5f7fa;
-  color: #1f2937;
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"]
   .gyro-workspace-tool-panel.is-resizable[data-active-tab="terminal"]
   .gyro-terminal-pane,
 :root[data-theme="light"] .gyro-terminal-pane {
-  background: #ffffff;
-  border-color: rgba(32, 34, 38, 0.12);
+  background: var(--gyro-surface);
+  border-color: var(--gyro-border);
 }
 
 :root[data-theme="light"]
   :is(.gyro-terminal-pane header, .gyro-terminal-toolbar select) {
-  background: #f1f2f4;
-  border-color: rgba(32, 34, 38, 0.12);
-  color: #20242b;
+  background: var(--gyro-control-bg);
+  border-color: var(--gyro-border);
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"] .gyro-terminal-pane-title strong {
-  color: #20242b;
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"] .gyro-terminal-pane-title > span:last-child,
 :root[data-theme="light"] .gyro-terminal-pane header small,
 :root[data-theme="light"] .gyro-terminal-search,
 :root[data-theme="light"] .gyro-terminal-empty {
-  color: #6b7280;
+  color: var(--gyro-faint);
 }
 
 :root[data-theme="light"] .gyro-terminal-toolbar button,
@@ -12409,9 +12408,9 @@ textarea,
   .gyro-workspace-tool-panel.is-resizable
   .gyro-workspace-tool-panel-head
   .gyro-icon-button {
-  background: #ffffff;
-  border-color: rgba(32, 34, 38, 0.1);
-  color: #5b6470;
+  background: var(--gyro-surface);
+  border-color: var(--gyro-border);
+  color: var(--gyro-muted);
 }
 
 :root[data-theme="light"] .gyro-terminal-toolbar button:hover:not(:disabled),
@@ -12428,28 +12427,28 @@ textarea,
   .gyro-workspace-tool-panel.is-resizable
   .gyro-workspace-tool-panel-head
   .gyro-icon-button:hover {
-  background: #e5e7eb;
-  border-color: rgba(32, 34, 38, 0.16);
-  color: #171a20;
+  background: var(--gyro-control-hover);
+  border-color: var(--gyro-border);
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"]
   :is(.gyro-agent-launcher-menu, .gyro-terminal-actions-menu) {
-  background: #ffffff;
-  border-color: rgba(32, 34, 38, 0.14);
-  box-shadow: 0 14px 32px rgba(32, 34, 38, 0.16);
+  background: var(--gyro-surface);
+  border-color: var(--gyro-border);
+  box-shadow: 0 14px 32px var(--gyro-shadow);
 }
 
 :root[data-theme="light"] .gyro-agent-launcher-menu strong {
-  color: #20242b;
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"] .gyro-agent-launcher-menu button.is-active {
-  background: #eef0f3;
+  background: var(--gyro-control-hover);
 }
 
 :root[data-theme="light"] .gyro-terminal-actions-menu button.is-danger {
-  color: #b42318;
+  color: var(--gyro-danger);
 }
 
 :root[data-theme="light"]
@@ -12457,29 +12456,29 @@ textarea,
   .gyro-pane-tabs
   button.is-active,
 :root[data-theme="light"] .gyro-cli-launch-focus button.is-active {
-  background: #ffffff;
-  color: #171a20;
+  background: var(--gyro-surface);
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"] .gyro-terminal-reconnect {
-  background: rgba(255, 255, 255, 0.94);
-  border-color: rgba(32, 34, 38, 0.14);
-  color: #20242b;
+  background: var(--gyro-control-bg);
+  border-color: var(--gyro-border);
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"] .gyro-terminal-reconnect:hover {
-  background: #f1f2f4;
-  border-color: rgba(32, 34, 38, 0.2);
-  color: #111827;
+  background: var(--gyro-control-bg);
+  border-color: var(--gyro-border);
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"] .gyro-cli-launch-preset,
 :root[data-theme="light"] .gyro-cli-launch-preset-row select,
 :root[data-theme="light"] .gyro-cli-launch-stepper,
 :root[data-theme="light"] .gyro-cli-launch-focus {
-  background: #ffffff;
-  border-color: rgba(32, 34, 38, 0.12);
-  color: #20242b;
+  background: var(--gyro-surface);
+  border-color: var(--gyro-border);
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"]
@@ -12487,52 +12486,52 @@ textarea,
     .gyro-cli-launch-preset header span,
     .gyro-cli-launch-preset header small
   ) {
-  color: #6b7280;
+  color: var(--gyro-faint);
 }
 
 :root[data-theme="light"]
   :is(.gyro-cli-launch-stepper button, .gyro-cli-launch-focus button) {
-  color: #505864;
+  color: var(--gyro-muted);
 }
 
 :root[data-theme="light"] .gyro-cli-launch-stepper span {
-  color: #171a20;
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"] .gyro-project-remove-overlay {
-  background: rgba(17, 24, 39, 0.22);
+  background: var(--gyro-scrim);
 }
 
 :root[data-theme="light"] .gyro-project-remove-card {
-  background: #ffffff;
-  border-color: #d9dde5;
+  background: var(--gyro-surface);
+  border-color: var(--gyro-border);
   box-shadow:
-    0 28px 70px rgba(32, 34, 38, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  color: #1d232c;
+    0 28px 70px var(--gyro-shadow),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"] .gyro-project-remove-card p {
-  color: #5f6672;
+  color: var(--gyro-muted);
 }
 
 :root[data-theme="light"] .gyro-project-remove-note {
-  color: #6b7280;
+  color: var(--gyro-faint);
 }
 
 :root[data-theme="light"] .gyro-project-remove-card strong {
-  color: #151a21;
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"] .gyro-project-remove-card code {
-  background: #f1f3f6;
-  color: #4b5563;
+  background: var(--gyro-code-bg);
+  color: var(--gyro-muted);
 }
 
 :root[data-theme="light"] .gyro-project-remove-keep {
-  background: #f7f8fa;
-  border-color: #d9dde5;
-  color: #20242b;
+  background: var(--gyro-control-bg);
+  border-color: var(--gyro-border);
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"]
@@ -12540,15 +12539,15 @@ textarea,
     .gyro-project-remove-keep:hover,
     .gyro-project-remove-keep:focus-visible
   ) {
-  background: #eceff3;
-  color: #111827;
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"] .gyro-provider-hero,
 :root[data-theme="light"] .gyro-provider-card-head,
 :root[data-theme="light"] .gyro-provider-card-body .gyro-settings-row,
 :root[data-theme="light"] .gyro-settings-surface .gyro-provider-row {
-  border-color: rgba(32, 34, 38, 0.1);
+  border-color: var(--gyro-border);
 }
 
 :root[data-theme="light"] .gyro-provider-hero .gyro-live-pill,
@@ -12557,20 +12556,20 @@ textarea,
 :root[data-theme="light"] .gyro-provider-state,
 :root[data-theme="light"] .gyro-provider-actions .gyro-secondary-button,
 :root[data-theme="light"] .gyro-settings-surface .gyro-provider-list {
-  background: rgba(255, 255, 255, 0.66);
-  border-color: rgba(32, 34, 38, 0.1);
-  box-shadow: inset 0 0 0 0.5px rgba(32, 34, 38, 0.08);
+  background: var(--gyro-surface);
+  border-color: var(--gyro-border);
+  box-shadow: inset 0 0 0 0.5px var(--gyro-premium-inset-highlight);
 }
 
 :root[data-theme="light"] .gyro-provider-card-body .gyro-settings-row strong,
 :root[data-theme="light"] .gyro-provider-health strong {
-  color: #20242b;
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"] .gyro-provider-card-body .gyro-settings-row span,
 :root[data-theme="light"] .gyro-provider-health small,
 :root[data-theme="light"] .gyro-provider-card-body .gyro-settings-row em {
-  color: #626975;
+  color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
 }
 
@@ -12581,7 +12580,7 @@ textarea,
   .gyro-settings-provider-actions
   code,
 :root[data-theme="light"] .gyro-provider-state {
-  color: #737a84;
+  color: var(--gyro-faint);
 }
 
 :root[data-theme="light"] .gyro-settings-sidebar-title {
@@ -17396,29 +17395,18 @@ button.gyro-account-menu-row:hover,
   cursor: grabbing;
 }
 
+/* The dragged project stays in the list as a quiet placeholder at the spot
+   it will land, while the others slide around it. */
+.gyro-sidebar-project-group {
+  transition: opacity 120ms ease;
+}
+
 .gyro-sidebar-project-group.is-dragging {
-  opacity: 0.48;
+  opacity: 0.35;
 }
 
-.gyro-sidebar-project-group.is-drop-before::before,
-.gyro-sidebar-project-group.is-drop-after::after {
-  background: var(--gyro-premium-accent);
-  border-radius: var(--gyro-radius-pill);
-  content: "";
-  height: 2px;
-  left: 4px;
-  pointer-events: none;
-  position: absolute;
-  right: 4px;
-  z-index: 4;
-}
-
-.gyro-sidebar-project-group.is-drop-before::before {
-  top: -2px;
-}
-
-.gyro-sidebar-project-group.is-drop-after::after {
-  bottom: -2px;
+.gyro-sidebar-project-group.is-dragging .gyro-sidebar-project-row {
+  background: var(--gyro-shell-row-hover);
 }
 
 /* Keep the current chat visible without turning it into a heavy selected card. */
@@ -21016,44 +21004,44 @@ button.gyro-account-menu-row:hover,
 }
 
 :root[data-theme="light"] :is(.gyro-sidebar-row:hover, .gyro-sidebar-row.is-active, .gyro-sidebar-thread:hover, .gyro-sidebar-thread.is-active) {
-  background: #e7edf4;
+  background: var(--gyro-sidebar-soft);
 }
 
 :root[data-theme="light"] .gyro-provider-hero {
-  border-bottom-color: #e1e7ee;
+  border-bottom-color: var(--gyro-border);
 }
 
 :root[data-theme="light"] .gyro-provider-card,
 :root[data-theme="light"] .gyro-settings-surface .gyro-provider-list {
-  background: #ffffff;
-  border-color: #dfe6ee;
+  background: var(--gyro-surface);
+  border-color: var(--gyro-border);
   box-shadow:
-    0 8px 22px rgba(28, 39, 52, 0.045),
-    inset 0 1px 0 #ffffff;
+    0 8px 22px var(--gyro-shadow),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
 }
 
 :root[data-theme="light"] .gyro-provider-card-head,
 :root[data-theme="light"] .gyro-provider-card-body .gyro-settings-row {
-  border-color: #e5eaf0;
+  border-color: var(--gyro-border);
 }
 
 :root[data-theme="light"] .gyro-provider-icon {
-  background: #f5f7fa;
-  border-color: #e1e7ee;
+  background: var(--gyro-surface-soft);
+  border-color: var(--gyro-border);
   box-shadow: none;
 }
 
 :root[data-theme="light"] .gyro-provider-state {
-  background: #f5f7fa;
-  border-color: #d9e1ea;
-  color: #647181;
+  background: var(--gyro-surface-soft);
+  border-color: var(--gyro-border);
+  color: var(--gyro-faint);
   box-shadow: none;
 }
 
 :root[data-theme="light"] .gyro-provider-state.is-enabled {
-  background: #ecf8f1;
-  border-color: #cbe8d9;
-  color: #18734a;
+  background: color-mix(in srgb, var(--gyro-success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--gyro-success) 24%, transparent);
+  color: var(--gyro-success);
 }
 
 :root[data-theme="light"] .gyro-provider-health > span.is-checking {
@@ -21061,17 +21049,17 @@ button.gyro-account-menu-row:hover,
 }
 
 :root[data-theme="light"] .gyro-provider-actions .gyro-secondary-button {
-  background: #f7f9fc;
-  border-color: #d9e1ea;
+  background: var(--gyro-control-bg);
+  border-color: var(--gyro-border);
   box-shadow: none;
-  color: #263241;
+  color: var(--gyro-text);
 }
 
 :root[data-theme="light"]
   .gyro-provider-actions
   .gyro-secondary-button:hover:not(:disabled) {
-  background: #edf2f7;
-  border-color: #cbd5e0;
+  background: var(--gyro-control-hover);
+  border-color: var(--gyro-border);
 }
 
 @keyframes gyro-provider-checking {
@@ -21239,13 +21227,13 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-update-release-card {
-  background: #1b1b19;
-  border: 1px solid #393936;
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-xl);
   bottom: calc(100% + 14px);
   box-shadow:
-    0 22px 52px rgba(0, 0, 0, 0.48),
-    inset 0 1px 0 rgba(255, 255, 255, 0.045);
+    0 22px 52px var(--gyro-shadow),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
   display: grid;
   gap: 9px;
   left: 0;
@@ -21271,7 +21259,7 @@ button.gyro-account-menu-row:hover,
 }
 
 .gyro-update-release-card-dismiss:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--gyro-control-hover);
   color: var(--gyro-text);
 }
 
@@ -21339,11 +21327,11 @@ button.gyro-account-menu-row:hover,
 }
 
 :root[data-theme="light"] .gyro-update-release-card {
-  background: #ffffff;
-  border-color: #d6dee8;
+  background: var(--gyro-surface);
+  border-color: var(--gyro-border);
   box-shadow:
-    0 22px 52px rgba(28, 39, 52, 0.16),
-    inset 0 1px 0 #ffffff;
+    0 22px 52px var(--gyro-shadow),
+    inset 0 1px 0 var(--gyro-premium-inset-highlight);
 }
 
 /* Projects are collapsed folders first. Their title is the one control that

@@ -3,12 +3,14 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main, v0.1.0, Heads/v0.1.1]
+    branches: [main, v0.1.0, Heads/v0.1.1, v0.1.3]
 
 jobs:
   node:
     name: Node
-    runs-on: macos-26
+    # Keep browser/source checks off the capacity-constrained ARM pool.
+    # Native ARM coverage remains in Rust and Tauri; releases also use this Intel image.
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -40,6 +42,11 @@ jobs:
       # server; scripts/run-canvas-preview-browser.mjs boots Vite itself.
       - run: pnpm test:canvas-browser
       - run: pnpm test:activity-composer-browser
+      - run: pnpm test:theme-parity:browser
+      - run: pnpm test:workflows:browser
+      - run: pnpm test:settings-redesign:browser
+      - run: pnpm test:companion-redesign:browser
+      - run: pnpm test:command-failure:browser
       - run: pnpm release:check
         # Source validation checks the intended signed preview notes. The tagged
         # release job resolves the actual signing mode and verifies the artifacts.

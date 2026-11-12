@@ -22,8 +22,8 @@ applyAppearancePreferences(
   document.documentElement,
   {
     interfaceSize: params.get("scale") === "large" ? "large" : "default",
-    mainColor: "#0874df",
-    secondaryColor: "#8b6fcb",
+    mainColor: "#ffffff",
+    secondaryColor: "#ffffff",
     motionSpeed: "default",
   },
   theme,

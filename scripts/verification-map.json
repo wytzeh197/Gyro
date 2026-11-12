@@ -1,4 +1,7 @@
 {
+  "check-command-failure-browser.mjs": { "kind": "behavioral" },
+  "check-companion-redesign.mjs": { "kind": "behavioral" },
+  "check-settings-redesign.mjs": { "kind": "behavioral" },
   "check-chat-render-snapshot.mjs": { "kind": "behavioral" },
   "check-chat-styles.mjs": { "kind": "source-text", "reason": "Checks stylesheet ownership and cascade constraints after chat CSS extraction." },
   "check-code-reviews-browser.mjs": { "kind": "behavioral" },
@@ -45,6 +48,10 @@
   },
   "check-appearance-persistence.mjs": {
     "kind": "behavioral"
+  },
+  "check-theme-parity-browser.mjs": {
+    "kind": "behavioral",
+    "note": "Headless production React fixtures across both themes, density and text sizes, including contrast, focus and system preference changes."
   },
   "check-chat-history-efficiency.mjs": {
     "kind": "behavioral"

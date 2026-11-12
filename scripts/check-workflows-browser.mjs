@@ -246,8 +246,18 @@ try {
   await screenshot("workflow-keyboard-focus");
   await click("New workflow");
   await click("Save workflow");
-  assert.equal(await evaluate("document.activeElement.getAttribute('aria-invalid')"), "true", "invalid save focuses the missing name");
-  assert.equal(await evaluate("window.workflowFixture.calls.filter(c=>c.action==='save').length"), 0, "incomplete workflow is not saved");
+  assert.equal(
+    await evaluate("document.activeElement.getAttribute('aria-invalid')"),
+    "true",
+    "invalid save focuses the missing name",
+  );
+  assert.equal(
+    await evaluate(
+      "window.workflowFixture.calls.filter(c=>c.action==='save').length",
+    ),
+    0,
+    "incomplete workflow is not saved",
+  );
   await field("Name", "Inspect a change");
   assert.equal(
     await evaluate(
@@ -256,35 +266,95 @@ try {
     true,
     "generated stable id",
   );
-  assert.equal(await evaluate("[...document.querySelectorAll('.gyro-workflow-advanced')].every(el=>!el.open)"), true, "advanced settings start collapsed");
-  assert.equal(await evaluate("Math.round(document.querySelector('.gyro-workflow-editor-footer').getBoundingClientRect().bottom) === innerHeight"), true, "save bar sits at the viewport edge");
+  assert.equal(
+    await evaluate(
+      "[...document.querySelectorAll('.gyro-workflow-advanced')].every(el=>!el.open)",
+    ),
+    true,
+    "advanced settings start collapsed",
+  );
+  assert.equal(
+    await evaluate(
+      "Math.round(document.querySelector('.gyro-workflow-editor-footer').getBoundingClientRect().bottom) === innerHeight",
+    ),
+    true,
+    "save bar sits at the viewport edge",
+  );
   await screenshot("workflow-editor-dark");
   await click("Discard changes");
   await click("Investigate a bug");
-  assert.equal(await evaluate("document.querySelector('.gyro-workflow-step-fields textarea').value.includes('{{input.problem}}')"), true, "starter references its declared input");
-  assert.equal(await evaluate("document.querySelector('input[value=problem]') !== null"), true, "starter supplies a required input");
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.gyro-workflow-step-fields textarea').value.includes('{{input.problem}}')",
+    ),
+    true,
+    "starter references its declared input",
+  );
+  assert.equal(
+    await evaluate("document.querySelector('input[value=problem]') !== null"),
+    true,
+    "starter supplies a required input",
+  );
   await field("Name", "Investigate my bug");
   await screenshot("workflow-starter-editor-dark");
   await click("Save workflow");
-  await until(async () => !(await text()).includes("Saving does not start a run"), "starter saved");
-  assert.equal(await evaluate("window.workflowFixture.calls.filter(c=>['launch','schedule'].includes(c.action)).length"), 0, "saving a starter never launches or schedules");
+  await until(
+    async () => !(await text()).includes("Saving does not start a run"),
+    "starter saved",
+  );
+  assert.equal(
+    await evaluate(
+      "window.workflowFixture.calls.filter(c=>['launch','schedule'].includes(c.action)).length",
+    ),
+    0,
+    "saving a starter never launches or schedules",
+  );
   await click("Edit workflow");
-  assert.equal(await evaluate("document.querySelector('.gyro-workflow-step-fields textarea').value.includes('{{input.problem}}')"), true, "saved instructions round trip");
-  assert.equal(await evaluate("document.querySelector('input[value=investigate-my-bug]') !== null"), true, "renamed starter receives its own identifier");
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.gyro-workflow-step-fields textarea').value.includes('{{input.problem}}')",
+    ),
+    true,
+    "saved instructions round trip",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('input[value=investigate-my-bug]') !== null",
+    ),
+    true,
+    "renamed starter receives its own identifier",
+  );
   await load("state=empty&theme=light", 900);
   await screenshot("workflow-empty-light");
   await load("state=empty&theme=light", 430);
-  assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true, "narrow library fits viewport");
+  assert.equal(
+    await evaluate("document.documentElement.scrollWidth <= innerWidth"),
+    true,
+    "narrow library fits viewport",
+  );
   await screenshot("workflow-empty-light-narrow");
   await click("New workflow");
   await field("Name", "My task");
   await click("Save workflow");
-  assert.equal(await evaluate("document.activeElement.tagName"), "TEXTAREA", "invalid save focuses missing instructions");
+  assert.equal(
+    await evaluate("document.activeElement.tagName"),
+    "TEXTAREA",
+    "invalid save focuses missing instructions",
+  );
   await field("Instructions", "Read the project and explain its structure.");
   await screenshot("workflow-editor-light-narrow");
   await click("Save workflow");
-  await until(async () => !(await text()).includes("Saving does not start a run"), "blank workflow saved");
-  assert.equal(await evaluate("window.workflowFixture.calls.filter(c=>c.action==='save').length"), 1, "only the complete workflow is saved");
+  await until(
+    async () => !(await text()).includes("Saving does not start a run"),
+    "blank workflow saved",
+  );
+  assert.equal(
+    await evaluate(
+      "window.workflowFixture.calls.filter(c=>c.action==='save').length",
+    ),
+    1,
+    "only the complete workflow is saved",
+  );
   await load();
   await until(
     async () => (await text()).includes("Disabled: Unsupported"),
@@ -443,7 +513,10 @@ try {
   await screenshot("workflow-retry-inspection-dark");
   await click("Cancel retry");
   await click("Stop run");
-  await until(async () => (await text()).includes("cancelled"), "cancel run");
+  await until(
+    async () => (await text()).toLowerCase().includes("cancelled"),
+    "cancel run",
+  );
   await load("state=attention&theme=light", 650);
   await click("Runs");
   await click("Inspect changes");

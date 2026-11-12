@@ -963,6 +963,32 @@ impl SessionStore {
         expected_hash: Option<String>,
         base_exists: bool,
     ) -> Result<MutationProposal> {
+        self.create_mutation_proposal_at_root_with_approval(
+            session_id,
+            turn_id,
+            root_id,
+            path,
+            content,
+            expected_hash,
+            base_exists,
+            true,
+        )
+    }
+
+    /// Persist approval visibility in the same insert as the proposal. Callers
+    /// must resolve authorization before passing false: a history reader must
+    /// never recover a preauthorized write as a request for user approval.
+    pub fn create_mutation_proposal_at_root_with_approval(
+        &self,
+        session_id: Uuid,
+        turn_id: Option<Uuid>,
+        root_id: Option<&str>,
+        path: impl Into<String>,
+        content: impl Into<String>,
+        expected_hash: Option<String>,
+        base_exists: bool,
+        approval_required: bool,
+    ) -> Result<MutationProposal> {
         let session = self
             .get_session(session_id)?
             .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
@@ -1009,8 +1035,8 @@ impl SessionStore {
         };
         self.conn.execute(
             "insert into mutation_proposals
-             (id, session_id, turn_id, workspace_path, path, operation, content, expected_hash, base_exists, status, error, created_at, updated_at)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             (id, session_id, turn_id, workspace_path, path, operation, content, expected_hash, base_exists, status, error, created_at, updated_at, surfaced_at)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 proposal.id.to_string(),
                 proposal.session_id.to_string(),
@@ -1025,6 +1051,7 @@ impl SessionStore {
                 proposal.error,
                 proposal.created_at.to_rfc3339(),
                 proposal.updated_at.to_rfc3339(),
+                (!approval_required).then(|| now.to_rfc3339()),
             ],
         )?;
         self.get_mutation_proposal(proposal.id)?
@@ -4061,6 +4088,44 @@ mod tests {
             .conn
             .execute_batch("drop trigger reject_status;")
             .unwrap();
+    }
+
+    #[test]
+    fn preauthorized_mutation_is_never_recovered_as_an_approval() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "full access")
+            .unwrap();
+        let proposal = store
+            .create_mutation_proposal_at_root_with_approval(
+                session.id,
+                None,
+                None,
+                "file.txt",
+                "content\n",
+                None,
+                false,
+                false,
+            )
+            .unwrap();
+        // Pause before applying. A separate connection observes the exact
+        // interleaving that previously surfaced an unwanted approval card.
+        let reader = SessionStore::open(paths).unwrap();
+        assert_eq!(
+            reader
+                .get_mutation_proposal(proposal.id)
+                .unwrap()
+                .unwrap()
+                .status,
+            MutationProposalStatus::Pending
+        );
+        assert!(reader
+            .list_unsurfaced_pending_mutation_proposals(session.id)
+            .unwrap()
+            .is_empty());
+        assert!(!temp.path().join("file.txt").exists());
     }
 
     #[test]
