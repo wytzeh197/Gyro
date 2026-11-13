@@ -1,0 +1,401 @@
+{
+  "format": "gyro-cloud-wire-inventory-v3",
+  "contractVersion": "3.0.0",
+  "policyVersion": "2026-11-07-v2",
+  "status": "unaccepted-disabled",
+  "coverage": "wire constants, routes, plan values and selected request/content schemas; response behavior covered by integration fixtures",
+  "routes": [
+    "GET /v3/policy",
+    "GET /v3/capabilities",
+    "POST /v3/intents",
+    "POST /v3/accounts",
+    "POST /v3/devices",
+    "GET /v3/devices",
+    "DELETE /v3/devices/:id",
+    "POST /v3/sign-out",
+    "DELETE /v3/account",
+    "GET /v3/usage",
+    "GET /v3/wallet",
+    "POST /v3/uploads",
+    "GET /v3/uploads/:id",
+    "PUT /v3/uploads/:id/chunks/:index",
+    "POST /v3/uploads/:id/commit",
+    "DELETE /v3/uploads/:id",
+    "GET /v3/versions",
+    "GET /v3/revisions/:id",
+    "DELETE /v3/revisions/:id",
+    "GET /v3/revisions/:id/chunks/:index",
+    "POST /v3/exports",
+    "GET /v3/exports/:id",
+    "GET /v3/exports/:id/revisions/:revision",
+    "DELETE /v3/exports/:id",
+    "GET /v3/exports/:id/revisions/:revision/chunks/:index",
+    "POST /v3/jobs",
+    "GET /v3/jobs/:id",
+    "GET /v3/jobs/by-request/:requestId",
+    "DELETE /v3/jobs/:id",
+    "POST /v3/checkout",
+    "POST /v3/billing",
+    "POST /v3/phone/pairs",
+    "POST /v3/phone/pair",
+    "GET /v3/phone/status",
+    "DELETE /v3/phone/self",
+    "GET /v3/phone/devices",
+    "DELETE /v3/phone/devices/:id",
+    "POST /v3/phone/publish"
+  ],
+  "envelope": {
+    "success": [
+      "contractVersion",
+      "policyVersion",
+      "result"
+    ],
+    "error": [
+      "contractVersion",
+      "policyVersion",
+      "error"
+    ],
+    "binaryHeaders": [
+      "X-Gyro-Contract",
+      "X-Gyro-Policy"
+    ],
+    "authorization": "verified Supabase JWT plus server-side account/session/device and paid-period authority",
+    "clientAuthority": false
+  },
+  "money": {
+    "planPrices": "integer USD minor units before applicable tax",
+    "walletsAndProviderCosts": "integer USD microunits",
+    "legacyV2": "EUR history is never reinterpreted"
+  },
+  "plans": {
+    "cloud": {
+      "id": "cloud",
+      "priceMinor": 1900,
+      "currency": "USD",
+      "priceUnit": "minor",
+      "taxAdded": true,
+      "devices": 2,
+      "storageBytes": 5000000000,
+      "uploadBytes": 40000000000,
+      "downloadBytes": 80000000000,
+      "aiMicros": 0,
+      "uploads": 1,
+      "jobs": 0,
+      "metadataPerMinute": 60,
+      "chunksPerMinute": 120,
+      "operationsPerPeriod": 100000,
+      "contextBytes": 65536,
+      "outputTokens": 2048
+    },
+    "plus": {
+      "id": "plus",
+      "priceMinor": 4900,
+      "currency": "USD",
+      "priceUnit": "minor",
+      "taxAdded": true,
+      "devices": 5,
+      "storageBytes": 20000000000,
+      "uploadBytes": 160000000000,
+      "downloadBytes": 320000000000,
+      "aiMicros": 5000000,
+      "uploads": 2,
+      "jobs": 2,
+      "metadataPerMinute": 120,
+      "chunksPerMinute": 240,
+      "operationsPerPeriod": 300000,
+      "contextBytes": 262144,
+      "outputTokens": 4096
+    },
+    "max": {
+      "id": "max",
+      "priceMinor": 9900,
+      "currency": "USD",
+      "priceUnit": "minor",
+      "taxAdded": true,
+      "devices": 10,
+      "storageBytes": 50000000000,
+      "uploadBytes": 200000000000,
+      "downloadBytes": 400000000000,
+      "aiMicros": 15000000,
+      "uploads": 2,
+      "jobs": 2,
+      "metadataPerMinute": 120,
+      "chunksPerMinute": 240,
+      "operationsPerPeriod": 300000,
+      "contextBytes": 262144,
+      "outputTokens": 4096
+    }
+  },
+  "serviceLimits": {
+    "version": "2026-11-07-service-v1",
+    "reset": "calendar-month-utc",
+    "recoveryOperations": {
+      "cloud": 10000,
+      "plus": 30000,
+      "max": 30000
+    },
+    "securityControlsExempt": true,
+    "accountExportSeparate": true
+  },
+  "project": {
+    "magic": "GYROPRJ1",
+    "header": "8 byte magic + unsigned big-endian u64 manifest byte length",
+    "content": "UTF-8 JSON manifest followed by ordered file bytes",
+    "maximumPayloadBytes": 2000000000,
+    "maximumManifestBytes": 8388608,
+    "maximumFiles": 25000,
+    "chunkBytes": 4194304,
+    "compression": false,
+    "symlinks": false,
+    "gitHistory": false,
+    "automaticSave": false,
+    "incrementalTransfer": false,
+    "proceduralValidation": [
+      "normalized relative paths",
+      "case/Unicode collisions",
+      "file-directory collisions",
+      "credential and authority exclusions",
+      "per-file and complete payload SHA-256",
+      "exclusive new-folder restore"
+    ]
+  },
+  "schemas": {
+    "begin": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "objectId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "baseRevisionId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "project",
+            "chat",
+            "handoff",
+            "report"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "size": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 2000000000
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "manifestSha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "consent": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "requestId",
+        "objectId",
+        "baseRevisionId",
+        "kind",
+        "label",
+        "size",
+        "sha256",
+        "manifestSha256",
+        "consent"
+      ],
+      "additionalProperties": false
+    },
+    "manifest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "type": "string",
+          "const": "gyro-project-v1"
+        },
+        "files": {
+          "maxItems": 25000,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2000000000
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "executable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "path",
+              "size",
+              "sha256",
+              "executable"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "format",
+        "files"
+      ],
+      "additionalProperties": false
+    },
+    "chat": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "format": {
+          "type": "string",
+          "const": "gyro-continuity-chat-v1"
+        },
+        "projectRevision": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "archive": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string",
+              "const": "gyro-portable-chat-v1"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+            },
+            "projectId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "messages": {
+              "maxItems": 100000,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "assistant"
+                    ]
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 4194304
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  }
+                },
+                "required": [
+                  "id",
+                  "role",
+                  "text",
+                  "createdAt"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "format",
+            "title",
+            "createdAt",
+            "messages"
+          ],
+          "additionalProperties": false
+        },
+        "unsupported": {
+          "minItems": 1,
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        }
+      },
+      "required": [
+        "format",
+        "projectRevision",
+        "archive",
+        "unsupported"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

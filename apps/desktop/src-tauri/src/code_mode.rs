@@ -726,11 +726,13 @@ mod tests {
         let result = run_worker(
             &binary(),
             &fixture_tools(),
-            // Touch each page: repeat() can retain lazy V8 ropes instead of
-            // allocating the intended resident memory before the time limit.
-            "let values=[]; while(true) values.push(new Uint8Array(1048576).fill(97));",
+            // Retain a fixed allocation above the production 256 MiB limit.
+            // Touch every page, then keep it alive without unbounded growth.
+            // Allow interpreter startup under parallel-suite load; the separate
+            // busy-loop test still asserts the short timeout independently.
+            "let values = []; for (let i = 0; i < 320; i++) values.push(new Uint8Array(1048576).fill(97)); while(true) { values[0][0] ^= 1; }",
             Arc::new(AtomicBool::new(false)),
-            Duration::from_secs(5),
+            Duration::from_secs(30),
             || false,
             |_, _| panic!("Host called"),
         );

@@ -14,17 +14,22 @@ const choices = initial.modelProviders.flatMap(provider => provider.models.map(m
   key: JSON.stringify([provider.id, model.id]), provider, model,
 })));
 
+const fixtureParams = new URLSearchParams(location.search);
+const fixtureContext = fixtureParams.get("context") ?? "6.4";
+const fixtureUsage = fixtureParams.get("usage") ?? "20";
+const fixtureUsed = Math.max(0, Math.min(100, Number(fixtureContext) || 0)) * 5_000;
+
 function Preview() {
   const [selected, setSelected] = useState(choices.find(item => item.provider.id === "xai" && item.model.id === "grok-4.7")!.key);
   const [config, setConfig] = useState(initial);
-  const [theme, setTheme] = useState("dark");
-  const [used, setUsed] = useState(32_000);
-  const [readings, setReadings] = useState<SessionEvent[]>([{
+  const [theme, setTheme] = useState(fixtureParams.get("theme") ?? "dark");
+  const [used, setUsed] = useState(fixtureUsed);
+  const [readings, setReadings] = useState<SessionEvent[]>(fixtureContext === "unknown" ? [] : [{
     id: "live-reading", sessionId: "context-fixture", turnId: "fixture-turn",
     kind: "system-event", createdAt: new Date().toISOString(), message: "",
     payload: { kind: "provider-context-usage", providerId: "xai", modelId: "grok-4.7",
-      contextWindowSource: "catalog",
-      contextUsage: { inputTokens: 32_000, totalTokens: 32_000, modelContextWindow: 500_000 } },
+      contextWindowSource: "runtime",
+      contextUsage: { inputTokens: fixtureUsed, totalTokens: fixtureUsed, modelContextWindow: 500_000 } },
   }]);
   const choice = choices.find(item => item.key === selected)!;
   useLayoutEffect(() => { document.documentElement.dataset.theme = theme; delete document.documentElement.dataset.nativeMaterial; }, [theme]);
@@ -77,7 +82,9 @@ function Preview() {
         events={[{ id:"fixture-message", sessionId:"context-fixture", kind:"user-message",
           createdAt:"2026-10-13T15:00:00Z", message:"Inspect the context ring beside the model selector.", payload:{} }, ...readings]}
         providerUsageByProvider={{ [choice.provider.id]: { providerId:choice.provider.id, status:"available" as const, fetchedAt:new Date().toISOString(),
-          windows:[{ id:"weekly",label:"Weekly limit",usedPercent:20,status:"ok" as const }] } }}
+          stale: fixtureParams.has("stale"),
+          windows:[{ id:"weekly",label:"Weekly limit",usedPercent:fixtureUsage === "unknown" ? undefined : Number(fixtureUsage),status:"ok" as const },
+            ...(fixtureParams.has("secondary") ? [{ id:"session",label:"5-hour limit",usedPercent:Number(fixtureParams.get("secondary")),status:"ok" as const }] : [])] } }}
       />
     </section>
     <output role="status">Fixture only: {choice.provider.displayName} / {choice.model.displayName}. Last simulated usage: {used.toLocaleString()} tokens. Hover the context ring.</output>

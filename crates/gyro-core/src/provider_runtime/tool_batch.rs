@@ -549,6 +549,27 @@ pub fn spill_result_data_within(
     window: Option<usize>,
 ) {
     use crate::efficiency::spill;
+    // A recovery read is already paged at the tool boundary. Re-spilling it
+    // hides the requested middle and leaves offsets describing bytes the model
+    // never received, causing recursive recovery calls or skipped evidence.
+    if matches!(
+        capability,
+        "workspace.read" | "workspace.read_range" | "workspace.read_editor"
+    ) && data["source"] == "spill"
+    {
+        return;
+    }
+    // Terminal snapshots nest their output under pane, unlike command results.
+    // Apply the same recoverable preview there; keep status, paging and revision
+    // fields intact. Do not recurse into arbitrary tool data or user documents.
+    if matches!(
+        capability,
+        "terminal.open" | "terminal.read" | "terminal.wait" | "terminal.stop"
+    ) {
+        if let Some(pane) = data.get_mut("pane").filter(|pane| pane.is_object()) {
+            spill_result_data_within(capability, tool, pane, window);
+        }
+    }
     let Some(object) = data.as_object() else {
         return;
     };
@@ -728,6 +749,71 @@ pub fn ordered<T: Send>(
 pub fn read_on_worker<T>(invoke: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(invoke))
         .unwrap_or_else(|_| Err(anyhow::anyhow!("Gyro tool worker failed")))
+}
+
+#[cfg(test)]
+mod terminal_evidence_tests {
+    use super::*;
+    use crate::efficiency::spill;
+    use serde_json::json;
+
+    #[test]
+    fn nested_terminal_output_is_bounded_recoverable_and_idempotent() {
+        let output = format!(
+            "START\n{}\nFAILED: exact diagnostic 🦀",
+            "build detail\n".repeat(1000)
+        );
+        for capability in [
+            "terminal.open",
+            "terminal.read",
+            "terminal.wait",
+            "terminal.stop",
+        ] {
+            let mut data = json!({
+                "completed": true,
+                "exitCode": 101,
+                "pane": {
+                    "output": output,
+                    "outputRevision": 42,
+                    "outputComplete": true,
+                    "status": "done",
+                    "command": "cargo test"
+                },
+                "outputWindow": {"offset": 900, "nextOffset": null, "previousOffset": 0},
+                "owner": {"kind": "model", "callId": "original"}
+            });
+            let original = data.clone();
+            spill_result_data_within(capability, "gyro_terminal_read", &mut data, None);
+            let preview = data["pane"]["output"].as_str().unwrap();
+            assert!(preview.starts_with("START\n"));
+            assert!(preview.ends_with("FAILED: exact diagnostic 🦀"));
+            assert!(preview.len() * 4 < output.len());
+            let address = spill::address(capability, "gyro_terminal_read", &output);
+            assert!(preview.contains(&address));
+            let restored = spill::read_window(&address, 0, output.len())
+                .unwrap()
+                .unwrap();
+            assert_eq!(restored.text, output);
+            let mut metadata = data.clone();
+            metadata["pane"]["output"] = original["pane"]["output"].clone();
+            assert_eq!(metadata, original);
+            let first = data.clone();
+            spill_result_data_within(capability, "gyro_terminal_read", &mut data, None);
+            assert_eq!(data, first);
+        }
+    }
+
+    #[test]
+    fn small_terminal_output_and_unrelated_nested_data_stay_exact() {
+        let mut small = json!({"pane": {"output": "exact output\n"}, "exitCode": null});
+        let original = small.clone();
+        spill_result_data_within("terminal.read", "gyro_terminal_read", &mut small, None);
+        assert_eq!(small, original);
+        let mut document = json!({"pane": {"output": "user data".repeat(1000)}});
+        let original = document.clone();
+        spill_result_data_within("workspace.read", "gyro_workspace_read", &mut document, None);
+        assert_eq!(document, original);
+    }
 }
 
 pub fn mark_browser_image_attached(response: &mut CapabilityResponse) {

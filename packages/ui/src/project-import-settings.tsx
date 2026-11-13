@@ -9,7 +9,7 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { SettingsGroup, SettingsSwitch } from "./settings-controls";
+import { SettingsEmptyState, SettingsGroup, SettingsSwitch } from "./settings-controls";
 import gyroLogoLight from "./assets/gyro-logo.svg";
 import gyroLogoDark from "./assets/gyro-logo-white.svg";
 import type {
@@ -367,6 +367,33 @@ export function ProjectImportSettings({
           ? "Import could not finish"
           : "Import complete";
 
+  const scanAction = (
+        <button
+          className="gyro-import-button gyro-primary-button"
+          disabled={
+            busy ||
+            loadingSources ||
+            !sources.some((source) => source.available)
+          }
+          onClick={onScan}
+          type="button"
+        >
+          {scanning ? (
+            <>
+              <LoaderCircle
+                aria-hidden="true"
+                className="gyro-import-spinner"
+                size={14}
+              />
+              Scanning…
+            </>
+          ) : scan ? (
+            "Rescan projects"
+          ) : (
+            "Scan projects"
+          )}
+        </button>
+  );
   return (
     <div className="gyro-project-import-settings">
       <SettingsGroup id="import-sources" label="Import sources">
@@ -419,31 +446,7 @@ export function ProjectImportSettings({
             onChange={onIncludeArchivedChange}
           />
         </div>
-        <button
-          className="gyro-import-button"
-          disabled={
-            busy ||
-            loadingSources ||
-            !sources.some((source) => source.available)
-          }
-          onClick={onScan}
-          type="button"
-        >
-          {scanning ? (
-            <>
-              <LoaderCircle
-                aria-hidden="true"
-                className="gyro-import-spinner"
-                size={14}
-              />
-              Scanning…
-            </>
-          ) : scan ? (
-            "Rescan projects"
-          ) : (
-            "Scan projects"
-          )}
-        </button>
+        {scan ? scanAction : null}
       </div>
       <p className="gyro-import-helper">
         Your projects stay in their current folders. Choose the chats you want
@@ -500,7 +503,7 @@ export function ProjectImportSettings({
           )}
         </section>
       )}
-      {!scan ? <SettingsGroup id="review-selection" label="Review selection" summary="No scan yet"><p>Scan the selected sources to review projects and chats before importing.</p></SettingsGroup> : null}
+      {!scan ? <SettingsGroup id="review-selection" label="Projects"><SettingsEmptyState icon={<FolderOpen size={32} />} title="Scan for projects" description="Find chats stored locally. Review the selection before importing.">{scanAction}</SettingsEmptyState></SettingsGroup> : null}
       {scan && (
         <SettingsGroup id="review-selection" label="Review selection">
           <div className="gyro-import-projects-toolbar">
@@ -717,7 +720,7 @@ export function ProjectImportSettings({
           </div>
         </SettingsGroup>
       )}
-      <SettingsGroup id="import-results" label="Import results" summary={job ? `${job.results.length} results` : "No imports yet"}>
+      <SettingsGroup id="import-results" label="Import results" collapsible attention={Boolean(job)} summary={job ? `${job.results.length} results` : "No imports yet"}>
         {job?.results.length ? (
             <div className="gyro-import-job-results">
               {job.results.map((result) => (

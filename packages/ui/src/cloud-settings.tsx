@@ -7,6 +7,7 @@ import {
 import { CloudServicesSettings } from "./cloud-services-settings";
 import {
   SettingsGroup,
+  SettingsEmptyState,
   SettingsRow,
   SettingsSwitch,
 } from "./settings-controls";
@@ -26,30 +27,20 @@ export function CloudSettings({
   workspace?: boolean;
   onManageCloud?: () => void;
 }) {
-  if (snapshot.availability === "coming-soon")
+  if (snapshot.availability === "coming-soon" || snapshot.status === "unavailable")
     return (
       <SettingsSection
         icon={Cloud}
         title="Gyro Cloud"
-        description="Optional hosted services · Coming soon"
+        description="Optional cloud services, separate from your local workspace."
       >
-        <SettingsGroup
-          id="cloud-release-availability"
-          label="Availability"
-          defaultOpen
-        >
-          <SettingsRow
-            label="Cloud is not enabled in this release"
-            detail="Account sign-in, subscriptions, backups, sharing and managed AI are disabled. Local work and your own providers remain available."
-          >
-            <button
-              type="button"
-              className="gyro-secondary-button"
-              aria-label="Enable Cloud, coming soon"
-              disabled
-            >
-              Coming soon
-            </button>
+        <SettingsEmptyState icon={<Cloud size={40} />}
+          title="Cloud is not enabled in this build"
+          description="Your local workspace and your own providers remain available." />
+        <SettingsGroup id="cloud-release-availability" label="Chat backup">
+          <SettingsRow label="Automatically back up chats" value="Unavailable">
+            <SettingsSwitch label="Automatically back up chats" checked={false} disabled onChange={() => {}} />
+            <span className="gyro-settings-info-value">Unavailable</span>
           </SettingsRow>
         </SettingsGroup>
       </SettingsSection>

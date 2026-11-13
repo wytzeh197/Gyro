@@ -1,4 +1,4 @@
-import { SettingsDisclosure } from "./settings-disclosure";
+import { SettingsGroup } from "./settings-controls";
 import { useId, useState } from "react";
 import { ArrowRight, ArrowUpRight, ChevronDown, Search, X } from "lucide-react";
 import type { SettingsSectionId } from "./types";
@@ -183,7 +183,8 @@ export function SettingsHelp({
       </p>
       <div className="gyro-help-answers">
         {filtered.map((group) => (
-          <SettingsDisclosure key={group.label} id={`help-${group.id}`} title={group.label} summary={`${group.articles.length} ${group.articles.length === 1 ? "answer" : "answers"}`} attention={terms.length > 0}>
+          <SettingsGroup key={group.label} id={`help-${group.id}`} label={group.label} summary={`${group.articles.length} ${group.articles.length === 1 ? "answer" : "answers"}`}>
+            <div className="gyro-help-topic">
             {group.articles.map((article) => (
               <details
                 key={`${article.title}:${query}`}
@@ -207,7 +208,8 @@ export function SettingsHelp({
                 </div>
               </details>
             ))}
-          </SettingsDisclosure>
+            </div>
+          </SettingsGroup>
         ))}
         {!count && (
           <div className="gyro-help-empty">

@@ -8,6 +8,7 @@ pub(crate) enum Operation {
     Verify,
     Refresh,
     User,
+    UpdateUser,
     Logout,
 }
 impl Operation {
@@ -16,7 +17,7 @@ impl Operation {
             Self::Code => "/otp",
             Self::Verify => "/verify",
             Self::Refresh => "/token?grant_type=refresh_token",
-            Self::User => "/user",
+            Self::User | Self::UpdateUser => "/user",
             Self::Logout => "/logout?scope=local",
         }
     }
@@ -58,10 +59,10 @@ impl Transport for HttpTransport {
         let mut req = self
             .agent
             .request(
-                if operation == Operation::User {
-                    "GET"
-                } else {
-                    "POST"
+                match operation {
+                    Operation::User => "GET",
+                    Operation::UpdateUser => "PUT",
+                    _ => "POST",
                 },
                 &format!("{}{}", self.origin, operation.path()),
             )

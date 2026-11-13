@@ -1,4 +1,11 @@
-import { History, RefreshCw } from "lucide-react";
+import {
+  CalendarClock,
+  ChevronLeft,
+  ChevronRight,
+  History,
+  Play,
+  RefreshCw,
+} from "lucide-react";
 import { FeatureUsageLine } from "../feature-usage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
@@ -7,6 +14,41 @@ import type {
   WorkflowRunSummary,
   WorkflowRuntime,
 } from "./types";
+const statusLabels: Record<string, string> = {
+  queued: "Queued",
+  running: "Running",
+  waiting: "Waiting",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+  interrupted: "Interrupted",
+  pending: "Pending",
+};
+function statusTone(status: string, requirementsMet?: boolean | null) {
+  if (requirementsMet === false) return "warning";
+  if (status === "completed") return "success";
+  if (status === "queued" || status === "running") return "running";
+  if (status === "waiting" || status === "interrupted") return "warning";
+  if (status === "failed") return "danger";
+  return "neutral";
+}
+function StatusPill({
+  status,
+  requirementsMet,
+  label,
+}: {
+  status: string;
+  requirementsMet?: boolean | null;
+  label?: string;
+}) {
+  return (
+    <em
+      className={`gyro-workflow-pill is-${statusTone(status, requirementsMet)}`}
+    >
+      {label ?? statusLabels[status] ?? status}
+    </em>
+  );
+}
 export function WorkflowRuns({
   runtime,
   runs,
@@ -162,63 +204,98 @@ export function WorkflowRuns({
   );
   if (selected)
     return (
-      <section aria-label="Workflow run detail">
-        <button onClick={() => setSelected(undefined)}>Back to runs</button>
+      <section
+        className="gyro-workflow-run-detail"
+        aria-label="Workflow run detail"
+      >
+        <button
+          className="gyro-workflow-back"
+          onClick={() => setSelected(undefined)}
+        >
+          <ChevronLeft size={14} aria-hidden="true" />
+          Back to runs
+        </button>
         {!detail ? (
-          <p role="status">Loading run…</p>
+          <p className="gyro-workflow-muted" role="status">
+            Loading run…
+          </p>
         ) : (
           <>
-            <h2>{detail.definition.name}</h2>
-            <p role="status">
-              {detail.status === "completed"
-                ? "Execution completed"
-                : detail.status}{" "}
-              ·{" "}
-              {detail.requirementsMet === true
-                ? "Recorded requirements met"
-                : detail.requirementsMet === false
-                  ? "Needs attention"
-                  : "Requirements not yet assessed"}
-            </p>
-            <p>
-              {detail.rootKey} ·{" "}
-              {detail.origin === "automation" ? "Scheduled" : "Manual"} ·{" "}
-              {new Date(detail.createdAt).toLocaleString()}
-            </p>
-            <p>
-              Recipe {detail.binding.definitionHash.slice(0, 12)}. Execution
-              status, review findings and verification are separate evidence.
-              Each attempt has a 30 minute deadline.
-            </p>
+            <header className="gyro-workflow-run-header">
+              <div>
+                <h2>{detail.definition.name}</h2>
+                <p>
+                  {detail.origin === "automation" ? "Scheduled" : "Manual"} ·{" "}
+                  {new Date(detail.createdAt).toLocaleString()} ·{" "}
+                  <code>{detail.rootKey}</code>
+                </p>
+              </div>
+              <div className="gyro-workflow-header-actions">
+                {["queued", "running", "waiting"].includes(detail.status) ? (
+                  <button disabled={busy} onClick={() => void stop()}>
+                    Stop run
+                  </button>
+                ) : null}
+                {["waiting", "interrupted", "cancelled", "failed"].includes(
+                  detail.status,
+                ) &&
+                detail.steps.some((step) => step.status !== "completed") ? (
+                  <button disabled={busy} onClick={() => void retryRun(false)}>
+                    Inspect retry
+                  </button>
+                ) : null}
+              </div>
+            </header>
+            <div className="gyro-workflow-run-summary" role="status">
+              <StatusPill
+                status={detail.status}
+                label={
+                  detail.status === "completed"
+                    ? "Execution completed"
+                    : undefined
+                }
+              />
+              <StatusPill
+                status={
+                  detail.requirementsMet === true
+                    ? "completed"
+                    : detail.requirementsMet === false
+                      ? "waiting"
+                      : "cancelled"
+                }
+                label={
+                  detail.requirementsMet === true
+                    ? "Recorded requirements met"
+                    : detail.requirementsMet === false
+                      ? "Needs attention"
+                      : "Requirements not yet assessed"
+                }
+              />
+            </div>
             <FeatureUsageLine
               usage={detail.usage}
               createdAt={detail.createdAt}
               finishedAt={detail.finishedAt}
             />
-            {detail.error ? <p role="alert">{detail.error}</p> : null}
-            {["queued", "running", "waiting"].includes(detail.status) ? (
-              <button disabled={busy} onClick={() => void stop()}>
-                Stop run
-              </button>
+            {detail.error ? (
+              <p className="gyro-workflow-alert" role="alert">
+                {detail.error}
+              </p>
             ) : null}
             {detail.previousRunId ? (
-              <p>
+              <p className="gyro-workflow-muted">
                 Continues run {detail.previousRunId}. Completed step receipts
                 were retained.
               </p>
             ) : null}
-            {["waiting", "interrupted", "cancelled", "failed"].includes(
-              detail.status,
-            ) && detail.steps.some((step) => step.status !== "completed") ? (
-              <button disabled={busy} onClick={() => void retryRun(false)}>
-                Inspect retry
-              </button>
-            ) : null}
             {retry ? (
-              <section aria-label="Retry unfinished steps">
+              <section
+                className="gyro-workflow-callout"
+                aria-label="Retry unfinished steps"
+              >
                 <h3>Retry from {retry.stepId}</h3>
                 <p>{retry.message}</p>
-                <p>
+                <p className="gyro-workflow-muted">
                   {retry.completedSteps} completed steps will be retained.
                   Inputs, role bindings and recipe version remain pinned.
                 </p>
@@ -231,23 +308,31 @@ export function WorkflowRuns({
                   I inspected the recorded actions and accept a fresh attempt of
                   the unfinished step.
                 </label>
-                <button
-                  disabled={busy || !reviewed}
-                  onClick={() => void retryRun(true)}
-                >
-                  Queue explicit continuation
-                </button>
-                <button disabled={busy} onClick={() => setRetry(undefined)}>
-                  Cancel retry
-                </button>
+                <div className="gyro-workflow-actions">
+                  <button
+                    className="gyro-primary-button"
+                    disabled={busy || !reviewed}
+                    onClick={() => void retryRun(true)}
+                  >
+                    Queue explicit continuation
+                  </button>
+                  <button disabled={busy} onClick={() => setRetry(undefined)}>
+                    Cancel retry
+                  </button>
+                </div>
               </section>
             ) : null}
-            <ol className="gyro-workflow-steps">
-              {detail.steps.map((step) => (
+            <h3 className="gyro-workflow-subheading">Steps</h3>
+            <ol className="gyro-workflow-steps gyro-workflow-run-steps">
+              {detail.steps.map((step, index) => (
                 <li key={step.stepId}>
-                  <strong>
-                    {step.stepId} · {step.status}
-                  </strong>
+                  <div className="gyro-workflow-step-head">
+                    <span className="gyro-workflow-step-index">
+                      {index + 1}
+                    </span>
+                    <strong>{step.stepId}</strong>
+                    <StatusPill status={step.status} />
+                  </div>
                   {step.verificationPassed !== undefined &&
                   step.verificationPassed !== null ? (
                     <p>
@@ -264,7 +349,11 @@ export function WorkflowRuns({
                       · {step.openFindings} open findings
                     </p>
                   ) : null}
-                  {step.error ? <p role="alert">{step.error}</p> : null}
+                  {step.error ? (
+                    <p className="gyro-workflow-alert" role="alert">
+                      {step.error}
+                    </p>
+                  ) : null}
                   {step.sessionId && onOpenSession ? (
                     <button onClick={() => onOpenSession(step.sessionId!)}>
                       Open step and approvals
@@ -279,35 +368,13 @@ export function WorkflowRuns({
                 </li>
               ))}
             </ol>
-            {["completed", "failed", "cancelled", "interrupted"].includes(
-              detail.status,
-            ) ? (
-              <div className="gyro-workflow-actions">
-                {deleteConfirmed ? (
-                  <>
-                    <p>
-                      Delete this private run record, including its saved inputs
-                      and outputs? Linked chats can be removed separately.
-                    </p>
-                    <button disabled={busy} onClick={() => void deleteRun()}>
-                      Delete run record
-                    </button>
-                    <button
-                      disabled={busy}
-                      onClick={() => setDeleteConfirmed(false)}
-                    >
-                      Keep run record
-                    </button>
-                  </>
-                ) : (
-                  <button onClick={() => setDeleteConfirmed(true)}>
-                    Delete run record…
-                  </button>
-                )}
-              </div>
-            ) : null}
-            <details>
+            <details className="gyro-workflow-disclosure">
               <summary>Original inputs and recipe</summary>
+              <p className="gyro-workflow-muted">
+                Recipe {detail.binding.definitionHash.slice(0, 12)}. Execution
+                status, review findings and verification are separate evidence.
+                Each attempt has a 30 minute deadline.
+              </p>
               <pre>
                 {JSON.stringify(
                   {
@@ -319,9 +386,46 @@ export function WorkflowRuns({
                 )}
               </pre>
             </details>
+            {["completed", "failed", "cancelled", "interrupted"].includes(
+              detail.status,
+            ) ? (
+              <div className="gyro-workflow-danger-zone">
+                {deleteConfirmed ? (
+                  <>
+                    <p>
+                      Delete this private run record, including its saved inputs
+                      and outputs? Linked chats can be removed separately.
+                    </p>
+                    <div className="gyro-workflow-actions">
+                      <button
+                        className="gyro-workflow-danger-button"
+                        disabled={busy}
+                        onClick={() => void deleteRun()}
+                      >
+                        Delete run record
+                      </button>
+                      <button
+                        disabled={busy}
+                        onClick={() => setDeleteConfirmed(false)}
+                      >
+                        Keep run record
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <button onClick={() => setDeleteConfirmed(true)}>
+                    Delete run record…
+                  </button>
+                )}
+              </div>
+            ) : null}
           </>
         )}
-        {error ? <p role="alert">{error}</p> : null}
+        {error ? (
+          <p className="gyro-workflow-alert" role="alert">
+            {error}
+          </p>
+        ) : null}
       </section>
     );
   return (
@@ -331,14 +435,19 @@ export function WorkflowRuns({
           <h1>Runs</h1>
           <p>Follow progress and review the results of your workflows.</p>
         </div>
-        <button onClick={onRefresh}>
-          <RefreshCw size={14} aria-hidden="true" /> Refresh runs
+        <button
+          className="gyro-workflow-icon-button"
+          onClick={onRefresh}
+          aria-label="Refresh runs"
+          title="Refresh runs"
+        >
+          <RefreshCw size={14} aria-hidden="true" />
         </button>
       </header>
       {!runs.length && !pending.length ? (
         <div className="gyro-workflow-empty">
-          <span className="gyro-workflow-empty-icon">
-            <History size={24} aria-hidden="true" />
+          <span className="gyro-workflow-icon-tile is-large">
+            <History size={20} aria-hidden="true" />
           </span>
           <h2>No workflow runs yet</h2>
           <p>
@@ -348,54 +457,100 @@ export function WorkflowRuns({
             Browse workflows
           </button>
         </div>
-      ) : null}
-      <ul className="gyro-workflow-list">
-        {pending.map((job) => (
-          <li key={job.id}>
-            <strong>{job.title}</strong>
-            <p>
-              {job.leaseOwner
-                ? "Starting"
-                : job.status === "paused"
-                  ? "Needs attention"
-                  : "Queued"}{" "}
-              · {job.execution.workspacePath}
-            </p>
-            <p>{job.lastResult}</p>
-            {job.status === "current" ? (
-              <button
-                onClick={() =>
-                  void runtime
-                    .run("toggle-job", { jobId: job.id, paused: true })
-                    .then(onRefresh)
-                    .catch((error) => setError(String(error)))
-                }
-              >
-                Cancel launch
-              </button>
-            ) : null}
-          </li>
-        ))}
-        {runs.map((run) => (
-          <li key={run.id}>
-            <button
-              className="gyro-workflow-row"
-              onClick={() => setSelected(run.id)}
-            >
-              <strong>{run.definition.name}</strong>
-              <span>
-                {run.status === "completed"
-                  ? "Execution completed"
-                  : run.status}
-                {run.requirementsMet === false ? " · needs attention" : ""} ·{" "}
-                {new Date(run.createdAt).toLocaleString()}
+      ) : (
+        <ul className="gyro-workflow-rows">
+          {pending.map((job) => (
+            <li key={job.id}>
+              <span className="gyro-workflow-icon-tile">
+                <Play size={16} aria-hidden="true" />
               </span>
-              <span>{run.rootKey}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-      {error ? <p role="alert">{error}</p> : null}
+              <div className="gyro-workflow-row-body">
+                <strong>
+                  {job.title}
+                  <StatusPill
+                    status={
+                      job.leaseOwner
+                        ? "running"
+                        : job.status === "paused"
+                          ? "waiting"
+                          : "queued"
+                    }
+                    label={
+                      job.leaseOwner
+                        ? "Starting"
+                        : job.status === "paused"
+                          ? "Needs attention"
+                          : "Queued"
+                    }
+                  />
+                </strong>
+                {job.execution.workspacePath ? (
+                  <small>
+                    <code>{job.execution.workspacePath}</code>
+                  </small>
+                ) : null}
+                {job.lastResult ? <p>{job.lastResult}</p> : null}
+              </div>
+              {job.status === "current" ? (
+                <div className="gyro-workflow-row-actions">
+                  <button
+                    onClick={() =>
+                      void runtime
+                        .run("toggle-job", { jobId: job.id, paused: true })
+                        .then(onRefresh)
+                        .catch((error) => setError(String(error)))
+                    }
+                  >
+                    Cancel launch
+                  </button>
+                </div>
+              ) : null}
+            </li>
+          ))}
+          {runs.map((run) => (
+            <li key={run.id} className="is-link">
+              <button
+                className="gyro-workflow-row"
+                onClick={() => setSelected(run.id)}
+              >
+                <span className="gyro-workflow-icon-tile">
+                  {run.origin === "automation" ? (
+                    <CalendarClock size={16} aria-hidden="true" />
+                  ) : (
+                    <Play size={16} aria-hidden="true" />
+                  )}
+                </span>
+                <span className="gyro-workflow-row-body">
+                  <strong>{run.definition.name}</strong>
+                  <small>
+                    {run.origin === "automation" ? "Scheduled" : "Manual"} ·{" "}
+                    {new Date(run.createdAt).toLocaleString()} · {run.rootKey}
+                  </small>
+                </span>
+                <StatusPill
+                  status={run.status}
+                  requirementsMet={run.requirementsMet}
+                  label={
+                    run.requirementsMet === false
+                      ? "Needs attention"
+                      : undefined
+                  }
+                />
+                <ChevronRight
+                  className="gyro-workflow-row-chevron"
+                  size={16}
+                  aria-hidden="true"
+                />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {error ? (
+        <p className="gyro-workflow-alert" role="alert">
+          {error}
+        </p>
+      ) : null}
     </section>
   );
 }

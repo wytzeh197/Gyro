@@ -410,6 +410,8 @@ fn live_plan_reaches_the_model_as_a_checklist_that_normal_turns_can_advance() {
     // Normal-mode turns are the ones that finish steps, so they get the marker.
     assert!(context.contains("GYRO_PLAN_UPDATE:"));
     assert!(context.contains("update-items"));
+    assert!(context.contains("Before starting a step"));
+    assert!(context.contains("before your next tool call; do not wait for the final answer"));
     assert!(context.contains("Before the final reply, reconcile the checklist"));
     assert!(context.contains("external acceptance blocked"));
 
@@ -999,6 +1001,16 @@ fn resumed_turns_skip_standing_guidance_but_keep_turn_state() {
     assert!(!resumed.contains("![short description](/absolute/path.png)"));
     assert!(resumed.contains(browser_knowledge::RESUMED_REVEAL_GUIDANCE));
     assert!(!resumed.contains("never end with a promise to report later"));
+    assert!(!resumed.contains("do not ask the user to paste files you can read"));
+    assert!(!resumed.contains("a bare filename names a root file"));
+    for guard in [
+        "preserve user-supplied paths exactly",
+        "a failed read never authorizes creation",
+        "Read-only and edit-path limits also cover proposals",
+        "rootId",
+    ] {
+        assert!(resumed.contains(guard), "Resume lost {guard}");
+    }
     assert!(resumed.contains("configured approval policy"));
     assert!(resumed.ends_with("User message:\nRename the browser module"));
     // Naming browser code is not a browse request.
@@ -2418,7 +2430,8 @@ fn stale_resume_binding_is_cleared_and_retried_without_cursor() {
         workspace_check: None,
         side_chat_context: None,
         workflow_run_id: None,
-        project_memory: None,        internal_purpose: None,
+        project_memory: None,
+        internal_purpose: None,
     };
     let mut attempts = Vec::new();
     let output = run_provider_chat_with_retry_using(
@@ -2500,7 +2513,8 @@ fn model_handoff_skips_incompatible_provider_binding() {
         workspace_check: None,
         side_chat_context: None,
         workflow_run_id: None,
-        project_memory: None,        internal_purpose: None,
+        project_memory: None,
+        internal_purpose: None,
     };
     assert!(compatible_provider_session_binding(binding.clone(), &request).is_none());
     let same_model = ProviderChatRequest {
@@ -2903,7 +2917,8 @@ fn provider_status_event_stores_run_metadata_without_tokens() {
         workspace_check: None,
         side_chat_context: None,
         workflow_run_id: None,
-        project_memory: None,        internal_purpose: None,
+        project_memory: None,
+        internal_purpose: None,
     };
 
     let event = append_provider_status_event(
@@ -2994,7 +3009,8 @@ fn native_provider_binding_owns_execution_authority() {
         workspace_check: None,
         side_chat_context: None,
         workflow_run_id: None,
-        project_memory: None,        internal_purpose: None,
+        project_memory: None,
+        internal_purpose: None,
     };
 
     bind_provider_chat_request(&mut request, &session, &config, store.paths()).unwrap();

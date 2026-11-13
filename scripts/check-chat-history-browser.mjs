@@ -208,6 +208,24 @@ try {
     const m = await metrics();
     return m.height - m.client - m.top < 5;
   }, "following latest after append");
+  // A short recent page must expose older history even without overflow.
+  await call("Page.navigate", { url: origin + "/chat-history-fixture.html?paged" });
+  await until(() => evaluate("document.querySelectorAll('.gyro-chat-turn').length === 1"), "short recent page");
+  assert.equal(await evaluate("!!document.querySelector('.gyro-chat-load-earlier button')"), true);
+  await evaluate("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
+  await evaluate("document.querySelector('.gyro-chat-load-earlier button').focus()");
+  assert.equal(await evaluate("document.activeElement === document.querySelector('.gyro-chat-load-earlier button')"), true);
+  await call("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+  await call("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  await until(() => evaluate("document.querySelectorAll('.gyro-chat-turn').length === 201"), "keyboard older page");
+  while (await evaluate("!!document.querySelector('.gyro-chat-load-earlier button')")) {
+    const count = await evaluate("document.querySelectorAll('.gyro-chat-turn').length");
+    await evaluate("document.querySelector('.gyro-chat-load-earlier button').click()");
+    await until(async () => (await evaluate("document.querySelectorAll('.gyro-chat-turn').length")) > count, "next older page");
+  }
+  assert.equal((await metrics()).first, true);
+  assert.equal((await metrics()).count, 1550, "every saved turn remains reachable by bounded pages");
+  console.log("PASS: bounded pages remain keyboard-accessible even without initial overflow.");
   console.log(
     "PASS: actual ChatSurface opens all 3,100 events, retains all 5,100 events as it grows, reaches the first message, preserves upward reading during append/remount, and follows latest only after an explicit jump. Disk/provider data are generated fixtures.",
   );

@@ -172,8 +172,13 @@ impl RunnerHost for TauriRunnerHost {
                 message,
                 error,
             } => {
-                if matches!(request.internal_purpose,Some(super::chat_types::InternalRequestPurpose::CodeReview|super::chat_types::InternalRequestPurpose::WorkflowExtraction))
-                {
+                if matches!(
+                    request.internal_purpose,
+                    Some(
+                        super::chat_types::InternalRequestPurpose::CodeReview
+                            | super::chat_types::InternalRequestPurpose::WorkflowExtraction
+                    )
+                ) {
                     if let Some(delta) = delta.as_deref() {
                         crate::features::code_reviews::output::append(&request.session_id, delta);
                     }
@@ -214,6 +219,35 @@ impl RunnerHost for TauriRunnerHost {
         }
     }
 
+    fn context_compaction_requested(&self, request: &ProviderChatRequest) -> bool {
+        request.internal_purpose.is_none()
+            && self
+                .app
+                .state::<ProviderCancellationManager>()
+                .flags
+                .lock()
+                .ok()
+                .and_then(|flags| flags.get(&request.session_id).cloned())
+                .is_some_and(|control| {
+                    control
+                        .context_compaction_requested
+                        .load(std::sync::atomic::Ordering::Acquire)
+                })
+    }
+    fn complete_context_compaction_request(&self, request: &ProviderChatRequest) {
+        if let Some(control) = self
+            .app
+            .state::<ProviderCancellationManager>()
+            .flags
+            .lock()
+            .ok()
+            .and_then(|flags| flags.get(&request.session_id).cloned())
+        {
+            control
+                .context_compaction_requested
+                .store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
     fn start_heartbeat(
         &self,
         request: ProviderChatRequest,

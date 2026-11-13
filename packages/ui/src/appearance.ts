@@ -63,8 +63,8 @@ export function appearanceAccentProperties(
   const dark = theme === "dark";
   const normalize = (value: string, fallback: string) =>
     /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
-  main = normalize(main, "#0874df");
-  secondary = normalize(secondary, "#8b6fcb");
+  main = normalize(main, "#ffffff");
+  secondary = normalize(secondary, "#ffffff");
   const backgrounds = dark ? ["#181818", "#383c41"] : ["#ffffff", "#e7ebf0"];
   const target = dark ? "#ffffff" : "#101724";
   const readable = (color: string, initial: number, against = backgrounds) => {
@@ -79,14 +79,21 @@ export function appearanceAccentProperties(
     }
     return target;
   };
+  // White is the neutral default. Resolve it against the current theme rather
+  // than tinting it into gray; saved custom hues still use contrast correction.
+  const neutral = dark ? "#ffffff" : "#000000";
+  const accent = (color: string, initial: number, against = backgrounds) =>
+    color.toLowerCase() === "#ffffff" ? neutral : readable(color, initial, against);
   const foreground = dark ? "#101724" : "#ffffff";
   return {
-    "--gyro-accent": readable(main, 0.12),
-    "--gyro-accent-strong": readable(main, dark ? 0.42 : 0.24),
-    "--gyro-secondary-accent": readable(secondary, 0.12),
-    "--gyro-secondary-accent-strong": readable(secondary, dark ? 0.34 : 0.24),
-    "--gyro-primary-bg": readable(main, dark ? 0.32 : 0.12, [foreground]),
-    "--gyro-primary-hover": readable(main, dark ? 0.42 : 0.24, [foreground]),
+    "--gyro-accent": accent(main, 0.12),
+    "--gyro-accent-strong": accent(main, dark ? 0.42 : 0.24),
+    "--gyro-secondary-accent": accent(secondary, 0.12),
+    "--gyro-secondary-accent-strong": accent(secondary, dark ? 0.34 : 0.24),
+    "--gyro-primary-bg": accent(main, dark ? 0.32 : 0.12, [foreground]),
+    "--gyro-primary-hover": main.toLowerCase() === "#ffffff"
+      ? (dark ? "#e5e5e5" : "#1a1a1a")
+      : accent(main, dark ? 0.42 : 0.24, [foreground]),
     "--gyro-primary-text": foreground,
   };
 }

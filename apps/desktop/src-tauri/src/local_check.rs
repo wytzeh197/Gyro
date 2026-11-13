@@ -453,3 +453,18 @@ mod tests {
         assert!(!token.is_cancelled());
     }
 }
+
+/// Native Cloud selection reads an actual saved report and refreshes its scope
+/// and freshness before making a read-only, sanitized preview. No approval is inherited.
+pub(super) fn cloud_report_preview(session:Uuid,report_id:Uuid)->Result<String,String>{
+    let _io=REPORT_IO.lock().map_err(to_string)?;
+    let base=reports_dir().map_err(to_string)?;
+    let mut report=gyro_core::cloud_connection::v2::selection::load_report(&base,session,report_id).map_err(to_string)?;
+    engine::refresh_evidence_scope(&mut report);
+    if check_workspace(&session.to_string()).ok().as_ref()!=Some(&(report.plan.snapshot.workspace.clone(),report.plan.workspace_revision)){
+        report.stale=true;report.freshness_note="Chat workspace changed or is unavailable.".into();
+    }else{engine::refresh_freshness(&mut report);}
+    engine::save_report(&base,&report).map_err(to_string)?;
+    Ok(gyro_core::cloud_connection::v2::selection::Report::from_check(&report).map_err(to_string)?.text().into())
+}
+

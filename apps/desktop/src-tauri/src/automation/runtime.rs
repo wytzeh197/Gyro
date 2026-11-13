@@ -63,7 +63,7 @@ impl AutomationRunAdmission {
             .flags
             .lock()
             .map_err(|_| "provider cancellation state is unavailable".to_string())?;
-        if flags.contains_key(&reservation_key)||flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
+        if flags.contains_key(&reservation_key) || flags.len() >= MAX_CONCURRENT_PROVIDER_RUNS {
             return Ok(None);
         }
         flags.insert(

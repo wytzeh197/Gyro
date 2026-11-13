@@ -1,3 +1,4 @@
+import { gitSetupMessage } from "./workspace-preparation";
 import {
   ArrowDown,
   ArrowRight,
@@ -1060,13 +1061,15 @@ export function WorkspaceSidebarContent({
     ),
   );
   const [draggedProjectKey, setDraggedProjectKey] = useState<string>();
-  const [projectDropTarget, setProjectDropTarget] = useState<{
-    key: string;
-    position: "before" | "after";
-  }>();
+  // While a project is dragged, the list previews the drop order live so the
+  // other projects slide out of the way instead of waiting for the drop.
+  const [projectDragOrder, setProjectDragOrder] = useState<string[]>();
+  const projectGroupElements = useRef(new Map<string, HTMLDivElement>());
+  const projectGroupTops = useRef<Map<string, number>>();
+  const projectSlideUntil = useRef(0);
   const projectGroups = stableSidebarProjectGroups(
     discoveredProjectGroups,
-    projectOrder,
+    projectDragOrder ?? projectOrder,
   )
     .map((project) => ({
       ...project,
@@ -1515,6 +1518,37 @@ export function WorkspaceSidebarContent({
       // Project order remains available for the current app session.
     }
   }, [projectOrder]);
+  // Slide project groups from where they were drawn to their new places
+  // whenever an order change captured their previous positions.
+  useLayoutEffect(() => {
+    const before = projectGroupTops.current;
+    if (!before) return;
+    projectGroupTops.current = undefined;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      return;
+    }
+    for (const [key, element] of projectGroupElements.current) {
+      const previousTop = before.get(key);
+      if (previousTop === undefined) continue;
+      for (const animation of element.getAnimations?.() ?? []) {
+        animation.cancel();
+      }
+      const offset = previousTop - element.getBoundingClientRect().top;
+      if (Math.abs(offset) < 1) continue;
+      element.animate?.(
+        [
+          { transform: `translateY(${offset}px)` },
+          { transform: "translateY(0)" },
+        ],
+        {
+          duration: SIDEBAR_PROJECT_SLIDE_MS,
+          easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+        },
+      );
+      projectSlideUntil.current =
+        performance.now() + SIDEBAR_PROJECT_SLIDE_MS * 0.6;
+    }
+  });
   useEffect(() => {
     setExpandedWorkspaceDirectories(
       new Set(
@@ -1604,6 +1638,14 @@ export function WorkspaceSidebarContent({
       return next;
     });
   };
+  /** Remember where each project is drawn so the next order change slides. */
+  const captureProjectPositions = () => {
+    const tops = new Map<string, number>();
+    for (const [key, element] of projectGroupElements.current) {
+      tops.set(key, element.getBoundingClientRect().top);
+    }
+    projectGroupTops.current = tops;
+  };
   const moveProject = (
     sourceKey: string,
     targetKey: string,
@@ -1612,23 +1654,67 @@ export function WorkspaceSidebarContent({
     if (sourceKey === targetKey) {
       return;
     }
-    setProjectOrder((current) => {
-      const visibleOrder = stableSidebarProjectGroups(
-        discoveredProjectGroups,
-        current,
-      ).map((project) => project.key);
-      const next = visibleOrder.filter((key) => key !== sourceKey);
-      const targetIndex = next.indexOf(targetKey);
-      if (targetIndex < 0) {
-        return current;
-      }
-      next.splice(targetIndex + (position === "after" ? 1 : 0), 0, sourceKey);
-      return next;
-    });
+    captureProjectPositions();
+    setProjectOrder((current) =>
+      reorderSidebarProjectKeys(
+        stableSidebarProjectGroups(discoveredProjectGroups, current).map(
+          (project) => project.key,
+        ),
+        sourceKey,
+        targetKey,
+        position,
+      ),
+    );
+  };
+  const previewProjectDrop = (
+    targetKey: string,
+    targetRow: HTMLElement,
+    clientY: number,
+  ) => {
+    if (!draggedProjectKey || draggedProjectKey === targetKey) return;
+    // Let the last slide settle so rows moving under a still pointer don't
+    // bounce the preview back and forth.
+    if (performance.now() < projectSlideUntil.current) return;
+    const keys = projectGroups.map((project) => project.key);
+    const sourceIndex = keys.indexOf(draggedProjectKey);
+    const targetIndex = keys.indexOf(targetKey);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    // Swap once the pointer crosses the target row's middle in the direction
+    // of travel. Tall, expanded projects then cannot flip the order back.
+    const rect = targetRow.getBoundingClientRect();
+    const middle = rect.top + rect.height / 2;
+    const position =
+      sourceIndex < targetIndex
+        ? clientY > middle
+          ? "after"
+          : undefined
+        : clientY < middle
+          ? "before"
+          : undefined;
+    if (!position) return;
+    captureProjectPositions();
+    setProjectDragOrder(
+      reorderSidebarProjectKeys(
+        stableSidebarProjectGroups(
+          discoveredProjectGroups,
+          projectDragOrder ?? projectOrder,
+        ).map((project) => project.key),
+        draggedProjectKey,
+        targetKey,
+        position,
+      ),
+    );
+  };
+  const commitProjectDrag = () => {
+    if (projectDragOrder) setProjectOrder(projectDragOrder);
+    setDraggedProjectKey(undefined);
+    setProjectDragOrder(undefined);
   };
   const finishProjectDrag = () => {
+    // A cancelled drag slides the projects back to their saved order.
+    if (projectDragOrder) captureProjectPositions();
     setDraggedProjectKey(undefined);
-    setProjectDropTarget(undefined);
+    setProjectDragOrder(undefined);
   };
   const toggleWorkspaceDirectory = (path: string, collapsed?: boolean) => {
     setExpandedWorkspaceDirectories((current) => {
@@ -2859,15 +2945,22 @@ export function WorkspaceSidebarContent({
                         {remoteCheckMessage}
                       </div>
                     ) : null}
-                    {ide?.sourceControl.error ? (
-                      <div className="gyro-sidebar-mini-copy is-error">
-                        {ide.sourceControl.error}
+                    {gitSetupMessage(ide?.sourceControl.readState) ? (
+                      <div className="gyro-sidebar-mini-copy" role="status">
+                        {gitSetupMessage(ide?.sourceControl.readState)}
                       </div>
-                    ) : null}
-                    {ide?.sourceControl.available === false &&
-                    !ide?.sourceControl.error ? (
-                      <div className="gyro-sidebar-mini-copy">
-                        Git is not ready for this workspace.
+                    ) : ide?.sourceControl.error ? (
+                      <div className="gyro-sidebar-mini-copy is-error" role="status">
+                        Couldn’t refresh Git status.
+                        {ide.sourceControl.stale ? " Showing last-known changes." : ""}
+                        <details>
+                          <summary>Details</summary>
+                          {ide.sourceControl.error}
+                        </details>
+                      </div>
+                    ) : ide?.sourceControl.available === false ? (
+                      <div className="gyro-sidebar-mini-copy" role="status">
+                        Git status is unavailable. Refresh to try again.
                       </div>
                     ) : null}
                   </div>
@@ -3021,7 +3114,7 @@ export function WorkspaceSidebarContent({
                     className="is-changes"
                     collapsed={collapsedScmGroups.has("changes")}
                     emptyCopy={
-                      ide?.sourceControl.available === false
+                      ide?.sourceControl.available !== true || ide.sourceControl.stale || ide.sourceControl.error
                         ? undefined
                         : stagedSourceControlFiles.length > 0
                           ? "Everything else is staged"
@@ -3869,7 +3962,20 @@ export function WorkspaceSidebarContent({
               })}
             />
           ) : (
-            <div className="gyro-sidebar-project-chat-list">
+            <div
+              className="gyro-sidebar-project-chat-list"
+              onDragOver={(event) => {
+                // Gaps between projects still accept the previewed order.
+                if (!draggedProjectKey) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event) => {
+                if (!draggedProjectKey) return;
+                event.preventDefault();
+                commitProjectDrag();
+              }}
+            >
               {pinnedSessions.length > 0 ? (
                 <>
                   <div className="gyro-sidebar-small-title">Pinned</div>
@@ -3922,50 +4028,28 @@ export function WorkspaceSidebarContent({
                     className={[
                       "gyro-sidebar-project-group",
                       draggedProjectKey === project.key ? "is-dragging" : "",
-                      projectDropTarget?.key === project.key
-                        ? `is-drop-${projectDropTarget.position}`
-                        : "",
                     ]
                       .filter(Boolean)
                       .join(" ")}
                     key={project.key}
-                    onDragOver={(event) => {
-                      if (
-                        !draggedProjectKey ||
-                        draggedProjectKey === project.key
-                      ) {
-                        return;
+                    ref={(element) => {
+                      if (element) {
+                        projectGroupElements.current.set(project.key, element);
+                      } else {
+                        projectGroupElements.current.delete(project.key);
                       }
+                    }}
+                    onDragOver={(event) => {
+                      if (!draggedProjectKey) return;
                       event.preventDefault();
                       event.dataTransfer.dropEffect = "move";
-                      const rect =
-                        event.currentTarget
-                          .querySelector<HTMLElement>(
-                            ".gyro-sidebar-project-row",
-                          )
-                          ?.getBoundingClientRect() ??
-                        event.currentTarget.getBoundingClientRect();
-                      setProjectDropTarget({
-                        key: project.key,
-                        position:
-                          event.clientY < rect.top + rect.height / 2
-                            ? "before"
-                            : "after",
-                      });
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const sourceKey =
-                        event.dataTransfer.getData("text/plain") ||
-                        draggedProjectKey;
-                      if (sourceKey && projectDropTarget) {
-                        moveProject(
-                          sourceKey,
-                          project.key,
-                          projectDropTarget.position,
-                        );
-                      }
-                      finishProjectDrag();
+                      previewProjectDrop(
+                        project.key,
+                        event.currentTarget.querySelector<HTMLElement>(
+                          ".gyro-sidebar-project-row",
+                        ) ?? event.currentTarget,
+                        event.clientY,
+                      );
                     }}
                   >
                     <SidebarProjectCard
@@ -4457,7 +4541,6 @@ export function SessionSidebarRow({
           ? "has-idle-time"
           : "",
         approvalCount > 0 ? "is-awaiting-approval" : "",
-        isAwaitingQuestion ? "is-awaiting-question" : "",
         isNested ? "is-nested" : "",
         isPinned ? "is-pinned" : "",
         isOpen ? "is-open" : "",
@@ -4529,8 +4612,8 @@ export function SessionSidebarRow({
           className={[
             "gyro-session-time",
             approvalCount > 0 ? "is-approval" : "",
-            isAwaitingQuestion ? "is-question" : "",
             !isAwaitingInput && isSending ? "is-working" : "",
+            isAwaitingQuestion ? "is-needs-input" : "",
             !isAwaitingInput && !isSending && isUnreadComplete
               ? "is-complete"
               : "",
@@ -4555,10 +4638,7 @@ export function SessionSidebarRow({
               <span className="gyro-sr-only">Awaiting approval</span>
             </>
           ) : isAwaitingQuestion ? (
-            <>
-              <MessageSquare aria-hidden="true" size={14} />
-              <span className="gyro-sr-only">Needs input</span>
-            </>
+            "Needs Input"
           ) : isSending ? (
             <CircleDashed aria-hidden="true" size={13} />
           ) : isUnreadComplete ? (
@@ -4662,6 +4742,24 @@ export type SidebarProjectGroupData = {
 
 export const SIDEBAR_PROJECT_ORDER_STORAGE_KEY =
   "gyro.sidebar-project-order-v1";
+
+/** How long projects take to slide into a new order. */
+const SIDEBAR_PROJECT_SLIDE_MS = 180;
+
+/** Move `sourceKey` next to `targetKey`, keeping every other project in place. */
+export function reorderSidebarProjectKeys(
+  keys: string[],
+  sourceKey: string,
+  targetKey: string,
+  position: "before" | "after",
+) {
+  if (sourceKey === targetKey) return keys;
+  const next = keys.filter((key) => key !== sourceKey);
+  const targetIndex = next.indexOf(targetKey);
+  if (targetIndex < 0) return keys;
+  next.splice(targetIndex + (position === "after" ? 1 : 0), 0, sourceKey);
+  return next;
+}
 
 export const SIDEBAR_PROJECT_COLLAPSE_STORAGE_KEY =
   "gyro.sidebar-project-collapse-v1";

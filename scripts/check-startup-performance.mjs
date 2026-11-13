@@ -36,6 +36,9 @@ const refresh = hook("refreshIdeSourceControl", "refreshWorkspaceBranches", {
   ideSourceControlRootRef: { current: undefined },
   ideSourceControlInFlightRef: { current: new Set() },
   ideSourceControlQueuedRef: { current: new Set() },
+  ideSourceControlPromiseRef: { current: new Map() },
+  workspacePreparationRunRef: { current: "startup-test" },
+  setWorkspacePreparation: () => {},
   dispatchWorkbench: (event) => events.push(event),
   invoke: (_command, args) =>
     new Promise((resolve, reject) => pending.push({ resolve, reject, args })),

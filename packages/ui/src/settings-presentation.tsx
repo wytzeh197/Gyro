@@ -7,17 +7,18 @@ import { remainingUsage } from "./usage-remaining";
 type IconComponent = LucideIcon;
 
 export function SettingsSection({
-  icon: Icon,
   title,
   description,
   children,
   dataTour,
+  actions,
 }: {
-  icon: IconComponent;
+  icon?: IconComponent;
   title: string;
   description?: string;
   children: ReactNode;
   dataTour?: string;
+  actions?: ReactNode;
 }) {
   return (
     <section
@@ -27,13 +28,12 @@ export function SettingsSection({
     >
       <header data-tour={dataTour}>
         <div>
-          <p className="gyro-settings-eyebrow">Settings</p>
-          <h1>
-            <Icon aria-hidden="true" size={18} />
-            {title}
-          </h1>
+          <h1>{title}</h1>
           {description ? <span>{description}</span> : null}
         </div>
+        {actions ? (
+          <div className="gyro-settings-header-actions">{actions}</div>
+        ) : null}
       </header>
       <div className="gyro-settings-section-body">{children}</div>
     </section>
@@ -122,14 +122,19 @@ export function UsageCard({
       : window.status === "warning" || (used !== undefined && used >= 80)
         ? "warning"
         : "normal";
-  const remaining = remainingUsage(window.usedPercent, window.status === "exhausted");
+  const remaining = remainingUsage(
+    window.usedPercent,
+    window.status === "exhausted",
+  );
   return (
     <article className={`gyro-usage-card is-${severity}`}>
       <header>
         <strong>{window.label}</strong>
         <span>
           {severity === "critical"
-            ? remaining.percent === 0 ? "No allowance left" : "Almost empty"
+            ? remaining.percent === 0
+              ? "No allowance left"
+              : "Almost empty"
             : severity === "warning"
               ? "Low allowance"
               : used === undefined
@@ -141,7 +146,11 @@ export function UsageCard({
         <div
           className="gyro-usage-wheel"
           role="progressbar"
-          aria-label={remaining.percent === undefined ? `${window.label}: level not reported` : `${window.label}: ${remaining.percentLabel} left`}
+          aria-label={
+            remaining.percent === undefined
+              ? `${window.label}: level not reported`
+              : `${window.label}: ${remaining.percentLabel} left`
+          }
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={remaining.percent}
@@ -167,7 +176,9 @@ export function UsageCard({
           role="progressbar"
           aria-valuemin={0}
           aria-valuemax={100}
-          {...(remaining.percent !== undefined ? { "aria-valuenow": remaining.percent } : {})}
+          {...(remaining.percent !== undefined
+            ? { "aria-valuenow": remaining.percent }
+            : {})}
         >
           {used !== undefined ? (
             <span
@@ -180,7 +191,9 @@ export function UsageCard({
       )}
       <div className="gyro-usage-card-meta">
         <strong>
-          {remaining.percent === undefined ? "Level not reported" : `${remaining.percentLabel} left`}
+          {remaining.percent === undefined
+            ? "Level not reported"
+            : `${remaining.percentLabel} left`}
         </strong>
         <span>
           {resetCaption ??

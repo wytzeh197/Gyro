@@ -98,8 +98,8 @@ pub struct CalendarSchedule {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutomationExecutionContext {
-    #[serde(default,skip_serializing_if="Option::is_none")]
-    pub workflow_binding:Option<crate::workflows::WorkflowAutomationBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_binding: Option<crate::workflows::WorkflowAutomationBinding>,
     #[serde(default)]
     pub calendar: Option<CalendarSchedule>,
     pub workspace_path: Option<String>,
@@ -249,9 +249,13 @@ impl AutomationStore {
     }
 
     pub fn create_automation(&self, draft: CreateAutomationRequest) -> Result<Automation> {
-        self.create_automation_with_id(draft,Uuid::new_v4())
+        self.create_automation_with_id(draft, Uuid::new_v4())
     }
-    fn create_automation_with_id(&self, draft: CreateAutomationRequest,id:Uuid) -> Result<Automation> {
+    fn create_automation_with_id(
+        &self,
+        draft: CreateAutomationRequest,
+        id: Uuid,
+    ) -> Result<Automation> {
         validate_workflow_automation(&draft)?;
         let title = draft.title.trim().to_string();
         let prompt = draft.prompt.trim().to_string();
@@ -301,9 +305,14 @@ impl AutomationStore {
     }
 
     pub fn edit_automation(&self, id: Uuid, draft: CreateAutomationRequest) -> Result<Automation> {
-        self.edit_automation_with_expected(id,draft,None)
+        self.edit_automation_with_expected(id, draft, None)
     }
-    fn edit_automation_with_expected(&self,id:Uuid,draft:CreateAutomationRequest,expected:Option<chrono::DateTime<Utc>>)->Result<Automation>{
+    fn edit_automation_with_expected(
+        &self,
+        id: Uuid,
+        draft: CreateAutomationRequest,
+        expected: Option<chrono::DateTime<Utc>>,
+    ) -> Result<Automation> {
         validate_workflow_automation(&draft)?;
         let transaction = rusqlite::Transaction::new_unchecked(
             &self.conn,
@@ -312,8 +321,18 @@ impl AutomationStore {
         let mut automation = self
             .get_automation(id)?
             .ok_or_else(|| anyhow!("automation not found"))?;
-        if let Some(expected)=expected {if automation.updated_at!=expected{return Err(anyhow!("workflow schedule changed; reload before adopting setup"));}}
-        if automation.execution.workflow_binding.is_some()&&draft.execution.workflow_binding.is_none(){return Err(anyhow!("Use workflow setup to update a workflow schedule; its binding cannot be replaced by a legacy prompt"));}
+        if let Some(expected) = expected {
+            if automation.updated_at != expected {
+                return Err(anyhow!(
+                    "workflow schedule changed; reload before adopting setup"
+                ));
+            }
+        }
+        if automation.execution.workflow_binding.is_some()
+            && draft.execution.workflow_binding.is_none()
+        {
+            return Err(anyhow!("Use workflow setup to update a workflow schedule; its binding cannot be replaced by a legacy prompt"));
+        }
         if automation.lease_owner.is_some() {
             return Err(anyhow!("wait for the active run before editing"));
         }
@@ -1067,9 +1086,19 @@ fn row_to_automation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Automation> {
     let created_at: String = row.get(19)?;
     let updated_at: String = row.get(20)?;
     let execution_context: String = row.get(21)?;
-    let execution:AutomationExecutionContext=serde_json::from_str(&execution_context).map_err(parse_error)?;
-    if let Some(workflow)=&execution.workflow_binding {
-        workflow.binding.validate(&workflow.definition).map_err(|error|rusqlite::Error::FromSqlConversionFailure(21,rusqlite::types::Type::Text,error.into()))?;
+    let execution: AutomationExecutionContext =
+        serde_json::from_str(&execution_context).map_err(parse_error)?;
+    if let Some(workflow) = &execution.workflow_binding {
+        workflow
+            .binding
+            .validate(&workflow.definition)
+            .map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    21,
+                    rusqlite::types::Type::Text,
+                    error.into(),
+                )
+            })?;
     }
 
     Ok(Automation {
@@ -1323,7 +1352,7 @@ mod tests {
                 stop_condition: Some("Stop after green twice".into()),
                 next_run_at: None,
                 execution: AutomationExecutionContext {
-                workflow_binding: None,
+                    workflow_binding: None,
                     calendar: None,
                     workspace_path: Some("/tmp/Gyro".into()),
                     provider_id: Some("openai".into()),
@@ -2156,6 +2185,6 @@ mod tests {
     }
 }
 
-#[path="automations/workflows.rs"]
+#[path = "automations/workflows.rs"]
 mod workflow_support;
 use workflow_support::validate_workflow_automation;

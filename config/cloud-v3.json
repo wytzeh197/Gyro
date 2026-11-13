@@ -1,0 +1,10 @@
+{
+  "enabled": false,
+  "contractVersion": "3.0.0",
+  "policyVersion": "2026-11-07-v2",
+  "environment": "unconfigured",
+  "apiOrigin": null,
+  "authProject": null,
+  "authPublishableKey": null,
+  "productionIsolationVerified": false
+}

@@ -35,6 +35,7 @@ mod capability_output_budget;
 mod capability_workspace_helpers;
 mod claude_usage_cli;
 mod cloud_connection;
+mod cloud_v3;
 mod code_mode;
 #[cfg(debug_assertions)]
 mod code_mode_smoke;
@@ -80,7 +81,6 @@ mod workspace_context_capability;
 mod workspace_roots;
 mod workspace_search;
 mod workspace_tree_order;
-
 #[cfg(all(debug_assertions, feature = "native-browser-events-smoke"))]
 mod browser_frontend_smoke;
 #[cfg(debug_assertions)]
@@ -90,6 +90,7 @@ mod commit_suggestion;
 mod delegated_agents;
 mod desktop_notifications;
 mod dictation_access;
+mod features;
 #[cfg(test)]
 mod gyro_cloud;
 mod launch_integrity;
@@ -97,7 +98,6 @@ mod lsp_capability;
 #[cfg(debug_assertions)]
 mod lsp_smoke;
 mod memory_capability;
-mod features;
 mod menu_bar;
 mod provider_context;
 mod provider_timeline;
@@ -110,6 +110,8 @@ mod task_suggestions;
 mod terminal_capability;
 mod terminal_process;
 mod terminal_wait;
+#[cfg(test)]
+mod tests;
 mod web_fetch_capability;
 mod workspace_capability_list;
 mod workspace_capability_read;
@@ -118,5 +120,3 @@ mod workspace_mutations;
 mod workspace_open_capability;
 mod workspace_path_capability;
 mod workspace_path_history;
-#[cfg(test)]
-mod tests;

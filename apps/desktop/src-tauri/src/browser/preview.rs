@@ -293,7 +293,7 @@ pub(crate) async fn capture_session_browser_preview(
             .get_snapshot(&session_id)?
             .ok_or_else(|| "this chat has no open browser".to_string())?;
         let before =
-            session_browser::call_agent(&app, &session_id, "status", serde_json::json!({}))?;
+            session_browser::observe_agent(&app, &session_id, "status", serde_json::json!({}))?;
         let screenshot = session_browser::capture_session_browser_png(&app, &session_id)?;
         let after =
             session_browser::call_agent(&app, &session_id, "status", serde_json::json!({}))?;
@@ -339,6 +339,11 @@ pub(crate) async fn capture_session_browser_preview(
             .map(str::to_string);
         capture.resource_id = Some(owned.resource_id);
         capture.viewport = Some(viewport);
+        // An image can remain useful even if animated content changed. Only
+        // offer element hit testing when the captured document stayed stable.
+        capture.annotation_state = (before.get("annotationState") == after.get("annotationState"))
+            .then(|| after.get("annotationState").cloned())
+            .flatten();
         Ok(capture)
     })
     .await
@@ -543,6 +548,7 @@ pub(crate) fn persist_browser_preview_capture(
         title: None,
         resource_id: None,
         viewport: None,
+        annotation_state: None,
     })
 }
 

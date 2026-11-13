@@ -32,6 +32,17 @@ assert.equal(
   "pdf",
 );
 assert.equal(linkedChatFile("", "/tmp/chart.png").kind, "image");
+// Markdown escapes spaces in local image paths; the file on disk does not.
+assert.equal(
+  linkedChatFile(
+    "Runs",
+    "/Users/me/Library/Application%20Support/Gyro/browser-captures/runs.png",
+    true,
+  ).target,
+  "/Users/me/Library/Application Support/Gyro/browser-captures/runs.png",
+);
+assert.equal(linkedChatFile("", "/tmp/100%.png").target, "/tmp/100%.png");
+assert.equal(linkedChatFile("bad", "/tmp/a%0A.png"), undefined);
 assert.equal(
   linkedChatFile("Source", "/tmp/code.ts:12").target,
   "/tmp/code.ts",

@@ -10,12 +10,17 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const origin = process.env.GYRO_TEST_ORIGIN || "http://127.0.0.1:1420";
 const activityComposer = process.argv.includes("--activity-composer");
-const fixture = activityComposer
-  ? "goal-composer-fixture.html"
-  : "canvas-fixture.html";
-const guard = activityComposer
-  ? "scripts/check-activity-composer-browser.mjs"
-  : "scripts/check-canvas-preview-browser.mjs";
+const themeParity = process.argv.includes("--theme-parity");
+const fixture = themeParity
+  ? "capture.html"
+  : activityComposer
+    ? "goal-composer-fixture.html"
+    : "canvas-fixture.html";
+const guard = themeParity
+  ? "scripts/check-theme-parity-browser.mjs"
+  : activityComposer
+    ? "scripts/check-activity-composer-browser.mjs"
+    : "scripts/check-canvas-preview-browser.mjs";
 
 const browserPath = [
   process.env.GYRO_CAPTURE_BROWSER,

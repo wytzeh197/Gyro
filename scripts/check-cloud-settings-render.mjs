@@ -176,12 +176,9 @@ check(
   () => {
     const html = render(ui.CloudSettings);
     const content = text(html);
-    assert.match(content, /Gyro Cloud is not available in this build/);
-    assert.match(content, /No Cloud connection established/);
-    assert.match(
-      content,
-      /complete local app remains available without a Cloud account/,
-    );
+    assert.match(content, /Cloud is not enabled in this build/);
+    assert.match(content, /local workspace and your own providers remain available/);
+    assert.match(html, /aria-label="Automatically back up chats"[^>]*disabled/);
     assert.doesNotMatch(
       html,
       /role="progressbar"|Managed assistance task|Selected sync &amp; backups/,
@@ -328,6 +325,12 @@ check("a scheduled plan stays distinct from the current plan", () => {
 });
 
 check("unconfigured, test and production prices cannot be confused", () => {
+  for (const status of ["unavailable", "signed-out", "offline"]) {
+    const rights = render(ui.BillingSettings, { snapshot: { status } });
+    for (const label of ["Read Cloud terms", "Download contract information", "Withdraw from contract", "Privacy and deletion", "Contact support"]) {
+      assert.ok(!isDisabled(button(rights, label)), `${status}: ${label} must remain available`);
+    }
+  }
   const unavailable = text(render(ui.BillingSettings));
   assert.doesNotMatch(unavailable, /€15|€49|\$10|\$40|VAT included/);
   const staging = text(
@@ -952,18 +955,14 @@ check("app-only release shows Account and Cloud while blocking hosted controls",
   assert.doesNotMatch(accountHtml, /type="email"|Send sign-in email|Restore purchases/);
   const navigation = render(ui.AccountNavigation, { account: { snapshot, actions }, selected: "account", onSelect: forbidden });
   assert.match(text(navigation), /Coming soon/);
-  assert.ok(button(navigation, "Cloud"));
+  assert.equal(buttons(navigation).length, 1, "Account footer has one entry; Cloud lives in the settings navigation");
   const billingHtml = render(ui.BillingSettings, { snapshot, actions });
-  const labelled = (html, name) => {
-    const result = buttons(html).find((candidate) => candidate.attributes.includes(`aria-label="${name}"`));
-    assert.ok(result, `Expected button: ${name}`);
-    return result;
-  };
-  assert.ok(isDisabled(labelled(billingHtml, "Subscribe to Gyro Plus, coming soon")));
-  assert.ok(isDisabled(labelled(billingHtml, "Subscribe to Gyro Premium, coming soon")));
+  assert.match(text(billingHtml), /Billing is not available in this build/);
+  assert.doesNotMatch(billingHtml, /Subscribe to|Change at next renewal/);
   assert.doesNotMatch(billingHtml, /type="email"|Send sign-in email|Manage billing/);
   const cloudHtml = render(ui.CloudSettings, { snapshot, actions });
-  assert.ok(isDisabled(labelled(cloudHtml, "Enable Cloud, coming soon")));
+  assert.match(text(cloudHtml), /Cloud is not enabled in this build/);
+  assert.match(cloudHtml, /aria-label="Automatically back up chats"[^>]*disabled/);
   assert.doesNotMatch(cloudHtml, /type="email"|Send sign-in email|fixture-paid-period/);
   assert.equal(actionCalls, 0);
 });

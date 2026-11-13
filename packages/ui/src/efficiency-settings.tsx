@@ -61,7 +61,7 @@ export function EfficiencySettings({
   return (
     <>
     {error ? <p className="gyro-settings-page-status" role="alert">{error}</p> : null}
-    <SettingsGroup id="context-handling" label="Context handling">
+    <SettingsGroup id="context-handling" label="Context">
       <SettingsRow
         label="Context efficiency"
         detail="Enable validated context improvements. Experiments remain separate; model and reasoning choices stay yours."
@@ -75,7 +75,8 @@ export function EfficiencySettings({
       </SettingsRow>
       {contextControls}
     </SettingsGroup>
-    <SettingsGroup id="parallel-agents" label="Parallel agents">
+    <SettingsGroup id="parallel-agents" label="Run behavior">
+      {advancedControls}
       <SettingsRow
         label="Parallel agents"
         detail="Allow additional agents when useful. Explicit task instructions still take precedence."
@@ -89,7 +90,7 @@ export function EfficiencySettings({
       </SettingsRow>
     </SettingsGroup>
     {reminders}
-    <SettingsGroup id="advanced-efficiency" label="Advanced efficiency">
+    <SettingsGroup id="advanced-efficiency" label="Experiments" collapsible>
       <SettingsRow
         label="Efficiency experiments"
         detail="Try structured output, task checkpoints, retrieval and progress detection. Live task-cost evaluation is pending; experiments are off by default."
@@ -164,6 +165,8 @@ export function EfficiencySettings({
             </SettingsRow>
           ))
         : null}
+    </SettingsGroup>
+    <SettingsGroup id="advanced-context" label="Advanced context settings" collapsible>
       <SettingsRow
         label="Task profile"
         detail="Applies only when no reasoning effort is selected and the model supports it."
@@ -293,7 +296,6 @@ export function EfficiencySettings({
         </form>
       </details>
       {error ? <p role="alert">{error}</p> : null}
-      {advancedControls}
     </SettingsGroup>
 
     </>

@@ -132,7 +132,7 @@ function expect(condition, message) {
   before.preferences.missionSessionIds = ["active-mission"];
   const after = workbenchReducer(before, { type: "reset-ui-preferences" });
   expect(
-    after.preferences.mainColor === "#0874df",
+    after.preferences.mainColor === "#ffffff",
     "UI reset restores the default palette.",
   );
   expect(
@@ -245,8 +245,7 @@ expect(
     testedGridLayout.focusedPaneId === "pane:two",
   "Chat grid state should add, focus, and reorder four stable project slots.",
 );
-// A chat from another project must never enter this project's grid, and the
-// refused insert must not displace the pane the user already had open.
+// The layout owns placement; the pane keeps its original workspace.
 const crossProjectGrid = chatGridReducer(chatGridState, {
   type: "select-pane",
   projectKey: "/Users/example/Gyro",
@@ -254,8 +253,11 @@ const crossProjectGrid = chatGridReducer(chatGridState, {
   mode: "replace",
 });
 expect(
-  crossProjectGrid === chatGridState,
-  "Chat grid must refuse a pane whose chat belongs to another project.",
+  crossProjectGrid.layouts["/Users/example/Gyro"].slots.some(
+    (pane) => pane?.sessionId === "stranger" &&
+      pane.workspacePath === "/private/tmp/gyro-alpha45-smoke",
+  ),
+  "Cross-folder panes retain their workspace inside the destination layout.",
 );
 // Dropping a sidebar chat already open in the split moves its existing pane,
 // preserving the React key, draft ownership and every other conversation.
@@ -878,7 +880,7 @@ expect(
     appSource.includes("const displayedChatLayout =") &&
     appSource.includes("createChatProjectLayout(currentChatProjectKey)") &&
     appSource.includes("!activeChatLayout?.slots.some(Boolean)") &&
-    appSource.includes("projectKey !== displayedChatLayout.projectKey") &&
+    appSource.includes("projectKey: displayedChatLayout.projectKey") &&
     !surfaceSource.includes("Drag another chat here") &&
     !surfaceSource.includes("Choose one of four chat slots") &&
     styleSource.includes(".gyro-chat-grid-empty") &&
@@ -889,7 +891,7 @@ expect(
     !styleSource.includes(
       ".gyro-chat-grid.is-count-4,\n.gyro-chat-grid.is-dragging",
     ),
-  "Chat dragging should cover empty and occupied canvases, preserve the live surface, switch projects when needed, and reveal adaptive placement tiles.",
+  "Chat dragging should cover empty and occupied canvases, preserve the live surface and cross-folder workspace ownership, and reveal adaptive placement tiles.",
 );
 expect(
   chatGridDropSource.includes("function nearestChatGridDropZone") &&
@@ -1055,13 +1057,14 @@ expect(
   "Settings should share one sidebar-colored titlebar across the whole window.",
 );
 expect(
-  cssRules(styleSource, ".gyro-chat-message-queue").some(
-    (rule) =>
-      rule.includes("max-width: var(--gyro-chat-content-width)") &&
-      rule.includes("width: min(var(--gyro-chat-content-width), 100%)"),
+  cssRules(styleSource, ".gyro-composer-input > .gyro-chat-message-queue").some(
+    (rule) => rule.includes("grid-row: 1"),
   ) &&
+    cssRules(styleSource, ".gyro-chat-message-queue").some((rule) =>
+      rule.includes("border-bottom: 1px solid var(--gyro-chat-hairline)"),
+    ) &&
     styleSource.includes("--gyro-chat-content-width: 760px"),
-  "The chat message queue should match the composer width.",
+  "The chat message queue should sit at the top of the composer text box, divided from the typing area.",
 );
 // Run-rail token ownership is checked by check-chat-styles; rendered theme values are captured by test:chat-render.
 
@@ -1564,8 +1567,8 @@ expect(
     runSource.includes("INFLIGHT_STATUSES.includes(status.status)") &&
     surfaceSource.includes('runModel.phase.name === "interrupted"') &&
     surfaceSource.includes('onProviderStatusAction?.("retry-send"') &&
-    tauriSource.includes("flags.contains_key(&session_id)") &&
-    tauriSource.includes("a provider turn is already running for this session"),
+    readRepoFile("apps/desktop/src-tauri/src/provider_run_cleanup.rs").includes("flags.contains_key(session_id)") &&
+    readRepoFile("apps/desktop/src-tauri/src/provider_run_cleanup.rs").includes("a provider turn is already running for this session"),
   "Chat recovery should retry the same turn, recover interrupted runs, and reject concurrent provider sends.",
 );
 expect(
@@ -2171,9 +2174,9 @@ expect(
   "Chat environment is the rail's resting state, so a fresh chat shows it.",
 );
 expect(
-  initialState.preferences.mainColor === "#0874df" &&
-    initialState.preferences.secondaryColor === "#8b6fcb",
-  "Appearance colors should start with Gyro's blue and violet palette.",
+  initialState.preferences.mainColor === "#ffffff" &&
+    initialState.preferences.secondaryColor === "#ffffff",
+  "Appearance colors should start with the theme-adaptive monochrome palette.",
 );
 expect(
   initialState.preferences.dailyPaceWarning === true,
@@ -2300,6 +2303,13 @@ for (const theme of ["dark", "light"]) {
     "#888888",
   ]) {
     const palette = appearanceAccentProperties(color, color, theme);
+    if (color === "#ffffff") {
+      for (const role of ["--gyro-accent", "--gyro-accent-strong",
+        "--gyro-secondary-accent", "--gyro-secondary-accent-strong", "--gyro-primary-bg"]) {
+        expect(palette[role] === (theme === "dark" ? "#ffffff" : "#000000"),
+          `Default ${role} must be white in dark mode and black in light mode.`);
+      }
+    }
     for (const surface of theme === "dark"
       ? ["#181818", "#383c41"]
       : ["#ffffff", "#e7ebf0"]) {
@@ -4692,7 +4702,9 @@ expect(
     sourceIncludes(tauriSource, "run_kimi_acp_chat") &&
     sourceIncludes(tauriSource, "spawn_provider_chat_heartbeat") &&
     sourceIncludes(surfaceSource, "function ChatMessageQueue") &&
-    sourceIncludes(surfaceSource, "gyro-chat-message-queue-wrap") &&
+    sourceIncludes(surfaceSource, "{queue}\n        {/* A question or plan decision") &&
+    sourceIncludes(surfaceSource, "gyro-chat-message-queue-more") &&
+    !sourceIncludes(surfaceSource, "gyro-chat-message-queue-wrap") &&
     sourceIncludes(surfaceSource, 'aria-label="Queued message options"') &&
     sourceIncludes(surfaceSource, "gyro-chat-message-queue-menu") &&
     sourceIncludes(surfaceSource, "<span>Edit</span>") &&
@@ -4712,11 +4724,7 @@ expect(
     ) &&
     !sourceIncludes(appSource, '"Steering next"') &&
     styleSource.includes(".gyro-chat-message-queue-menu") &&
-    styleSource.includes(".gyro-chat-message-queue-wrap") &&
-    cssRules(
-      styleSource,
-      ".gyro-chat-message-queue-wrap > .gyro-chat-message-queue",
-    ).some((rule) => rule.includes("width: 90%")) &&
+    !styleSource.includes(".gyro-chat-message-queue-wrap") &&
     styleSource.includes(
       ".gyro-chat-message-queue:has(.gyro-chat-message-queue-menu)",
     ) &&
@@ -4822,7 +4830,7 @@ expect(
     ) &&
     runViewSource.includes("renderSay(step.text)") &&
     sourceIncludes(surfaceSource, "stripHiddenSessionTitleMarker") &&
-    sourceIncludes(surfaceSource, "isHiddenSessionTitleActivity") &&
+    sourceIncludes(surfaceSource, "isHiddenControlMarkerActivity") &&
     sourceIncludes(surfaceSource, "const shouldUsePlainText") &&
     sourceIncludes(
       surfaceSource,
@@ -5700,15 +5708,18 @@ expect(
 
 expect(
   surfaceSource.includes('"has-environment-popover"') &&
-    styleSource.includes("--gyro-environment-popover-gutter: 342px") &&
-    styleSource.includes(
-      "> .gyro-chat-thread-canvas\n    > .gyro-chat-composer-dock",
+    cssRules(styleSource, ".gyro-chat-environment-popover").some(
+      (rule) => rule.includes("position: absolute") && rule.includes("z-index: 100"),
     ) &&
-    styleSource.includes(
-      "width: calc(100% - var(--gyro-environment-popover-gutter))",
-    ) &&
-    styleSource.includes("width: auto;"),
-  "The temporary Environment popover should reserve the conversation canvas so the transcript and composer shift left without narrowing the top bar.",
+    !styleSource.includes("--gyro-environment-popover-gutter") &&
+    cssRules(
+      styleSource,
+      ".gyro-chat-surface.is-thread.has-environment-popover:not(.has-companion, .is-tiled)",
+    ).some((rule) => rule.includes("grid-template-columns:") && rule.includes("column-gap:")) &&
+    !styleSource.includes(
+      ".gyro-sidebar-ai-chat\n  .gyro-chat-surface.is-thread.has-environment-popover",
+    ),
+  "The Environment panel should reserve space beside a single chat, overlay split panes, and add no sidebar strip.",
 );
 
 expect(
@@ -6793,7 +6804,7 @@ expect(
       '"Council needs a folder before starting a chat."',
     ) &&
     sourceIncludes(appSource, 'case "select-no-folder":') &&
-    sourceIncludes(appSource, 'startNewChat({ workspacePath: "" })') &&
+    sourceIncludes(appSource, 'startNewChat({ workspacePath: "", carryDraftFrom: activeDraftKey })') &&
     sourceIncludes(appSource, "void openWorkspace();") &&
     sourceIncludes(
       appSource,
@@ -7692,7 +7703,7 @@ expect(
     compactAction.includes('invoke<SessionEvent>("append_user_message"') &&
     compactAction.includes('message: "/compact"') &&
     compactAction.indexOf('"append_user_message"') <
-      compactAction.indexOf('"compact_provider_chat"') &&
+      compactAction.indexOf('"compact_provider_chat"', compactAction.indexOf("const compactionTurnId")) &&
     compactAction.includes(
       "sessionId: compactSessionId, turnId: compactionTurnId",
     ) &&
@@ -7797,25 +7808,27 @@ expect(
     tauriSource.includes('object.insert("questions".into(), questions);') &&
     planModeSource.includes("export function questionsFromPayload") &&
     planModeSource.includes("export function formatChatAnswers") &&
-    planModeSource.includes("No, and tell Gyro what to do instead") &&
+    planModeSource.includes("export function useComposerAnswer") &&
+    planModeSource.includes("answerRef.current = handler") &&
     planModeSource.includes("gyro-question-option-badge") &&
     planModeSource.includes("export function ChatQuestionAnswers") &&
     chatTurnSource.includes("<ChatQuestionAnswers {...questionAnswers} />") &&
     planModeStyleSource.includes(".gyro-question-dock") &&
+    // The card opens out of the text box and a typed answer goes to it; the
+    // bar underneath drops only the add-context and approval controls.
+    sourceIncludes(surfaceSource, "{overlay}\n        {attachments.length > 0 ? (") &&
+    sourceIncludes(surfaceSource, "answerRef={composerAnswerRef}") &&
+    sourceIncludes(surfaceSource, "const answerCard = composerAnswerRef.current;") &&
+    styleSource.includes(".gyro-composer-input > .gyro-question-dock {") &&
     styleSource.includes(
-      ".gyro-composer-shell.has-overlay > :not(.gyro-question-dock)",
+      "> :is(.gyro-composer-control-context, .gyro-composer-control-approval) {",
     ) &&
-    styleSource.includes(
-      ".gyro-composer-shell.has-overlay > .gyro-composer-bar",
-    ) &&
-    styleSource.includes(
-      ".gyro-composer-shell.has-overlay > .gyro-composer-bar > *",
-    ) &&
-    styleSource.includes("> .gyro-composer-control-effort {") &&
+    !styleSource.includes(".gyro-composer-shell.has-overlay > .gyro-composer-bar > *") &&
+    !styleSource.includes(".gyro-question-dock-other") &&
     !styleSource.includes(".gyro-plan-decision-card") &&
     !styleSource.includes(".gyro-plan-artifact-card") &&
     styleSource.includes(".gyro-plan-rail.is-document"),
-  "Plan mode should ask one question at a time, land the plan as a card in the transcript, keep the model and effort chips above the implement decision, and put that decision where the composer sits.",
+  "Plan mode should ask one question at a time, land the plan as a card in the transcript, and open questions and the implement decision out of the composer's text box, which takes a typed answer.",
 );
 
 expect(
@@ -7838,17 +7851,15 @@ expect(
     styleSource.includes("backdrop-filter: none") &&
     sourceIncludes(
       surfaceSource,
-      ") : !hasGoalCaption &&sessionGoal?.text ? (",
+      ') : chatMode !== "plan" && !hasGoalCaption && sessionGoal?.text ? (',
     ) &&
     sourceIncludes(appSource, "const changeChatMode = useCallback") &&
-    // A goal is the outcome and a mode is how the turn runs, so neither
-    // cancels the other. Planning toward a stated outcome is the case the
-    // goal exists for; entering Plan mode used to delete it and then hide it
-    // from the very turn that needed it.
+    // Switching the next-message selection preserves the saved goal, but
+    // Plan requests must not also start or continue Goal mode.
     !sourceIncludes(appSource, "shouldClearGoal") &&
-    !sourceIncludes(
+    sourceIncludes(
       appSource,
-      'const turnGoal = turnMode === "plan" ? undefined : requestedTurnGoal',
+      'const turnGoal = turnMode === "plan" ? undefined : (',
     ) &&
     sourceIncludes(appSource, 'overrideContext && "goal" in overrideContext') &&
     sourceIncludes(appSource, "const turnMode =") &&
@@ -7859,7 +7870,7 @@ expect(
       appSource,
       "submittedChatMode={persistedSessionContext.mode}",
     ),
-  "Completion-only edit summaries, composer overlays, light context pills, and goal/mode independence should remain enforced.",
+  "Completion-only edit summaries, composer overlays, light context pills, and exclusive Goal/Plan selection should remain enforced.",
 );
 expect(
   styleSource.includes(
@@ -8385,8 +8396,8 @@ expect(
     styleSource.includes("--gyro-app: #141415") &&
     styleSource.includes("--gyro-pane: #141415") &&
     styleSource.includes("--gyro-hero-composer: var(--gyro-surface)") &&
-    styleSource.includes("--gyro-user-main: #0874df") &&
-    styleSource.includes("--gyro-user-secondary: #8b6fcb") &&
+    styleSource.includes("--gyro-user-main: #ffffff") &&
+    styleSource.includes("--gyro-user-secondary: #ffffff") &&
     styleSource.includes("var(--gyro-user-main) 86%") &&
     styleSource.includes(':root[data-theme="light"]') &&
     styleSource.includes("--gyro-app: #fbfbfb") &&
@@ -9187,10 +9198,7 @@ expect(
     surfaceSource.includes("function LiveFileChanges") &&
     surfaceSource.includes("gyro-composer-live-changes") &&
     surfaceSource.indexOf('className="gyro-composer-live-changes"') <
-      surfaceSource.indexOf("{queuedMessages.length > 0 ?") &&
-    cssRules(styleSource, ".gyro-chat-message-queue-wrap").every(
-      (rule) => !/margin-bottom:\s*-/.test(rule),
-    ) &&
+      surfaceSource.indexOf("queuedMessages.length > 0 ? (\n                <ChatMessageQueue") &&
     cssRules(styleSource, ".gyro-chat-message-queue").every(
       (rule) => !/margin-bottom:\s*-/.test(rule),
     ) &&

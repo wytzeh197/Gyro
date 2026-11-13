@@ -70,7 +70,10 @@ impl SessionStore {
             "stop the review and reload before deleting it"
         );
         let active_fixes:u64=self.conn.query_row("select count(*) from review_fix_intents where review_id=?1 and status in ('queued','dispatching','sent')",[id.to_string()],|row|row.get(0))?;
-        ensure!(active_fixes==0,"Cancel the review's active fix requests before deleting it");
+        ensure!(
+            active_fixes == 0,
+            "Cancel the review's active fix requests before deleting it"
+        );
         let mut removable = run.snapshot_id;
         if let Some(snapshot) = removable {
             let mut statement = self.conn.prepare("select run_json from code_reviews")?;
@@ -107,7 +110,7 @@ impl SessionStore {
         model_id: &str,
         previous: Option<Uuid>,
         origin: crate::UsageOrigin,
-        workflow_run_id:Option<Uuid>,
+        workflow_run_id: Option<Uuid>,
     ) -> Result<CodeReviewRun> {
         let transaction = rusqlite::Transaction::new_unchecked(
             &self.conn,
@@ -130,7 +133,8 @@ impl SessionStore {
                     && run.provider_id == provider_id
                     && run.model_id == model_id
                     && run.previous_review_id == previous
-                    && run.origin == origin &&run.workflow_run_id==workflow_run_id,
+                    && run.origin == origin
+                    && run.workflow_run_id == workflow_run_id,
                 "review operation ID belongs to a different request"
             );
             run
@@ -140,8 +144,14 @@ impl SessionStore {
                 active < 100,
                 "review queue is full; wait or cancel a queued review"
             );
-            let run =
-                self.create_code_review_origin(snapshot, provider_id, model_id, previous, origin,workflow_run_id)?;
+            let run = self.create_code_review_origin(
+                snapshot,
+                provider_id,
+                model_id,
+                previous,
+                origin,
+                workflow_run_id,
+            )?;
             transaction.execute(
                 "insert into code_review_operations(operation_id,review_id) values (?1,?2)",
                 params![operation.to_string(), run.id.to_string()],
@@ -245,16 +255,49 @@ impl SessionStore {
         model_id: &str,
         previous_review_id: Option<Uuid>,
         origin: crate::UsageOrigin,
-        workflow_run_id:Option<Uuid>,
+        workflow_run_id: Option<Uuid>,
     ) -> Result<CodeReviewRun> {
         ensure!(
             previous_review_id == snapshot.previous_review_id,
             "previous review must be frozen in the captured input"
         );
-        if let Some(id)=workflow_run_id {
-            let workflow=self.workflow_run(id)?.ok_or_else(||anyhow::anyhow!("owning workflow is unavailable"))?;
-            ensure!(workflow.status==crate::workflows::WorkflowRunStatus::Running&&workflow.origin==origin&&workflow.root_key==snapshot.root_key,"review workflow ownership changed");
-            ensure!(workflow.definition.steps.iter().enumerate().any(|(index,step)|match step{crate::workflows::WorkflowStep::Review{role,source_step,..}if workflow.steps[index].status==crate::workflows::WorkflowStepStatus::Pending=>workflow.steps.iter().find(|step|&step.step_id==source_step).and_then(|step|step.session_id)==Some(snapshot.source_session_id)&&workflow.binding.roles.get(role).is_some_and(|binding|binding.provider_id==provider_id&&binding.model_id==model_id),_=>false}),"review does not match a pending workflow step and role");
+        if let Some(id) = workflow_run_id {
+            let workflow = self
+                .workflow_run(id)?
+                .ok_or_else(|| anyhow::anyhow!("owning workflow is unavailable"))?;
+            ensure!(
+                workflow.status == crate::workflows::WorkflowRunStatus::Running
+                    && workflow.origin == origin
+                    && workflow.root_key == snapshot.root_key,
+                "review workflow ownership changed"
+            );
+            ensure!(
+                workflow
+                    .definition
+                    .steps
+                    .iter()
+                    .enumerate()
+                    .any(|(index, step)| match step {
+                        crate::workflows::WorkflowStep::Review {
+                            role, source_step, ..
+                        } if workflow.steps[index].status
+                            == crate::workflows::WorkflowStepStatus::Pending =>
+                            workflow
+                                .steps
+                                .iter()
+                                .find(|step| &step.step_id == source_step)
+                                .and_then(|step| step.session_id)
+                                == Some(snapshot.source_session_id)
+                                && workflow
+                                    .binding
+                                    .roles
+                                    .get(role)
+                                    .is_some_and(|binding| binding.provider_id == provider_id
+                                        && binding.model_id == model_id),
+                        _ => false,
+                    }),
+                "review does not match a pending workflow step and role"
+            );
         }
         ensure!(
             self.get_session(snapshot.source_session_id)?.is_some(),
@@ -323,7 +366,11 @@ impl SessionStore {
         })?;
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
     }
-    pub(super) fn save_code_review_revision(&self, run: &CodeReviewRun, expected: u64) -> Result<()> {
+    pub(super) fn save_code_review_revision(
+        &self,
+        run: &CodeReviewRun,
+        expected: u64,
+    ) -> Result<()> {
         let encoded = serde_json::to_string(run)?;
         ensure!(
             encoded.len() <= 512 * 1024,

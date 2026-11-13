@@ -7,7 +7,6 @@ import {
 } from "react";
 import {
   ArrowRight,
-  ArrowUp,
   ArrowUpRight,
   Check,
   ChevronDown,
@@ -20,10 +19,13 @@ import {
   MessageCircleQuestion,
   Minus,
   PanelRight,
-  PenLine,
   X,
 } from "lucide-react";
-import { InlineMarkdown } from "./chat-question-popup";
+import {
+  InlineMarkdown,
+  useComposerAnswer,
+  type ComposerAnswerRef,
+} from "./chat-question-popup";
 import type { ChatQuestionAnswer } from "./chat-questions";
 import type { SessionPlan, SessionPlanItemStatus } from "./types";
 
@@ -40,24 +42,37 @@ export function planDisplayTitle(plan: SessionPlan) {
 }
 
 /**
- * The decision after a plan: it takes the composer's place like a question, so
- * approving or redirecting never needs the plan panel open. Typing a change
- * keeps Plan mode and sends it as feedback on the draft.
+ * The decision after a plan: it opens out of the composer like a question, so
+ * approving or redirecting never needs the plan panel open. Typing a change in
+ * the composer keeps Plan mode and sends it as feedback on the draft.
  */
 export function ImplementPlanDock({
+  answerRef,
   isPending,
   onDecision,
   onRevise,
   plan,
 }: {
+  answerRef?: ComposerAnswerRef;
   isPending: boolean;
   onDecision: (decision: "approve" | "reject") => void;
   onRevise: (message: string) => void;
   plan: SessionPlan;
 }) {
-  const [feedback, setFeedback] = useState("");
   const rootRef = useRef<HTMLFormElement>(null);
   const steps = plan.items.length;
+  useComposerAnswer(
+    answerRef,
+    rootRef,
+    (text) => {
+      if (!isPending) onRevise(text);
+    },
+    (index) => {
+      if (index !== 0 || isPending) return false;
+      onDecision("approve");
+      return true;
+    },
+  );
 
   useEffect(() => {
     const active = document.activeElement;
@@ -66,18 +81,12 @@ export function ImplementPlanDock({
   }, []);
 
   const onKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
-    const inField = event.target instanceof HTMLInputElement;
     if (event.key === "Escape") {
       event.stopPropagation();
-      if (inField && feedback) {
-        setFeedback("");
-        rootRef.current?.focus();
-        return;
-      }
       if (!isPending) onDecision("reject");
       return;
     }
-    if (inField || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (
       !isPending &&
       (event.key === "1" ||
@@ -93,13 +102,7 @@ export function ImplementPlanDock({
       aria-label="Implement this plan?"
       className={`gyro-question-dock is-plan-decision${isPending ? " is-pending" : ""}`}
       onKeyDown={onKeyDown}
-      onSubmit={(event) => {
-        event.preventDefault();
-        const message = feedback.trim();
-        if (!message || isPending) return;
-        onRevise(message);
-        setFeedback("");
-      }}
+      onSubmit={(event) => event.preventDefault()}
       ref={rootRef}
       tabIndex={-1}
     >
@@ -143,34 +146,6 @@ export function ImplementPlanDock({
             size={14}
           />
         </button>
-      </div>
-      <div className="gyro-question-dock-other">
-        <PenLine aria-hidden="true" size={13} />
-        <input
-          aria-label="Tell Gyro what to change in the plan"
-          disabled={isPending}
-          onChange={(event) => setFeedback(event.target.value)}
-          placeholder="Keep planning… tell Gyro what to change"
-          value={feedback}
-        />
-        {feedback.trim() ? (
-          <button
-            aria-label="Send plan feedback"
-            className="gyro-question-dock-send"
-            type="submit"
-          >
-            <ArrowUp size={13} />
-          </button>
-        ) : (
-          <button
-            className="gyro-question-dock-skip"
-            disabled={isPending}
-            onClick={() => onDecision("reject")}
-            type="button"
-          >
-            Keep planning
-          </button>
-        )}
       </div>
       {isPending ? (
         <span aria-hidden="true" className="gyro-question-dock-progress" />

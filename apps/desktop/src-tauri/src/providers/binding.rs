@@ -47,12 +47,28 @@ pub(crate) fn bind_provider_chat_request(
     paths: &GyroPaths,
 ) -> Result<(), String> {
     let role_store = gyro_core::SessionStore::open(paths.clone()).map_err(to_string)?;
-    let root=session_execution_workspace(session,paths)?;
-    if let Some(id)=request.workflow_run_id {
-        let ceiling=role_store.validate_workflow_dispatch(id,session.id,&request.provider_id,request.model_id.as_deref(),&root.to_string_lossy()).map_err(to_string)?;
-        request.full_access=false;request.require_command_approval=true;request.require_file_edit_approval=true;
-        if ceiling==gyro_core::workflows::WorkflowAccess::ReadOnly {request.mode=super::chat_types::ChatMode::Plan;}
-    } else if role_store.active_workflow_for_root(&root.to_string_lossy()).map_err(to_string)?.is_some() {
+    let root = session_execution_workspace(session, paths)?;
+    if let Some(id) = request.workflow_run_id {
+        let ceiling = role_store
+            .validate_workflow_dispatch(
+                id,
+                session.id,
+                &request.provider_id,
+                request.model_id.as_deref(),
+                &root.to_string_lossy(),
+            )
+            .map_err(to_string)?;
+        request.full_access = false;
+        request.require_command_approval = true;
+        request.require_file_edit_approval = true;
+        if ceiling == gyro_core::workflows::WorkflowAccess::ReadOnly {
+            request.mode = super::chat_types::ChatMode::Plan;
+        }
+    } else if role_store
+        .active_workflow_for_root(&root.to_string_lossy())
+        .map_err(to_string)?
+        .is_some()
+    {
         return Err("A workflow owns this checkout. Stop it before starting another mutating chat, or use another worktree.".into());
     }
     if role_store

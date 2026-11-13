@@ -134,9 +134,18 @@ pub(crate) struct WorkspacePreparationRequest {
     pub(crate) run_id: String,
 }
 
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum GitPreparationCheck {
+    Status,
+    Branches,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WorkspacePreparationError {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) git_check: Option<GitPreparationCheck>,
     pub(crate) phase: String,
     pub(crate) message: String,
 }
@@ -144,6 +153,8 @@ pub(crate) struct WorkspacePreparationError {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WorkspacePreparationProgress {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) git_state: Option<gyro_core::workspace_check::GitReadState>,
     pub(crate) run_id: String,
     pub(crate) workspace_path: String,
     pub(crate) phase: Option<String>,

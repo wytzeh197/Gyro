@@ -1553,21 +1553,19 @@ assert.ok(
 // already flip at `:root[data-theme="light"]`. One hardcoded colour and the rail
 // grows a ghost line in one theme, which is how `styles.css` accumulated its 280
 // light overrides. The rule is only real if it is checked.
+// The rail declarations moved to chat.css; styles.css retains only the old
+// banner comments. Inspect the shipped declarations, not that empty marker span.
 const stylesheet = readRepoSource(
-  new URL("../packages/ui/src/styles.css", import.meta.url),
+  new URL("../packages/ui/src/chat.css", import.meta.url),
   "utf8",
 );
-const railStart = stylesheet.indexOf("Run rail (gyro-run-*)");
-assert.ok(railStart > 0, "the run rail block should be findable in styles.css");
-// The marker sits inside the banner comment, and comments explain the rule by
-// quoting the selector. Start past the banner, then drop the remaining comments,
-// so only declarations are measured.
-const bannerEnd = stylesheet.indexOf("*/", railStart);
-const railEnd = stylesheet.indexOf("End run rail (gyro-run-*)", bannerEnd);
-assert.ok(railEnd > bannerEnd, "the run rail end marker should be findable");
+const railStart = stylesheet.indexOf("\n.gyro-run {");
+const railEnd = stylesheet.indexOf("\n.gyro-chat-prompt h1 {", railStart);
+assert.ok(railStart >= 0 && railEnd > railStart, "the shipped run rail must be present");
 const rail = stylesheet
-  .slice(bannerEnd, railEnd)
+  .slice(railStart, railEnd)
   .replace(/\/\*[\s\S]*?\*\//g, "");
+assert.ok(rail.includes(".gyro-run-row-icon {"), "inspect actual rail declarations");
 
 const literalColour = rail.match(
   /(?<![\w-])(#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\))/gi,
@@ -2092,9 +2090,11 @@ const rerun = buildRunModel(
   ],
   { isRunning: true },
 );
-assert.equal(rerun.steps.length, 1, "a rerun still folds into one row");
+assert.equal(rerun.steps.length, 2, "a rerun cannot reopen the completed row");
+assert.equal(rerun.steps[0].item.status, "done");
+assert.equal(rerun.steps[1].item.status, "running");
 assert.equal(
-  rerun.steps[0].at,
+  rerun.steps[1].at,
   "2026-11-02T10:05:00.000Z",
   "a rerun should restart the row's clock",
 );

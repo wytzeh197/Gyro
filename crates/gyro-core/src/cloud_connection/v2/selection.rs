@@ -125,7 +125,7 @@ impl Report {
 }
 
 /// Read a real saved report by UUID; the renderer supplies no report text or filesystem path.
-pub(super) fn load_report(
+pub fn load_report(
     base: &std::path::Path,
     session: Uuid,
     report_id: Uuid,
@@ -141,7 +141,7 @@ pub(super) fn load_report(
         return Err(Error::Input);
     }
     let mut bytes = Vec::new();
-    std::fs::File::open(path)
+    { use std::os::unix::fs::OpenOptionsExt; std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path) }
         .map_err(|_| Error::Input)?
         .take(512 * 1024 + 1)
         .read_to_end(&mut bytes)
@@ -305,6 +305,23 @@ pub fn validate_attachment(name: &str, bytes: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 impl Chat {
+    /// A v3 selection must fit as a complete supported archive. Stream the local
+    /// transcript and reject an oversized selection instead of loading its tail
+    /// or silently truncating a long chat. Legacy v2 behavior is unchanged.
+    pub fn from_bounded_session(store:&SessionStore,id:Uuid,namespace:Uuid,max_bytes:usize)->Result<Self,Error>{
+        let session=store.get_session(id).map_err(|_|Error::Storage)?.ok_or(Error::Input)?;
+        let mut messages=Vec::new();let mut bytes=0usize;let mut failure=None;
+        let stopped=store.visit_transcript_events(id,|event|{
+            let role=match event.kind{SessionEventKind::UserMessage=>Role::User,SessionEventKind::AssistantMessage=>Role::Assistant,_=>return true};
+            let text=match safe_text(&event.message){Ok(text)=>text,Err(error)=>{failure=Some(error);return false;}};
+            let message=Message{id:portable_message_id(namespace,event.id),role,text,created_at:event.created_at};
+            let length=match serde_json::to_vec(&message){Ok(b)=>b.len(),Err(_)=>{failure=Some(Error::Input);return false;}};
+            bytes=bytes.saturating_add(length+1);if bytes>max_bytes||messages.len()>=100000{failure=Some(Error::Limited);return false;}messages.push(message);true
+        }).map_err(|_|Error::Storage)?;
+        if let Some(error)=failure{return Err(error);}if stopped{return Err(Error::Limited);}
+        let value=Self{format:"gyro-portable-chat-v1".into(),title:safe_text(&session.title)?,created_at:session.created_at,project_id:None,messages};
+        if value.bytes()?.len()>max_bytes{return Err(Error::Limited);}Ok(value)
+    }
     pub fn from_session(
         store: &SessionStore,
         id: Uuid,

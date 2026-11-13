@@ -80,6 +80,23 @@ impl WorkflowCheckoutLease {
         }
     }
 }
+#[cfg(unix)]
+impl Drop for WorkflowCheckoutLease {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+        // A concurrent fork can briefly inherit the open file description before
+        // exec closes CLOEXEC descriptors. Closing only our copy would retain
+        // ownership until that child execs/exits; release our lease explicitly.
+        loop {
+            if unsafe { libc::flock(self._file.as_raw_fd(), libc::LOCK_UN) } == 0 {
+                break;
+            }
+            if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+                break;
+            }
+        }
+    }
+}
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -119,6 +136,35 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+    }
+    #[test]
+    fn dropping_checkout_lease_releases_ownership_with_a_duplicated_descriptor() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("private"));
+        for exclusive in [false, true] {
+            let lease = WorkflowCheckoutLease::try_acquire(&paths, temp.path(), exclusive)
+                .unwrap()
+                .unwrap();
+            // dup, like fork, shares the flock-owning open file description.
+            let inherited = lease._file.try_clone().unwrap();
+            assert!(
+                WorkflowCheckoutLease::try_acquire(&paths, temp.path(), true)
+                    .unwrap()
+                    .is_none()
+            );
+            drop(lease);
+            let next = WorkflowCheckoutLease::try_acquire(&paths, temp.path(), true)
+                .unwrap()
+                .expect("a child descriptor must not extend the owner's lease");
+            drop(inherited);
+            assert!(
+                WorkflowCheckoutLease::try_acquire(&paths, temp.path(), false)
+                    .unwrap()
+                    .is_none(),
+                "closing the old descriptor must not release the new lease"
+            );
+            drop(next);
+        }
     }
     #[test]
     #[ignore = "subprocess-only checkout lease probe"]

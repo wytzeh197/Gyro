@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import { sessionQuestionCounts } from "../packages/ui/src/session-approvals.ts";
 import {
   formatChatAnswers,
+  isChatQuestionDismissed,
+  setChatQuestionDismissed,
+  subscribeChatQuestionDismissals,
   latestChatQuestions,
   parseChatAnswers,
   parseChatQuestions,
@@ -158,6 +161,41 @@ assert.deepEqual(parseChatAnswers(answered), {
 });
 assert.equal(parseChatAnswers("Which release? Stable"), undefined);
 console.log("Chat question detection checks passed.");
+
+// A skipped request survives remounts/reloads without suppressing a new request.
+const storedDismissals = new Map();
+const storageEvents = new Map();
+globalThis.window = {
+  localStorage: {
+    getItem: (key) => storedDismissals.get(key) ?? null,
+    setItem: (key, value) => storedDismissals.set(key, value),
+    removeItem: (key) => storedDismissals.delete(key),
+  },
+  addEventListener: (name, listener) => storageEvents.set(name, listener),
+  removeEventListener: (name) => storageEvents.delete(name),
+};
+let dismissalUpdates = 0;
+const unsubscribeDismissals = subscribeChatQuestionDismissals(() => dismissalUpdates++);
+setChatQuestionDismissed("chat-a", "request-1", true);
+assert.equal(isChatQuestionDismissed("chat-a", "request-1"), true);
+assert.equal(isChatQuestionDismissed("chat-b", "request-1"), false);
+assert.equal(isChatQuestionDismissed("chat-a", "request-2"), false);
+assert.equal(dismissalUpdates, 1);
+const reloadedQuestions = await import("../packages/ui/src/chat-questions.ts?dismissal-reload");
+assert.equal(reloadedQuestions.isChatQuestionDismissed("chat-a", "request-1"), true, "fresh module restores persisted Skip");
+setChatQuestionDismissed("chat-a", "request-1", false);
+assert.equal(isChatQuestionDismissed("chat-a", "request-1"), false, "explicit reveal clears dismissal");
+setChatQuestionDismissed("chat-a", "request-1", true);
+const [storedKey] = storedDismissals.keys();
+storedDismissals.delete(storedKey);
+storageEvents.get("storage")({ key: storedKey });
+assert.equal(isChatQuestionDismissed("chat-a", "request-1"), false, "another window can explicitly reopen");
+window.localStorage.setItem = () => { throw Error("storage blocked"); };
+setChatQuestionDismissed("chat-a", "blocked-storage", true);
+assert.equal(isChatQuestionDismissed("chat-a", "blocked-storage"), true, "storage failure still retains Skip during this run");
+unsubscribeDismissals();
+delete globalThis.window;
+console.log("Question dismissal checks passed: persistence, request/session isolation, explicit reveal, synchronization, and storage fallback.");
 
 const sidebarSessions = [
   { id: "question-chat" },

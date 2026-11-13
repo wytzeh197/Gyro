@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { BrowserFeedback, BrowserPreviewCapture } from "./types";
-
-type BrowserScreenshotAction = "capture" | "reveal" | "feedback";
+import type {
+  BrowserFeedback,
+  BrowserPreviewCapture,
+  BrowserElementAnnotation,
+  BrowserScreenshotHandler,
+} from "./types";
+import { BrowserAnnotationControls } from "./browser-annotation-controls";
 
 type BrowserCaptureViewProps = {
   capture: BrowserPreviewCapture;
@@ -11,10 +15,7 @@ type BrowserCaptureViewProps = {
   deviceLabel: string;
   isChat: boolean;
   onBackToLive: () => void;
-  onScreenshot?: (
-    action?: BrowserScreenshotAction,
-    feedback?: BrowserFeedback,
-  ) => void | boolean | Promise<boolean | void>;
+  onScreenshot?: BrowserScreenshotHandler;
 };
 
 export function BrowserCaptureView(props: BrowserCaptureViewProps) {
@@ -46,6 +47,30 @@ function CaptureImageView({
   >("loading");
   const imageReady = imageStatus === "ready";
   const [feedbackMode, setFeedbackMode] = useState(false);
+  const [elementMode, setElementMode] = useState(false);
+  const [element, setElement] = useState<BrowserElementAnnotation>();
+  const [elementError, setElementError] = useState("");
+  const [elementBusy, setElementBusy] = useState(false);
+  const elementRequest = useRef(0);
+  useEffect(
+    () => () => {
+      elementRequest.current++;
+    },
+    [],
+  );
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        elementRequest.current++;
+        setElementMode(false);
+        setElement(undefined);
+        setElementError("");
+        setElementBusy(false);
+      }
+    };
+    window.addEventListener("keydown", escape);
+    return () => window.removeEventListener("keydown", escape);
+  }, []);
   const [feedbackComment, setFeedbackComment] = useState("");
   const [feedbackRegion, setFeedbackRegion] = useState<
     BrowserFeedback["region"] | null
@@ -163,6 +188,40 @@ function CaptureImageView({
             </div>
           </div>
         ) : null}
+        {elementMode && !element && imageReady ? (
+          <div
+            className="gyro-browser-feedback-layer"
+            aria-label="Select an element of the browser capture"
+            onPointerDown={async (event) => {
+              const point = capturePoint(event);
+              if (!point || elementBusy || !onScreenshot) return;
+              const request = ++elementRequest.current;
+              setElementBusy(true);
+              setElementError("");
+              try {
+                const result = await onScreenshot("annotate-point", {
+                  captureId: capture.filename,
+                  comment: "",
+                  annotationToken: crypto.randomUUID(),
+                  region: { ...point, width: 0, height: 0 },
+                });
+                if (request !== elementRequest.current) return;
+                if (result && typeof result === "object" && result.annotation)
+                  setElement(result.annotation);
+                else
+                  setElementError(
+                    (result && typeof result === "object" && result.error) ||
+                      "Element unavailable. Return to Live and select it again.",
+                  );
+              } catch (error) {
+                if (request === elementRequest.current)
+                  setElementError(String(error));
+              } finally {
+                if (request === elementRequest.current) setElementBusy(false);
+              }
+            }}
+          />
+        ) : null}
         {feedbackMode && imageReady ? (
           <div
             aria-label="Select an area of the browser capture"
@@ -208,6 +267,37 @@ function CaptureImageView({
           </div>
         ) : null}
       </div>
+      {element && onScreenshot ? (
+        <BrowserAnnotationControls
+          initialAnnotation={element}
+          onAction={onScreenshot}
+          onClose={() => {
+            setElement(undefined);
+            setElementMode(false);
+          }}
+        />
+      ) : elementMode ? (
+        <div className="gyro-browser-feedback-form">
+          <span role={elementError ? "alert" : "status"}>
+            {elementError ||
+              (elementBusy
+                ? "Reading element…"
+                : "Select an element in this capture, or return to Live for keyboard selection.")}
+          </span>
+          <div>
+            <button
+              type="button"
+              onClick={() => {
+                elementRequest.current++;
+                setElementMode(false);
+                setElementBusy(false);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
       {feedbackMode && imageReady ? (
         <form
           className="gyro-browser-feedback-form"
@@ -265,10 +355,35 @@ function CaptureImageView({
           </button>
           {isChat && onScreenshot ? (
             <button
+              type="button"
+              aria-pressed={elementMode}
+              disabled={!imageReady || !capture.annotationState}
+              title={
+                capture.annotationState
+                  ? "Select an element from this capture"
+                  : "Return to Live to select an element"
+              }
+              onClick={() => {
+                elementRequest.current++;
+                setElementMode((current) => !current);
+                setElement(undefined);
+                setElementError("");
+                setElementBusy(false);
+                setFeedbackMode(false);
+              }}
+            >
+              Select element
+            </button>
+          ) : null}
+          {isChat && onScreenshot ? (
+            <button
               aria-pressed={feedbackMode}
               disabled={!imageReady}
               onClick={() => {
                 if (!imageReady) return;
+                setElementMode(false);
+                setElement(undefined);
+                elementRequest.current++;
                 setFeedbackMode((current) => !current);
                 setFeedbackRegion(null);
                 setFeedbackComment("");

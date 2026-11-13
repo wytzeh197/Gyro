@@ -42,7 +42,7 @@ pub struct ProviderChatRequest {
     pub project_memory: Option<crate::project_memory::PreparedMemoryContext>,
     /// Only a native coordinator can bind a request to a running journal step.
     #[serde(skip)]
-    pub workflow_run_id:Option<uuid::Uuid>,
+    pub workflow_run_id: Option<uuid::Uuid>,
 }
 
 /// Why Gyro itself, rather than the person in the chat, sent a request.

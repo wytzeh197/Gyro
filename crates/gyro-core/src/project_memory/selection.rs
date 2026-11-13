@@ -5,12 +5,12 @@ use crate::mutations::content_hash;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-pub const SELECTION_VERSION: u32 = 1;
+pub const SELECTION_VERSION: u32 = 2;
 pub const MAX_CONTEXT_BYTES: usize = 6 * 1024;
 pub const DEFAULT_CONTEXT_BYTES: usize = 768;
 pub const MAX_CONTEXT_ENTRIES: usize = 8;
 pub const MEMORY_CONTEXT_HEADER: &str =
-    "Project memory (possibly dated reference; current request and permissions prevail):\n";
+    "Project memory (may be stale; current request/permissions prevail):\n";
 
 #[derive(Clone, Copy, Debug)]
 pub struct MemoryBudget {
@@ -72,10 +72,78 @@ pub struct MemorySelection {
 
 fn terms(text: &str) -> BTreeSet<String> {
     const STOP: &[&str] = &[
-        "the", "and", "that", "this", "with", "from", "for", "are", "was", "were", "have", "has",
-        "had", "can", "could", "would", "should", "will", "how", "what", "when", "where", "which",
-        "please", "use", "using", "our", "you", "your", "into", "then", "than", "want", "need",
-        "make", "get", "its", "some", "about", "also", "project", "memory", "work", "help",
+        "the",
+        "and",
+        "that",
+        "this",
+        "with",
+        "from",
+        "for",
+        "are",
+        "was",
+        "were",
+        "have",
+        "has",
+        "had",
+        "can",
+        "could",
+        "would",
+        "should",
+        "will",
+        "how",
+        "what",
+        "when",
+        "where",
+        "which",
+        "please",
+        "use",
+        "using",
+        "our",
+        "you",
+        "your",
+        "into",
+        "then",
+        "than",
+        "want",
+        "need",
+        "make",
+        "get",
+        "its",
+        "some",
+        "about",
+        "also",
+        "project",
+        "work",
+        "help",
+        // Task verbs and conversational filler should not retrieve unrelated facts.
+        // Domain terms such as "memory" remain searchable.
+        "fix",
+        "change",
+        "add",
+        "remove",
+        "show",
+        "find",
+        "check",
+        "look",
+        "read",
+        "run",
+        "implement",
+        "update",
+        "optimize",
+        "improve",
+        "explain",
+        "tell",
+        "does",
+        "why",
+        "now",
+        "one",
+        "just",
+        "little",
+        "more",
+        "less",
+        "still",
+        "again",
+        "continue",
     ];
     text.chars()
         .take(4096)
@@ -84,6 +152,23 @@ fn terms(text: &str) -> BTreeSet<String> {
         .filter(|s| s.chars().count() >= 3)
         .map(str::to_lowercase)
         .filter(|word| !STOP.contains(&word.as_str()))
+        .take(128)
+        .collect()
+}
+
+/// Exact snake_case or mixedCase symbols are strong anchors even in a longer
+/// question. Keep the same bounded tokenization as lexical retrieval.
+fn identifiers(text: &str) -> BTreeSet<String> {
+    text.chars()
+        .take(4096)
+        .collect::<String>()
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|token| {
+            token.contains('_')
+                || (token.chars().any(char::is_lowercase)
+                    && token.chars().skip(1).any(char::is_uppercase))
+        })
+        .map(str::to_lowercase)
         .take(128)
         .collect()
 }
@@ -100,6 +185,7 @@ fn path_matches(scope: &str, path: &str) -> bool {
 
 pub fn select_memory(document: &MemoryDocument<'_>, query: MemoryQuery<'_>) -> MemorySelection {
     let request_terms = terms(query.request);
+    let request_identifiers = identifiers(query.request);
     let entry_terms: Vec<_> = document
         .entries
         .iter()
@@ -132,7 +218,14 @@ pub fn select_memory(document: &MemoryDocument<'_>, query: MemoryQuery<'_>) -> M
             .intersection(&entry_terms[index])
             .map(|term| 1000 / frequencies.get(term).copied().unwrap_or(1))
             .sum();
-        if !explicit && !path && relevance == 0 {
+        let matched_terms = request_terms.intersection(&entry_terms[index]).count();
+        let exact_identifier = !request_identifiers.is_disjoint(&entry_terms[index]);
+        // A single shared word ("chat", "tokens") in a longer request is weak
+        // evidence. Require corroboration, except for focused one-topic queries
+        // and exact code symbols. Explicit IDs and scoped paths always qualify.
+        let relevant = matched_terms >= 2
+            || (matched_terms == 1 && (request_terms.len() == 1 || exact_identifier));
+        if !explicit && !path && !relevant {
             continue;
         }
         let unresolved =
@@ -161,7 +254,7 @@ pub fn select_memory(document: &MemoryDocument<'_>, query: MemoryQuery<'_>) -> M
         .filter(|c| !c.is_control())
         .take(80)
         .collect::<String>();
-    let mut bytes = MEMORY_CONTEXT_HEADER.len() + root_label.len() + 3;
+    let mut bytes = MEMORY_CONTEXT_HEADER.len() + root_label.len() + 2;
     for (tier, _, _, index) in ranked {
         let entry = &document.entries[index];
         let normalized = entry.text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -240,7 +333,12 @@ pub struct PreparedMemoryContext {
 
 impl PreparedMemoryContext {
     pub fn render(&self, resumed: bool) -> (String, MemoryReceipt) {
-        if resumed && self.previous.is_none() {
+        if resumed
+            && self
+                .previous
+                .as_ref()
+                .is_none_or(|receipt| receipt.selection_version != SELECTION_VERSION)
+        {
             let reset = "Project memory update: disregard all earlier project memory.\n";
             let mut fresh = self.clone();
             fresh.max_bytes = fresh.max_bytes.saturating_sub(reset.len());
@@ -312,7 +410,7 @@ impl PreparedMemoryContext {
                         + body.len()
                         + root_body.len()
                         + root.root_label.len()
-                        + 3
+                        + 2
                         + line.len()
                         > self.max_bytes
                 {

@@ -114,7 +114,7 @@ export function useChatTranscriptScroll({
         !hasMoreBefore ||
         isLoadingEarlier ||
         !onLoadEarlier ||
-        !isLoadedTranscriptClipped(transcript)
+        (!manual && !isLoadedTranscriptClipped(transcript))
       ) {
         return;
       }

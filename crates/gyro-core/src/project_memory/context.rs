@@ -168,12 +168,19 @@ pub fn prepare_memory_context(
             // invalidated and resent just because the next message is
             // "continue" or an unrelated question. Keep a bounded receipt of
             // retained context; a fresh dispatch never sends these entries.
-            if let Some(previous_root) = prepared.previous.as_ref().and_then(|previous| {
-                previous
-                    .roots
-                    .iter()
-                    .find(|previous| previous.root_id == root.id)
-            }) {
+            if let Some(previous_root) = prepared
+                .previous
+                .as_ref()
+                .filter(|previous| {
+                    previous.selection_version == super::selection::SELECTION_VERSION
+                })
+                .and_then(|previous| {
+                    previous
+                        .roots
+                        .iter()
+                        .find(|previous| previous.root_id == root.id)
+                })
+            {
                 for receipt in &previous_root.entries {
                     if selection.entries.len() >= budget.max_entries {
                         break;
@@ -214,10 +221,10 @@ pub fn prepare_memory_context(
                 .entries
                 .iter()
                 .filter(|entry| entry.reason != "retained")
-                .map(|entry| entry.text.len() + entry.key.len() + 7)
+                .map(|entry| entry.text.len() + entry.key.len() + 6)
                 .sum::<usize>()
                 + selection.root_label.len()
-                + 3,
+                + 2,
         );
         prepared.selections.push(selection);
     }

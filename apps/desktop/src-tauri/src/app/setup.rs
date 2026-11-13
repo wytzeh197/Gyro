@@ -123,6 +123,7 @@ pub fn run() {
         .manage(ProviderCancellationManager::default())
         .manage(local_check::LocalCheckManager::default())
         .manage(cloud_connection::CloudConnection::default())
+        .manage(crate::cloud_v3::CloudV3::default())
         .manage(project_import::ProjectImportManager::default())
         .manage(delegated_agents::AgentManager::default())
         .manage(ProviderApprovalManager::default())
@@ -228,6 +229,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             crate::local_check::prepare_local_check,
             crate::cloud_connection::cloud_connection_view,
+            crate::cloud_v3::cloud_v3,
             crate::cloud_connection::cloud_connection_action,
             crate::cloud_connection::cloud_connection_begin,
             crate::cloud_connection::cloud_connection_verify,
@@ -293,6 +295,7 @@ pub fn run() {
             crate::session_browser::session_browser_history,
             crate::session_browser::session_browser_close,
             crate::session_browser::session_browser_snapshot,
+            crate::session_browser::session_browser_annotate,
             crate::automation::commands::complete_automation_lease,
             crate::terminal::panes::close_terminal_pane,
             crate::automation::commands::create_automation,

@@ -58,7 +58,12 @@ pub(crate) fn repo_root_and_prefix(
     workspace: &Path,
     _deadline: Instant,
 ) -> anyhow::Result<Option<(PathBuf, String)>> {
-    Ok(discover_repository(workspace))
+    if !gyro_core::workspace_check::git_repository_present(workspace)? {
+        return Ok(None);
+    }
+    discover_repository(workspace)
+        .map(Some)
+        .ok_or_else(|| anyhow::anyhow!("Git repository metadata is invalid or unreadable"))
 }
 
 const GIT_DISCOVERY_DEPTH: usize = 64;

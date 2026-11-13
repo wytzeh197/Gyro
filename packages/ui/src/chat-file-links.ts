@@ -174,6 +174,17 @@ export function linkedChatFile(
       return undefined;
     }
   }
+  // Markdown escapes spaces in paths (`Application%20Support`); the file on
+  // disk has the decoded name.
+  if (local && /%[0-9a-f]{2}/i.test(target)) {
+    try {
+      const decoded = decodeURIComponent(target);
+      if (/[\u0000-\u001f]/.test(decoded)) return undefined;
+      target = decoded;
+    } catch {
+      // A literal `%` that is not an escape stays as written.
+    }
+  }
   if (local) target = target.replace(/:\d+(?::\d+)?$/, "");
   const filename = (local ? target : path).split("/").pop() || "File";
   const name = label.trim() || filename;

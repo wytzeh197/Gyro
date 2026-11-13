@@ -214,6 +214,9 @@ fn exchange(purpose: InternalRequestPurpose, malicious: bool, ollama: bool) {
                     Err(error) => panic!("{error}"),
                 }
             };
+            // Accepted sockets can inherit nonblocking mode on macOS.
+            // Keep accept bounded above, then use a timed blocking request read.
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();

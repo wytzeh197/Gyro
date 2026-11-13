@@ -369,6 +369,118 @@ assert.equal(
 );
 console.log("stray title marker regressions passed");
 
+// Marker-only provider notes must disappear from the rendered transcript,
+// including its generic-event fallback. Run-model checks alone miss that path.
+{
+  const { createRequire } = await import("node:module");
+  const { resolve } = await import("node:path");
+  const requireUi = createRequire(resolve("packages/ui/package.json"));
+  const requireDesktop = createRequire(resolve("apps/desktop/package.json"));
+  const { build } = createRequire(requireDesktop.resolve("vite"))("esbuild");
+  const { createElement } = requireUi("react");
+  const { renderToStaticMarkup } = requireUi("react-dom/server");
+  const compiled = await build({
+    stdin: {
+      contents: 'export { ChatThread } from "./packages/ui/src/surfaces.tsx";',
+      resolveDir: process.cwd(),
+      loader: "tsx",
+    },
+    bundle: true,
+    write: false,
+    format: "cjs",
+    platform: "node",
+    jsx: "automatic",
+    external: ["react", "react-dom", "lucide-react"],
+    loader: {
+      ".css": "empty",
+      ".svg": "dataurl",
+      ".png": "dataurl",
+      ".woff2": "dataurl",
+    },
+    logLevel: "silent",
+  });
+  const componentModule = { exports: {} };
+  new Function("require", "module", "exports", compiled.outputFiles[0].text)(
+    requireUi,
+    componentModule,
+    componentModule.exports,
+  );
+  const marker =
+    'GYRO_PLAN_UPDATE: {"action":"update-items","items":[{"id":"keyboard","status":"complete"}]}';
+  const render = (note, isSending = true, turnId = "turn-1") =>
+    renderToStaticMarkup(
+      createElement(componentModule.exports.ChatThread, {
+        events: [user, { ...commentaryNote("plan-note", note), turnId }],
+        isSending,
+        draft: "",
+        onDraftChange: () => {},
+        onSend: () => {},
+      }),
+    );
+  const originalError = console.error;
+  console.error = (...args) => {
+    if (!String(args[0]).startsWith("Warning: useLayoutEffect does nothing"))
+      originalError(...args);
+  };
+  try {
+    for (const isSending of [true, false]) {
+      for (const turnId of ["turn-1", null]) {
+        const html = render(marker, isSending, turnId);
+        assert.ok(!html.includes("GYRO_PLAN_UPDATE"), "hide plan-only notes");
+        assert.ok(!html.includes("system event"), "no empty fallback row");
+      }
+    }
+    for (const isSending of [true, false]) {
+      for (const turnId of ["turn-1", null]) {
+        const memoryEvent = event(
+          "memory-context",
+          "system-event",
+          "Project memory context prepared",
+          {
+            kind: "project-memory-context",
+            schema: "gyro.project-memory-context.v1",
+            receipt: { selectedEntryCount: 2 },
+          },
+          turnId,
+        );
+        const snapshot = JSON.stringify(memoryEvent);
+        const renderMemory = (item) =>
+          renderToStaticMarkup(
+            createElement(componentModule.exports.ChatThread, {
+              events: [user, item],
+              isSending,
+              draft: "",
+              onDraftChange: () => {},
+              onSend: () => {},
+            }),
+          );
+        const html = renderMemory(memoryEvent);
+        assert.ok(!html.includes("Project memory context prepared"));
+        assert.ok(!html.includes("system event"), "no memory receipt row");
+        assert.equal(JSON.stringify(memoryEvent), snapshot, "retain the receipt");
+        assert.ok(
+          renderMemory({ ...memoryEvent, payload: {} }).includes(
+            "Project memory context prepared",
+          ),
+          "filter the internal event kind, not arbitrary message text",
+        );
+      }
+    }
+    const mixed = render(marker + "\nThe keyboard settings are finished.");
+    assert.ok(mixed.includes("The keyboard settings are finished."));
+    assert.ok(!mixed.includes("GYRO_PLAN_UPDATE"));
+    const literal = "The GYRO_PLAN_UPDATE: marker updates the checklist.";
+    assert.ok(render(literal).includes(literal), "keep ordinary marker mentions");
+    assert.ok(
+      !render("GYRO_SESSION_TITLE: Update settings").includes("GYRO_SESSION_TITLE"),
+      "title-only notes remain hidden",
+    );
+  } finally {
+    console.error = originalError;
+  }
+}
+console.log("hidden plan marker transcript render regressions passed");
+
 // Tool calls are written immediately while provider commentary can be batched
 // until completion. Disk order and provider-only counters are not chronology.
 {

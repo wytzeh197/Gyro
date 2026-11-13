@@ -20,9 +20,18 @@ export function MemoryContextReceipts({
         .map((item) => (
           <details key={`${item.turnId}:${item.providerId}`}>
             <summary>
-              {item.receipt.suppliedBytes
-                ? `${item.receipt.roots.reduce((count, root) => count + root.entries.length, 0)} entries · ~${item.receipt.estimatedTokens} tokens`
-                : `${item.receipt.reusedCount} entries reused · no added memory text`}
+              {(() => {
+                const count = item.receipt.suppliedBytes
+                  ? item.receipt.roots.reduce(
+                      (count, root) => count + root.entries.length,
+                      0,
+                    )
+                  : item.receipt.reusedCount;
+                const noun = count === 1 ? "entry" : "entries";
+                return item.receipt.suppliedBytes
+                  ? `${count} ${noun} · ~${item.receipt.estimatedTokens} tokens`
+                  : `${count} ${noun} reused · no added memory text`;
+              })()}
             </summary>
             <p>
               Prepared for this turn · {item.providerId}. This records supplied

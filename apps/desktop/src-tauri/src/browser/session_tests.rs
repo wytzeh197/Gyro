@@ -1,6 +1,153 @@
 use super::*;
 
 #[test]
+fn observation_waits_for_headers_agent_and_dom_but_not_images() {
+    for method in ["status", "readPage", "find"] {
+        let manager = SessionBrowserManager::default();
+        manager
+            .inner
+            .lock()
+            .unwrap()
+            .insert("chat".into(), browser_slot("chat", false));
+        let (resource, _) = manager.capture_resource("chat").unwrap();
+        manager
+            .reserve_navigation(&resource, Some("https://next.example/"))
+            .unwrap();
+        let mut probes = 0;
+        let mut reads = 0;
+        std::thread::scope(|threads| {
+            threads.spawn(|| {
+                std::thread::sleep(Duration::from_millis(30));
+                manager
+                    .commit_navigation(&resource, "https://next.example/")
+                    .unwrap();
+            });
+            let result = manager
+                .observe_document(
+                    "chat",
+                    method,
+                    serde_json::json!({"maxDepth":3}),
+                    |lease, snapshot, action, args| {
+                        lease.validate(&manager)?;
+                        assert_eq!(snapshot.url, "https://next.example/");
+                        assert!(
+                            snapshot.loading,
+                            "subresources are deliberately still loading"
+                        );
+                        if action == "status" {
+                            probes += 1;
+                            match probes {
+                                1 => Err("browser agent is not ready".into()),
+                                2 => Ok(serde_json::json!({"readyState":"loading"})),
+                                _ => Ok(serde_json::json!({"readyState":"interactive"})),
+                            }
+                        } else {
+                            reads += 1;
+                            assert_eq!(action, method);
+                            assert_eq!(args["maxDepth"], 3);
+                            Ok(serde_json::json!({"ok":true}))
+                        }
+                    },
+                )
+                .unwrap();
+            assert_eq!(probes, 3);
+            assert_eq!(reads, usize::from(method != "status"));
+            assert!(result.is_object());
+        });
+    }
+}
+
+#[test]
+fn observation_never_retries_actions_or_non_readiness_errors() {
+    let manager = SessionBrowserManager::default();
+    manager
+        .inner
+        .lock()
+        .unwrap()
+        .insert("chat".into(), browser_slot("chat", false));
+    let mut dispatched = 0;
+    let error = manager
+        .observe_document("chat", "click", Value::Null, |_, _, _, _| {
+            dispatched += 1;
+            Ok(Value::Null)
+        })
+        .unwrap_err();
+    assert!(error.contains("cannot dispatch"));
+    assert_eq!(dispatched, 0);
+    let error = manager
+        .observe_document("chat", "readPage", Value::Null, |_, _, _, _| {
+            dispatched += 1;
+            Err("browser agent call timed out".into())
+        })
+        .unwrap_err();
+    assert_eq!(error, "browser agent call timed out");
+    assert_eq!(
+        dispatched, 1,
+        "a timed-out evaluation is not blindly repeated"
+    );
+}
+
+#[test]
+fn observation_rejects_navigation_changes_before_reading() {
+    let manager = SessionBrowserManager::default();
+    manager
+        .inner
+        .lock()
+        .unwrap()
+        .insert("chat".into(), browser_slot("chat", false));
+    let mut dispatched = Vec::new();
+    let result =
+        manager.observe_document("chat", "readPage", Value::Null, |lease, _, action, _| {
+            dispatched.push(action.to_owned());
+            manager.reserve_navigation(&lease.resource, Some("https://other.example/"))?;
+            Ok(serde_json::json!({"readyState":"complete"}))
+        });
+    assert!(result.is_err());
+    assert_eq!(dispatched, ["status"]);
+}
+
+#[test]
+fn observation_stop_during_readiness_prevents_the_read() {
+    let manager = SessionBrowserManager::default();
+    manager
+        .inner
+        .lock()
+        .unwrap()
+        .insert("chat".into(), browser_slot("chat", false));
+    let cancellation = gyro_core::CancellationToken::default();
+    let _scope = begin_model_operation(
+        gyro_core::CapabilityId::BrowserReadPage,
+        cancellation.clone(),
+    )
+    .unwrap();
+    let mut dispatched = Vec::new();
+    let result = manager.observe_document("chat", "readPage", Value::Null, |_, _, action, _| {
+        dispatched.push(action.to_owned());
+        cancellation.cancel();
+        Ok(serde_json::json!({"readyState":"complete"}))
+    });
+    assert!(operation_was_cancelled(&result.unwrap_err()));
+    assert_eq!(dispatched, ["status"]);
+}
+
+#[test]
+fn observation_readiness_has_a_deadline() {
+    let manager = SessionBrowserManager::default();
+    manager
+        .inner
+        .lock()
+        .unwrap()
+        .insert("chat".into(), browser_slot("chat", false));
+    let started = Instant::now();
+    let result = manager.observe_document("chat", "readPage", Value::Null, |_, _, action, _| {
+        assert_eq!(action, "status");
+        Ok(serde_json::json!({"readyState":"loading"}))
+    });
+    assert!(result.unwrap_err().contains("not ready for observation"));
+    assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+#[test]
 fn screenshot_waits_for_its_document_and_rejects_superseded_navigation() {
     let manager = SessionBrowserManager::default();
     manager

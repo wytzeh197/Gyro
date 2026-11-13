@@ -157,8 +157,11 @@ pub(crate) fn session_context_signal(
                 .get("activityId")
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|id| id.starts_with("context-compaction-"))
-            // A failed compaction released nothing.
-            && payload.get("status").and_then(serde_json::Value::as_str) != Some("failed")
+            // Only a durable, successful compaction releases the old context.
+            && matches!(
+                payload.get("status").and_then(serde_json::Value::as_str),
+                Some("done" | "completed")
+            )
     });
     // Usage written onto the compaction itself is the summary call, not the
     // thread the next turn will resume. Treating it as a fresh reading would
@@ -236,4 +239,31 @@ pub(crate) fn is_encoded_text(field: Option<&str>, text: &str) -> bool {
             .iter()
             .any(|encoded| field.eq_ignore_ascii_case(encoded))
     }) || (text.len() > 4_096 && text.starts_with("data:"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_successful_compaction_resets_context_occupancy() {
+        for status in ["running", "failed", "cancelled", "done", "completed"] {
+            let event = SessionEvent::new(
+                Uuid::new_v4(),
+                gyro_core::SessionEventKind::CommandOutput,
+                "Context compaction",
+                serde_json::json!({
+                    "kind": "provider-activity",
+                    "activityKind": "context",
+                    "activityId": "context-compaction-test",
+                    "status": status,
+                }),
+            );
+            assert_eq!(
+                session_context_signal(&event).session_compaction,
+                matches!(status, "done" | "completed"),
+                "{status}"
+            );
+        }
+    }
 }
