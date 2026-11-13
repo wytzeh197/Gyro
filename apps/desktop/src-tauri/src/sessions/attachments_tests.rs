@@ -91,6 +91,56 @@ fn browser_attachment_images_are_optional_and_integrity_checked() {
 }
 
 #[test]
+fn annotation_context_requires_current_target_and_truthful_image_delivery() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("annotation.json");
+    let snapshot = serde_json::json!({
+        "schema": "gyro.browser-annotation.v1",
+        "url": "http://127.0.0.1:4317",
+        "selector": "#save",
+        "attachedImage": {"id":"before-image","path":"/fixture/before.png"},
+        "evidence": {"screenshotModelVisible":true}
+    })
+    .to_string();
+    fs::write(&path, &snapshot).unwrap();
+    let mut request = anthropic_provider_request();
+    request.attachments = vec![ChatAttachmentRequest {
+        id: "annotation".into(),
+        kind: "browser-snapshot".into(),
+        name: "Browser element annotation.json".into(),
+        path: path.display().to_string(),
+        relative_path: None,
+        mime_type: Some("text/plain".into()),
+        size: snapshot.len() as u64,
+        content_hash: None,
+        modified_at: None,
+        preview_url: None,
+    }];
+    for provider in gyro_core::provider_registry() {
+        request.provider_id = provider.id.into();
+        let prompt = provider_context_message_with_tool_support(&request, None, true);
+        assert!(prompt.contains("reacquire exactly one matching target"));
+        assert!(prompt.contains("not permission to edit"));
+        assert!(prompt.contains("No image is delivered to this model"));
+        assert!(prompt.contains(r#""screenshotModelVisible":false"#));
+    }
+    request.attachments.push(ChatAttachmentRequest {
+        id: "before-image".into(),
+        kind: "image".into(),
+        name: "Before.png".into(),
+        path: "/fixture/before.png".into(),
+        relative_path: None,
+        mime_type: Some("image/png".into()),
+        size: 1,
+        content_hash: None,
+        modified_at: None,
+        preview_url: None,
+    });
+    let prompt = provider_context_message_with_tool_support(&request, None, true);
+    assert!(prompt.contains(r#""screenshotModelVisible":true"#));
+}
+
+#[test]
 fn browser_attachment_reaches_every_provider_as_untrusted_immutable_context() {
     let temp = tempfile::tempdir().unwrap();
     let snapshot_path = temp.path().join("browser.json");

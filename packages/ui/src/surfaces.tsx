@@ -164,6 +164,7 @@ import {
   deliverChatMediaDrop,
   isMediaDrag,
 } from "./chat-media-transfer";
+import { beginProblemDrag, isProblemDrag, readProblemDrag, type ProblemDragPayload } from "./problem-drag";
 import type { ChatPointerDropTarget } from "./chat-pointer-drag";
 import {
   registerChatPointerDropTarget,
@@ -4415,6 +4416,7 @@ export const NEW_CHAT_DRAFT_KEY = "new";
  * knows which chat its rectangle covers.
  */
 type MediaDropTarget = {
+  attachProblem?: (problem: ProblemDragPayload) => void;
   attach: (files: File[]) => void;
   attachPaths?: (paths: string[]) => void;
   reportError: (message: string) => void;
@@ -4787,6 +4789,7 @@ type ChatSurfaceProps = {
   onSteerQueuedMessage?: (messageId: string) => void;
   /** True when an open project file can be captured for the Editor action. */
   canAttachEditorSnapshot?: boolean;
+  onAttachProblem?: (problem: ProblemDragPayload) => void;
   onAttachMediaFiles?: (files: File[]) => void;
   onAttachMediaPaths?: (paths: string[]) => void;
   onMediaDropError?: (message: string) => void;
@@ -5052,6 +5055,7 @@ export function ChatSurface({
   onRemoveQueuedMessage,
   onSteerQueuedMessage,
   canAttachEditorSnapshot = false,
+  onAttachProblem,
   onAttachMediaFiles,
   onAttachMediaPaths,
   onMediaDropError,
@@ -5256,6 +5260,16 @@ export function ChatSurface({
   // drop reachable from anywhere and names the chat surface it landed on.
   useEffect(() => {
     const onDragOver = (event: DragEvent) => {
+      if (isProblemDrag(event.dataTransfer)) {
+        const target = mediaDropTargetAt({ x: event.clientX, y: event.clientY });
+        installMediaDropHighlightCleanup();
+        highlightMediaDropTarget(target?.attachProblem ? target : undefined);
+        if (target?.attachProblem) {
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+        }
+        return;
+      }
       if (
         chatDragSource(event.dataTransfer) ||
         !isMediaDrag(event.dataTransfer)
@@ -5273,6 +5287,22 @@ export function ChatSurface({
     };
     const onDrop = (event: DragEvent) => {
       if (handledMediaDrops.has(event)) return;
+      if (isProblemDrag(event.dataTransfer)) {
+        const target = mediaDropTargetAt({ x: event.clientX, y: event.clientY });
+        highlightMediaDropTarget(undefined);
+        if (!target?.attachProblem) return;
+        event.preventDefault();
+        event.stopPropagation();
+        handledMediaDrops.add(event);
+        const problem = readProblemDrag(event.dataTransfer!);
+        if (problem) {
+          target.attachProblem(problem);
+          target.composer?.()?.querySelector("textarea")?.focus();
+        } else {
+          target.reportError("This problem could not be attached. Drag it from the Problems panel again.");
+        }
+        return;
+      }
       if (
         chatDragSource(event.dataTransfer) ||
         !isMediaDrag(event.dataTransfer)
@@ -6324,6 +6354,7 @@ export function ChatSurface({
             onDraftChange={handleComposerDraftChange}
             onRemoveAttachment={onRemoveAttachment}
             canAttachEditorSnapshot={canAttachEditorSnapshot}
+            onAttachProblem={onAttachProblem}
             onAttachMediaFiles={onAttachMediaFiles}
             onAttachMediaPaths={onAttachMediaPaths}
             onMediaDropError={onMediaDropError}
@@ -6608,6 +6639,7 @@ export function ChatSurface({
             onDraftChange={handleComposerDraftChange}
             onRemoveAttachment={onRemoveAttachment}
             canAttachEditorSnapshot={canAttachEditorSnapshot}
+            onAttachProblem={onAttachProblem}
             onAttachMediaFiles={onAttachMediaFiles}
             onAttachMediaPaths={onAttachMediaPaths}
             onMediaDropError={onMediaDropError}
@@ -9302,6 +9334,7 @@ export function ChatEnvironmentPopover({
                 }
                 onStatusChange={onPlanItemStatusChange}
                 plan={plan}
+                workspacePath={workspacePath}
               />
             </div>
           ) : null}
@@ -13294,6 +13327,11 @@ function WorkbenchPaneContent({
             ide?.diagnostics.map((diagnostic) => (
               <button
                 className={`gyro-problem-row is-${diagnostic.severity}`}
+                draggable
+                onDragStart={(event) =>
+                  beginProblemDrag(event.dataTransfer, diagnostic, workspacePath)
+                }
+                title="Click to open the file, or drag to chat to attach this problem"
                 key={diagnostic.id}
                 onClick={() =>
                   onOpenDiffInEditor?.(
@@ -21527,6 +21565,7 @@ function Composer({
   onDraftChange,
   onRemoveAttachment,
   canAttachEditorSnapshot = false,
+  onAttachProblem,
   onAttachMediaFiles,
   onAttachMediaPaths,
   onMediaDropError,
@@ -21590,6 +21629,7 @@ function Composer({
   onRemoveAttachment?: (attachmentId: string) => void;
   /** True when an open project file can be captured for the Editor action. */
   canAttachEditorSnapshot?: boolean;
+  onAttachProblem?: (problem: ProblemDragPayload) => void;
   onAttachMediaFiles?: (files: File[]) => void;
   onAttachMediaPaths?: (paths: string[]) => void;
   onMediaDropError?: (message: string) => void;
@@ -22756,6 +22796,7 @@ function Composer({
     const reportError = (message: string) => onMediaDropError?.(message);
     const host: MediaDropTarget = {
       attach,
+      attachProblem: onAttachProblem,
       attachPaths: onAttachMediaPaths,
       reportError,
       paneKey: draftKey,
@@ -22767,6 +22808,7 @@ function Composer({
     localMediaDrop = host;
     const deregister = registerMediaDropTarget({
       attach,
+      attachProblem: onAttachProblem,
       attachPaths: onAttachMediaPaths,
       reportError,
       paneKey: draftKey,
@@ -22781,7 +22823,7 @@ function Composer({
       deregister();
       if (localMediaDrop === host) localMediaDrop = undefined;
     };
-  }, [draftKey, onAttachMediaFiles, onAttachMediaPaths, onMediaDropError]);
+  }, [draftKey, onAttachProblem, onAttachMediaFiles, onAttachMediaPaths, onMediaDropError]);
 
   const showSetupNotice =
     !isGoalComposerActive && shellReady && !canSubmitChat &&

@@ -33,7 +33,10 @@ createRoot(document.getElementById("root")).render(React.createElement(Fixture))
 `;
 const profile = await mkdtemp(join(tmpdir(), "gyro-plan-live-"));
 const server = await createServer({
+  configFile: false,
+  esbuild: { jsx: "automatic" },
   root: resolve("apps/desktop"),
+  optimizeDeps: { noDiscovery: true, include: ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime"], entries: [] },
   cacheDir: join(profile, "vite-cache"),
   server: { host: "127.0.0.1", port: 0, hmr: false },
   plugins: [{
@@ -63,7 +66,7 @@ let browser, ws;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 try {
   browser = spawn(process.env.GYRO_CAPTURE_BROWSER || "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser", [
-    "--headless=new", "--no-first-run", "--no-default-browser-check",
+    "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
     "--disable-background-networking", "--use-mock-keychain", "--password-store=basic",
     "--user-data-dir=" + profile, "--remote-debugging-port=0", "about:blank",
   ], { stdio: ["ignore", "ignore", "pipe"] });
@@ -88,6 +91,7 @@ try {
   const pending = new Map();
   ws.onmessage = ({ data }) => {
     const message = JSON.parse(data), request = pending.get(message.id);
+    if (message.method === "Runtime.exceptionThrown") console.error(JSON.stringify(message.params));
     if (!request) return;
     pending.delete(message.id);
     message.error ? request.reject(message.error) : request.resolve(message.result);
@@ -109,17 +113,23 @@ try {
     return result.result.value;
   }
   await call("Page.enable");
+  await call("Runtime.enable");
   await call("Emulation.setDeviceMetricsOverride", { width: 600, height: 660, deviceScaleFactor: 1, mobile: false });
   await call("Page.navigate", { url: origin + "/__live_plan.html" });
   const counter = () => evaluate('document.querySelector(".is-plan header small")?.textContent');
-  await until(async () => await counter() === "0 / 2", "initial counter");
+  try {
+    await until(async () => await counter() === "0 / 2", "initial counter");
+  } catch (error) {
+    console.error(await evaluate("document.body.innerText"));
+    throw error;
+  }
   assert.equal(await evaluate("window.planEventChannel"), "gyro://session-plan-updated");
   const statuses = () => evaluate('[...document.querySelectorAll(".gyro-environment-plan-steps li")].map(el=>el.className)');
   assert.deepEqual(await statuses(), ["is-todo", "is-todo"]);
-  async function emit(id, status, n) {
+  async function emit(id, status, n, detail) {
     const event = { id: "progress-" + n, sessionId: "live-plan", turnId: "active-turn",
-      kind: "plan-updated", createdAt: "2026-11-11T12:00:0" + n + "Z", message: "",
-      payload: { action: "update-items", items: [{ id, status }] } };
+      kind: "plan-updated", createdAt: new Date(Date.parse("2026-11-11T12:00:00Z") + n * 1000).toISOString(), message: "",
+      payload: { action: "update-items", items: [{ id, status, ...(detail === undefined ? {} : { detail }) }] } };
     await evaluate("window.deliverPlan(" + JSON.stringify(event) + ")");
   }
   await emit("one", "in-progress", 1);
@@ -134,6 +144,25 @@ try {
   await emit("two", "blocked", 4);
   await until(async () => (await statuses())[1] === "is-blocked", "blocked mark");
   assert.equal(await counter(), "1 / 2");
+  const tooltipText = () => evaluate('document.querySelector(".gyro-plan-blocked-tooltip")?.textContent');
+  const badgePoint = await evaluate('(()=>{const r=document.querySelector(".gyro-plan-blocked-badge").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()');
+  await call("Input.dispatchMouseEvent", {type:"mouseMoved", ...badgePoint});
+  await until(async () => await tooltipText() === "No blocking reason was recorded for this step.", "missing reason fallback on hover");
+  const reason = "Waiting for access to the staging environment. Ask the workspace owner to grant access before verification.";
+  await emit("two", "blocked", 4.1, reason);
+  await until(async () => await tooltipText() === reason, "live blocking reason");
+  assert.equal(await evaluate('document.querySelector(".gyro-plan-blocked-tooltip").parentElement === document.body'), true);
+  assert.equal(await evaluate('(()=>{const t=document.querySelector(".gyro-plan-blocked-tooltip");const r=t.getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight && getComputedStyle(t).backgroundColor!=="rgba(0, 0, 0, 0)"})()'), true);
+  await call("Input.dispatchMouseEvent", {type:"mouseMoved", x:590, y:650});
+  await until(async () => !(await tooltipText()), "tooltip closes after hover");
+  await evaluate('document.querySelector(".gyro-plan-blocked-badge").focus()');
+  await until(async () => await tooltipText() === reason, "reason on keyboard focus");
+  assert.equal(await evaluate('document.activeElement.getAttribute("aria-describedby") === document.querySelector("[role=tooltip]").id'), true);
+  await call("Input.dispatchKeyEvent", {type:"keyDown", key:"Escape", code:"Escape"});
+  await until(async () => !(await tooltipText()), "Escape dismisses tooltip");
+  assert.deepEqual(await statuses(), ["is-complete", "is-blocked"]);
+  await evaluate('document.querySelector(".gyro-plan-blocked-badge").blur();document.querySelector(".gyro-plan-blocked-badge").focus()');
+  await until(async () => await tooltipText() === reason, "tooltip reopens");
   const output = resolve("artifacts/plan-live-progress");
   await mkdir(output, { recursive: true });
   for (const theme of ["dark", "light"]) {
@@ -144,6 +173,7 @@ try {
   }
   await emit("two", "complete", 5);
   await until(async () => await counter() === "2 / 2", "all done");
+  assert.equal(await tooltipText(), undefined);
   assert.equal(await evaluate('document.querySelectorAll(".gyro-plan-step-status.is-in-progress").length'), 0);
   const nextTask = {id:"next-task",sessionId:"live-plan",turnId:"next-turn",kind:"user-message",
     createdAt:"2026-11-11T12:00:07Z",message:"Start another task",payload:{optimistic:true}};
@@ -168,12 +198,16 @@ try {
   await evaluate("window.deliverPlan(" + JSON.stringify(replacement) + ")");
   await until(async () => await counter() === "0 / 1", "new task plan appears");
   console.log("Live plan browser checks passed: progress, blocked/completed marks, first-send clearing for completed and stale partial plans, saved document retention, stale refresh, and replacement plan. Simulated native events, production hook and panel.");
+} catch (error) {
+  console.error(error);
+  process.exitCode = 1;
 } finally {
   ws?.close();
   const stopped = browser && browser.exitCode === null && browser.signalCode === null
     ? new Promise(resolve => browser.once("exit", resolve)) : Promise.resolve();
   browser?.kill("SIGTERM");
   await Promise.race([stopped, pause(5000)]);
-  await server.close();
+  server.httpServer?.closeAllConnections();
+  await Promise.race([server.close(), pause(5000)]);
   await rm(profile, { recursive: true, force: true });
 }

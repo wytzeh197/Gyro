@@ -53,6 +53,11 @@ pub struct VerificationEvidence {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskCheckpoint {
+    /// References only: image pixels and attachment bodies must be reopened.
+    #[serde(default)]
+    pub attachment_references: Vec<Value>,
+    #[serde(default)]
+    pub attachments_truncated: bool,
     #[serde(default)]
     pub progress_notice: Option<Value>,
     #[serde(default)]
@@ -162,6 +167,37 @@ impl TaskCheckpoint {
             }
         }
 
+        let mut attachment_references = same_task
+            .map(|p| p.attachment_references.clone())
+            .unwrap_or_default();
+        for event in events
+            .iter()
+            .filter(|e| user_messages.iter().any(|m| m.event_id == e.id))
+        {
+            for attachment in event.payload["attachments"]
+                .as_array()
+                .into_iter()
+                .flatten()
+            {
+                let mut reference = serde_json::Map::new();
+                for key in ["id", "kind", "name", "path", "contentHash"] {
+                    if let Some(value) = attachment.get(key).filter(|v| v.is_string()) {
+                        reference.insert(key.into(), value.clone());
+                    }
+                }
+                let reference = serde_json::json!({"eventId":event.id, "turnId":event.turn_id,
+                    "reference":reference, "availability":"revalidate; body not included"});
+                if !attachment_references.contains(&reference) {
+                    attachment_references.push(reference);
+                }
+            }
+        }
+        let attachments_truncated =
+            attachment_references.len() > 32 || same_task.is_some_and(|p| p.attachments_truncated);
+        if attachment_references.len() > 32 {
+            attachment_references.drain(..attachment_references.len() - 32);
+        }
+
         let plan = events
             .iter()
             .rev()
@@ -173,6 +209,31 @@ impl TaskCheckpoint {
             if !cap.contains("run_test") && !cap.contains("run_task") {return None;}
             Some(VerificationEvidence{event_id:e.id,output_id:data["id"].as_str().map(str::to_owned),outcome:serde_json::json!({"exitCode":data["exitCode"],"status":data["status"],"evidence":data["evidenceSummary"]}),source_truncated:data["sourceTruncated"].as_bool().unwrap_or(false),availability:"revalidate".into()})
         }).rev().take(16).collect();
+        for event in events
+            .iter()
+            .rev()
+            .filter(|e| {
+                e.kind == SessionEventKind::SystemEvent
+                    && e.payload["kind"] == "task-check-recorded"
+                    && events.iter().any(|source| {
+                        source.kind == SessionEventKind::UserMessage
+                            && source.turn_id.map(|id| id.to_string()).as_deref()
+                                == e.payload["sourceTurnId"].as_str()
+                            && user_messages
+                                .iter()
+                                .any(|message| message.event_id == source.id)
+                    })
+            })
+            .take(8)
+        {
+            verification.push(VerificationEvidence {
+                event_id: event.id,
+                output_id: event.payload["reportId"].as_str().map(str::to_owned),
+                outcome: event.payload.clone(),
+                source_truncated: false,
+                availability: "revalidate".into(),
+            });
+        }
         if verification.is_empty() {
             verification = same_task
                 .map(|p| p.verification.clone())
@@ -192,6 +253,8 @@ impl TaskCheckpoint {
                 text: e.message.clone(),
             });
         Self {
+            attachment_references,
+            attachments_truncated,
             progress_notice: same_task.and_then(|p| p.progress_notice.clone()),
             recent_agent_message,
             repository_signals: same_task
@@ -237,6 +300,46 @@ mod tests {
         assert!(!c.verified);
         assert!(c.handoff().contains("assertions"));
     }
+    #[test]
+    fn handoff_retains_check_and_attachment_references_without_claiming_current_proof() {
+        let session = Uuid::new_v4();
+        let turn = Uuid::new_v4();
+        let mut request = SessionEvent::new(
+            session,
+            SessionEventKind::UserMessage,
+            "Fix the selected form",
+            serde_json::json!({
+                "attachments":[{"id":"before","kind":"image","path":"/tmp/before.png","contentHash":"sha256","bytes":"not-context"}]
+            }),
+        );
+        request.turn_id = Some(turn);
+        let check = SessionEvent::new(
+            session,
+            SessionEventKind::SystemEvent,
+            "Task check recorded",
+            serde_json::json!({
+                "kind":"task-check-recorded", "sourceTurnId":turn, "reportId":"report-one",
+                "criteria":[{"id":"form"}], "results":[{"criterionId":"form","status":"passed"}]
+            }),
+        );
+        let unrelated = SessionEvent::new(
+            session,
+            SessionEventKind::SystemEvent,
+            "Other check",
+            serde_json::json!({
+                "kind":"task-check-recorded", "sourceTurnId":Uuid::new_v4(), "reportId":"other-report"
+            }),
+        );
+        let checkpoint = TaskCheckpoint::derive(session, &[request, check, unrelated], "/w", 1);
+        checkpoint.validate().unwrap();
+        assert!(!checkpoint.verified);
+        assert_eq!(checkpoint.verification.len(), 1);
+        assert_eq!(checkpoint.verification[0].availability, "revalidate");
+        assert_eq!(checkpoint.attachment_references.len(), 1);
+        assert!(!checkpoint.handoff().contains("not-context"));
+        assert!(checkpoint.handoff().contains("/tmp/before.png"));
+    }
+
     #[test]
     fn oversized_assertions_rejected() {
         let mut n = AgentNotes::default();

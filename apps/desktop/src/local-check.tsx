@@ -12,6 +12,7 @@ import {
   CheckWorkContext,
   CheckWorkActivityContext,
   type CheckWorkActivity,
+  type SessionEvent,
   confirmAction,
   useDialogDismiss,
 } from "@gyro-dev/ui";
@@ -24,6 +25,11 @@ import type {
   BrowserCheck,
 } from "./local-check-types";
 import "./local-check.css";
+import {
+  completionRequirements,
+  completionSummary,
+  MAX_CHECK_REQUIREMENTS,
+} from "./check-completion";
 
 type CheckSession = { id: string; title: string; workspacePath: string };
 type CheckInvoke = <T>(
@@ -104,6 +110,7 @@ function BrowserActionReview({ browser }: { browser: BrowserCheck }) {
 
 export function LocalCheckHost({
   sessions,
+  events,
   reminders = [],
   onDismissReminder,
   children,
@@ -113,6 +120,7 @@ export function LocalCheckHost({
   cloudUnavailableReason,
 }: {
   sessions: CheckSession[];
+  events?: Record<string, SessionEvent[]>;
   reminders?: CheckReminder[];
   onDismissReminder?: (turnId: string) => void;
   children: ReactNode;
@@ -128,10 +136,22 @@ export function LocalCheckHost({
   const [activities, setActivities] = useState<
     Record<string, CheckWorkActivity>
   >({});
-  const open = useCallback((id: string) => {
-    setOpened((current) => (current[id] ? current : { ...current, [id]: {} }));
-    setTarget(id);
-  }, []);
+  const open = useCallback(
+    (id: string) => {
+      const source = events?.[id]?.findLast(
+        (event) => event.kind === "user-message" && event.turnId,
+      );
+      setOpened((current) =>
+        activities[id]?.running ||
+        (current[id]?.sourceTurnId === source?.turnId && current[id])
+          ? current
+          : { ...current, [id]: { sourceTurnId: source?.turnId } },
+      );
+      setTarget(id);
+    },
+    [events, activities],
+  );
+  const openDetails = useCallback((id: string) => setTarget(id), []);
   const hide = useCallback(() => setTarget(undefined), []);
   const activityChanged = useCallback(
     (id: string, activity?: CheckWorkActivity) => {
@@ -163,7 +183,9 @@ export function LocalCheckHost({
                   type="button"
                   onClick={() => {
                     setOpened((current) =>
-                      current[reminder.sessionId]
+                      activities[reminder.sessionId]?.running ||
+                      current[reminder.sessionId]?.sourceTurnId ===
+                        reminder.turnId
                         ? current
                         : {
                             ...current,
@@ -193,12 +215,19 @@ export function LocalCheckHost({
           .filter((session) => opened[session.id])
           .map((session) => (
             <LocalCheckDialog
-              key={session.id}
+              key={`${session.id}:${opened[session.id]?.sourceTurnId ?? "unbound"}`}
               session={session}
               sourceTurnId={opened[session.id]?.sourceTurnId}
+              sourceRequest={
+                events?.[session.id]?.find(
+                  (event) =>
+                    event.kind === "user-message" &&
+                    event.turnId === opened[session.id]?.sourceTurnId,
+                )?.message
+              }
               visible={target === session.id}
               onClose={hide}
-              onOpen={open}
+              onOpen={openDetails}
               onActivity={activityChanged}
               call={call}
               available={available}
@@ -237,6 +266,7 @@ function CheckDialogSurface({
 export function LocalCheckDialog({
   session,
   sourceTurnId,
+  sourceRequest,
   onClose,
   visible = true,
   onOpen,
@@ -248,6 +278,7 @@ export function LocalCheckDialog({
 }: {
   session: CheckSession;
   sourceTurnId?: string;
+  sourceRequest?: string;
   onClose: () => void;
   visible?: boolean;
   onOpen?: (sessionId: string) => void;
@@ -259,24 +290,11 @@ export function LocalCheckDialog({
 }) {
   const [requirements, setRequirements] = useState<
     { id: string; requirement: string; expected: string; scope: CheckScope }[]
-  >(
-    sourceTurnId
-      ? []
-      : [
-          {
-            id: "add-item",
-            requirement: "Add a to-do item",
-            expected: "true",
-            scope: "api",
-          },
-          {
-            id: "reject-empty",
-            requirement: "Reject an empty title",
-            expected: "true",
-            scope: "api",
-          },
-        ],
+  >([]);
+  const [task, setTask] = useState<CheckDraft["task"]>(
+    sourceTurnId ? { sourceTurnId } : undefined,
   );
+  const requestText = task?.sourceTurnId === sourceTurnId ? sourceRequest : undefined;
   const [previewUrl, setPreviewUrl] = useState("http://127.0.0.1:4317");
   const [command, setCommand] = useState("");
   const [actionKind, setActionKind] = useState("command");
@@ -396,20 +414,8 @@ export function LocalCheckDialog({
     );
   }, [running, plan, call]);
   const latest = reports[0];
-  const resultSummary = latest
-    ? [
-        ["passed", "passed"],
-        ["failed", "failed"],
-        ["not-checked", "not checked"],
-      ]
-        .flatMap(([status, label]) => {
-          const count = latest.results.filter(
-            (result) => result.status === status,
-          ).length;
-          return count ? [`${count} ${label}`] : [];
-        })
-        .join(" · ")
-    : "No result recorded";
+  const completion = completionSummary(latest);
+  const resultSummary = completion.detail;
   const activityLabel = running
     ? "Running"
     : error
@@ -418,7 +424,7 @@ export function LocalCheckDialog({
         ? "Out of date"
         : latest?.output?.termination.kind === "cancelled"
           ? "Stopped"
-          : "Finished";
+          : completion.label;
   const activityDetail =
     error || (running ? `Checking ${session.title}` : resultSummary);
   useEffect(() => {
@@ -459,6 +465,7 @@ export function LocalCheckDialog({
     try {
       const draft: CheckDraft = {
         sessionId: session.id,
+        ...(task ? { task } : {}),
         previewUrl,
         command: actionKind === "browser" ? "" : command,
         ...(actionKind === "browser"
@@ -478,9 +485,10 @@ export function LocalCheckDialog({
           .split("\n")
           .map((s) => s.trim())
           .filter(Boolean),
-        criteria: requirements
-          .filter((r) => r.requirement.trim())
-          .map((r) => ({ ...r, expected: JSON.parse(r.expected) as unknown })),
+        criteria: requirements.map((r) => ({
+          ...r,
+          expected: JSON.parse(r.expected) as unknown,
+        })),
       };
       const reviewed = await call<CheckPlan>("prepare_local_check", { draft });
       if (alive.current) {
@@ -495,7 +503,38 @@ export function LocalCheckDialog({
     }
   };
 
+  const checkAgain = (report: CheckReport) => {
+    if (operation.current) return;
+    const draft = report.plan.draft;
+    setTask(
+      draft.task
+        ? { ...draft.task, previousPlanId: report.plan.id }
+        : undefined,
+    );
+    setRequirements(
+      draft.criteria.map((c) => ({
+        ...c,
+        scope: c.scope === "unspecified" ? "command" : c.scope,
+        expected: JSON.stringify(c.expected),
+      })),
+    );
+    setPreviewUrl(draft.previewUrl);
+    setCommand(draft.command);
+    setActionKind(draft.browser ? "browser" : "command");
+    setBrowserSteps(JSON.stringify(draft.browser?.steps ?? [], null, 2));
+    setBrowserReadySelector(draft.browser?.readySelector ?? "");
+    setBrowserWidth(String(draft.browser?.viewport?.width ?? 1280));
+    setBrowserHeight(String(draft.browser?.viewport?.height ?? 800));
+    setFiles(draft.files.join("\n"));
+    setDataChanges(draft.dataChanges);
+    setPlan(undefined);
+    setConfirmed(false);
+    setError("");
+    setStage("requirements");
+  };
+
   const loadExample = (variant: string) => {
+    setTask(undefined);
     setActionKind("command");
     setCommand(`node scripts/fixtures/gyro-check/check.mjs ${variant}`);
     setDataChanges(
@@ -526,6 +565,7 @@ export function LocalCheckDialog({
   };
 
   const loadBrowserExample = () => {
+    setTask(undefined);
     setActionKind("browser");
     setBrowserReadySelector("form");
     setBrowserSteps(
@@ -630,11 +670,13 @@ export function LocalCheckDialog({
           <div>
             <h2 id="gyro-check-title">Check this work</h2>
             <p>{session.title}</p>
-            {sourceTurnId ? (
-              <p>
-                Finished turn <code>{sourceTurnId}</code>. Add your check
-                criteria before preparing a plan.
-              </p>
+            {requestText ? (
+              <details>
+                <summary>Original task</summary>
+                <p>{requestText}</p>
+              </details>
+            ) : sourceTurnId ? (
+              <p>Check the requirements for the originating task.</p>
             ) : null}
           </div>
           <button
@@ -681,11 +723,33 @@ export function LocalCheckDialog({
           >
             <fieldset disabled={busy || !available}>
               <legend>Requirements</legend>
+              {!requirements.length ? (
+                <p>No requirements yet. Add what this task needs to achieve.</p>
+              ) : null}
+              {requestText && !requirements.length ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setRequirements([
+                      {
+                        id: "task-outcome",
+                        requirement: requestText.slice(0, 2000),
+                        expected: "true",
+                        scope: "command",
+                      },
+                    ])
+                  }
+                >
+                  Use task request
+                </button>
+              ) : null}
               {requirements.map((criterion, index) => (
                 <div className="gyro-check-criterion" key={criterion.id}>
                   <label>
                     Requirement {index + 1}
                     <input
+                      required
+                      maxLength={2000}
                       value={criterion.requirement}
                       onChange={(e) =>
                         setRequirements((current) =>
@@ -732,8 +796,36 @@ export function LocalCheckDialog({
                       }
                     />
                   </label>
+                  <button
+                    type="button"
+                    aria-label={`Remove requirement ${index + 1}`}
+                    onClick={() =>
+                      setRequirements((current) =>
+                        current.filter((r) => r.id !== criterion.id),
+                      )
+                    }
+                  >
+                    Remove requirement
+                  </button>
                 </div>
               ))}
+              <button
+                type="button"
+                disabled={requirements.length >= MAX_CHECK_REQUIREMENTS}
+                onClick={() =>
+                  setRequirements((current) => [
+                    ...current,
+                    {
+                      id: `requirement-${crypto.randomUUID()}`,
+                      requirement: "",
+                      expected: "true",
+                      scope: actionKind === "browser" ? "browser" : "command",
+                    },
+                  ])
+                }
+              >
+                Add requirement
+              </button>
               <label>
                 Local test URL
                 <input
@@ -1023,6 +1115,7 @@ export function LocalCheckDialog({
                 <CheckReportView
                   key={report.plan.id}
                   report={report}
+                  onCheckAgain={() => checkAgain(report)}
                   disabled={busy}
                   onDelete={() => void remove(report.plan.id)}
                   cloudRequest={cloudRequest}
@@ -1100,6 +1193,7 @@ export function LocalCheckDialog({
 
 function CheckReportView({
   report,
+  onCheckAgain,
   onDelete,
   disabled,
   cloudRequest,
@@ -1107,6 +1201,7 @@ function CheckReportView({
   sharePrimary,
 }: {
   report: CheckReport;
+  onCheckAgain: () => void;
   onDelete: () => void;
   disabled: boolean;
   cloudRequest?: CheckCloudRequest;
@@ -1128,33 +1223,42 @@ function CheckReportView({
           Delete report
         </button>
       </header>
+      <p role="status">
+        {completionSummary(report).label} · {completionSummary(report).detail}
+      </p>
       <p>{report.freshnessNote}</p>
-      {report.results.map((result) => {
-        const criterion = report.plan.draft.criteria.find(
-          (c) => c.id === result.criterionId,
-        );
+      <button type="button" disabled={disabled} onClick={onCheckAgain}>
+        Check again
+      </button>
+      {completionRequirements(report).map(({ criterion, result, status }) => {
         return (
           <section
-            key={result.criterionId}
-            className={`gyro-check-result is-${result.status}`}
+            key={criterion.id}
+            className={`gyro-check-result is-${status === "stale" ? "not-checked" : status}`}
           >
             <h4>
-              {result.status === "not-checked"
-                ? "Not checked"
-                : result.status === "passed"
-                  ? "Passed"
-                  : "Failed"}{" "}
+              {status === "stale"
+                ? "Stale"
+                : status === "not-checked"
+                  ? "Not checked"
+                  : status === "passed"
+                    ? "Passed"
+                    : "Failed"}{" "}
               · {criterion?.requirement}
             </h4>
             <p>
               Required evidence:{" "}
               {scopeLabels[criterion?.scope ?? "unspecified"]}
-              {result.observedScope
+              {result?.observedScope
                 ? ` · Returned: ${scopeLabels[result.observedScope]}`
                 : ""}
             </p>
-            <p>{result.reason}</p>
-            {result.evidence ? (
+            <p>
+              {status === "stale"
+                ? "Files changed after this observation. Check again to verify the current result."
+                : (result?.reason ?? "No matching evidence was recorded.")}
+            </p>
+            {result?.evidence ? (
               <>
                 <p>
                   Expected <code>{JSON.stringify(criterion?.expected)}</code> ·
@@ -1171,6 +1275,14 @@ function CheckReportView({
         <dl>
           <dt>Chat</dt>
           <dd>{report.plan.draft.sessionId}</dd>
+          {report.plan.draft.task ? (
+            <>
+              <dt>Source turn</dt>
+              <dd>{report.plan.draft.task.sourceTurnId}</dd>
+              <dt>Previous check</dt>
+              <dd>{report.plan.draft.task.previousPlanId ?? "First check"}</dd>
+            </>
+          ) : null}
           <dt>Workspace</dt>
           <dd>{report.plan.snapshot.workspace}</dd>
           <dt>Git HEAD</dt>

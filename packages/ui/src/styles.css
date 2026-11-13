@@ -23877,7 +23877,7 @@ textarea:focus-visible,
   .gyro-sidebar
   .gyro-session-row:not(:hover):not(:focus-within):not(.is-active):not(
     .is-menu-open
-  ):not(.is-pinned)
+  ):not(.is-pinned):not(.has-idle-time)
   .gyro-sidebar-thread-main {
   padding-right: 36px;
 }

@@ -197,6 +197,49 @@ if (chatEdge === "sidebar-many") {
   })));
 }
 
+// Opt-in sidebar with standalone Recents chats and a second project, for
+// sidebar spacing reviews against a realistically filled navigator.
+if (chatEdge === "sidebar-full") {
+  const standalone = (index: number, title: string, providerId: string) => {
+    const path = `${WORKSPACE.replace(/\/[^/]+$/, "")}/gyro-chat-2026-11-${10 + index}`;
+    return {
+      ...session,
+      id: `ses_capture_recent_${index}`,
+      title,
+      providerId,
+      providerLabel: providerId === "openai" ? "Codex CLI" : "Claude Code",
+      workspacePath: path,
+      workspaceIdentity: {
+        ...session.workspaceIdentity,
+        roots: [{ id: `capture-recent-${index}`, path }],
+        activeRootId: `capture-recent-${index}`,
+      },
+      createdAt: at(-900 - index * 40),
+      updatedAt: at(-900 - index * 40),
+    };
+  };
+  const atlas = `${WORKSPACE.replace(/\/[^/]+$/, "")}/atlas`;
+  sessions.push(
+    {
+      ...session,
+      id: "ses_capture_atlas",
+      title: "Pull latest from GitHub",
+      workspacePath: atlas,
+      workspaceIdentity: {
+        ...session.workspaceIdentity,
+        roots: [{ id: "capture-atlas", path: atlas }],
+        activeRootId: "capture-atlas",
+      },
+      createdAt: at(-820),
+      updatedAt: at(-820),
+    },
+    standalone(1, "Traffic lights delay on launch", "anthropic"),
+    standalone(2, "Connection test", "anthropic"),
+    standalone(3, "Check with GitHub, is the release live", "openai"),
+    standalone(4, "Browser acceptance pass", "openai"),
+  );
+}
+
 let sequence = 0;
 let captureSessionSequence = 0;
 function sessionEvent(

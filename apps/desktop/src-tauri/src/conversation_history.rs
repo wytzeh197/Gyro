@@ -23,7 +23,27 @@ pub(super) fn acp_conversation_history_text_for_session(session_id: &str) -> Opt
     let events = store.read_events(session_uuid).ok()?;
     if model_switch_awaits_first_reply(&events) {
         let transcript = store.read_transcript_events(session_uuid).unwrap_or(events);
-        return conversation_history_from_events(transcript);
+        // Model switches use task state independently of experimental prompt
+        // compaction. Respect the user's explicit efficiency/task-state opt-outs.
+        let config = super::efficiency::config();
+        let checkpoint = if config.enabled && config.task_state {
+            store
+                .get_session(session_uuid)
+                .ok()
+                .flatten()
+                .and_then(|session| {
+                    super::efficiency::checkpoint(
+                        &store,
+                        session_uuid,
+                        &session.workspace_path.to_string_lossy(),
+                        session.workspace_identity.revision,
+                    )
+                    .ok()
+                })
+        } else {
+            None
+        };
+        return model_handoff_history(checkpoint, transcript);
     }
     if super::efficiency::config().policies() && super::efficiency::config().task_state {
         let context = store.read_efficiency_context_events(session_uuid).ok()?;
@@ -58,6 +78,34 @@ pub(super) fn acp_conversation_history_text_for_session(session_id: &str) -> Opt
         }
     }
     conversation_history_from_events(events)
+}
+
+/// A model switch needs structured task state as well as the tapered transcript.
+/// Checkpoints are context, never proof that old files/checks are still current.
+fn model_handoff_history(
+    checkpoint: Option<gyro_core::efficiency::checkpoint::TaskCheckpoint>,
+    transcript: Vec<SessionEvent>,
+) -> Option<String> {
+    let history = conversation_history_from_events(transcript).unwrap_or_default();
+    let context = checkpoint.and_then(|mut checkpoint| {
+        checkpoint.verified = false;
+        for file in &mut checkpoint.files {
+            file.availability = "revalidate".into();
+        }
+        for evidence in &mut checkpoint.verification {
+            evidence.availability = "revalidate".into();
+        }
+        checkpoint.validate().ok().map(|_| checkpoint.handoff())
+    });
+    match context {
+        Some(context) => Some(format!(
+            "{context}\nRecent conversation (older messages may be clipped; inspect source events for omitted details):\n{history}"
+        )),
+        None if !history.is_empty() => Some(format!(
+            "Structured task context is unavailable or disabled. This bounded transcript may omit earlier constraints, attempts, attachments and evidence. Retrieve required details before continuing; do not assume an interrupted action failed.\n{history}"
+        )),
+        None => None,
+    }
 }
 
 fn local_context_checkpoint(event: &SessionEvent) -> Option<&str> {
@@ -492,6 +540,52 @@ fn strip_code_fence(text: &str) -> &str {
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn model_handoff_preserves_structured_constraints_beyond_tapered_history() {
+        let session = Uuid::new_v4();
+        let mut checkpoint =
+            gyro_core::efficiency::checkpoint::TaskCheckpoint::derive(session, &[], "/project", 7);
+        checkpoint.objective = "Fix the form".into();
+        checkpoint
+            .agent_assertions
+            .constraints
+            .push("Preserve offline support".into());
+        checkpoint
+            .agent_assertions
+            .attempted_approaches
+            .push("Do not repeat the failed API-only fix".into());
+        checkpoint.verified = true;
+        let transcript = (0..50)
+            .map(|i| {
+                SessionEvent::new(
+                    session,
+                    SessionEventKind::AssistantMessage,
+                    format!("Message {i}"),
+                    serde_json::json!({}),
+                )
+            })
+            .collect();
+        let history = model_handoff_history(Some(checkpoint), transcript).unwrap();
+        assert!(history.contains("Preserve offline support"));
+        assert!(history.contains("failed API-only fix"));
+        assert!(history.contains(r#""verified":false"#));
+        assert!(history.contains("Revalidate file hashes"));
+        assert!(history.contains("older messages may be clipped"));
+    }
+
+    #[test]
+    fn model_handoff_discloses_unavailable_structured_context() {
+        let transcript = vec![SessionEvent::new(
+            Uuid::new_v4(),
+            SessionEventKind::AssistantMessage,
+            "Partial work",
+            serde_json::json!({}),
+        )];
+        let history = model_handoff_history(None, transcript).unwrap();
+        assert!(history.contains("unavailable or disabled"));
+        assert!(history.contains("interrupted action"));
+    }
 
     #[test]
     fn handoff_history_keeps_messages_despite_tool_activity() {

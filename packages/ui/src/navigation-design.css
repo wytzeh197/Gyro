@@ -707,17 +707,21 @@
   padding-inline: 0;
 }
 
+/* Section labels share one 28px band with the label centred, so Projects
+   (which carries a 28px add button) and Recents sit the same distance from
+   their first row. */
 :root[data-theme] .gyro-sidebar .gyro-sidebar-small-title {
-  padding: var(--gyro-space-compact) var(--gyro-space-standard);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--gyro-space-standard);
   margin: 0;
   min-height: 28px;
 }
 
+/* The add button ends on the same edge as the window actions above it. */
 :root[data-theme] .gyro-sidebar .gyro-sidebar-projects-heading {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  padding-block: var(--gyro-space-compact);
+  padding-right: 0;
 }
 
 :root[data-theme] .gyro-sidebar-projects-heading > button,
@@ -747,6 +751,28 @@
   margin-bottom: var(--gyro-space-compact);
 }
 
+/* Top-level chats (Recents, Pinned) share the icon column of New session and
+   Settings; only project children step in under the tree. */
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-project-chat-list
+  .gyro-session-row:not(.is-nested) {
+  margin-left: 0;
+}
+
+:root[data-theme] .gyro-sidebar .gyro-sidebar-recents-empty {
+  padding-left: calc(var(--gyro-space-standard) + 24px);
+}
+
+/* Settings reads at the same size and weight as the rows above it. */
+:root[data-theme] .gyro-sidebar-footer-row .gyro-account-button {
+  font-size: var(--gyro-font-support);
+}
+
+:root[data-theme] .gyro-sidebar-footer-row .gyro-account-name strong {
+  font-weight: 400;
+}
+
 /* Pin control stays out of the way until its project row is hovered or focused. */
 :root[data-theme] .gyro-sidebar-project-row > .gyro-sidebar-project-pin {
   opacity: 0;
@@ -761,6 +787,8 @@
 
 :root[data-theme] .gyro-sidebar .gyro-sidebar-project-row.has-pin {
   grid-template-columns: minmax(0, 1fr) 28px;
+  /* The pin ends on the same edge as the Projects add button above it. */
+  padding-right: 0;
 }
 
 :root[data-theme] .gyro-sidebar .gyro-sidebar-project-toggle[aria-expanded] {

@@ -174,9 +174,14 @@ export async function requestBrowserAnnotation({
         {
           kind: "browser-snapshot",
           name: "Browser element annotation.json",
-          bytes: Array.from(new TextEncoder().encode(JSON.stringify(metadata))),
+          // Bind the metadata to the exact image; providers can then report
+          // whether that image was actually delivered rather than assuming it.
+          bytes: [] as number[],
         },
       ]) {
+        const beforeImage = attachments[0];
+        if (item.kind === "browser-snapshot" && !beforeImage)
+          throw new Error("The annotation image was not saved.");
         const attachment = await invoke<ChatAttachment>(
           "prepare_chat_attachment",
           {
@@ -184,6 +189,28 @@ export async function requestBrowserAnnotation({
               sessionId: attachmentSession,
               path: "",
               ...item,
+              bytes:
+                item.kind === "browser-snapshot" && beforeImage
+                  ? Array.from(
+                      new TextEncoder().encode(
+                        JSON.stringify({
+                          ...metadata,
+                          attachedImage: {
+                            id: beforeImage.id,
+                            path: beforeImage.path,
+                          },
+                          verification: {
+                            status: "not-checked",
+                            target: {
+                              url: captured.annotation.url,
+                              selector: captured.annotation.selector,
+                              viewport: captured.annotation.viewport,
+                            },
+                          },
+                        }),
+                      ),
+                    )
+                  : item.bytes,
               relativePath: "Browser annotation",
             },
           },

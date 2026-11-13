@@ -17756,6 +17756,31 @@ button.gyro-response-changed-files:hover {
   line-height: 18px;
   padding: 0 calc(var(--gyro-chat-space-1) * 1.75);
 }
+.gyro-plan-blocked-badge {
+  cursor: help;
+}
+.gyro-plan-blocked-badge:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+.gyro-plan-blocked-tooltip {
+  background: var(--gyro-sidebar);
+  box-sizing: border-box;
+  border: 1px solid var(--gyro-premium-hairline);
+  border-radius: var(--gyro-radius-md);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 20%);
+  color: var(--gyro-text);
+  font-size: var(--gyro-chat-meta-size);
+  line-height: 1.5;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+  position: fixed;
+  white-space: pre-wrap;
+  width: min(300px, calc(100vw - 24px));
+  z-index: 1000;
+}
 .gyro-environment-plan-open {
   align-items: center;
   background: transparent;

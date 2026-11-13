@@ -131,6 +131,21 @@ try {
   await until(() => evaluate("!!document.querySelector('main')"));
   await click("Open Check");
   await until(() => evaluate("!!document.querySelector('[role=dialog]')"));
+  assert.equal(
+    await evaluate("document.querySelectorAll('.gyro-check-criterion').length"),
+    0,
+  );
+  await click("Add requirement");
+  assert.equal(
+    await evaluate("document.querySelectorAll('.gyro-check-criterion').length"),
+    1,
+  );
+  await click("Remove requirement");
+  assert.equal(
+    await evaluate("document.querySelectorAll('.gyro-check-criterion').length"),
+    0,
+  );
+  checks += 3;
   await evaluate(
     "document.querySelector('details').open = true; document.querySelectorAll('details')[1].open = true",
   );
@@ -184,6 +199,22 @@ try {
   await checkStatuses(["passed", "passed"]);
   assert.equal(await evaluate("window.__gyroCheckFixture.executed"), 1);
   checks++;
+  await click("Check again");
+  assert.equal(await evaluate("window.__gyroCheckFixture.executed"), 1);
+  assert.equal(
+    await evaluate("document.querySelectorAll('.gyro-check-criterion').length"),
+    2,
+  );
+  await click("Review check plan");
+  await until(() =>
+    evaluate("!!document.querySelector('input[type=checkbox]')"),
+  );
+  assert.equal(
+    await evaluate("document.querySelector('input[type=checkbox]').checked"),
+    false,
+  );
+  await click("Deny");
+  checks += 3;
   await approve("broken");
   await checkStatuses(["passed", "failed"]);
   await evaluate(
@@ -246,8 +277,15 @@ try {
     executionBeforeHide,
   );
   checks += 4;
+  const countBeforeStop = await evaluate(
+    "window.__gyroCheckFixture.reports.length",
+  );
   await click("Stop running check");
-  await until(() => evaluate("window.__gyroCheckFixture.reports.length === 6"));
+  await until(() =>
+    evaluate(
+      `window.__gyroCheckFixture.reports.length === ${countBeforeStop + 1}`,
+    ),
+  );
   await checkStatuses(["not-checked", "not-checked"]);
   const count = await evaluate("window.__gyroCheckFixture.reports.length");
   await click("Delete report");
@@ -362,7 +400,7 @@ try {
   await until(() => evaluate("!!document.querySelector('[role=dialog]')"));
   assert.equal(
     await evaluate(
-      "document.querySelector('.gyro-check-result-heading').textContent.includes('2 passed')",
+      "document.querySelector('.gyro-check-result-heading').textContent.includes('2 stale')",
     ),
     true,
   );
@@ -393,12 +431,11 @@ try {
     Buffer.from(dark.data, "base64"),
   );
   const calls = await evaluate("window.__gyroCheckFixture.calls");
-  const geometry = await checkGeometryAndCompletion({
-    send,
-    evaluate,
-    root,
-    artifacts,
-  });
+  // Keep the full suite as the default. The focused UI run is useful in
+  // checkouts without the separately maintained historical geometry mockup.
+  const geometry = process.argv.includes("--ui-only")
+    ? { checks: 0, skipped: "Historical geometry mockup: explicit --ui-only scope" }
+    : await checkGeometryAndCompletion({ send, evaluate, root, artifacts });
   checks += geometry.checks;
   await writeFile(
     join(artifacts, "result.json"),

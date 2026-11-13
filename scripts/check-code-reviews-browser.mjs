@@ -388,6 +388,34 @@ try {
     "original source turn remains inspectable",
   );
   await screenshot("review-turn-entry");
+  await setField("Reviewer", "api-fixture");
+  await setField("Model", "review-model");
+  await click("Preview review");
+  await until(
+    async () => (await text()).includes("Ready to review"),
+    "turn preview",
+  );
+  await click("Start review · review-model");
+  await until(
+    async () => (await text()).includes("A return value breaks"),
+    "turn result",
+  );
+  await click("Review again");
+  await until(
+    async () => (await text()).includes("Preview review"),
+    "recheck setup",
+  );
+  assert.equal(
+    await evaluate(
+      "[...document.querySelectorAll('select')].some(select=>select.value==='uncommitted')",
+    ),
+    true,
+    "recheck uses current files, not the old turn snapshot",
+  );
+  assert.ok(
+    (await text()).includes("Rechecking current changes"),
+    "scope change is explicit",
+  );
   assert.equal(errors.length, 0, "no browser exceptions");
   await writeFile(
     join(output, "manifest.json"),

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 pub mod browser;
+pub const MAX_CHECK_REQUIREMENTS: usize = 8;
 use std::{
     collections::BTreeSet,
     fs,
@@ -51,6 +52,9 @@ pub struct CheckCriterion {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CheckDraft {
     pub session_id: String,
+    /// The originating turn and previous reviewed plan are context, never authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<CheckTaskReference>,
     pub preview_url: String,
     pub command: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -60,9 +64,23 @@ pub struct CheckDraft {
     pub criteria: Vec<CheckCriterion>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CheckTaskReference {
+    pub source_turn_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_plan_id: Option<String>,
+}
+
 impl CheckDraft {
     pub fn validate(&self) -> Result<()> {
         uuid::Uuid::parse_str(&self.session_id)?;
+        if let Some(task) = &self.task {
+            uuid::Uuid::parse_str(&task.source_turn_id)?;
+            if let Some(id) = &task.previous_plan_id {
+                uuid::Uuid::parse_str(id)?;
+            }
+        }
         ensure!(
             self.preview_url.len() <= 2048,
             "Use a bounded local test URL"
@@ -98,8 +116,8 @@ impl CheckDraft {
             "Select 1–64 relevant files to fingerprint"
         );
         ensure!(
-            !self.criteria.is_empty() && self.criteria.len() <= 2,
-            "Provide one or two requirements"
+            !self.criteria.is_empty() && self.criteria.len() <= MAX_CHECK_REQUIREMENTS,
+            "Provide 1–8 requirements"
         );
         let mut ids = BTreeSet::new();
         for criterion in &self.criteria {
@@ -374,7 +392,10 @@ pub fn report_from_output(plan: CheckPlan, output: ExecutionOutcome) -> CheckRep
             parsed.preview_url == report.plan.draft.preview_url,
             "Observation preview URL does not match the approved plan"
         );
-        ensure!(parsed.observations.len() <= 2, "Too many observations");
+        ensure!(
+            parsed.observations.len() <= MAX_CHECK_REQUIREMENTS,
+            "Too many observations"
+        );
         let mut ids = BTreeSet::new();
         for observation in &parsed.observations {
             ensure!(

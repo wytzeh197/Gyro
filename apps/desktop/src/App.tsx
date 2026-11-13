@@ -473,6 +473,9 @@ import {
   type BrowserPreviewCapture,
   type CapabilityActivity,
   type CapabilityApprovalDecision,
+  problemAttachmentName,
+  problemAttachmentText,
+  type ProblemDragPayload,
   type ChatAttachment,
   type ChatBrowserResource,
   type ChatCompanionTabId,
@@ -10250,6 +10253,63 @@ export function App() {
     ],
   );
 
+  const attachDroppedProblem = useCallback(
+    (problem: ProblemDragPayload, target?: {
+      draftKey: string;
+      sessionId?: string;
+      workspacePath?: string;
+    }) => {
+      const draftKey = target?.draftKey ?? activeDraftKey;
+      const sessionId = target ? target.sessionId : activeSessionId;
+      const sourceWorkspace = problem.workspacePath ?? (target ? target.workspacePath : workspacePath);
+      const content = problemAttachmentText({ ...problem, workspacePath: sourceWorkspace });
+      const id = `pending-problem:${crypto.randomUUID()}`;
+      const placeholder: ChatAttachment = {
+        id, path: id, kind: "ide-snapshot",
+        name: problemAttachmentName(problem),
+        size: new TextEncoder().encode(content).length,
+        mimeType: "text/plain",
+        pending: true,
+      };
+      setChatAttachments((current) => ({
+        ...current,
+        [draftKey]: [...(current[draftKey] ?? []), placeholder],
+      }));
+      const upload = withMediaUploadTimeout(invoke<ChatAttachment>("prepare_chat_attachment", {
+        request: {
+          sessionId: sessionId ?? NEW_CHAT_DRAFT_KEY,
+          workspacePath: sourceWorkspace,
+          path: "",
+          kind: "ide-snapshot",
+          name: placeholder.name,
+          relativePath: "diagnostic" in problem ? problem.diagnostic.path : "Blocked plan step",
+          bytes: Array.from(new TextEncoder().encode(content)),
+        },
+      })).catch((error) => {
+        notify("command-failed", "Problem could not be attached", String(error));
+        return undefined;
+      }).then((attachment) => {
+        setChatAttachments((current) => {
+          // Follow a draft moved to another chat while storage was pending.
+          // A chip removed by the user must never reappear.
+          const key = [draftKey, ...Object.keys(current)].find((key) =>
+            current[key]?.some((item) => item.id === id),
+          );
+          if (!key) return current;
+          const items = current[key] ?? [];
+          const keep = attachment && !items.some((item) => item.path === attachment.path);
+          return {
+            ...current,
+            [key]: items.flatMap((item) => item.id !== id ? [item] : keep ? [attachment] : []),
+          };
+        });
+        return attachment;
+      });
+      void trackPendingMedia(placeholder, upload);
+    },
+    [activeDraftKey, activeSessionId, notify, workspacePath],
+  );
+
   const attachDroppedMedia = useCallback(
     async (
       files: File[],
@@ -18112,6 +18172,14 @@ export function App() {
           maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
           onAgentAction={(action) => notify("terminal", "Agent action", action)}
           canAttachEditorSnapshot={canAttachEditorSnapshot}
+          onAttachProblem={(problem) => {
+            focusChatPane(pane);
+            attachDroppedProblem(problem, {
+              draftKey: paneDraftKey,
+              sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+              workspacePath: pane.workspacePath,
+            });
+          }}
           onAttachMediaFiles={(files) => {
             focusChatPane(pane);
             void attachDroppedMedia(files, {
@@ -18498,6 +18566,7 @@ export function App() {
       isToolPanelAvailable={isBottomDrawerAvailable}
       maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
       canAttachEditorSnapshot={canAttachEditorSnapshot}
+      onAttachProblem={attachDroppedProblem}
       onAttachMediaFiles={attachDroppedMedia}
       onAttachMediaPaths={(paths) => {
         void (async () => {
@@ -18949,6 +19018,7 @@ export function App() {
                       notify("terminal", "Agent action", action)
                     }
                     canAttachEditorSnapshot={canAttachEditorSnapshot}
+                    onAttachProblem={attachDroppedProblem}
                     onAttachMediaFiles={attachDroppedMedia}
                     onAttachMediaPaths={(paths) => {
                       void (async () => {
@@ -19812,6 +19882,7 @@ export function App() {
           isToolPanelAvailable={isBottomDrawerAvailable}
           maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
           canAttachEditorSnapshot={canAttachEditorSnapshot}
+          onAttachProblem={attachDroppedProblem}
           onAttachMediaFiles={attachDroppedMedia}
           onAttachMediaPaths={(paths) => {
             void (async () => {
@@ -20058,7 +20129,7 @@ export function App() {
                 >
                   <AppearanceContext.Provider value={appearance}>
                     <LocalCheckHost
-                      sessions={sessions}
+                      sessions={sessions} events={sessionEventsById}
                       reminders={checkReminders.reminders}
                       onDismissReminder={checkReminders.dismiss}
                       cloudRequest={

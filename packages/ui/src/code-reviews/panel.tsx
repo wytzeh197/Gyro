@@ -329,12 +329,29 @@ export function CodeReviewPanel({
                     onReviewAgain={() => {
                       setPrevious(detail.run.id);
                       setSelected(undefined);
-                      setScope(detail.snapshot.scope.kind);
-                      if (detail.snapshot.scope.kind === "turn")
-                        setTurnId(detail.snapshot.scope.turnId);
-                      if (detail.snapshot.scope.kind === "branch")
-                        setBase(detail.snapshot.scope.base);
+                      // A turn snapshot is immutable. Recheck the working files
+                      // after fixes instead of reviewing that historical patch again.
+                      setScope(
+                        detail.snapshot.scope.kind === "branch"
+                          ? "branch"
+                          : "uncommitted",
+                      );
+                      setTurnId("");
+                      setBase(
+                        detail.snapshot.scope.kind === "branch"
+                          ? detail.snapshot.scope.base
+                          : "",
+                      );
+                      setPaths(
+                        detail.snapshot.files
+                          .map((file) => file.path)
+                          .join("\n"),
+                      );
+                      setBrief(detail.snapshot.request ?? "");
                       setRootId(detail.snapshot.rootId);
+                      setNotice(
+                        "Rechecking current changes. Preview the scope; files with no current diff remain unverified.",
+                      );
                       resetCapture();
                     }}
                   />

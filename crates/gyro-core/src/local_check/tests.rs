@@ -7,6 +7,7 @@ fn plan() -> CheckPlan {
         created_at: chrono::Utc::now().to_rfc3339(),
         workspace_revision: 1,
         draft: CheckDraft {
+            task: None,
             session_id: uuid::Uuid::new_v4().to_string(),
             preview_url: "http://127.0.0.1:4317".into(),
             command: "node check.mjs".into(),
@@ -54,6 +55,70 @@ fn observed(mut values: Value) -> Value {
             .or_insert(json!("api"));
     }
     json!({"version":2,"previewUrl":"http://127.0.0.1:4317","observations":values})
+}
+
+#[test]
+fn requirements_are_bounded_and_legacy_drafts_still_load() {
+    let mut draft = plan().draft;
+    let legacy = serde_json::to_value(&draft).unwrap();
+    assert!(legacy.get("task").is_none());
+    assert!(serde_json::from_value::<CheckDraft>(legacy)
+        .unwrap()
+        .task
+        .is_none());
+    draft.criteria = (0..MAX_CHECK_REQUIREMENTS)
+        .map(|i| CheckCriterion {
+            id: format!("criterion-{i}"),
+            requirement: format!("Requirement {i}"),
+            expected: json!(true),
+            scope: CheckScope::Command,
+        })
+        .collect();
+    assert!(draft.validate().is_ok());
+    draft.criteria.push(CheckCriterion {
+        id: "extra".into(),
+        requirement: "Extra".into(),
+        expected: json!(true),
+        scope: CheckScope::Command,
+    });
+    assert!(draft.validate().is_err());
+    draft.criteria.pop();
+    draft.task = Some(CheckTaskReference {
+        source_turn_id: "not-a-turn".into(),
+        previous_plan_id: None,
+    });
+    assert!(draft.validate().is_err());
+}
+
+#[test]
+fn eight_requirements_need_eight_independent_observations() {
+    let mut p = plan();
+    p.draft.criteria = (0..MAX_CHECK_REQUIREMENTS)
+        .map(|i| CheckCriterion {
+            id: format!("criterion-{i}"),
+            requirement: format!("Requirement {i}"),
+            expected: json!(true),
+            scope: CheckScope::Api,
+        })
+        .collect();
+    let observations: Vec<_> = (0..7)
+        .map(|i| {
+            json!({
+                "criterionId": format!("criterion-{i}"), "actual": true,
+                "scope": "api", "evidence": "Synthetic API observation"
+            })
+        })
+        .collect();
+    let report = report_from_output(p, output(observed(json!(observations))));
+    assert_eq!(
+        report
+            .results
+            .iter()
+            .filter(|r| r.status == CheckStatus::Passed)
+            .count(),
+        7
+    );
+    assert_eq!(report.results[7].status, CheckStatus::NotChecked);
 }
 
 #[test]

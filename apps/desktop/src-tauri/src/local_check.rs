@@ -108,6 +108,37 @@ pub(super) async fn prepare_local_check(
 ) -> Result<CheckPlan, String> {
     tauri::async_runtime::spawn_blocking(move || {
         draft.validate().map_err(to_string)?;
+        if let Some(task) = &draft.task {
+            let store = open_store()?;
+            let turn = parse_uuid(&task.source_turn_id)?;
+            let events = store
+                .read_transcript_events(parse_uuid(&draft.session_id)?)
+                .map_err(to_string)?;
+            if !events.iter().any(|e| {
+                e.turn_id == Some(turn) && e.kind == gyro_core::SessionEventKind::UserMessage
+            }) {
+                return Err("The originating task is unavailable in this chat.".into());
+            }
+            if let Some(previous) = &task.previous_plan_id {
+                let _io = REPORT_IO.lock().map_err(to_string)?;
+                let path = reports_dir()
+                    .map_err(to_string)?
+                    .join(format!("{previous}.json"));
+                let meta = fs::symlink_metadata(&path).map_err(to_string)?;
+                if !meta.is_file() || meta.len() > 512 * 1024 {
+                    return Err("The previous check is unavailable.".into());
+                }
+                let report: CheckReport =
+                    serde_json::from_slice(&fs::read(&path).map_err(to_string)?)
+                        .map_err(to_string)?;
+                if report.plan.draft.session_id != draft.session_id
+                    || report.plan.draft.task.as_ref().map(|t| &t.source_turn_id)
+                        != Some(&task.source_turn_id)
+                {
+                    return Err("The previous check belongs to another task.".into());
+                }
+            }
+        }
         let (root, revision) = check_workspace(&draft.session_id)?;
         let snapshot = engine::snapshot(&root, &draft.files).map_err(to_string)?;
         let plan = CheckPlan {
@@ -284,6 +315,27 @@ pub(super) async fn resolve_local_check(
                 .map_err(to_string)
         })();
         saved?;
+        // Link immutable evidence to the source task; this event never grants
+        // completion or permission. Saved reports remain the freshness authority.
+        if let Some(task) = &report.plan.draft.task {
+            let store = open_store()?;
+            store.append_event(
+                parse_uuid(&report.plan.draft.session_id)?,
+                gyro_core::SessionEventKind::SystemEvent,
+                "Task check recorded",
+                serde_json::json!({
+                    "kind": "task-check-recorded",
+                    "sourceTurnId": task.source_turn_id,
+                    "reportId": report.plan.id,
+                    "previousPlanId": task.previous_plan_id,
+                    "requirements": report.plan.draft.criteria,
+                    "snapshot": report.plan.snapshot,
+                    "results": report.results,
+                    "stale": report.stale,
+                    "freshness": "Reopen this report to recheck current files.",
+                }),
+            ).map_err(|error| format!("Check report saved, but task history could not be updated: {error}"))?;
+        }
         Ok(report)
     })
     .await
@@ -456,14 +508,29 @@ mod tests {
 
 /// Native Cloud selection reads an actual saved report and refreshes its scope
 /// and freshness before making a read-only, sanitized preview. No approval is inherited.
-pub(super) fn cloud_report_preview(session:Uuid,report_id:Uuid)->Result<String,String>{
-    let _io=REPORT_IO.lock().map_err(to_string)?;
-    let base=reports_dir().map_err(to_string)?;
-    let mut report=gyro_core::cloud_connection::v2::selection::load_report(&base,session,report_id).map_err(to_string)?;
+pub(super) fn cloud_report_preview(session: Uuid, report_id: Uuid) -> Result<String, String> {
+    let _io = REPORT_IO.lock().map_err(to_string)?;
+    let base = reports_dir().map_err(to_string)?;
+    let mut report =
+        gyro_core::cloud_connection::v2::selection::load_report(&base, session, report_id)
+            .map_err(to_string)?;
     engine::refresh_evidence_scope(&mut report);
-    if check_workspace(&session.to_string()).ok().as_ref()!=Some(&(report.plan.snapshot.workspace.clone(),report.plan.workspace_revision)){
-        report.stale=true;report.freshness_note="Chat workspace changed or is unavailable.".into();
-    }else{engine::refresh_freshness(&mut report);}
-    engine::save_report(&base,&report).map_err(to_string)?;
-    Ok(gyro_core::cloud_connection::v2::selection::Report::from_check(&report).map_err(to_string)?.text().into())
+    if check_workspace(&session.to_string()).ok().as_ref()
+        != Some(&(
+            report.plan.snapshot.workspace.clone(),
+            report.plan.workspace_revision,
+        ))
+    {
+        report.stale = true;
+        report.freshness_note = "Chat workspace changed or is unavailable.".into();
+    } else {
+        engine::refresh_freshness(&mut report);
+    }
+    engine::save_report(&base, &report).map_err(to_string)?;
+    Ok(
+        gyro_core::cloud_connection::v2::selection::Report::from_check(&report)
+            .map_err(to_string)?
+            .text()
+            .into(),
+    )
 }

@@ -1,3 +1,4 @@
+export { problemAttachmentText, problemAttachmentName, type ProblemDragPayload } from "./problem-drag";
 export { reconcileGitPreparation, hasOnlyGitWarnings } from "./workspace-preparation";
 export { applyGoogleModelDiscovery } from "./google-models";
 export { ProjectMemoryPanel } from "./project-memory/panel";
