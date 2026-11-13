@@ -6,6 +6,10 @@ const MIN_FIELD_BYTES: usize = 2_048;
 /// Only completed, known edit tools may omit bulk arguments from old exchanges.
 /// Keep identifiers, commands, unknown tools, failures and malformed JSON exact.
 /// The original argument object must be persisted before any replacement.
+///
+/// A call that does not qualify stays in the transcript and is visited again
+/// on every later owned request. Its argument body is parsed and copied only
+/// after the paired result says that edit completed.
 pub(super) fn retire(
     messages: &mut [Value],
     newest: usize,
@@ -37,46 +41,16 @@ pub(super) fn retire(
             ) {
                 continue;
             }
-            let arguments = &call["function"]["arguments"];
-            if arguments
-                .as_str()
-                .is_some_and(|text| text.len() < MIN_FIELD_BYTES)
-            {
-                continue;
-            }
-            let (original, mut parsed, encoded) = match arguments {
+            let encoded = match &call["function"]["arguments"] {
                 Value::String(text) => {
-                    let Ok(parsed) = serde_json::from_str::<Value>(text) else {
+                    if text.len() < MIN_FIELD_BYTES {
                         continue;
-                    };
-                    (text.clone(), parsed, true)
+                    }
+                    true
                 }
-                Value::Object(_) => (arguments.to_string(), arguments.clone(), false),
+                Value::Object(_) => false,
                 _ => continue,
             };
-            let (tool, prefix) = if name == "gyro_tool_invoke" {
-                (parsed["name"].as_str().unwrap_or_default(), "/arguments")
-            } else {
-                (name, "")
-            };
-            let (capability, fields): (&str, &[&str]) = match tool {
-                "gyro_workspace_propose_edit" => ("workspace-propose-edit", &["content"]),
-                "gyro_workspace_edit" => ("workspace-edit", &["oldString", "newString"]),
-                _ => continue,
-            };
-            let fields: Vec<String> = fields
-                .iter()
-                .map(|field| format!("{prefix}/{field}"))
-                .filter(|pointer| {
-                    parsed
-                        .pointer(pointer)
-                        .and_then(Value::as_str)
-                        .is_some_and(|text| text.len() >= MIN_FIELD_BYTES)
-                })
-                .collect();
-            if fields.is_empty() {
-                continue;
-            }
             // Only the result paired with this call can establish completion.
             // Stop at the next assistant exchange so a later call cannot qualify it.
             let reply = match call.get("id") {
@@ -92,17 +66,81 @@ pub(super) fn retire(
                     .filter(|m| m["tool_call_id"].is_null() && m["tool_name"] == name),
                 _ => None,
             };
-            let completed = reply
-                .and_then(|m| m["content"].as_str())
+            let Some(reported) = reply
+                .and_then(|message| message["content"].as_str())
                 .and_then(|text| serde_json::from_str::<Value>(text).ok())
-                .is_some_and(|result| {
-                    result["status"] == "completed"
-                        && result["error"].is_null()
-                        && result["result"]["capabilityId"] == capability
-                });
-            if !completed {
+                .filter(|result| result["status"] == "completed" && result["error"].is_null())
+                .and_then(|result| result["result"]["capabilityId"].as_str().map(str::to_owned))
+            else {
+                continue;
+            };
+            if !matches!(
+                reported.as_str(),
+                "workspace-propose-edit" | "workspace-edit"
+            ) {
                 continue;
             }
+            if name != "gyro_tool_invoke" {
+                let expected = match name {
+                    "gyro_workspace_propose_edit" => "workspace-propose-edit",
+                    "gyro_workspace_edit" => "workspace-edit",
+                    _ => continue,
+                };
+                if reported != expected {
+                    continue;
+                }
+            }
+            let arguments = &call["function"]["arguments"];
+            let parsed_string = if encoded {
+                let Value::String(text) = arguments else {
+                    continue;
+                };
+                match serde_json::from_str::<Value>(text) {
+                    Ok(parsed) => Some(parsed),
+                    Err(_) => continue,
+                }
+            } else {
+                None
+            };
+            let view = parsed_string.as_ref().unwrap_or(arguments);
+            let (tool, prefix) = if name == "gyro_tool_invoke" {
+                (view["name"].as_str().unwrap_or_default(), "/arguments")
+            } else {
+                (name, "")
+            };
+            let (capability, field_names): (&str, &[&str]) = match tool {
+                "gyro_workspace_propose_edit" => ("workspace-propose-edit", &["content"]),
+                "gyro_workspace_edit" => ("workspace-edit", &["oldString", "newString"]),
+                _ => continue,
+            };
+            if reported != capability {
+                continue;
+            }
+            let fields: Vec<String> = field_names
+                .iter()
+                .map(|field| format!("{prefix}/{field}"))
+                .filter(|pointer| {
+                    view.pointer(pointer)
+                        .and_then(Value::as_str)
+                        .is_some_and(|text| text.len() >= MIN_FIELD_BYTES)
+                })
+                .collect();
+            if fields.is_empty() {
+                continue;
+            }
+            // The body is still the call's original bytes. Copy it only now,
+            // for the spill address and the persisted record.
+            let (original, mut parsed) = if encoded {
+                let Value::String(text) = arguments else {
+                    continue;
+                };
+                let Some(parsed) = parsed_string else {
+                    continue;
+                };
+                (text.clone(), parsed)
+            } else {
+                (arguments.to_string(), arguments.clone())
+            };
             let address = super::spill::address(capability, "arguments", &original);
             for pointer in fields {
                 let Some(Value::String(text)) = parsed.pointer_mut(&pointer) else {
@@ -279,6 +317,22 @@ mod tests {
             );
             assert_eq!(messages, before, "case {case}");
         }
+    }
+
+    #[test]
+    fn failed_object_arguments_stay_exact() {
+        let original = json!({"path":"a.rs","content":"x".repeat(16_000)});
+        let mut messages = exchange("gyro_workspace_propose_edit", original);
+        let mut result: Value =
+            serde_json::from_str(messages[3]["content"].as_str().unwrap()).unwrap();
+        result["status"] = json!("failed");
+        messages[3]["content"] = json!(result.to_string());
+        let before = messages.clone();
+        assert_eq!(
+            retire(&mut messages, 4, |_, _| panic!("failed object edit")),
+            0
+        );
+        assert_eq!(messages, before);
     }
 
     #[test]
