@@ -1057,6 +1057,17 @@
   padding: calc(var(--gyro-chat-space-1) * 1.5);
 }
 
+/* The environment card is the panel's surface; the aside only places it. */
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  > .gyro-chat-environment-popover.is-env-card {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-xl);
+  box-shadow: none;
+}
+
 :root[data-theme] .gyro-chat-environment-popover > header {
   min-height: 26px;
   padding: 0 var(--gyro-chat-space-1) var(--gyro-chat-space-1)

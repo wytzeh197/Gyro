@@ -1,0 +1,707 @@
+/* The environment card in the chat stream (design F): a two-line bar while
+   folded, a step rail with live beats when opened. Tokens only, so the light
+   theme follows. */
+
+.gyro-env-card {
+  --gyro-env-card-accent-soft: color-mix(in srgb, var(--gyro-cobalt) 16%, transparent);
+  --gyro-env-card-pending: color-mix(in srgb, var(--gyro-text) 14%, transparent);
+  box-sizing: border-box;
+  width: 100%;
+  margin: 4px 0 12px;
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-xl);
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-sans);
+  font-size: var(--gyro-font-support);
+  overflow: hidden;
+}
+
+:where(.gyro-env-card) button {
+  font: inherit;
+  color: inherit;
+}
+
+/* Folded bar */
+
+.gyro-env-card.is-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gyro-env-card.is-bar.is-waiting {
+  padding-right: 12px;
+  border-color: color-mix(in srgb, var(--gyro-attention) 45%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--gyro-attention) 8%, transparent);
+}
+
+.gyro-env-card-bar-toggle {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 62px;
+  padding: 11px 14px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+.gyro-env-card-bar-toggle:hover {
+  background: color-mix(in srgb, var(--gyro-text) 3%, transparent);
+}
+
+.gyro-env-card-bar-toggle:focus-visible,
+.gyro-env-card-header:focus-visible,
+.gyro-env-card-cell:focus-visible,
+.gyro-env-card-button:focus-visible {
+  outline: 2px solid var(--gyro-cobalt);
+  outline-offset: -2px;
+}
+
+.gyro-env-card-lines {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.gyro-env-card-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.gyro-env-card-line.is-meta {
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-micro);
+  white-space: nowrap;
+}
+
+.gyro-env-card-line.is-meta > * {
+  flex-shrink: 0;
+}
+
+.gyro-env-card-line.is-meta > .gyro-env-card-grow {
+  flex-shrink: 1;
+}
+
+.gyro-env-card-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--gyro-font-chrome);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-env-card-grow {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-env-card-chevron {
+  flex-shrink: 0;
+  color: var(--gyro-faint);
+}
+
+.gyro-env-card-mono {
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-micro);
+}
+
+.gyro-env-card .is-dim {
+  color: var(--gyro-faint);
+}
+
+.gyro-env-card .is-accent {
+  color: var(--gyro-cobalt);
+}
+
+.gyro-env-card .is-attention {
+  color: var(--gyro-attention);
+}
+
+.gyro-env-card-diff .is-added {
+  color: var(--gyro-success);
+}
+
+.gyro-env-card-diff .is-removed {
+  color: var(--gyro-danger);
+}
+
+.gyro-env-card-dotted {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.gyro-env-card-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gyro-faint);
+}
+
+.gyro-env-card-dot.is-success {
+  background: var(--gyro-success);
+}
+
+.gyro-env-card-dot.is-accent {
+  background: var(--gyro-cobalt);
+}
+
+.gyro-env-card-dot.is-attention {
+  width: 7px;
+  height: 7px;
+  background: var(--gyro-attention);
+}
+
+.gyro-env-card-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Segment bar */
+
+.gyro-env-card-segments {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 3px;
+}
+
+.gyro-env-card-segment {
+  width: 12px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--gyro-env-card-pending);
+}
+
+.gyro-env-card-segment.is-complete {
+  background: var(--gyro-cobalt);
+}
+
+.gyro-env-card-segment.is-in-progress {
+  background: color-mix(in srgb, var(--gyro-cobalt) 45%, transparent);
+}
+
+.gyro-env-card-segment.is-blocked {
+  background: color-mix(in srgb, var(--gyro-attention) 55%, transparent);
+}
+
+/* Step nodes */
+
+.gyro-env-card-node {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+
+.gyro-env-card-node.is-complete {
+  background: var(--gyro-env-card-accent-soft);
+  color: var(--gyro-cobalt);
+}
+
+.gyro-env-card-node.is-done {
+  background: color-mix(in srgb, var(--gyro-success) 16%, transparent);
+  color: var(--gyro-success);
+}
+
+.gyro-env-card-node.is-active {
+  border: 2px solid color-mix(in srgb, var(--gyro-cobalt) 25%, transparent);
+  border-top-color: var(--gyro-cobalt);
+  animation: gyro-env-card-spin 900ms linear infinite;
+}
+
+.gyro-env-card-node.is-todo {
+  border: 1.5px solid color-mix(in srgb, var(--gyro-text) 22%, transparent);
+}
+
+.gyro-env-card-node.is-blocked {
+  border: 1.5px dashed var(--gyro-attention);
+}
+
+@keyframes gyro-env-card-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Buttons (waiting) */
+
+.gyro-env-card-button {
+  flex-shrink: 0;
+  min-height: 34px;
+  padding: 0 12px;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--gyro-text) 12%, transparent);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  cursor: pointer;
+  transition:
+    background-color var(--gyro-premium-motion) var(--gyro-premium-ease),
+    color var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+.gyro-env-card-button:hover {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-env-card-button.is-primary {
+  padding: 0 14px;
+  background: var(--gyro-primary-bg);
+  border-color: transparent;
+  color: var(--gyro-primary-text);
+  font-weight: 500;
+}
+
+.gyro-env-card-button.is-primary:hover {
+  background: var(--gyro-primary-hover);
+  color: var(--gyro-primary-text);
+}
+
+/* Opened card */
+
+.gyro-env-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gyro-env-card-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--gyro-font-chrome);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-env-card-chip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  background: var(--gyro-surface-raised);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+
+.gyro-env-card-rail {
+  margin: 0;
+  padding: 6px 16px 14px;
+  list-style: none;
+}
+
+.gyro-env-card-step {
+  display: flex;
+  gap: 12px;
+}
+
+.gyro-env-card-track {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: center;
+  width: 20px;
+}
+
+.gyro-env-card-stem {
+  flex: 1 1 auto;
+  width: 1.5px;
+  min-height: 10px;
+  background: color-mix(in srgb, var(--gyro-text) 12%, transparent);
+}
+
+.gyro-env-card-stem.is-complete {
+  background: color-mix(in srgb, var(--gyro-cobalt) 45%, transparent);
+}
+
+.gyro-env-card-step-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-bottom: 10px;
+  font-size: var(--gyro-font-support);
+  line-height: 18px;
+}
+
+.gyro-env-card-step.is-complete .gyro-env-card-step-body {
+  color: var(--gyro-faint);
+}
+
+.gyro-env-card-step.is-todo .gyro-env-card-step-body,
+.gyro-env-card-step.is-in-progress:not(.is-active) .gyro-env-card-step-body {
+  color: var(--gyro-muted);
+}
+
+.gyro-env-card-step-body.is-highlight {
+  margin: -6px -8px 10px 0;
+  padding: 6px 10px 8px;
+  background: color-mix(in srgb, var(--gyro-cobalt) 7%, transparent);
+  border-radius: var(--gyro-radius-md);
+}
+
+.gyro-env-card-step-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.gyro-env-card-step-row.is-strong {
+  font-weight: 500;
+}
+
+.gyro-env-card-step-row .is-accent {
+  flex-shrink: 0;
+  font-size: var(--gyro-font-micro);
+  font-weight: 400;
+}
+
+.gyro-env-card-step-detail {
+  margin: 2px 0 0;
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-micro);
+}
+
+.gyro-env-card-badge {
+  flex-shrink: 0;
+  padding: 0 8px;
+  background: var(--gyro-attention-soft);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-attention);
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+/* Live beats under the active step */
+
+.gyro-env-card-beats {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gyro-env-card-beat {
+  display: flex;
+  gap: 10px;
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-support);
+  line-height: 19px;
+}
+
+.gyro-env-card-beat > .gyro-env-card-grow {
+  padding-bottom: 5px;
+}
+
+.gyro-env-card-beat.is-live {
+  color: var(--gyro-text);
+}
+
+.gyro-env-card-beat-track {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: center;
+  width: 6px;
+}
+
+.gyro-env-card-beat-dot {
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--gyro-faint) 60%, transparent);
+}
+
+.gyro-env-card-beat.is-live .gyro-env-card-beat-dot {
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  background: var(--gyro-cobalt);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gyro-cobalt) 18%, transparent);
+}
+
+.gyro-env-card-beat-stem {
+  flex: 1 1 auto;
+  width: 1px;
+  margin-top: 3px;
+  background: color-mix(in srgb, var(--gyro-text) 12%, transparent);
+}
+
+.gyro-env-card-ref {
+  flex-shrink: 1;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Footer: branch, processes, subagents */
+
+.gyro-env-card-foot {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  background: var(--gyro-surface-soft);
+  border-top: 1px solid var(--gyro-border-soft);
+}
+
+.gyro-env-card-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 58px;
+  padding: 10px 14px;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--gyro-border-soft);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+
+.gyro-env-card-cell:first-child {
+  border-left: 0;
+}
+
+.gyro-env-card-cell:hover {
+  background: color-mix(in srgb, var(--gyro-text) 3%, transparent);
+}
+
+.gyro-env-card-cell-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-micro);
+}
+
+.gyro-env-card-cell-label .is-accent {
+  flex-shrink: 0;
+}
+
+.gyro-env-card-cell-value {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--gyro-font-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-env-card-next {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 10px 14px;
+  background: color-mix(in srgb, var(--gyro-attention) 8%, transparent);
+  border-top: 1px solid var(--gyro-border-soft);
+  font-size: var(--gyro-font-support);
+}
+
+/* The chat's right-hand Environment panel: a status line, the plan when
+   there is one, the branch, anything running, and the next action. No
+   tinted bands; chat.css drops the panel aside's own chrome so the card is
+   the surface. */
+
+.gyro-env-card.is-panel {
+  margin: 0;
+  padding: 4px 0 6px;
+}
+
+.gyro-env-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 8px 0 14px;
+}
+
+.gyro-env-panel-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-env-card-dot.is-running {
+  background: var(--gyro-cobalt);
+}
+
+.gyro-env-card-dot.is-waiting {
+  background: var(--gyro-attention);
+}
+
+.gyro-env-card-dot.is-done,
+.gyro-env-card-dot.is-idle {
+  background: var(--gyro-success);
+}
+
+.gyro-env-card-close {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-faint);
+  cursor: pointer;
+}
+
+.gyro-env-card-close:hover {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-env-card-close:focus-visible,
+.gyro-env-panel-row:focus-visible {
+  outline: 2px solid var(--gyro-cobalt);
+  outline-offset: -2px;
+}
+
+.gyro-env-panel-plan {
+  padding: 4px 0 0;
+}
+
+.gyro-env-panel-title {
+  margin: 0;
+  padding: 0 14px 4px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  font-weight: 400;
+}
+
+.gyro-env-card.is-panel .gyro-env-card-rail {
+  padding: 4px 14px 6px;
+}
+
+.gyro-env-panel-rows {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 6px;
+}
+
+.gyro-env-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  text-align: left;
+  cursor: pointer;
+}
+
+.gyro-env-panel-row:hover {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-env-panel-row > svg {
+  flex-shrink: 0;
+  color: var(--gyro-faint);
+}
+
+.gyro-env-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px 12px 6px;
+}
+
+.gyro-env-card.is-panel .gyro-env-card-button {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: var(--gyro-font-micro);
+}
+
+.gyro-env-card.is-panel .gyro-env-card-button.is-primary {
+  background: var(--gyro-ink-bg);
+  color: var(--gyro-ink-text);
+}
+
+.gyro-env-card.is-panel .gyro-env-card-button.is-primary:hover {
+  background: color-mix(in srgb, var(--gyro-ink-bg) 86%, var(--gyro-surface));
+}
+
+@media (max-width: 560px) {
+  .gyro-env-card-foot {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gyro-env-card-cell {
+    min-height: 44px;
+    border-top: 1px solid var(--gyro-border-soft);
+    border-left: 0;
+  }
+
+  .gyro-env-card-cell:first-child {
+    border-top: 0;
+  }
+
+  .gyro-env-card-segments {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-env-card-node.is-active {
+    animation: none;
+    border-color: var(--gyro-cobalt);
+    border-right-color: color-mix(in srgb, var(--gyro-cobalt) 25%, transparent);
+  }
+
+  .gyro-env-card-bar-toggle,
+  .gyro-env-card-button,
+  .gyro-env-card-cell {
+    transition: none;
+  }
+}

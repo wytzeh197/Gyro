@@ -666,6 +666,7 @@ import {
 
 import type { BrowserScreenshotHandler } from "./types";
 import { BrowserAnnotationControls } from "./browser-annotation-controls";
+import { ChatEnvironmentCard } from "./chat-environment-card";
 const CommandIcon = Command;
 const AutoApproveIcon = createLucideIcon("AutoApprove", [
   [
@@ -6181,38 +6182,37 @@ export function ChatSurface({
   ) : !activeRailPanel || isEnvironmentPopoverOpen ? null : (
     legacySidePanel
   );
+  // The Environment panel on the right of the chat is the environment card:
+  // the plan as a step rail, with the branch, processes and subagents below.
+  const environmentTurn = turns.at(-1);
   const environmentPopover = isEnvironmentPopoverOpen ? (
-    <ChatEnvironmentPopover
-      attachments={attachments}
-      branchLabel={environmentBranchLabel}
-      isRunning={Boolean(isComposerSending)}
-      branchItems={branchPopoverItems({
-        branchCatalog,
-        branchName: environmentBranchLabel,
-        isDisabled: isComposerSending,
-        isLoading: isBranchLoading,
-        workspaceMode,
-        workspacePath,
-      })}
-      onBranchAction={onComposerAction}
-      onClose={onToggleEnvironmentRail}
-      onOpenTab={onOpenCompanionTab}
-      onOpenReview={(scope) => {
-        setReviewScope(scope);
-        setReviewTurnFiles(undefined);
-        if (onOpenCompanionTab) onOpenCompanionTab("review");
-        else onSelectChatPanel?.("review");
-      }}
-      onOpenPlan={onTogglePlanPanel}
-      onPlanItemStatusChange={onPlanItemStatusChange}
-      onRunGitAction={railDiffTools?.onRunGitAction}
-      onSelectBranch={() => onComposerAction?.("select-branch")}
-      plan={sessionPlan}
-      sourceControl={sourceControl}
-      terminalPanes={terminalPanes}
-      subagents={subagents}
-      workspacePath={workspacePath}
-    />
+    <aside aria-label="Environment" className="gyro-chat-environment-popover is-env-card">
+      <ChatEnvironmentCard
+        isRunning={
+          Boolean(isComposerSending) &&
+          (!environmentTurn || environmentTurn.id === activeTurnId)
+        }
+        modelLabel={contextModel.modelLabel}
+        onClose={onToggleEnvironmentRail}
+        onOpenReview={(scope) => {
+          setReviewScope(scope);
+          setReviewTurnFiles(undefined);
+          if (onOpenCompanionTab) onOpenCompanionTab("review");
+          else onSelectChatPanel?.("review");
+        }}
+        onOpenTab={(tab) => {
+          if (onOpenCompanionTab) onOpenCompanionTab(tab);
+          else onSelectChatPanel?.(tab);
+        }}
+        onRunGitAction={railDiffTools?.onRunGitAction}
+        placement="panel"
+        plan={sessionPlan}
+        sourceControl={sourceControl}
+        subagents={subagents}
+        terminalPanes={terminalPanes}
+        turn={environmentTurn}
+      />
+    </aside>
   ) : null;
   if (isEmptyStart) {
     return (
