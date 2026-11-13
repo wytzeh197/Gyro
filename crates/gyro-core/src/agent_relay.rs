@@ -13,12 +13,12 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::fs;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use crate::agent_sessions::{bounded_agent_summary, resolve_choice, ChoiceCatalog, ChoiceRequest};
@@ -27,6 +27,9 @@ use crate::paths::secure_private_file;
 const TOKEN_HEX_LEN: usize = 64;
 const MAX_PROMPT_CHARS: usize = 32_000;
 const MAX_HTTP_BODY: usize = 1024 * 1024;
+const MAX_HTTP_CONNECTIONS: usize = 16;
+const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const HTTP_IO_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_OFFLINE_AFTER_MS: i64 = 45_000;
 
 const SCHEMA: &str = "
@@ -239,13 +242,45 @@ fn validate_pairing_code(code: &str) -> Result<&str> {
 }
 
 fn accept_loop(listener: TcpListener, shutdown: Arc<AtomicBool>, data_dir: PathBuf) {
+    let mut workers: Vec<(TcpStream, JoinHandle<()>)> = Vec::new();
+    let dispatch_lock = Arc::new(Mutex::new(()));
     while !shutdown.load(Ordering::Relaxed) {
+        let mut index = 0;
+        while index < workers.len() {
+            if workers[index].1.is_finished() {
+                let (_, worker) = workers.swap_remove(index);
+                let _ = worker.join();
+            } else {
+                index += 1;
+            }
+        }
         match listener.accept() {
             Ok((stream, _)) => {
-                let _ = stream.set_nonblocking(false);
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-                let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
-                let _ = handle_connection(stream, &data_dir);
+                // Bound threads, sockets and request buffers. Do not block the
+                // accept loop even when every available worker is occupied.
+                if workers.len() >= MAX_HTTP_CONNECTIONS {
+                    let _ = stream.shutdown(Shutdown::Both);
+                    continue;
+                }
+                let deadline = Instant::now() + HTTP_REQUEST_TIMEOUT;
+                if stream.set_nonblocking(false).is_err()
+                    || stream.set_write_timeout(Some(HTTP_IO_TIMEOUT)).is_err()
+                {
+                    continue;
+                }
+                let Ok(control) = stream.try_clone() else {
+                    continue;
+                };
+                let directory = data_dir.clone();
+                let lock = dispatch_lock.clone();
+                if let Ok(worker) = thread::Builder::new()
+                    .name("gyro-relay-request".into())
+                    .spawn(move || {
+                        let _ = handle_connection(stream, &directory, &lock, deadline);
+                    })
+                {
+                    workers.push((control, worker));
+                }
             }
             Err(error)
                 if error.kind() == std::io::ErrorKind::WouldBlock
@@ -256,10 +291,23 @@ fn accept_loop(listener: TcpListener, shutdown: Arc<AtomicBool>, data_dir: PathB
             Err(_) => break,
         }
     }
+    // Close blocked reads/writes before joining so dropping the relay does not
+    // leave detached workers or wait for slow clients to finish their requests.
+    for (stream, _) in &workers {
+        let _ = stream.shutdown(Shutdown::Both);
+    }
+    for (_, worker) in workers {
+        let _ = worker.join();
+    }
 }
 
-fn handle_connection(mut stream: TcpStream, data_dir: &Path) -> Result<()> {
-    let (head, body) = match read_request(&mut stream)? {
+fn handle_connection(
+    mut stream: TcpStream,
+    data_dir: &Path,
+    dispatch_lock: &Mutex<()>,
+    deadline: Instant,
+) -> Result<()> {
+    let (head, body) = match read_request(&mut stream, deadline)? {
         Some(request) => request,
         None => return Ok(()),
     };
@@ -269,8 +317,15 @@ fn handle_connection(mut stream: TcpStream, data_dir: &Path) -> Result<()> {
     }
     let path = request_path(&head);
     let bearer = bearer_token(&head);
-    let conn = open_db(data_dir)?;
-    let (status, response) = dispatch(&conn, path, bearer.as_deref(), &body);
+    let (status, response) = {
+        // Preserve the relay's serialized state transitions, without holding
+        // the lock during any client-controlled socket reads or writes.
+        let _guard = dispatch_lock
+            .lock()
+            .map_err(|_| anyhow!("relay dispatch lock poisoned"))?;
+        let conn = open_db(data_dir)?;
+        dispatch(&conn, path, bearer.as_deref(), &body)
+    };
     write_http(&mut stream, status, response.as_bytes())?;
     Ok(())
 }
@@ -1416,11 +1471,11 @@ fn encode_hex(bytes: &[u8]) -> String {
     out
 }
 
-fn read_request(stream: &mut TcpStream) -> Result<Option<(String, Vec<u8>)>> {
+fn read_request(stream: &mut TcpStream, deadline: Instant) -> Result<Option<(String, Vec<u8>)>> {
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 4096];
     let header_end = loop {
-        let read = stream.read(&mut chunk)?;
+        let read = read_before_deadline(stream, &mut chunk, deadline)?;
         if read == 0 {
             return Ok(None);
         }
@@ -1440,7 +1495,7 @@ fn read_request(stream: &mut TcpStream) -> Result<Option<(String, Vec<u8>)>> {
         return Ok(None);
     }
     while body.len() < length {
-        let read = stream.read(&mut chunk)?;
+        let read = read_before_deadline(stream, &mut chunk, deadline)?;
         if read == 0 {
             break;
         }
@@ -1448,6 +1503,30 @@ fn read_request(stream: &mut TcpStream) -> Result<Option<(String, Vec<u8>)>> {
     }
     body.truncate(length);
     Ok(Some((head, body)))
+}
+
+fn read_before_deadline(
+    stream: &mut TcpStream,
+    buffer: &mut [u8],
+    deadline: Instant,
+) -> std::io::Result<usize> {
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "relay request timed out")
+        })?;
+    // Each read gets only the remaining total budget, so drip-fed bytes cannot
+    // continually renew the timeout in either the header or the body.
+    stream.set_read_timeout(Some(remaining.min(HTTP_IO_TIMEOUT)))?;
+    let count = stream.read(buffer)?;
+    if Instant::now() >= deadline {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "relay request timed out",
+        ));
+    }
+    Ok(count)
 }
 
 fn find_header_end(buffer: &[u8]) -> Option<usize> {
@@ -1598,6 +1677,145 @@ mod tests {
             .into_iter()
             .map(|byte| byte as char)
             .collect()
+    }
+
+    #[test]
+    fn relay_serves_authenticated_requests_while_other_clients_stall() {
+        let temp = tempfile::tempdir().unwrap();
+        let relay =
+            AgentRelayServer::start(temp.path().join("relay"), "127.0.0.1:0", None).unwrap();
+        let address = relay.origin().strip_prefix("http://").unwrap();
+        let mut header_client = TcpStream::connect(address).unwrap();
+        header_client.write_all(b"POST /mcp HTTP/1.1\r\n").unwrap();
+        let mut body_client = TcpStream::connect(address).unwrap();
+        body_client
+            .write_all(b"POST /mcp HTTP/1.1\r\nContent-Length: 100\r\n\r\n{")
+            .unwrap();
+
+        let response = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .post(&format!("{}/mcp", relay.origin()))
+            .set("Authorization", &format!("Bearer {}", relay.agent_token()))
+            .send_json(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+        drop(header_client);
+        drop(body_client);
+        let response = response.expect("stalled clients must not block authenticated requests");
+        assert_eq!(response.status(), 200);
+        let body: Value = response.into_json().unwrap();
+        assert!(body["result"]["tools"].is_array());
+    }
+
+    #[test]
+    fn relay_bounds_connections_recovers_capacity_and_closes_workers_on_shutdown() {
+        let temp = tempfile::tempdir().unwrap();
+        let relay =
+            AgentRelayServer::start(temp.path().join("relay"), "127.0.0.1:0", None).unwrap();
+        let address = relay.origin().strip_prefix("http://").unwrap();
+        let mut clients = (0..MAX_HTTP_CONNECTIONS)
+            .map(|_| TcpStream::connect(address).unwrap())
+            .collect::<Vec<_>>();
+        let mut excess = TcpStream::connect(address).unwrap();
+        excess
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let rejected = excess.read(&mut [0u8; 1]);
+        assert!(
+            matches!(rejected, Ok(0))
+                || matches!(rejected, Err(ref error) if error.kind() == std::io::ErrorKind::ConnectionReset),
+            "connections over the limit must be closed promptly: {rejected:?}",
+        );
+        // Closing one stalled socket must release a worker slot.
+        drop(clients.pop());
+        let (status, body) = post_json(
+            &format!("{}/mcp", relay.origin()),
+            Some(relay.agent_token()),
+            json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+        );
+        assert_eq!(status, 200);
+        assert!(body["result"]["tools"].is_array());
+        let started = Instant::now();
+        drop(relay);
+        assert!(started.elapsed() < Duration::from_secs(2));
+        for mut client in clients {
+            client
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let closed = client.read(&mut [0u8; 1]);
+            assert!(
+                matches!(closed, Ok(0))
+                    || matches!(closed, Err(ref error) if error.kind() == std::io::ErrorKind::ConnectionReset),
+                "shutdown must close worker sockets: {closed:?}",
+            );
+        }
+    }
+
+    fn assert_relay_request_deadline(initial: &[u8], trickle: bool) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        client
+            .set_write_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        let control = server.try_clone().unwrap();
+        client.write_all(initial).unwrap();
+        let deadline = Instant::now() + Duration::from_millis(250);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let reader = thread::spawn(move || {
+            let result = read_request(&mut server, deadline);
+            let _ = sender.send(result);
+        });
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        let writer = thread::spawn(move || {
+            let mut writes = 0;
+            while trickle && !flag.load(Ordering::Relaxed) {
+                if client.write_all(b"x").is_err() {
+                    break;
+                }
+                writes += 1;
+                thread::sleep(Duration::from_millis(10));
+            }
+            // Keep the connection open until the read has completed.
+            (client, writes)
+        });
+        let result = receiver.recv_timeout(Duration::from_secs(2));
+        stop.store(true, Ordering::Relaxed);
+        let _ = control.shutdown(Shutdown::Both);
+        let (_, writes) = writer.join().unwrap();
+        reader.join().unwrap();
+        let error = result
+            .expect("request must finish within its total time budget")
+            .expect_err("an incomplete request must not survive the deadline");
+        let error = error.downcast_ref::<std::io::Error>().unwrap();
+        assert!(
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+            ),
+            "unexpected deadline error: {error}",
+        );
+        if trickle {
+            assert!(writes > 1, "test must deliver multiple chunks");
+        }
+    }
+
+    #[test]
+    fn relay_deadline_expires_for_silent_clients() {
+        assert_relay_request_deadline(b"", false);
+    }
+
+    #[test]
+    fn relay_deadline_expires_despite_trickled_headers() {
+        assert_relay_request_deadline(b"POST /mcp HTTP/1.1\r\nX-Slow: ", true);
+    }
+
+    #[test]
+    fn relay_deadline_expires_despite_trickled_bodies() {
+        assert_relay_request_deadline(
+            b"POST /mcp HTTP/1.1\r\nContent-Length: 1048576\r\n\r\n{",
+            true,
+        );
     }
 
     #[test]
