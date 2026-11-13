@@ -1,3 +1,5 @@
+import { CloudV3Settings, cloudV3Enabled } from "./cloud-v3-settings";
+import { CloudV3Navigation } from "./cloud-v3-navigation";
 import type { BrowserViewportMode } from "@gyro-dev/ui";
 import {
   askTextValue,
@@ -18588,7 +18590,7 @@ export function App() {
       approvalCountsBySessionId={approvalCountsBySessionId}
       questionCountsBySessionId={questionCountsBySessionId}
       modelTerminalSessionIds={modelTerminalSessionIds}
-      accountNavigation={
+      accountNavigation={cloudV3Enabled ? <CloudV3Navigation selected={workbench.preferences.lastSettingsSection} onSelect={section => dispatchWorkbench({ type: "set-settings-section", section })} /> :
         <AccountNavigation
           account={cloudConnection}
           selected={workbench.preferences.lastSettingsSection}
@@ -19363,7 +19365,9 @@ export function App() {
       ) : null}
       {activeDestination === "settings" || activeDestination === "providers" ? (
         <SettingsSurface
-          accountSettings={<AccountSettings account={cloudConnection} />}
+          billingSettings={cloudV3Enabled ? <CloudV3Settings page="billing" /> : undefined}
+          accountSettings={cloudV3Enabled ? <CloudV3Settings page="account" /> : <AccountSettings account={cloudConnection} />}
+          cloudSettings={cloudV3Enabled ? <CloudV3Settings /> : undefined}
           billingSnapshot={cloudConnection.snapshot}
           billingActions={{
             ...cloudConnection.actions,
@@ -19611,13 +19615,13 @@ export function App() {
       {activeDestination === "cloud" ? (
         <div className="gyro-settings-surface gyro-cloud-workspace">
           <div className="gyro-settings-content">
-            <CloudSettings
+            {cloudV3Enabled ? <CloudV3Settings /> : <CloudSettings
               workspace
               snapshot={cloudConnection.snapshot}
               actions={cloudConnection.actions}
               onOpenBilling={() => openSettingsSection("billing")}
               onManageCloud={() => openSettingsSection("cloud")}
-            />
+            />}
           </div>
         </div>
       ) : null}

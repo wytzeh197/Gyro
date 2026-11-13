@@ -35,6 +35,7 @@ mod capability_output_budget;
 mod capability_workspace_helpers;
 mod claude_usage_cli;
 mod cloud_connection;
+mod cloud_v3;
 mod code_mode;
 #[cfg(debug_assertions)]
 mod code_mode_smoke;
@@ -80,7 +81,6 @@ mod workspace_context_capability;
 mod workspace_roots;
 mod workspace_search;
 mod workspace_tree_order;
-
 #[cfg(all(debug_assertions, feature = "native-browser-events-smoke"))]
 mod browser_frontend_smoke;
 #[cfg(debug_assertions)]

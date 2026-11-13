@@ -18089,6 +18089,7 @@ export type SettingsSurfaceProps = {
   onImportSettings?: (settings: Partial<PortableSettings>) => void;
   billingSnapshot?: BillingSnapshot;
   billingActions?: BillingActions;
+  billingSettings?: ReactNode;
 
   projectImport?: ProjectImportSettingsProps;
   config: GyroConfig;
@@ -18366,6 +18367,7 @@ export function SettingsSurface({
   onImportSettings,
   billingSnapshot,
   billingActions,
+  billingSettings,
 
   projectImport,
   config,
@@ -18867,7 +18869,7 @@ export function SettingsSurface({
               onOpenBilling={() => onSectionChange?.("billing")}
             />
           ) : null}
-          {activeSection === "billing" ? (
+          {activeSection === "billing" ? billingSettings ?? (
             <BillingSettings
               snapshot={billingSnapshot}
               actions={billingActions}

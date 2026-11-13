@@ -1,0 +1,1348 @@
+/* Account and Cloud share Gyro's real semantic tokens and native controls. */
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-content:has(.gyro-cloud-workspace) {
+  width: 100%;
+  max-width: 1140px;
+}
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-content:has(.gyro-cloud-account-page) {
+  max-width: var(--gyro-chat-content-width);
+}
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-content:has([data-cloud-tab="usage"]) {
+  max-width: 1040px;
+}
+.gyro-cloud-workspace,
+.gyro-cloud-dialog[data-panel="transfers"] {
+  /* White on the reference-approved blue primary controls, in both themes. */
+  --gyro-cloud-on-accent: #fff;
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-body);
+  line-height: 1.5;
+}
+.gyro-cloud-workspace :is(h1, h2, h3, p, dl, dd) {
+  margin: 0;
+}
+.gyro-cloud-workspace h1 {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-comfortable);
+  font-size: var(--gyro-font-heading);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.gyro-cloud-workspace h1 :is(svg, .gyro-cloud-icon) {
+  color: var(--gyro-muted);
+  flex: none;
+}
+.gyro-cloud-workspace h2 {
+  font-size: var(--gyro-font-lead);
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: var(--gyro-space-panel);
+}
+.gyro-cloud-workspace h3 {
+  font-size: var(--gyro-font-body);
+  font-weight: 500;
+}
+.gyro-cloud-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--gyro-space-section);
+  margin-bottom: calc(var(--gyro-space-panel) * 2);
+}
+.gyro-cloud-page-header p {
+  color: var(--gyro-muted);
+  margin-top: var(--gyro-space-standard);
+}
+.gyro-cloud-header-aside {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--gyro-space-section);
+}
+.gyro-cloud-sample {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  padding-top: var(--gyro-space-standard);
+}
+.gyro-cloud-workspace .gyro-cloud-text-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gyro-accent);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.gyro-cloud-workspace .gyro-cloud-text-button:hover {
+  text-decoration: underline;
+}
+.gyro-cloud-workspace button:focus-visible,
+.gyro-cloud-dialog button:focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 3px;
+}
+.gyro-cloud-workspace button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.gyro-cloud-workspace .gyro-primary-button {
+  padding: var(--gyro-space-standard) var(--gyro-space-section);
+  min-height: 36px;
+  font-size: var(--gyro-font-body);
+  border-radius: var(--gyro-radius-md);
+}
+.gyro-cloud-workspace .gyro-secondary-button {
+  padding: 6px var(--gyro-space-comfortable);
+  min-height: 32px;
+  font-size: var(--gyro-font-support);
+  border-radius: var(--gyro-radius-md);
+}
+.gyro-cloud-page-action {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-section);
+  margin-bottom: calc(var(--gyro-space-panel) * 2);
+}
+.gyro-cloud-tabs {
+  --gyro-cloud-tab-underline-size: 2px;
+  display: flex;
+  gap: calc(var(--gyro-space-panel) * 2);
+  border-bottom: 1px solid var(--gyro-border);
+  margin-bottom: calc(var(--gyro-space-panel) * 2);
+}
+.gyro-cloud-tabs button {
+  position: relative;
+  padding: 0 var(--gyro-space-standard) var(--gyro-space-panel);
+  border: 0;
+  border-bottom: var(--gyro-cloud-tab-underline-size) solid transparent;
+  background: transparent;
+  color: var(--gyro-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.gyro-cloud-tabs button.is-current {
+  color: var(--gyro-text);
+  font-weight: 500;
+}
+/* A real indicator node invalidates WebKit paint when selection moves. */
+.gyro-cloud-tab-indicator {
+  position: absolute;
+  inset-inline: 0;
+  bottom: calc(-1 * var(--gyro-cloud-tab-underline-size));
+  border-bottom: var(--gyro-cloud-tab-underline-size) solid var(--gyro-accent);
+  pointer-events: none;
+}
+.gyro-cloud-tabs button:hover {
+  color: var(--gyro-text);
+}
+.gyro-cloud-band {
+  padding-bottom: calc(var(--gyro-space-panel) * 2);
+  margin-bottom: calc(var(--gyro-space-panel) * 2);
+  border-bottom: 1px solid var(--gyro-border);
+}
+.gyro-cloud-band:last-child {
+  border-bottom: 0;
+}
+.gyro-cloud-band-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gyro-space-panel);
+  margin-bottom: var(--gyro-space-panel);
+}
+.gyro-cloud-band-heading h2 {
+  margin-bottom: 0;
+}
+.gyro-cloud-caption,
+.gyro-cloud-muted,
+.gyro-cloud-local-note {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-workspace .gyro-cloud-caption {
+  margin-top: var(--gyro-space-comfortable);
+}
+.gyro-cloud-workspace .gyro-cloud-local-note {
+  margin-top: calc(var(--gyro-space-panel) * 2);
+}
+.gyro-cloud-project-columns,
+.gyro-cloud-project-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.7fr) minmax(150px, 1fr) 100px 180px;
+  align-items: center;
+  gap: var(--gyro-space-panel);
+}
+.gyro-cloud-project-columns {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  padding: 0 0 var(--gyro-space-standard);
+  border-bottom: 1px solid var(--gyro-border);
+}
+.gyro-cloud-project-row {
+  padding: var(--gyro-space-comfortable) 0;
+  border-bottom: 1px solid var(--gyro-border);
+  min-height: 68px;
+}
+.gyro-cloud-project-name {
+  display: flex;
+  gap: var(--gyro-space-section);
+  align-items: center;
+  min-width: 0;
+}
+.gyro-cloud-project-name svg {
+  color: var(--gyro-muted);
+  flex: none;
+}
+.gyro-cloud-project-name strong {
+  display: block;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.gyro-cloud-project-row small {
+  display: block;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-project-date {
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-project-controls {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--gyro-space-section);
+}
+.gyro-cloud-workspace .gyro-cloud-version-count {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-icon-button {
+  display: grid;
+  place-items: center;
+  padding: var(--gyro-space-standard);
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-muted);
+  cursor: pointer;
+}
+.gyro-cloud-icon-button:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+.gyro-cloud-empty {
+  padding: calc(var(--gyro-space-section) * 2) 0;
+  color: var(--gyro-muted);
+}
+.gyro-cloud-empty svg {
+  margin-bottom: var(--gyro-space-comfortable);
+}
+.gyro-cloud-empty h3 {
+  color: var(--gyro-text);
+  margin-bottom: var(--gyro-space-standard);
+}
+.gyro-cloud-storage-strip {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0 calc(var(--gyro-space-panel) * 2);
+  padding: var(--gyro-space-section) 0 calc(var(--gyro-space-panel) * 2);
+  margin-top: calc(var(--gyro-space-panel) * 2);
+  border-top: 1px solid var(--gyro-border);
+}
+.gyro-cloud-storage-strip .gyro-cloud-caption {
+  grid-column: 1 / -1;
+}
+.gyro-cloud-meter {
+  margin-top: var(--gyro-space-comfortable);
+}
+.gyro-cloud-meter > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gyro-space-panel);
+  margin-bottom: var(--gyro-space-standard);
+}
+.gyro-cloud-meter progress {
+  display: block;
+  width: 100%;
+  height: 8px;
+  appearance: none;
+  border: 0;
+  overflow: hidden;
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-control-hover);
+}
+.gyro-cloud-meter progress::-webkit-progress-bar {
+  background: var(--gyro-control-hover);
+  border-radius: var(--gyro-radius-md);
+}
+.gyro-cloud-meter progress::-webkit-progress-value {
+  background: var(--gyro-accent);
+  border-radius: var(--gyro-radius-md);
+}
+.gyro-cloud-meter progress::-moz-progress-bar {
+  background: var(--gyro-accent);
+  border-radius: var(--gyro-radius-md);
+}
+.gyro-cloud-meter progress[data-level="warning"]::-webkit-progress-value {
+  background: var(--gyro-status-warning);
+}
+.gyro-cloud-meter progress[data-level="critical"]::-webkit-progress-value {
+  background: var(--gyro-danger);
+}
+.gyro-cloud-meter small {
+  display: block;
+  color: var(--gyro-muted);
+  margin-top: var(--gyro-space-standard);
+}
+.gyro-cloud-link-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-section);
+  width: 100%;
+  padding: var(--gyro-space-panel) 0;
+  border: 0;
+  border-bottom: 1px solid var(--gyro-border);
+  background: transparent;
+  text-align: left;
+  color: var(--gyro-text);
+  font: inherit;
+  cursor: pointer;
+}
+.gyro-cloud-link-row:hover {
+  background: var(--gyro-control-hover);
+}
+.gyro-cloud-link-row > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.gyro-cloud-link-row strong {
+  display: block;
+  font-weight: 500;
+}
+.gyro-cloud-link-row small {
+  display: block;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-link-row > svg {
+  color: var(--gyro-muted);
+  flex: none;
+}
+.gyro-cloud-link-value {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-usage-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
+  gap: calc(var(--gyro-space-panel) * 3);
+}
+.gyro-cloud-usage-main .gyro-cloud-band:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.gyro-cloud-device-aside {
+  border-left: 1px solid var(--gyro-border);
+  padding-left: calc(var(--gyro-space-panel) * 2);
+}
+.gyro-cloud-device-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-section);
+  padding: var(--gyro-space-panel) 0;
+  border-bottom: 1px solid var(--gyro-border);
+}
+.gyro-cloud-device-row > svg {
+  flex: none;
+  color: var(--gyro-muted);
+}
+.gyro-cloud-device-row strong {
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+  display: block;
+  overflow-wrap: anywhere;
+}
+.gyro-cloud-device-row small {
+  display: block;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  margin-top: var(--gyro-space-standard);
+}
+.gyro-cloud-device-aside > .gyro-primary-button {
+  margin-top: calc(var(--gyro-space-panel) * 2);
+}
+.gyro-cloud-aside-links {
+  border-top: 1px solid var(--gyro-border);
+  margin-top: calc(var(--gyro-space-panel) * 2);
+}
+.gyro-cloud-wallet-total {
+  font-weight: 500;
+}
+.gyro-cloud-wallet-ledger {
+  display: flex;
+  gap: calc(var(--gyro-space-panel) * 2);
+  margin-top: var(--gyro-space-panel) !important;
+  padding: var(--gyro-space-standard) 0;
+  border-block: 1px solid var(--gyro-border);
+}
+.gyro-cloud-wallet-ledger > div {
+  display: flex;
+  flex: 1;
+  gap: var(--gyro-space-standard);
+}
+.gyro-cloud-wallet-ledger > div + div {
+  border-left: 1px solid var(--gyro-border);
+  padding-left: calc(var(--gyro-space-panel) * 2);
+}
+.gyro-cloud-wallet-ledger dt {
+  color: var(--gyro-muted);
+}
+.gyro-cloud-account-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-section);
+  padding: 0 0 calc(var(--gyro-space-panel) * 2);
+  margin-bottom: var(--gyro-space-section);
+  border-bottom: 1px solid var(--gyro-border);
+}
+.gyro-cloud-account-summary .gyro-account-profile-avatar {
+  width: 56px;
+  height: 56px;
+  font-size: var(--gyro-font-lead);
+}
+.gyro-cloud-account-summary > div {
+  min-width: 0;
+}
+.gyro-cloud-account-summary strong {
+  display: block;
+  font-size: var(--gyro-font-lead);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.gyro-cloud-account-summary small {
+  display: block;
+  color: var(--gyro-muted);
+  overflow-wrap: anywhere;
+}
+.gyro-cloud-account-summary .gyro-primary-button {
+  margin-left: auto;
+  flex: none;
+}
+.gyro-cloud-signed-in {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  padding-left: var(--gyro-space-section);
+  border-left: 1px solid var(--gyro-border);
+}
+.gyro-cloud-profile-details > div {
+  display: grid;
+  grid-template-columns: 30% 1fr;
+  gap: var(--gyro-space-section);
+  padding: var(--gyro-space-comfortable) 0;
+  border-bottom: 1px solid var(--gyro-border);
+}
+.gyro-cloud-profile-details > div:last-child {
+  border-bottom: 0;
+}
+.gyro-cloud-profile-details dt {
+  color: var(--gyro-muted);
+}
+.gyro-cloud-profile-details dd {
+  overflow-wrap: anywhere;
+}
+.gyro-cloud-profile-field {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-section);
+  margin-bottom: var(--gyro-space-panel);
+}
+.gyro-cloud-profile-field input {
+  flex: 1;
+}
+.gyro-cloud-signout {
+  padding-top: calc(var(--gyro-space-panel) * 2);
+}
+.gyro-cloud-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+.gyro-cloud-dialog {
+  width: min(760px, calc(100vw - 48px));
+  max-height: 85vh;
+  padding: var(--gyro-space-section);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-lg);
+  background: var(--gyro-pane);
+  color: var(--gyro-text);
+  box-shadow: 0 16px 48px var(--gyro-shadow);
+  font: inherit;
+}
+.gyro-cloud-dialog::backdrop {
+  background: rgb(0 0 0 / 0.55);
+}
+.gyro-cloud-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--gyro-space-section);
+  margin-bottom: var(--gyro-space-section);
+}
+.gyro-cloud-dialog-header h2 {
+  margin: 0;
+  font-size: var(--gyro-font-lead);
+}
+.gyro-cloud-dialog .gyro-settings-group {
+  margin: 0;
+}
+.gyro-cloud-dialog .gyro-settings-disclosure-heading {
+  display: none;
+}
+.gyro-cloud-dialog .gyro-settings-disclosure-body {
+  display: grid;
+  gap: var(--gyro-space-panel);
+  padding: 0;
+}
+.gyro-cloud-dialog .gyro-settings-row {
+  padding: var(--gyro-space-panel) 0;
+}
+.gyro-cloud-dialog pre {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-dialog .gyro-cloud-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.gyro-cloud-dialog .gyro-auth-card {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+.gyro-cloud-feedback {
+  margin-bottom: var(--gyro-space-panel);
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-feedback[role="alert"] {
+  color: var(--gyro-danger);
+}
+.gyro-cloud-feedback .gyro-cloud-text-button {
+  margin-left: var(--gyro-space-standard);
+}
+@media (max-width: 1200px) {
+  .gyro-cloud-project-columns,
+  .gyro-cloud-project-row {
+    grid-template-columns: minmax(150px, 1.5fr) minmax(125px, 1fr) 80px 150px;
+    gap: var(--gyro-space-comfortable);
+  }
+  .gyro-cloud-project-controls {
+    gap: var(--gyro-space-standard);
+  }
+  .gyro-cloud-page-header {
+    flex-wrap: wrap;
+  }
+  .gyro-cloud-usage-grid {
+    gap: var(--gyro-space-section);
+  }
+  .gyro-cloud-device-aside {
+    padding-left: var(--gyro-space-section);
+  }
+}
+@media (max-width: 940px) {
+  .gyro-cloud-project-columns {
+    display: none;
+  }
+  .gyro-cloud-project-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .gyro-cloud-project-date {
+    grid-row: 2;
+  }
+  .gyro-cloud-project-controls {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    flex-wrap: wrap;
+  }
+  .gyro-cloud-version-count {
+    grid-row: 3;
+  }
+  .gyro-cloud-usage-grid {
+    grid-template-columns: 1fr;
+  }
+  .gyro-cloud-device-aside {
+    border-left: 0;
+    border-top: 1px solid var(--gyro-border);
+    padding: var(--gyro-space-section) 0 0;
+  }
+  .gyro-cloud-account-summary {
+    flex-wrap: wrap;
+  }
+  .gyro-cloud-signed-in {
+    display: none;
+  }
+}
+@media (max-width: 620px) {
+  .gyro-cloud-tabs {
+    gap: var(--gyro-space-standard);
+  }
+  .gyro-cloud-tabs button {
+    font-size: var(--gyro-font-support);
+  }
+  .gyro-cloud-storage-strip {
+    grid-template-columns: 1fr;
+    gap: var(--gyro-space-comfortable);
+  }
+  .gyro-cloud-project-controls {
+    flex-direction: column;
+    gap: var(--gyro-space-standard);
+  }
+  .gyro-cloud-band-heading {
+    flex-wrap: wrap;
+  }
+  .gyro-cloud-profile-details > div {
+    grid-template-columns: 1fr;
+    gap: var(--gyro-space-compact);
+  }
+}
+
+/* Reference-match pass: compact identity rows and an inline storage strip. */
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cloud-workspace
+  .gyro-primary-button {
+  background: var(--gyro-user-main);
+  color: var(--gyro-cloud-on-accent);
+  border: 1px solid var(--gyro-user-main);
+  padding: var(--gyro-space-standard) var(--gyro-space-section);
+  min-height: 40px;
+  font-size: var(--gyro-font-body);
+  font-weight: 500;
+}
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cloud-workspace
+  .gyro-primary-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.gyro-cloud-page-header p {
+  font-size: var(--gyro-font-lead);
+}
+.gyro-cloud-workspace h2 {
+  font-size: var(--gyro-font-lead);
+}
+.gyro-cloud-workspace[data-cloud-tab="projects"] #gyro-saved-projects {
+  font-size: var(--gyro-font-heading);
+}
+.gyro-cloud-project-name strong {
+  font-size: var(--gyro-font-lead);
+}
+.gyro-cloud-project-date,
+.gyro-cloud-workspace .gyro-cloud-version-count {
+  font-size: var(--gyro-font-body);
+}
+.gyro-cloud-meter.is-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--gyro-space-section);
+}
+.gyro-cloud-meter.is-heading > div {
+  margin: 0;
+}
+.gyro-cloud-meter.is-heading > div > span:first-child {
+  display: none;
+}
+.gyro-cloud-meter.is-heading > div > span:last-child {
+  font-size: var(--gyro-font-lead);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.gyro-cloud-meter.is-heading > small {
+  grid-column: 1 / -1;
+}
+.gyro-cloud-account-summary .gyro-account-profile-avatar {
+  background: var(--gyro-user-main);
+  color: var(--gyro-cloud-on-accent);
+  border-radius: var(--gyro-radius-lg);
+}
+.gyro-cloud-account-summary small {
+  font-size: var(--gyro-font-body);
+}
+.gyro-cloud-account-page .gyro-cloud-band {
+  padding-bottom: var(--gyro-space-panel);
+  margin-bottom: var(--gyro-space-section);
+}
+.gyro-cloud-device-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gyro-space-section);
+}
+.gyro-cloud-device-heading .gyro-cloud-caption {
+  margin: 0;
+}
+.gyro-cloud-account-page .gyro-cloud-device-row {
+  min-height: 58px;
+  padding: var(--gyro-space-comfortable) 0;
+}
+.gyro-cloud-account-page .gyro-cloud-device-row > div {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-section);
+}
+.gyro-cloud-account-page .gyro-cloud-device-row strong {
+  font-size: var(--gyro-font-body);
+}
+.gyro-cloud-account-page .gyro-cloud-device-row small {
+  margin: 0 0 0 auto;
+}
+.gyro-cloud-account-page .gyro-cloud-device-row .gyro-cloud-this-device {
+  margin-left: 0;
+  color: var(--gyro-accent-strong);
+  background: var(--gyro-accent-soft);
+  border-radius: var(--gyro-radius-sm);
+  padding: 0 var(--gyro-space-standard);
+}
+.gyro-cloud-account-page section[aria-labelledby="gyro-account-devices"] {
+  border-bottom: 0;
+  padding-bottom: 0;
+  margin-bottom: calc(var(--gyro-space-panel) * 2);
+}
+.gyro-cloud-account-page > .gyro-cloud-link-row {
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  padding-inline: var(--gyro-space-section);
+}
+@media (max-width: 940px) {
+  .gyro-cloud-account-page .gyro-cloud-device-row > div {
+    flex-wrap: wrap;
+    gap: var(--gyro-space-standard);
+  }
+}
+
+.gyro-cloud-local-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gyro-space-panel);
+  margin-top: calc(var(--gyro-space-panel) * 2);
+}
+.gyro-cloud-local-footer .gyro-cloud-local-note {
+  margin-top: 0;
+}
+.gyro-cloud-local-footer > button {
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-dialog[data-panel="projects"] .gyro-auth-card > h2 {
+  display: none;
+}
+
+/* Account and Cloud share a compact settings hierarchy. */
+.gyro-cloud-workspace {
+  --gyro-cloud-font-heading: calc(20px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-workspace h1 {
+  font-size: var(--gyro-cloud-font-heading);
+}
+.gyro-cloud-workspace h2 {
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-workspace[data-cloud-tab="projects"] #gyro-saved-projects {
+  font-size: var(--gyro-font-body);
+}
+.gyro-cloud-caption,
+.gyro-cloud-muted,
+.gyro-cloud-local-note {
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-page-action {
+  margin-bottom: var(--gyro-space-panel);
+}
+.gyro-cloud-project-columns,
+.gyro-cloud-project-row {
+  grid-template-columns:
+    minmax(180px, 460px) minmax(150px, 250px) minmax(100px, 1fr)
+    180px;
+}
+.gyro-cloud-project-row small,
+.gyro-cloud-project-date,
+.gyro-cloud-workspace .gyro-cloud-version-count {
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-account-summary strong {
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-account-summary .gyro-account-profile-avatar {
+  border-radius: 50%;
+}
+.gyro-cloud-device-row strong,
+.gyro-cloud-account-page .gyro-cloud-device-row strong {
+  font-size: var(--gyro-font-body);
+}
+.gyro-cloud-device-row small,
+.gyro-cloud-link-row small,
+.gyro-cloud-link-value {
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-meter.is-heading > div > span:last-child {
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-usage-main .gyro-cloud-band:first-child {
+  position: relative;
+}
+.gyro-cloud-usage-main .gyro-cloud-band:first-child .gyro-cloud-meter {
+  margin-top: 0;
+}
+.gyro-cloud-usage-main .gyro-cloud-band:first-child .gyro-cloud-meter > div {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+.gyro-cloud-usage-main
+  .gyro-cloud-band:first-child
+  .gyro-cloud-meter
+  > div
+  > span:first-child {
+  display: none;
+}
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cloud-workspace
+  .gyro-primary-button {
+  font-size: var(--gyro-font-body);
+  min-height: var(--gyro-navigation-row-height);
+  padding: var(--gyro-space-compact) var(--gyro-space-comfortable);
+  border-radius: var(--gyro-radius-md);
+}
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cloud-workspace
+  .gyro-secondary-button {
+  font-size: var(--gyro-font-support);
+  min-height: var(--gyro-navigation-row-height);
+  padding: var(--gyro-space-compact) var(--gyro-space-comfortable);
+  border-radius: var(--gyro-radius-md);
+}
+.gyro-cloud-meter progress {
+  height: var(--gyro-space-standard);
+}
+@media (max-width: 1200px) {
+  .gyro-cloud-project-columns,
+  .gyro-cloud-project-row {
+    grid-template-columns: minmax(150px, 1.5fr) minmax(125px, 1fr) 80px 150px;
+  }
+}
+@media (max-width: 940px) {
+  .gyro-cloud-project-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+/* Match spacing and controls across Account and all Cloud tabs. */
+.gyro-cloud-workspace .gyro-cloud-page-header {
+  margin-bottom: var(--gyro-space-panel);
+}
+.gyro-cloud-workspace .gyro-cloud-page-header p {
+  font-size: var(--gyro-font-micro);
+}
+.gyro-cloud-workspace .gyro-cloud-band {
+  padding-bottom: var(--gyro-space-comfortable);
+  margin-bottom: var(--gyro-space-panel);
+}
+.gyro-cloud-workspace .gyro-cloud-band-heading,
+.gyro-cloud-workspace h2 {
+  margin-bottom: var(--gyro-space-comfortable);
+}
+.gyro-cloud-workspace .gyro-cloud-band-heading h2 {
+  margin-bottom: 0;
+}
+.gyro-cloud-workspace .gyro-cloud-tabs {
+  gap: var(--gyro-space-section);
+  margin-bottom: var(--gyro-space-panel);
+}
+.gyro-cloud-workspace .gyro-cloud-tabs button {
+  padding-bottom: var(--gyro-space-comfortable);
+}
+.gyro-cloud-workspace .gyro-cloud-project-name strong {
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-workspace .gyro-cloud-project-row {
+  min-height: calc(var(--gyro-space-panel) * 3);
+  padding-block: var(--gyro-space-standard);
+}
+.gyro-cloud-workspace :is(.gyro-cloud-project-row small, .gyro-cloud-project-date,
+  .gyro-cloud-version-count, .gyro-cloud-device-row small, .gyro-cloud-link-row small,
+  .gyro-cloud-link-value, .gyro-cloud-caption, .gyro-cloud-muted, .gyro-cloud-local-note) {
+  font-size: var(--gyro-font-micro);
+}
+:root[data-theme] .gyro-settings-surface .gyro-cloud-workspace
+  :is(.gyro-primary-button, .gyro-secondary-button) {
+  font-size: var(--gyro-font-micro);
+}
+
+/* Cloud uses a denser canvas, with compact geometry as well as typography. */
+:root[data-theme] .gyro-settings-surface
+  .gyro-settings-content:has([data-cloud-tab]) {
+  max-width: 860px;
+}
+.gyro-cloud-workspace[data-cloud-tab] {
+  --gyro-cloud-font-heading: calc(18px * var(--gyro-ui-scale, 1));
+  font-size: var(--gyro-font-micro);
+  line-height: 1.45;
+}
+.gyro-cloud-workspace[data-cloud-tab] h1 {
+  gap: var(--gyro-space-standard);
+}
+.gyro-cloud-workspace[data-cloud-tab] h1 :is(svg, .gyro-cloud-icon) {
+  width: var(--gyro-font-lead);
+  height: var(--gyro-font-lead);
+}
+.gyro-cloud-workspace[data-cloud-tab] h2,
+.gyro-cloud-workspace[data-cloud-tab] #gyro-saved-projects,
+.gyro-cloud-workspace[data-cloud-tab] h3,
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-project-name strong,
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-device-row strong {
+  font-size: var(--gyro-font-micro);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-page-header {
+  gap: var(--gyro-space-comfortable);
+  margin-bottom: var(--gyro-space-comfortable);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-page-header p {
+  margin-top: var(--gyro-space-compact);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-header-aside {
+  gap: var(--gyro-space-comfortable);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-page-action {
+  margin-bottom: var(--gyro-space-comfortable);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-tabs {
+  gap: var(--gyro-space-comfortable);
+  margin-bottom: var(--gyro-space-comfortable);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-tabs button {
+  padding: 0 var(--gyro-space-standard) var(--gyro-space-standard);
+  border-bottom-width: var(--gyro-cloud-tab-underline-size);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-project-row {
+  min-height: calc(var(--gyro-space-panel) * 2.5);
+  padding-block: var(--gyro-space-compact);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-project-name,
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-project-controls {
+  gap: var(--gyro-space-standard);
+}
+.gyro-cloud-workspace[data-cloud-tab] :is(.gyro-cloud-project-name, .gyro-cloud-device-row) > svg {
+  width: var(--gyro-font-lead);
+  height: var(--gyro-font-lead);
+}
+.gyro-cloud-workspace[data-cloud-tab] :is(.gyro-cloud-project-columns,
+  .gyro-cloud-project-row small, .gyro-cloud-project-date, .gyro-cloud-version-count,
+  .gyro-cloud-device-row small, .gyro-cloud-link-row small, .gyro-cloud-link-value,
+  .gyro-cloud-caption, .gyro-cloud-muted, .gyro-cloud-local-note) {
+  font-size: var(--gyro-font-caption);
+}
+:root[data-theme] .gyro-settings-surface .gyro-cloud-workspace[data-cloud-tab]
+  :is(.gyro-primary-button, .gyro-secondary-button) {
+  min-height: var(--gyro-ide-control-size);
+  padding: calc(var(--gyro-space-compact) / 2) var(--gyro-space-comfortable);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-icon-button {
+  min-width: var(--gyro-ide-control-size);
+  min-height: var(--gyro-ide-control-size);
+  padding: var(--gyro-space-compact);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-icon-button svg {
+  width: var(--gyro-font-lead);
+  height: var(--gyro-font-lead);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-storage-strip {
+  margin-top: var(--gyro-space-comfortable);
+  padding: var(--gyro-space-comfortable) 0;
+  gap: 0 var(--gyro-space-panel);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-meter {
+  margin-top: var(--gyro-space-standard);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-meter progress {
+  height: calc(var(--gyro-space-compact) * 1.5);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-meter.is-heading > div > span:last-child {
+  font-size: var(--gyro-font-micro);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-caption {
+  margin-top: var(--gyro-space-standard);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-link-row {
+  padding-block: var(--gyro-space-standard);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-empty {
+  padding-block: var(--gyro-space-section);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-usage-grid {
+  gap: var(--gyro-space-section);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-device-aside {
+  padding-left: var(--gyro-space-panel);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-device-row {
+  gap: var(--gyro-space-standard);
+  padding-block: var(--gyro-space-standard);
+}
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-device-aside > .gyro-primary-button,
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-aside-links,
+.gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-local-footer {
+  margin-top: var(--gyro-space-panel);
+}
+@media (max-width: 940px) {
+  .gyro-cloud-workspace[data-cloud-tab] .gyro-cloud-device-aside {
+    padding-left: 0;
+  }
+}
+
+/* Account identity and details use the same compact scale. */
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-content:has(.gyro-cloud-account-page) {
+  max-width: 720px;
+}
+.gyro-cloud-account-page {
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-account-page h1 {
+  font-size: var(--gyro-cloud-font-heading);
+}
+.gyro-cloud-account-page h2,
+.gyro-cloud-account-page .gyro-cloud-account-summary strong {
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-account-page .gyro-cloud-page-header {
+  display: grid;
+  gap: var(--gyro-space-standard);
+  margin-bottom: var(--gyro-space-panel);
+}
+.gyro-cloud-account-page .gyro-cloud-page-header p,
+.gyro-cloud-account-page .gyro-cloud-account-summary small,
+.gyro-cloud-account-page .gyro-cloud-caption,
+.gyro-cloud-account-page .gyro-cloud-link-value {
+  font-size: var(--gyro-font-micro);
+}
+.gyro-cloud-account-page .gyro-cloud-sample {
+  padding-top: 0;
+}
+.gyro-cloud-account-page .gyro-cloud-account-summary {
+  gap: var(--gyro-space-comfortable);
+  padding-bottom: var(--gyro-space-panel);
+  margin-bottom: var(--gyro-space-panel);
+}
+.gyro-cloud-account-page .gyro-account-profile-avatar {
+  width: calc(var(--gyro-space-panel) * 2);
+  height: calc(var(--gyro-space-panel) * 2);
+  font-size: var(--gyro-font-support);
+}
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cloud-account-page
+  :is(.gyro-primary-button, .gyro-secondary-button) {
+  min-height: var(--gyro-navigation-row-height);
+  padding: var(--gyro-space-compact) var(--gyro-space-comfortable);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-cloud-account-page .gyro-cloud-profile-details > div {
+  padding-block: var(--gyro-space-standard);
+}
+.gyro-cloud-account-page .gyro-cloud-device-row {
+  min-height: calc(var(--gyro-space-panel) * 2);
+  padding-block: var(--gyro-space-standard);
+}
+.gyro-cloud-account-page .gyro-cloud-device-row strong {
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-account-page section[aria-labelledby="gyro-account-devices"] {
+  margin-bottom: var(--gyro-space-panel);
+}
+.gyro-cloud-account-page > .gyro-cloud-link-row {
+  padding: var(--gyro-space-standard) var(--gyro-space-comfortable);
+}
+.gyro-cloud-account-page .gyro-cloud-signout {
+  padding-top: var(--gyro-space-panel);
+}
+.gyro-cloud-account-page .gyro-cloud-signout .gyro-cloud-caption {
+  margin-top: var(--gyro-space-standard);
+}
+
+/* Selected pending-save dialog. Shared identity, spacing and controls stay token based. */
+.gyro-cloud-dialog[data-panel="transfers"] {
+  width: min(
+    calc(var(--gyro-space-panel) * 42),
+    calc(100vw - var(--gyro-space-panel) * 3)
+  );
+  padding: calc(var(--gyro-space-panel) * 1.5);
+  font-size: var(--gyro-font-body);
+  line-height: 1.5;
+}
+.gyro-cloud-dialog[data-panel="transfers"] .gyro-cloud-dialog-header {
+  margin: 0 0 var(--gyro-space-panel);
+  padding: 0;
+  border: 0;
+}
+.gyro-cloud-dialog[data-panel="transfers"] .gyro-cloud-dialog-header h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-comfortable);
+  font-size: var(--gyro-font-heading);
+  line-height: 1.3;
+  font-weight: 600;
+}
+.gyro-cloud-dialog[data-panel="transfers"]
+  .gyro-cloud-dialog-header
+  h2
+  :is(svg, .gyro-cloud-icon) {
+  color: var(--gyro-muted);
+  flex: none;
+}
+.gyro-cloud-pending p {
+  margin: 0;
+}
+.gyro-cloud-pending-intro {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-lead);
+}
+.gyro-cloud-pending-list {
+  margin-top: var(--gyro-space-panel);
+}
+.gyro-cloud-pending-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--gyro-space-comfortable);
+  padding: var(--gyro-space-standard) 0;
+}
+.gyro-cloud-pending-row + .gyro-cloud-pending-row {
+  border-top: 1px solid var(--gyro-border-soft);
+}
+.gyro-cloud-pending-identity,
+.gyro-cloud-pending-select {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-panel);
+  color: var(--gyro-text);
+}
+.gyro-cloud-pending-identity > svg,
+.gyro-cloud-pending-select > svg {
+  flex: none;
+  color: var(--gyro-muted);
+}
+.gyro-cloud-pending-name {
+  min-width: 0;
+  display: grid;
+  gap: var(--gyro-space-compact);
+}
+.gyro-cloud-pending-name strong {
+  font-size: var(--gyro-font-lead);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.gyro-cloud-pending-name > span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-body);
+}
+.gyro-cloud-pending-status {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-body);
+}
+.gyro-cloud-pending-select {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: var(--gyro-space-standard);
+  border-radius: var(--gyro-radius-md);
+}
+.gyro-cloud-pending-select[aria-pressed="true"] {
+  background: var(--gyro-surface-raised);
+}
+.gyro-cloud-pending-menu {
+  position: relative;
+}
+.gyro-cloud-pending-actions {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  top: 100%;
+  min-width: calc(var(--gyro-space-panel) * 15);
+  max-width: calc(100vw - var(--gyro-space-panel) * 5);
+  display: grid;
+  padding: var(--gyro-space-standard);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-pane);
+  box-shadow: 0 var(--gyro-space-standard) var(--gyro-space-panel)
+    var(--gyro-shadow);
+}
+.gyro-cloud-pending-actions button {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  padding: var(--gyro-space-comfortable);
+  border: 0;
+  background: transparent;
+  color: var(--gyro-text);
+  border-radius: var(--gyro-radius-sm);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.gyro-cloud-pending-actions button:hover {
+  background: var(--gyro-surface-raised);
+}
+.gyro-cloud-pending-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.gyro-cloud-pending-actions button svg {
+  flex: none;
+}
+.gyro-cloud-pending-description {
+  margin-top: var(--gyro-space-comfortable) !important;
+  color: var(--gyro-muted);
+}
+.gyro-cloud-pending-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gyro-space-panel);
+  border-top: 1px solid var(--gyro-border);
+  margin-top: var(--gyro-space-section);
+  padding-top: var(--gyro-space-comfortable);
+}
+.gyro-cloud-pending-footer > p {
+  flex: 1;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+.gyro-cloud-pending-footer > div {
+  display: flex;
+  gap: var(--gyro-space-comfortable);
+  align-items: center;
+}
+.gyro-cloud-pending-dismiss {
+  border: 0;
+  background: transparent;
+  color: var(--gyro-muted);
+  font: inherit;
+  padding: var(--gyro-space-standard);
+  cursor: pointer;
+}
+.gyro-cloud-pending-footer .gyro-primary-button {
+  font-size: var(--gyro-font-body);
+  padding: var(--gyro-space-standard) var(--gyro-space-section);
+  min-height: calc(var(--gyro-space-panel) * 2.5);
+  color: var(--gyro-cloud-on-accent);
+}
+.gyro-cloud-pending-confirm {
+  margin-top: var(--gyro-space-panel);
+  padding-top: var(--gyro-space-panel);
+  border-top: 1px solid var(--gyro-border);
+}
+.gyro-cloud-pending-confirm > p + p {
+  color: var(--gyro-muted);
+  margin-top: var(--gyro-space-standard);
+}
+.gyro-cloud-pending-confirm > div {
+  display: flex;
+  gap: var(--gyro-space-comfortable);
+  justify-content: flex-end;
+  margin-top: var(--gyro-space-panel);
+  flex-wrap: wrap;
+}
+.gyro-cloud-pending button:focus-visible {
+  outline: 2px solid var(--gyro-accent);
+  outline-offset: 3px;
+}
+@media (max-width: 600px) {
+  .gyro-cloud-dialog[data-panel="transfers"] {
+    width: calc(100vw - var(--gyro-space-panel) * 2);
+    padding: var(--gyro-space-panel);
+  }
+  .gyro-cloud-pending-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .gyro-cloud-pending-status {
+    grid-row: 2;
+    grid-column: 1;
+    padding-left: calc(var(--gyro-space-panel) * 2.5);
+  }
+  .gyro-cloud-pending-menu {
+    grid-row: 1;
+    grid-column: 2;
+  }
+  .gyro-cloud-pending-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .gyro-cloud-pending-footer > div {
+    justify-content: flex-end;
+  }
+  .gyro-cloud-dialog[data-panel="transfers"] .gyro-cloud-dialog-header h2 {
+    font-size: var(--gyro-font-lead);
+  }
+}
+
+.gyro-cloud-dialog[data-panel="transfers"] > .gyro-cloud-fieldset {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px;
+  margin: -2px;
+}
+
+:root[data-theme]
+  .gyro-cloud-dialog[data-panel="transfers"]
+  .gyro-cloud-pending-footer
+  .gyro-primary-button {
+  background: var(--gyro-user-main);
+  border: 1px solid var(--gyro-user-main);
+  color: var(--gyro-cloud-on-accent);
+  font-size: var(--gyro-font-body);
+  font-weight: 500;
+  min-height: calc(var(--gyro-space-panel) * 2.5);
+  padding: var(--gyro-space-standard) var(--gyro-space-section);
+  border-radius: var(--gyro-radius-md);
+}
+:root[data-theme]
+  .gyro-cloud-dialog[data-panel="transfers"]
+  .gyro-cloud-pending-footer
+  .gyro-primary-button:disabled {
+  opacity: 0.5;
+}
+
+@media (min-width: 601px) and (min-height: 700px) {
+  .gyro-cloud-dialog[data-panel="transfers"] {
+    transform: translateY(calc(var(--gyro-space-panel) * 3));
+  }
+}

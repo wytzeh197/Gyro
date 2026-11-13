@@ -128,12 +128,33 @@ fn reader_command() -> Result<Command> {
 }
 
 fn read_with_command(
-    mut command: Command,
+    command: Command,
     account: &str,
     deadline: Duration,
 ) -> Result<Option<String>> {
     if account.len() > MAX_ACCOUNT_BYTES || account.contains('\0') {
         bail!("invalid credential account");
+    }
+    let input = serde_json::to_vec(account)?;
+    let bytes = exchange_with_command(command, &input, deadline, MAX_REPLY_BYTES)?;
+    let reply: Reply = serde_json::from_slice(&bytes)
+        .map_err(|_| anyhow::anyhow!("invalid credential reader response"))?;
+    if reply.denied {
+        bail!(InteractionRequired);
+    }
+    Ok(reply.value)
+}
+
+/// Private, bounded IPC for same-executable credential helpers. Secrets never
+/// enter argv, environment or files. The child is killed and reaped on timeout.
+pub(crate) fn exchange_with_command(
+    mut command: Command,
+    input: &[u8],
+    deadline: Duration,
+    max_reply_bytes: u64,
+) -> Result<Vec<u8>> {
+    if input.len() > 8192 {
+        bail!("invalid credential request");
     }
     let (_parent_channel, child_channel) =
         UnixStream::pair().context("create private credential reader channel")?;
@@ -151,8 +172,8 @@ fn read_with_command(
             Ok(())
         });
     }
-    // Only the account name enters stdin. Credentials return through an
-    // anonymous pipe, never process arguments, environment, files or logs.
+    // Requests and credentials use anonymous pipes, never process arguments,
+    // environment, files or logs. Provider reads send only the account name.
     let mut child = command
         .process_group(0)
         .stdin(Stdio::piped())
@@ -162,18 +183,19 @@ fn read_with_command(
         .context("start isolated credential reader")?;
     drop(child_channel);
     crate::execution::register_process_group(child.id());
-    let input = child.stdin.take().expect("piped stdin");
+    let mut channel = child.stdin.take().expect("piped stdin");
     let output = child.stdout.take().expect("piped stdout");
     // Drain while the child runs, with a strict bound, so a large credential
     // cannot fill the pipe and deadlock the parent's wait.
     let reader = std::thread::spawn(move || {
         let mut bytes = Vec::new();
         output
-            .take(MAX_REPLY_BYTES + 1)
+            .take(max_reply_bytes + 1)
             .read_to_end(&mut bytes)
             .map(|_| bytes)
     });
-    let sent = serde_json::to_writer(input, account);
+    let sent = channel.write_all(input);
+    drop(channel);
     let started = Instant::now();
     let status = if sent.is_ok() {
         loop {
@@ -206,15 +228,13 @@ fn read_with_command(
         bail!("{ACCESS_DETAIL}");
     }
     let bytes = reply
-        .filter(|bytes| bytes.len() as u64 <= MAX_REPLY_BYTES)
+        .filter(|bytes| bytes.len() as u64 <= max_reply_bytes)
         .context("invalid credential reader response")?;
-    // Never include malformed response bytes or serializer errors in a log.
-    let reply: Reply = serde_json::from_slice(&bytes)
-        .map_err(|_| anyhow::anyhow!("invalid credential reader response"))?;
-    if reply.denied {
-        bail!(InteractionRequired);
-    }
-    Ok(reply.value)
+    Ok(bytes)
+}
+
+pub(crate) fn disable_interaction() -> bool {
+    unsafe { SecKeychainSetUserInteractionAllowed(0) == 0 }
 }
 
 pub(super) fn run_helper() -> Option<i32> {
@@ -276,7 +296,7 @@ pub(super) fn run_helper() -> Option<i32> {
     )
 }
 
-fn has_trusted_parent_channel() -> bool {
+pub(crate) fn has_trusted_parent_channel() -> bool {
     let mut peer: libc::pid_t = 0;
     let mut length = std::mem::size_of_val(&peer) as libc::socklen_t;
     let parent = unsafe { libc::getppid() };

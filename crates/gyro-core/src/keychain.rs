@@ -119,13 +119,14 @@ fn get_api_key_direct(account: &str) -> Result<Option<String>> {
 
 mod local_secrets;
 #[cfg(target_os = "macos")]
-mod macos_read;
+pub(crate) mod macos_read;
 
 /// Called before CLI/Tauri startup. The isolated reader has private pipes and
 /// cannot change the parent application's Keychain interaction policy.
 pub fn run_read_helper() -> Option<i32> {
     #[cfg(target_os = "macos")]
-    return macos_read::run_helper();
+    return crate::cloud_connection::supabase::store::macos::run_helper()
+        .or_else(macos_read::run_helper);
     #[cfg(not(target_os = "macos"))]
     None
 }

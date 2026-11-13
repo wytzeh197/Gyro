@@ -1,6 +1,8 @@
 use super::{secret, AuthError, Session, StagingConfig};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+#[cfg(target_os = "macos")]
+pub(crate) mod macos;
 
 /// Opaque native-only refresh credential. Access tokens are never persisted.
 pub struct RefreshCredential {
@@ -10,6 +12,13 @@ pub struct RefreshCredential {
 }
 pub trait RefreshStore: Send + Sync {
     fn load(&self) -> Result<Option<RefreshCredential>, AuthError>;
+    /// Explicit reconnect consumes the stored refresh credential before issuer
+    /// dispatch. An ambiguous result is never retried automatically.
+    fn take_for_reconnect(&self) -> Result<Option<RefreshCredential>, AuthError> {
+        let saved = self.load()?;
+        if saved.is_some() { self.clear()?; }
+        Ok(saved)
+    }
     fn save(&self, session: &Session) -> Result<(), AuthError>;
     fn clear(&self) -> Result<(), AuthError>;
 }
@@ -60,6 +69,9 @@ pub struct MacKeychain {
     scope: Option<String>,
 }
 impl MacKeychain {
+    pub(crate) fn v3(config: &StagingConfig, staging: bool, scope: &str) -> Self {
+        Self { project_ref: config.project_ref.clone(), environment: if staging { "staging-v3" } else { "production-v3" }, scope: Some(scope.into()) }
+    }
     pub fn staging(config: &StagingConfig) -> Self {
         Self {
             project_ref: config.project_ref.clone(),
@@ -138,10 +150,7 @@ impl MacKeychain {
             {
                 return Err(AuthError::Storage);
             }
-            let raw = store
-                .entry()?
-                .get_password()
-                .map_err(|_| AuthError::Storage)?;
+            let raw = macos::load(&store.account())?.ok_or(AuthError::Storage)?;
             let value: serde_json::Value =
                 serde_json::from_str(&raw).map_err(|_| AuthError::Storage)?;
             if value.get("access_token").is_some() || raw.contains("fixture-access-never-persist") {
@@ -172,6 +181,13 @@ impl MacKeychain {
                 }
                 verify(rotated)
             }
+            "take-for-reconnect" => {
+                let saved = store.take_for_reconnect()?.ok_or(AuthError::Storage)?;
+                if saved.refresh_token != rotated || saved.account_id != account || store.load()?.is_some() {
+                    return Err(AuthError::Storage);
+                }
+                Ok(())
+            }
             "clear" => store.clear(),
             _ => Err(AuthError::Input),
         }
@@ -183,23 +199,26 @@ impl MacKeychain {
             .as_ref()
             .map_or(account.clone(), |scope| format!("{account}:{scope}"))
     }
-    #[cfg(all(target_os = "macos", not(test)))]
-    fn entry(&self) -> Result<keyring::Entry, AuthError> {
-        keyring::Entry::new("dev.gyro.cloud.refresh", &self.account())
-            .map_err(|_| AuthError::Storage)
-    }
+
 }
 impl RefreshStore for MacKeychain {
     fn load(&self) -> Result<Option<RefreshCredential>, AuthError> {
         #[cfg(all(target_os = "macos", not(test)))]
         {
-            match self.entry()?.get_password() {
-                Ok(value) => decode(&value, &self.project_ref).map(Some),
-                Err(keyring::Error::NoEntry) => Ok(None),
-                Err(_) => Err(AuthError::Storage),
-            }
+            macos::load(&self.account())?
+                .map(|value| decode(&value, &self.project_ref))
+                .transpose()
         }
         // No fallback to local files, and no real Keychain access in unit tests.
+        #[cfg(any(not(target_os = "macos"), test))]
+        Err(AuthError::Storage)
+    }
+    fn take_for_reconnect(&self) -> Result<Option<RefreshCredential>, AuthError> {
+        #[cfg(all(target_os = "macos", not(test)))]
+        {
+            macos::take_for_reconnect(&self.account())?
+                .map(|value| decode(&value, &self.project_ref)).transpose()
+        }
         #[cfg(any(not(target_os = "macos"), test))]
         Err(AuthError::Storage)
     }
@@ -207,9 +226,7 @@ impl RefreshStore for MacKeychain {
         let value = encode(session, &self.project_ref)?;
         #[cfg(all(target_os = "macos", not(test)))]
         {
-            self.entry()?
-                .set_password(&value)
-                .map_err(|_| AuthError::Storage)
+            macos::save(&self.account(), value)
         }
         #[cfg(any(not(target_os = "macos"), test))]
         {
@@ -220,10 +237,7 @@ impl RefreshStore for MacKeychain {
     fn clear(&self) -> Result<(), AuthError> {
         #[cfg(all(target_os = "macos", not(test)))]
         {
-            match self.entry()?.delete_credential() {
-                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-                Err(_) => Err(AuthError::Storage),
-            }
+            macos::clear(&self.account())
         }
         #[cfg(any(not(target_os = "macos"), test))]
         Err(AuthError::Storage)

@@ -81,6 +81,8 @@ struct User {
     role: String,
     #[serde(default)]
     is_anonymous: bool,
+    #[serde(default)]
+    user_metadata: serde_json::Value,
 }
 impl User {
     fn validate(&self) -> Result<(), AuthError> {
@@ -109,6 +111,22 @@ struct TokenResponse {
 #[derive(Deserialize)]
 #[serde(transparent)]
 struct DateTimeSeconds(i64);
+
+/// Display-only profile. User-editable metadata never grants Cloud authority.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Profile {
+    pub account_id: Uuid,
+    pub email: String,
+    pub display_name: String,
+}
+fn display_name(value: &str) -> Result<&str, AuthError> {
+    let value = value.trim();
+    if value.chars().count() > 80 || value.chars().any(char::is_control) {
+        return Err(AuthError::Input);
+    }
+    Ok(value)
+}
 
 /// No Debug or Serialize: reusable credentials never form a webview result.
 pub struct Session {
@@ -163,6 +181,12 @@ impl Session {
     }
     /// Renew an already validated native session without requiring persistence.
     /// This opaque credential is never serialized or returned to the webview.
+    /// Native-only comparison; credentials are never rendered or serialized to IPC.
+    pub(crate) fn matches_refresh_credential(&self, saved: &RefreshCredential) -> bool {
+        self.project_ref == saved.project_ref
+            && self.account_id == saved.account_id
+            && self.refresh_token == saved.refresh_token
+    }
     pub(crate) fn refresh_credential(&self) -> RefreshCredential {
         RefreshCredential {
             project_ref: self.project_ref.clone(),
@@ -365,6 +389,54 @@ impl Client {
             received: Instant::now(),
             ttl,
         })
+    }
+    fn verified_profile(&self, session: &Session, bytes: &[u8]) -> Result<Profile, AuthError> {
+        let user: User = decode(bytes)?;
+        user.validate()?;
+        if user.id != session.account_id {
+            return Err(AuthError::Protocol);
+        }
+        let name = user
+            .user_metadata
+            .get("display_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        Ok(Profile {
+            account_id: user.id,
+            email: user.email,
+            display_name: display_name(name).map_err(|_| AuthError::Protocol)?.into(),
+        })
+    }
+    pub(crate) fn profile(&self, session: &Session) -> Result<Profile, AuthError> {
+        if session.project_ref != self.config.project_ref || !session.is_fresh() {
+            return Err(AuthError::Rejected);
+        }
+        self.verified_profile(
+            session,
+            &self
+                .wire
+                .request(Operation::User, Some(&session.access_token), json!({}))?,
+        )
+    }
+    pub(crate) fn update_profile(
+        &self,
+        session: &Session,
+        name: &str,
+    ) -> Result<Profile, AuthError> {
+        let name = display_name(name)?;
+        if session.project_ref != self.config.project_ref || !session.is_fresh() {
+            return Err(AuthError::Rejected);
+        }
+        let bytes = self.wire.request(
+            Operation::UpdateUser,
+            Some(&session.access_token),
+            json!({"data":{"display_name":name}}),
+        )?;
+        let profile = self.verified_profile(session, &bytes)?;
+        if profile.display_name != name {
+            return Err(AuthError::Protocol);
+        }
+        Ok(profile)
     }
     /// Issuer logout only. The coordinator must first clear local memory and
     /// Keychain, invalidate in-flight work, and separately revoke Gyro access.
