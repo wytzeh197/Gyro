@@ -26,6 +26,9 @@
   --gyro-chat-space-4: calc(16px * var(--gyro-ui-scale, 1));
   --gyro-chat-raised: var(--gyro-surface);
   --gyro-chat-hairline: var(--gyro-border);
+  /* Header bottom-border width; mirrored as top padding to keep controls
+     centred on the native traffic lights. Unscaled, like the border. */
+  --gyro-chat-header-hairline-width: 1px;
   --gyro-chat-motion-fast: 120ms;
   --gyro-chat-motion-normal: 240ms;
   --gyro-chat-motion-reduced: 1ms;
@@ -2167,7 +2170,9 @@
   box-sizing: border-box;
   height: var(--gyro-chat-header-height);
   min-height: var(--gyro-chat-header-height);
-  padding-block: 0;
+  /* 1px top balances the 1px bottom hairline, so title and actions centre on
+     the native traffic lights (y 23), level with the sidebar window row. */
+  padding-block: var(--gyro-chat-header-hairline-width) 0;
   border-bottom: 1px solid var(--gyro-border-soft);
   box-shadow: none;
 }
@@ -15917,6 +15922,9 @@ button.gyro-response-changed-files:hover {
 }
 :root[data-theme] .gyro-app-shell.is-thread-layout .gyro-chat-thread-topbar {
   padding-right: var(--gyro-space-standard);
+  /* Re-assert the hairline balance (see the shared header rule) over later
+     thread-topbar padding resets. */
+  padding-top: var(--gyro-chat-header-hairline-width);
 }
 
 :root[data-theme]

@@ -15,7 +15,9 @@
   height: var(--gyro-window-header-height);
   min-height: var(--gyro-window-header-height);
   align-items: center;
-  padding-top: var(--gyro-window-header-control-inset);
+  /* +1px balances the bar's 1px bottom hairline (border-box), so controls
+     centre on y 23 — the native traffic lights' visual centre — not 22.5. */
+  padding-top: calc(var(--gyro-window-header-control-inset) + 1px);
   padding-bottom: 0;
 }
 

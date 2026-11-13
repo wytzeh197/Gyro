@@ -26349,10 +26349,11 @@ textarea:focus-visible,
   cursor: default;
 }
 
-/* Native 14px traffic lights sit at x 16, y 17: the 1px nudge moved them down
-   from y 16, and a 14px circle then spans y 17-31, so its centreline is y 24 —
-   exactly where 28px navigation buttons land from the bar's 10px padding. The
-   row reads as one line now; before the nudge the lights floated 1px high.
+/* Native traffic lights (MAIN_TRAFFIC_LIGHT_Y 15) render with their visual
+   centre at y 23. The live window row is set in window-chrome-density.css: a
+   40px bar whose padding balances its 1px bottom hairline so 28px controls
+   centre on y 23 too; the inset chat and companion headers do the same in
+   chat.css. The 48px rule below is the older baseline it overrides.
    Window controls never carry their own top offset: the padding below derives
    from the shared --gyro-traffic-light-* tokens, so a future nudge moves the row
    with the lights instead of breaking the alignment. Those tokens live in the
