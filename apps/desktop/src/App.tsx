@@ -1,3 +1,4 @@
+import { useRemoteWorkspaceSlots } from "../../../packages/ui/src/remote-access-context";
 import { CloudV3Settings, cloudV3Enabled } from "./cloud-v3-settings";
 import { CloudV3Navigation } from "./cloud-v3-navigation";
 import type { BrowserViewportMode } from "@gyro-dev/ui";
@@ -611,6 +612,9 @@ const SourceControlDiffEditor = lazy(
 );
 
 export function App() {
+  const remoteSlots = useRemoteWorkspaceSlots();
+  const remoteWorkspaceVisible = useRef(false);
+  remoteWorkspaceVisible.current = Boolean(remoteSlots.content);
   const quitConfirmation = useQuitConfirmation();
   const [workbench, dispatchWorkbench] = useMeasuredWorkbenchReducer(
     loadInitialWorkbenchState,
@@ -6172,6 +6176,7 @@ export function App() {
   // stacks; the workspace journal only takes over when focus is elsewhere.
   useEffect(() => {
     const onUndoKey = (event: KeyboardEvent) => {
+      if (remoteWorkspaceVisible.current) return;
       if (
         !(event.metaKey || event.ctrlKey) ||
         event.key.toLowerCase() !== "z"
@@ -14208,6 +14213,7 @@ export function App() {
   );
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (remoteWorkspaceVisible.current) return;
       if (
         event.ctrlKey &&
         !event.metaKey &&
@@ -16724,6 +16730,7 @@ export function App() {
   const appShortcutHandler = useRef<(event: KeyboardEvent) => void>(() => {});
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (remoteWorkspaceVisible.current) return;
       const isCommand = event.metaKey || event.ctrlKey;
       if (event.defaultPrevented) return;
       if (event.key === "Escape") {
@@ -18770,6 +18777,7 @@ export function App() {
 
   const appChrome = (
     <AppChrome
+      sidebarProjectsReady={sessionsLoadedRef.current}
       renderAiChat={renderWorkspaceChat}
       activePaneTab={workbench.activePaneTab}
       activeDestination={activeDestination}

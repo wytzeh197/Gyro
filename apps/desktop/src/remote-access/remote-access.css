@@ -12,9 +12,9 @@
   .gyro-sidebar-project-toggle[aria-expanded]:has(
     > .gyro-sidebar-project-remote
   ) {
-  grid-template-columns: var(--gyro-icon-compact) var(
-      --gyro-icon-standard
-    ) minmax(0, 1fr) max-content;
+  grid-template-columns:
+    var(--gyro-icon-compact) var(--gyro-icon-standard)
+    minmax(0, 1fr) max-content;
 }
 .gyro-sidebar-project-toggle > .gyro-sidebar-project-remote {
   display: inline-flex;
@@ -594,4 +594,8 @@
 /* The stack spaces its items; a banner inside it needs no margin of its own. */
 .gyro-remote-stack > .gyro-remote-banner {
   margin: 0;
+}
+
+.gyro-local-workspace-content {
+  display: contents;
 }

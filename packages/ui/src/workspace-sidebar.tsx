@@ -1,6 +1,7 @@
 import { gitSetupMessage } from "./workspace-preparation";
 import {
   RemoteProjectIndicator,
+  RemoteProjectNavigation,
   useRemoteProjectHost,
 } from "./remote-access-context";
 import {
@@ -4271,6 +4272,7 @@ export function WorkspaceSidebarContent({
                   </div>
                 );
               })}
+              <RemoteProjectNavigation />
               <section
                 aria-label="Recent chats"
                 className="gyro-sidebar-recents"
@@ -4562,13 +4564,13 @@ export function SessionSidebarRow({
   isDragging?: boolean;
   isMenuOpen: boolean;
   onSelect: () => void;
-  onPin: () => void;
-  onMenuToggle: () => void;
+  onPin?: () => void;
+  onMenuToggle?: () => void;
   onMenuClose: () => void;
-  onRename: () => void;
+  onRename?: () => void;
   onOpenInGrid?: () => void;
   onUploadCloudChat?: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
   onDragStart?: (event: ReactDragEvent<HTMLDivElement>) => void;
   onDragEnd?: (event: ReactDragEvent<HTMLDivElement>) => void;
   onPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -4628,7 +4630,9 @@ export function SessionSidebarRow({
       onDragStart={onDragStart}
       onPointerDown={onPointerDown}
     >
-      {isNested ? <span aria-hidden="true" className="gyro-sidebar-tree-branch" /> : null}
+      {isNested ? (
+        <span aria-hidden="true" className="gyro-sidebar-tree-branch" />
+      ) : null}
       <button
         aria-current={isActive ? "page" : undefined}
         aria-label={ariaTitle}
@@ -4722,31 +4726,39 @@ export function SessionSidebarRow({
           )}
         </small>
       </button>
-      <div className="gyro-session-actions" aria-label="Chat actions">
-        <button
-          aria-label={isPinned ? "Unpin chat" : "Pin chat"}
-          aria-pressed={isPinned}
-          className={
-            isPinned ? "gyro-session-action is-pinned" : "gyro-session-action"
-          }
-          onClick={onPin}
-          title={isPinned ? "Unpin" : "Pin"}
-          type="button"
-        >
-          <Pin fill={isPinned ? "currentColor" : "none"} size={13} />
-        </button>
-        <button
-          aria-expanded={isMenuOpen}
-          aria-label="Chat options"
-          className="gyro-session-action is-more"
-          onClick={onMenuToggle}
-          ref={menuTriggerRef}
-          title="More"
-          type="button"
-        >
-          <MoreHorizontal size={15} />
-        </button>
-      </div>
+      {onPin || onMenuToggle ? (
+        <div className="gyro-session-actions" aria-label="Chat actions">
+          {onPin ? (
+            <button
+              aria-label={isPinned ? "Unpin chat" : "Pin chat"}
+              aria-pressed={isPinned}
+              className={
+                isPinned
+                  ? "gyro-session-action is-pinned"
+                  : "gyro-session-action"
+              }
+              onClick={onPin}
+              title={isPinned ? "Unpin" : "Pin"}
+              type="button"
+            >
+              <Pin fill={isPinned ? "currentColor" : "none"} size={13} />
+            </button>
+          ) : null}
+          {onMenuToggle ? (
+            <button
+              aria-expanded={isMenuOpen}
+              aria-label="Chat options"
+              className="gyro-session-action is-more"
+              onClick={onMenuToggle}
+              ref={menuTriggerRef}
+              title="More"
+              type="button"
+            >
+              <MoreHorizontal size={15} />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {isMenuOpen ? (
         <div className="gyro-session-menu" ref={menuRef} role="menu">
           <CheckWorkMenuItem

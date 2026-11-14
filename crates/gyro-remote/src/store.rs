@@ -57,6 +57,13 @@ pub struct Invitation {
     #[serde(default)]
     pub address: Option<iroh::EndpointAddr>,
 }
+/// Only roots already present in this Mac's sidebar are synchronized.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SidebarProject {
+    pub path: PathBuf,
+    pub name: String,
+}
 struct PendingInvite {
     hash: Vec<u8>,
     expires: u64,
@@ -130,11 +137,29 @@ impl Store {
             "insert or replace into settings values(1,?1)",
             [serde_json::to_string(value)?],
         )?;
+        if value.enabled {
+            self.promote_approved_clients()?;
+        }
         if !value.enabled {
             self.clear_invitation()?;
             self.db()?.execute("delete from pending", [])?;
         }
         Ok(())
+    }
+    // Legacy inbound client records have already passed local pairing approval.
+    // A host-only record may still be awaiting approval, so never promote it here.
+    pub fn promote_approved_clients(&self) -> Result<()> {
+        self.db()?
+            .execute("update peers set role='both' where role='client'", [])?;
+        Ok(())
+    }
+    pub fn invitation_active(&self) -> Result<bool> {
+        Ok(self
+            .invitation
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Pairing unavailable"))?
+            .as_ref()
+            .is_some_and(|invite| invite.expires > now()))
     }
     pub fn peers(&self) -> Result<Vec<Peer>> {
         let db = self.db()?;
@@ -253,7 +278,10 @@ impl Store {
             .into_iter()
             .find(|p| p.id == id)
             .context("Pairing request expired")?;
-        self.trust(&peer)?;
+        self.trust(&Peer {
+            role: "both".into(),
+            ..peer
+        })?;
         self.db()?
             .execute("delete from pending where id=?1", [id])?;
         Ok(())
@@ -286,6 +314,46 @@ impl Store {
             "insert or ignore into projects values(?1,?2,?3)",
             params![Uuid::new_v4().to_string(), name, root.to_string_lossy()],
         )?;
+        Ok(())
+    }
+    pub fn sync_projects(&self, projects: &[SidebarProject]) -> Result<()> {
+        if projects.len() > 1024 {
+            bail!("Too many sidebar projects");
+        }
+        let mut roots = Vec::new();
+        for project in projects {
+            // A disconnected disk must not block the remaining sidebar projects.
+            let Ok(root) = project.path.canonicalize() else {
+                continue;
+            };
+            if !root.is_dir() || root.parent().is_none() {
+                continue;
+            }
+            let name = project.name.trim();
+            if name.is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
+                bail!("Use a project name between 1 and 80 characters");
+            }
+            roots.push((root.to_string_lossy().into_owned(), name.to_owned()));
+        }
+        let mut db = self.db()?;
+        let tx = db.transaction()?;
+        let existing = {
+            let mut q = tx.prepare("select id,path from projects")?;
+            let rows = q
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        for (id, path) in existing {
+            if !roots.iter().any(|(root, _)| root == &path) {
+                tx.execute("delete from projects where id=?1", [id])?;
+            }
+        }
+        for (path, name) in roots {
+            tx.execute("insert into projects values(?1,?2,?3) on conflict(path) do update set name=excluded.name",
+                params![Uuid::new_v4().to_string(),name,path])?;
+        }
+        tx.commit()?;
         Ok(())
     }
     pub fn unshare(&self, id: &str) -> Result<()> {
@@ -433,14 +501,68 @@ mod tests {
         })
         .unwrap();
         let i = s.invite("h".into()).unwrap();
+        assert!(s.invitation_active().unwrap());
         assert!(s.request_pair("a", "Client", "bad").is_err());
         s.request_pair("a", "Client", &i.secret).unwrap();
+        assert!(!s.invitation_active().unwrap());
         assert!(!s.trusts("a", "client"));
         assert!(s.request_pair("b", "Other", &i.secret).is_err());
         s.approve("a").unwrap();
         assert!(s.trusts("a", "client"));
+        assert!(s.trusts("a", "host"));
         s.revoke("a").unwrap();
         assert!(!s.trusts("a", "client"));
+    }
+    #[test]
+    fn sidebar_sync_preserves_ids_and_revokes_removed_roots() {
+        let d = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let removed = tempfile::tempdir().unwrap();
+        let tree = tempfile::tempdir().unwrap();
+        let s = Store::open(d.path()).unwrap();
+        s.share(removed.path()).unwrap();
+        let old = s.projects().unwrap().remove(0);
+        s.scope("s", &old.id, tree.path()).unwrap();
+        let input = [SidebarProject {
+            path: root.path().into(),
+            name: "Gyro".into(),
+        }];
+        s.sync_projects(&input).unwrap();
+        let first = s.projects().unwrap().remove(0);
+        assert!(!s.authorizes("s", tree.path()));
+        s.sync_projects(&[SidebarProject {
+            name: "Renamed".into(),
+            ..input[0].clone()
+        }])
+        .unwrap();
+        let renamed = s.projects().unwrap().remove(0);
+        assert_eq!(first.id, renamed.id);
+        assert_eq!(renamed.name, "Renamed");
+        assert!(s.authorizes("local", root.path()));
+        assert_eq!(s.projects().unwrap().len(), 1);
+        s.sync_projects(&[]).unwrap();
+        assert!(!s.authorizes("local", root.path()));
+    }
+    #[test]
+    fn legacy_migration_promotes_only_locally_approved_clients() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Store::open(d.path()).unwrap();
+        s.trust(&Peer {
+            id: "approved".into(),
+            name: "Approved".into(),
+            role: "client".into(),
+        })
+        .unwrap();
+        s.trust(&Peer {
+            id: "awaiting".into(),
+            name: "Awaiting".into(),
+            role: "host".into(),
+        })
+        .unwrap();
+        s.promote_approved_clients().unwrap();
+        assert!(s.trusts("approved", "host"));
+        assert!(s.trusts("approved", "client"));
+        assert!(!s.trusts("awaiting", "client"));
     }
     #[test]
     fn receipts_fence_replays_and_survive_reopen() {

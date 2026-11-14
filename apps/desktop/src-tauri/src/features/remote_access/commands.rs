@@ -1,6 +1,6 @@
 use super::{err, store, RemoteAccess, RemoteWatch, Runtime};
 use base64::Engine;
-use gyro_remote::store::{Invitation, Settings};
+use gyro_remote::store::{Invitation, Settings, SidebarProject};
 use gyro_remote::{store::Peer, Operation, RemoteEvent, Request};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -20,6 +20,7 @@ pub(crate) enum LocalAction {
     Invite,
     CancelInvitation,
     Share { path: String },
+    SyncProjects { projects: Vec<SidebarProject> },
     Unshare { project_id: String },
     Approve { peer_id: String },
     Reject { peer_id: String },
@@ -43,7 +44,7 @@ pub(crate) async fn remote_access_status(app: tauri::AppHandle) -> Result<Value,
             .map_err(err)?;
     }
     drop(slot);
-    tauri::async_runtime::spawn_blocking(||{let s=store()?;Ok(json!({"settings":s.settings().map_err(err)?,"deviceId":null,"hostingActive":false,"peers":s.peers().map_err(err)?,"pending":s.pending().map_err(err)?,"projects":s.projects().map_err(err)?,"controls":{}}))}).await.map_err(err)?
+    tauri::async_runtime::spawn_blocking(||{let s=store()?;Ok(json!({"settings":s.settings().map_err(err)?,"deviceId":null,"hostingActive":false,"invitationActive":false,"peers":s.peers().map_err(err)?,"pending":s.pending().map_err(err)?,"projects":s.projects().map_err(err)?,"controls":{}}))}).await.map_err(err)?
 }
 #[tauri::command]
 pub(crate) async fn remote_access_action(
@@ -87,7 +88,8 @@ pub(crate) async fn remote_access_action(
     if state.runtime.lock().await.is_none()
         && matches!(
             &request,
-            LocalAction::Share { .. }
+            LocalAction::SyncProjects { .. }
+                | LocalAction::Share { .. }
                 | LocalAction::Unshare { .. }
                 | LocalAction::Revoke { .. }
                 | LocalAction::Reject { .. }
@@ -97,6 +99,9 @@ pub(crate) async fn remote_access_action(
         return tauri::async_runtime::spawn_blocking(move || {
             let s = store()?;
             match request {
+                LocalAction::SyncProjects { projects } => {
+                    s.sync_projects(&projects).map_err(err)?
+                }
                 LocalAction::Share { path } => s.share(std::path::Path::new(&path)).map_err(err)?,
                 LocalAction::Unshare { project_id } => s.unshare(&project_id).map_err(err)?,
                 LocalAction::Revoke { peer_id } | LocalAction::Reject { peer_id } => {
@@ -168,7 +173,7 @@ pub(crate) async fn remote_access_action(
             if !runtime.store.trusts(&host_id, "host") {
                 return Err("Unknown host".into());
             }
-            return node
+            let result = node
                 .request(
                     &host_id,
                     Request {
@@ -179,7 +184,11 @@ pub(crate) async fn remote_access_action(
                 )
                 .await
                 .map_err(|_| "Host unavailable".to_string())?
-                .into_result();
+                .into_result()?;
+            if result.get("status").and_then(Value::as_str) == Some("approved") {
+                approve_reciprocal_host(&runtime, &host_id)?;
+            }
+            return Ok(result);
         }
         LocalAction::Disconnect { host_id } => {
             if let Some(watch) = runtime.watches.lock().map_err(err)?.remove(&host_id) {
@@ -197,6 +206,24 @@ pub(crate) async fn remote_access_action(
         .await
         .map_err(err)?
 }
+// Successful approval or an authorized Hello proves the host approved this Mac.
+fn approve_reciprocal_host(runtime: &Runtime, id: &str) -> Result<(), String> {
+    if !runtime.store.trusts(id, "client") {
+        let mut peer = runtime
+            .store
+            .peers()
+            .map_err(err)?
+            .into_iter()
+            .find(|p| p.id == id)
+            .ok_or("Unknown host")?;
+        peer.role = "both".into();
+        runtime.store.trust(&peer).map_err(err)?;
+        let _ = runtime
+            .app
+            .emit("gyro://remote-access-changed", Value::Null);
+    }
+    Ok(())
+}
 #[tauri::command]
 pub(crate) async fn remote_host_request(
     app: tauri::AppHandle,
@@ -208,7 +235,8 @@ pub(crate) async fn remote_host_request(
     if !runtime.store.trusts(&host_id, "host") {
         return Err("Host is not paired".into());
     }
-    runtime
+    let hello = matches!(&request.operation, Operation::Hello);
+    let result = runtime
         .node
         .get()
         .unwrap()
@@ -217,7 +245,11 @@ pub(crate) async fn remote_host_request(
         .map_err(|_| {
             "Host unavailable or request timed out. Refresh before retrying an action.".to_string()
         })?
-        .into_result()
+        .into_result()?;
+    if hello {
+        approve_reciprocal_host(&runtime, &host_id)?;
+    }
+    Ok(result)
 }
 #[tauri::command]
 pub(crate) async fn remote_host_watch(
@@ -312,23 +344,14 @@ pub(super) fn local_action(runtime: &Runtime, request: LocalAction) -> Result<Va
         LocalAction::Unshare { project_id } => {
             runtime.store.project(&project_id).map_err(err)?;
             runtime.store.unshare(&project_id).map_err(err)?;
-            // Use the same complete-root authorization as request admission.
-            // A removed secondary root invalidates a session too; overlapping
-            // shares that still authorize every root must remain connected.
-            let sessions = crate::stores::open_store()?
-                .list_sessions()
-                .map_err(err)?
-                .into_iter()
-                .filter(|s| runtime.session(&s.id.to_string()).is_err())
-                .map(|s| s.id.to_string())
-                .collect::<Vec<_>>();
-            runtime.close_terminals(|t| sessions.contains(&t.session));
-            for session in sessions {
-                let _ = node.events.send(RemoteEvent {
-                    session_id: session,
-                    topic: "scopeRevoked".into(),
-                    payload: Value::Null,
-                });
+            revoke_removed_scopes(runtime)?;
+        }
+        LocalAction::SyncProjects { projects } => {
+            let previous = runtime.store.projects().map_err(err)?;
+            runtime.store.sync_projects(&projects).map_err(err)?;
+            let next = runtime.store.projects().map_err(err)?;
+            if previous.iter().any(|p| !next.iter().any(|n| n.id == p.id)) {
+                revoke_removed_scopes(runtime)?;
             }
         }
         LocalAction::Approve { peer_id } => runtime.store.approve(&peer_id).map_err(err)?,
@@ -378,4 +401,27 @@ pub(super) fn local_action(runtime: &Runtime, request: LocalAction) -> Result<Va
         _ => return Err("Unsupported local device action".into()),
     }
     runtime.snapshot()
+}
+
+fn revoke_removed_scopes(runtime: &Runtime) -> Result<(), String> {
+    let node = runtime.node.get().unwrap();
+    // Use the same complete-root authorization as request admission.
+    // A removed secondary root invalidates a session too; overlapping
+    // shares that still authorize every root must remain connected.
+    let sessions = crate::stores::open_store()?
+        .list_sessions()
+        .map_err(err)?
+        .into_iter()
+        .filter(|s| runtime.session(&s.id.to_string()).is_err())
+        .map(|s| s.id.to_string())
+        .collect::<Vec<_>>();
+    runtime.close_terminals(|t| sessions.contains(&t.session));
+    for session in sessions {
+        let _ = node.events.send(RemoteEvent {
+            session_id: session,
+            topic: "scopeRevoked".into(),
+            payload: Value::Null,
+        });
+    }
+    Ok(())
 }

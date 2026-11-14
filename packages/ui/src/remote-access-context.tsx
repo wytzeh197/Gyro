@@ -7,12 +7,23 @@ export const RemoteAccessSlots = createContext<{
   settings?: ReactNode;
   /** Present only while rendering projects from the selected remote host. */
   projectHost?: string;
+  /** Extra host-bound projects join the normal sidebar; local state stays mounted. */
+  projects?: ReactNode;
+  content?: ReactNode;
+  selectLocal?: () => void;
+  syncProjects?: (projects: Array<{ path: string; name: string }>) => void;
 }>({});
 export function MachineNavigation() {
   return useContext(RemoteAccessSlots).navigation ?? null;
 }
 export function RemoteAccessSettingsContent() {
   return useContext(RemoteAccessSlots).settings ?? null;
+}
+export function useRemoteWorkspaceSlots() {
+  return useContext(RemoteAccessSlots);
+}
+export function RemoteProjectNavigation() {
+  return useContext(RemoteAccessSlots).projects ?? null;
 }
 export function useRemoteProjectHost() {
   return useContext(RemoteAccessSlots).projectHost;

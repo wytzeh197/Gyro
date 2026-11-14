@@ -36,13 +36,27 @@ const emptyData = (): WorkspaceData => ({
   terminals: [],
 });
 
-export function useRemoteWorkspace(hostId: string) {
+import type { RemoteSelection } from "./catalog";
+
+export function useRemoteWorkspace(
+  hostId: string,
+  selection?: RemoteSelection,
+) {
   const access = useRemoteAccess();
   const client = useMemo(
     () => new RemoteHostClient(hostId, access.ports),
     [hostId, access.ports],
   );
-  const [view, setView] = useState(() => readView(hostId));
+  const [view, setView] = useState(() => ({
+    ...readView(hostId),
+    ...(selection
+      ? {
+          projectId: selection.projectId ?? readView(hostId).projectId,
+          sessionId: selection.sessionId,
+          panel: "chat" as const,
+        }
+      : {}),
+  }));
   const [data, setData] = useState<WorkspaceData>(emptyData);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [online, setOnline] = useState(false);
@@ -339,6 +353,12 @@ export function useRemoteWorkspace(hostId: string) {
     },
     [client],
   );
+  useEffect(() => {
+    if (!selection) return;
+    selectSession(selection.sessionId);
+    if (selection.projectId)
+      setView((previous) => ({ ...previous, projectId: selection.projectId }));
+  }, [selection?.projectId, selection?.sessionId, selectSession]);
   async function createSession(
     model: ModelChoice,
     branch?: string,

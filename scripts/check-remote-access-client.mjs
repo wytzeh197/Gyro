@@ -179,6 +179,15 @@ assert.equal(
 
 a.dispose();
 b.dispose();
+assert.equal(
+  calls.findLast(
+    (c) =>
+      c.args?.hostId === "host-a" &&
+      c.args?.request?.operation.op === "release",
+  )?.args.request.lease,
+  17,
+  "view cleanup fences its release to the previous control generation",
+);
 await assert.rejects(a.request({ op: "projects" }), /closed/);
 assert.ok(
   calls.every((call) =>

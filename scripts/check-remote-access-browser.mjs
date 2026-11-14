@@ -132,6 +132,16 @@ try {
     () => evaluate("document.body.innerText.includes('Shared projects')"),
     "settings fixture",
   );
+  assert.equal(
+    await evaluate("window.gyroRemoteFixture.syncedProjects.length"),
+    0,
+    "startup does not clear shares before local sessions load",
+  );
+  await evaluate("window.gyroHydrateLocalFixture()");
+  await until(
+    () => evaluate("window.gyroRemoteFixture.syncedProjects.length > 0"),
+    "local projects sync after hydration",
+  );
   await shot("settings-dark.png");
   await evaluate(
     "document.querySelector('[role=switch][aria-label=\"Allow remote access\"]').click()",
@@ -151,12 +161,37 @@ try {
       ),
     "generated invitation",
   );
+  await evaluate("window.gyroRemoteFixture.addPending('Second fixture Mac')");
+  await until(
+    () =>
+      evaluate(
+        "!document.querySelector('#gyro-copy-invitation') && document.body.innerText.includes('Second fixture Mac wants to connect')",
+      ),
+    "used invitation closes before expiry",
+  );
+  await click("Approve");
+  await until(
+    () =>
+      evaluate(
+        "!document.body.innerText.includes('Second fixture Mac wants to connect')",
+      ),
+    "pairing approval closes sheet",
+  );
+  await click("Pair a device");
+  await until(
+    () => evaluate("Boolean(document.querySelector('#gyro-copy-invitation'))"),
+    "second invitation",
+  );
   await click("Cancel");
   await until(
     () => evaluate("!document.querySelector('#gyro-copy-invitation')"),
     "cancel invitation",
   );
-  await click("Connect");
+  await until(
+    () => evaluate("document.body.innerText.includes('Open projects')"),
+    "automatic remote discovery",
+  );
+  await click("Open projects");
   await until(
     () =>
       evaluate("document.body.innerText.includes('Connected · Experimental')"),
@@ -189,6 +224,52 @@ try {
     "host branch metadata",
   );
   assert.equal(
+    await evaluate(
+      "Boolean([...document.querySelectorAll('.gyro-sidebar button')].find(b=>b.textContent.includes('Existing local chat')))",
+    ),
+    true,
+    "local chats remain beside remote chats",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelectorAll('.gyro-sidebar-project-toggle').length",
+    ),
+    2,
+    "same-path local and remote folders remain separate",
+  );
+  await evaluate(
+    "[...document.querySelectorAll('.gyro-sidebar button')].find(b=>b.textContent.includes('Existing local chat')).click()",
+  );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-main')?.innerText.includes('Existing local history')",
+      ),
+    "local chat routes locally despite identical remote ID",
+  );
+  await evaluate(
+    "(() => {const f=document.querySelector('textarea[aria-label=\"Local draft\"]'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(f,'Keep this local draft'); f.dispatchEvent(new Event('input',{bubbles:true}));})()",
+  );
+  await evaluate(
+    "[...document.querySelectorAll('.gyro-sidebar button')].find(b=>b.textContent.includes('Existing remote chat')).click()",
+  );
+  await until(
+    () => evaluate("Boolean(document.querySelector('.gyro-remote-chat'))"),
+    "return to remote chat",
+  );
+  await click("Take control");
+  await until(
+    () => evaluate('!document.body.innerText.includes("You\'re watching.")'),
+    "control after local navigation",
+  );
+  assert.equal(
+    await evaluate(
+      "Boolean(document.querySelector('.gyro-main textarea[aria-label=\"Local draft\"]'))",
+    ),
+    false,
+    "inactive local DOM cannot change remote shell styling",
+  );
+  assert.equal(
     await evaluate("Boolean(document.querySelector('#gyro-machine'))"),
     false,
     "no global Machine picker",
@@ -202,7 +283,7 @@ try {
   );
   assert.equal(
     await evaluate(
-      "(() => { const b=document.querySelector('.gyro-sidebar-project-toggle'); const name=b.querySelector('span').getBoundingClientRect(); const marker=b.querySelector('.gyro-sidebar-project-remote').getBoundingClientRect(); return Math.abs(name.y-marker.y)<2; })()",
+      "(() => { const b=[...document.querySelectorAll('.gyro-sidebar-project-toggle')].find(b=>b.querySelector('.gyro-sidebar-project-remote')); const name=b.querySelector('span').getBoundingClientRect(); const marker=b.querySelector('.gyro-sidebar-project-remote').getBoundingClientRect(); return Math.abs(name.y-marker.y)<2; })()",
     ),
     true,
     "remote marker stays on the project name row",
@@ -246,7 +327,7 @@ try {
     JSON.stringify(fields, null, 2),
   );
   await evaluate(
-    "(() => { const field=document.querySelector('textarea'); if(!field) throw Error('Composer missing'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(field,'Implement the fixture change'); field.dispatchEvent(new Event('input',{bubbles:true})); })()",
+    "(() => { const field=document.querySelector('.gyro-remote-workspace textarea'); if(!field) throw Error('Composer missing'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(field,'Implement the fixture change'); field.dispatchEvent(new Event('input',{bubbles:true})); })()",
   );
   await pause(100);
   await writeFile(
@@ -377,24 +458,69 @@ try {
   await details();
   await click("This Mac");
   await until(
-    () => evaluate("document.body.innerText.includes('Shared projects')"),
-    "return to local surface",
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-main')?.innerText.includes('Existing local history')",
+      ),
+    "return to preserved local chat",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('textarea[aria-label=\"Local draft\"]')?.value",
+    ),
+    "Keep this local draft",
+    "local draft survives remote browsing",
   );
   assert.equal(
     await evaluate(
       "Boolean(document.querySelector('.gyro-sidebar-project-remote'))",
     ),
-    false,
-    "local settings has no remote project marker",
+    true,
+    "remote folders remain available while browsing local chats",
   );
-  await click("Connect");
-  await until(
-    () => evaluate("document.body.innerText.includes('Existing remote chat')"),
-    "return to remote host",
+  await evaluate(
+    "[...document.querySelectorAll('.gyro-sidebar button')].find(b=>b.textContent.includes('Existing remote chat')).click()",
   );
   await until(
-    () => evaluate("document.body.innerText.includes('Existing remote chat')"),
-    "restored host session",
+    () => evaluate("Boolean(document.querySelector('.gyro-remote-chat'))"),
+    "reopen remote chat from shared sidebar",
+  );
+  await evaluate(
+    "(() => { const fixture = window.gyroRemoteFixture; for(let i=0;i<7;i++) fixture.sessions.push({...fixture.sessions[0],id:'extra-'+i,title:'More remote chat '+i}); })()",
+  );
+  await until(
+    () =>
+      evaluate(
+        "Boolean(document.querySelector('button[aria-label^=\"Show more chats in remote-project, remote\"]'))",
+      ),
+    "remote project uses normal collapsed chat count",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelectorAll('.gyro-sidebar-project-group:has(.gyro-sidebar-project-remote) .gyro-session-row').length",
+    ),
+    5,
+    "initial remote project list stays compact",
+  );
+  await evaluate(
+    "document.querySelector('button[aria-label^=\"Show more chats in remote-project, remote\"]').click()",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelectorAll('.gyro-sidebar-project-group:has(.gyro-sidebar-project-remote) .gyro-session-row').length",
+    ),
+    8,
+    "more reveals all remote chats",
+  );
+  await evaluate(
+    "document.querySelector('button[aria-label^=\"Show fewer chats in remote-project, remote\"]').click()",
+  );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelectorAll('.gyro-sidebar-project-group:has(.gyro-sidebar-project-remote) .gyro-session-row').length===5",
+      ),
+    "less restores compact project list",
   );
   await call("Emulation.setDeviceMetricsOverride", {
     width: 900,
@@ -419,6 +545,10 @@ try {
           "settings",
           "host-toggle",
           "invitation-cancel",
+          "invitation-consumed",
+          "automatic-project-discovery",
+          "local-and-remote-ID-collision",
+          "local-draft-preserved",
           "host-selection",
           "existing-session",
           "controller",

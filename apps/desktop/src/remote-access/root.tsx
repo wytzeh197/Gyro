@@ -14,6 +14,8 @@ import type { AccessStatus, Peer } from "./types";
 import type { NativePorts } from "./client";
 import { nativePorts } from "./ports";
 import "./remote-access.css";
+import { useRemoteCatalog, type RemoteSelection } from "./catalog";
+import { RemoteNavigation } from "./navigation";
 
 const Settings = lazy(() => import("./settings"));
 const Workspace = lazy(() => import("./workspace"));
@@ -32,15 +34,27 @@ export function RemoteWorkspaceRoot({
   const [status, setStatus] = useState<AccessStatus>();
   const [error, setError] = useState<string>();
   const [selectedHost, setSelectedHost] = useState<Peer>();
+  const [selection, setSelection] = useState<RemoteSelection>();
+  const peers = status?.peers ?? [];
+  const { catalogs, refresh: refreshCatalog } = useRemoteCatalog(
+    ports,
+    status?.settings.enabled ? peers : [],
+  );
+  const refreshSequence = useRef(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const refresh = useCallback(async () => {
     if (!native() && !suppliedPorts) return;
+    const sequence = ++refreshSequence.current;
     try {
-      setStatus(await ports.invoke<AccessStatus>("remote_access_status"));
-      setError(undefined);
+      const next = await ports.invoke<AccessStatus>("remote_access_status");
+      if (sequence === refreshSequence.current) {
+        setStatus(next);
+        setError(undefined);
+      }
     } catch {
-      setError("Remote access settings are unavailable. Try again.");
+      if (sequence === refreshSequence.current)
+        setError("Remote access settings are unavailable. Try again.");
     }
   }, [ports, suppliedPorts]);
   const action = useCallback(
@@ -78,8 +92,62 @@ export function RemoteWorkspaceRoot({
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const selectHost = useCallback((host?: Peer) => {
     setSelectedHost(host);
+    setSelection(host ? { hostId: host.id } : undefined);
     setSettingsOpen(false);
   }, []);
+  const selectRemote = useCallback((next: RemoteSelection) => {
+    setSelection(next);
+    setSettingsOpen(false);
+  }, []);
+  const selectLocal = useCallback(() => setSelection(undefined), []);
+  const projectSyncKey = useRef<string>();
+  const requestedProjects = useRef<Array<{ path: string; name: string }>>();
+  const syncProjects = useCallback(
+    (projects: Array<{ path: string; name: string }>) => {
+      if (!native() && !suppliedPorts) return;
+      requestedProjects.current = projects;
+      const key = JSON.stringify(projects);
+      if (projectSyncKey.current === key) return;
+      projectSyncKey.current = key;
+      void action({ action: "syncProjects", projects }).catch(() => {
+        if (projectSyncKey.current === key) projectSyncKey.current = undefined;
+        setError(
+          "Sidebar projects could not be shared. Try again in Remote access settings.",
+        );
+      });
+    },
+    [action, suppliedPorts],
+  );
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (requestedProjects.current) syncProjects(requestedProjects.current);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [syncProjects]);
+  const activeHost = status?.settings.enabled
+    ? peers.find((p) => p.id === selection?.hostId)
+    : undefined;
+  useEffect(() => {
+    if (selection && status && !activeHost) selectLocal();
+  }, [selection, status, activeHost, selectLocal]);
+  useEffect(() => {
+    if (!selection) return;
+    const shortcut = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.defaultPrevented) return;
+      if (event.key === ",") {
+        event.preventDefault();
+        openSettings();
+      } else if (event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        selectRemote({
+          hostId: selection.hostId,
+          projectId: selection.projectId,
+        });
+      }
+    };
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  }, [selection, openSettings, selectRemote]);
   const context = useMemo(
     () => ({
       ports,
@@ -90,6 +158,9 @@ export function RemoteWorkspaceRoot({
       refresh,
       action,
       openSettings,
+      selectRemote,
+      refreshCatalog,
+      connectedHostIds: catalogs.filter((c) => c.online).map((c) => c.host.id),
     }),
     [
       ports,
@@ -100,6 +171,9 @@ export function RemoteWorkspaceRoot({
       refresh,
       action,
       openSettings,
+      selectRemote,
+      refreshCatalog,
+      catalogs,
     ],
   );
   const settings = (
@@ -110,15 +184,31 @@ export function RemoteWorkspaceRoot({
   return (
     <RemoteAccessContext.Provider value={context}>
       <RemoteAccessSlots.Provider
-        value={{ settings, projectHost: selectedHost?.name }}
+        value={{
+          settings,
+          selectLocal,
+          syncProjects,
+          projects: (
+            <RemoteNavigation
+              catalogs={catalogs}
+              selection={selection}
+              onSelect={selectRemote}
+              onRefresh={() => void refreshCatalog()}
+            />
+          ),
+          content:
+            activeHost && selection ? (
+              <Suspense fallback={fallback()}>
+                <Workspace
+                  key={activeHost.id}
+                  host={activeHost}
+                  selection={selection}
+                />
+              </Suspense>
+            ) : undefined,
+        }}
       >
-        <Suspense fallback={fallback()}>
-          {selectedHost ? (
-            <Workspace key={selectedHost.id} host={selectedHost} />
-          ) : (
-            children
-          )}
-        </Suspense>
+        {children}
         <dialog
           className="gyro-remote-dialog"
           ref={dialog}

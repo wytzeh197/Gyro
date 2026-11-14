@@ -2008,7 +2008,7 @@
 }
 
 /* Settings uses the same inset canvas and continuous surround as Sessions. */
-:root[data-theme] .gyro-app-shell.is-settings-layout > .gyro-main > .gyro-settings-surface {
+:root[data-theme] .gyro-app-shell.is-settings-layout > .gyro-main .gyro-settings-surface {
   border: 0;
   border-radius: var(--gyro-chat-canvas-radius);
   background: var(--gyro-pane);

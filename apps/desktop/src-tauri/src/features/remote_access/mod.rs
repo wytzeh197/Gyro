@@ -115,6 +115,9 @@ impl Runtime {
         loopback: bool,
     ) -> Result<Arc<Self>, String> {
         remote_store.reconcile_interrupted_requests().map_err(err)?;
+        if remote_store.settings().map_err(err)?.enabled {
+            remote_store.promote_approved_clients().map_err(err)?;
+        }
         let runtime = Arc::new(Runtime {
             app: app.clone(),
             store: remote_store,
@@ -277,7 +280,10 @@ impl Runtime {
                 self.authorize(peer, &request.operation)?;
                 self.mutation_paths(&request.operation)?;
                 if let Some(session) = request.operation.session_id() {
-                    self.controls.lock().map_err(err)?.check(session, peer, request.lease)?;
+                    self.controls
+                        .lock()
+                        .map_err(err)?
+                        .check(session, peer, request.lease)?;
                 }
             }
             dispatch::execute(self, peer, request)
@@ -310,7 +316,7 @@ impl Runtime {
         let hosting_active =
             self.store.settings().map_err(err)?.enabled && self.node.get().is_some();
         Ok(
-            json!({"settings":self.store.settings().map_err(err)?,"hostingActive":hosting_active,"deviceId":self.node.get().map(|n|n.id()),"peers":self.store.peers().map_err(err)?,"pending":self.store.pending().map_err(err)?,"projects":self.store.projects().map_err(err)?,"controls":self.controls.lock().map_err(err)?.all()}),
+            json!({"settings":self.store.settings().map_err(err)?,"hostingActive":hosting_active,"invitationActive":self.store.invitation_active().map_err(err)?,"deviceId":self.node.get().map(|n|n.id()),"peers":self.store.peers().map_err(err)?,"pending":self.store.pending().map_err(err)?,"projects":self.store.projects().map_err(err)?,"controls":self.controls.lock().map_err(err)?.all()}),
         )
     }
 }
@@ -356,7 +362,12 @@ pub(crate) fn require_local_terminal_control(
             .as_ref()
             .and_then(std::sync::Weak::upgrade);
         match runtime.as_ref() {
-            Some(r) => r.terminals.lock().map_err(err)?.get(pane).map(|t| t.session.clone()),
+            Some(r) => r
+                .terminals
+                .lock()
+                .map_err(err)?
+                .get(pane)
+                .map(|t| t.session.clone()),
             None => None,
         }
     };

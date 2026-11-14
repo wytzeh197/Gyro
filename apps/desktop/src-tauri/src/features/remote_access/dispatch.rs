@@ -171,11 +171,11 @@ pub(super) fn execute(runtime: &Runtime, peer: &str, request: &Request) -> Resul
             )?)
         }
         Operation::Release { session_id } => {
-            runtime
-                .controls
-                .lock()
-                .map_err(err)?
-                .release(session_id, peer);
+            // An old view's delayed cleanup must not release a newly claimed lease.
+            let mut controls = runtime.controls.lock().map_err(err)?;
+            if controls.check(session_id, peer, request.lease).is_ok() {
+                controls.release(session_id, peer);
+            }
             Ok(Value::Null)
         }
         Operation::Submit {

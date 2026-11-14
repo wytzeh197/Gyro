@@ -149,13 +149,14 @@ export class RemoteHostClient implements HostClient {
     this.subscription++;
     this.unsubscribe?.();
     // Release authority, never stop work. No mutation is replayed after a failure.
-    for (const sessionId of this.leases.keys())
+    for (const [sessionId, lease] of this.leases)
       void this.ports
         .invoke("remote_host_request", {
           hostId: this.hostId,
           request: {
             id: crypto.randomUUID(),
             operation: { op: "release", sessionId },
+            lease,
           },
         })
         .catch(() => {});

@@ -18,6 +18,7 @@ export type Control = {
 };
 export type AccessStatus = {
   hostingActive?: boolean;
+  invitationActive?: boolean;
   settings: { enabled: boolean; name: string };
   deviceId?: string | null;
   peers: Peer[];

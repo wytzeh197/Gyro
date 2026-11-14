@@ -1,7 +1,7 @@
 import { gitSetupMessage, hasOnlyGitWarnings, preparationMessage, preparationStatusLabel } from "./workspace-preparation";
 import { ProjectMemoryPanel } from "./project-memory/panel";
 import type { ProjectMemoryRuntime } from "./project-memory/types";
-import { RemoteAccessSettingsContent } from "./remote-access-context";
+import { RemoteAccessSettingsContent, useRemoteWorkspaceSlots } from "./remote-access-context";
 import {
   Activity,
   Archive,
@@ -355,6 +355,8 @@ import {
   isMacPlatform,
   primaryGlobalSearchShortcut,
   relativeSessionTime,
+  sidebarProjectGroups,
+  sessionHasStartedForSidebar,
   scmFileBadge,
   terminalPaneHasActiveWork,
   workspaceAncestorPaths,
@@ -662,6 +664,7 @@ import {
   chatGridReducer,
   chatProjectKey,
   defaultCliLaunchPreset,
+  isTransientWorkspacePath,
   isUserSelectedWorkspacePath,
   normalizedDesktopNotifications,
   resolveChatGridDropSlot,
@@ -957,6 +960,7 @@ function ChatSwitcher({
 }
 
 type AppChromeProps = {
+  sidebarProjectsReady?: boolean;
   sessions: Session[];
   commandProfiles: CommandProfile[];
   savedProjects: Array<{ path: string; label: string }>;
@@ -1950,18 +1954,50 @@ function ProviderReadinessBanner({
   );
 }
 
+/** Keep local UI state without letting its inactive DOM affect shell :has() styles. */
+function PreservedLocalWorkspace({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: ReactNode;
+}) {
+  const [container] = useState(() => {
+    const element = document.createElement("div");
+    element.className = "gyro-local-workspace-content";
+    return element;
+  });
+  const [ready, setReady] = useState(false);
+  const mount = useCallback(
+    (anchor: HTMLDivElement | null) => {
+      if (anchor) {
+        if (active) anchor.appendChild(container);
+        setReady(true);
+      } else container.remove();
+    },
+    [active, container],
+  );
+  return (
+    <>
+      <div className="gyro-local-workspace-content" ref={mount} />
+      {ready ? createPortal(children, container) : null}
+    </>
+  );
+}
+
 export function AppChrome({
+  sidebarProjectsReady = true,
   sessions,
   commandProfiles,
   savedProjects,
-  activeSessionId,
+  activeSessionId: localActiveSessionId,
   sendingSessionIds = [],
   completedSessionIds = [],
   approvalCountsBySessionId = {},
   questionCountsBySessionId = {},
   modelTerminalSessionIds = [],
-  activeDestination,
-  activeWorkspaceLayout,
+  activeDestination: localActiveDestination,
+  activeWorkspaceLayout: localWorkspaceLayout,
   workspacePath,
   notifications = [],
   pinnedSessionIds = [],
@@ -1987,21 +2023,21 @@ export function AppChrome({
   workspaceSidebarHidden,
   workspaceSidebarWidth,
   chatSidebarWidth,
-  onSelectSession,
+  onSelectSession: selectLocalSession,
   onAddSessionToGrid,
-  onSelectWorkspaceLayout,
-  onSelectDestination,
+  onSelectWorkspaceLayout: selectLocalLayout,
+  onSelectDestination: selectLocalDestination,
   onOpenToolPanel,
   onDeleteSession,
   onDismissNotification,
-  onOpenSettings,
-  onOpenSettingsSection,
+  onOpenSettings: openLocalSettings,
+  onOpenSettingsSection: openLocalSettingsSection,
   isShellOptimizing = false,
-  onOpenCommandPalette,
-  onCreateSession,
-  onCreateCliSession,
-  onSelectSessions,
-  onOpenWorkspace,
+  onOpenCommandPalette: openLocalCommandPalette,
+  onCreateSession: createLocalSession,
+  onCreateCliSession: createLocalCliSession,
+  onSelectSessions: selectLocalSessions,
+  onOpenWorkspace: openLocalWorkspace,
   onAddWorkspaceFolder,
   onRevealSymbol,
   onRemoveWorkspaceFolder,
@@ -2060,7 +2096,7 @@ export function AppChrome({
   onRenameSession,
   onUploadCloudChat,
   accountNavigation,
-  onRemoveProject,
+  onRemoveProject: removeLocalProject,
   projectSettings,
   onToggleChatsCollapsed,
   onSettingsSectionChange,
@@ -2075,6 +2111,84 @@ export function AppChrome({
   renderAiChat,
   children,
 }: AppChromeProps) {
+  const remote = useRemoteWorkspaceSlots();
+  const remoteActive = Boolean(remote.content);
+  const activeDestination = remoteActive ? "workspace" : localActiveDestination;
+  const activeWorkspaceLayout = remoteActive ? "thread" : localWorkspaceLayout;
+  const activeSessionId = remoteActive ? undefined : localActiveSessionId;
+  const onSelectSession = (id: string) => {
+    remote.selectLocal?.();
+    selectLocalSession(id);
+  };
+  const onSelectWorkspaceLayout: typeof selectLocalLayout = (...args) => {
+    remote.selectLocal?.();
+    selectLocalLayout(...args);
+  };
+  const onSelectDestination: typeof selectLocalDestination = (...args) => {
+    remote.selectLocal?.();
+    selectLocalDestination(...args);
+  };
+  const onOpenSettings = () => {
+    remote.selectLocal?.();
+    openLocalSettings();
+  };
+  const onCreateSession = () => {
+    remote.selectLocal?.();
+    createLocalSession();
+  };
+  const onCreateCliSession: typeof createLocalCliSession = (...args) => {
+    remote.selectLocal?.();
+    createLocalCliSession(...args);
+  };
+  const onSelectSessions = () => {
+    remote.selectLocal?.();
+    selectLocalSessions();
+  };
+  const onOpenWorkspace = () => {
+    remote.selectLocal?.();
+    openLocalWorkspace();
+  };
+  const onOpenSettingsSection: typeof openLocalSettingsSection =
+    openLocalSettingsSection
+      ? (...args) => {
+          remote.selectLocal?.();
+          openLocalSettingsSection(...args);
+        }
+      : undefined;
+  const onOpenCommandPalette = () => {
+    remote.selectLocal?.();
+    openLocalCommandPalette();
+  };
+  const onRemoveProject: typeof removeLocalProject = removeLocalProject
+    ? (...args) => {
+        remote.selectLocal?.();
+        removeLocalProject(...args);
+      }
+    : undefined;
+  const localProjectList = JSON.stringify(
+    sidebarProjectGroups(
+      sessions.filter(
+        (s) =>
+          s.origin !== "cli" &&
+          (s.importSource || !isTransientWorkspacePath(s.workspacePath)) &&
+          !pinnedSessionIds.includes(s.id) &&
+          isUserSelectedWorkspacePath(s.workspacePath) &&
+          sessionHasStartedForSidebar(s),
+      ),
+      savedProjects,
+      workspacePath,
+      draftChats,
+    )
+      .filter((p) => p.hasWorkspace)
+      .map((p) => ({
+        path: p.key,
+        name: projectSettings?.details[p.key]?.name || p.label,
+      })),
+  );
+  useEffect(() => {
+    if (sidebarProjectsReady)
+      remote.syncProjects?.(JSON.parse(localProjectList));
+  }, [localProjectList, remote.syncProjects, sidebarProjectsReady]);
   const isIdeSurface =
     activeDestination === "workspace" && activeWorkspaceLayout === "code";
   const [localSidebarHidden, setLocalSidebarHidden] = useState(false);
@@ -2913,8 +3027,15 @@ export function AppChrome({
               pinnedSessionIds={pinnedSessionIds}
               openChatSessionIds={openChatSessionIds}
               draftChats={draftChats}
-              activeDraftId={activeDraftId}
-              onSelectDraftChat={onSelectDraftChat}
+              activeDraftId={remoteActive ? undefined : activeDraftId}
+              onSelectDraftChat={
+                onSelectDraftChat
+                  ? (...args) => {
+                      remote.selectLocal?.();
+                      onSelectDraftChat(...args);
+                    }
+                  : undefined
+              }
               savedProjects={savedProjects}
               selectedTerminalPaneId={selectedTerminalPaneId}
               sessions={sessions}
@@ -3038,7 +3159,8 @@ export function AppChrome({
           </>
         ) : null}
         {failureNotices.length > 0 ||
-        (activeDestination !== "settings" &&
+        (!remoteActive &&
+          activeDestination !== "settings" &&
           (providerReadinessNotice ||
             cliUpdateOffers.some((offer) => offer.updateAvailable))) ? (
           <div className="gyro-global-status-notices" ref={noticeLaneRef}>
@@ -3049,14 +3171,17 @@ export function AppChrome({
                 onDismiss={onDismissNotification}
               />
             ))}
-            {activeDestination !== "settings" && providerReadinessNotice ? (
+            {!remoteActive &&
+            activeDestination !== "settings" &&
+            providerReadinessNotice ? (
               <ProviderReadinessBanner
                 actionLabel={providerReadinessNotice.actionLabel}
                 message={providerReadinessNotice.message}
                 onAction={onProviderReadinessAction}
               />
             ) : null}
-            {activeDestination !== "settings" &&
+            {!remoteActive &&
+            activeDestination !== "settings" &&
             cliUpdateOffers.some((offer) => offer.updateAvailable) ? (
               <CliUpdateBanner
                 failure={cliUpdateFailure}
@@ -3070,6 +3195,7 @@ export function AppChrome({
         ) : null}
         {activeDestination === "workspace" &&
         activeWorkspaceLayout === "thread" &&
+        !remoteActive &&
         !activeSession ? (
           <div
             aria-hidden="true"
@@ -3077,7 +3203,10 @@ export function AppChrome({
             data-tauri-drag-region
           />
         ) : null}
-        {children}
+        <PreservedLocalWorkspace active={!remoteActive}>
+          {children}
+        </PreservedLocalWorkspace>
+        {remote.content}
       </main>
     </div>
   );

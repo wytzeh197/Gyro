@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
   Copy,
@@ -23,7 +22,10 @@ import type { Peer } from "./types";
 /** Device keys are hex; group them so people can compare them aloud. */
 const fingerprint = (id: string) =>
   /^[0-9a-f]+$/i.test(id)
-    ? (id.slice(0, 16).match(/.{1,4}/g)?.join(" ") ?? id)
+    ? (id
+        .slice(0, 16)
+        .match(/.{1,4}/g)
+        ?.join(" ") ?? id)
     : id;
 const countdown = (seconds: number) =>
   `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
@@ -33,7 +35,7 @@ export default function RemoteAccessSettings() {
     error: loadError,
     action,
     refresh,
-    selectedHost,
+    connectedHostIds,
     selectHost,
   } = useRemoteAccess();
   const [busy, setBusy] = useState(false);
@@ -50,6 +52,8 @@ export default function RemoteAccessSettings() {
     status: string;
   }>();
   const [paired, setPaired] = useState<Peer>();
+  const peersRef = useRef(status?.peers);
+  peersRef.current = status?.peers;
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (status) setName(status.settings.name);
@@ -59,39 +63,54 @@ export default function RemoteAccessSettings() {
     return () => clearInterval(t);
   }, []);
   useEffect(() => {
+    if (
+      invitation &&
+      (status?.invitationActive === false || invitation.expiresAt * 1000 <= now)
+    )
+      setInvitation(undefined);
+  }, [invitation, status?.invitationActive, now]);
+  useEffect(() => {
     if (!pending || pending.status !== "pending") return;
     let disposed = false;
-    const timer = setInterval(() => {
-      void action<{ status: string }>({
-        action: "pairStatus",
-        hostId: pending.hostId,
-      })
-        .then((result) => {
-          if (disposed || result.status === "pending") return;
-          setPending({ ...pending, status: result.status });
-          if (result.status === "approved") {
-            void refresh();
-            setPaired({
-              id: pending.hostId,
-              name:
-                status?.peers.find((p) => p.id === pending.hostId)?.name ??
-                "Paired Mac",
-              role: "host",
-            });
-          }
-        })
-        .catch(() => {
-          if (!disposed)
-            setError(
-              "Host unavailable. Keep Gyro open on both Macs and try again.",
-            );
+    let inFlight = false;
+    const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const result = await action<{ status: string }>({
+          action: "pairStatus",
+          hostId: pending.hostId,
         });
-    }, 2000);
+        if (disposed) return;
+        setError(undefined);
+        if (result.status === "approved") {
+          setPending(undefined);
+          setPasted("");
+          setPaired({
+            id: pending.hostId,
+            name:
+              peersRef.current?.find((p) => p.id === pending.hostId)?.name ??
+              "Paired Mac",
+            role: "both",
+          });
+        } else if (result.status !== "pending")
+          setPending({ ...pending, status: result.status });
+      } catch {
+        if (!disposed)
+          setError(
+            "Host unavailable. Keep Gyro open on both Macs and try again.",
+          );
+      } finally {
+        inFlight = false;
+      }
+    };
+    const timer = setInterval(() => void poll(), 2000);
+    void poll();
     return () => {
       disposed = true;
       clearInterval(timer);
     };
-  }, [pending, action, refresh, status?.peers]);
+  }, [pending, action]);
   async function run(work: () => Promise<unknown>) {
     if (busy) return;
     setBusy(true);
@@ -125,7 +144,7 @@ export default function RemoteAccessSettings() {
   return (
     <SettingsSection
       title="Remote access"
-      description="Use your projects and coding sessions from another Mac. Experimental: both Macs need Gyro open and awake."
+      description="Your sidebar projects appear on paired Macs, alongside their local chats. Experimental: both Macs need remote access on and Gyro open and awake."
     >
       <div className="gyro-remote-settings">
         {(error || (status && loadError)) && (
@@ -141,7 +160,9 @@ export default function RemoteAccessSettings() {
         ) : !status ? (
           <SettingsEmptyState
             title="Remote access settings did not load"
-            description={loadError ?? "Gyro could not read this Mac's remote access state."}
+            description={
+              loadError ?? "Gyro could not read this Mac's remote access state."
+            }
           >
             <button
               type="button"
@@ -161,7 +182,9 @@ export default function RemoteAccessSettings() {
                 <strong>{status.settings.name}</strong>
                 <span role="status">
                   {hostingDown ? (
-                    <SettingsStatus status="warning">Unavailable</SettingsStatus>
+                    <SettingsStatus status="warning">
+                      Unavailable
+                    </SettingsStatus>
                   ) : enabled ? (
                     <SettingsStatus status="good">
                       {status.hostingActive ? "On · Reachable" : "On"}
@@ -191,16 +214,22 @@ export default function RemoteAccessSettings() {
             <div className="gyro-remote-hero-meta">
               <span>
                 {status.peers.length}{" "}
-                {status.peers.length === 1 ? "trusted device" : "trusted devices"}
+                {status.peers.length === 1
+                  ? "trusted device"
+                  : "trusted devices"}
               </span>
               <span>
                 {status.projects.length}{" "}
-                {status.projects.length === 1 ? "shared project" : "shared projects"}
+                {status.projects.length === 1
+                  ? "shared project"
+                  : "shared projects"}
               </span>
               <button
                 type="button"
                 className={
-                  pairIsPrimary ? "gyro-primary-button" : "gyro-secondary-button"
+                  pairIsPrimary
+                    ? "gyro-primary-button"
+                    : "gyro-secondary-button"
                 }
                 disabled={busy || !enabled}
                 title={enabled ? undefined : "Turn on remote access to pair"}
@@ -265,7 +294,9 @@ export default function RemoteAccessSettings() {
             ))}
             {invitation && (
               <section className="gyro-remote-sheet" aria-label="Pair a device">
-                <strong className="gyro-remote-sheet-title">Pair a device</strong>
+                <strong className="gyro-remote-sheet-title">
+                  Pair a device
+                </strong>
                 <ol className="gyro-remote-steps">
                   <li className="is-done">
                     <Check size={14} aria-hidden /> Create an invitation
@@ -324,7 +355,9 @@ export default function RemoteAccessSettings() {
                         }
                         onClick={() =>
                           void run(() =>
-                            navigator.clipboard.writeText(invitation.invitation),
+                            navigator.clipboard.writeText(
+                              invitation.invitation,
+                            ),
                           )
                         }
                       >
@@ -373,31 +406,12 @@ export default function RemoteAccessSettings() {
                   ? `${status.projects.length} shared`
                   : undefined
               }
-              actions={
-                <button
-                  type="button"
-                  className="gyro-secondary-button"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(async () => {
-                      const path = await open({
-                        directory: true,
-                        multiple: false,
-                        title: "Choose a project to share",
-                      });
-                      if (typeof path === "string")
-                        await action({ action: "share", path });
-                    })
-                  }
-                >
-                  Share a project…
-                </button>
-              }
+              description="Projects in your sidebar are automatically available to paired Macs while remote access is on."
             >
               {status.projects.length === 0 && (
                 <SettingsEmptyState
-                  title="No shared projects"
-                  description="Trusted devices only see the projects you share here."
+                  title="No sidebar projects yet"
+                  description="Add a project to your sidebar to make it available to paired Macs."
                 />
               )}
               {status.projects.map((project) => (
@@ -405,20 +419,7 @@ export default function RemoteAccessSettings() {
                   key={project.id}
                   label={project.name}
                   detail={project.path}
-                >
-                  <button
-                    type="button"
-                    className="gyro-secondary-button"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(() =>
-                        action({ action: "unshare", projectId: project.id }),
-                      )
-                    }
-                  >
-                    Stop sharing
-                  </button>
-                </SettingsRow>
+                />
               ))}
             </SettingsGroup>
             <SettingsGroup
@@ -442,29 +443,19 @@ export default function RemoteAccessSettings() {
                   label={peer.name}
                   detail={`${peer.role === "client" ? "Can connect to this Mac" : peer.role === "both" ? "Host and client" : "Host you can open"} · ${fingerprint(peer.id)}`}
                 >
-                  {selectedHost?.id === peer.id ? (
-                    <>
-                      <SettingsStatus status="good">Connected</SettingsStatus>
-                      <button
-                        type="button"
-                        className="gyro-secondary-button"
-                        onClick={() => selectHost()}
-                      >
-                        Disconnect
-                      </button>
-                    </>
-                  ) : (
-                    peer.role !== "client" && (
-                      <button
-                        type="button"
-                        className="gyro-secondary-button"
-                        disabled={busy}
-                        onClick={() => selectHost(peer)}
-                      >
-                        Connect
-                      </button>
-                    )
+                  {connectedHostIds.includes(peer.id) && (
+                    <SettingsStatus status="good">Connected</SettingsStatus>
                   )}
+                  <button
+                    type="button"
+                    className="gyro-secondary-button"
+                    disabled={busy || !enabled}
+                    onClick={() => selectHost(peer)}
+                  >
+                    {connectedHostIds.includes(peer.id)
+                      ? "Open projects"
+                      : "Connect"}
+                  </button>
                   <button
                     type="button"
                     className="gyro-secondary-button"

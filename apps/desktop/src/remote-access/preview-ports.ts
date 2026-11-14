@@ -28,9 +28,11 @@ export function createPreviewPorts() {
     deviceId: clientId,
     peers: [{ id: hostId, name: "Remote Mac · Fixture", role: "host" }],
     pending: [],
+    invitationActive: false,
     projects: [],
     controls: {},
   };
+  const syncedProjects: unknown[] = [];
   const sessions = [makeSession("existing-chat", "Existing remote chat")];
   const histories = new Map<string, SessionEvent[]>([
     [
@@ -91,11 +93,21 @@ export function createPreviewPorts() {
             name: String(request.name),
             enabled: Boolean(request.enabled),
           };
-        if (request.action === "invite")
+        if (request.action === "syncProjects") {
+          syncedProjects.push(request.projects);
+          status.projects = (
+            request.projects as Array<{ path: string; name: string }>
+          ).map((p, i) => ({ ...p, id: `local-${i}` }));
+        }
+        if (request.action === "cancelInvitation")
+          status.invitationActive = false;
+        if (request.action === "invite") {
+          status.invitationActive = true;
           return {
             invitation: "gyro-pair-v1:EXPLICIT-BROWSER-FIXTURE",
             expiresAt: Math.floor(Date.now() / 1000) + 300,
           } as T;
+        }
         if (request.action === "revoke")
           status.peers = status.peers.filter(
             (peer) => peer.id !== request.peerId,
@@ -104,7 +116,7 @@ export function createPreviewPorts() {
           const peer = status.pending.find((p) => p.id === request.peerId);
           status.pending = status.pending.filter((p) => p !== peer);
           if (peer && request.action === "approve")
-            status.peers.push({ ...peer, role: "client" });
+            status.peers.push({ ...peer, role: "both" });
         }
         if (request.action === "pair")
           return { hostId, peerId: clientId, status: "pending" } as T;
@@ -338,11 +350,13 @@ export function createPreviewPorts() {
   };
   return {
     port,
+    syncedProjects,
     setOnline(value: boolean) {
       online = value;
     },
     /** Fixture-only: a device asking this Mac to trust it. */
     addPending(name: string) {
+      status.invitationActive = false;
       status.pending.push({
         id: "a1b2c3d4e5f60718293a4b5c6d7e8f90",
         name,

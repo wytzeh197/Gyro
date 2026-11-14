@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { readBoundedLocalStorage, readStoredAppearance } from "../ui-storage";
 import type { AccessStatus, Peer } from "./types";
 import type { NativePorts } from "./client";
+import type { RemoteSelection } from "./catalog";
 export type RemoteAccessContextValue = {
   ports: NativePorts;
   status?: AccessStatus;
@@ -11,6 +12,9 @@ export type RemoteAccessContextValue = {
   refresh: () => Promise<void>;
   action: <T = unknown>(request: Record<string, unknown>) => Promise<T>;
   openSettings: () => void;
+  selectRemote: (selection: RemoteSelection) => void;
+  refreshCatalog: () => Promise<void>;
+  connectedHostIds: string[];
 };
 export const RemoteAccessContext =
   createContext<RemoteAccessContextValue | null>(null);
