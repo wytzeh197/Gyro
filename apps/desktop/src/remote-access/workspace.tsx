@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChatSurface,
   confirmAction,
@@ -9,7 +9,6 @@ import {
   type ReasoningEffort,
 } from "@gyro-dev/ui";
 import {
-  Eye,
   FolderOpen,
   GitBranch,
   Terminal,
@@ -18,13 +17,14 @@ import { useRemoteAccess, useRemoteTheme } from "./context";
 import { useRemoteWorkspace } from "./use-workspace";
 import { RemoteFiles, RemoteGit, RemoteTerminals } from "./workspace-panels";
 import { CommandApprovalCard, MutationReviewPanel } from "./workspace-review";
-import type { Control, HostInfo, ModelChoice, Peer } from "./types";
+import type { HostInfo, ModelChoice, Peer } from "./types";
 
 function configFromHost(info?: HostInfo, choice?: ModelChoice): GyroConfig {
   return {
     telemetryEnabled: false,
-    requireCommandApproval: true,
-    requireFileEditApproval: true,
+    fullAccess: info?.fullAccess ?? false,
+    requireCommandApproval: info?.requireCommandApproval ?? true,
+    requireFileEditApproval: info?.requireFileEditApproval ?? true,
     selectedProviderId: (choice?.providerId ?? info?.selectedProviderId) as
       ProviderId | undefined,
     commandProfiles: [],
@@ -53,19 +53,6 @@ const PANELS = [
   { id: "terminal", label: "Terminal", Icon: Terminal },
 ] as const;
 
-const relativeTime = new Intl.RelativeTimeFormat(undefined, {
-  numeric: "auto",
-});
-function ago(timestamp: string) {
-  const time = new Date(timestamp).getTime();
-  if (Number.isNaN(time)) return "";
-  const minutes = Math.round((time - Date.now()) / 60_000);
-  if (Math.abs(minutes) < 60) return relativeTime.format(minutes, "minute");
-  const hours = Math.round(minutes / 60);
-  if (Math.abs(hours) < 24) return relativeTime.format(hours, "hour");
-  return relativeTime.format(Math.round(hours / 24), "day");
-}
-
 import type { RemoteSelection } from "./catalog";
 
 export default function RemoteWorkspace({
@@ -77,8 +64,17 @@ export default function RemoteWorkspace({
 }) {
   useRemoteTheme();
   const workspace = useRemoteWorkspace(host.id, selection);
-  const { view, setView, data, online, owns, busy, error, run, selectSession } =
-    workspace;
+  const {
+    view,
+    setView,
+    data,
+    online,
+    canAct,
+    busy,
+    error,
+    run,
+    selectSession,
+  } = workspace;
   const access = useRemoteAccess();
   const [selected, setSelected] = useState<ModelChoice>();
   useEffect(
@@ -86,7 +82,16 @@ export default function RemoteWorkspace({
     [selection.projectId, selection.sessionId],
   );
   const [worktree, setWorktree] = useState(false);
-  const [homeDraft, setHomeDraft] = useState("");
+  const homeDraftKey = `new:${view.projectId ?? ""}`;
+  const homeDraft = view.drafts[homeDraftKey] ?? "";
+  const setHomeDraft = (text: string) =>
+    setView((previous) => ({
+      ...previous,
+      drafts: { ...previous.drafts, [homeDraftKey]: text },
+    }));
+  useEffect(() => {
+    if (selection.draft !== undefined) setHomeDraft(selection.draft);
+  }, [selection]);
   // The chat's Environment card holds the connection and remote tools. A
   // tool panel takes its place on the right; the top bar brings it back.
   const [environmentOpen, setEnvironmentOpen] = useState(true);
@@ -94,8 +99,9 @@ export default function RemoteWorkspace({
   // open and owned, then goes through the normal submit path.
   const [queued, setQueued] = useState<{ sessionId: string; text: string }>();
   const session =
-    data.snapshot?.session ??
-    data.sessions.find((s) => s.id === view.sessionId);
+    (data.snapshot?.session.id === view.sessionId
+      ? data.snapshot?.session
+      : undefined) ?? data.sessions.find((s) => s.id === view.sessionId);
   const initialProvider =
     data.info?.providers.find((p) => p.id === data.info?.selectedProviderId) ??
     data.info?.providers[0];
@@ -114,15 +120,12 @@ export default function RemoteWorkspace({
   );
   const selectedProject = data.projects.find((p) => p.id === view.projectId);
   const panel = view.panel;
-  const controls = data.snapshot?.control;
   const pendingSubmission = session
     ? view.pendingSubmissions[session.id]
     : undefined;
   const approvals = session ? (data.snapshot?.approvals ?? []) : [];
   const mutations = session ? (data.snapshot?.mutations ?? []) : [];
-  const canDecide = owns && online && !busy;
-  const peerName = (id?: string | null) =>
-    access.status?.peers.find((p) => p.id === id)?.name ?? "Another device";
+  const canDecide = canAct && online && !busy;
   const modelOptions =
     data.info?.providers.flatMap((p) =>
       p.models.map((id) => ({
@@ -132,28 +135,17 @@ export default function RemoteWorkspace({
       })),
     ) ?? [];
   useEffect(() => {
-    if (queued && session?.id === queued.sessionId && owns && online && !busy) {
+    if (
+      queued &&
+      session?.id === queued.sessionId &&
+      canAct &&
+      online &&
+      !busy
+    ) {
       setQueued(undefined);
       void workspace.submit(queued.text, model);
     }
-  }, [queued, session?.id, owns, online, busy]);
-  const selectProject = (path: string) => {
-    const project = data.projects.find((p) => p.path === path);
-    if (project) {
-      access.selectRemote({ hostId: host.id, projectId: project.id });
-      selectSession(undefined);
-      setView((previous) => ({ ...previous, projectId: project.id }));
-    }
-  };
-  const select = (id: string) => {
-    setSelected(undefined);
-    access.selectRemote({
-      hostId: host.id,
-      projectId: view.projectId,
-      sessionId: id,
-    });
-    selectSession(id);
-  };
+  }, [queued, session?.id, canAct, online, busy]);
   const create = async () => {
     const branch = worktree ? `remote/${Date.now()}` : undefined;
     const id = await workspace.createSession(model, branch);
@@ -167,9 +159,8 @@ export default function RemoteWorkspace({
     }
     return id;
   };
-  const startChat = async (event: FormEvent) => {
-    event.preventDefault();
-    const text = homeDraft.trim();
+  const startChat = async (message: string) => {
+    const text = message.trim();
     if (!text) return;
     const id = await create();
     if (id) {
@@ -203,15 +194,13 @@ export default function RemoteWorkspace({
   };
   const blocked = !online
     ? `Read only until ${host.name} is back.`
-    : !owns
-      ? "Watching. Take control to send."
-      : pendingSubmission
-        ? "Checking the previous submission. Refresh before sending again."
-        : busy
-          ? "Waiting for the host…"
-          : data.snapshot?.running
-            ? "A response is running on the host."
-            : undefined;
+    : pendingSubmission
+      ? "Checking the previous submission. Refresh before sending again."
+      : busy
+        ? "Waiting for the host…"
+        : data.snapshot?.running
+          ? "A response is running on the host."
+          : undefined;
   const readOnly = Boolean(session) && !workspace.loading && !online;
   const reconnect = (
     <div className="gyro-remote-readonly" role="status">
@@ -274,7 +263,7 @@ export default function RemoteWorkspace({
         host={host.name}
         branch={session?.worktreeName ?? session?.branch}
         canDecide={canDecide}
-        primary={owns && index === 0}
+        primary={canAct && index === 0}
         onDecide={(decision) =>
           decide(approval.id, approval.kind, decision, approval.turnId)
         }
@@ -293,8 +282,6 @@ export default function RemoteWorkspace({
     : online
       ? { status: "online" as const, label: "Connected · Experimental" }
       : { status: "offline" as const, label: "Unavailable" };
-  const watching = Boolean(session) && online && !owns;
-  const requestedBy = owns ? controls?.requestedBy : undefined;
   const environmentRemote: ChatEnvironmentRemote | undefined = session
     ? {
         host: host.name,
@@ -307,26 +294,6 @@ export default function RemoteWorkspace({
           .filter(Boolean)
           .join(" · "),
         notices: [
-          ...(watching
-            ? [
-                {
-                  id: "watching",
-                  icon: <Eye size={13} aria-hidden />,
-                  text: controls
-                    ? `You're watching. ${peerName(controls.owner)} has control, so prompts and approvals are off.`
-                    : "You're watching. Prompts and approvals are off until you take control.",
-                },
-              ]
-            : []),
-          ...(requestedBy
-            ? [
-                {
-                  id: "request",
-                  text: `${peerName(requestedBy)} asked for control.`,
-                  tone: "warning" as const,
-                },
-              ]
-            : []),
           ...(workspace.storageWarning
             ? [
                 {
@@ -358,48 +325,6 @@ export default function RemoteWorkspace({
                 },
               ]
             : []),
-          ...(watching
-            ? [
-                {
-                  id: "take",
-                  label: "Take control",
-                  primary: true,
-                  disabled: busy,
-                  onClick: () => void workspace.claim(),
-                },
-              ]
-            : []),
-          ...(watching && controls
-            ? [
-                {
-                  id: "request",
-                  label: controls.requestedBy
-                    ? "Control requested"
-                    : "Request control",
-                  disabled: busy || Boolean(controls.requestedBy),
-                  onClick: () =>
-                    void run<Control>({
-                      op: "requestControl",
-                      sessionId: session.id,
-                    }),
-                },
-              ]
-            : []),
-          ...(requestedBy
-            ? [
-                {
-                  id: "transfer",
-                  label: "Transfer control",
-                  disabled: busy,
-                  onClick: () =>
-                    void run({
-                      op: "transferControl",
-                      sessionId: session.id,
-                      peerId: requestedBy,
-                    }),
-                },
-              ]
-            : []),
           {
             id: "local",
             label: "This Mac",
@@ -415,7 +340,7 @@ export default function RemoteWorkspace({
       <MutationReviewPanel
         mutations={mutations}
         canDecide={canDecide}
-        primary={owns && !approvals.length}
+        primary={canAct && !approvals.length}
         onDecide={(id, decision) => decide(id, "mutation", decision)}
       />
     ) : session && panel !== "chat" ? (
@@ -438,34 +363,46 @@ export default function RemoteWorkspace({
         )}
       </aside>
     ) : undefined;
-  // Without a chat there's no Environment card, so the home hero says which
-  // Mac this is and how to get back to your own.
-  const homeHead = (
-    <div className="gyro-remote-actions">
-      <h2>Code on {host.name}</h2>
-      <span className="gyro-remote-spacer" />
-      <span
-        className={online ? "gyro-status-dot" : "gyro-attention-dot"}
-        aria-hidden
-      />
-      <span className="gyro-remote-meta" role="status">
-        {connection.label}
-      </span>
-      <button
-        type="button"
-        className="gyro-secondary-button"
-        onClick={() => access.selectHost()}
-      >
-        This Mac
-      </button>
-    </div>
-  );
-  const recent = [...data.sessions]
-    .sort(
-      (a, b) =>
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-    )
-    .slice(0, 5);
+  const composerAction = (action: string) => {
+    if (action.startsWith("refresh-provider-usage:")) {
+      void workspace.load();
+      return;
+    }
+    if (action === "new-chat") {
+      access.selectRemote({ hostId: host.id, projectId: view.projectId });
+      return;
+    }
+
+    const choice = modelOptions.find(
+      (option) =>
+        action ===
+        `select-provider-model:${option.providerId}:${option.modelId}`,
+    );
+    if (choice) {
+      setSelected({
+        providerId: choice.providerId,
+        modelId: choice.modelId,
+      });
+      return;
+    }
+    const effort = action.match(
+      /^select-provider-effort:.*:(low|medium|high|xhigh|max|ultra)$/,
+    )?.[1];
+    if (effort) {
+      setSelected({ ...model, reasoningEffort: effort });
+      return;
+    }
+    if (
+      action === "set-workspace-mode:worktree" ||
+      action === "set-workspace-mode:local"
+    ) {
+      setWorktree(action.endsWith("worktree"));
+      return;
+    }
+    workspace.setError(
+      "This action is unavailable remotely. Manage provider setup and permission policy on the host.",
+    );
+  };
   return (
     <div className="gyro-remote-workspace">
       {!session && workspace.loading && (
@@ -474,10 +411,7 @@ export default function RemoteWorkspace({
         </div>
       )}
       {!session && !workspace.loading && !online && (
-        <div className="gyro-remote-home">
-          {homeHead}
-          {reconnect}
-        </div>
+        <div className="gyro-remote-home">{reconnect}</div>
       )}
       {!session && !workspace.loading && online && !data.projects.length && (
         <div className="gyro-remote-empty">
@@ -489,113 +423,38 @@ export default function RemoteWorkspace({
         </div>
       )}
       {!session && !workspace.loading && online && data.projects.length > 0 && (
-        <div className="gyro-remote-home">
-          {homeHead}
-          {error && (
-            <p className="gyro-remote-error" role="alert">
-              {error}
-            </p>
-          )}
-          <form className="gyro-remote-composer" onSubmit={startChat}>
-            <textarea
-              aria-label="First prompt"
-              placeholder={`Ask Gyro to work in ${selectedProject?.name ?? "this project"}`}
-              rows={3}
-              value={homeDraft}
-              onChange={(event) => setHomeDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey))
-                  event.currentTarget.form?.requestSubmit();
-              }}
-            />
-            <div className="gyro-remote-actions">
-              <select
-                className="gyro-settings-select"
-                aria-label="Remote project"
-                value={view.projectId ?? ""}
-                onChange={(event) => {
-                  selectSession(undefined);
-                  setView((previous) => ({
-                    ...previous,
-                    projectId: event.target.value,
-                  }));
-                }}
-              >
-                {data.projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="gyro-settings-select"
-                aria-label="Host model"
-                value={`${model.providerId}:${model.modelId}`}
-                disabled={!modelOptions.length}
-                onChange={(event) => {
-                  const option = modelOptions.find(
-                    (m) =>
-                      `${m.providerId}:${m.modelId}` === event.target.value,
-                  );
-                  if (option)
-                    setSelected({
-                      providerId: option.providerId,
-                      modelId: option.modelId,
-                    });
-                }}
-              >
-                {!modelOptions.length && (
-                  <option value=":">No models on {host.name}</option>
-                )}
-                {modelOptions.map((m) => (
-                  <option
-                    key={`${m.providerId}:${m.modelId}`}
-                    value={`${m.providerId}:${m.modelId}`}
-                  >
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-              <label className="gyro-remote-check">
-                <input
-                  type="checkbox"
-                  checked={worktree}
-                  onChange={(event) => setWorktree(event.target.checked)}
-                />
-                Worktree
-              </label>
-              <span className="gyro-remote-spacer" />
-              <button
-                type="submit"
-                className="gyro-primary-button"
-                disabled={
-                  busy || !homeDraft.trim() || !view.projectId || !model.modelId
-                }
-              >
-                {busy ? "Starting…" : "Start chat"}
-              </button>
-            </div>
-          </form>
-          <section className="gyro-remote-recent" aria-label="Recent chats">
-            <h3>Recent chats</h3>
-            {recent.length ? (
-              recent.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className="gyro-remote-recent-row"
-                  onClick={() => select(s.id)}
-                >
-                  <span>{s.title}</span>
-                  <time dateTime={s.updatedAt}>{ago(s.updatedAt)}</time>
-                </button>
-              ))
-            ) : (
-              <p className="gyro-remote-meta">
-                No chats in {selectedProject?.name ?? "this project"} yet.
-              </p>
-            )}
-          </section>
+        <div className="gyro-remote-chat">
+          <ChatSurface
+            config={config}
+            events={[]}
+            workspacePath={selectedProject?.path}
+            workspaceMode={worktree ? "worktree" : "local"}
+            paneKey={`remote:${host.id}:${homeDraftKey}`}
+            draft={homeDraft}
+            onDraftChange={setHomeDraft}
+            onSend={(message) => void startChat(message)}
+            sessionModel={{
+              providerId: model.providerId as ProviderId,
+              modelId: model.modelId,
+              reasoningEffort: model.reasoningEffort as ReasoningEffort,
+            }}
+            composerBlockedReason={
+              busy
+                ? "Starting the session on the host…"
+                : !model.modelId
+                  ? `No models on ${host.name}`
+                  : undefined
+            }
+            chatNotice={
+              error ? (
+                <p className="gyro-remote-error" role="alert">
+                  {error}
+                </p>
+              ) : undefined
+            }
+            isToolPanelAvailable={false}
+            onComposerAction={composerAction}
+          />
         </div>
       )}
       {session && (
@@ -611,6 +470,15 @@ export default function RemoteWorkspace({
             >
               <ChatSurface
                 config={config}
+                providerUsageByProvider={
+                  data.snapshot?.providerUsage
+                    ? {
+                        [data.snapshot.providerUsage.providerId]:
+                          data.snapshot.providerUsage,
+                      }
+                    : undefined
+                }
+                sessionUsage={data.snapshot?.sessionUsage}
                 events={workspace.events}
                 sessionTitle={session.title}
                 workspacePath={session.workspacePath}
@@ -639,39 +507,9 @@ export default function RemoteWorkspace({
                 onOpenCompanionFile={(path) =>
                   void workspace.openRemoteFile(path)
                 }
-                onComposerAction={(action) => {
-                  const choice = modelOptions.find(
-                    (option) =>
-                      action ===
-                      `select-provider-model:${option.providerId}:${option.modelId}`,
-                  );
-                  if (choice) {
-                    setSelected({
-                      providerId: choice.providerId,
-                      modelId: choice.modelId,
-                    });
-                    return;
-                  }
-                  const effort = action.match(
-                    /^select-provider-effort:.*:(low|medium|high|xhigh|max|ultra)$/,
-                  )?.[1];
-                  if (effort) {
-                    setSelected({ ...model, reasoningEffort: effort });
-                    return;
-                  }
-                  if (
-                    action === "set-workspace-mode:worktree" ||
-                    action === "set-workspace-mode:local"
-                  ) {
-                    setWorktree(action.endsWith("worktree"));
-                    return;
-                  }
-                  workspace.setError(
-                    "This action is unavailable remotely. Manage provider setup and permission policy on the host.",
-                  );
-                }}
+                onComposerAction={composerAction}
                 onStopChat={
-                  owns
+                  canAct
                     ? () => void run({ op: "stop", sessionId: session.id })
                     : undefined
                 }
@@ -688,7 +526,7 @@ export default function RemoteWorkspace({
                 questionState={{
                   resolvedId: view.resolvedQuestions[session.id],
                   onResolve: (id) => {
-                    if (owns)
+                    if (canAct)
                       setView((previous) => ({
                         ...previous,
                         resolvedQuestions: {

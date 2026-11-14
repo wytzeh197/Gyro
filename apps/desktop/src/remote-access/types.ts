@@ -1,6 +1,9 @@
 import type {
   Session,
   SessionEvent,
+  ProviderChatStreamEvent,
+  ProviderUsageState,
+  SessionUsageTotals,
   SourceControlState,
   WorkspaceFile,
   WorkspaceFileContent,
@@ -38,6 +41,9 @@ export type HostInfo = {
   experimental: boolean;
   capabilities: string[];
   selectedProviderId?: string;
+  fullAccess?: boolean;
+  requireCommandApproval?: boolean;
+  requireFileEditApproval?: boolean;
   providers: Array<{
     id: string;
     displayName: string;
@@ -54,6 +60,9 @@ export type History = {
   unchanged: boolean;
 };
 export type Snapshot = {
+  liveEvents?: ProviderChatStreamEvent[];
+  providerUsage?: ProviderUsageState;
+  sessionUsage?: SessionUsageTotals;
   session: Session;
   running: boolean;
   control?: Control;
@@ -103,15 +112,9 @@ export type HostOperation =
     }
   | { op: "renameSession"; sessionId: string; title: string }
   | { op: "history"; sessionId: string; before?: string; revision?: string }
+  | { op: "snapshot"; sessionId: string; includeLiveEvents?: boolean }
   | {
-      op:
-        | "snapshot"
-        | "watch"
-        | "claim"
-        | "release"
-        | "requestControl"
-        | "stop"
-        | "files";
+      op: "watch" | "claim" | "release" | "requestControl" | "stop" | "files";
       sessionId: string;
     }
   | { op: "transferControl"; sessionId: string; peerId: string }

@@ -248,7 +248,18 @@ async fn run(app: &tauri::AppHandle, directory: &Path) -> anyhow::Result<Value> 
         receiver.recv_timeout(Duration::from_secs(1))?,
         gyro_core::CapabilityApprovalDecision::AllowOnce
     );
-    assert!(super::require_local_control(app, &session).is_err());
+    assert!(super::require_local_control(app, &session).is_ok());
+    let generation = call(
+        &client,
+        &host_id,
+        Operation::Claim {
+            session_id: session.clone(),
+        },
+        None,
+    )
+    .await?["generation"]
+        .as_u64()
+        .unwrap();
     call(
         &client,
         &host_id,
@@ -516,6 +527,6 @@ async fn run(app: &tauri::AppHandle, directory: &Path) -> anyhow::Result<Value> 
     other.close().await;
     host.node.get().unwrap().close().await;
     Ok(
-        json!({"ok":true,"checks":["unpaired-denied","host-approval-required","create-idempotent","shared-paths","local-control-fenced","file-conflict","approval-turn-fencing","approval-routing","git-stage-commit","git-stale-revision","worktree-session","worktree-scope-revocation","submit-idempotent","disconnect-keeps-running","remote-pty","stale-control-denied","other-device-denied","revocation"],"regressions":regressions,"provider":"deterministic fixture; no provider calls","transport":"two loopback endpoints; no public relay"}),
+        json!({"ok":true,"checks":["unpaired-denied","host-approval-required","create-idempotent","shared-paths","automatic-device-control","file-conflict","approval-turn-fencing","approval-routing","git-stage-commit","git-stale-revision","worktree-session","worktree-scope-revocation","submit-idempotent","disconnect-keeps-running","remote-pty","stale-control-denied","other-device-denied","revocation"],"regressions":regressions,"provider":"deterministic fixture; no provider calls","transport":"two loopback endpoints; no public relay"}),
     )
 }

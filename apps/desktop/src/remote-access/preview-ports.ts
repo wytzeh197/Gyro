@@ -1,5 +1,9 @@
 /** Explicit browser fixture only. Never imported by the native application. */
-import type { Session, SessionEvent } from "@gyro-dev/ui";
+import type {
+  Session,
+  SessionEvent,
+  ProviderChatStreamEvent,
+} from "@gyro-dev/ui";
 import type { NativePorts } from "./client";
 import type {
   AccessStatus,
@@ -62,7 +66,11 @@ export function createPreviewPorts() {
   let generation = 0;
   let online = true;
   let watchId: unknown;
-  let control: Snapshot["control"];
+  let control: Snapshot["control"] = { owner: "local", generation: 1 };
+  const running = new Set<string>();
+  const frames = new Map<string, ProviderChatStreamEvent[]>();
+  const requests: HostRequest[] = [];
+  let watchedSession: string | undefined;
   let approvals: Snapshot["approvals"] = [];
   let mutations: Snapshot["mutations"] = [];
   function emit(
@@ -70,6 +78,7 @@ export function createPreviewPorts() {
     topic: HostEvent["topic"],
     payload: HostEvent["payload"],
   ) {
+    if (sessionId !== watchedSession) return;
     for (const handler of listeners.get("gyro://remote-host-event") ?? [])
       handler({
         payload: { hostId, watchId, event: { sessionId, topic, payload } },
@@ -83,7 +92,10 @@ export function createPreviewPorts() {
       if (command === "remote_access_status")
         return structuredClone(status) as T;
       if (command === "remote_host_watch") {
-        watchId = args?.watchId;
+        if (args?.sessionId) {
+          watchId = args.watchId;
+          watchedSession = String(args.sessionId);
+        } else if (args?.watchId === watchId) watchedSession = undefined;
         return undefined as T;
       }
       if (command === "remote_access_action") {
@@ -130,6 +142,7 @@ export function createPreviewPorts() {
       const request = args.request as HostRequest;
       if (receipts.has(request.id))
         return structuredClone(receipts.get(request.id)) as T;
+      requests.push(structuredClone(request));
       const op = request.operation;
       let result: unknown;
       switch (op.op) {
@@ -139,8 +152,11 @@ export function createPreviewPorts() {
             hostId,
             name: "Remote Mac · Fixture",
             experimental: true,
-            capabilities: ["chat", "files", "git", "terminal"],
+            capabilities: ["liveCatchup", "chat", "files", "git", "terminal"],
             selectedProviderId: "openai",
+            fullAccess: true,
+            requireCommandApproval: false,
+            requireFileEditApproval: false,
             providers: [
               {
                 id: "openai",
@@ -165,7 +181,10 @@ export function createPreviewPorts() {
           result = { status: receipts.has(op.requestId) ? "done" : "unknown" };
           break;
         case "sessions":
-          result = sessions;
+          result = sessions.map((session) => ({
+            ...session,
+            running: running.has(session.id),
+          }));
           break;
         case "createSession": {
           const session = makeSession(crypto.randomUUID(), op.title);
@@ -178,7 +197,29 @@ export function createPreviewPorts() {
         case "snapshot":
           result = {
             session: sessions.find((s) => s.id === op.sessionId),
-            running: false,
+            running: running.has(op.sessionId),
+            liveEvents: op.includeLiveEvents
+              ? (frames.get(op.sessionId) ?? [])
+              : undefined,
+            providerUsage: {
+              providerId: "openai",
+              status: "available",
+              windows: [
+                {
+                  id: "five-hour",
+                  label: "5 hour",
+                  usedPercent: 37,
+                  resetsAt: "2026-11-14T20:00:00Z",
+                },
+                {
+                  id: "weekly",
+                  label: "Weekly",
+                  usedPercent: 62,
+                  resetsAt: "2026-11-20T20:00:00Z",
+                },
+              ],
+              fetchedAt: new Date().toISOString(),
+            },
             control,
             approvals,
             mutations,
@@ -194,6 +235,13 @@ export function createPreviewPorts() {
         case "claim":
           control = { owner: clientId, generation: ++generation };
           result = control;
+          break;
+        case "stop":
+          if (request.lease !== control?.generation)
+            throw new Error("Stale write");
+          running.delete(op.sessionId);
+          emitFrame(op.sessionId, { phase: "cancelled", status: "cancelled" });
+          result = null;
           break;
         case "approval":
           approvals = approvals.filter((a) => a.id !== op.approvalId);
@@ -348,9 +396,68 @@ export function createPreviewPorts() {
       };
     },
   };
+  function emitFrame(
+    sessionId: string,
+    partial: Partial<ProviderChatStreamEvent>,
+  ) {
+    const previous = frames.get(sessionId) ?? [];
+    const frame = {
+      sessionId,
+      turnId: `live-${sessionId}`,
+      providerId: "openai",
+      modelId: "gpt-6.1",
+      sequence: previous.length,
+      eventId: crypto.randomUUID(),
+      ...partial,
+    } as ProviderChatStreamEvent;
+    frames.set(sessionId, [...previous, frame]);
+    emit(sessionId, "provider", frame as unknown as Record<string, unknown>);
+  }
   return {
     port,
     syncedProjects,
+    requests,
+    startHostRun(sessionId = "existing-chat") {
+      running.add(sessionId);
+      frames.set(sessionId, []);
+      histories.set(sessionId, [
+        ...(histories.get(sessionId) ?? []),
+        {
+          id: crypto.randomUUID(),
+          sessionId,
+          turnId: `live-${sessionId}`,
+          kind: "user-message",
+          createdAt: new Date().toISOString(),
+          message: "Continue work on the host",
+          payload: {},
+        },
+      ]);
+      emitFrame(sessionId, { phase: "started", status: "running" });
+      emitFrame(sessionId, {
+        phase: "delta",
+        textDelta: "Started on the Mac Mini. ",
+      });
+      emitFrame(sessionId, {
+        phase: "activity",
+        activityId: "host-command",
+        activityKind: "command",
+        activityLabel: "Running host command",
+        activityDetail: "pnpm typecheck",
+        activityStatus: "running",
+      });
+      emitFrame(sessionId, {
+        phase: "context-usage",
+        contextUsage: {
+          inputTokens: 12000,
+          outputTokens: 100,
+          totalTokens: 12100,
+          modelContextWindow: 475000,
+        },
+      });
+    },
+    streamText(text: string, sessionId = "existing-chat") {
+      emitFrame(sessionId, { phase: "delta", textDelta: text });
+    },
     setOnline(value: boolean) {
       online = value;
     },

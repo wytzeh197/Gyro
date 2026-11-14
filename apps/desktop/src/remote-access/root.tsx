@@ -188,6 +188,43 @@ export function RemoteWorkspaceRoot({
           settings,
           selectLocal,
           syncProjects,
+          projectChoices: catalogs.flatMap(({ host, projects }) =>
+            projects.map(({ project }) => ({
+              key: JSON.stringify([host.id, project.id]),
+              hostId: host.id,
+              projectId: project.id,
+              path: project.path,
+              label: project.name,
+              hostName: host.name,
+            })),
+          ),
+          selectedProjectKey: selection?.projectId
+            ? JSON.stringify([selection.hostId, selection.projectId])
+            : undefined,
+          selectProject: (key, draft) => {
+            for (const catalog of catalogs) {
+              const project = catalog.projects.find(
+                ({ project }) =>
+                  JSON.stringify([catalog.host.id, project.id]) === key,
+              );
+              if (project) {
+                selectRemote({
+                  hostId: catalog.host.id,
+                  projectId: project.project.id,
+                  draft,
+                });
+                return;
+              }
+            }
+          },
+          createSession:
+            activeHost && selection
+              ? () =>
+                  selectRemote({
+                    hostId: selection.hostId,
+                    projectId: selection.projectId,
+                  })
+              : undefined,
           projects: (
             <RemoteNavigation
               catalogs={catalogs}

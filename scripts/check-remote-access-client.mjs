@@ -199,6 +199,62 @@ assert.ok(
   !calls.some((call) => call.command === "stop_provider_chat"),
   "disconnect does not stop host work",
 );
+
+// A subscription catches up before delivering frames that raced the snapshot.
+let finishCatchup;
+let catchupWatch;
+const catchupListeners = new Set();
+const catchupPorts = {
+  async invoke(command, args) {
+    if (command === "remote_host_watch") catchupWatch = args?.watchId;
+    if (args?.request?.operation.op === "hello")
+      return { capabilities: ["liveCatchup"] };
+    if (args?.request?.operation.op === "snapshot")
+      return new Promise((resolve) => {
+        finishCatchup = resolve;
+      });
+    return {};
+  },
+  async listen(_event, handler) {
+    catchupListeners.add(handler);
+    return () => catchupListeners.delete(handler);
+  },
+};
+const catchup = new RemoteHostClient("catchup-host", catchupPorts);
+await catchup.capabilities();
+const caught = [];
+const opening = catchup.subscribe("running-chat", (event) =>
+  caught.push(event.payload.sequence),
+);
+await new Promise((resolve) => setTimeout(resolve, 0));
+for (const handler of catchupListeners)
+  handler({
+    payload: {
+      hostId: "catchup-host",
+      watchId: catchupWatch,
+      event: {
+        sessionId: "running-chat",
+        topic: "provider",
+        payload: { sequence: 12 },
+      },
+    },
+  });
+assert.deepEqual(caught, [], "live frames wait while catch-up is in flight");
+finishCatchup({ liveEvents: [{ sequence: 10 }, { sequence: 11 }] });
+const closeCatchup = await opening;
+assert.deepEqual(
+  caught,
+  [10, 11, 12],
+  "catch-up is delivered before newer live frames",
+);
+closeCatchup();
+catchup.dispose();
+assert.equal(
+  catchupListeners.size,
+  0,
+  "catch-up subscription disposes its listener",
+);
+
 console.log(
-  "Remote client checks passed: routing, leases, stale events, ordered input, uncertain input, draft isolation and storage recovery.",
+  "Remote client checks passed: routing, leases, stale events, ordered input, uncertain input, draft isolation, storage recovery and ordered live catch-up.",
 );

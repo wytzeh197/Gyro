@@ -7,7 +7,6 @@ pub(crate) mod smoke;
 #[cfg(debug_assertions)]
 mod smoke_regressions;
 mod workspace;
-use base64::Engine;
 use gyro_remote::{
     control::Controls,
     protocol::Operation,
@@ -32,6 +31,7 @@ pub(super) struct Runtime {
     pub store: Store,
     pub node: OnceLock<Arc<Node>>,
     pub controls: Mutex<Controls>,
+    live_events: Mutex<gyro_remote::live_events::LiveEvents>,
     pub terminals: Mutex<HashMap<String, RemoteTerminal>>,
     mutation_locks: mutation_locks::MutationLocks,
     pub watches: Mutex<HashMap<String, RemoteWatch>>,
@@ -69,29 +69,8 @@ impl RemoteAccess {
         if let Some(runtime) = slot.as_ref() {
             return Ok(runtime.clone());
         }
-        let app_key = app.config().identifier.clone();
-        let secret = tauri::async_runtime::spawn_blocking(move || -> Result<[u8; 32], String> {
-            let entry = keyring::Entry::new(&format!("{app_key}.remote-access"), "device-identity")
-                .map_err(|_| "Device Keychain is unavailable".to_string())?;
-            match entry.get_password() {
-                Ok(value) => base64::engine::general_purpose::STANDARD
-                    .decode(value)
-                    .map_err(|_| {
-                        "Device identity is invalid; reset remote access in Keychain".to_string()
-                    })?
-                    .try_into()
-                    .map_err(|_| "Device identity is invalid".to_string()),
-                Err(keyring::Error::NoEntry) => {
-                    let key = iroh_secret();
-                    entry
-                        .set_password(&base64::engine::general_purpose::STANDARD.encode(key))
-                        .map_err(|_| {
-                            "Could not save the device identity in Keychain".to_string()
-                        })?;
-                    Ok(key)
-                }
-                Err(_) => Err("Unlock Keychain to use remote access".into()),
-            }
+        let secret = tauri::async_runtime::spawn_blocking(|| {
+            gyro_core::keychain::remote_device_identity(iroh_secret).map_err(err)
         })
         .await
         .map_err(err)??;
@@ -123,6 +102,7 @@ impl Runtime {
             store: remote_store,
             node: OnceLock::new(),
             controls: Mutex::new(Controls::default()),
+            live_events: Mutex::new(gyro_remote::live_events::LiveEvents::default()),
             terminals: Mutex::new(HashMap::new()),
             mutation_locks: mutation_locks::MutationLocks::default(),
             watches: Mutex::new(HashMap::new()),
@@ -166,6 +146,9 @@ impl Runtime {
                 return;
             };
             if let Some(session) = payload.get("sessionId").and_then(Value::as_str) {
+                if let Ok(mut events) = runtime.live_events.lock() {
+                    events.push(session, payload.clone());
+                }
                 runtime.publish(session, "provider", payload.clone());
             }
         });
@@ -321,7 +304,7 @@ impl Runtime {
     }
 }
 
-/// A local host interaction may always reclaim control, but never silently.
+/// An explicit host action can act immediately, fencing older remote writes.
 pub(crate) fn require_local_control(app: &tauri::AppHandle, session: &str) -> Result<(), String> {
     let Some(state) = app.try_state::<RemoteAccess>() else {
         return Ok(());
@@ -334,16 +317,7 @@ pub(crate) fn require_local_control(app: &tauri::AppHandle, session: &str) -> Re
         .and_then(std::sync::Weak::upgrade);
     if let Some(runtime) = runtime {
         let mut controls = runtime.controls.lock().map_err(err)?;
-        if controls
-            .current(session)
-            .is_some_and(|c| c.owner != "local")
-        {
-            return Err(
-                "This session is controlled remotely. Take control in Settings → Remote access."
-                    .into(),
-            );
-        }
-        controls.claim(session, "local", false)?;
+        controls.claim(session, "local", true)?;
     }
     Ok(())
 }
@@ -390,7 +364,7 @@ pub(crate) fn release_local_controls(app: &tauri::AppHandle) {
 }
 
 pub(crate) fn start_if_enabled(app: tauri::AppHandle) {
-    // Reading persisted opt-in does not create an endpoint or access Keychain.
+    // Reading persisted opt-in does not create an endpoint or read secrets.
     if store()
         .and_then(|s| s.settings().map_err(err))
         .is_ok_and(|s| s.enabled)

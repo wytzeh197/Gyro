@@ -72,19 +72,6 @@ export function RemoteNavigation({
                 />
                 {!isCollapsed ? (
                   <div className="gyro-sidebar-project-children">
-                    <button
-                      type="button"
-                      className="gyro-sidebar-thread is-empty"
-                      aria-label={`New chat in ${project.name}, remote on ${catalog.host.name}`}
-                      onClick={() =>
-                        onSelect({
-                          hostId: catalog.host.id,
-                          projectId: project.id,
-                        })
-                      }
-                    >
-                      New chat
-                    </button>
                     {visible.map((session) => (
                       <SessionSidebarRow
                         key={session.id}
@@ -92,7 +79,7 @@ export function RemoteNavigation({
                         isNested
                         isPinned={false}
                         isMenuOpen={false}
-                        isSending={false}
+                        isSending={catalog.online && Boolean(session.running)}
                         isActive={
                           selection?.hostId === catalog.host.id &&
                           selection.projectId === project.id &&

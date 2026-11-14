@@ -18827,6 +18827,9 @@ export function App() {
       onAddTerminalPane={addTerminalPane}
       onCloseTerminalPane={requestCloseTerminalPane}
       onCreateSession={startNewChat}
+      onSelectNewSessionProject={(path, draft) =>
+        startNewChat({ workspacePath: path ?? "", initialDraft: draft })
+      }
       onCreateCliSession={createCliSession}
       onDeleteSession={deleteSession}
       onDismissNotification={(id) =>

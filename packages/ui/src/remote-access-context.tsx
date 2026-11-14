@@ -1,6 +1,15 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { Monitor } from "lucide-react";
 
+export type RemoteProjectChoice = {
+  key: string;
+  hostId: string;
+  projectId: string;
+  path: string;
+  label: string;
+  hostName: string;
+};
+
 /** Native host integrations supply these slots; UI previews need no networking. */
 export const RemoteAccessSlots = createContext<{
   navigation?: ReactNode;
@@ -11,6 +20,12 @@ export const RemoteAccessSlots = createContext<{
   projects?: ReactNode;
   content?: ReactNode;
   selectLocal?: () => void;
+  projectChoices?: RemoteProjectChoice[];
+  selectedProjectKey?: string;
+  selectProject?: (key: string, draft: string) => void;
+  createSession?: () => void;
+  localProjects?: Array<{ path: string; label: string }>;
+  selectLocalProject?: (path: string | undefined, draft: string) => void;
   syncProjects?: (projects: Array<{ path: string; name: string }>) => void;
 }>({});
 export function MachineNavigation() {

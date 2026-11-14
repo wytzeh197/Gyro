@@ -145,6 +145,29 @@ fn read_with_command(
     Ok(reply.value)
 }
 
+/// Silent migration of the desktop remote identity from the legacy service.
+#[cfg(not(test))]
+pub(super) fn remote_identity() -> Result<Option<String>> {
+    let input = serde_json::to_vec(&serde_json::json!({"remoteIdentity":true}))?;
+    let bytes = exchange_with_command(reader_command()?, &input, READ_DEADLINE, MAX_REPLY_BYTES)?;
+    let reply: Reply =
+        serde_json::from_slice(&bytes).context("invalid remote identity response")?;
+    if reply.denied {
+        bail!("The existing remote identity is protected by macOS. Allow the previous Gyro build to access it once before migrating; existing pairings have been preserved.");
+    }
+    Ok(reply.value)
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ReadRequest {
+    Account(String),
+    RemoteIdentity {
+        #[serde(rename = "remoteIdentity")]
+        remote_identity: bool,
+    },
+}
+
 /// Private, bounded IPC for same-executable credential helpers. Secrets never
 /// enter argv, environment or files. The child is killed and reaped on timeout.
 pub(crate) fn exchange_with_command(
@@ -258,10 +281,19 @@ pub(super) fn run_helper() -> Option<i32> {
             libc::_exit(3);
         }
     });
-    let account: String = match serde_json::from_reader::<_, String>(
-        std::io::stdin().take(MAX_ACCOUNT_BYTES as u64 + 16),
+    let request = match serde_json::from_reader::<_, ReadRequest>(
+        std::io::stdin().take(MAX_ACCOUNT_BYTES as u64 + 64),
     ) {
-        Ok(account) if account.len() <= MAX_ACCOUNT_BYTES && !account.contains('\0') => account,
+        Ok(ReadRequest::Account(account))
+            if account.len() <= MAX_ACCOUNT_BYTES && !account.contains('\0') =>
+        {
+            ReadRequest::Account(account)
+        }
+        Ok(ReadRequest::RemoteIdentity {
+            remote_identity: true,
+        }) => ReadRequest::RemoteIdentity {
+            remote_identity: true,
+        },
         _ => return Some(2),
     };
     // Per-query no-auth flags do not suppress UI for the file-based Keychain
@@ -270,7 +302,20 @@ pub(super) fn run_helper() -> Option<i32> {
     if unsafe { SecKeychainSetUserInteractionAllowed(0) } != 0 {
         return Some(3);
     }
-    let reply = match super::get_api_key_direct(&account) {
+    let result = match request {
+        ReadRequest::Account(account) => super::get_api_key_direct(&account),
+        ReadRequest::RemoteIdentity { .. } => {
+            match keyring::Entry::new("dev.gyro.desktop.remote-access", "device-identity") {
+                Ok(entry) => match entry.get_password() {
+                    Ok(value) => Ok(Some(value)),
+                    Err(keyring::Error::NoEntry) => Ok(None),
+                    Err(error) => Err(error.into()),
+                },
+                Err(error) => Err(error.into()),
+            }
+        }
+    };
+    let reply = match result {
         Ok(value)
             if value
                 .as_ref()

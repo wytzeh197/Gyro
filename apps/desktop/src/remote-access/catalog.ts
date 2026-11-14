@@ -7,10 +7,14 @@ export type RemoteSelection = {
   hostId: string;
   projectId?: string;
   sessionId?: string;
+  draft?: string;
 };
 export type RemoteCatalog = {
   host: Peer;
-  projects: Array<{ project: Project; sessions: Session[] }>;
+  projects: Array<{
+    project: Project;
+    sessions: Array<Session & { running?: boolean }>;
+  }>;
   online: boolean;
   loading: boolean;
   error?: string;
@@ -64,7 +68,9 @@ export function useRemoteCatalog(ports: NativePorts, peers: Peer[]) {
               const projects = await Promise.all(
                 shared.map(async (project) => ({
                   project,
-                  sessions: await client!.request<Session[]>({
+                  sessions: await client!.request<
+                    Array<Session & { running?: boolean }>
+                  >({
                     op: "sessions",
                     projectId: project.id,
                   }),
@@ -101,7 +107,7 @@ export function useRemoteCatalog(ports: NativePorts, peers: Peer[]) {
     };
     refreshRef.current = refresh;
     void refresh();
-    const timer = setInterval(() => void refresh(), 5000);
+    const timer = setInterval(() => void refresh(), 2500);
     return () => {
       disposed = true;
       clearInterval(timer);

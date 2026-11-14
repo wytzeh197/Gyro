@@ -8,7 +8,7 @@ import { applyProviderChatStreamEvent } from "../app-state";
 import { createProviderStreamDispatcher } from "../provider-stream-dispatcher";
 import {
   mergePersistedAndOptimisticEvents,
-  applyProviderChatStreamActivity,
+  applyProviderChatStreamPresentation,
 } from "../provider-stream-events";
 import { mergeSessionHistoryPages } from "../session-event-order";
 import { RemoteHostClient } from "./client";
@@ -70,6 +70,7 @@ export function useRemoteWorkspace(
   viewRef.current = view;
   const optimistic = useRef(new Map<string, SessionEvent[]>());
   const refreshInFlight = useRef(false);
+  const refreshRequested = useRef(false);
   const toolsInFlight = useRef(false);
   // Which session/panel pair has finished its first load; polling after that
   // refreshes in place instead of flashing a loading state.
@@ -79,12 +80,10 @@ export function useRemoteWorkspace(
   const generation = useRef(0);
   const earlierLoaded = useRef(false);
   const sessionId = view.sessionId;
-  const owns =
-    online &&
-    Boolean(
-      data.snapshot?.control &&
-      data.snapshot.control.owner === access.status?.deviceId,
-    );
+  // Trusted, connected devices can act without a manual control step.
+  const canAct = online;
+  const streamOrder = useRef(new Map());
+  const streamRevision = useRef(0);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -110,8 +109,11 @@ export function useRemoteWorkspace(
     )
       setOnline(false);
   }, []);
-  const load = useCallback(async () => {
-    if (refreshInFlight.current) return;
+  const load = useCallback(async (): Promise<void> => {
+    if (refreshInFlight.current) {
+      refreshRequested.current = true;
+      return;
+    }
     refreshInFlight.current = true;
     const current = generation.current;
     const selected = viewRef.current;
@@ -139,6 +141,7 @@ export function useRemoteWorkspace(
         return;
       }
       if (!selected.sessionId) return;
+      const beforeStream = streamRevision.current;
       const [snapshot, history] = await Promise.all([
         client.request<Snapshot>({
           op: "snapshot",
@@ -162,7 +165,13 @@ export function useRemoteWorkspace(
         historyRevisions.current.set(selected.sessionId, history.revision);
       setData((previous) => ({
         ...previous,
-        snapshot,
+        snapshot:
+          beforeStream === streamRevision.current
+            ? snapshot
+            : {
+                ...snapshot,
+                running: previous.snapshot?.running ?? snapshot.running,
+              },
         history:
           history.unchanged && previous.history
             ? { ...previous.history, revision: history.revision }
@@ -213,24 +222,29 @@ export function useRemoteWorkspace(
             previous.filter((e) => e.sessionId === selected.sessionId),
             history.events,
           ),
-          snapshot.running
+          snapshot.running || beforeStream !== streamRevision.current
             ? optimistic.current.get(selected.sessionId!)
             : undefined,
         ),
       );
-      if (!snapshot.running) optimistic.current.delete(selected.sessionId);
+      if (!snapshot.running && beforeStream === streamRevision.current)
+        optimistic.current.delete(selected.sessionId);
     } catch (reason) {
       fail(reason);
       setOnline(false);
       setLoading(false);
     } finally {
       refreshInFlight.current = false;
+      if (refreshRequested.current && mounted.current) {
+        refreshRequested.current = false;
+        queueMicrotask(() => void load());
+      }
     }
   }, [client, access.status?.deviceId, fail]);
   useEffect(() => {
     generation.current++;
     earlierLoaded.current = false;
-    setEvents([]);
+    setEvents(optimistic.current.get(sessionId ?? "") ?? []);
     setData((previous) => ({
       ...previous,
       snapshot: undefined,
@@ -249,12 +263,30 @@ export function useRemoteWorkspace(
     let unlisten: (() => void) | undefined;
     let refreshTimer: number | undefined;
     let reconnectTimer: number | undefined;
-    const dispatcher = createProviderStreamDispatcher(new Map(), (event) => {
-      if (!disposed && viewRef.current.sessionId === event.sessionId) {
-        applyProviderChatStreamEvent(optimistic, setEvents, event);
-        applyProviderChatStreamActivity(optimistic, setEvents, event);
-      }
-    });
+    const dispatcher = createProviderStreamDispatcher(
+      streamOrder.current,
+      (event) => {
+        if (!disposed && viewRef.current.sessionId === event.sessionId) {
+          streamRevision.current++;
+          const active = ["started", "delta", "activity", "heartbeat"].includes(
+            event.phase,
+          );
+          const settled = ["completed", "failed", "cancelled"].includes(
+            event.phase,
+          );
+          if (active || settled)
+            setData((previous) => ({
+              ...previous,
+              snapshot:
+                previous.snapshot?.session.id === event.sessionId
+                  ? { ...previous.snapshot, running: active }
+                  : previous.snapshot,
+            }));
+          applyProviderChatStreamEvent(optimistic, setEvents, event);
+          applyProviderChatStreamPresentation(optimistic, setEvents, event);
+        }
+      },
+    );
     void client
       .subscribe(sessionId, (event) => {
         if (disposed) return;
@@ -291,28 +323,6 @@ export function useRemoteWorkspace(
       clearTimeout(reconnectTimer);
     };
   }, [client, sessionId, online, load, fail, streamEpoch]);
-  useEffect(() => {
-    if (!sessionId || !owns) return;
-    const timer = setInterval(() => {
-      void client
-        .request<Control>({ op: "claim", sessionId })
-        .then((control) => {
-          if (mounted.current && viewRef.current.sessionId === sessionId)
-            setData((previous) => ({
-              ...previous,
-              snapshot: previous.snapshot
-                ? { ...previous.snapshot, control }
-                : undefined,
-            }));
-        })
-        .catch((reason) => {
-          client.forgetControl(sessionId);
-          void load();
-          fail(reason);
-        });
-    }, 10000);
-    return () => clearInterval(timer);
-  }, [client, sessionId, owns, load, fail]);
   const run = useCallback(
     async <T>(
       operation: HostOperation,
@@ -326,6 +336,26 @@ export function useRemoteWorkspace(
       setError(undefined);
       const issued = generation.current;
       try {
+        // Claim only for an explicit write, never for watching or a heartbeat.
+        // The host still fences delayed writes with the returned generation.
+        if (
+          "sessionId" in operation &&
+          ([
+            "renameSession",
+            "submit",
+            "stop",
+            "approval",
+            "question",
+            "writeFile",
+            "path",
+          ].includes(operation.op) ||
+            (operation.op === "git" &&
+              !["status", "diff", "branches"].includes(operation.action)) ||
+            (operation.op === "terminal" &&
+              !["list", "read"].includes(operation.action)))
+        )
+          await client.request({ op: "claim", sessionId: operation.sessionId });
+        if (!mounted.current || issued !== generation.current) return;
         const result = await client.request<T>(operation, requestId);
         return mounted.current && issued === generation.current
           ? result
@@ -388,21 +418,10 @@ export function useRemoteWorkspace(
     }
     return undefined;
   }
-  async function claim() {
-    if (!sessionId) return;
-    const control = await run<Control>({ op: "claim", sessionId });
-    if (control)
-      setData((previous) => ({
-        ...previous,
-        snapshot: previous.snapshot
-          ? { ...previous.snapshot, control }
-          : undefined,
-      }));
-  }
   async function submit(message: string, model: ModelChoice) {
     if (
       !sessionId ||
-      !owns ||
+      !canAct ||
       busy ||
       data.snapshot?.running ||
       view.pendingSubmissions[sessionId]
@@ -569,7 +588,7 @@ export function useRemoteWorkspace(
     setData,
     events,
     online,
-    owns,
+    canAct,
     busy,
     loading,
     storageWarning,
@@ -583,7 +602,6 @@ export function useRemoteWorkspace(
       toolsLoadedFor !== `${sessionId}:${view.panel}`,
     selectSession,
     createSession,
-    claim,
     submit,
     loadEarlier,
     openRemoteFile,

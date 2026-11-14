@@ -26,6 +26,7 @@ const browser = spawn(
   { stdio: "ignore" },
 );
 let socket;
+let captureFailure;
 const errors = [];
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(check, description) {
@@ -86,6 +87,23 @@ try {
       captureBeyondViewport: false,
     });
     await writeFile(join(artifacts, name), Buffer.from(data, "base64"));
+  };
+  captureFailure = async () => {
+    await shot("failure.png");
+    await writeFile(
+      join(artifacts, "failure.json"),
+      JSON.stringify(
+        {
+          errors,
+          text: await evaluate("document.body.innerText"),
+          html: await evaluate(
+            "document.querySelector('.gyro-main')?.innerHTML",
+          ),
+        },
+        null,
+        2,
+      ),
+    );
   };
   const click = (label) =>
     evaluate(
@@ -194,9 +212,19 @@ try {
   await click("Open projects");
   await until(
     () =>
-      evaluate("document.body.innerText.includes('Connected · Experimental')"),
-    "remote host connection",
+      evaluate(
+        "document.querySelector('.gyro-chat-start h1')?.textContent.includes('remote-project')",
+      ),
+    "standard remote new-session surface",
   );
+  assert.equal(
+    await evaluate(
+      "Boolean(document.querySelector('.gyro-sidebar-project-children > button.is-empty'))",
+    ),
+    false,
+    "remote folders do not have a separate New chat row",
+  );
+  await evaluate("window.gyroRemoteFixture.startHostRun()");
   await until(
     () => evaluate("document.body.innerText.includes('Existing remote chat')"),
     "host session listing",
@@ -211,6 +239,112 @@ try {
       ),
     "existing remote history",
   );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-remote-chat')?.innerText.includes('Started on the Mac Mini.')",
+      ),
+    "catch up to text produced before opening the chat",
+  );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-remote-chat')?.innerText.includes('pnpm typecheck')",
+      ),
+    "catch up to commands on the host",
+  );
+  await until(
+    () =>
+      evaluate(
+        "Boolean(document.querySelector('.gyro-sidebar-project-group:has(.gyro-sidebar-project-remote) [aria-label=\"Chat working\"]'))",
+      ),
+    "host run appears as working in the sidebar",
+  );
+  assert.equal(
+    await evaluate(
+      "window.gyroRemoteFixture.requests.some(r=>r.operation.op==='claim')",
+    ),
+    false,
+    "watching a running chat does not acquire control",
+  );
+  await evaluate(
+    "window.gyroRemoteFixture.streamText('Live text from the host.')",
+  );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-remote-chat')?.innerText.includes('Live text from the host.')",
+      ),
+    "text keeps streaming without refreshing",
+  );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-composer-context-meter [role=\"progressbar\"]')?.getAttribute('aria-label')?.includes('62%')",
+      ),
+    "host plan usage reaches the normal meter",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.gyro-composer-context-meter')?.textContent.includes('Waiting for provider measurement')",
+    ),
+    false,
+    "live host context measurement is available",
+  );
+  await shot("live-host-chat.png");
+  await evaluate(
+    "document.querySelector('.gyro-composer-context-meter [role=\"progressbar\"]').focus()",
+  );
+  await pause(150);
+  await shot("remote-usage-tooltip.png");
+  await evaluate(
+    "(() => { const f=window.gyroRemoteFixture; f.sessions.push({...f.sessions[0],id:'background-chat',title:'Another active remote chat'}); f.startHostRun('background-chat'); })()",
+  );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelectorAll('.gyro-sidebar-project-group:has(.gyro-sidebar-project-remote) [aria-label=\"Chat working\"]').length===2",
+      ),
+    "every remote chat reports its host running state",
+  );
+  await evaluate(
+    "[...document.querySelectorAll('.gyro-sidebar button')].find(b=>b.textContent.includes('Another active remote chat')).click()",
+  );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-remote-chat')?.innerText.includes('Started on the Mac Mini.')",
+      ),
+    "a second running chat catches up independently",
+  );
+  await evaluate(
+    "window.gyroRemoteFixture.streamText('Only the second chat.', 'background-chat')",
+  );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-remote-chat')?.innerText.includes('Only the second chat.')",
+      ),
+    "second chat streams live",
+  );
+  await evaluate(
+    "[...document.querySelectorAll('.gyro-sidebar button')].find(b=>b.textContent.includes('Existing remote chat')).click()",
+  );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-remote-chat')?.innerText.includes('Live text from the host.')",
+      ),
+    "switch back to the first active chat",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.gyro-remote-chat')?.innerText.includes('Only the second chat.')",
+    ),
+    false,
+    "host chat streams never bleed into each other",
+  );
+
   assert.equal(
     await evaluate(
       "/Connecting to|is unavailable|Keep Gyro open|No projects on/.test(document.querySelector('.gyro-sidebar')?.innerText ?? '')",
@@ -218,10 +352,10 @@ try {
     false,
     "background peer connection notices do not appear in the sidebar",
   );
-  await click("Take control");
-  await until(
-    () => evaluate('!document.body.innerText.includes("You\'re watching.")'),
-    "control lease",
+  assert.equal(
+    await evaluate("document.body.innerText.includes('Take control')"),
+    false,
+    "remote chats act without manual control",
   );
   await until(
     () =>
@@ -264,10 +398,41 @@ try {
     () => evaluate("Boolean(document.querySelector('.gyro-remote-chat'))"),
     "return to remote chat",
   );
-  await click("Take control");
+  assert.equal(
+    await evaluate("document.body.innerText.includes('Take control')"),
+    false,
+    "returning to a chat needs no control action",
+  );
   await until(
-    () => evaluate('!document.body.innerText.includes("You\'re watching.")'),
-    "control after local navigation",
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-remote-chat')?.innerText.includes('Live text from the host.')",
+      ),
+    "reopening a running chat restores its current text",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.gyro-remote-chat')?.innerText.match(/Started on the Mac Mini\./g)?.length",
+    ),
+    1,
+    "catch-up does not duplicate text after switching",
+  );
+  await evaluate(
+    "document.querySelector('button[aria-label=\"Stop response\"]').click()",
+  );
+  await until(
+    () =>
+      evaluate(
+        "window.gyroRemoteFixture.requests.some(r=>r.operation.op==='stop')",
+      ),
+    "Stop works immediately on a host-started run",
+  );
+  await until(
+    () =>
+      evaluate(
+        "!document.querySelector('button[aria-label=\"Stop response\"]')",
+      ),
+    "stop settles the shared run",
   );
   assert.equal(
     await evaluate(
@@ -516,7 +681,7 @@ try {
     await evaluate(
       "document.querySelectorAll('.gyro-sidebar-project-group:has(.gyro-sidebar-project-remote) .gyro-session-row').length",
     ),
-    8,
+    await evaluate("window.gyroRemoteFixture.sessions.length"),
     "more reveals all remote chats",
   );
   await evaluate(
@@ -528,6 +693,135 @@ try {
         "document.querySelectorAll('.gyro-sidebar-project-group:has(.gyro-sidebar-project-remote) .gyro-session-row').length===5",
       ),
     "less restores compact project list",
+  );
+  await click("New session");
+  await click("New Chat");
+  await until(
+    () =>
+      evaluate(
+        "Boolean(document.querySelector('.gyro-remote-chat .gyro-chat-start h1'))",
+      ),
+    "global New session opens the normal remote start screen",
+  );
+  assert.equal(
+    await evaluate(
+      "Boolean(document.querySelector('.gyro-chat-start .gyro-brand-logo img[alt=\"Gyro\"]'))",
+    ),
+    true,
+    "new remote sessions reuse the Gyro logo",
+  );
+  assert.equal(
+    await evaluate("Boolean(document.querySelector('.gyro-remote-composer'))"),
+    false,
+    "old remote-only composer is removed",
+  );
+  await shot("new-session-remote-dark.png");
+  await evaluate(
+    "document.querySelector('button[aria-label^=\"Project:\"]').click()",
+  );
+  await until(
+    () => evaluate("Boolean(document.querySelector('.gyro-project-picker'))"),
+    "standard project picker opens",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.gyro-project-picker')?.innerText.includes('Remote')",
+    ),
+    true,
+    "remote projects are marked in the picker",
+  );
+  await evaluate(
+    "[...document.querySelectorAll('.gyro-project-picker button')].find(b=>b.textContent.includes('No folder')).click()",
+  );
+  await until(
+    () =>
+      evaluate(
+        "Boolean(document.querySelector('.gyro-chat-start')) && !document.querySelector('.gyro-remote-workspace')",
+      ),
+    "No folder returns to a normal local new session",
+  );
+  await evaluate(
+    "(() => { const f=document.querySelector('.gyro-chat-start textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(f,'Create through the normal remote folder picker'); f.dispatchEvent(new Event('input',{bubbles:true})); })()",
+  );
+  await pause(100);
+  await evaluate(
+    "document.querySelector('button[aria-label^=\"Project:\"]').click()",
+  );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-project-picker')?.innerText.includes('Remote')",
+      ),
+    "local new-session picker includes remote folders",
+  );
+  await shot("project-picker-remote.png");
+  await evaluate(
+    "[...document.querySelectorAll('.gyro-project-picker [role=menuitem]')].find(b=>b.textContent.includes('Remote')).focus()",
+  );
+  assert.equal(
+    await evaluate("document.activeElement.matches(':focus-visible')"),
+    true,
+    "remote folder has visible keyboard focus",
+  );
+  await call("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27,
+  });
+  await call("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27,
+  });
+  await until(
+    () => evaluate("!document.querySelector('.gyro-project-picker')"),
+    "Escape closes the remote folder picker",
+  );
+  assert.equal(
+    await evaluate(
+      "document.activeElement.getAttribute('aria-label')?.startsWith('Project:')",
+    ),
+    true,
+    "project picker restores focus to its trigger",
+  );
+  await evaluate(
+    "document.querySelector('button[aria-label^=\"Project:\"]').click()",
+  );
+  await evaluate(
+    "[...document.querySelectorAll('.gyro-project-picker button')].find(b=>b.textContent.includes('remote-project') && b.textContent.includes('Remote')).click()",
+  );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-remote-chat textarea')?.value === 'Create through the normal remote folder picker'",
+      ),
+    "draft follows selection to the remote host",
+  );
+  await evaluate(
+    "document.querySelector('button[aria-label=\"Send message\"]').click()",
+  );
+  await until(
+    () =>
+      evaluate(
+        "window.gyroRemoteFixture.requests.some(r=>r.operation.op==='submit' && r.operation.message==='Create through the normal remote folder picker')",
+      ),
+    "normal Send creates and submits on the host",
+  );
+  await until(
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-remote-chat')?.innerText.includes('Fixture response: the request ran')",
+      ),
+    "new remote session receives its reply",
+  );
+  assert.equal(
+    await evaluate(
+      "document.body.innerText.includes('This action is unavailable remotely')",
+    ),
+    false,
+    "usage refresh does not produce an unsupported-action error",
   );
   await call("Emulation.setDeviceMetricsOverride", {
     width: 900,
@@ -558,7 +852,11 @@ try {
           "local-draft-preserved",
           "host-selection",
           "existing-session",
-          "controller",
+          "automatic-device-control",
+          "host-started-live-text-and-commands",
+          "catch-up-after-switching",
+          "host-context-and-plan-usage",
+          "standard-new-session-remote-folder-picker",
           "submit",
           "files-editor",
           "stale-file-save",
@@ -579,6 +877,7 @@ try {
   console.log(`Remote access browser checks passed. Artifacts: ${artifacts}`);
 } catch (error) {
   console.error(error);
+  await captureFailure?.();
   if (socket?.readyState === WebSocket.OPEN) {
     const id = 999999;
     socket.send(

@@ -144,3 +144,28 @@ pub fn delete_api_key(account: &str) -> Result<()> {
         local_secrets::delete(account).context("delete credential on this Mac")
     }
 }
+
+/// Stable remote device identity, kept in the existing owner-only local secret
+/// store. Legacy login-Keychain migration is silent and never replaces a key
+/// that macOS refuses to release (which would invalidate trusted pairings).
+pub fn remote_device_identity(generate: impl FnOnce() -> [u8; 32]) -> Result<[u8; 32]> {
+    use base64::Engine;
+    const ACCOUNT: &str = "remote-device:dev.gyro.desktop";
+    fn decode(value: &str) -> Result<[u8; 32]> {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD
+            .decode(value)
+            .context("invalid saved remote device identity")?
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("invalid saved remote device identity"))
+    }
+    let encoded = local_secrets::get_or_insert_with(ACCOUNT, || {
+        #[cfg(all(target_os = "macos", not(test)))]
+        if let Some(value) = macos_read::remote_identity()? {
+            decode(&value)?;
+            return Ok(value);
+        }
+        Ok(base64::engine::general_purpose::STANDARD.encode(generate()))
+    })?;
+    decode(&encoded)
+}

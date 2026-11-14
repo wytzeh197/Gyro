@@ -30,14 +30,9 @@ impl Controls {
         self.entries.retain(|_, c| c.expires > Instant::now());
         self.entries.get(session).cloned()
     }
-    pub fn claim(
-        &mut self,
-        session: &str,
-        peer: &str,
-        force_local: bool,
-    ) -> Result<Control, String> {
+    pub fn claim(&mut self, session: &str, peer: &str, force: bool) -> Result<Control, String> {
         if let Some(c) = self.current(session) {
-            if c.owner != peer && !force_local {
+            if c.owner != peer && !force {
                 return Err(
                     "This session is controlled on another device. Request control first.".into(),
                 );
@@ -119,6 +114,26 @@ impl Controls {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn explicit_actions_can_switch_devices_while_stale_writes_remain_fenced() {
+        let mut controls = Controls::default();
+        let local = controls.claim("s", "local", true).unwrap();
+        let remote = controls.claim("s", "paired-mac", true).unwrap();
+        assert!(controls
+            .check("s", "local", Some(local.generation))
+            .is_err());
+        assert!(controls
+            .check("s", "paired-mac", Some(remote.generation))
+            .is_ok());
+        let local_again = controls.claim("s", "local", true).unwrap();
+        assert!(controls
+            .check("s", "paired-mac", Some(remote.generation))
+            .is_err());
+        assert!(controls
+            .check("s", "local", Some(local_again.generation))
+            .is_ok());
+    }
+
     #[test]
     fn transfer_fences_stale_inputs_and_host_can_reclaim() {
         let mut c = Controls::default();

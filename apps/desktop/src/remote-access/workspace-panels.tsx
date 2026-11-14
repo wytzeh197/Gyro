@@ -196,7 +196,7 @@ export function RemoteFiles({
           <button
             type="button"
             className="gyro-secondary-button"
-            disabled={!w.owns || w.busy}
+            disabled={!w.canAct || w.busy}
             onClick={() => void pathAction("createFile")}
           >
             New file
@@ -204,7 +204,7 @@ export function RemoteFiles({
           <button
             type="button"
             className="gyro-secondary-button"
-            disabled={!w.owns || w.busy}
+            disabled={!w.canAct || w.busy}
             onClick={() => void pathAction("createDirectory")}
           >
             New folder
@@ -242,7 +242,7 @@ export function RemoteFiles({
               <button
                 type="button"
                 className="gyro-secondary-button"
-                disabled={!w.owns || w.busy || buffer.file.truncated}
+                disabled={!w.canAct || w.busy || buffer.file.truncated}
                 onClick={() => void save()}
               >
                 Save on host
@@ -260,7 +260,7 @@ export function RemoteFiles({
               <button
                 type="button"
                 className="gyro-secondary-button"
-                disabled={!w.owns || w.busy}
+                disabled={!w.canAct || w.busy}
                 onClick={() => void pathAction("rename")}
               >
                 Rename
@@ -268,7 +268,7 @@ export function RemoteFiles({
               <button
                 type="button"
                 className="gyro-secondary-button"
-                disabled={!w.owns || w.busy}
+                disabled={!w.canAct || w.busy}
                 onClick={() => void pathAction("delete")}
               >
                 Delete
@@ -286,7 +286,7 @@ export function RemoteFiles({
                 theme={theme}
                 loadState="ready"
                 minimapEnabled={false}
-                readOnly={!w.owns || !w.online || buffer.file.truncated}
+                readOnly={!w.canAct || !w.online || buffer.file.truncated}
                 path={`/.gyro-remote/${hostId}/${session.id}/${view.selectedFile}`}
                 fileContent={{
                   ...buffer.file,
@@ -366,7 +366,7 @@ export function RemoteGit({ workspace: w, session }: Props) {
             type="button"
             className="gyro-secondary-button"
             key={kind}
-            disabled={!w.owns || w.busy || !git?.status.available}
+            disabled={!w.canAct || w.busy || !git?.status.available}
             onClick={() => void action(kind)}
           >
             {kind}
@@ -375,7 +375,7 @@ export function RemoteGit({ workspace: w, session }: Props) {
         <button
           type="button"
           className="gyro-secondary-button"
-          disabled={!w.owns || w.busy || !git?.status.available}
+          disabled={!w.canAct || w.busy || !git?.status.available}
           onClick={() => {
             void askTextValue({ title: "New host branch" }).then((branch) => {
               if (branch) void action("createBranch", undefined, branch);
@@ -387,7 +387,7 @@ export function RemoteGit({ workspace: w, session }: Props) {
         <button
           type="button"
           className="gyro-secondary-button"
-          disabled={!w.owns || w.busy || !git?.status.available}
+          disabled={!w.canAct || w.busy || !git?.status.available}
           onClick={() => {
             void askTextValue({ title: "Switch to existing host branch" }).then(
               (branch) => {
@@ -421,7 +421,7 @@ export function RemoteGit({ workspace: w, session }: Props) {
           <button
             type="button"
             className="gyro-secondary-button"
-            disabled={!w.owns || w.busy}
+            disabled={!w.canAct || w.busy}
             onClick={() =>
               void action(file.staged ? "unstage" : "stage", file.path)
             }
@@ -431,7 +431,7 @@ export function RemoteGit({ workspace: w, session }: Props) {
           <button
             type="button"
             className="gyro-secondary-button"
-            disabled={!w.owns || w.busy}
+            disabled={!w.canAct || w.busy}
             onClick={() => void action("discard", file.path)}
           >
             Discard
@@ -449,7 +449,7 @@ export function RemoteGit({ workspace: w, session }: Props) {
       <button
         type="button"
         className="gyro-secondary-button"
-        disabled={!w.owns || w.busy || !message.trim()}
+        disabled={!w.canAct || w.busy || !message.trim()}
         onClick={() => void action("commit", undefined, message)}
       >
         Commit staged changes on host
@@ -527,7 +527,7 @@ export function RemoteTerminals({ workspace: w, session }: Props) {
         <button
           type="button"
           className="gyro-secondary-button"
-          disabled={!w.owns || w.busy}
+          disabled={!w.canAct || w.busy}
           onClick={() =>
             void w
               .run<TerminalSnapshot>({
@@ -547,7 +547,7 @@ export function RemoteTerminals({ workspace: w, session }: Props) {
           <button
             type="button"
             className="gyro-secondary-button"
-            disabled={!w.owns}
+            disabled={!w.canAct}
             onClick={() => {
               void confirmAction(
                 "Close this host terminal and stop its process?",
@@ -576,18 +576,18 @@ export function RemoteTerminals({ workspace: w, session }: Props) {
       {pane ? (
         <div
           className="gyro-remote-terminal-body"
-          ref={(node) => node?.toggleAttribute("inert", !w.online || !w.owns)}
+          ref={(node) => node?.toggleAttribute("inert", !w.online || !w.canAct)}
         >
           <LiveTerminalPaneBody
             key={pane.paneId}
             pane={paneFromSnapshot(pane)}
             theme={theme}
-            isActive={w.online && w.owns}
+            isActive={w.online && w.canAct}
             onSelect={setSelected}
             onBell={() => {}}
             onReconnect={() => void create()}
             onResize={(paneId, cols, rows) => {
-              if (w.owns)
+              if (w.canAct)
                 void w
                   .run<TerminalSnapshot>({
                     op: "terminal",
@@ -600,7 +600,7 @@ export function RemoteTerminals({ workspace: w, session }: Props) {
                   .then(update);
             }}
             onWrite={(paneId, input) => {
-              if (w.owns)
+              if (w.canAct)
                 void w
                   .run<TerminalSnapshot>({
                     op: "terminal",

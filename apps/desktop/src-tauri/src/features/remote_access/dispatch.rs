@@ -24,20 +24,34 @@ pub(super) fn execute(runtime: &Runtime, peer: &str, request: &Request) -> Resul
         Operation::Projects => value(runtime.store.projects().map_err(err)?),
         Operation::Sessions { project_id } => {
             let project = runtime.store.project(project_id).map_err(err)?;
-            value(
-                open_store()?
-                    .list_sessions()
-                    .map_err(err)?
-                    .into_iter()
-                    .filter(|s| {
-                        s.parent_session_id.is_none()
-                            && runtime
-                                .store
-                                .belongs(&s.id.to_string(), &s.workspace_path, &project)
-                            && runtime.session(&s.id.to_string()).is_ok()
-                    })
-                    .collect::<Vec<_>>(),
-            )
+            let running = runtime
+                .app
+                .state::<ProviderCancellationManager>()
+                .flags
+                .lock()
+                .map_err(err)?
+                .keys()
+                .cloned()
+                .collect::<std::collections::HashSet<_>>();
+            let sessions = open_store()?
+                .list_sessions()
+                .map_err(err)?
+                .into_iter()
+                .filter(|s| {
+                    s.parent_session_id.is_none()
+                        && runtime
+                            .store
+                            .belongs(&s.id.to_string(), &s.workspace_path, &project)
+                        && runtime.session(&s.id.to_string()).is_ok()
+                })
+                .map(|s| {
+                    let active = running.contains(&s.id.to_string());
+                    let mut session = serde_json::to_value(s).map_err(err)?;
+                    session["running"] = json!(active);
+                    Ok(session)
+                })
+                .collect::<Result<Vec<Value>, String>>()?;
+            value(sessions)
         }
         Operation::CreateSession {
             project_id,
@@ -110,45 +124,18 @@ pub(super) fn execute(runtime: &Runtime, peer: &str, request: &Request) -> Resul
             false,
             revision.clone(),
         )?),
-        Operation::Snapshot { session_id } => snapshot(runtime, session_id),
+        Operation::Snapshot {
+            session_id,
+            include_live_events,
+        } => snapshot(runtime, session_id, include_live_events.unwrap_or(false)),
         Operation::Watch { .. } => Ok(Value::Bool(true)),
-        Operation::Claim { session_id } => {
-            // An existing active host run starts with local authority. A hidden window
-            // yields it so a paired client can continue without another host click.
-            let visible = runtime
-                .app
-                .get_webview_window("main")
-                .and_then(|w| w.is_visible().ok())
-                .unwrap_or(false);
-            if visible
-                && runtime
-                    .app
-                    .state::<ProviderCancellationManager>()
-                    .flags
-                    .lock()
-                    .map_err(err)?
-                    .contains_key(session_id)
-                && runtime
-                    .controls
-                    .lock()
-                    .map_err(err)?
-                    .current(session_id)
-                    .is_none()
-            {
-                runtime
-                    .controls
-                    .lock()
-                    .map_err(err)?
-                    .claim(session_id, "local", false)?;
-            }
-            value(
-                runtime
-                    .controls
-                    .lock()
-                    .map_err(err)?
-                    .claim(session_id, peer, false)?,
-            )
-        }
+        Operation::Claim { session_id } => value(
+            runtime
+                .controls
+                .lock()
+                .map_err(err)?
+                .claim(session_id, peer, true)?,
+        ),
         Operation::RequestControl { session_id } => value(
             runtime
                 .controls
@@ -215,7 +202,8 @@ pub(super) fn execute(runtime: &Runtime, peer: &str, request: &Request) -> Resul
                 reasoning_effort: session.reasoning_effort,
             };
             // One turn per question, whichever device or retry answers it first.
-            let digest = <sha2::Sha256 as sha2::Digest>::digest(format!("{session_id}\0{question_id}"));
+            let digest =
+                <sha2::Sha256 as sha2::Digest>::digest(format!("{session_id}\0{question_id}"));
             let mut bytes = [0u8; 16];
             bytes.copy_from_slice(&digest[..16]);
             let turn = uuid::Builder::from_custom_bytes(bytes).into_uuid();
@@ -246,7 +234,7 @@ fn hello(runtime: &Runtime) -> Result<Value, String> {
         json!({"id":p.id,"displayName":p.display_name,"models":models,"defaultModelId":p.default_model_id,"kind":p.kind,"runtimeStatus":status})
     }).collect::<Vec<_>>();
     Ok(
-        json!({"protocol":1,"hostId":runtime.node.get().unwrap().id(),"name":runtime.store.settings().map_err(err)?.name,"providers":providers,"selectedProviderId":config.selected_provider_id,"capabilities":["chat","files","git","terminal","approvals","questions","worktrees"],"experimental":true}),
+        json!({"protocol":1,"hostId":runtime.node.get().unwrap().id(),"name":runtime.store.settings().map_err(err)?.name,"providers":providers,"selectedProviderId":config.selected_provider_id,"fullAccess":config.full_access,"requireCommandApproval":config.require_command_approval,"requireFileEditApproval":config.require_file_edit_approval,"capabilities":["liveCatchup","chat","files","git","terminal","approvals","questions","worktrees"],"experimental":true}),
     )
 }
 fn validate_model(model: &ModelChoice) -> Result<(), String> {
@@ -394,7 +382,11 @@ fn submit(
     });
     Ok(json!({"accepted":true,"event":event,"turnId":turn_id}))
 }
-fn snapshot(runtime: &Runtime, session_id: &str) -> Result<Value, String> {
+fn snapshot(
+    runtime: &Runtime,
+    session_id: &str,
+    include_live_events: bool,
+) -> Result<Value, String> {
     let session = parse_uuid(session_id)?;
     let recent = open_store()?
         .read_recent_events(session, 400)
@@ -420,8 +412,27 @@ fn snapshot(runtime: &Runtime, session_id: &str) -> Result<Value, String> {
     let mutations = open_store()?
         .list_unsurfaced_pending_mutation_proposals(session)
         .map_err(err)?;
+    let stored_session = runtime.session(session_id)?;
+    let provider_usage = stored_session.provider_id.as_deref().and_then(|provider| {
+        crate::usage::fetch::spawn_provider_usage_refresh(&runtime.app, provider, true);
+        crate::usage::fetch::stored_provider_usage(provider)
+            .ok()
+            .and_then(|snapshot| {
+                let mut value = serde_json::to_value(snapshot).ok()?;
+                value["status"] = json!(if value["windows"]
+                    .as_array()
+                    .is_some_and(|w| !w.is_empty())
+                {
+                    "available"
+                } else {
+                    "unavailable"
+                });
+                Some(value)
+            })
+    });
+    let session_usage = open_store()?.session_usage_totals(session).map_err(err)?;
     Ok(
-        json!({"session":runtime.session(session_id)?,"running":runtime.app.state::<ProviderCancellationManager>().flags.lock().map_err(err)?.contains_key(session_id),"control":runtime.controls.lock().map_err(err)?.current(session_id),"approvals":provider.into_iter().chain(capabilities).collect::<Vec<_>>(),"mutations":mutations}),
+        json!({"liveEvents":if include_live_events { Some(runtime.live_events.lock().map_err(err)?.snapshot(session_id)) } else { None },"providerUsage":provider_usage,"sessionUsage":session_usage,"session":stored_session,"running":runtime.app.state::<ProviderCancellationManager>().flags.lock().map_err(err)?.contains_key(session_id),"control":runtime.controls.lock().map_err(err)?.current(session_id),"approvals":provider.into_iter().chain(capabilities).collect::<Vec<_>>(),"mutations":mutations}),
     )
 }
 fn approve(

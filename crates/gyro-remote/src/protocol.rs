@@ -51,6 +51,8 @@ pub enum Operation {
     },
     Snapshot {
         session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        include_live_events: Option<bool>,
     },
     Watch {
         session_id: String,
@@ -185,7 +187,7 @@ impl Operation {
         match self {
             Self::RenameSession { session_id, .. }
             | Self::History { session_id, .. }
-            | Self::Snapshot { session_id }
+            | Self::Snapshot { session_id, .. }
             | Self::Watch { session_id }
             | Self::Submit { session_id, .. }
             | Self::Stop { session_id }
@@ -260,4 +262,21 @@ pub struct RemoteEvent {
     pub session_id: String,
     pub topic: String,
     pub payload: Value,
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+    #[test]
+    fn live_catchup_is_optional_and_keeps_normal_snapshots_small() {
+        let normal = serde_json::json!({"op":"snapshot","sessionId":"s"});
+        let operation: Operation = serde_json::from_value(normal.clone()).unwrap();
+        assert_eq!(serde_json::to_value(operation).unwrap(), normal);
+        let catchup: Operation = serde_json::from_value(serde_json::json!({
+            "op":"snapshot","sessionId":"s","includeLiveEvents":true
+        }))
+        .unwrap();
+        assert_eq!(catchup.session_id(), Some("s"));
+        assert!(!catchup.mutates());
+    }
 }

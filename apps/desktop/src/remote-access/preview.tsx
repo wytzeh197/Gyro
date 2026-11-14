@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AppChrome,
+  ChatSurface,
   SettingsSurface,
   type GyroConfig,
   type Session,
@@ -43,6 +44,10 @@ function LocalApp() {
     "settings",
   );
   const [draft, setDraft] = useState("");
+  const [newSession, setNewSession] = useState(false);
+  const [newPath, setNewPath] = useState<string | undefined>(
+    localSession.workspacePath,
+  );
   return (
     <AppChrome
       sidebarProjectsReady={loaded}
@@ -56,8 +61,20 @@ function LocalApp() {
       activeDestination={destination}
       activeWorkspaceLayout="thread"
       activeSettingsSection="remote-access"
-      onSelectSession={() => setDestination("workspace")}
-      onCreateSession={() => setDestination("workspace")}
+      onSelectSession={() => {
+        setNewSession(false);
+        setDestination("workspace");
+      }}
+      onCreateSession={() => {
+        setNewSession(true);
+        setDestination("workspace");
+      }}
+      onSelectNewSessionProject={(path, text) => {
+        setNewSession(true);
+        setNewPath(path);
+        setDraft(text);
+        setDestination("workspace");
+      }}
       onCreateCliSession={() => {}}
       onSelectSessions={() => setDestination("workspace")}
       onSelectWorkspaceLayout={() => setDestination("workspace")}
@@ -73,6 +90,24 @@ function LocalApp() {
           themeMode="dark"
           activeSection="remote-access"
           onThemeChange={() => {}}
+        />
+      ) : newSession ? (
+        <ChatSurface
+          config={config}
+          events={[]}
+          workspacePath={newPath}
+          paneKey="local:new"
+          draft={draft}
+          onDraftChange={setDraft}
+          onSend={() => {}}
+          savedProjects={[
+            {
+              path: localSession.workspacePath,
+              label: "Local project",
+              detail: "This Mac",
+              sessionCount: 1,
+            },
+          ]}
         />
       ) : (
         <div className="gyro-remote-home">

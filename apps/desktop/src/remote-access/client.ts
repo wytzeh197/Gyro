@@ -4,6 +4,7 @@ import type {
   HostInfo,
   HostOperation,
   HostRequest,
+  Snapshot,
 } from "./types";
 export type HostTarget = { kind: "local" } | { kind: "remote"; hostId: string };
 export interface HostClient {
@@ -29,6 +30,7 @@ export class RemoteHostClient implements HostClient {
   readonly target: HostTarget;
   private leases = new Map<string, number>();
   private disposed = false;
+  private supportsLiveCatchup = false;
   private unsubscribe?: () => void;
   private subscription = 0;
   private watchId?: string;
@@ -80,6 +82,9 @@ export class RemoteHostClient implements HostClient {
     } else result = await send();
     if (this.disposed)
       throw new Error("Host changed while the request was running");
+    if (operation.op === "hello")
+      this.supportsLiveCatchup =
+        (result as HostInfo).capabilities?.includes("liveCatchup") ?? false;
     if (operation.op === "claim" || operation.op === "transferControl") {
       const control = result as Control;
       if (operation.op === "claim")
@@ -101,6 +106,8 @@ export class RemoteHostClient implements HostClient {
     const watchId = crypto.randomUUID();
     this.watchId = watchId;
     this.unsubscribe?.();
+    let catchingUp = true;
+    const buffered: HostEvent[] = [];
     const unlisten = await this.ports.listen<{
       hostId: string;
       watchId: string;
@@ -112,8 +119,10 @@ export class RemoteHostClient implements HostClient {
         payload.hostId === this.hostId &&
         payload.watchId === watchId &&
         payload.event.sessionId === sessionId
-      )
-        handler(payload.event);
+      ) {
+        if (catchingUp) buffered.push(payload.event);
+        else handler(payload.event);
+      }
     });
     if (this.disposed || generation !== this.subscription) {
       unlisten();
@@ -126,8 +135,33 @@ export class RemoteHostClient implements HostClient {
         sessionId,
         watchId,
       });
+      // Listen first, then read the host's bounded current-turn catch-up. Live
+      // frames arriving during that read wait so sequence ordering can dedupe
+      // the overlap without dropping the beginning of an already-running turn.
+      const snapshot = await this.request<Snapshot>({
+        op: "snapshot",
+        sessionId,
+        ...(this.supportsLiveCatchup ? { includeLiveEvents: true } : {}),
+      });
+      if (!this.disposed && generation === this.subscription) {
+        for (const payload of snapshot.liveEvents ?? [])
+          handler({
+            sessionId,
+            topic: "provider",
+            payload: payload as unknown as Record<string, unknown>,
+          });
+        catchingUp = false;
+        for (const event of buffered) handler(event);
+      }
     } catch (error) {
       unlisten();
+      void this.ports
+        .invoke("remote_host_watch", {
+          hostId: this.hostId,
+          sessionId: null,
+          watchId,
+        })
+        .catch(() => {});
       throw error;
     }
     return () => {

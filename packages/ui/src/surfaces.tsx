@@ -1,7 +1,11 @@
 import { gitSetupMessage, hasOnlyGitWarnings, preparationMessage, preparationStatusLabel } from "./workspace-preparation";
 import { ProjectMemoryPanel } from "./project-memory/panel";
 import type { ProjectMemoryRuntime } from "./project-memory/types";
-import { RemoteAccessSettingsContent, useRemoteWorkspaceSlots } from "./remote-access-context";
+import {
+  RemoteAccessSlots,
+  RemoteAccessSettingsContent,
+  useRemoteWorkspaceSlots,
+} from "./remote-access-context";
 import {
   Activity,
   Archive,
@@ -57,6 +61,7 @@ import {
   Mic,
   Minimize2,
   Minus,
+  Monitor,
   MoreHorizontal,
   MoreVertical,
   Palette,
@@ -1021,6 +1026,7 @@ type AppChromeProps = {
   isShellOptimizing?: boolean;
   onOpenCommandPalette: () => void;
   onCreateSession: () => void;
+  onSelectNewSessionProject?: (path: string | undefined, draft: string) => void;
   onCreateCliSession: (profileId: string, workspacePath: string) => void;
   onSelectSessions: () => void;
   onOpenWorkspace: () => void;
@@ -2035,6 +2041,7 @@ export function AppChrome({
   isShellOptimizing = false,
   onOpenCommandPalette: openLocalCommandPalette,
   onCreateSession: createLocalSession,
+  onSelectNewSessionProject,
   onCreateCliSession: createLocalCliSession,
   onSelectSessions: selectLocalSessions,
   onOpenWorkspace: openLocalWorkspace,
@@ -2133,8 +2140,11 @@ export function AppChrome({
     openLocalSettings();
   };
   const onCreateSession = () => {
-    remote.selectLocal?.();
-    createLocalSession();
+    if (remote.createSession) remote.createSession();
+    else {
+      remote.selectLocal?.();
+      createLocalSession();
+    }
   };
   const onCreateCliSession: typeof createLocalCliSession = (...args) => {
     remote.selectLocal?.();
@@ -3206,7 +3216,25 @@ export function AppChrome({
         <PreservedLocalWorkspace active={!remoteActive}>
           {children}
         </PreservedLocalWorkspace>
-        {remote.content}
+        <RemoteAccessSlots.Provider
+          value={{
+            ...remote,
+            localProjects: JSON.parse(localProjectList).map(
+              (project: { path: string; name: string }) => ({
+                path: project.path,
+                label: project.name,
+              }),
+            ),
+            selectLocalProject: onSelectNewSessionProject
+              ? (path, draft) => {
+                  remote.selectLocal?.();
+                  onSelectNewSessionProject(path, draft);
+                }
+              : undefined,
+          }}
+        >
+          {remote.content}
+        </RemoteAccessSlots.Provider>
       </main>
     </div>
   );
@@ -8925,6 +8953,7 @@ function ChatRailToolHeader({
  * across both rows would let a context menu close a composer one.
  */
 function ChatContextSection({
+  draft,
   branchCatalog,
   branchName,
   isBranchLoading,
@@ -8934,6 +8963,7 @@ function ChatContextSection({
   workspaceMode = "local",
   workspacePath,
 }: {
+  draft: string;
   branchCatalog?: GitBranchCatalog;
   branchName?: string;
   isBranchLoading?: boolean;
@@ -8943,6 +8973,7 @@ function ChatContextSection({
   workspaceMode?: WorkbenchMode;
   workspacePath?: string;
 }) {
+  const remote = useRemoteWorkspaceSlots();
   const [activePopover, setActivePopover] = useState<
     "project" | "workspace-mode" | "branch" | null
   >(null);
@@ -8965,28 +8996,50 @@ function ChatContextSection({
   const branchLabel =
     branchName ??
     (workspaceMode === "worktree" ? "New worktree branch" : "main");
-  const savedProjectItems: ComposerPopoverItem[] = savedProjects
+  const savedProjectItems: ComposerPopoverItem[] = (
+    remote.selectedProjectKey ? (remote.localProjects ?? []) : savedProjects
+  )
     .filter((project) => project.path)
     .slice(0, 6)
     .map((project) => ({
       action: `select-saved-project:${encodeURIComponent(project.path)}`,
-      active: project.path === workspacePath,
-      detail: project.detail,
+      active: !remote.selectedProjectKey && project.path === workspacePath,
+      detail:
+        "detail" in project && typeof project.detail === "string"
+          ? project.detail
+          : "This Mac",
       icon: Folder,
       kind: "project" as const,
       label: project.label,
-      removeAction: `remove-saved-project:${encodeURIComponent(project.path)}`,
+      removeAction: remote.selectedProjectKey
+        ? undefined
+        : `remove-saved-project:${encodeURIComponent(project.path)}`,
     }));
   const runAction = (action?: string) => {
     setActivePopover(null);
-    if (action) {
+    if (action?.startsWith("select-remote-project:")) {
+      remote.selectProject?.(
+        decodeURIComponent(action.slice("select-remote-project:".length)),
+        draft,
+      );
+    } else if (remote.selectedProjectKey && action === "select-no-folder") {
+      remote.selectLocalProject?.(undefined, draft);
+    } else if (
+      remote.selectedProjectKey &&
+      action?.startsWith("select-saved-project:")
+    ) {
+      remote.selectLocalProject?.(
+        decodeURIComponent(action.slice("select-saved-project:".length)),
+        draft,
+      );
+    } else if (action) {
       onAction?.(action);
     }
   };
   const items: ComposerPopoverItem[] =
     activePopover === "project"
       ? [
-          ...(hasUserWorkspace && workspacePath
+          ...(!remote.selectedProjectKey && hasUserWorkspace && workspacePath
             ? [
                 {
                   action: `select-saved-project:${encodeURIComponent(workspacePath)}`,
@@ -9007,21 +9060,35 @@ function ChatContextSection({
           },
           ...savedProjectItems.filter(
             (project) =>
+              remote.selectedProjectKey ||
               project.action !==
-              `select-saved-project:${encodeURIComponent(workspacePath ?? "")}`,
+                `select-saved-project:${encodeURIComponent(workspacePath ?? "")}`,
           ),
-          {
-            action: "select-workspace",
-            icon: Folder,
-            label: hasUserWorkspace ? "Change folder" : "Select folder",
-            sectionLabel: "Actions",
-          },
-          {
-            action: "search-workspace",
-            disabled: !hasUserWorkspace,
-            icon: Search,
-            label: "Search workspace",
-          },
+          ...(remote.projectChoices ?? []).map((project) => ({
+            action: `select-remote-project:${encodeURIComponent(project.key)}`,
+            active: remote.selectedProjectKey === project.key,
+            detail: `${project.hostName} · ${project.path}`,
+            icon: Monitor,
+            label: project.label,
+            badge: "Remote",
+            kind: "project" as const,
+          })),
+          ...(!remote.selectedProjectKey
+            ? [
+                {
+                  action: "select-workspace",
+                  icon: Folder,
+                  label: hasUserWorkspace ? "Change folder" : "Select folder",
+                  sectionLabel: "Actions",
+                },
+                {
+                  action: "search-workspace",
+                  disabled: !hasUserWorkspace,
+                  icon: Search,
+                  label: "Search workspace",
+                },
+              ]
+            : []),
         ]
       : activePopover === "workspace-mode"
         ? [
@@ -23304,6 +23371,7 @@ function Composer({
       ) : null}
       {shouldShowContextRow ? (
         <ChatContextSection
+          draft={draft}
           branchCatalog={branchCatalog}
           branchName={branchName}
           isBranchLoading={isBranchLoading}
