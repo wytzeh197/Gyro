@@ -509,14 +509,11 @@ where
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => {
-                    if !pending.is_empty()
-                        && !send_text_chunk(
-                            &sender,
-                            stream,
-                            String::from_utf8_lossy(&pending).into_owned(),
-                        )
-                    {
-                        return;
+                    if !pending.is_empty() {
+                        let text = utf8_text(std::mem::take(&mut pending));
+                        if !send_text_chunk(&sender, stream, text) {
+                            return;
+                        }
                     }
                     break;
                 }
@@ -539,16 +536,17 @@ fn flush_complete_utf8(
 ) -> bool {
     loop {
         match std::str::from_utf8(pending) {
-            Ok(text) => {
-                let text = text.to_string();
-                pending.clear();
-                return send_text_chunk(sender, stream, text);
+            Ok(_) => {
+                // The chunk already owns these bytes. A valid read becomes
+                // the output `String` directly; copying it first doubled the
+                // traffic on every 8 KiB command chunk.
+                return send_text_chunk(sender, stream, utf8_text(std::mem::take(pending)));
             }
             Err(error) => {
                 let valid_up_to = error.valid_up_to();
                 if valid_up_to > 0 {
-                    let text = String::from_utf8_lossy(&pending[..valid_up_to]).into_owned();
-                    pending.drain(..valid_up_to);
+                    let rest = pending.split_off(valid_up_to);
+                    let text = utf8_text(std::mem::replace(pending, rest));
                     if !send_text_chunk(sender, stream, text) {
                         return false;
                     }
@@ -562,6 +560,15 @@ fn flush_complete_utf8(
                 }
             }
         }
+    }
+}
+
+/// `Vec<u8>` to `String` without a second copy when the bytes are UTF-8.
+/// Invalid bytes still use the same replacement as `from_utf8_lossy`.
+fn utf8_text(bytes: Vec<u8>) -> String {
+    match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
     }
 }
 
@@ -851,6 +858,25 @@ mod tests {
 
         assert_eq!(output, expected);
         assert!(!output.contains('\u{fffd}'));
+    }
+
+    #[test]
+    fn reader_replaces_invalid_utf8_and_keeps_the_surrounding_text() {
+        let mut bytes = b"ok-".to_vec();
+        bytes.push(0xff);
+        bytes.extend_from_slice(b"end-\xC3\xA9");
+        let (sender, receiver) = mpsc::sync_channel(16);
+        let reader = spawn_reader(
+            ByteReader(Cursor::new(bytes)),
+            ExecutionStream::Stdout,
+            sender,
+        );
+        reader.join().unwrap();
+        let output = receiver
+            .try_iter()
+            .map(|chunk| chunk.text)
+            .collect::<String>();
+        assert_eq!(output, "ok-\u{fffd}end-é");
     }
 
     #[test]
