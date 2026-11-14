@@ -5,6 +5,8 @@
 //! app + CLI writers stay compatible under WAL and recover cleanly from brief
 //! lock contention.
 
+pub mod recovery;
+
 use anyhow::{Context, Result};
 use rusqlite::{Connection, ErrorCode};
 use std::collections::{HashMap, VecDeque};
@@ -53,8 +55,18 @@ pub fn configure_connection(conn: &Connection) -> Result<()> {
 pub fn open_private_database(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)
         .with_context(|| format!("open sqlite database {}", path.display()))?;
+    ensure_supported_schema(&conn)?;
     configure_connection(&conn)?;
     Ok(conn)
+}
+
+/// Check before any schema maintenance, including on a reused connection.
+pub(crate) fn ensure_supported_schema(conn: &Connection) -> Result<i32> {
+    let version: i32 = conn.query_row("pragma user_version", [], |row| row.get(0))?;
+    anyhow::ensure!(version <= crate::sessions::SESSION_STORE_SCHEMA_VERSION,
+        "This database uses schema version {version}, but this Gyro build supports up to {}. Open it with a newer Gyro version; no schema migration was performed.",
+        crate::sessions::SESSION_STORE_SCHEMA_VERSION);
+    Ok(version)
 }
 
 /// Idle connections kept for one database: the most commands the app runs at
@@ -139,6 +151,7 @@ impl PooledConnection {
         schema: StoreSchema,
         initialize: impl FnOnce() -> Result<()>,
     ) -> Result<()> {
+        ensure_supported_schema(self)?;
         let key = (self.path.clone(), schema);
         let current = match self.identity {
             Some(identity) => {
@@ -242,6 +255,7 @@ pub(crate) fn open_pooled_database(path: &Path) -> Result<PooledConnection> {
     };
     drop(stale);
     if let Some(idle) = reused {
+        ensure_supported_schema(&idle.conn)?;
         return Ok(PooledConnection {
             conn: Some(idle.conn),
             path: idle.path,

@@ -20,7 +20,7 @@ use crate::{
         },
     },
     workspace_path_history,
-    workspace_search::{literal_search_ranges, run_workspace_rg_search},
+    workspace_search::{literal_search_ranges, run_workspace_rg_search, RgMatchOptions},
 };
 use std::{
     path::{Path, PathBuf},
@@ -610,25 +610,44 @@ pub(crate) fn search_workspace_impl(
     let max_results = request.max_results.unwrap_or(200).clamp(1, 1000);
     // UI search keeps fixed strings so ordinary typing is not treated as regex.
     // Model capability search calls ripgrep directly and reports regex errors.
-    let use_regex = request.regex.unwrap_or(false);
-    match run_workspace_rg_search(&root, query, request.globs.as_ref(), max_results, use_regex) {
+    let options = RgMatchOptions {
+        use_regex: request.regex.unwrap_or(false),
+        ignore_case: !request.case_sensitive.unwrap_or(true),
+        whole_word: request.whole_word.unwrap_or(false),
+    };
+    let fallback = || {
+        fallback_search_workspace(&root, query, max_results, options.ignore_case)
+    };
+    match run_workspace_rg_search(&root, query, request.globs.as_ref(), max_results, options) {
         Ok(results) => Ok(results),
         // Agents sometimes send patterns that are invalid regex. Fall back to a
         // literal search so the capability returns matches instead of an error
         // that short-circuits the whole turn.
-        Err(_) if use_regex => {
-            run_workspace_rg_search(&root, query, request.globs.as_ref(), max_results, false)
-                .or_else(|_| fallback_search_workspace(&root, query, max_results))
-        }
-        Err(_) => fallback_search_workspace(&root, query, max_results),
+        Err(_) if options.use_regex => run_workspace_rg_search(
+            &root,
+            query,
+            request.globs.as_ref(),
+            max_results,
+            RgMatchOptions {
+                use_regex: false,
+                ..options
+            },
+        )
+        .or_else(|_| fallback()),
+        Err(_) => fallback(),
     }
 }
 
+/// Best-effort walk used only when ripgrep cannot run. `ignore_case` folds
+/// ASCII only, which keeps byte offsets stable for the match ranges. Whole-word
+/// matching is not applied here.
 pub(crate) fn fallback_search_workspace(
     root: &Path,
     query: &str,
     max_results: usize,
+    ignore_case: bool,
 ) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
+    let folded_query = ignore_case.then(|| query.to_ascii_lowercase());
     let mut results = Vec::new();
     let started_at = Instant::now();
     let mut scanned_files = 0usize;
@@ -682,7 +701,18 @@ pub(crate) fn fallback_search_workspace(
         }
         let content = String::from_utf8_lossy(&bytes);
         for (index, line) in content.lines().enumerate() {
-            if line.contains(query) {
+            let ranges = match &folded_query {
+                Some(folded) => {
+                    let folded_line = line.to_ascii_lowercase();
+                    if !folded_line.contains(folded.as_str()) {
+                        continue;
+                    }
+                    literal_search_ranges(&folded_line, folded)
+                }
+                None if line.contains(query) => literal_search_ranges(line, query),
+                None => continue,
+            };
+            {
                 let path = entry
                     .path()
                     .strip_prefix(root)?
@@ -692,7 +722,7 @@ pub(crate) fn fallback_search_workspace(
                     path,
                     line_number: index + 1,
                     line: line.to_string(),
-                    ranges: literal_search_ranges(line, query),
+                    ranges,
                 });
                 if results.len() >= max_results {
                     return Ok(results);

@@ -90,6 +90,10 @@ pub fn run() {
         context.config_mut().app.windows.clear();
     }
     #[cfg(debug_assertions)]
+    if std::env::var_os("GYRO_REMOTE_SMOKE").is_some() {
+        context.config_mut().app.windows.clear();
+    }
+    #[cfg(debug_assertions)]
     if std::env::var("GYRO_LOCAL_PROVIDER_FIXTURE").as_deref() == Ok("1") {
         // Isolated native browser integration uses a hidden, empty parent webview.
         context.config_mut().app.windows.clear();
@@ -118,6 +122,7 @@ pub fn run() {
     let app = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(TerminalProcessManager::default())
+        .manage(crate::features::remote_access::RemoteAccess::default())
         .manage(language_server::LanguageServerManager::default())
         .manage(DebugAdapterManager::default())
         .manage(ProviderCancellationManager::default())
@@ -139,6 +144,8 @@ pub fn run() {
         .manage(menu_bar::MenuBarController::default())
         .manage(quit_confirmation::QuitConfirmation::default())
         .setup(|app| {
+            #[cfg(debug_assertions)]
+            if crate::features::remote_access::smoke::start(app.handle())? { return Ok(()); }
             #[cfg(all(debug_assertions, feature = "native-browser-events-smoke"))]
             if browser_frontend_smoke::start(app.handle())? {
                 return Ok(());
@@ -195,6 +202,7 @@ pub fn run() {
             crate::features::code_reviews::execution::recover(app.handle().clone());
             crate::features::code_reviews::fix_queue::recover(app.handle());
             agent_session_worker::start(app.handle().clone());
+            crate::features::remote_access::start_if_enabled(app.handle().clone());
             goal_runner::recover(app.handle().clone());
             #[cfg(all(debug_assertions, feature = "native-browser-shell-review"))]
             browser_shell_review::start(app.handle());
@@ -218,6 +226,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
+                crate::features::remote_access::release_local_controls(window.app_handle());
                 if let Err(error) = window.hide() {
                     eprintln!("could not hide Gyro window: {error}");
                 }
@@ -227,6 +236,10 @@ pub fn run() {
             canvas_preview::response(request)
         })
         .invoke_handler(tauri::generate_handler![
+            crate::features::remote_access::commands::remote_access_status,
+            crate::features::remote_access::commands::remote_access_action,
+            crate::features::remote_access::commands::remote_host_request,
+            crate::features::remote_access::commands::remote_host_watch,
             crate::local_check::prepare_local_check,
             crate::cloud_connection::cloud_connection_view,
             crate::cloud_v3::cloud_v3,

@@ -1,0 +1,597 @@
+.gyro-remote-stack {
+  display: grid;
+  gap: var(--gyro-space-comfortable);
+  min-width: 0;
+}
+/* Let the settings section body space the groups, like other settings pages. */
+.gyro-remote-settings {
+  display: contents;
+}
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-project-toggle[aria-expanded]:has(
+    > .gyro-sidebar-project-remote
+  ) {
+  grid-template-columns: var(--gyro-icon-compact) var(
+      --gyro-icon-standard
+    ) minmax(0, 1fr) max-content;
+}
+.gyro-sidebar-project-toggle > .gyro-sidebar-project-remote {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--gyro-space-compact);
+  margin-left: auto;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  font-weight: inherit;
+}
+.gyro-sidebar-project-remote > svg {
+  width: var(--gyro-icon-compact);
+  height: var(--gyro-icon-compact);
+}
+.gyro-remote-toolbar,
+.gyro-remote-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-standard);
+}
+.gyro-remote-toolbar {
+  padding: var(--gyro-space-standard) var(--gyro-space-panel);
+  border-bottom: thin solid var(--gyro-border);
+}
+.gyro-remote-toolbar h2 {
+  margin: 0;
+  flex: 1;
+}
+.gyro-remote-toolbar > span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-remote-toolbar > select {
+  max-width: 100%;
+}
+.gyro-remote-dialog {
+  background: var(--gyro-surface);
+  color: var(--gyro-text);
+  border: thin solid var(--gyro-border);
+  border-radius: var(--gyro-radius-lg);
+  padding: 0;
+  max-width: min(90vw, calc(var(--gyro-ide-sidebar-width) * 3));
+  max-height: 90vh;
+  overflow: auto;
+}
+/* The settings title already names the dialog; only Close sits on top. */
+.gyro-remote-dialog-header {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--gyro-space-standard) var(--gyro-space-panel) 0;
+}
+.gyro-remote-dialog::backdrop {
+  background: var(--gyro-heavy-shadow);
+}
+.gyro-remote-settings p,
+.gyro-remote-settings small {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+.gyro-remote-settings textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: var(--gyro-font-mono);
+}
+.gyro-remote-settings .gyro-settings-input,
+.gyro-remote-workspace .gyro-settings-input {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: var(--gyro-control-height);
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
+  border: thin solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  padding: var(--gyro-space-standard);
+  font: inherit;
+}
+.gyro-remote-settings textarea.gyro-settings-input {
+  min-height: calc(var(--gyro-control-height) * 2);
+  font-family: var(--gyro-font-mono);
+}
+.gyro-remote-error {
+  color: var(--gyro-danger);
+  margin: var(--gyro-space-standard) var(--gyro-space-panel);
+}
+.gyro-remote-workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--gyro-app);
+}
+.gyro-remote-chat {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.gyro-remote-chat > * {
+  flex: 1;
+  min-width: 0;
+}
+.gyro-remote-empty {
+  display: grid;
+  place-content: center;
+  text-align: center;
+  padding: var(--gyro-space-section);
+  flex: 1;
+  color: var(--gyro-muted);
+}
+.gyro-remote-panel {
+  padding: var(--gyro-space-panel);
+  overflow: auto;
+}
+.gyro-remote-files {
+  display: grid;
+  grid-template-columns: var(--gyro-ide-sidebar-width) minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+.gyro-remote-file-list {
+  overflow: auto;
+  border-right: thin solid var(--gyro-border);
+  padding: var(--gyro-space-standard);
+}
+.gyro-remote-file-list .gyro-sidebar-row {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gyro-remote-editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.gyro-remote-editor-body,
+.gyro-remote-terminal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.gyro-remote-terminal {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: var(--gyro-space-standard);
+}
+.gyro-remote-output,
+.gyro-remote-code {
+  white-space: pre-wrap;
+  overflow: auto;
+  font-family: var(--gyro-font-mono);
+  background: var(--gyro-code-bg);
+  padding: var(--gyro-space-comfortable);
+  color: var(--gyro-code-text);
+}
+.gyro-remote-settings :is(input, textarea, button):focus-visible,
+.gyro-remote-workspace :is(input, button, select):focus-visible {
+  outline: solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-space-compact);
+}
+
+.gyro-remote-spacer {
+  flex-shrink: 1;
+}
+.gyro-remote-crumbs {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  min-width: 0;
+  overflow: hidden;
+  color: var(--gyro-muted);
+  white-space: nowrap;
+}
+.gyro-remote-crumbs > span[aria-hidden] {
+  color: var(--gyro-faint);
+}
+.gyro-remote-crumbs strong {
+  overflow: hidden;
+  color: var(--gyro-text);
+  text-overflow: ellipsis;
+}
+.gyro-remote-spacer {
+  flex: 1;
+}
+.gyro-remote-meta {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-remote-actions.is-end {
+  justify-content: flex-end;
+}
+
+/* Banner above the composer: a prompt the host never acknowledged. */
+.gyro-remote-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  margin: var(--gyro-space-comfortable) var(--gyro-space-comfortable) 0;
+  padding: var(--gyro-space-standard) var(--gyro-space-comfortable);
+  border: thin solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-raised);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-remote-banner > svg {
+  flex-shrink: 0;
+}
+.gyro-remote-banner.is-warning {
+  border-color: color-mix(in srgb, var(--gyro-status-warning) 40%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--gyro-status-warning) 10%,
+    var(--gyro-surface)
+  );
+  color: var(--gyro-text);
+}
+
+/* Home: a composer first, recent chats below. */
+.gyro-remote-home {
+  display: grid;
+  flex: 1;
+  align-content: center;
+  gap: var(--gyro-space-panel);
+  width: 100%;
+  max-width: calc(var(--gyro-ide-sidebar-width) * 3);
+  margin: 0 auto;
+  padding: var(--gyro-space-section);
+  box-sizing: border-box;
+  overflow: auto;
+}
+.gyro-remote-home h2 {
+  margin: 0;
+  text-align: center;
+  font-family: var(--gyro-font-display);
+  font-size: var(--gyro-font-heading);
+  font-weight: 600;
+}
+.gyro-remote-composer {
+  display: grid;
+  gap: var(--gyro-space-comfortable);
+  padding: var(--gyro-space-panel);
+  border: thin solid var(--gyro-border);
+  border-radius: var(--gyro-radius-composer);
+  background: var(--gyro-surface-raised);
+}
+.gyro-remote-composer textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: var(--gyro-font-body);
+}
+.gyro-remote-composer textarea::placeholder {
+  color: var(--gyro-faint);
+}
+.gyro-remote-composer:focus-within {
+  border-color: var(--gyro-focus-ring);
+}
+.gyro-remote-composer .gyro-settings-select {
+  max-width: calc(var(--gyro-ide-sidebar-width) * 0.75);
+}
+.gyro-remote-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gyro-space-compact);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-remote-recent {
+  display: grid;
+  gap: var(--gyro-space-compact);
+}
+.gyro-remote-recent h3 {
+  margin: 0 0 var(--gyro-space-compact);
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+}
+.gyro-remote-recent-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-comfortable);
+  padding: var(--gyro-space-standard) var(--gyro-space-comfortable);
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: var(--gyro-font-support);
+  text-align: left;
+  cursor: pointer;
+}
+.gyro-remote-recent-row:hover {
+  background: var(--gyro-control-bg);
+}
+.gyro-remote-recent-row > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-remote-recent-row > time {
+  flex-shrink: 0;
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-micro);
+}
+
+/* Offline: the transcript stays readable, the composer becomes Reconnect. */
+.gyro-remote-readonly {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gyro-space-standard);
+  padding: var(--gyro-space-standard) var(--gyro-space-standard)
+    var(--gyro-space-standard) var(--gyro-space-panel);
+  border: thin dashed var(--gyro-border);
+  border-radius: var(--gyro-radius-composer);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+.gyro-remote-chat.is-readonly .gyro-chat-transcript {
+  opacity: 0.55;
+}
+/* Out of flow but still laid out: the transcript's dock measures the
+   composer's top edge, and display:none reads as 0 and blanks the chat. */
+.gyro-remote-chat.is-readonly .gyro-composer-shell {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Command approvals sit above the composer. */
+.gyro-remote-approval {
+  display: grid;
+  gap: var(--gyro-space-standard);
+  padding: var(--gyro-space-card);
+  border: thin solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-raised);
+  font-size: var(--gyro-font-support);
+}
+.gyro-remote-approval p,
+.gyro-remote-review p {
+  margin: 0;
+  color: var(--gyro-muted);
+}
+.gyro-remote-code {
+  margin: 0;
+  max-height: calc(var(--gyro-control-height) * 8);
+  border-radius: var(--gyro-radius-sm);
+  padding: var(--gyro-space-standard) var(--gyro-space-comfortable);
+  font-size: var(--gyro-font-micro);
+}
+
+/* Chat with a panel beside it: tools, or file edits to review. */
+.gyro-remote-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+.gyro-remote-split.has-side {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.gyro-remote-split.has-review {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+}
+.gyro-remote-side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border-left: thin solid var(--gyro-border-soft);
+  background: var(--gyro-surface-soft);
+}
+.gyro-remote-side.is-review {
+  gap: var(--gyro-space-comfortable);
+  padding: var(--gyro-space-panel);
+  font-size: var(--gyro-font-support);
+}
+.gyro-remote-side > .gyro-remote-files {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+}
+.gyro-remote-review {
+  display: grid;
+  gap: var(--gyro-space-standard);
+  padding-top: var(--gyro-space-comfortable);
+  border-top: thin solid var(--gyro-border-soft);
+}
+.gyro-remote-path {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gyro-space-compact);
+  min-width: 0;
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-micro);
+  overflow-wrap: anywhere;
+}
+.gyro-remote-diff {
+  white-space: pre;
+  max-height: none;
+}
+.gyro-remote-diff > span {
+  display: block;
+}
+.gyro-remote-diff .is-add {
+  color: var(--gyro-scm-added);
+}
+.gyro-remote-diff .is-del {
+  color: var(--gyro-scm-deleted);
+}
+
+/* Settings: status-first hero and pairing sheets. */
+.gyro-remote-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-comfortable);
+  padding: var(--gyro-space-card);
+  border: thin solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-raised);
+}
+.gyro-remote-hero-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: var(--gyro-icon-target);
+  height: var(--gyro-icon-target);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-muted);
+}
+.gyro-remote-hero-text {
+  display: grid;
+  flex: 1;
+  gap: var(--gyro-space-compact);
+  min-width: 0;
+}
+.gyro-remote-hero-text code {
+  color: var(--gyro-faint);
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-caption);
+}
+.gyro-remote-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gyro-space-comfortable);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+.gyro-remote-hero-meta > button {
+  margin-left: auto;
+}
+.gyro-remote-sheet {
+  display: grid;
+  gap: var(--gyro-space-comfortable);
+  padding: var(--gyro-space-panel);
+  border: thin solid var(--gyro-border);
+  border-radius: var(--gyro-radius-lg);
+  background: var(--gyro-surface-raised);
+}
+.gyro-remote-sheet > p {
+  margin: 0;
+}
+.gyro-remote-sheet-title {
+  font-size: var(--gyro-font-lead);
+}
+.gyro-remote-steps {
+  display: grid;
+  gap: var(--gyro-space-standard);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-support);
+}
+.gyro-remote-steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+}
+.gyro-remote-steps li > span,
+.gyro-remote-steps li > svg {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: var(--gyro-space-section);
+  height: var(--gyro-space-section);
+  border: thin solid var(--gyro-border);
+  border-radius: var(--gyro-radius-pill);
+  font-size: var(--gyro-font-caption);
+}
+.gyro-remote-steps li > svg {
+  padding: var(--gyro-space-compact);
+}
+.gyro-remote-steps .is-done {
+  color: var(--gyro-muted);
+}
+.gyro-remote-steps .is-active {
+  color: var(--gyro-text);
+  font-weight: 600;
+}
+.gyro-remote-steps .is-active > span {
+  border-color: var(--gyro-text);
+}
+.gyro-remote-invite {
+  display: block;
+  padding: var(--gyro-space-comfortable);
+  overflow: hidden;
+  border: thin solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-code-bg);
+  color: var(--gyro-code-text);
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-remote-compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--gyro-space-comfortable);
+}
+.gyro-remote-compare > div {
+  display: grid;
+  justify-items: center;
+  gap: var(--gyro-space-standard);
+  padding: var(--gyro-space-panel) var(--gyro-space-comfortable);
+  border: thin solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  text-align: center;
+}
+.gyro-remote-compare code {
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-body);
+}
+@media (max-width: 720px) {
+  .gyro-remote-split.has-side,
+  .gyro-remote-split.has-review {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .gyro-remote-side {
+    border-left: 0;
+    border-top: thin solid var(--gyro-border-soft);
+  }
+  .gyro-remote-compare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Keep the approval cards off the composer's edge. */
+.gyro-remote-chat .gyro-remote-stack {
+  margin-bottom: var(--gyro-space-standard);
+}
+/* The stack spaces its items; a banner inside it needs no margin of its own. */
+.gyro-remote-stack > .gyro-remote-banner {
+  margin: 0;
+}

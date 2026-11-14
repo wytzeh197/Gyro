@@ -1,3 +1,5 @@
+import type { DocumentSymbol } from "./document-symbols";
+
 export type SessionOrigin = "cli" | "desktop";
 
 /** Chat is a single-agent thread; mission is a goal chat that can own CLI workers. */
@@ -437,6 +439,7 @@ export type ChatAttachment = {
 };
 
 export type SettingsSectionId =
+  | "remote-access"
   | "account"
   | "cloud"
   | "general"
@@ -1489,6 +1492,20 @@ export type WorkspaceScopedSettings = {
   searchExclude?: string[];
   searchMaxResults?: number;
   editorMinimapEnabled?: boolean;
+  /** Points before the appearance scale; 8–32. */
+  editorFontSize?: number;
+  editorTabSize?: number;
+  editorInsertSpaces?: boolean;
+  editorWordWrap?: "off" | "on" | "bounded";
+  /** Columns that draw a vertical guide. */
+  editorRulers?: number[];
+  editorRenderWhitespace?: "none" | "boundary" | "selection" | "trailing" | "all";
+  editorFormatOnSave?: boolean;
+  /** Path and symbol breadcrumbs above the editor. Default on. */
+  editorBreadcrumbs?: boolean;
+  filesAutoSave?: "off" | "afterDelay" | "onFocusChange";
+  /** Milliseconds after the last edit when auto-save is afterDelay. */
+  filesAutoSaveDelay?: number;
 };
 
 export type WorkspaceKeybinding = {
@@ -1713,6 +1730,11 @@ export type WorkspaceSearchQuery = {
   query: string;
   globs?: string[];
   maxResults?: number;
+  /** Off by default: the Search view matches case-insensitively. */
+  matchCase?: boolean;
+  wholeWord?: boolean;
+  /** Treat `query` as a regular expression instead of literal text. */
+  useRegex?: boolean;
 };
 
 export type WorkspaceSearchResult = {
@@ -2095,6 +2117,12 @@ export type IdeSessionEventPayloadKind =
   | "file-write-approved"
   | "file-write-rejected";
 
+export type DocumentSymbolsState = {
+  path: string;
+  status: "loading" | "ready" | "unavailable";
+  symbols: DocumentSymbol[];
+};
+
 export type IdeState = {
   tabs: EditorTab[];
   activePath?: string;
@@ -2107,6 +2135,8 @@ export type IdeState = {
   searchResults: WorkspaceSearchResult[];
   fileDecorations: FileDecoration[];
   diagnostics: ProblemDiagnostic[];
+  /** Symbols for the active editor, from `textDocument/documentSymbol`. */
+  documentSymbols?: DocumentSymbolsState;
   sourceControl: SourceControlState;
   taskDefinitions: TaskDefinition[];
   /** Finished command results, keyed by workspace path then task id. */
@@ -2731,7 +2761,8 @@ export type GlobalSearchSelection =
   | { kind: "action"; id: string }
   | { kind: "file"; path: string }
   | { kind: "project"; path: string }
-  | { kind: "session"; sessionId: string };
+  | { kind: "session"; sessionId: string }
+  | { kind: "symbol"; index: number };
 
 export type WorkspacePreparationPhase =
   "catalog" | "watcher" | "git" | "tasks" | "tests";

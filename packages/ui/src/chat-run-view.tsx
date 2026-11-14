@@ -173,6 +173,7 @@ export function ChatRun({
   onContinueAfterToolBudget,
   layout = "segments",
 }: ChatRunProps) {
+  const timelineId = useId();
   const retryState = useContext(ChatRetryContext);
   const isProblem =
     model.phase.name === "failed" || model.phase.name === "interrupted";
@@ -294,12 +295,13 @@ export function ChatRun({
         canCollapse={canCollapse}
         headerActions={headerActions}
         isCollapsed={isCollapsed}
+        timelineId={showSteps && showRail ? timelineId : undefined}
         model={model}
         activeLabel={activeLabel}
         onToggle={() => setIsCollapsed((current) => !current)}
       />
       <MotionDisclosure open={showSteps && showRail}>
-        <ol aria-label="Work timeline" className="gyro-run-rail">
+        <ol aria-label="Work timeline" className="gyro-run-rail" id={timelineId}>
           {isSegments
             ? segments.map((segment) => {
                 if (segment.kind === "say") {
@@ -781,6 +783,7 @@ function RunHeader({
   canCollapse,
   headerActions,
   isCollapsed,
+  timelineId,
   model,
   onToggle,
 }: {
@@ -789,6 +792,7 @@ function RunHeader({
   canCollapse: boolean;
   headerActions?: ReactNode;
   isCollapsed: boolean;
+  timelineId?: string;
   model: RunModel;
   onToggle: () => void;
 }) {
@@ -806,13 +810,14 @@ function RunHeader({
     <div className="gyro-run-header">
       {canCollapse ? (
         <button
+          aria-controls={timelineId}
           aria-expanded={!isCollapsed}
           className="gyro-run-header-toggle"
           onClick={onToggle}
           type="button"
         >
           <span>{headerLabel}</span>
-          <ChevronRight size={13} />
+          <ChevronRight aria-hidden="true" size={13} />
         </button>
       ) : (
         <span>{headerLabel}</span>

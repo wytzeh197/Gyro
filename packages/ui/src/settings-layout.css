@@ -513,9 +513,7 @@
   .gyro-help-answers {
   gap: calc(var(--gyro-space-section) * 2);
 }
-:root[data-theme]
-  .gyro-settings-surface.is-minimal-settings
-  .gyro-help-topic {
+:root[data-theme] .gyro-settings-surface.is-minimal-settings .gyro-help-topic {
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -647,4 +645,52 @@
   :root[data-theme] .gyro-settings-surface.is-minimal-settings {
     padding-inline: var(--gyro-space-section);
   }
+}
+
+/* Supporting copy follows the same reading rhythm as preference rows.
+   Legacy shortcut, import and provider blocks used 2–3px text gaps. */
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  :is(
+    .gyro-workspace-keybindings > div > label > span,
+    .gyro-workspace-contribution-title > span,
+    .gyro-provider-custom-list > li > div,
+    .gyro-usage-toolbar > div:first-child,
+    .gyro-import-archived > div,
+    .gyro-import-job-header > div,
+    .gyro-import-project-expand > span
+  ) {
+  gap: var(--gyro-space-standard);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-account-identity-text {
+  display: grid;
+  gap: var(--gyro-space-standard);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-account-identity-text
+  > small {
+  margin-top: 0;
+}
+
+/* Nested setup sections need their own separation from the preceding list.
+   The outer page grid cannot space children inside a disclosure body. */
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-disclosure-body
+  > :is(
+    .gyro-settings-group.is-open-section,
+    div:has(> .gyro-settings-group.is-open-section)
+  ) {
+  margin-top: var(--gyro-space-section);
+}
+
+/* Standalone fields and dashboards have no row padding of their own. */
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-group-rows
+  > :is(.gyro-remote-stack, .gyro-usage-dashboard) {
+  padding-top: var(--gyro-space-card);
 }

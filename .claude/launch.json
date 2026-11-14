@@ -35,6 +35,22 @@
       "port": 1420
     },
     {
+      "name": "desktop-remote-preview",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@gyro-dev/desktop",
+        "exec",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "1449",
+        "--strictPort"
+      ],
+      "port": 1449
+    },
+    {
       "name": "desktop-sidebar-resize",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": [
@@ -49,6 +65,22 @@
         "--strictPort"
       ],
       "port": 1450
+    },
+    {
+      "name": "desktop-ide-phase0",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@gyro-dev/desktop",
+        "exec",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "1460",
+        "--strictPort"
+      ],
+      "port": 1460
     }
   ]
 }

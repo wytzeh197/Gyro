@@ -247,6 +247,7 @@ impl FixtureReviewer {
             }
             let result = tauri::async_runtime::block_on(
                 crate::capabilities::execute::resolve_capability_approval(
+                    app.clone(),
                     CapabilityApprovalDecisionRequest {
                         approval_id: id.to_string(),
                         session_id: self.session.to_string(),

@@ -4,6 +4,7 @@ export { applyGoogleModelDiscovery } from "./google-models";
 export { ProjectMemoryPanel } from "./project-memory/panel";
 export type { ProjectMemoryRuntime, MemorySnapshot, MemoryEntry, MemoryDraft, MemorySettings, MemoryReceipt, MemoryCandidate } from "./project-memory/types";
 export type { GoogleModelDiscovery } from "./google-models";
+export type { ChatEnvironmentRemote } from "./chat-environment-card";
 export {
   applyModelContextWindows,
   liveModelContextTokens,
@@ -222,6 +223,7 @@ export type {
   MenuBarSnapshotState,
   IdeSessionEventPayloadKind,
   IdeState,
+  DocumentSymbolsState,
   IdeViewId,
   ModelFocus,
   ModelFollowMode,
@@ -603,6 +605,7 @@ export type {
 export {
   workspaceCommandRegistry,
   workspaceCommandForKeybinding,
+  isWorkspaceEditorCommand,
   workspacePanelContributions,
   workspaceViewContainers,
 } from "./workspace-shell";
@@ -613,9 +616,14 @@ export type {
   WorkspaceViewContainerContribution,
 } from "./workspace-shell";
 export {
+  replaceWorkspaceSearchMatches,
+  workspaceSearchFlags,
   workspaceSearchGlobs,
   workspaceSearchGlobText,
+  workspaceSearchMatcher,
+  workspaceSearchRequestFlags,
 } from "./workspace-search";
+export type { WorkspaceSearchFlags } from "./workspace-search";
 export {
   isWorkspaceTrusted,
   normalizedWorkspaceTrustPath,
@@ -671,6 +679,28 @@ export {
   workspacePathExcluded,
   workspacePathMatchesGlob,
 } from "./workspace-settings";
+export {
+  defaultWorkspaceEditorSettings,
+  normalizedWorkspaceEditorSettings,
+  workspaceRulerList,
+} from "./workspace-editor-settings";
+export type { WorkspaceEditorSettings } from "./workspace-editor-settings";
+export {
+  documentSymbolKindGlyph,
+  documentSymbolKindLabel,
+  documentSymbolPathAt,
+  documentSymbolsFromLsp,
+  flattenDocumentSymbols,
+} from "./document-symbols";
+export type {
+  DocumentSymbol,
+  DocumentSymbolRange,
+  FlatDocumentSymbol,
+} from "./document-symbols";
+export { editorCursor, setEditorCursor, useEditorCursor } from "./editor-cursor";
+export type { EditorCursorPosition } from "./editor-cursor";
+export { DocumentOutline, EditorBreadcrumbs } from "./document-symbol-views";
+export type { RevealDocumentSymbol } from "./document-symbol-views";
 export {
   cliUpdateActionLabel,
   cliUpdateDismissKey,

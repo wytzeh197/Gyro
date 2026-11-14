@@ -9,6 +9,7 @@ import { automaticBrowserDevice } from "./browser-viewport.ts";
 import { addNotification } from "./failure-notifications.ts";
 import type {
   DesktopNotificationPreferences,
+  DocumentSymbolsState,
   AppDestination,
   Automation,
   AutomationStatus,
@@ -1760,6 +1761,7 @@ export type WorkbenchAction =
       results: WorkspaceSearchResult[];
     }
   | { type: "ide-set-diagnostics"; diagnostics: ProblemDiagnostic[] }
+  | { type: "ide-set-document-symbols"; documentSymbols?: DocumentSymbolsState }
   | { type: "ide-set-source-control"; sourceControl: SourceControlState }
   | { type: "github-reset" }
   | { type: "github-loading"; loading: boolean }
@@ -3434,6 +3436,13 @@ export function workbenchReducer(
           searchResults: action.results,
         },
       };
+    case "ide-set-document-symbols":
+      return state.ide.documentSymbols === action.documentSymbols
+        ? state
+        : {
+            ...state,
+            ide: { ...state.ide, documentSymbols: action.documentSymbols },
+          };
     case "ide-set-diagnostics":
       return {
         ...state,
@@ -5104,6 +5113,7 @@ function normalizedSettingsSection(
 ): SettingsSectionId {
   switch (value) {
     case "general":
+    case "remote-access":
     case "import-projects":
     case "editor-workspace":
     case "tools-contributions":

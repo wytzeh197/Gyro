@@ -9,8 +9,12 @@ import {
   useState,
 } from "react";
 import {
+  documentSymbolsFromLsp,
+  setEditorCursor,
   useAppearance,
   userIsTypingElsewhere,
+  type DocumentSymbol,
+  type WorkspaceEditorSettings,
   type EditorBuffer,
   type EditorRevealTarget,
   type EditorSelection,
@@ -26,13 +30,42 @@ import { canonicalFileUri, filePathFromUri } from "./document-uri";
 
 const MonacoEditor = lazy(() => import("../monaco-editor"));
 
+/**
+ * The editor that last had focus. Palette commands and rebound shortcuts run
+ * Monaco actions here, since focus has moved to the palette by then.
+ */
+let lastFocusedEditor: Monaco.editor.IStandaloneCodeEditor | undefined;
+let quickOutlineUnbound = false;
+
+/** Runs a Monaco action on the last focused editor; false when there is none. */
+export function runActiveEditorAction(actionId: string) {
+  const editor = lastFocusedEditor;
+  const action = editor?.getModel() ? editor.getAction(actionId) : null;
+  if (!editor || !action) return false;
+  editor.focus();
+  void action.run();
+  return true;
+}
+
+/** Feeds the breadcrumbs and Outline, which read the cursor outside React state. */
+function reportCursor(editor: Monaco.editor.IStandaloneCodeEditor) {
+  const model = editor.getModel(),
+    position = editor.getPosition(),
+    path = model ? filePathFromUri(model.uri.toString()) : undefined;
+  if (path && position) setEditorCursor(path, position);
+}
+
 type EditorPosition = { lineNumber: number; column: number };
 export type WorkspaceNavigationSource = EditorPosition & { path: string };
 export type MonacoEditorPaneProps = {
+  /** A viewer can inspect and copy a remote buffer without acquiring write authority. */
+  readOnly?: boolean;
   languageOverride?: string;
   semanticReady?: string;
   fileError?: string;
   buffer?: EditorBuffer;
+  /** Resolved user/workspace/folder editor settings. */
+  editorSettings?: WorkspaceEditorSettings;
   fileContent?: WorkspaceFileContent;
   loadState: "idle" | "loading" | "ready" | "error";
   minimapEnabled: boolean;
@@ -304,12 +337,74 @@ function registerLspRoute(monaco: Parameters<OnMount>[1], route: LspRoute) {
         },
         releaseDocumentSemanticTokens: () => {},
       });
+    const formatWith = async (
+      model: Monaco.editor.ITextModel,
+      method: "textDocument/formatting" | "textDocument/rangeFormatting",
+      options: Monaco.languages.FormattingOptions,
+      token: Monaco.CancellationToken,
+      range?: Monaco.IRange,
+    ) => {
+      const route = routeForModel(model, language);
+      if (!route) return [];
+      const { path, onLspRequest } = route.current;
+      const version = model.getVersionId();
+      try {
+        const result = await onLspRequest(path, method, {
+          options: lspFormattingOptions(options),
+          ...(range ? { range: lspRangeFromMonaco(range) } : {}),
+        });
+        if (!requestStillCurrent(model, version, token)) return [];
+        return monacoTextEditsFromLsp(monaco, result);
+      } catch {
+        return [];
+      }
+    };
+    const formattingRegistration =
+      monaco.languages.registerDocumentFormattingEditProvider(language, {
+        displayName: "Language server",
+        provideDocumentFormattingEdits: (model, options, token) =>
+          formatWith(model, "textDocument/formatting", options, token),
+      });
+    const rangeFormattingRegistration =
+      monaco.languages.registerDocumentRangeFormattingEditProvider(language, {
+        displayName: "Language server",
+        provideDocumentRangeFormattingEdits: (model, range, options, token) =>
+          formatWith(model, "textDocument/rangeFormatting", options, token, range),
+      });
+    const symbolRegistration = monaco.languages.registerDocumentSymbolProvider(
+      language,
+      {
+        displayName: "Language server",
+        provideDocumentSymbols: async (model, token) => {
+          const route = routeForModel(model, language);
+          if (!route) return [];
+          const { path, onLspRequest } = route.current;
+          const version = model.getVersionId();
+          try {
+            const result = await onLspRequest(
+              path,
+              "textDocument/documentSymbol",
+              {},
+            );
+            if (!requestStillCurrent(model, version, token)) return [];
+            return documentSymbolsFromLsp(result).map((symbol) =>
+              monacoDocumentSymbol(monaco, symbol),
+            );
+          } catch {
+            return [];
+          }
+        },
+      },
+    );
     const registrations = [
       completionRegistration,
       hoverRegistration,
       definitionRegistration,
       referencesRegistration,
       semanticRegistration,
+      formattingRegistration,
+      rangeFormattingRegistration,
+      symbolRegistration,
     ];
     provider = {
       references: 0,
@@ -349,6 +444,7 @@ function MonacoEditorPaneView(props: MonacoEditorPaneProps) {
     languageOverride,
     fileError,
     semanticReady,
+    editorSettings,
   } = props;
   const syntax = useSyntax(
     path ?? "",
@@ -427,6 +523,7 @@ function MonacoEditorPaneView(props: MonacoEditorPaneProps) {
         registration.dispose(),
       );
       paneRegistrations.current = [];
+      if (lastFocusedEditor === editorRef.current) lastFocusedEditor = undefined;
       editorRef.current = null;
     },
     [],
@@ -439,12 +536,15 @@ function MonacoEditorPaneView(props: MonacoEditorPaneProps) {
         reduceMotion,
         minimapEnabled,
         limited: syntax.policy.limited,
-        readOnly: syntax.policy.readOnly,
+        readOnly: syntax.policy.readOnly || Boolean(props.readOnly),
+        settings: editorSettings,
       }),
     [
+      editorSettings,
       minimapEnabled,
       syntax.policy.limited,
       syntax.policy.readOnly,
+      props.readOnly,
       scale,
       reduceMotion,
     ],
@@ -521,6 +621,16 @@ function MonacoEditorPaneView(props: MonacoEditorPaneProps) {
 
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
+    lastFocusedEditor ??= editor;
+    if (!quickOutlineUnbound) {
+      // ⇧⌘O opens Gyro's `@` palette, fed by the same symbols as the Outline.
+      quickOutlineUnbound = true;
+      monaco.editor.addKeybindingRule({
+        keybinding:
+          monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyO,
+        command: "-editor.action.quickOutline",
+      });
+    }
     synchronizeModelLanguage(editor, monaco);
     hasMountedRef.current = true;
     setMounted(true);
@@ -530,6 +640,9 @@ function MonacoEditorPaneView(props: MonacoEditorPaneProps) {
     // React Monaco's default cache is shared across panes; each split should
     // retain its own cursor, selection and scroll position for each file.
     paneRegistrations.current.push(
+      editor.onDidFocusEditorWidget(() => {
+        lastFocusedEditor = editor;
+      }),
       editor.onWillChangeModel(() => {
         const model = editor.getModel(),
           state = editor.saveViewState();
@@ -541,10 +654,16 @@ function MonacoEditorPaneView(props: MonacoEditorPaneProps) {
         const state = uri ? viewStates.current.get(uri) : undefined;
         if (state) editor.restoreViewState(state);
         revealEditorTarget(editor);
+        reportCursor(editor);
       }),
       editor.onDidChangeCursorSelection((event) => {
         const model = editor.getModel();
         const path = model ? filePathFromUri(model.uri.toString()) : undefined;
+        if (path)
+          setEditorCursor(path, {
+            lineNumber: event.selection.positionLineNumber,
+            column: event.selection.positionColumn,
+          });
         const text = model?.getValueInRange(event.selection);
         propsRef.current.onSelectionChange(
           path && text
@@ -618,6 +737,7 @@ function MonacoEditorPaneView(props: MonacoEditorPaneProps) {
       }),
     );
     revealEditorTarget(editor);
+    reportCursor(editor);
   };
 
   if (!path)
@@ -819,4 +939,61 @@ function lspMarkdown(value: unknown): string {
     return `\`\`\`${value.language}\n${value.value}\n\`\`\``;
   }
   return typeof value.value === "string" ? value.value : "";
+}
+
+function lspFormattingOptions(options: Monaco.languages.FormattingOptions) {
+  return {
+    tabSize: options.tabSize,
+    insertSpaces: options.insertSpaces,
+    trimTrailingWhitespace: true,
+    insertFinalNewline: true,
+    trimFinalNewlines: true,
+  };
+}
+
+function lspRangeFromMonaco(range: Monaco.IRange) {
+  return {
+    start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
+    end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
+  };
+}
+
+function monacoTextEditsFromLsp(
+  monaco: Parameters<OnMount>[1],
+  value: unknown,
+): Monaco.languages.TextEdit[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((edit) => {
+    if (!isRecord(edit) || typeof edit.newText !== "string") return [];
+    const range = monacoRangeFromLsp(monaco, edit.range);
+    return range ? [{ range, text: edit.newText }] : [];
+  });
+}
+
+function monacoDocumentSymbol(
+  monaco: Parameters<OnMount>[1],
+  symbol: DocumentSymbol,
+): Monaco.languages.DocumentSymbol {
+  const range = new monaco.Range(
+    symbol.range.startLineNumber,
+    symbol.range.startColumn,
+    symbol.range.endLineNumber,
+    symbol.range.endColumn,
+  );
+  const selection = new monaco.Range(
+    symbol.selectionRange.startLineNumber,
+    symbol.selectionRange.startColumn,
+    symbol.selectionRange.endLineNumber,
+    symbol.selectionRange.endColumn,
+  );
+  return {
+    name: symbol.name,
+    detail: symbol.detail ?? "",
+    // LSP SymbolKind is 1-based; Monaco's enum is the same list from 0.
+    kind: (symbol.kind - 1) as Monaco.languages.SymbolKind,
+    tags: [],
+    range,
+    selectionRange: selection,
+    children: symbol.children.map((child) => monacoDocumentSymbol(monaco, child)),
+  };
 }

@@ -1888,9 +1888,11 @@ pub(crate) fn handle_desktop_provider_capability_request_inner(
 
 #[tauri::command]
 pub(crate) async fn resolve_capability_approval(
+    app: tauri::AppHandle,
     request: CapabilityApprovalDecisionRequest,
     manager: tauri::State<'_, ProviderCapabilityApprovalManager>,
 ) -> Result<(), String> {
+    crate::features::remote_access::require_local_control(&app, &request.session_id)?;
     let approval_id = parse_uuid(&request.approval_id)?;
     let session_id = parse_uuid(&request.session_id)?;
     let turn_id = request.turn_id.as_deref().map(parse_uuid).transpose()?;

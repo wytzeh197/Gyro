@@ -1,5 +1,6 @@
 #[cfg(test)]
 use gyro_core::provider_runtime::support::is_stale_resume_error as is_stale_provider_resume_error;
+mod database;
 mod provider_approval;
 mod provider_deadline;
 mod runner_host;
@@ -73,6 +74,8 @@ enum Commands {
     Automate(AutomateArgs),
     /// Validate local setup.
     Doctor(DoctorArgs),
+    /// List migration backups or restore one into a new database file.
+    Database(database::DatabaseArgs),
     /// Manage local Gyro configuration.
     Config(ConfigArgs),
     /// Generate shell completions on stdout.
@@ -765,6 +768,7 @@ impl Cli {
             Some(Commands::Setup(args)) => args.json,
             Some(Commands::App(args)) => args.json,
             Some(Commands::Doctor(args)) => args.json,
+            Some(Commands::Database(args)) => args.json,
             Some(Commands::Approvals(args)) => args.json,
             Some(Commands::Spill(args)) => args.json,
             Some(Commands::ProviderPermissionServer) => false,
@@ -833,7 +837,10 @@ fn main() {
 
 fn run_cli(cli: Cli) -> Result<()> {
     let _process_scope = gyro_core::process_guard::ProcessLeaseScope::unleased();
-    recover_provider_mutations_on_startup()?;
+    // Recovery must remain available when the live database cannot open.
+    if !matches!(&cli.command, Some(Commands::Database(_))) {
+        recover_provider_mutations_on_startup()?;
+    }
     match cli.command {
         Some(Commands::Chat(args)) => interactive_chat(args),
         Some(Commands::Run(args)) => run_task(args),
@@ -843,6 +850,7 @@ fn run_cli(cli: Cli) -> Result<()> {
         Some(Commands::App(args)) => app_command(args),
         Some(Commands::Automate(args)) => automate_command(args),
         Some(Commands::Doctor(args)) => doctor(args),
+        Some(Commands::Database(args)) => database::run(args),
         Some(Commands::Config(args)) => config_command(args),
         Some(Commands::Completions(args)) => completions_command(args),
         Some(Commands::Approvals(args)) => approvals_command(args),

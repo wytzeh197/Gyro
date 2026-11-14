@@ -3,6 +3,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import { syncNativeAppearance } from "./native-appearance";
 import ReactDOM from "react-dom/client";
 import { EarlyShell } from "./early-shell";
+import { RemoteWorkspaceRoot } from "./remote-access/root";
 import { AppFailure } from "./app-failure";
 import { resolveBootSurface } from "./surface-boundary";
 import { readStoredAppearance } from "./ui-storage";
@@ -131,7 +132,7 @@ if (bootSurface === "embedded") {
       root.render(
         <React.StrictMode>
           <AppErrorBoundary>
-            <App />
+            <RemoteWorkspaceRoot><App /></RemoteWorkspaceRoot>
           </AppErrorBoundary>
         </React.StrictMode>,
       );

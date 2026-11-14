@@ -77,7 +77,9 @@ if (parameters.get("tour") === "skip") writeTourRecord(localStorage, "dismissed"
 const chatEdge = parameters.get("edge");
 const isStreamingEdge = chatEdge === "streaming";
 const isListLayoutEdge = chatEdge === "markdown-lists";
-const isCodeBlockEdge = chatEdge === "code-block" || isListLayoutEdge;
+const isRichResponseEdge = chatEdge === "rich-response";
+const isCodeBlockEdge =
+  chatEdge === "code-block" || isListLayoutEdge || isRichResponseEdge;
 const isStackedEdge = chatEdge === "stacked";
 const isThreeEdge = chatEdge === "three";
 const isSplitEdge = chatEdge === "split" || isStackedEdge || isThreeEdge;
@@ -450,6 +452,26 @@ if (isCodeBlockEdge) {
         "",
         "- The retry loop has a ceiling.",
         "- The last error is thrown instead of swallowed.",
+        ...(isRichResponseEdge ? [
+          "",
+          "## Verification",
+          "",
+          "| Check | Result | Detail |",
+          "| :--- | :--- | ---: |",
+          "| Retry limit | Passed | 5 attempts |",
+          "| Recovery | Passed | 1 successful flush |",
+          "| Exhaustion | Passed | Last error preserved |",
+          "",
+          "Run the focused check:",
+          "",
+          "```sh",
+          "pnpm test --filter sync -- --runInBand --testNamePattern='preserves the last error after all retry attempts are exhausted'",
+          "```",
+          "",
+          "```",
+          "All retry checks passed.",
+          "```",
+        ] : []),
         ...(isListLayoutEdge ? [
           "",
           "Wrapping and numbered steps:",
@@ -1263,6 +1285,43 @@ const emptyUsageTotals = {
 };
 
 const invoke: Invoke = (command, args) => {
+  // Exercise chat's Save as workflow navigation without a native backend.
+  // Unknown fixture mutations fail explicitly rather than returning malformed data.
+  if (command.startsWith("workflow_")) {
+    const action = args?.action;
+    const root = session.workspaceIdentity.roots[0]!;
+    const project = {
+      sessionId: SESSION_ID,
+      rootId: root.id,
+      title: "aurora",
+      path: WORKSPACE,
+    };
+    if (command === "workflow_run_request") {
+      if (action === "projects") return [project];
+      if (action === "project") return project;
+      if (action === "jobs" || action === "runs") return [];
+      if (action === "setup")
+        return { rootId: root.id, roots: [root], providers: [], tasks: [] };
+    }
+    if (command === "workflow_definition_request" && action === "list")
+      return { rootId: root.id, roots: [root], definitions: [] };
+    if (command === "workflow_extraction_request") {
+      if (action === "list") return [];
+      if (action === "turns")
+        return chatEvents
+          .filter((event) => event.kind === "user-message")
+          .map((event) => ({
+            turnId: event.turnId,
+            eventId: event.id,
+            request: event.message,
+            status: "completed",
+            hasAnswer: true,
+          }));
+    }
+    return Promise.reject(
+      new Error("Workflow changes are unavailable in this chat preview."),
+    );
+  }
   if (command === "search_workspace") {
     const request = args?.request as { query: string };
     let pattern: RegExp;

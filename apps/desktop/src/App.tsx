@@ -31,6 +31,9 @@ import {
   validateWorkspaceEntryName,
   WorkspaceEditBar,
   workspaceEntryName,
+  replaceWorkspaceSearchMatches,
+  type DocumentSymbol,
+  workspaceSearchRequestFlags,
   WorkspacePathUndoContext,
   WorkspaceRenameDialog,
   type PullRequestDraft,
@@ -225,6 +228,13 @@ import {
   editorBufferFromFile,
   useWorkspaceRename,
 } from "./editor/use-workspace-rename";
+import { applyTextEdits } from "./editor/workspace-edits";
+import { useDocumentSymbols } from "./editor/use-document-symbols";
+import { useAutoSave } from "./editor/use-auto-save";
+import {
+  editorCommandWouldStealTyping,
+  runEditorCommandLater,
+} from "./editor/editor-commands";
 import {
   MonacoEditorPane,
   type WorkspaceNavigationSource,
@@ -1052,9 +1062,9 @@ export function App() {
   const workspacePreparationRunRef = useRef("");
   const workspacePreparationPathRef = useRef("");
   const openGlobalSearch = useCallback(
-    (mode: "commands" | "files" | "global" = "global") => {
+    (mode: "commands" | "files" | "global" = "global", query = "") => {
       setCommandPaletteMode(mode);
-      setCommandPaletteQuery("");
+      setCommandPaletteQuery(query);
       setIsCommandPaletteOpen(true);
     },
     [],
@@ -4556,6 +4566,7 @@ export function App() {
                 request: {
                   workspacePath: root,
                   query: query.query,
+                  ...workspaceSearchRequestFlags(query),
                   globs: globs.length > 0 ? globs : undefined,
                   maxResults: query.maxResults ?? settings.searchMaxResults,
                 },
@@ -13722,6 +13733,16 @@ export function App() {
     [openEditorFile, workspaceRoots],
   );
 
+  const revealDocumentSymbol = useCallback(
+    (path: string, symbol: DocumentSymbol) =>
+      openEditorLocation(
+        path,
+        symbol.selectionRange.startLineNumber,
+        symbol.selectionRange.startColumn,
+      ),
+    [openEditorLocation],
+  );
+
   const closeEditorTab = useCallback(
     async (path: string, groupId?: string) => {
       const groupsWithPath = workbench.ide.layout.groups.filter((group) =>
@@ -13846,10 +13867,77 @@ export function App() {
     [notify],
   );
 
+  const languageRequestRef = useRef<
+    | ((
+        path: string,
+        method: string,
+        params: Record<string, unknown>,
+      ) => Promise<unknown>)
+    | undefined
+  >(undefined);
+  /**
+   * Format on save: asks the language server for whole-document edits and
+   * applies them only if the buffer is still the text the server formatted.
+   * A slow or failing server never blocks the save itself.
+   */
+  const formatBufferBeforeSave = useCallback(
+    async (path: string, root: string) => {
+      const settings = resolvedWorkspaceSettings(
+        workbench.preferences.workspaceUserSettings,
+        workbench.preferences.workspaceSettingsByWorkspace,
+        workbench.preferences.workspaceSettingsByFolder,
+        activeWorkspaceRoot,
+        root,
+      );
+      const request = languageRequestRef.current;
+      const before = editorBuffersRef.current[path]?.content;
+      if (
+        !settings.editorFormatOnSave ||
+        !request ||
+        before === undefined ||
+        workbench.ide.buffers[path]?.content !== before
+      )
+        return;
+      let timer: number | undefined;
+      try {
+        const edits = await Promise.race([
+          request(path, "textDocument/formatting", {
+            options: {
+              tabSize: settings.editorTabSize ?? 2,
+              insertSpaces: settings.editorInsertSpaces ?? true,
+            },
+          }),
+          new Promise<undefined>((resolve) => {
+            timer = window.setTimeout(() => resolve(undefined), 3000);
+          }),
+        ]);
+        if (!Array.isArray(edits) || edits.length === 0) return;
+        if (editorBuffersRef.current[path]?.content !== before) return;
+        const formatted = applyTextEdits(before, edits);
+        if (formatted !== before) updateEditorBuffer(path, formatted);
+      } catch {
+        // No formatter or a stale document: save the text as typed.
+      } finally {
+        window.clearTimeout(timer);
+      }
+    },
+    [
+      activeWorkspaceRoot,
+      updateEditorBuffer,
+      workbench.ide.buffers,
+      workbench.preferences.workspaceSettingsByFolder,
+      workbench.preferences.workspaceSettingsByWorkspace,
+      workbench.preferences.workspaceUserSettings,
+    ],
+  );
+
   const saveEditorBuffer = useCallback(
-    async (path: string) => {
-      const buffer = editorBuffersRef.current[path];
+    async (path: string, options?: { quiet?: boolean }) => {
       const root = workspaceRootForPath(workspaceRoots, path);
+      const initial = editorBuffersRef.current[path];
+      if (initial && root && !initial.truncated)
+        await formatBufferBeforeSave(path, root);
+      const buffer = editorBuffersRef.current[path];
       if (!buffer || !root) {
         notify("command-failed", "Save blocked", "Open a workspace first");
         return false;
@@ -13929,7 +14017,7 @@ export function App() {
         });
         if (selectedFileRef.current === path)
           setSelectedFileContent({ ...saved, content: live.content });
-        notify("tests-passed", "File saved", path);
+        if (!options?.quiet) notify("tests-passed", "File saved", path);
         void appendEditorEvent("file-write-approved", `Saved ${path}`, {
           path,
           contentHash: saved.contentHash,
@@ -13954,8 +14042,15 @@ export function App() {
         return false;
       }
     },
-    [appendEditorEvent, notify, workbench.ide.buffers, workspaceRoots],
+    [appendEditorEvent, formatBufferBeforeSave, notify, workspaceRoots],
   );
+  useAutoSave({
+    mode: effectiveWorkspaceSettings.filesAutoSave ?? "off",
+    delay: effectiveWorkspaceSettings.filesAutoSaveDelay ?? 1000,
+    buffers: workbench.ide.buffers,
+    activePath: workbench.ide.activePath,
+    save: (path) => saveEditorBuffer(path, { quiet: true }),
+  });
 
   const languageSessions = useLanguageSessions({
     roots: workspaceRoots,
@@ -13989,6 +14084,17 @@ export function App() {
     },
   });
   const requestLanguageFeature = languageSessions.request;
+  languageRequestRef.current = requestLanguageFeature;
+  const symbolsPath =
+    selectedFile && workbench.ide.buffers[selectedFile] ? selectedFile : undefined;
+  useDocumentSymbols({
+    path: symbolsPath,
+    content: symbolsPath ? workbench.ide.buffers[symbolsPath]?.content : undefined,
+    request: requestLanguageFeature,
+    current: workbench.ide.documentSymbols,
+    onChange: (documentSymbols) =>
+      dispatchWorkbench({ type: "ide-set-document-symbols", documentSymbols }),
+  });
   const workspaceRename = useWorkspaceRename({
     roots: workspaceRoots,
     buffers: workbench.ide.buffers,
@@ -14184,9 +14290,13 @@ export function App() {
             "read_workspace_file_full",
             { workspacePath: root, path },
           );
-          const occurrences = file.content.split(searchText).length - 1;
-          if (occurrences === 0) continue;
-          const content = file.content.split(searchText).join(replacement);
+          const replaced = replaceWorkspaceSearchMatches(
+            file.content,
+            query,
+            replacement,
+          );
+          if (!replaced || replaced.occurrences === 0) continue;
+          const { content, occurrences } = replaced;
           const saved = await invoke<WorkspaceFileContent>(
             "write_workspace_file",
             {
@@ -16394,9 +16504,18 @@ export function App() {
             void runAutomation(workbench.selectedAutomationId);
           }
           break;
+        case "editor.action.quickOutline":
+          // After the palette that ran this command has closed.
+          window.setTimeout(() => openGlobalSearch("files", "@"), 0);
+          break;
+        default:
+          runEditorCommandLater(commandId, () =>
+            notify("command-failed", "No editor to run this in", "Open a file in the editor first."),
+          );
       }
     },
     [
+      openGlobalSearch,
       addTerminalPane,
       addWorkspaceFolder,
       handleBrowserNavigate,
@@ -16640,6 +16759,7 @@ export function App() {
         openGlobalSearch("global");
       } else if (
         workspaceCommand &&
+        !editorCommandWouldStealTyping(workspaceCommand.id) &&
         (!workspaceCommand.requiresWorkspace ||
           Boolean(activeSession?.workspacePath ?? workspacePath)) &&
         (!workspaceCommand.requiresTrust || workspaceTrusted)
@@ -18714,6 +18834,7 @@ export function App() {
       onOpenSettingsSection={openSettingsSection}
       onOpenWorkspace={openWorkspace}
       onAddWorkspaceFolder={addWorkspaceFolder}
+      onRevealSymbol={revealDocumentSymbol}
       onRemoveWorkspaceFolder={removeWorkspaceFolder}
       workspaceRootIssues={workspaceRootIssues}
       onSelectWorkspaceFolder={setSelectedWorkspaceRoot}
@@ -19140,6 +19261,10 @@ export function App() {
                 effectiveMinimapEnabled={
                   effectiveWorkspaceSettings.editorMinimapEnabled
                 }
+                breadcrumbsEnabled={
+                  effectiveWorkspaceSettings.editorBreadcrumbs !== false
+                }
+                onRevealSymbol={revealDocumentSymbol}
                 workspacePath={activeWorkspaceRoot}
                 workspaceTrusted={workspaceTrusted}
                 onOpenWorkspace={openWorkspace}
@@ -19348,6 +19473,7 @@ export function App() {
                       onOpenLocation={openWorkspaceLocation}
                       onRenameSymbol={workspaceRename.begin}
                       onLspRequest={requestLanguageFeature}
+                      editorSettings={effectiveWorkspaceSettings}
                       theme={resolvedTheme}
                     />
                   );
@@ -20059,6 +20185,8 @@ export function App() {
               );
           }}
           onSelectFile={(path) => openEditorLocation(path)}
+          onSelectSymbol={revealDocumentSymbol}
+          symbols={workbench.ide.documentSymbols}
           onSelectSession={selectSession}
           onSelectWorkspaceLayout={selectWorkspaceLayout}
           hasWorkspace={Boolean(activeSession?.workspacePath ?? workspacePath)}

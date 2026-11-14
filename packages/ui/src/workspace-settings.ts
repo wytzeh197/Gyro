@@ -1,5 +1,9 @@
 import type { WorkspaceScopedSettings } from "./types";
 import { normalizedWorkspaceFolderPath } from "./workspace-project.ts";
+import {
+  defaultWorkspaceEditorSettings,
+  normalizedWorkspaceEditorSettings,
+} from "./workspace-editor-settings.ts";
 
 export const defaultWorkspaceUserSettings: Required<WorkspaceScopedSettings> = {
   filesExclude: [".git/**"],
@@ -12,6 +16,7 @@ export const defaultWorkspaceUserSettings: Required<WorkspaceScopedSettings> = {
   ],
   searchMaxResults: 200,
   editorMinimapEnabled: true,
+  ...defaultWorkspaceEditorSettings,
 };
 
 export function normalizedWorkspaceUserSettings(
@@ -67,6 +72,7 @@ export function normalizedWorkspaceScopedSettings(
     ...(searchExclude ? { searchExclude } : {}),
     ...(searchMaxResults !== undefined ? { searchMaxResults } : {}),
     ...(editorMinimapEnabled !== undefined ? { editorMinimapEnabled } : {}),
+    ...normalizedWorkspaceEditorSettings(value as Record<string, unknown>),
   };
 }
 

@@ -1800,7 +1800,8 @@
 
 /* A status in the control lane keeps its dot: the row's blanket span rule would
    otherwise make it a block and collapse the dot. */
-:root[data-theme] .gyro-settings-surface .gyro-settings-row .gyro-settings-status {
+:root[data-theme] .gyro-settings-surface .gyro-settings-row .gyro-settings-status,
+:root[data-theme] .gyro-settings-surface .gyro-settings-header-actions .gyro-settings-status {
   display: inline-flex;
   align-items: center;
 }

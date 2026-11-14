@@ -39,6 +39,13 @@ pub(crate) async fn resolve_provider_approval(
     app: tauri::AppHandle,
     request: ProviderApprovalDecisionRequest,
 ) -> Result<SessionEvent, String> {
+    {
+        let manager = app.state::<ProviderApprovalManager>();
+        let pending = manager.pending.lock().map_err(|_| "Approval state is unavailable".to_string())?;
+        if let Some(approval) = pending.get(&request.approval_id) {
+            crate::features::remote_access::require_local_control(&app, &approval.session_id.to_string())?;
+        }
+    }
     tauri::async_runtime::spawn_blocking(move || resolve_provider_approval_blocking(app, request))
         .await
         .map_err(|error| format!("provider approval worker failed: {error}"))?

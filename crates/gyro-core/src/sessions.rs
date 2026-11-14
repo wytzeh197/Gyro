@@ -6,6 +6,7 @@ mod project_memory_candidates;
 mod project_memory_storage;
 mod review_fix_storage;
 mod titles;
+mod turn_index;
 mod workflow_continuation;
 mod workflow_drafts;
 mod workflow_retention;
@@ -41,13 +42,10 @@ const MAX_WORKSPACE_CONTEXT_LOOKUP_BYTES: usize = 8 * 1024 * 1024;
 const WORKSPACE_CONTEXT_MARKER: &str = "workspace-context";
 const MAX_SESSION_EVENT_BATCH: usize = 256;
 const MAX_SESSION_EVENT_BATCH_BYTES: usize = 8 * 1024 * 1024;
-/// How far back a replay check looks in a log that predates the turn index.
-/// A replay is of the turn just sent, so it is always near the tail.
-const LEGACY_TURN_MESSAGE_SCAN_LINES: usize = 64;
 const TRUNCATED_SESSION_EVENT_MARKER: &str = "… [truncated]";
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 /// Bump when additive schema migrations change so reopen skips table_info scans.
-const SESSION_STORE_SCHEMA_VERSION: i32 = 16;
+pub(crate) const SESSION_STORE_SCHEMA_VERSION: i32 = 17;
 /// Ceiling for one delete's sub-agent cleanup, so a cycle in the data — which
 /// the write path cannot create — cannot spin forever.
 const MAX_SUBAGENT_SESSION_TREE: usize = 256;
@@ -459,7 +457,7 @@ impl SessionStore {
         paths.ensure()?;
         reject_unsafe_private_file(&paths.database_path)?;
         let conn = crate::sqlite::open_pooled_database(&paths.database_path)
-            .with_context(|| format!("open {}", paths.database_path.display()))?;
+            .map_err(|error| anyhow!("open {}: {error:#}", paths.database_path.display()))?;
         secure_private_file(&paths.database_path)?;
         let store = Self { paths, conn };
         store
@@ -1508,15 +1506,16 @@ impl SessionStore {
             let _ = std::fs::remove_file(&events_path);
             return Err(anyhow!("session {session_id} was deleted while appending"));
         }
+        // A previous writer may have died after fsync but before indexing.
+        // Repair before deciding whether this request is a replay.
+        self.catch_up_turn_index_locked(session_id, &events_path, &mut file)?;
         if let Some(turn_id) = turn_id.filter(|_| {
             matches!(
                 kind,
                 SessionEventKind::UserMessage | SessionEventKind::AssistantMessage
             )
         }) {
-            if let Some(existing) =
-                self.find_indexed_turn_message(session_id, turn_id, &kind, &events_path)?
-            {
+            if let Some(existing) = self.indexed_turn_message(session_id, turn_id, &kind)? {
                 if existing.message == message {
                     return Ok(existing);
                 }
@@ -1540,29 +1539,11 @@ impl SessionStore {
         file.flush()?;
         file.sync_data()
             .with_context(|| format!("sync {}", events_path.display()))?;
-        // Index the turn message before another writer can take the lock, so
-        // its replay check sees this one without scanning the log.
-        if let Some(turn_id) = event.turn_id.filter(|_| {
-            matches!(
-                event.kind,
-                SessionEventKind::UserMessage | SessionEventKind::AssistantMessage
-            )
-        }) {
-            if let Err(error) = self.record_turn_message_index(session_id, turn_id, &event) {
-                eprintln!("session event was saved but its turn index was not updated: {error}");
-            }
-        }
-        // The status index must follow JSONL append order too. Releasing the
-        // lock first lets a later terminal status be overwritten by an older
-        // running status whose SQLite write was delayed by another process.
-        if let Some(turn_id) = event.turn_id {
-            if let Some(status) = provider_status_from_payload(&event.payload) {
-                if let Err(error) = self.record_turn_provider_status(session_id, turn_id, &status) {
-                    eprintln!(
-                        "session event was saved but its turn status index was not updated: {error}"
-                    );
-                }
-            }
+        // Commit both projections and their durable watermark together, still
+        // under the append lock. Failure leaves a replayable tail, not a false
+        // claim that the index is complete. The fsynced append remains success.
+        if let Err(error) = self.catch_up_turn_index_locked(session_id, &events_path, &mut file) {
+            eprintln!("session event was saved but its turn indexes need recovery: {error}");
         }
         drop(event_lock);
         drop(file);
@@ -1586,6 +1567,7 @@ impl SessionStore {
         session_id: Uuid,
         turn_id: Uuid,
     ) -> Result<Option<String>> {
+        self.ensure_turn_index(session_id)?;
         self.conn
             .query_row(
                 "select status from session_turn_status
@@ -1599,6 +1581,7 @@ impl SessionStore {
 
     /// Whether this conversation has a durable provider turn still in flight.
     pub fn has_running_provider_turn(&self, session_id: Uuid) -> Result<bool> {
+        self.ensure_turn_index(session_id)?;
         self.conn
             .query_row(
                 "select exists(select 1 from session_turn_status where session_id = ?1 and status = 'running')",
@@ -1616,6 +1599,18 @@ impl SessionStore {
     ///
     /// [`latest_provider_status_for_turn`]: Self::latest_provider_status_for_turn
     pub fn list_running_turns(&self) -> Result<Vec<(Uuid, Uuid)>> {
+        // A missing running row is just as important as a stale one. Inspect
+        // every session's watermark, not only the currently indexed runners.
+        let session_ids = self
+            .conn
+            .prepare("select id from sessions")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for id in session_ids {
+            if let Ok(id) = Uuid::parse_str(&id) {
+                self.ensure_turn_index(id)?;
+            }
+        }
         let mut statement = self.conn.prepare(
             "select session_id, turn_id from session_turn_status
              where status = 'running'
@@ -1704,6 +1699,9 @@ impl SessionStore {
         file.flush()?;
         file.sync_data()
             .with_context(|| format!("sync {}", events_path.display()))?;
+        if let Err(error) = self.catch_up_turn_index_locked(session_id, &events_path, &mut file) {
+            eprintln!("session event batch was saved but its turn indexes need recovery: {error}");
+        }
         drop(event_lock);
         drop(file);
 
@@ -1926,6 +1924,7 @@ impl SessionStore {
         session_id: Uuid,
         efficiency: bool,
     ) -> Result<Vec<SessionEvent>> {
+        self.ensure_turn_index(session_id)?;
         let session = self
             .get_session(session_id)?
             .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
@@ -1993,11 +1992,10 @@ impl SessionStore {
                         // A read may have indexed the assistant before its
                         // plan marker was appended. Its turn index keeps the
                         // Markdown fallback available across that boundary.
-                        if let Some(assistant) = self.find_indexed_turn_message(
+                        if let Some(assistant) = self.indexed_turn_message(
                             session_id,
                             turn_id,
                             &SessionEventKind::AssistantMessage,
-                            &events_path,
                         )? {
                             context_events.push((offset.saturating_sub(1), assistant));
                         }
@@ -2201,10 +2199,8 @@ impl SessionStore {
     }
 
     fn initialize(&self) -> Result<()> {
-        let user_version: i32 = self
-            .conn
-            .query_row("pragma user_version", [], |row| row.get(0))?;
-        if user_version >= SESSION_STORE_SCHEMA_VERSION {
+        let user_version = crate::sqlite::ensure_supported_schema(&self.conn)?;
+        if user_version == SESSION_STORE_SCHEMA_VERSION {
             return self.ensure_current_schema();
         }
         // The app and the CLI can both open an old database at once. One
@@ -2213,11 +2209,17 @@ impl SessionStore {
             &self.conn,
             rusqlite::TransactionBehavior::Immediate,
         )?;
-        let user_version: i32 =
-            transaction.query_row("pragma user_version", [], |row| row.get(0))?;
-        if user_version >= SESSION_STORE_SCHEMA_VERSION {
+        let user_version = crate::sqlite::ensure_supported_schema(&transaction)?;
+        if user_version == SESSION_STORE_SCHEMA_VERSION {
             self.ensure_current_schema()?;
         } else {
+            // This write reservation excludes competing SQLite writers while
+            // a separate read connection snapshots the last committed state.
+            crate::sqlite::recovery::before_migration(
+                &self.paths,
+                user_version,
+                SESSION_STORE_SCHEMA_VERSION,
+            )?;
             self.migrate_schema()?;
         }
         transaction.commit()?;
@@ -2385,6 +2387,14 @@ impl SessionStore {
                foreign key (session_id) references sessions(id) on delete cascade
              );
 
+             create table if not exists session_turn_index (
+               session_id text primary key not null references sessions(id) on delete cascade,
+               file_identity text not null,
+               indexed_bytes integer not null,
+               file_modified text not null,
+               anchor text not null
+             );
+
              create table if not exists session_context_index (
                session_id text primary key not null,
                indexed_bytes integer not null,
@@ -2415,12 +2425,11 @@ impl SessionStore {
         Ok(())
     }
 
-    fn find_indexed_turn_message(
+    fn indexed_turn_message(
         &self,
         session_id: Uuid,
         turn_id: Uuid,
         kind: &SessionEventKind,
-        events_path: &Path,
     ) -> Result<Option<SessionEvent>> {
         if let Some((event_id, message, created_at)) = self
             .conn
@@ -2452,29 +2461,7 @@ impl SessionStore {
                 created_at,
             }));
         }
-        // Once a session has any indexed turn message, every later one is
-        // indexed too (under the append lock), so the index is authoritative
-        // and a new turn costs no log scan.
-        let indexed: bool = self.conn.query_row(
-            "select exists(select 1 from session_turn_messages where session_id = ?1)",
-            params![session_id.to_string()],
-            |row| row.get(0),
-        )?;
-        if indexed {
-            return Ok(None);
-        }
-        // Legacy logs written before the turn index existed. The scan only
-        // guards replays, so a log it cannot read must not block the append.
-        match find_existing_turn_message(events_path, turn_id, kind) {
-            Ok(found) => Ok(found),
-            Err(error) => {
-                eprintln!(
-                    "skipped the legacy turn check for {}: {error:#}",
-                    events_path.display()
-                );
-                Ok(None)
-            }
-        }
+        Ok(None)
     }
 
     fn record_turn_message_index(
@@ -2736,27 +2723,6 @@ fn provider_status_from_payload(payload: &Value) -> Option<String> {
         .get("status")
         .and_then(Value::as_str)
         .map(str::to_string)
-}
-
-fn find_existing_turn_message(
-    path: &Path,
-    turn_id: Uuid,
-    kind: &SessionEventKind,
-) -> Result<Option<SessionEvent>> {
-    let mut file = open_session_event_log_for_read(path)?;
-    let lines = read_recent_event_lines(&mut file, LEGACY_TURN_MESSAGE_SCAN_LINES)?;
-    for (index, line) in lines.iter().enumerate().rev() {
-        if line.is_empty() {
-            continue;
-        }
-        let Some(event) = parse_session_event_line_or_skip(path, index, line) else {
-            continue;
-        };
-        if event.turn_id == Some(turn_id) && &event.kind == kind {
-            return Ok(Some(event));
-        }
-    }
-    Ok(None)
 }
 
 fn open_session_event_log_for_append(path: &Path) -> Result<File> {
@@ -4078,16 +4044,20 @@ mod tests {
             store.read_events(session.id).unwrap().last().unwrap().id,
             event.id
         );
-        assert_eq!(
-            store
-                .latest_provider_status_for_turn(session.id, turn_id)
-                .unwrap(),
-            None
-        );
+        assert!(store
+            .latest_provider_status_for_turn(session.id, turn_id)
+            .is_err());
         store
             .conn
             .execute_batch("drop trigger reject_status;")
             .unwrap();
+        assert_eq!(
+            store
+                .latest_provider_status_for_turn(session.id, turn_id)
+                .unwrap()
+                .as_deref(),
+            Some("done")
+        );
     }
 
     #[test]
@@ -4641,7 +4611,7 @@ mod tests {
     }
 
     #[test]
-    fn a_new_turn_trusts_the_turn_index_instead_of_scanning_the_log() {
+    fn an_unindexed_durable_turn_is_recovered_before_replay_checks() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
         let session = store
@@ -4650,8 +4620,7 @@ mod tests {
         store
             .append_user_turn_message(session.id, "first", serde_json::json!({}))
             .unwrap();
-        // A turn message the index never saw. Once the session is indexed the
-        // log is not scanned for it, so the append is not a replay of it.
+        // A crash between log fsync and index commit must not permit a replay.
         let turn_id = Uuid::new_v4();
         let (unindexed_id, line) = raw_event_line(
             session.id,
@@ -4660,25 +4629,26 @@ mod tests {
             Some(turn_id),
         );
         append_raw_lines(&session.events_path, &[line]);
-        let appended = store
+        let mismatch = store
             .append_user_turn_message_with_turn_id(
                 session.id,
                 "second",
                 serde_json::json!({}),
                 turn_id,
             )
-            .unwrap();
-        assert_ne!(appended.id, unindexed_id);
-        // Replays of indexed turns are still recognised.
+            .unwrap_err();
+        assert!(mismatch
+            .to_string()
+            .contains("already contains a different"));
         let replay = store
             .append_user_turn_message_with_turn_id(
                 session.id,
-                "second",
+                "unindexed",
                 serde_json::json!({}),
                 turn_id,
             )
             .unwrap();
-        assert_eq!(replay.id, appended.id);
+        assert_eq!(replay.id, unindexed_id);
     }
 
     #[test]

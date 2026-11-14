@@ -75,10 +75,12 @@ pub(crate) fn create_terminal_pane_blocking(
 
 #[tauri::command]
 pub(crate) async fn write_terminal_input(
+    app: tauri::AppHandle,
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
     input: String,
 ) -> Result<TerminalPaneSnapshot, String> {
+    crate::features::remote_access::require_local_terminal_control(&app, &pane_id)?;
     let manager = manager.inner().clone();
     tauri::async_runtime::spawn_blocking(move || manager.write(&pane_id, &input).map_err(to_string))
         .await
@@ -156,11 +158,13 @@ pub(crate) async fn terminal_pane_working_directory(
 
 #[tauri::command]
 pub(crate) async fn resize_terminal_pane(
+    app: tauri::AppHandle,
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
     cols: u16,
     rows: u16,
 ) -> Result<TerminalPaneSnapshot, String> {
+    crate::features::remote_access::require_local_terminal_control(&app, &pane_id)?;
     let manager = manager.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         manager.resize(&pane_id, cols, rows).map_err(to_string)
@@ -184,9 +188,11 @@ pub(crate) async fn terminal_pane_has_foreground_job(
 
 #[tauri::command]
 pub(crate) async fn stop_terminal_pane(
+    app: tauri::AppHandle,
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
 ) -> Result<TerminalPaneSnapshot, String> {
+    crate::features::remote_access::require_local_terminal_control(&app, &pane_id)?;
     let manager = manager.inner().clone();
     tauri::async_runtime::spawn_blocking(move || manager.stop(&pane_id).map_err(to_string))
         .await
@@ -286,6 +292,7 @@ pub(crate) async fn close_terminal_pane(
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
 ) -> Result<(), String> {
+    crate::features::remote_access::require_local_terminal_control(&app, &pane_id)?;
     let manager = manager.inner().clone();
     let governed_session =
         tauri::async_runtime::spawn_blocking(move || manager.close(&pane_id).map_err(to_string))

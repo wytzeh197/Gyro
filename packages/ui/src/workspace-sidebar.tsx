@@ -1,5 +1,13 @@
 import { gitSetupMessage } from "./workspace-preparation";
 import {
+  RemoteProjectIndicator,
+  useRemoteProjectHost,
+} from "./remote-access-context";
+import {
+  DocumentOutline,
+  type RevealDocumentSymbol,
+} from "./document-symbol-views";
+import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
@@ -145,6 +153,7 @@ import {
   type WorkspaceRootIssuesModel,
 } from "./workspace-root-issues";
 import {
+  workspaceSearchFlags,
   workspaceSearchGlobText,
   workspaceSearchGlobs,
 } from "./workspace-search";
@@ -759,6 +768,7 @@ export function WorkspaceSidebarContent({
   onSelectSessions,
   onOpenWorkspace,
   onAddWorkspaceFolder,
+  onRevealSymbol,
   onRemoveWorkspaceFolder,
   workspaceRootIssues,
   onSelectWorkspaceFolder,
@@ -857,6 +867,8 @@ export function WorkspaceSidebarContent({
   onSelectSessions: () => void;
   onOpenWorkspace: () => void;
   onAddWorkspaceFolder?: () => void;
+  /** Outline row click: reveal the symbol in the editor. */
+  onRevealSymbol?: RevealDocumentSymbol;
   onRemoveWorkspaceFolder?: (path: string) => void;
   workspaceRootIssues?: WorkspaceRootIssuesModel;
   onSelectWorkspaceFolder?: (path: string) => void;
@@ -1123,6 +1135,7 @@ export function WorkspaceSidebarContent({
     onExpandedWorkspaceDirectoriesChange?.([...expandedWorkspaceDirectories]);
   }, [expandedWorkspaceDirectories, onExpandedWorkspaceDirectoriesChange]);
   const [selectedExplorerPath, setSelectedExplorerPath] = useState<string>();
+  const [outlineCollapsed, setOutlineCollapsed] = useState(false);
   const [selectedExplorerPaths, setSelectedExplorerPaths] = useState<
     Set<string>
   >(() => new Set());
@@ -1437,6 +1450,11 @@ export function WorkspaceSidebarContent({
   const [sidebarSearchExcludeDraft, setSidebarSearchExcludeDraft] = useState(
     workspaceSearchGlobText(ide?.searchQuery.globs, "exclude"),
   );
+  const [sidebarSearchFlags, setSidebarSearchFlags] = useState(() =>
+    workspaceSearchFlags(ide?.searchQuery),
+  );
+  const toggleSidebarSearchFlag = (flag: keyof typeof sidebarSearchFlags) =>
+    setSidebarSearchFlags((current) => ({ ...current, [flag]: !current[flag] }));
   const workspaceFileRootKey = files
     .filter((file) => file.isWorkspaceRoot)
     .map((file) => file.path)
@@ -1457,6 +1475,7 @@ export function WorkspaceSidebarContent({
       workspaceSearchCallbackRef.current?.({
         query: sidebarSearchDraft,
         globs: globs.length > 0 ? globs : undefined,
+        ...sidebarSearchFlags,
       });
     }, 250);
     return () => {
@@ -1470,6 +1489,7 @@ export function WorkspaceSidebarContent({
     sidebarSearchDraft,
     sidebarSearchIncludeDraft,
     sidebarSearchExcludeDraft,
+    sidebarSearchFlags,
     workspaceFileRootKey,
   ]);
   useEffect(() => {
@@ -1480,7 +1500,17 @@ export function WorkspaceSidebarContent({
     setSidebarSearchExcludeDraft(
       workspaceSearchGlobText(ide?.searchQuery.globs, "exclude"),
     );
-  }, [ide?.searchQuery.globs, ide?.searchQuery.query]);
+    if (ide?.searchQuery.query) {
+      const next = workspaceSearchFlags(ide.searchQuery);
+      setSidebarSearchFlags((current) =>
+        current.matchCase === next.matchCase &&
+        current.wholeWord === next.wholeWord &&
+        current.useRegex === next.useRegex
+          ? current
+          : next,
+      );
+    }
+  }, [ide?.searchQuery]);
   useEffect(() => {
     if (!sidebarReplaceOpen) return;
     setSelectedReplacePaths(
@@ -1939,7 +1969,6 @@ export function WorkspaceSidebarContent({
           />
         </div>
       </div>
-
       {isIdeSidebar ? (
         <>
           {!workspacePath ? (
@@ -2544,6 +2573,20 @@ export function WorkspaceSidebarContent({
             </SidebarSection>
           ) : null}
 
+          {workspacePath && activeIdeView === "explorer" ? (
+            <SidebarSection
+              collapsible
+              isCollapsed={outlineCollapsed}
+              onToggle={() => setOutlineCollapsed((value) => !value)}
+              title="Outline"
+            >
+              <DocumentOutline
+                onReveal={(path, symbol) => onRevealSymbol?.(path, symbol)}
+                state={ide?.documentSymbols}
+              />
+            </SidebarSection>
+          ) : null}
+
           {workspacePath && activeIdeView === "search" ? (
             <SidebarSection
               grow
@@ -2565,6 +2608,7 @@ export function WorkspaceSidebarContent({
                   onRunWorkspaceSearch?.({
                     query: sidebarSearchDraft,
                     globs: globs.length > 0 ? globs : undefined,
+                    ...sidebarSearchFlags,
                   });
                 }}
               >
@@ -2586,6 +2630,31 @@ export function WorkspaceSidebarContent({
                   placeholder="Search in files"
                   value={sidebarSearchDraft}
                 />
+                <span
+                  className="gyro-sidebar-search-flags"
+                  role="group"
+                  aria-label="Search options"
+                >
+                  {(
+                    [
+                      ["matchCase", "Aa", "Match case"],
+                      ["wholeWord", "ab", "Match whole word"],
+                      ["useRegex", ".*", "Use regular expression"],
+                    ] as const
+                  ).map(([flag, glyph, label]) => (
+                    <button
+                      key={flag}
+                      aria-label={label}
+                      aria-pressed={sidebarSearchFlags[flag]}
+                      className={sidebarSearchFlags[flag] ? "is-active" : ""}
+                      onClick={() => toggleSidebarSearchFlag(flag)}
+                      title={label}
+                      type="button"
+                    >
+                      {glyph}
+                    </button>
+                  ))}
+                </span>
                 <button
                   aria-expanded={sidebarReplaceOpen}
                   aria-label="Toggle replace preview"
@@ -2674,6 +2743,7 @@ export function WorkspaceSidebarContent({
                             sidebarSearchIncludeDraft,
                             sidebarSearchExcludeDraft,
                           ),
+                          ...sidebarSearchFlags,
                         },
                         sidebarReplaceDraft,
                         [...selectedReplacePaths],
@@ -4349,6 +4419,7 @@ export function SidebarProjectRow({
   isPinned?: boolean;
   onPin?: () => void;
 }) {
+  const remoteHost = useRemoteProjectHost();
   return (
     <div
       aria-grabbed={draggable ? Boolean(isDragging) : undefined}
@@ -4370,8 +4441,10 @@ export function SidebarProjectRow({
         aria-expanded={isCollapsed === undefined ? undefined : !isCollapsed}
         aria-label={
           isCollapsed === undefined
-            ? undefined
-            : `${isCollapsed ? "Expand" : "Collapse"} ${label}`
+            ? remoteHost
+              ? `${label}, remote on ${remoteHost}`
+              : undefined
+            : `${isCollapsed ? "Expand" : "Collapse"} ${label}${remoteHost ? `, remote on ${remoteHost}` : ""}`
         }
         className="gyro-sidebar-project-toggle"
         onClick={onClick}
@@ -4386,6 +4459,7 @@ export function SidebarProjectRow({
         ) : null}
         <Icon size={15} />
         <span>{label}</span>
+        <RemoteProjectIndicator />
         {isCollapsed === undefined ? meta ? <small>{meta}</small> : null : null}
       </button>
       {onPin ? (

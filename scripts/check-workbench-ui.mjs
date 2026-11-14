@@ -2624,8 +2624,11 @@ expect(
     appSource.includes("const applyWorkspaceReplace = useCallback") &&
     appSource.includes("Replace blocked by unsaved changes") &&
     appSource.includes("Replace blocked in Restricted Mode") &&
+    // The old text-scanned Outline stays gone; the current one is built from
+    // the language server's textDocument/documentSymbol answer.
     !surfaceSource.includes("documentOutlineSymbols(") &&
-    !surfaceSource.includes('title="Outline"'),
+    surfaceSource.includes("<DocumentOutline") &&
+    appSource.includes("useDocumentSymbols({"),
   "Workspace navigation should keep Explorer persistent while providing guarded search-and-replace preview.",
 );
 expect(
@@ -6710,7 +6713,7 @@ expect(
     !releaseWorkflowSource.includes("tauri-apps/tauri-action") &&
     !tauriConfigSource.includes("updates.gyro.dev") &&
     surfaceSource.includes('title="Updates"') &&
-    surfaceSource.includes("Public Alpha") &&
+    surfaceSource.includes("Public Beta") &&
     surfaceSource.includes('"Check for updates"') &&
     updateStateSource.includes("formatUpdateCheckedAt") &&
     !surfaceSource.includes('label="Release channel"') &&

@@ -1,4 +1,6 @@
 import type { editor } from "monaco-editor";
+// Type-only: this module also loads in Node checks and the launch film.
+import type { WorkspaceEditorSettings } from "@gyro-dev/ui";
 
 /** Shared presentation inputs update the existing editor without recreating its model. */
 export function workspaceEditorOptions({
@@ -7,13 +9,18 @@ export function workspaceEditorOptions({
   minimapEnabled,
   limited,
   readOnly,
+  settings,
 }: {
   scale: number;
   reduceMotion: boolean;
   minimapEnabled: boolean;
   limited: boolean;
   readOnly: boolean;
+  settings?: WorkspaceEditorSettings;
 }): editor.IStandaloneEditorConstructionOptions {
+  // Defaults mirror defaultWorkspaceEditorSettings.
+  // Line height tracks the font so larger sizes do not clip descenders.
+  const fontSize = (settings?.editorFontSize ?? 13.5) * scale;
   return {
     automaticLayout: true,
     bracketPairColorization: { enabled: !limited },
@@ -23,19 +30,20 @@ export function workspaceEditorOptions({
     fontFamily:
       "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
     fontLigatures: false,
-    fontSize: 13.5 * scale,
+    fontSize,
     guides: {
       bracketPairs: !limited,
       indentation: !limited,
     },
-    lineHeight: Math.round(21 * scale),
+    lineHeight: Math.round(fontSize * (21 / 13.5)),
     minimap: {
       enabled: minimapEnabled && !limited,
       scale: 0.75,
     },
     overviewRulerBorder: false,
     padding: { top: 8, bottom: 12 },
-    renderWhitespace: "selection" as const,
+    renderWhitespace: settings?.editorRenderWhitespace ?? "selection",
+    rulers: settings?.editorRulers ?? [],
     scrollbar: {
       horizontalScrollbarSize: 10,
       verticalScrollbarSize: 10,
@@ -46,7 +54,8 @@ export function workspaceEditorOptions({
     smoothScrolling: false,
     cursorBlinking: reduceMotion ? ("solid" as const) : ("blink" as const),
     stickyScroll: { enabled: !limited, maxLineCount: 3 },
-    tabSize: 2,
-    wordWrap: "off" as const,
+    tabSize: settings?.editorTabSize ?? 2,
+    insertSpaces: settings?.editorInsertSpaces ?? true,
+    wordWrap: settings?.editorWordWrap ?? "off",
   };
 }

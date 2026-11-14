@@ -1,6 +1,7 @@
 import { gitSetupMessage, hasOnlyGitWarnings, preparationMessage, preparationStatusLabel } from "./workspace-preparation";
 import { ProjectMemoryPanel } from "./project-memory/panel";
 import type { ProjectMemoryRuntime } from "./project-memory/types";
+import { RemoteAccessSettingsContent } from "./remote-access-context";
 import {
   Activity,
   Archive,
@@ -29,6 +30,7 @@ import {
   Download,
   Edit3,
   FileCode2,
+  AtSign,
   FileDiff,
   FileText,
   Gauge,
@@ -212,6 +214,15 @@ import { ComposerEffortSelector } from "./composer-effort-selector";
 import { ComposerModelRail } from "./composer-model-rail";
 import { clippingBounds } from "./composer-popover-bounds";
 import { DesktopNotificationSettings } from "./desktop-notification-settings";
+import {
+  EditorBreadcrumbs,
+  type RevealDocumentSymbol,
+} from "./document-symbol-views";
+import {
+  documentSymbolKindLabel,
+  flattenDocumentSymbols,
+  type DocumentSymbol,
+} from "./document-symbols";
 import { buildDiffFileTree, type DiffTreeNode } from "./diff-file-tree";
 import { LanguagePicker } from "./editor/languages/language-picker";
 import { EfficiencySettings } from "./efficiency-settings";
@@ -324,6 +335,11 @@ import { Folder, FolderOpen, Folders } from "./workspace-folder-icons";
 import "./workspace-folder-icons.css";
 import { type WorkspaceRootIssuesModel } from "./workspace-root-issues";
 import { resolvedWorkspaceSettings } from "./workspace-settings";
+import {
+  normalizedWorkspaceEditorSettings,
+  workspaceRulerList,
+  type WorkspaceEditorSettings,
+} from "./workspace-editor-settings";
 import {
   GlobalSearchMode,
   IconComponent,
@@ -561,6 +577,7 @@ import type {
   IdeAssistantAction,
   IdeContribution,
   IdeState,
+  DocumentSymbolsState,
   IdeViewId,
   InterfaceSize,
   LanguageServerState,
@@ -666,7 +683,7 @@ import {
 
 import type { BrowserScreenshotHandler } from "./types";
 import { BrowserAnnotationControls } from "./browser-annotation-controls";
-import { ChatEnvironmentCard } from "./chat-environment-card";
+import { ChatEnvironmentCard, type ChatEnvironmentRemote } from "./chat-environment-card";
 const CommandIcon = Command;
 const AutoApproveIcon = createLucideIcon("AutoApprove", [
   [
@@ -682,6 +699,7 @@ const workspaceShellIcons: Record<WorkspaceShellIcon, IconComponent> = {
   ai: Sparkles,
   browser: Globe2,
   diff: GitPullRequest,
+  editor: FileCode2,
   explorer: FileText,
   output: FileText,
   problems: CircleDashed,
@@ -1003,6 +1021,7 @@ type AppChromeProps = {
   onSelectSessions: () => void;
   onOpenWorkspace: () => void;
   onAddWorkspaceFolder?: () => void;
+  onRevealSymbol?: RevealDocumentSymbol;
   onRemoveWorkspaceFolder?: (path: string) => void;
   workspaceRootIssues?: WorkspaceRootIssuesModel;
   onSelectWorkspaceFolder?: (path: string) => void;
@@ -1194,6 +1213,7 @@ const settingsSidebarItems: Array<{
     group: "Gyro account",
   },
   { id: "advanced", label: "Data & privacy", icon: Settings, group: "System" },
+  { id: "remote-access", label: "Remote access", icon: Laptop, group: "System" },
   { id: "updates", label: "Updates", icon: RefreshCw, group: "System" },
   { id: "about", label: "Help", icon: HelpCircle, group: "System" },
 ];
@@ -1206,6 +1226,7 @@ type SettingsSearchEntry = {
 };
 
 const settingsSearchEntries: SettingsSearchEntry[] = [
+  { section: "remote-access", label: "Remote access", detail: "Pair devices and share projects", keywords: "remote host devices pairing invitation terminal" },
   {
     section: "account",
     label: "Gyro Account",
@@ -1982,6 +2003,7 @@ export function AppChrome({
   onSelectSessions,
   onOpenWorkspace,
   onAddWorkspaceFolder,
+  onRevealSymbol,
   onRemoveWorkspaceFolder,
   workspaceRootIssues,
   onSelectWorkspaceFolder,
@@ -2832,6 +2854,7 @@ export function AppChrome({
               onOpenToolPanel={onOpenToolPanel}
               onOpenWorkspace={onOpenWorkspace}
               onAddWorkspaceFolder={onAddWorkspaceFolder}
+              onRevealSymbol={onRevealSymbol}
               onRemoveWorkspaceFolder={onRemoveWorkspaceFolder}
               workspaceRootIssues={workspaceRootIssues}
               onSelectWorkspaceFolder={onSelectWorkspaceFolder}
@@ -4730,6 +4753,8 @@ type ChatSurfaceProps = {
   workspaceMode?: WorkbenchMode;
   /** Whether empty chats show their starter prompt shortcuts. */
   isEnvironmentRailOpen?: boolean;
+  /** A chat on another machine: its connection and tools show in the Environment card. */
+  environmentRemote?: ChatEnvironmentRemote;
   isToolPanelOpen?: boolean;
   /**
    * Whether the surrounding layout can draw the bottom drawer at all. The Chat
@@ -5038,6 +5063,7 @@ export function ChatSurface({
   subagents,
   planEditorRequest,
   isEnvironmentRailOpen,
+  environmentRemote,
   isToolPanelOpen,
   isToolPanelAvailable = true,
   isComposerSending,
@@ -5992,8 +6018,12 @@ export function ChatSurface({
   const environmentBranchLabel =
     branchName ??
     (workspaceMode === "worktree" ? "New worktree branch" : "main");
+  // A remote chat keeps its card even before the first prompt: the card is
+  // where its connection and controls live.
   const isEnvironmentPopoverOpen =
-    !isEmptyStart && activeRailPanel === "environment" && !isCompanionPanel;
+    (!isEmptyStart || Boolean(environmentRemote)) &&
+    activeRailPanel === "environment" &&
+    !isCompanionPanel;
   const legacySidePanel =
     (activeRailPanel || hasCompanion) &&
     displayedRailPanel !== "tools" &&
@@ -6207,6 +6237,7 @@ export function ChatSurface({
         onRunGitAction={railDiffTools?.onRunGitAction}
         placement="panel"
         plan={sessionPlan}
+        remote={environmentRemote}
         sourceControl={sourceControl}
         subagents={subagents}
         terminalPanes={terminalPanes}
@@ -10098,6 +10129,187 @@ function workspaceSettingsList(value: string) {
     .filter(Boolean);
 }
 
+type EditorSettingsPatch = Partial<
+  Pick<WorkspaceScopedSettings, "editorMinimapEnabled"> & WorkspaceEditorSettings
+>;
+
+/** Editor and auto-save rows; each select can inherit the parent scope. */
+function WorkspaceEditorSettingsRows({
+  settings,
+  inherited,
+  inheritedLabel,
+  keyPrefix,
+  onChange,
+}: {
+  settings: WorkspaceScopedSettings;
+  inherited: ReturnType<typeof resolvedWorkspaceSettings>;
+  inheritedLabel: string;
+  keyPrefix: string;
+  onChange: (patch: EditorSettingsPatch) => void;
+}) {
+  const toggle = (
+    key:
+      | "editorMinimapEnabled"
+      | "editorInsertSpaces"
+      | "editorBreadcrumbs"
+      | "editorFormatOnSave",
+    title: string,
+    description: string,
+  ) => (
+    <label key={key}>
+      <span>
+        <strong>{title}</strong>
+        <small>{description}</small>
+      </span>
+      <SettingsSelect
+        onChange={(event) =>
+          onChange({
+            [key]:
+              event.target.value === "inherit"
+                ? undefined
+                : event.target.value === "on",
+          })
+        }
+        value={
+          settings[key] === undefined ? "inherit" : settings[key] ? "on" : "off"
+        }
+      >
+        <option value="inherit">
+          {inheritedLabel} ({inherited[key] ? "On" : "Off"})
+        </option>
+        <option value="on">On</option>
+        <option value="off">Off</option>
+      </SettingsSelect>
+    </label>
+  );
+  const choice = <K extends "editorWordWrap" | "editorRenderWhitespace" | "filesAutoSave">(
+    key: K,
+    title: string,
+    description: string,
+    options: readonly (readonly [NonNullable<WorkspaceScopedSettings[K]>, string])[],
+  ) => {
+    const labelFor = (value: unknown) =>
+      options.find(([option]) => option === value)?.[1] ?? String(value);
+    return (
+      <label key={key}>
+        <span>
+          <strong>{title}</strong>
+          <small>{description}</small>
+        </span>
+        <SettingsSelect
+          onChange={(event) =>
+            onChange({
+              [key]: normalizedWorkspaceEditorSettings({
+                [key]: event.target.value,
+              })[key],
+            })
+          }
+          value={settings[key] ?? "inherit"}
+        >
+          <option value="inherit">
+            {inheritedLabel} ({labelFor(inherited[key])})
+          </option>
+          {options.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </SettingsSelect>
+      </label>
+    );
+  };
+  const number = (
+    key: "editorFontSize" | "editorTabSize" | "filesAutoSaveDelay",
+    title: string,
+    description: string,
+  ) => (
+    <label key={key}>
+      <span>
+        <strong>{title}</strong>
+        <small>{description}</small>
+      </span>
+      <SettingsDraftInput
+        inputMode="decimal"
+        key={`${key}-${keyPrefix}`}
+        onCommit={(draft) =>
+          onChange({
+            [key]: draft.trim()
+              ? normalizedWorkspaceEditorSettings({ [key]: Number(draft) })[key]
+              : undefined,
+          })
+        }
+        placeholder={`${inheritedLabel}: ${inherited[key]}`}
+        value={settings[key] ?? ""}
+      />
+    </label>
+  );
+  return (
+    <>
+      {number("editorFontSize", "Font size", "Editor text size in points, 8 to 32.")}
+      {number("editorTabSize", "Tab size", "Columns per indent level, 1 to 8.")}
+      {toggle(
+        "editorInsertSpaces",
+        "Insert spaces",
+        "Indent with spaces instead of tab characters.",
+      )}
+      {choice("editorWordWrap", "Word wrap", "How long lines wrap in the editor.", [
+        ["off", "Off"],
+        ["on", "At the window edge"],
+        ["bounded", "At column 80 or the window edge"],
+      ])}
+      <label>
+        <span>
+          <strong>Rulers</strong>
+          <small>Comma-separated columns that draw a vertical guide.</small>
+        </span>
+        <SettingsDraftInput
+          key={`rulers-${keyPrefix}`}
+          onCommit={(value) => onChange({ editorRulers: workspaceRulerList(value) })}
+          placeholder={`${inheritedLabel}: ${inherited.editorRulers.join(", ") || "none"}`}
+          value={(settings.editorRulers ?? []).join(", ")}
+        />
+      </label>
+      {choice(
+        "editorRenderWhitespace",
+        "Render whitespace",
+        "Which spaces and tabs are drawn as dots and arrows.",
+        [
+          ["none", "None"],
+          ["boundary", "Between words, except single spaces"],
+          ["selection", "In the selection"],
+          ["trailing", "Trailing only"],
+          ["all", "All"],
+        ],
+      )}
+      {toggle(
+        "editorMinimapEnabled",
+        "Minimap",
+        "Shows a compact document overview beside the editor.",
+      )}
+      {toggle(
+        "editorBreadcrumbs",
+        "Breadcrumbs",
+        "Shows the file path and the symbols around the cursor above the editor.",
+      )}
+      {toggle(
+        "editorFormatOnSave",
+        "Format on save",
+        "Formats with the language server before writing; a slow server never blocks the save.",
+      )}
+      {choice("filesAutoSave", "Auto save", "When edited files are written to disk.", [
+        ["off", "Off"],
+        ["afterDelay", "After a delay"],
+        ["onFocusChange", "When focus leaves the editor or window"],
+      ])}
+      {number(
+        "filesAutoSaveDelay",
+        "Auto save delay",
+        "Milliseconds after the last edit, 100 to 60,000. Used by After a delay.",
+      )}
+    </>
+  );
+}
+
 // Keep incomplete text (commas, spaces, or the first digit) until editing ends.
 // Normalizing every keystroke makes lists and bounded numbers impossible to type.
 function SettingsDraftInput({
@@ -10374,39 +10586,13 @@ function WorkspaceSettingsEditor({
           </SettingsGroup>
           <SettingsGroup id="editor" label="Editor">
             <div className="gyro-workspace-settings-list">
-              <label>
-                <span>
-                  <strong>Minimap</strong>
-                  <small>
-                    Shows a compact document overview beside the editor.
-                  </small>
-                </span>
-                <SettingsSelect
-                  onChange={(event) =>
-                    update({
-                      ...settings,
-                      editorMinimapEnabled:
-                        event.target.value === "inherit"
-                          ? undefined
-                          : event.target.value === "on",
-                    })
-                  }
-                  value={
-                    settings.editorMinimapEnabled === undefined
-                      ? "inherit"
-                      : settings.editorMinimapEnabled
-                        ? "on"
-                        : "off"
-                  }
-                >
-                  <option value="inherit">
-                    {inheritedLabel} (
-                    {inherited.editorMinimapEnabled ? "On" : "Off"})
-                  </option>
-                  <option value="on">On</option>
-                  <option value="off">Off</option>
-                </SettingsSelect>
-              </label>
+              <WorkspaceEditorSettingsRows
+                inherited={inherited}
+                inheritedLabel={inheritedLabel}
+                keyPrefix={`${scope}-${path}`}
+                onChange={(patch) => update({ ...settings, ...patch })}
+                settings={settings}
+              />
             </div>
           </SettingsGroup>
           {scope !== "user" && Object.keys(settings).length > 0 ? (
@@ -10681,6 +10867,9 @@ type IdeSurfaceProps = {
   workspacePath?: string;
   workspaceTrusted?: boolean;
   effectiveMinimapEnabled?: boolean;
+  /** Path and symbol breadcrumbs above each editor (`editorBreadcrumbs`). */
+  breadcrumbsEnabled?: boolean;
+  onRevealSymbol?: RevealDocumentSymbol;
   selectedPath?: string;
   fileContent?: WorkspaceFileContent;
   fileError?: string;
@@ -10774,6 +10963,8 @@ export function IdeSurface({
   workspacePath,
   workspaceTrusted = true,
   effectiveMinimapEnabled,
+  breadcrumbsEnabled = true,
+  onRevealSymbol,
   selectedPath,
   fileContent,
   fileError = "",
@@ -11028,6 +11219,9 @@ export function IdeSurface({
                     effectiveMinimapEnabled ??
                     ide?.layout.minimapEnabled !== false
                   }
+                  breadcrumbsEnabled={breadcrumbsEnabled}
+                  documentSymbols={ide?.documentSymbols}
+                  onRevealSymbol={onRevealSymbol}
                   onActivate={() => onSelectEditorGroup?.(group.id)}
                   onAssistantAction={onAssistantAction}
                   onCloseGroup={() => onCloseEditorGroup?.(group.id)}
@@ -11378,6 +11572,9 @@ type EditorGroupPaneProps = {
   fileLoadState: "idle" | "loading" | "ready" | "error";
   filesAvailable: boolean;
   minimapEnabled: boolean;
+  breadcrumbsEnabled?: boolean;
+  documentSymbols?: DocumentSymbolsState;
+  onRevealSymbol?: RevealDocumentSymbol;
   /** When Browser is focused and no file is open, de-emphasize editor chrome. */
   browserFocusEmpty?: boolean;
   onActivate: () => void;
@@ -11402,6 +11599,10 @@ function EditorGroupPane({
   isActive,
   activePath,
   activeBuffer,
+  breadcrumbPath,
+  breadcrumbsEnabled,
+  documentSymbols,
+  onRevealSymbol,
   revealTarget,
   fileContent,
   fileError,
@@ -11758,6 +11959,14 @@ function EditorGroupPane({
             document.body,
           )
         : null}
+      {breadcrumbsEnabled && activePath && !review ? (
+        <EditorBreadcrumbs
+          displayPath={breadcrumbPath ?? activePath}
+          onReveal={onRevealSymbol}
+          path={activePath}
+          symbols={documentSymbols}
+        />
+      ) : null}
       <div className="gyro-code-surface" role="region" aria-label="Code editor">
         {renderEditor && activePath ? (
           renderEditor({
@@ -17127,6 +17336,8 @@ export function CommandPaletteOverlay({
   onSelectSession,
   onSelectProject,
   onSelectFile,
+  symbols,
+  onSelectSymbol,
 }: {
   onClose: () => void;
   onSelectDestination: (destination: AppDestination) => void;
@@ -17147,6 +17358,9 @@ export function CommandPaletteOverlay({
   onSelectSession?: (sessionId: string) => void;
   onSelectProject?: (path: string) => void;
   onSelectFile?: (path: string) => void;
+  /** The active editor's symbols, listed when the query starts with `@`. */
+  symbols?: DocumentSymbolsState;
+  onSelectSymbol?: RevealDocumentSymbol;
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listboxId = useId();
@@ -17264,6 +17478,34 @@ export function CommandPaletteOverlay({
           first.label.localeCompare(second.label),
       );
   }, [files, projects, recentFilePaths]);
+  const symbolTargets = useMemo(
+    () => (symbols ? flattenDocumentSymbols(symbols.symbols) : []),
+    [symbols],
+  );
+  const symbolEntries = useMemo<GlobalSearchEntry[]>(
+    () =>
+      symbolTargets.map<GlobalSearchEntry>((symbol, index) => {
+        const kind = documentSymbolKindLabel(symbol.kind);
+        const detail = symbol.container.length
+          ? `${kind} in ${symbol.container.join(".")}`
+          : kind;
+        return {
+          id: `symbol:${index}`,
+          label: symbol.name,
+          detail: `${detail} · line ${symbol.selectionRange.startLineNumber}`,
+          icon: AtSign,
+          selection: { kind: "symbol", index },
+          target: createGlobalSearchTarget(
+            symbol.name,
+            detail,
+            symbol.detail ?? "",
+          ),
+          priority: index,
+        };
+      }),
+    [symbolTargets],
+  );
+  const symbolRanker = useGlobalSearchRanker(symbolEntries);
   const actionRanker = useGlobalSearchRanker(actionEntries);
   const fileRanker = useGlobalSearchRanker(fileEntries);
   const projectRanker = useGlobalSearchRanker(projectEntries);
@@ -17280,6 +17522,18 @@ export function CommandPaletteOverlay({
       ranker
         .rank(deferredQuery, limit)
         .map(({ item, match }) => ({ entry: item, match }));
+    if (mode !== "commands" && deferredQuery.startsWith("@")) {
+      const fileName = symbols?.path.split("/").at(-1);
+      return [
+        {
+          id: "symbols",
+          label: fileName ? `Symbols in ${fileName}` : "Symbols",
+          hits: symbolRanker
+            .rank(deferredQuery.slice(1), 400)
+            .map(({ item, match }) => ({ entry: item, match })),
+        },
+      ].filter((group) => group.hits.length > 0);
+    }
     if (mode === "commands") {
       return [
         { id: "commands", label: "Commands", hits: rank(actionRanker, 12) },
@@ -17319,11 +17573,23 @@ export function CommandPaletteOverlay({
     mode,
     projectRanker,
     sessionRanker,
+    symbolRanker,
+    symbols?.path,
   ]);
   const visibleHits = groups.flatMap((group) => group.hits);
   const visibleEntries = visibleHits.map((hit) => hit.entry);
   const activeEntry = visibleEntries[selectedIndex];
   const isStale = query !== deferredQuery;
+  const symbolMode = mode !== "commands" && query.startsWith("@");
+  const symbolEmptyMessage = !symbols
+    ? "Open a file to go to its symbols"
+    : symbols.status === "loading"
+      ? "Reading symbols…"
+      : !symbols.symbols.length
+        ? symbols.status === "unavailable"
+          ? "No language server provides symbols for this file"
+          : "No symbols in this file"
+        : `No symbols match “${query.slice(1).trim()}”`;
 
   useEffect(() => {
     dismissOpenMenus();
@@ -17353,6 +17619,13 @@ export function CommandPaletteOverlay({
     }
     if (entry.selection.kind === "project") {
       onSelectProject?.(entry.selection.path);
+      onClose();
+      return;
+    }
+    if (entry.selection.kind === "symbol") {
+      const symbol: DocumentSymbol | undefined =
+        symbolTargets[entry.selection.index];
+      if (symbols && symbol) onSelectSymbol?.(symbols.path, symbol);
       onClose();
       return;
     }
@@ -17460,8 +17733,19 @@ export function CommandPaletteOverlay({
           {visibleEntries.length === 0 ? (
             <div className="gyro-global-search-empty">
               <Search size={18} />
-              <strong>No results for “{query.trim()}”</strong>
-              <span>Try a file, project, session title, or Gyro action.</span>
+              {symbolMode ? (
+                <>
+                  <strong>{symbolEmptyMessage}</strong>
+                  <span>Delete the @ to search files again.</span>
+                </>
+              ) : (
+                <>
+                  <strong>No results for “{query.trim()}”</strong>
+                  <span>
+                    Try a file, project, session title, or Gyro action.
+                  </span>
+                </>
+              )}
             </div>
           ) : null}
           {groups.map((group) => (
@@ -18889,6 +19173,7 @@ export function SettingsSurface({
           aria-label="Settings"
           data-settings-page={activeSection}
         >
+          {activeSection === "remote-access" ? <RemoteAccessSettingsContent /> : null}
           {activeSection === "import-projects" && projectImport ? (
             <SettingsSection
               icon={Folder}
@@ -19856,7 +20141,7 @@ export function SettingsSurface({
                       <strong className="gyro-update-version">
                         {updateVersion ? `Gyro ${updateVersion}` : "Gyro"}
                       </strong>
-                      <span className="gyro-update-channel">Public Alpha</span>
+                      <span className="gyro-update-channel">Public Beta</span>
                       <SettingsStatus status={updateLevel}>
                         {updateStatusLabel(updateState)}
                       </SettingsStatus>
@@ -25246,6 +25531,8 @@ function ChatTurnView({
     Boolean(onContinueChat) &&
     (hasResponse || runModel.steps.length > 0 || missingFinalResponse) &&
     runModel.phase.name === "done";
+  const workflowTurnId =
+    !isRunning && hasResponse && onSaveWorkflow ? turn.user?.turnId : undefined;
   // A turn the provider never closed out can be resent; a cancelled one cannot
   // be reconnected. Both decisions stay here because they need the status event
   // the run model deliberately does not carry.
@@ -25287,7 +25574,6 @@ function ChatTurnView({
           aggregateFileStats={aggregateFileStats}
           headerActions={
             <>
-              {!isRunning&&hasResponse&&turn.user?.turnId&&onSaveWorkflow?<button type="button" onClick={()=>onSaveWorkflow(turn.user!.turnId)}>Save as workflow</button>:null}
               {isRunning && onCompactContext ? (
                 <button type="button" onClick={onCompactContext}
                   title="Compact at the next safe tool or response boundary">
@@ -25303,19 +25589,6 @@ function ChatTurnView({
                 >
                   {turnTokensLabel(turn.turnTokens)}
                 </span>
-              ) : null}
-              {!isRunning && canContinue && !missingFinalResponse ? (
-                <button
-                  onClick={onContinueChat}
-                  title={
-                    hasResponse
-                      ? "Continue this chat"
-                      : "Resume this turn from where it left off"
-                  }
-                  type="button"
-                >
-                  Continue
-                </button>
               ) : null}
             </>
           }
@@ -25473,6 +25746,35 @@ function ChatTurnView({
             onUndo={onUndoChanges}
             summaries={fileReviewSummaries}
           />
+        ) : null}
+        {workflowTurnId || (canContinue && !missingFinalResponse) ? (
+          <footer
+            aria-label="Follow-up actions"
+            className="gyro-chat-turn-actions"
+          >
+            {workflowTurnId ? (
+              <button
+                type="button"
+                onClick={() => onSaveWorkflow?.(workflowTurnId)}
+              >
+                <ScrollText aria-hidden="true" size={14} />
+                Save as workflow
+              </button>
+            ) : null}
+            {canContinue && !missingFinalResponse ? (
+              <button
+                onClick={onContinueChat}
+                title={
+                  hasResponse
+                    ? "Continue this chat"
+                    : "Resume this turn from where it left off"
+                }
+                type="button"
+              >
+                Continue <ArrowRight aria-hidden="true" size={14} />
+              </button>
+            ) : null}
+          </footer>
         ) : null}
       </div>
     </section>
@@ -26067,7 +26369,7 @@ function formatMessageTime(value: string) {
 type AssistantResponseTableAlign = "left" | "center" | "right" | null;
 
 type AssistantResponseBlock =
-  | { kind: "code"; content: string }
+  | { kind: "code"; content: string; language?: string }
   | { kind: "commands"; items: string[] }
   | AssistantResponseHeading
   | { kind: "list"; items: string[] }
@@ -26578,7 +26880,12 @@ function AssistantResponseBlockView({
   }
   if (block.kind === "table") {
     return (
-      <div className="gyro-response-table-wrap">
+      <div
+        className="gyro-response-table-wrap"
+        tabIndex={0}
+        role="region"
+        aria-label="Response table"
+      >
         <table className="gyro-response-table">
           <thead>
             <tr>
@@ -26616,9 +26923,19 @@ function AssistantResponseBlockView({
   }
   if (block.kind === "code") {
     return (
-      <pre className="gyro-response-code-block">
-        <code>{block.content}</code>
-      </pre>
+      <div className="gyro-response-code">
+        <div className="gyro-response-code-heading">
+          <span>{block.language || "Code"}</span>
+          <MessageCopyButton label="Copy code" message={block.content} />
+        </div>
+        <pre
+          className="gyro-response-code-block"
+          tabIndex={0}
+          aria-label={block.language ? `${block.language} code` : "Code block"}
+        >
+          <code>{block.content}</code>
+        </pre>
+      </div>
     );
   }
   if (imageHint?.imagesBelow && isOnlyReplyImages(block.content)) return null;
@@ -26764,6 +27081,7 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
   const commandItems: string[] = [];
   const codeLines: string[] = [];
   let isInCodeBlock = false;
+  let codeLanguage: string | undefined;
 
   const flushParagraph = () => {
     if (paragraphLines.length === 0) {
@@ -26805,7 +27123,11 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
     if (codeLines.length === 0) {
       return;
     }
-    blocks.push({ kind: "code", content: codeLines.join("\n") });
+    blocks.push({
+      kind: "code",
+      content: codeLines.join("\n"),
+      language: codeLanguage,
+    });
     codeLines.length = 0;
   };
   const flushOpenBlocks = () => {
@@ -26825,6 +27147,8 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
         isInCodeBlock = false;
       } else {
         flushOpenBlocks();
+        // The fence label is display metadata, never markup or an executable language.
+        codeLanguage = trimmed.slice(3).trim().split(/\s+/)[0] || undefined;
         isInCodeBlock = true;
       }
       continue;

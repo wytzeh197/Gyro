@@ -109,6 +109,13 @@ pub(crate) struct WorkspaceSearchRequest {
     /// this off so ordinary user typing is fixed-string.
     #[serde(default)]
     pub(crate) regex: Option<bool>,
+    /// Defaults to true, ripgrep's own default. The Search view sends false
+    /// unless Match Case is on.
+    #[serde(default)]
+    pub(crate) case_sensitive: Option<bool>,
+    /// Only match whole words (ripgrep `--word-regexp`).
+    #[serde(default)]
+    pub(crate) whole_word: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize)]

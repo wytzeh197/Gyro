@@ -836,6 +836,9 @@ fn start_language_server_process(
                         "hover": { "contentFormat": ["markdown", "plaintext"] },
                         "definition": { "linkSupport": true },
                         "rename": { "prepareSupport": true },
+                        "formatting": { "dynamicRegistration": false },
+                        "rangeFormatting": { "dynamicRegistration": false },
+                        "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
                         "semanticTokens": {
                             "requests": { "full": true },
                             "tokenTypes": ["namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment", "string", "number", "regexp", "operator", "decorator"],

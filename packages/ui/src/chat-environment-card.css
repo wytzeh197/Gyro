@@ -3,8 +3,16 @@
    theme follows. */
 
 .gyro-env-card {
-  --gyro-env-card-accent-soft: color-mix(in srgb, var(--gyro-cobalt) 16%, transparent);
-  --gyro-env-card-pending: color-mix(in srgb, var(--gyro-text) 14%, transparent);
+  --gyro-env-card-accent-soft: color-mix(
+    in srgb,
+    var(--gyro-cobalt) 16%,
+    transparent
+  );
+  --gyro-env-card-pending: color-mix(
+    in srgb,
+    var(--gyro-text) 14%,
+    transparent
+  );
   box-sizing: border-box;
   width: 100%;
   margin: 4px 0 12px;
@@ -33,7 +41,8 @@
 .gyro-env-card.is-bar.is-waiting {
   padding-right: 12px;
   border-color: color-mix(in srgb, var(--gyro-attention) 45%, transparent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--gyro-attention) 8%, transparent);
+  box-shadow: 0 0 0 4px
+    color-mix(in srgb, var(--gyro-attention) 8%, transparent);
 }
 
 .gyro-env-card-bar-toggle {
@@ -48,7 +57,8 @@
   border: 0;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--gyro-premium-motion) var(--gyro-premium-ease);
+  transition: background-color var(--gyro-premium-motion)
+    var(--gyro-premium-ease);
 }
 
 .gyro-env-card-bar-toggle:hover {
@@ -493,7 +503,8 @@
   border-left: 1px solid var(--gyro-border-soft);
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--gyro-premium-motion) var(--gyro-premium-ease);
+  transition: background-color var(--gyro-premium-motion)
+    var(--gyro-premium-ease);
 }
 
 .gyro-env-card-cell:first-child {
@@ -670,6 +681,132 @@
 
 .gyro-env-card.is-panel .gyro-env-card-button.is-primary:hover {
   background: color-mix(in srgb, var(--gyro-ink-bg) 86%, var(--gyro-surface));
+}
+
+/* Remote chats share the normal status and branch rows. Host controls are
+   disclosed from the quiet location label, rather than a second card. */
+.gyro-env-panel-context {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  padding: 0 var(--gyro-space-panel);
+  min-height: var(--gyro-control-standard);
+  font-size: var(--gyro-font-micro);
+}
+
+.gyro-env-panel-branch,
+.gyro-env-panel-location {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gyro-space-compact);
+  min-width: 0;
+  min-height: var(--gyro-control-compact);
+  padding: 0;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  background: transparent;
+  color: var(--gyro-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gyro-env-panel-branch {
+  font-family: var(--gyro-font-mono);
+}
+
+.gyro-env-panel-location {
+  border-left: thin solid var(--gyro-border-soft);
+  padding-left: var(--gyro-space-standard);
+}
+
+.gyro-env-panel-context svg,
+.gyro-env-panel-remote-head svg {
+  flex-shrink: 0;
+  width: var(--gyro-icon-compact);
+  height: var(--gyro-icon-compact);
+}
+
+.gyro-env-panel-branch:hover:not(:disabled),
+.gyro-env-panel-location:hover {
+  color: var(--gyro-text);
+}
+
+.gyro-env-panel-branch:disabled {
+  color: var(--gyro-faint);
+  cursor: default;
+}
+
+.gyro-env-panel-branch:focus-visible,
+.gyro-env-panel-location:focus-visible {
+  outline: solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-space-compact);
+}
+
+.gyro-env-panel-remote {
+  display: grid;
+  gap: var(--gyro-space-compact);
+  margin-top: var(--gyro-space-compact);
+  padding-top: var(--gyro-space-compact);
+  border-top: thin solid var(--gyro-border-soft);
+}
+
+.gyro-env-panel-remote[hidden] {
+  display: none;
+}
+
+.gyro-env-panel-remote-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  min-height: var(--gyro-control-compact);
+  padding: 0 var(--gyro-space-panel);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+
+.gyro-env-panel-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gyro-space-standard);
+  margin: var(--gyro-space-compact) 0 0;
+  padding: 0 var(--gyro-space-panel);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+}
+
+.gyro-env-panel-note > svg,
+.gyro-env-panel-note > .gyro-env-card-dot {
+  flex-shrink: 0;
+  margin-top: var(--gyro-space-compact);
+  color: var(--gyro-faint);
+}
+
+.gyro-env-panel-note.is-warning {
+  color: var(--gyro-text);
+}
+
+.gyro-env-panel-actions.is-remote {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  padding: var(--gyro-space-standard) var(--gyro-space-panel)
+    var(--gyro-space-compact);
+}
+
+.gyro-env-card-close:disabled,
+.gyro-env-card.is-panel .gyro-env-card-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.gyro-env-panel-row.is-pressed {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-env-panel-row.is-pressed > svg {
+  color: var(--gyro-text);
 }
 
 @media (max-width: 560px) {

@@ -23,6 +23,7 @@ pub(crate) async fn run_provider_chat(
     app: tauri::AppHandle,
     request: ProviderChatRequest,
 ) -> Result<ProviderChatResponse, String> {
+    crate::features::remote_access::require_local_control(&app, &request.session_id)?;
     run_goal_chat(app, request, None).await
 }
 
@@ -50,6 +51,7 @@ pub(crate) async fn compact_provider_chat(
     session_id: String,
     turn_id: Option<String>,
 ) -> Result<ProviderContextCompactionResponse, String> {
+    crate::features::remote_access::require_local_control(&app, &session_id)?;
     let run_id = turn_id
         .as_deref()
         .map(parse_uuid)
@@ -125,6 +127,7 @@ pub(crate) async fn stop_provider_chat(
     session_id: String,
     wait_for_stop: Option<bool>,
 ) -> Result<(), String> {
+    crate::features::remote_access::require_local_control(&app, &session_id)?;
     let wait_for_stop = wait_for_stop.unwrap_or(false);
     let Some(control) = cancel_provider_run(&app, &session_id, ProviderStopReason::User)? else {
         // Steer can race natural completion. The queue should proceed when the
