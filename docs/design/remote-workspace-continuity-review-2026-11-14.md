@@ -24,3 +24,11 @@ Validation: `pnpm -r typecheck`, `node scripts/check-ui-tokens.mjs`, `node scrip
 ## Proposed project rule
 
 Connecting a device adds host-scoped projects to the existing workspace and preserves local navigation and state. The reason is continuity: opening another Mac should not make this Mac's work disappear. This is a proposed Gyro project rule; shared instructions have not been changed.
+
+## Sidebar connection notices correction
+
+Turning Remote access on must not add connection status messages to the host's project sidebar. Removed background connecting, unavailable/retry, and empty-host notices. Available remote project folders still appear automatically, and explicit remote workspace connection controls remain in that workspace. No tokens, visual primitives, or keyboard actions were added.
+
+Proposed Gyro rule: the project sidebar contains local and remote projects; background device discovery must not add standalone connection notices. This keeps enabling hosting from looking like a request to connect to another device. Shared instructions have not been changed.
+
+Verification for this correction: workspace TypeScript, UI token checks, and the remote browser flow passed, including absence of background peer notices while remote folders remain available. Reinstalled the local app, verified its signature and final frontend assets, confirmed **On · Reachable** with three automatically shared projects, then returned to a clean native sidebar. All 213 existing session IDs, session files, and configuration were preserved. The correction was pushed only after this native verification.

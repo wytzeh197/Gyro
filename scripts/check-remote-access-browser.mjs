@@ -211,6 +211,13 @@ try {
       ),
     "existing remote history",
   );
+  assert.equal(
+    await evaluate(
+      "/Connecting to|is unavailable|Keep Gyro open|No projects on/.test(document.querySelector('.gyro-sidebar')?.innerText ?? '')",
+    ),
+    false,
+    "background peer connection notices do not appear in the sidebar",
+  );
   await click("Take control");
   await until(
     () => evaluate('!document.body.innerText.includes("You\'re watching.")'),

@@ -21,12 +21,10 @@ export function RemoteNavigation({
   catalogs,
   selection,
   onSelect,
-  onRefresh,
 }: {
   catalogs: RemoteCatalog[];
   selection?: RemoteSelection;
   onSelect: (selection: RemoteSelection) => void;
-  onRefresh: () => void;
 }) {
   const [collapsed, setCollapsed] = useState<string[]>([]);
   const slots = useRemoteWorkspaceSlots();
@@ -154,28 +152,6 @@ export function RemoteNavigation({
               </div>
             );
           })}
-          {catalog.loading && !catalog.projects.length ? (
-            <p className="gyro-sidebar-mini-copy" role="status">
-              Connecting to {catalog.host.name}…
-            </p>
-          ) : null}
-          {catalog.error ? (
-            <div className="gyro-sidebar-mini-copy" role="status">
-              {catalog.error}{" "}
-              <button
-                className="gyro-secondary-button"
-                type="button"
-                onClick={onRefresh}
-              >
-                Retry
-              </button>
-            </div>
-          ) : null}
-          {!catalog.loading && catalog.online && !catalog.projects.length ? (
-            <p className="gyro-sidebar-mini-copy">
-              No projects on {catalog.host.name} yet.
-            </p>
-          ) : null}
         </RemoteAccessSlots.Provider>
       ))}
     </>

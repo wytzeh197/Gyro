@@ -193,7 +193,6 @@ export function RemoteWorkspaceRoot({
               catalogs={catalogs}
               selection={selection}
               onSelect={selectRemote}
-              onRefresh={() => void refreshCatalog()}
             />
           ),
           content:
