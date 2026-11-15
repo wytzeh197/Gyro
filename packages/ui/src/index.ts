@@ -56,6 +56,12 @@ export {
 } from "./confirm-action";
 export { askTextValue, type TextPromptOptions } from "./text-prompt";
 export {
+  askConfirmation,
+  describeConfirmation,
+  type ConfirmDialogOptions,
+} from "./confirm-dialog";
+export { installGyroTooltips } from "./gyro-tooltip";
+export {
   validateWorkspaceEntryName,
   workspaceEntryName,
 } from "./workspace-names";

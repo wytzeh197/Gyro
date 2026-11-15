@@ -867,7 +867,7 @@ impl SessionStore {
                     );
                 }
             }
-            self.remove_chat_workspace(session_id);
+            self.remove_private_session_data(session_id);
             return Ok(false);
         };
 
@@ -919,15 +919,18 @@ impl SessionStore {
                 );
             }
         }
-        self.remove_chat_workspace(session_id);
+        self.remove_private_session_data(session_id);
         Ok(changed > 0)
     }
 
-    /// A projectless chat's private workspace goes with its chat. Best-effort:
+    /// A chat's private workspace and spill copies go with its chat. Best-effort:
     /// the chat is already deleted, and a repeated delete retries this.
-    fn remove_chat_workspace(&self, session_id: Uuid) {
+    fn remove_private_session_data(&self, session_id: Uuid) {
         if let Err(error) = self.paths.remove_chat_workspace(session_id) {
             eprintln!("could not remove the private workspace of chat {session_id}: {error}");
+        }
+        if let Err(error) = crate::efficiency::spill::remove_session(&self.paths, session_id) {
+            eprintln!("could not remove the spill copies of chat {session_id}: {error}");
         }
     }
 
@@ -3670,6 +3673,15 @@ mod tests {
             .unwrap();
         let child_log = child.events_path.clone();
 
+        let spill_address = crate::efficiency::spill::address("test", "read", "private output");
+        for session in [&parent, &child, &grandchild, &unrelated] {
+            let _scope = crate::efficiency::spill::SessionScope::start(store.paths(), session.id);
+            assert!(crate::efficiency::spill::persist(
+                &spill_address,
+                "private output"
+            ));
+        }
+
         assert!(store.delete_session(parent.id).unwrap());
 
         assert!(store.get_session(parent.id).unwrap().is_none());
@@ -3677,6 +3689,20 @@ mod tests {
         assert!(store.get_session(grandchild.id).unwrap().is_none());
         assert!(!child_log.exists());
         assert!(store.get_session(unrelated.id).unwrap().is_some());
+        for session in [&parent, &child, &grandchild] {
+            let _scope = crate::efficiency::spill::SessionScope::start(store.paths(), session.id);
+            assert!(
+                crate::efficiency::spill::read_scoped_window(&spill_address, 0, 100)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        let _scope = crate::efficiency::spill::SessionScope::start(store.paths(), unrelated.id);
+        assert!(
+            crate::efficiency::spill::read_scoped_window(&spill_address, 0, 100)
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[cfg(unix)]

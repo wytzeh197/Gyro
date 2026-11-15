@@ -1054,6 +1054,21 @@ export function isProviderRuntimeUsable(
 }
 
 export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
+  if (config.hostModelCatalog) {
+    const enriched = providersForConfig({ ...config, hostModelCatalog: false });
+    return config.modelProviders.map((host) => {
+      const catalog = enriched.find((provider) => provider.id === host.id);
+      return {
+        ...catalog,
+        ...host,
+        capabilities: catalog?.capabilities,
+        models: host.models.map((model) => ({
+          ...catalog?.models.find((item) => item.id === model.id),
+          ...model,
+        })),
+      };
+    });
+  }
   const savedProviders = new Map(
     config.modelProviders.map((provider) => [provider.id, provider]),
   );

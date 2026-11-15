@@ -205,6 +205,22 @@ fn workspace_watcher_ignores_git_internals_and_dependency_churn() {
     let build_folder = NotifyEvent::new(notify::EventKind::Any).add_path(root.join("target"));
     assert!(!workspace_watch_event_is_relevant(&root, &build_output));
     assert!(workspace_watch_event_is_relevant(&root, &build_folder));
+    let nested_build_folder =
+        NotifyEvent::new(notify::EventKind::Any).add_path(root.join("apps/desktop/dist"));
+    assert!(workspace_watch_event_is_relevant(
+        &root,
+        &nested_build_folder
+    ));
+    // Ambiguous build names below the root can be real source directories.
+    for source in ["src/build/tool.ts", "packages/target/src/lib.rs"] {
+        let event = NotifyEvent::new(notify::EventKind::Any).add_path(root.join(source));
+        assert!(workspace_watch_event_is_relevant(&root, &event), "{source}");
+    }
+
+    // An overflow invalidates the entire snapshot regardless of which path
+    // accompanied the notice, including otherwise ignored build output.
+    let rescan = build_output.set_flag(notify::event::Flag::Rescan);
+    assert!(workspace_watch_event_is_relevant(&root, &rescan));
 }
 
 #[test]

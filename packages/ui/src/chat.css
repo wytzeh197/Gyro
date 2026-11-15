@@ -3651,106 +3651,95 @@
   color: var(--gyro-muted);
 }
 
-.gyro-dictation-button {
+.gyro-dictation-control {
   position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
 }
-
-.gyro-dictation-button.is-listening {
-  background: color-mix(in srgb, var(--gyro-accent) 22%, transparent);
+:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-composer-bar .gyro-dictation-control .gyro-dictation-button {
+  align-items: center;
+  justify-content: center;
+  display: inline-flex;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-pill);
+  background: var(--gyro-surface);
+  color: var(--gyro-muted);
+  gap: var(--gyro-space-standard);
+}
+:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-composer-bar .gyro-dictation-control .gyro-dictation-button:hover {
+  background: var(--gyro-surface-raised);
   color: var(--gyro-text);
 }
-.gyro-dictation-badge {
-  align-items: center;
-  background: var(--gyro-accent);
-  border-radius: var(--gyro-radius-pill);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gyro-surface) 70%, transparent);
+:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-composer-bar .gyro-dictation-control .gyro-dictation-button.is-listening {
+  width: auto;
+  max-width: none;
+  flex-basis: auto;
+  aspect-ratio: auto;
+  padding-inline: var(--gyro-space-group);
+  background: color-mix(in srgb, var(--gyro-status-running) 12%, var(--gyro-surface));
+  border-color: var(--gyro-status-running);
   color: var(--gyro-text);
-  display: none;
-  height: calc(14px * var(--gyro-ui-scale, 1));
-  justify-content: center;
-  pointer-events: none;
-  position: absolute;
-  right: calc(1px * var(--gyro-ui-scale, 1));
-  top: calc(1px * var(--gyro-ui-scale, 1));
-  width: calc(14px * var(--gyro-ui-scale, 1));
 }
-
-.gyro-dictation-button.is-listening .gyro-dictation-badge,
-.gyro-dictation-button.is-processing .gyro-dictation-badge {
-  display: inline-flex;
+:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-composer-bar .gyro-dictation-control .gyro-dictation-button.is-listening > svg {
+  color: var(--gyro-status-running);
 }
-
-.gyro-dictation-wave {
-  align-items: center;
-  display: inline-flex;
-  gap: calc(var(--gyro-chat-space-1) * 0.375);
-  height: 100%;
-  justify-content: center;
+.gyro-dictation-label {
+  font-size: var(--gyro-chat-meta-size);
+  font-weight: 500;
+  white-space: nowrap;
 }
-
-.gyro-dictation-wave > span {
-  animation: gyro-dictation-beat var(--gyro-chat-motion-spin) ease-in-out
-    infinite;
-  background: currentColor;
-  border-radius: var(--gyro-radius-pill);
-  display: block;
-  height: calc(5px * var(--gyro-ui-scale, 1));
-  width: calc(2px * var(--gyro-ui-scale, 1));
-}
-
-.gyro-dictation-wave > span:nth-child(2) {
-  animation-delay: var(--gyro-chat-motion-fast);
-}
-
-.gyro-dictation-wave > span:nth-child(3) {
-  animation-delay: var(--gyro-chat-motion-normal);
-}
-.gyro-dictation-stop,
-.gyro-dictation-button.is-listening:hover .gyro-dictation-wave,
-.gyro-dictation-button.is-listening:focus-visible .gyro-dictation-wave,
-.gyro-dictation-button.is-processing .gyro-dictation-wave {
-  display: none;
-}
-
-.gyro-dictation-button.is-listening:hover .gyro-dictation-stop,
-.gyro-dictation-button.is-listening:focus-visible .gyro-dictation-stop {
-  display: block;
-}
-
-.gyro-dictation-button.is-processing .gyro-dictation-stop {
-  display: none;
-}
-
-.gyro-dictation-spinner {
+.gyro-dictation-progress {
   animation: gyro-dictation-spin var(--gyro-chat-motion-spin) linear infinite;
-  border-radius: var(--gyro-radius-pill);
-  border: calc(1.5px * var(--gyro-ui-scale, 1)) solid
-    color-mix(in srgb, currentColor 32%, transparent);
-  border-top-color: currentColor;
-  display: none;
-  height: calc(8px * var(--gyro-ui-scale, 1));
-  width: calc(8px * var(--gyro-ui-scale, 1));
 }
-
-.gyro-dictation-button.is-processing .gyro-dictation-spinner {
-  display: block;
+.gyro-dictation-feedback {
+  position: absolute;
+  inset-block-end: calc(100% + var(--gyro-space-standard));
+  inset-inline-end: 0;
+  z-index: var(--gyro-layer-composer-slash);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gyro-space-standard);
+  width: max-content;
+  max-width: min(calc(var(--gyro-space-panel) * 18), calc(100vw - var(--gyro-space-panel) * 2));
+  box-sizing: border-box;
+  padding: var(--gyro-space-group);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-raised);
+  color: var(--gyro-text);
 }
-
+.gyro-dictation-feedback p {
+  margin: 0;
+  font-size: var(--gyro-chat-meta-size);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.gyro-dictation-feedback button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: var(--gyro-control-compact);
+  height: var(--gyro-control-compact);
+  padding: 0;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  background: transparent;
+  color: var(--gyro-muted);
+  cursor: pointer;
+}
+.gyro-dictation-feedback button:hover {
+  color: var(--gyro-text);
+  background: var(--gyro-surface);
+}
+.gyro-dictation-control button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
 @media (prefers-reduced-motion: reduce) {
-  .gyro-dictation-wave > span {
+  .gyro-dictation-progress {
     animation: none;
   }
-
-  .gyro-dictation-spinner {
-    animation-duration: var(--gyro-chat-motion-spin);
-  }
-}
-
-.gyro-dictation-status {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-chat-meta-size);
-  margin: 0;
-  padding: 0 var(--gyro-chat-block-gap) calc(var(--gyro-chat-space-1) * 1.5);
 }
 
 .gyro-chat-surface-controls {
@@ -17938,10 +17927,11 @@ button.gyro-response-changed-files:hover {
   .gyro-chat-surface
   .gyro-run.is-segments.is-minimal
   .gyro-run-call.is-running {
+  /* Current calls stay on the flat work rail, including parallel batches. */
   color: var(--gyro-text);
-  background: var(--gyro-chat-raised);
-  border-radius: var(--gyro-radius-md);
-  padding: var(--gyro-chat-space-2) var(--gyro-chat-block-gap);
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
 }
 :root[data-theme]
   .gyro-chat-surface
@@ -18989,6 +18979,19 @@ button.gyro-response-changed-files:hover {
   max-width: none;
   max-height: calc(100% - var(--gyro-chat-space-2));
   margin: var(--gyro-chat-space-2) var(--gyro-chat-space-2) 0 0;
+}
+
+/* With a companion open, keep Environment inside the chat's grid column.
+   Absolute placement leaves both the transcript and companion geometry intact. */
+.gyro-chat-surface.is-thread.has-environment-overlay
+  > .gyro-chat-environment-popover {
+  position: absolute;
+  grid-column: 1;
+  grid-row: 2;
+  top: var(--gyro-chat-space-2);
+  right: var(--gyro-chat-space-2);
+  width: min(320px, calc(100% - 2 * var(--gyro-chat-space-2)));
+  max-height: calc(100% - 2 * var(--gyro-chat-space-2));
 }
 
 :root[data-theme] [data-chat-pane-drag][draggable="true"] {

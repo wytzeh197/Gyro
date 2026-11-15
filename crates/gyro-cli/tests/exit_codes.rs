@@ -1462,6 +1462,107 @@ printf '%s\n' '{"method":"turn/completed","params":{"turn":{"status":"completed"
 }
 
 #[test]
+fn real_binary_rebuilds_shared_codex_context_then_resumes_only_private_threads() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let home = root.join("home");
+    let shared = root.join("shared-codex");
+    let workspace = root.join("workspace");
+    for directory in [&home, &shared, &workspace] {
+        fs::create_dir_all(directory).unwrap();
+    }
+    let wire = root.join("wire.jsonl");
+    let provider = write_script(
+        root,
+        r#"
+case "$CODEX_HOME" in */Gyro/providers/codex/*) ;; *) exit 40 ;; esac
+test "$CODEX_SQLITE_HOME" = "$CODEX_HOME" || exit 41
+IFS= read -r initialize
+printf '%s\n' '{"id":1,"result":{}}'
+IFS= read -r initialized
+IFS= read -r thread
+printf '%s\n' "$thread" >> "$GYRO_TEST_MARKER"
+printf '%s\n' '{"id":2,"result":{"thread":{"id":"private-thread"}}}'
+IFS= read -r turn
+printf '%s\n' "$turn" >> "$GYRO_TEST_MARKER"
+printf '%s\n' '{"id":3,"result":{"turn":{"id":"private-turn"}}}'
+printf '%s\n' '{"method":"item/completed","params":{"item":{"type":"agentMessage","text":"continued privately"}}}'
+printf '%s\n' '{"method":"turn/completed","params":{"turn":{"status":"completed"}}}'
+"#,
+    );
+    write_config(&home, &provider, false);
+    let paths = GyroPaths::from_base_dir(data_base(&home));
+    let store = SessionStore::open(paths).unwrap();
+    let session = store
+        .create_session(&workspace, SessionOrigin::Cli, "old chat")
+        .unwrap();
+    store
+        .append_event(
+            session.id,
+            gyro_core::SessionEventKind::UserMessage,
+            "Keep the earlier violet requirement",
+            serde_json::json!({}),
+        )
+        .unwrap();
+    store
+        .upsert_provider_session_binding(
+            session.id,
+            "openai",
+            None,
+            None,
+            None,
+            serde_json::json!({"kind":"codex-session","sessionId":"shared-thread"}),
+            "ready",
+            None,
+        )
+        .unwrap();
+    for resumed in [false, true] {
+        let output = gyro_command(&home, &workspace)
+            .env("CODEX_HOME", &shared)
+            .env("GYRO_TEST_MARKER", &wire)
+            .args([
+                "resume",
+                &session.id.to_string(),
+                "--profile",
+                "test-provider",
+                "--message",
+                "continue",
+                "--no-open",
+                "--json",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["run"]["resumed"], resumed);
+    }
+    let messages: Vec<Value> = fs::read_to_string(&wire)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(messages[0]["method"], "thread/start");
+    assert!(messages[1]
+        .to_string()
+        .contains("earlier violet requirement"));
+    assert_eq!(messages[2]["method"], "thread/resume");
+    assert_eq!(messages[2]["params"]["threadId"], "private-thread");
+    assert!(!messages[3]
+        .to_string()
+        .contains("earlier violet requirement"));
+    assert!(!shared.join("sessions").exists());
+    assert!(store
+        .read_events(session.id)
+        .unwrap()
+        .iter()
+        .any(|event| event.message.contains("earlier violet requirement")));
+}
+
+#[test]
 fn real_binary_requires_explicit_retry_after_a_stale_codex_resume() {
     let root = PathBuf::from("/tmp").join(format!("gyro-codex-resume-{}", uuid::Uuid::new_v4()));
     let home = root.join("home");
@@ -1508,6 +1609,14 @@ printf '%s\n' '{"method":"turn/completed","params":{"turn":{"status":"completed"
             None,
         )
         .unwrap();
+
+    // A stale cursor minted inside the private home still requires an explicit
+    // retry. Pre-isolation shared cursors are covered by the migration test.
+    let source = std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".codex"));
+    let isolated = gyro_core::provider_runtime::codex_home::prepare(&paths, &source).unwrap();
+    gyro_core::provider_runtime::codex_home::remember_thread(&isolated, "thread-stale").unwrap();
 
     let stale_resume = gyro_command(&home, &workspace)
         .env("GYRO_TEST_MARKER", &attempts)

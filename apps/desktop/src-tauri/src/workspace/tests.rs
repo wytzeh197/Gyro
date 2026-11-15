@@ -302,6 +302,37 @@ fn workspace_watch_cache_reuses_stable_tree_and_invalidates_on_directory_change(
 }
 
 #[test]
+fn watched_workspace_recovers_after_a_missed_notification() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().canonicalize().unwrap();
+    let manager = WorkspaceWatchManager::default();
+    manager.prime(root.to_str().unwrap()).unwrap();
+    // Keep a registered watcher without delivering the mutation notification.
+    // This reproduces an OS watcher losing events while the handle stays alive.
+    let watcher = <notify::RecommendedWatcher as notify::Watcher>::new(
+        |_event: notify::Result<notify::Event>| {},
+        notify::Config::default(),
+    )
+    .unwrap();
+    manager
+        .watchers
+        .lock()
+        .unwrap()
+        .insert(root.clone(), watcher);
+    fs::write(root.join("after-loss.txt"), "new\n").unwrap();
+    manager
+        .snapshots
+        .lock()
+        .unwrap()
+        .get_mut(&root)
+        .unwrap()
+        .scanned_at = std::time::Instant::now() - crate::app::limits::WORKSPACE_TREE_MAX_CACHE_AGE;
+
+    let files = manager.snapshot(root.to_str().unwrap()).unwrap();
+    assert!(files.iter().any(|file| file.path == "after-loss.txt"));
+}
+
+#[test]
 fn workspace_snapshot_generations_advance_only_when_a_scan_is_stored() {
     let workspace = tempfile::tempdir().unwrap();
     fs::write(workspace.path().join("first.txt"), "one\n").unwrap();

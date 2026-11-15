@@ -10,6 +10,7 @@ pub(crate) mod compaction;
 pub(crate) mod events;
 pub(crate) mod health;
 pub(crate) mod markers;
+pub(crate) mod partial_response;
 pub(crate) mod process;
 pub(crate) mod prompt;
 pub(crate) mod retry;

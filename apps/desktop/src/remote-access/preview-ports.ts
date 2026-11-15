@@ -98,6 +98,20 @@ export function createPreviewPorts() {
       command: string,
       args?: Record<string, unknown>,
     ): Promise<T> {
+      if (command === "prepare_chat_attachment") {
+        const request = args?.request as Record<string, unknown>;
+        return {
+          id: crypto.randomUUID(), name: request.name ?? "fixture.png", kind: request.kind,
+          path: "/fixture/client-attachments/fixture.png", size: 68,
+          contentHash: "fixture-image-hash", available: true,
+          previewUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZqkAAAAASUVORK5CYII=",
+        } as T;
+      }
+      if (command === "remote_upload_attachment") {
+        if (!online) throw new Error("Host unavailable");
+        const attachment = args?.attachment as Record<string, unknown>;
+        return { ...attachment, path: `/fixture/host-attachments/${args?.sessionId}/fixture.png` } as T;
+      }
       if (command === "remote_access_status")
         return structuredClone(status) as T;
       if (command === "remote_host_watch") {
@@ -209,7 +223,7 @@ export function createPreviewPorts() {
             hostId,
             name: "Remote Mac · Fixture",
             experimental: true,
-            capabilities: ["liveCatchup", "chat", "files", "git", "terminal"],
+            capabilities: ["liveCatchup", "chat", "files", "git", "terminal", "sessionModel", "attachments", "imagePreviews", "chatModes"],
             selectedProviderId: "openai",
             fullAccess: true,
             requireCommandApproval: false,
@@ -218,7 +232,7 @@ export function createPreviewPorts() {
               {
                 id: "openai",
                 displayName: "Fixture provider",
-                models: ["gpt-6.1"],
+                models: ["gpt-6.1", "gpt-6"],
                 defaultModelId: "gpt-6.1",
                 runtimeStatus: "ready",
               },
@@ -244,13 +258,30 @@ export function createPreviewPorts() {
           }));
           break;
         case "createSession": {
-          const session = makeSession(crypto.randomUUID(), op.title);
+          const session = { ...makeSession(crypto.randomUUID(), op.title), ...op.model } as Session;
           sessions.push(session);
           histories.set(session.id, []);
           control = { owner: clientId, generation: ++generation };
           result = { session, control };
           break;
         }
+        case "setModel": {
+          if (request.lease !== control?.generation) throw new Error("Stale model change");
+          const session = sessions.find((item) => item.id === op.sessionId)!;
+          Object.assign(session, op.model);
+          result = { ...session };
+          break;
+        }
+        case "readImage":
+          result = {
+            data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZqkAAAAASUVORK5CYII=",
+            nextOffset: 68, total: 68, revision: "fixture-image", mimeType: "image/png",
+          };
+          break;
+        case "attachWorkspaceFile":
+          result = { id: crypto.randomUUID(), kind: "workspace-file", name: op.path,
+            path: op.path, relativePath: op.path, size: 10, contentHash: "fixture-file-hash" };
+          break;
         case "snapshot":
           result = {
             session: sessions.find((s) => s.id === op.sessionId),
@@ -282,13 +313,19 @@ export function createPreviewPorts() {
             mutations,
           };
           break;
-        case "history":
+        case "history": {
+          const events = histories.get(op.sessionId) ?? [];
+          // Match the native host: a known revision returns no transcript body.
+          const revision = JSON.stringify(events);
+          const unchanged = !op.before && op.revision === revision;
           result = {
-            events: histories.get(op.sessionId) ?? [],
+            events: unchanged ? [] : events,
+            revision,
             hasMoreBefore: false,
-            unchanged: false,
+            unchanged,
           };
           break;
+        }
         case "claim":
           control = { owner: clientId, generation: ++generation };
           result = control;
@@ -320,7 +357,9 @@ export function createPreviewPorts() {
             kind: "user-message",
             createdAt: new Date().toISOString(),
             message: op.message,
-            payload: {},
+            payload: { attachments: op.attachments?.map((attachment, index) => ({
+              ...attachment, id: `attachment-${index}`, size: 68,
+            })) ?? [] },
           };
           const reply: SessionEvent = {
             ...event,
@@ -487,6 +526,22 @@ export function createPreviewPorts() {
           createdAt: new Date().toISOString(),
           message: "Continue work on the host",
           payload: {},
+        },
+        {
+          id: `inspection-${sessionId}`,
+          sessionId,
+          turnId: `live-${sessionId}`,
+          kind: "system-event",
+          createdAt: new Date().toISOString(),
+          message: "Inspected host working tree",
+          payload: {
+            kind: "provider-activity",
+            activityId: "host-inspection",
+            activityKind: "command",
+            label: "Inspected host working tree",
+            detail: "git status --short",
+            status: "done",
+          },
         },
       ]);
       emitFrame(sessionId, { phase: "started", status: "running" });

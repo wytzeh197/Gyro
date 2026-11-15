@@ -237,6 +237,12 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
     timing::mark(TimingStage::WorkspaceReady);
     let bound_context =
         active_provider_capability_context(&app, &request.session_id).map_err(to_string)?;
+    // All owned API result serialization and context retirement runs on this
+    // worker. Native MCP requests bind the same owner after broker validation.
+    let _spill_scope = gyro_core::efficiency::spill::SessionScope::start(
+        store.paths(),
+        parse_uuid(&bound_context.session_id)?,
+    );
     let workspace_context = bound_context.workspace_context.clone();
     request.workspace_context = Some(workspace_context.clone());
     request.workspace_check = Some(bound_context.workspace_check.clone());

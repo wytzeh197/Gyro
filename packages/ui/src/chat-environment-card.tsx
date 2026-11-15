@@ -4,7 +4,6 @@ import {
   ChevronDown,
   ChevronUp,
   GitBranch,
-  Monitor,
   RefreshCw,
   Terminal,
   X,
@@ -41,6 +40,7 @@ import type {
   TerminalPane,
 } from "./types";
 import { terminalPaneHasActiveWork } from "./workspace-sidebar";
+import { DeviceIcon, useDeviceKind } from "./device-kind";
 import "./chat-environment-card.css";
 
 /**
@@ -55,6 +55,7 @@ import "./chat-environment-card.css";
  */
 export type ChatEnvironmentRemote = {
   host: string;
+  hostId?: string;
   status: "connecting" | "online" | "offline";
   /** Read from the connection, e.g. "Connected · Experimental". */
   statusLabel: string;
@@ -260,6 +261,7 @@ export function ChatEnvironmentCard({
   const remoteDetailsOpen = isPanelExpanded;
   const remoteTrigger = useRef<HTMLButtonElement>(null);
   const remoteDetailsId = useId();
+  const remoteKind = useDeviceKind(remote?.hostId, remote?.host);
   const isOpen = isPanel || !isFolded;
   const bodyId = useId();
   const now = useTickingNow(isRunning);
@@ -639,7 +641,7 @@ export function ChatEnvironmentCard({
                 title={`Remote on ${remote.host} · ${remote.statusLabel}`}
                 onClick={() => setIsPanelExpanded((open) => !open)}
               >
-                <Monitor aria-hidden="true" />
+                <DeviceIcon kind={remoteKind} aria-hidden="true" />
                 <span className="gyro-env-card-ellipsis">
                   Remote · {remote.host}
                 </span>

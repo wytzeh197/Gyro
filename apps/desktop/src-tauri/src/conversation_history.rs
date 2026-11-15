@@ -542,6 +542,37 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
+    fn interrupted_response_commentary_is_not_replayed_as_a_completed_answer() {
+        let session = Uuid::new_v4();
+        let mut events = vec![
+            SessionEvent::new(
+                session,
+                SessionEventKind::UserMessage,
+                "Explain the file",
+                serde_json::json!({}),
+            ),
+            SessionEvent::new(
+                session,
+                SessionEventKind::SystemEvent,
+                "Partial response (interrupted):\n\nAn unfinished assertion",
+                serde_json::json!({"kind":"provider-activity", "activityKind":"commentary", "partialResponse":true}),
+            ),
+        ];
+        assert!(conversation_history_from_events(events.clone()).is_none());
+        assert!(local_compaction_summary(&events).is_none());
+        events.push(SessionEvent::new(
+            session,
+            SessionEventKind::AssistantMessage,
+            "The verified final answer",
+            serde_json::json!({"kind":"provider-response"}),
+        ));
+        let history = conversation_history_from_events(events).unwrap();
+        assert!(history.contains("The verified final answer"));
+        assert!(!history.contains("unfinished assertion"));
+        assert!(!history.contains("Partial response"));
+    }
+
+    #[test]
     fn model_handoff_preserves_structured_constraints_beyond_tapered_history() {
         let session = Uuid::new_v4();
         let mut checkpoint =

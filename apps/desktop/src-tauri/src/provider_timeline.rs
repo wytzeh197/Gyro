@@ -47,9 +47,91 @@ pub(super) struct ProviderTimeline {
     text_boundary: bool,
     last_item_key: Option<String>,
     commentary: HashMap<String, CommentaryTimeline>,
+    partial_response_taken: bool,
 }
 
+/// A stopped answer remains commentary, not the turn's single final response.
+/// The text budget also bounds recovery work on a failure path.
+pub(crate) struct PartialResponse {
+    pub(crate) message: String,
+    pub(crate) position: TimelinePosition,
+    pub(crate) segments: Option<serde_json::Value>,
+}
+
+const PARTIAL_RESPONSE_PREFIX: &str = "Partial response (interrupted):\n\n";
+const MAX_PARTIAL_RESPONSE_BYTES: usize = 32 * 1024;
+
 impl ProviderTimeline {
+    pub(crate) fn take_partial_response(&mut self) -> Option<PartialResponse> {
+        if self.partial_response_taken {
+            return None;
+        }
+        // Native Codex sends agent messages as cumulative commentary, whereas
+        // API/CLI adapters send answer deltas. Recover the latest native
+        // message when this turn has no answer-delta buffer.
+        let native = self
+            .commentary
+            .iter()
+            .filter_map(|(key, state)| {
+                let position = self.first_seen.get(key)?;
+                Some((state, position))
+            })
+            .max_by_key(|(_, position)| position.timeline_order);
+        let (raw, position) = if let Some((_, position)) = self.blocks.first() {
+            (self.text.as_str(), position.clone())
+        } else {
+            let (state, position) = native?;
+            (state.label.as_str(), position.clone())
+        };
+        let cleaned = strip_hidden_control_markers(raw).message;
+        let cleaned = gyro_core::security::redact_secrets(&cleaned.replace('\0', ""));
+        if cleaned.trim().is_empty() {
+            return None;
+        }
+        let mut message = cleaned;
+        let segments = if self.blocks.is_empty() {
+            native
+                .filter(|(state, _)| state.label == message)
+                .map(|(state, _)| serde_json::Value::Array(state.segments.clone()))
+        } else {
+            self.response_segments(&message)
+        };
+        let mut segments = segments.filter(|segments| {
+            // A pathological stream with thousands of tiny tool/text blocks
+            // must not make the recovery payload exceed the store's limit.
+            segments.as_array().is_some_and(|items| items.len() <= 128)
+        });
+        if message.len() > MAX_PARTIAL_RESPONSE_BYTES {
+            let mut end = MAX_PARTIAL_RESPONSE_BYTES;
+            while !message.is_char_boundary(end) {
+                end -= 1;
+            }
+            message.truncate(end);
+            message.push_str("\n\n[Partial response truncated]");
+            segments = None;
+        }
+        if let Some(items) = segments.as_mut().and_then(serde_json::Value::as_array_mut) {
+            for segment in items.iter_mut().skip(1) {
+                if let Some(start) = segment["start"].as_u64() {
+                    segment["start"] = serde_json::json!(
+                        start + PARTIAL_RESPONSE_PREFIX.encode_utf16().count() as u64
+                    );
+                }
+            }
+        }
+        message.insert_str(0, PARTIAL_RESPONSE_PREFIX);
+        self.partial_response_taken = true;
+        Some(PartialResponse {
+            message,
+            position,
+            segments,
+        })
+    }
+
+    pub(crate) fn retry_partial_response(&mut self) {
+        self.partial_response_taken = false;
+    }
+
     fn next_position(&mut self) -> TimelinePosition {
         let position = TimelinePosition {
             timeline_order: self.next_order,
@@ -309,6 +391,71 @@ mod tests {
     use crate::{
         providers::streaming::StreamingCommandState, state::provider_run::ProviderRunControl,
     };
+
+    #[test]
+    fn interrupted_text_is_labeled_once_and_keeps_unicode_timeline_positions() {
+        let mut timeline = ProviderTimeline::default();
+        let first = timeline.observe(None, Some("GYRO_SESSION_TITLE: Read file\nFirst 🦀."));
+        timeline.observe(Some("capability:read"), None);
+        let second = timeline.observe(None, Some("\n\nSecond café."));
+        let partial = timeline.take_partial_response().unwrap();
+        assert_eq!(
+            partial.message,
+            format!("{PARTIAL_RESPONSE_PREFIX}First 🦀.\n\nSecond café.")
+        );
+        assert_eq!(partial.position, first);
+        let segments = partial.segments.unwrap();
+        assert_eq!(segments[0]["start"], 0);
+        assert_eq!(segments[1]["timelineOrder"], second.timeline_order);
+        assert_eq!(
+            segments[1]["start"],
+            format!("{PARTIAL_RESPONSE_PREFIX}First 🦀.\n\n")
+                .encode_utf16()
+                .count()
+        );
+        assert!(timeline.take_partial_response().is_none());
+        timeline.retry_partial_response();
+        assert!(
+            timeline.take_partial_response().is_some(),
+            "a failed write can be retried"
+        );
+    }
+
+    #[test]
+    fn interrupted_text_omits_empty_and_control_only_output_and_bounds_recovery() {
+        let mut timeline = ProviderTimeline::default();
+        assert!(timeline.take_partial_response().is_none());
+        timeline.observe(
+            None,
+            Some("GYRO_SESSION_TITLE: Read file\nGYRO_PLAN_UPDATE:{\"action\":\"replace\"}"),
+        );
+        assert!(timeline.take_partial_response().is_none());
+        let mut timeline = ProviderTimeline::default();
+        timeline.observe(None, Some(&"🦀".repeat(MAX_PARTIAL_RESPONSE_BYTES)));
+        let partial = timeline.take_partial_response().unwrap();
+        assert!(partial.message.len() <= MAX_PARTIAL_RESPONSE_BYTES + 100);
+        assert!(partial.message.ends_with("[Partial response truncated]"));
+        assert!(partial.segments.is_none());
+    }
+
+    #[test]
+    fn interrupted_native_commentary_recovers_the_latest_message() {
+        let mut timeline = ProviderTimeline::default();
+        timeline.activity(&commentary("I will inspect the file."));
+        timeline.observe(Some("capability:read"), None);
+        let mut answer = commentary("The code handles 🦀");
+        answer.id = "answer".into();
+        let (position, _) = timeline.activity(&answer);
+        answer.label.push_str(" by reading the file.");
+        timeline.activity(&answer);
+        let partial = timeline.take_partial_response().unwrap();
+        assert_eq!(partial.position, position);
+        assert_eq!(
+            partial.message,
+            format!("{PARTIAL_RESPONSE_PREFIX}{}", answer.label)
+        );
+        assert!(!partial.message.contains("I will inspect"));
+    }
 
     #[test]
     fn heartbeats_are_not_counted_as_shown_output() {

@@ -192,11 +192,15 @@ pub fn retrieval_hint(data: &serde_json::Value) -> Option<String> {
 #[derive(Clone, Debug)]
 pub struct SpillStore {
     root: PathBuf,
+    writes: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl SpillStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            writes: Default::default(),
+        }
     }
     pub fn root(&self) -> &Path {
         &self.root
@@ -253,9 +257,10 @@ impl SpillStore {
         Ok(removed)
     }
 
-    /// The store a session uses when no caller passed one: inside the app data directory, beside
-    /// the rest of the per-user state. `GYRO_SPILL_DIR` overrides it, which is what tests and
-    /// unusually constrained environments use. `None` only when the platform has no data directory.
+    /// The legacy local-owner cache when no session scope is bound.
+    /// `GYRO_SPILL_DIR` overrides this cache. Session-scoped model copies use
+    /// the host's explicit GyroPaths instead, including isolated test paths.
+    /// `None` only when the platform has no data directory.
     pub fn app_data() -> Option<Self> {
         if let Ok(dir) = std::env::var("GYRO_SPILL_DIR") {
             if !dir.is_empty() {
@@ -269,6 +274,90 @@ impl SpillStore {
 /// How many spilled copies the store keeps before the oldest are swept.
 const SPILL_KEEP: usize = 512;
 
+thread_local! {
+    static SCOPED_STORE: std::cell::RefCell<Option<SpillStore>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Bind spill production to a host-verified session on this worker. Entry
+/// points on other workers/processes must bind their own verified context.
+/// The guard cannot move to another thread and nested calls restore the owner.
+pub struct SessionScope {
+    previous: Option<SpillStore>,
+    _same_thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl SessionScope {
+    pub fn start(paths: &crate::GyroPaths, session: uuid::Uuid) -> Self {
+        let store = SpillStore::new(session_root(paths, session));
+        Self {
+            previous: SCOPED_STORE.with(|current| current.replace(Some(store))),
+            _same_thread: std::marker::PhantomData,
+        }
+    }
+}
+
+fn session_root(paths: &crate::GyroPaths, session: uuid::Uuid) -> PathBuf {
+    paths
+        .base_dir
+        .join("spill")
+        .join("sessions")
+        .join(session.to_string())
+}
+
+/// Called after explicit session deletion, including its delegated children.
+/// Never follow a replaced cache parent outside the owned data tree.
+pub(crate) fn remove_session(paths: &crate::GyroPaths, session: uuid::Uuid) -> io::Result<()> {
+    for parent in [
+        paths.base_dir.join("spill"),
+        paths.base_dir.join("spill/sessions"),
+    ] {
+        match fs::symlink_metadata(&parent) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "spill cache parent is a symlink",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
+    let root = session_root(paths, session);
+    match fs::symlink_metadata(&root) {
+        Ok(metadata) if metadata.file_type().is_symlink() => fs::remove_file(root),
+        Ok(_) => fs::remove_dir_all(root),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+impl Drop for SessionScope {
+    fn drop(&mut self) {
+        SCOPED_STORE.with(|current| current.replace(self.previous.take()));
+    }
+}
+
+/// Model-facing reads require the session scope established by the host. A
+/// content-derived address is an identifier, never proof of authorization.
+/// Older unscoped cache entries are deliberately not used as a fallback.
+pub fn read_scoped_window(
+    address: &str,
+    offset: usize,
+    limit: usize,
+) -> io::Result<Option<SpillRead>> {
+    check_address(address)?;
+    let store = SCOPED_STORE
+        .with(|current| current.borrow().clone())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "spill read requires a verified session scope",
+            )
+        })?;
+    read_window_from(&store, address, offset, limit)
+}
+
 /// A process-wide store, resolved once. Retirement runs on every provider call and must never fail
 /// because a directory is missing, so this is best-effort and never surfaces an error.
 fn session_store() -> Option<&'static SpillStore> {
@@ -280,15 +369,20 @@ fn session_store() -> Option<&'static SpillStore> {
 /// Put the full copy of a spilled value on disk, so the address quoted in its preview resolves.
 /// Returns whether the copy is readable; `false` means the preview is all there is.
 pub fn persist(address: &str, text: &str) -> bool {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static WRITES: AtomicUsize = AtomicUsize::new(0);
-    let Some(store) = session_store() else {
+    use std::sync::atomic::Ordering;
+    let store = SCOPED_STORE
+        .with(|current| current.borrow().clone())
+        .or_else(|| session_store().cloned());
+    let Some(store) = store else {
         return false;
     };
     let saved = store.save(address, text).is_ok();
     // Sweep occasionally rather than on a timer: this is a cache, so dropping old copies is
     // expected, and a write-count trigger costs nothing on the hot path.
-    if WRITES.fetch_add(1, Ordering::Relaxed) % 64 == 0 {
+    // Counter belongs to this store, not the process: interleaved sessions
+    // must not repeatedly sweep one namespace while another grows forever.
+    // A newly bound scope sweeps on its first write as well.
+    if store.writes.fetch_add(1, Ordering::Relaxed) % 64 == 0 {
         let _ = store.gc(SPILL_KEEP);
     }
     saved
@@ -730,6 +824,155 @@ mod tests {
         assert_eq!(
             store.load(&address).unwrap().as_deref(),
             Some("same evidence")
+        );
+    }
+
+    #[test]
+    fn scoped_spills_require_context_and_isolate_identical_addresses() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::GyroPaths::from_base_dir(dir.path().join("Gyro"));
+        let first = uuid::Uuid::new_v4();
+        let second = uuid::Uuid::new_v4();
+        let text = "private workspace evidence";
+        let address = address("workspace.read", "gyro_workspace_read", text);
+        assert_eq!(
+            read_scoped_window(&address, 0, 100).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        {
+            let _first = SessionScope::start(&paths, first);
+            assert!(persist(&address, text));
+            assert_eq!(
+                read_scoped_window(&address, 0, 100).unwrap().unwrap().text,
+                text
+            );
+            {
+                let _second = SessionScope::start(&paths, second);
+                assert!(
+                    read_scoped_window(&address, 0, 100).unwrap().is_none(),
+                    "knowing an identical content address grants no access"
+                );
+                assert!(persist(&address, text));
+                assert_eq!(
+                    read_scoped_window(&address, 0, 100).unwrap().unwrap().text,
+                    text
+                );
+            }
+            assert_eq!(
+                read_scoped_window(&address, 0, 100).unwrap().unwrap().text,
+                text,
+                "nested scope restored its caller"
+            );
+        }
+        assert_eq!(
+            read_scoped_window(&address, 0, 100).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        let _later_turn = SessionScope::start(&paths, first);
+        assert_eq!(
+            read_scoped_window(&address, 0, 100).unwrap().unwrap().text,
+            text,
+            "the same session can recover evidence on a later turn"
+        );
+    }
+
+    #[test]
+    fn scoped_spills_never_fall_back_to_legacy_copies() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::GyroPaths::from_base_dir(dir.path().join("Gyro"));
+        let address = address("workspace.read", "gyro_workspace_read", "legacy evidence");
+        let legacy = SpillStore::new(paths.base_dir.join("spill"));
+        legacy.save(&address, "legacy evidence").unwrap();
+        let _scope = SessionScope::start(&paths, uuid::Uuid::new_v4());
+        assert!(read_scoped_window(&address, 0, 100).unwrap().is_none());
+        assert!(legacy.load(&address).unwrap().is_some());
+    }
+
+    #[test]
+    fn scoped_spill_retention_is_independent_between_interleaved_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::GyroPaths::from_base_dir(dir.path().join("Gyro"));
+        let first = uuid::Uuid::new_v4();
+        let second = uuid::Uuid::new_v4();
+        let _first = SessionScope::start(&paths, first);
+        for batch in 0..12 {
+            let text = format!("first-{batch}");
+            assert!(persist(&address("test", "read", &text), &text));
+            let _second = SessionScope::start(&paths, second);
+            for item in 0..63 {
+                let text = format!("second-{batch}-{item}");
+                assert!(persist(&address("test", "read", &text), &text));
+            }
+        }
+        let copies = fs::read_dir(session_root(&paths, second)).unwrap().count();
+        assert!(
+            copies <= SPILL_KEEP + 63,
+            "interleaving must not starve a session's sweep: {copies}"
+        );
+        assert_eq!(
+            fs::read_dir(session_root(&paths, first)).unwrap().count(),
+            12
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deleting_scoped_spills_does_not_follow_replaced_cache_parents() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::GyroPaths::from_base_dir(dir.path().join("Gyro"));
+        let outside = dir.path().join("outside");
+        let session = uuid::Uuid::new_v4();
+        let unrelated = outside.join(session.to_string());
+        fs::create_dir_all(&unrelated).unwrap();
+        fs::create_dir_all(paths.base_dir.join("spill")).unwrap();
+        std::os::unix::fs::symlink(&outside, paths.base_dir.join("spill/sessions")).unwrap();
+        assert_eq!(
+            remove_session(&paths, session).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        assert!(unrelated.is_dir());
+    }
+
+    #[test]
+    fn scoped_spills_bind_each_worker_and_restore_after_unwind() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::GyroPaths::from_base_dir(dir.path().join("Gyro"));
+        let first = uuid::Uuid::new_v4();
+        let second = uuid::Uuid::new_v4();
+        let address = address("workspace.read", "gyro_workspace_read", "first session");
+        let _scope = SessionScope::start(&paths, first);
+        assert!(persist(&address, "first session"));
+        std::thread::scope(|threads| {
+            threads
+                .spawn(|| {
+                    assert_eq!(
+                        read_scoped_window(&address, 0, 100).unwrap_err().kind(),
+                        io::ErrorKind::PermissionDenied
+                    );
+                    let _scope = SessionScope::start(&paths, second);
+                    assert!(read_scoped_window(&address, 0, 100).unwrap().is_none());
+                })
+                .join()
+                .unwrap();
+            threads
+                .spawn(|| {
+                    let _scope = SessionScope::start(&paths, first);
+                    assert_eq!(
+                        read_scoped_window(&address, 0, 100).unwrap().unwrap().text,
+                        "first session"
+                    );
+                })
+                .join()
+                .unwrap();
+        });
+        let result = std::panic::catch_unwind(|| {
+            let _scope = SessionScope::start(&paths, second);
+            panic!("injected worker failure");
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            read_scoped_window(&address, 0, 100).unwrap().unwrap().text,
+            "first session"
         );
     }
 }

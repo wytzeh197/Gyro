@@ -1,0 +1,305 @@
+/* Native form controls, drawn in Gyro's language.
+
+   WebKit's stock checkbox, radio, slider, progress bar, number spinner, date
+   and colour pickers, file button and select arrow all render as macOS Aqua
+   controls, which sit oddly beside Gyro's flat, tokenised surfaces. Every
+   selector is wrapped in :where() so it carries zero specificity: a surface
+   that already styles its own control keeps winning, and this sheet only
+   reaches controls nobody designed. */
+
+/* ---------- Checkbox and radio ---------- */
+:where(input[type="checkbox"], input[type="radio"]):where(:not([role="switch"])) {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex: none;
+  width: calc(15px * var(--gyro-ui-scale, 1));
+  height: calc(15px * var(--gyro-ui-scale, 1));
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--gyro-text) 28%, transparent);
+  border-radius: 4px;
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-primary-text, var(--gyro-surface));
+  cursor: pointer;
+  vertical-align: -2px;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+:where(input[type="radio"]) {
+  border-radius: 50%;
+}
+:where(input[type="checkbox"], input[type="radio"])::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  transform: scale(0);
+  transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  background: currentColor;
+}
+:where(input[type="checkbox"])::before {
+  clip-path: polygon(14% 52%, 0 66%, 38% 100%, 100% 22%, 86% 8%, 37% 70%);
+}
+:where(input[type="radio"])::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+:where(:is(input[type="checkbox"], input[type="radio"]):hover:not(:disabled)) {
+  border-color: color-mix(in srgb, var(--gyro-accent) 70%, transparent);
+}
+:where(:is(input[type="checkbox"], input[type="radio"]):checked),
+:where(:is(input[type="checkbox"]):indeterminate) {
+  background: var(--gyro-primary-bg, var(--gyro-accent));
+  border-color: var(--gyro-primary-bg, var(--gyro-accent));
+}
+:where(:is(input[type="checkbox"], input[type="radio"]):checked)::before {
+  transform: scale(1);
+}
+:where(:is(input[type="checkbox"]):indeterminate)::before {
+  height: 2px;
+  clip-path: none;
+  border-radius: 1px;
+  transform: scale(1);
+}
+:where(:is(input[type="checkbox"], input[type="radio"]):focus-visible) {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+:where(:is(input[type="checkbox"], input[type="radio"]):disabled) {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* ---------- Range slider ---------- */
+:where(input[type="range"]) {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 18px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  accent-color: var(--gyro-accent);
+}
+:where(input[type="range"])::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--gyro-radius-pill, 999px);
+  background: color-mix(in srgb, var(--gyro-text) 14%, transparent);
+}
+:where(input[type="range"])::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 2px solid var(--gyro-primary-bg, var(--gyro-accent));
+  border-radius: 50%;
+  background: var(--gyro-surface-raised);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 120ms ease;
+}
+:where(:is(input[type="range"]):hover)::-webkit-slider-thumb {
+  transform: scale(1.12);
+}
+:where(:is(input[type="range"]):focus-visible) {
+  outline: none;
+}
+:where(:is(input[type="range"]):focus-visible)::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--gyro-accent-soft);
+}
+:where(:is(input[type="range"]):disabled) {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* ---------- Progress and meter ---------- */
+:where(progress, meter) {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 6px;
+  border: 0;
+  border-radius: var(--gyro-radius-pill, 999px);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--gyro-text) 12%, transparent);
+  vertical-align: middle;
+}
+:where(progress)::-webkit-progress-bar {
+  background: color-mix(in srgb, var(--gyro-text) 12%, transparent);
+  border-radius: inherit;
+}
+:where(progress)::-webkit-progress-value {
+  background: var(--gyro-primary-bg, var(--gyro-accent));
+  border-radius: inherit;
+  transition: inline-size 200ms ease;
+}
+:where(meter)::-webkit-meter-bar {
+  height: 6px;
+  border: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--gyro-text) 12%, transparent);
+}
+:where(meter)::-webkit-meter-optimum-value {
+  background: var(--gyro-primary-bg, var(--gyro-accent));
+}
+:where(meter)::-webkit-meter-suboptimum-value {
+  background: var(--gyro-warn, #e0a83a);
+}
+:where(meter)::-webkit-meter-even-less-good-value {
+  background: var(--gyro-danger);
+}
+
+/* ---------- Number spinners: arrows key and scroll still step ---------- */
+:where(input[type="number"])::-webkit-inner-spin-button,
+:where(input[type="number"])::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+:where(input[type="number"]) {
+  -moz-appearance: textfield;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Date, time and search fields ---------- */
+:where(input[type="date"], input[type="time"], input[type="datetime-local"]) {
+  color-scheme: inherit;
+  font-variant-numeric: tabular-nums;
+}
+:where(
+    input[type="date"],
+    input[type="time"],
+    input[type="datetime-local"]
+  )::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.55;
+  border-radius: 4px;
+  padding: 2px;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+:where(
+    input[type="date"],
+    input[type="time"],
+    input[type="datetime-local"]
+  )::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  background: var(--gyro-accent-soft);
+}
+:where(input[type="date"], input[type="time"], input[type="datetime-local"])::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+:where(input[type="date"], input[type="time"], input[type="datetime-local"])::-webkit-datetime-edit-text {
+  color: var(--gyro-muted);
+}
+:where(input[type="date"], input[type="time"], input[type="datetime-local"])::-webkit-datetime-edit-day-field:focus,
+:where(input[type="date"], input[type="time"], input[type="datetime-local"])::-webkit-datetime-edit-month-field:focus,
+:where(input[type="date"], input[type="time"], input[type="datetime-local"])::-webkit-datetime-edit-year-field:focus,
+:where(input[type="date"], input[type="time"], input[type="datetime-local"])::-webkit-datetime-edit-hour-field:focus,
+:where(input[type="date"], input[type="time"], input[type="datetime-local"])::-webkit-datetime-edit-minute-field:focus,
+:where(input[type="date"], input[type="time"], input[type="datetime-local"])::-webkit-datetime-edit-ampm-field:focus {
+  background: var(--gyro-accent-soft);
+  color: var(--gyro-text);
+  border-radius: 3px;
+}
+:where(input[type="search"])::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  cursor: pointer;
+  background: var(--gyro-muted);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 3l6 6M9 3L3 9' stroke='black' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+:where(input[type="search"])::-webkit-search-decoration {
+  -webkit-appearance: none;
+}
+
+/* ---------- Colour swatch ---------- */
+:where(input[type="color"]) {
+  appearance: none;
+  -webkit-appearance: none;
+  width: calc(28px * var(--gyro-ui-scale, 1));
+  height: calc(28px * var(--gyro-ui-scale, 1));
+  padding: 3px;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  background: var(--gyro-surface-soft);
+  cursor: pointer;
+}
+:where(input[type="color"])::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+:where(input[type="color"])::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--gyro-radius-sm) - 2px);
+}
+
+/* ---------- File input button ---------- */
+:where(input[type="file"]) {
+  color: var(--gyro-muted);
+  font: inherit;
+  font-size: var(--gyro-font-support);
+}
+:where(input[type="file"])::file-selector-button {
+  margin-right: var(--gyro-space-standard, 8px);
+  padding: 5px 12px;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+:where(input[type="file"])::file-selector-button:hover {
+  border-color: color-mix(in srgb, var(--gyro-accent) 50%, transparent);
+  background: var(--gyro-accent-soft);
+}
+
+/* ---------- Selects nobody wrapped: flat field, Gyro chevron ---------- */
+:where(select):where(:not([multiple], [size], :has(+ svg), :has(+ .gyro-select-chevron))) {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  padding: 4px 28px 4px 10px;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  background-color: var(--gyro-surface-soft);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4l2.5 2.5L7.5 4'/%3E%3C/svg%3E");
+  background-position: right 10px center;
+  background-repeat: no-repeat;
+  background-size: 10px;
+  color: var(--gyro-text);
+  font: inherit;
+  cursor: pointer;
+}
+:where(:is(select):hover:not(:disabled)) {
+  border-color: color-mix(in srgb, var(--gyro-text) 22%, transparent);
+}
+:where(:is(select):focus-visible) {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 1px;
+}
+:where(:is(select):disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ---------- Placeholder and autofill ---------- */
+:where(input, textarea)::placeholder {
+  color: color-mix(in srgb, var(--gyro-muted) 78%, transparent);
+  opacity: 1;
+}
+:where(:is(input):-webkit-autofill),
+:where(:is(input):-webkit-autofill:hover),
+:where(:is(input):-webkit-autofill:focus) {
+  -webkit-text-fill-color: var(--gyro-text);
+  caret-color: var(--gyro-text);
+  box-shadow: 0 0 0 1000px var(--gyro-surface-soft) inset;
+  transition: background-color 9999s ease-out;
+}
+
+/* ---------- Text caret ---------- */
+:where(input, textarea, [contenteditable="true"]) {
+  caret-color: var(--gyro-accent);
+}

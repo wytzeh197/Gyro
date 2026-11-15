@@ -1,0 +1,62 @@
+Synara/Gyro backend research — 2026-11-13
+
+Synara source: 95671f5052d482b28b5217f852f001dca0815d8a
+Gyro source: 9b1259d7bf30624046c2063d3ec6f2475bdc039c
+Core and desktop Rust trees unchanged from initial 75eef89a19889afbf3213acd9e7a9b7f0e05598e.
+
+1. Existing Gyro regression test
+
+Command:
+cargo test --locked -p gyro-core --lib sessions::tests::status_index_failure_preserves_a_successful_durable_append -- --nocapture
+
+Result:
+running 1 test
+session event was saved but its turn status index was not updated: injected index failure
+test sessions::tests::status_index_failure_preserves_a_successful_durable_append ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1133 filtered out; finished in 0.04s
+
+Interpretation: this test checks that the durable append succeeds despite an index failure. It does not check that the index subsequently repairs itself.
+
+2. Additional isolated probe against the actual gyro-core crate
+
+Command:
+cargo run --offline --manifest-path /tmp/gyro-synara-audit-probe/Cargo.toml --target-dir /Users/wytze/Gyro/target
+
+Setup:
+Temporary standalone Cargo package using a path dependency on /Users/wytze/Gyro/crates/gyro-core.
+Started from a copy of the workspace Cargo.lock; Cargo resolved the standalone package offline.
+All session data lived in tempfile::tempdir(). No installed-app data or provider was used.
+The preserved source is probe.rs; the preserved manifest is probe-Cargo.toml.
+The assertions deliberately confirm current defects, so a successful probe means the findings reproduced.
+
+Observed output:
+session event was saved but its turn index was not updated: audit injected index failure
+message_index_failure: append_returned_ok=true duplicate_event_ids=true durable_copies=2
+session event was saved but its turn status index was not updated: audit injected status failure
+status_index_failure_after_reopen: log_status="done" index_status=Some("running") has_running=true
+future_schema: user_version=9999 open_accepted=true
+
+Exit code: 0
+
+3. Existing normalized-stream behavioral checks
+
+Command:
+node --experimental-strip-types scripts/check-provider-stream-ordering.mjs
+
+Observed output:
+Shared chronology contract passed for 42 catalog/custom model entries.
+Provider stream ordering checks passed (reorder, dedupe, completion, coalescing, background continuation, retry timing, stable activity chronology, aggregate edits, streamed text blocks, timeline index equivalence).
+
+Exit code: 0
+
+Limits:
+No Synara tests/application, full Gyro suite, installed-app crash test, live provider request, paid API request, or comparative latency/RSS benchmark was run.
+Passing normalized-event fixtures does not establish live compatibility for 42 models.
+No product source was changed, committed, or deployed by this research.
+
+Inspected Gyro source SHA-256 values:
+6d0f3e53047db2580791f57b8846a9d310437aadb9d1c6cace4014904a18ff2f  crates/gyro-core/src/sessions.rs
+a2d85fff02b57945f22faebf4137eea1ff55de11277d06a4fcdba5926d2b94c9  crates/gyro-core/src/sqlite.rs
+b69319d405c5a3a9528561bdb49febb33e21fe10470f86df4f8e48f2f16aef19  apps/desktop/src-tauri/src/providers/run.rs
+f3197f067395cc1c43fc8e6fb6d792d950fb9188ef07c7257805699407cf1159  apps/desktop/src-tauri/src/providers/events.rs
+528f55a0574596ea26277046af6c5b0f3f0bc42870803e105742400511308c6e  crates/gyro-core/src/provider_runtime/runners/codex.rs

@@ -44,6 +44,23 @@ pub enum Operation {
         session_id: String,
         title: String,
     },
+    SetModel {
+        session_id: String,
+        model: ModelChoice,
+    },
+    UploadAttachment {
+        session_id: String,
+        upload_id: Uuid,
+        name: String,
+        kind: String,
+        offset: usize,
+        data: String,
+        complete: bool,
+    },
+    AttachWorkspaceFile {
+        session_id: String,
+        path: String,
+    },
     History {
         session_id: String,
         before: Option<String>,
@@ -62,6 +79,10 @@ pub enum Operation {
         turn_id: String,
         message: String,
         model: ModelChoice,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<AttachmentRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<String>,
     },
     Stop {
         session_id: String,
@@ -97,6 +118,11 @@ pub enum Operation {
     Search {
         session_id: String,
         query: String,
+    },
+    ReadImage {
+        session_id: String,
+        path: String,
+        offset: u64,
     },
     ReadFile {
         session_id: String,
@@ -182,10 +208,22 @@ pub enum TerminalAction {
     Close,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AttachmentRef {
+    pub path: String,
+    pub kind: String,
+    pub name: String,
+    pub content_hash: String,
+}
+
 impl Operation {
     pub fn session_id(&self) -> Option<&str> {
         match self {
             Self::RenameSession { session_id, .. }
+            | Self::SetModel { session_id, .. }
+            | Self::UploadAttachment { session_id, .. }
+            | Self::AttachWorkspaceFile { session_id, .. }
             | Self::History { session_id, .. }
             | Self::Snapshot { session_id, .. }
             | Self::Watch { session_id }
@@ -199,6 +237,7 @@ impl Operation {
             | Self::Release { session_id }
             | Self::Files { session_id }
             | Self::Search { session_id, .. }
+            | Self::ReadImage { session_id, .. }
             | Self::ReadFile { session_id, .. }
             | Self::WriteFile { session_id, .. }
             | Self::Path { session_id, .. }
@@ -211,6 +250,9 @@ impl Operation {
         match self {
             Self::CreateSession { .. }
             | Self::RenameSession { .. }
+            | Self::SetModel { .. }
+            | Self::UploadAttachment { .. }
+            | Self::AttachWorkspaceFile { .. }
             | Self::Submit { .. }
             | Self::Stop { .. }
             | Self::Approval { .. }

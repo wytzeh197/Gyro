@@ -239,7 +239,7 @@ try {
       interactions.push(name);
       console.log("PASS " + name);
     };
-    await test("ordinary groups stay open and switches update", async () => {
+    await test("the first group starts open and switches update", async () => {
       await navigate("general");
       assert.ok(
         await evaluate(

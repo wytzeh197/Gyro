@@ -868,28 +868,28 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     },
     CapabilityDescriptor {
         id: CapabilityId::CodeDefinition,
-        class: CapabilityClass::WorkspaceInspect,
+        class: CapabilityClass::TerminalExecute,
         description: "Jump to where the symbol at a 1-based line and column in a workspace file is defined, using the workspace language server. Each location carries a source preview line. Returns status indexing with retryAfterMs while a cold language server is still warming up; retry shortly instead of concluding the symbol is missing.",
     },
     CapabilityDescriptor {
         id: CapabilityId::CodeReferences,
-        class: CapabilityClass::WorkspaceInspect,
+        class: CapabilityClass::TerminalExecute,
         description: "Find every reference to the symbol at a 1-based line and column in a workspace file, using the workspace language server. Pass includeDeclaration to include the declaration itself. Returns status indexing with retryAfterMs while a cold language server is still warming up; retry shortly instead of concluding there are no references.",
     },
     CapabilityDescriptor {
         id: CapabilityId::CodeHover,
-        class: CapabilityClass::WorkspaceInspect,
+        class: CapabilityClass::TerminalExecute,
         description: "Read the language server hover card (type signature and docs) for the symbol at a 1-based line and column in a workspace file. Returns status indexing with retryAfterMs while a cold language server is still warming up.",
     },
     CapabilityDescriptor {
         id: CapabilityId::CodeSymbols,
-        class: CapabilityClass::WorkspaceInspect,
+        class: CapabilityClass::TerminalExecute,
         description: "List the symbols a workspace source file declares, using the workspace language server. Returns status indexing with retryAfterMs while a cold language server is still warming up; retry shortly instead of concluding the file is empty.",
     },
     CapabilityDescriptor {
         id: CapabilityId::CodeFormat,
-        class: CapabilityClass::WorkspaceInspect,
-        description: "Format a workspace source file with the workspace language server and return the resulting text edits (range plus newText) and the fully formatted text, without writing anything. Pass tabSize and insertSpaces to match the file's style. Returns status indexing with retryAfterMs while a cold language server is still warming up.",
+        class: CapabilityClass::TerminalExecute,
+        description: "Format a workspace source file with the workspace language server and return the resulting text edits (range plus newText) and the fully formatted text, without applying the edits. The language server may execute project build scripts or plugins. Pass tabSize and insertSpaces to match the file's style. Returns status indexing with retryAfterMs while a cold language server is still warming up.",
     },
     CapabilityDescriptor {
         id: CapabilityId::IdeReveal,
@@ -1561,11 +1561,25 @@ mod tests {
         assert!(plan.contains(&CapabilityId::WorkspaceRead));
         assert!(plan.contains(&CapabilityId::BrowserReadPage));
         assert!(plan.contains(&CapabilityId::GithubStatus));
-        // Code intelligence is read-only inspection, so Plan mode keeps it.
-        assert!(plan.contains(&CapabilityId::CodeDefinition));
-        assert!(plan.contains(&CapabilityId::CodeReferences));
-        assert!(plan.contains(&CapabilityId::CodeHover));
-        assert!(plan.contains(&CapabilityId::CodeSymbols));
+        // Language servers may execute project build scripts or plugins.
+        for id in [
+            CapabilityId::CodeDefinition,
+            CapabilityId::CodeReferences,
+            CapabilityId::CodeHover,
+            CapabilityId::CodeSymbols,
+            CapabilityId::CodeFormat,
+        ] {
+            assert!(!plan.contains(&id));
+            assert_eq!(
+                capability_descriptor(id).class,
+                CapabilityClass::TerminalExecute
+            );
+            assert_eq!(
+                ProjectCapabilityPolicy::defaults("/tmp/project")
+                    .access_for(capability_descriptor(id).class),
+                CapabilityAccess::Ask
+            );
+        }
         // Git history is read-only inspection too, so Plan keeps it.
         assert!(plan.contains(&CapabilityId::WorkspaceGitLog));
         assert!(plan.contains(&CapabilityId::WorkspaceGitBranches));

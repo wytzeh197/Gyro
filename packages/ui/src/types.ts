@@ -2660,6 +2660,8 @@ export type EfficiencyConfig = {
 };
 
 export type GyroConfig = {
+  /** Ephemeral remote view: the connected host owns the available model list. */
+  hostModelCatalog?: boolean;
   automaticUpdateChecks?: boolean;
   telemetryEnabled: boolean;
   requireCommandApproval: boolean;

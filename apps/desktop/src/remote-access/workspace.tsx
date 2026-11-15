@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChatSurface,
   confirmAction,
   ChatFileActionsContext,
+  type ChatAttachment,
   type ChatEnvironmentRemote,
   type GyroConfig,
   type ProviderId,
@@ -15,12 +16,14 @@ import {
 } from "../../../../packages/ui/node_modules/lucide-react";
 import { useRemoteAccess, useRemoteTheme } from "./context";
 import { useRemoteWorkspace } from "./use-workspace";
+import { useRemoteAttachments } from "./attachments";
 import { RemoteFiles, RemoteGit, RemoteTerminals } from "./workspace-panels";
 import { CommandApprovalCard, MutationReviewPanel } from "./workspace-review";
 import type { HostInfo, ModelChoice, Peer } from "./types";
 
 function configFromHost(info?: HostInfo, choice?: ModelChoice): GyroConfig {
   return {
+    hostModelCatalog: true,
     telemetryEnabled: false,
     fullAccess: info?.fullAccess ?? false,
     requireCommandApproval: info?.requireCommandApproval ?? true,
@@ -38,6 +41,9 @@ function configFromHost(info?: HostInfo, choice?: ModelChoice): GyroConfig {
         provider.runtimeStatus === "ready" ? "connected" : "not-connected",
       kind: provider.kind,
       models: provider.models.map((id) => ({ id, displayName: id })),
+      modelIds: provider.models,
+      selectedReasoningEffort: choice?.providerId === provider.id
+        ? choice.reasoningEffort as ReasoningEffort : undefined,
       defaultModelId: provider.defaultModelId,
       selectedModelId:
         choice?.providerId === provider.id
@@ -82,8 +88,14 @@ export default function RemoteWorkspace({
     [selection.projectId, selection.sessionId],
   );
   const [worktree, setWorktree] = useState(false);
+  const [chatMode, setChatMode] = useState<"normal" | "plan">("normal");
+  const selectionRef = useRef(selection.sessionId);
+  selectionRef.current = selection.sessionId;
   const homeDraftKey = `new:${view.projectId ?? ""}`;
   const homeDraft = view.drafts[homeDraftKey] ?? "";
+  const media = useRemoteAttachments(
+    host.id, view.sessionId ?? homeDraftKey, access.ports, workspace.setError,
+  );
   const setHomeDraft = (text: string) =>
     setView((previous) => ({
       ...previous,
@@ -97,7 +109,10 @@ export default function RemoteWorkspace({
   const [environmentOpen, setEnvironmentOpen] = useState(true);
   // A prompt typed on the home composer waits here until its new chat is
   // open and owned, then goes through the normal submit path.
-  const [queued, setQueued] = useState<{ sessionId: string; text: string }>();
+  const [queued, setQueued] = useState<{
+    sessionId: string; text: string; model: ModelChoice;
+    attachments: ChatAttachment[]; mode: "normal" | "plan";
+  }>();
   const session =
     (data.snapshot?.session.id === view.sessionId
       ? data.snapshot?.session
@@ -116,7 +131,7 @@ export default function RemoteWorkspace({
   };
   const config = useMemo(
     () => configFromHost(data.info, model),
-    [data.info, model.providerId, model.modelId],
+    [data.info, model.providerId, model.modelId, model.reasoningEffort],
   );
   const selectedProject = data.projects.find((p) => p.id === view.projectId);
   const panel = view.panel;
@@ -143,7 +158,8 @@ export default function RemoteWorkspace({
       !busy
     ) {
       setQueued(undefined);
-      void workspace.submit(queued.text, model);
+      void workspace.submit(queued.text, queued.model, queued.attachments, queued.mode)
+        .then((sent) => { if (sent) media.clear(queued.sessionId, queued.attachments); });
     }
   }, [queued, session?.id, canAct, online, busy]);
   const create = async () => {
@@ -160,12 +176,18 @@ export default function RemoteWorkspace({
     return id;
   };
   const startChat = async (message: string) => {
-    const text = message.trim();
-    if (!text) return;
+    const text = message.trim() || (media.attachments.length ? "Please review the attached files." : "");
+    if (!text || media.preparing) return;
+    const attachments = media.attachments;
+    const chosenModel = { ...model };
     const id = await create();
     if (id) {
-      setQueued({ sessionId: id, text });
-      setHomeDraft("");
+      media.move(homeDraftKey, id);
+      setView((previous) => ({
+        ...previous,
+        drafts: { ...previous.drafts, [id]: text, [homeDraftKey]: "" },
+      }));
+      setQueued({ sessionId: id, text, model: chosenModel, attachments, mode: chatMode });
     }
   };
   const openPanel = (value: (typeof PANELS)[number]["id"]) =>
@@ -194,7 +216,9 @@ export default function RemoteWorkspace({
   };
   const blocked = !online
     ? `Read only until ${host.name} is back.`
-    : pendingSubmission
+    : media.preparing
+      ? "Preparing attachments…"
+      : pendingSubmission
       ? "Checking the previous submission. Refresh before sending again."
       : busy
         ? "Waiting for the host…"
@@ -285,6 +309,7 @@ export default function RemoteWorkspace({
   const environmentRemote: ChatEnvironmentRemote | undefined = session
     ? {
         host: host.name,
+        hostId: host.id,
         status: connection.status,
         statusLabel: connection.label,
         location: [
@@ -363,7 +388,37 @@ export default function RemoteWorkspace({
         )}
       </aside>
     ) : undefined;
+  const selectModel = async (choice: ModelChoice) => {
+    if (!session) { setSelected(choice); return; }
+    if (!data.info?.capabilities.includes("sessionModel")) {
+      workspace.setError("Update Gyro on the host to save remote model choices.");
+      return;
+    }
+    const id = session.id;
+    const updated = await run({ op: "setModel", sessionId: id, model: choice });
+    if (updated && selectionRef.current === id) setSelected(undefined);
+  };
   const composerAction = (action: string) => {
+    const picker = {
+      "attach-files": "any", "select-image": "image", "select-video": "video",
+      "select-media": "media", "add-context": "workspace-file", "select-file": "workspace-file",
+    } as const;
+    if (action in picker) {
+      void media.pick(picker[action as keyof typeof picker]);
+      return;
+    }
+    if (action === "set-chat-mode-normal" || action === "set-chat-mode-plan") {
+      if (action.endsWith("plan") && !data.info?.capabilities.includes("chatModes")) {
+        workspace.setError("Update Gyro on the host to use Plan mode remotely.");
+        return;
+      }
+      setChatMode(action.endsWith("plan") ? "plan" : "normal");
+      return;
+    }
+    if (action.startsWith("refresh-provider-models:") || action.startsWith("check-provider:")) {
+      void workspace.load();
+      return;
+    }
     if (action.startsWith("refresh-provider-usage:")) {
       void workspace.load();
       return;
@@ -379,7 +434,7 @@ export default function RemoteWorkspace({
         `select-provider-model:${option.providerId}:${option.modelId}`,
     );
     if (choice) {
-      setSelected({
+      void selectModel({
         providerId: choice.providerId,
         modelId: choice.modelId,
       });
@@ -389,7 +444,7 @@ export default function RemoteWorkspace({
       /^select-provider-effort:.*:(low|medium|high|xhigh|max|ultra)$/,
     )?.[1];
     if (effort) {
-      setSelected({ ...model, reasoningEffort: effort });
+      void selectModel({ ...model, reasoningEffort: effort });
       return;
     }
     if (
@@ -433,13 +488,21 @@ export default function RemoteWorkspace({
             draft={homeDraft}
             onDraftChange={setHomeDraft}
             onSend={(message) => void startChat(message)}
+            attachments={media.attachments}
+            onRemoveAttachment={media.remove}
+            onAttachMediaFiles={media.files}
+            onAttachMediaPaths={media.paths}
+            onMediaDropError={workspace.setError}
+            chatMode={chatMode}
             sessionModel={{
               providerId: model.providerId as ProviderId,
               modelId: model.modelId,
               reasoningEffort: model.reasoningEffort as ReasoningEffort,
             }}
             composerBlockedReason={
-              busy
+              media.preparing
+                ? "Preparing attachments…"
+                : busy
                 ? "Starting the session on the host…"
                 : !model.modelId
                   ? `No models on ${host.name}`
@@ -464,7 +527,10 @@ export default function RemoteWorkspace({
           <div className={`gyro-remote-chat${readOnly ? " is-readonly" : ""}`}>
             <ChatFileActionsContext.Provider
               value={{
-                preview: async () => undefined,
+                preview: (path, kind) => kind === "image"
+                  ? workspace.client.previewImage(session.id, path) : Promise.resolve(undefined),
+                resolveCitedImage: async ({ target }) =>
+                  await workspace.client.previewImage(session.id, target) ? target : undefined,
                 open: (path) => void workspace.openRemoteFile(path),
               }}
             >
@@ -490,7 +556,17 @@ export default function RemoteWorkspace({
                     drafts: { ...previous.drafts, [session.id]: text },
                   }))
                 }
-                onSend={(message) => void workspace.submit(message, model)}
+                onSend={(message) => {
+                  const attachments = media.attachments;
+                  void workspace.submit(message, model, attachments, chatMode)
+                    .then((sent) => { if (sent) media.clear(session.id, attachments); });
+                }}
+                attachments={media.attachments}
+                onRemoveAttachment={media.remove}
+                onAttachMediaFiles={media.files}
+                onAttachMediaPaths={media.paths}
+                onMediaDropError={workspace.setError}
+                chatMode={chatMode}
                 sessionModel={{
                   providerId: model.providerId as ProviderId,
                   modelId: model.modelId,

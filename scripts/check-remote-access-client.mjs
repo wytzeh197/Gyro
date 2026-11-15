@@ -4,6 +4,8 @@ import {
   emptyView,
   readView,
   persistView,
+  pendingSubmitOutcome,
+  PENDING_SUBMIT_GRACE_MS,
 } from "../apps/desktop/src/remote-access/view-state.ts";
 
 const calls = [],
@@ -255,6 +257,57 @@ assert.equal(
   "catch-up subscription disposes its listener",
 );
 
+const pendingSubmit = {
+  requestId: "r",
+  turnId: "t",
+  message: "m",
+  draft: "m",
+  sentAt: 1_000,
+};
+const late = 1_000 + PENDING_SUBMIT_GRACE_MS;
+const facts = {
+  recorded: false,
+  status: "unknown",
+  inFlight: false,
+  now: late,
+};
+assert.equal(pendingSubmitOutcome(pendingSubmit, facts), "notRun");
+assert.equal(
+  pendingSubmitOutcome({ ...pendingSubmit, sentAt: undefined }, facts),
+  "notRun",
+  "a pending submit saved by an older build is not stuck forever",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, now: late - 1 }),
+  "wait",
+  "the host gets time to record a submit it already received",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, inFlight: true }),
+  "wait",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, status: "started" }),
+  "wait",
+  "a submit the host started is never cleared as not run",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, status: "uncertain" }),
+  "wait",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, status: "failed", now: 0 }),
+  "notRun",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, status: "done", now: 0 }),
+  "ran",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, recorded: true, now: 0 }),
+  "ran",
+);
+
 console.log(
-  "Remote client checks passed: routing, leases, stale events, ordered input, uncertain input, draft isolation, storage recovery and ordered live catch-up.",
+  "Remote client checks passed: pending submit outcomes, routing, leases, stale events, ordered input, uncertain input, draft isolation, storage recovery and ordered live catch-up.",
 );

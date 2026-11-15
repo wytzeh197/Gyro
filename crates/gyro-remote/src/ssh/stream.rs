@@ -38,10 +38,52 @@ enum ClientFrame {
     Request(Request),
     Unwatch(Uuid),
 }
-type Pending = Arc<Mutex<HashMap<Uuid, oneshot::Sender<Response>>>>;
+// No pending-map operation spans an await. A synchronous lock lets a cancelled
+// request remove its entry immediately from Drop, including during shutdown.
+type Pending = Arc<std::sync::Mutex<HashMap<Uuid, Option<oneshot::Sender<Response>>>>>;
+type Writer = Arc<Mutex<Option<Box<dyn AsyncWrite + Unpin + Send>>>>;
+
+fn close_writer(writer: &Writer) {
+    if let Ok(mut slot) = writer.try_lock() {
+        slot.take();
+    } else if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        // An interrupted frame may still own the lock while its Drop guard
+        // closes us. Retire the pipe as soon as that guard releases it.
+        let writer = writer.clone();
+        runtime.spawn(async move {
+            writer.lock().await.take();
+        });
+    }
+}
+
+struct PendingRequest<'a> {
+    client: &'a Client,
+    id: Uuid,
+}
+impl Drop for PendingRequest<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut pending) = self.client.pending.lock() {
+            pending.remove(&self.id);
+        }
+    }
+}
+
+struct FrameWrite<'a> {
+    client: &'a Client,
+    complete: bool,
+}
+impl Drop for FrameWrite<'_> {
+    fn drop(&mut self) {
+        if !self.complete {
+            // A partial length/body cannot be followed by another frame. This
+            // also runs when the caller drops the request future mid-write.
+            self.client.close();
+        }
+    }
+}
 
 pub struct Client {
-    writer: Mutex<Box<dyn AsyncWrite + Unpin + Send>>,
+    writer: Writer,
     pending: Pending,
     events: broadcast::Sender<RemoteEvent>,
     closed: Arc<AtomicBool>,
@@ -62,11 +104,13 @@ impl Client {
             },
         )
         .await?;
-        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
+        let pending: Pending = Arc::new(std::sync::Mutex::new(HashMap::new()));
         let (events, _) = broadcast::channel(256);
         let closed = Arc::new(AtomicBool::new(false));
         let (shutdown, _) = tokio::sync::watch::channel(false);
         let shutdown_reader = shutdown.clone();
+        let writer: Writer = Arc::new(Mutex::new(Some(Box::new(writer))));
+        let reader_writer = writer.clone();
         let p = pending.clone();
         let e = events.clone();
         let c = closed.clone();
@@ -74,7 +118,14 @@ impl Client {
             while let Ok(frame) = read_frame::<Frame, _>(&mut reader).await {
                 match frame {
                     Frame::Response(response) => {
-                        if let Some(sender) = p.lock().await.remove(&response.id) {
+                        // Keep the ID reserved until its owning request settles.
+                        // Otherwise that request's cleanup could remove a newer
+                        // request reusing the same ID after response delivery.
+                        if let Some(sender) = p
+                            .lock()
+                            .ok()
+                            .and_then(|mut p| p.get_mut(&response.id).and_then(Option::take))
+                        {
                             let _ = sender.send(response);
                         }
                     }
@@ -85,7 +136,10 @@ impl Client {
             }
             c.store(true, Ordering::SeqCst);
             shutdown_reader.send_replace(true);
-            p.lock().await.clear();
+            close_writer(&reader_writer);
+            if let Ok(mut pending) = p.lock() {
+                pending.clear();
+            }
             let _ = e.send(RemoteEvent {
                 session_id: String::new(),
                 topic: "resync".into(),
@@ -93,7 +147,7 @@ impl Client {
             });
         });
         Ok(Arc::new(Self {
-            writer: Mutex::new(Box::new(writer)),
+            writer,
             pending,
             events,
             closed,
@@ -104,9 +158,17 @@ impl Client {
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
     }
+    pub(super) async fn closed(&self) {
+        let mut shutdown = self.shutdown.subscribe();
+        let _ = shutdown.wait_for(|closed| *closed).await;
+    }
     pub fn close(&self) {
         self.closed.store(true, Ordering::SeqCst);
         self.shutdown.send_replace(true);
+        close_writer(&self.writer);
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.clear();
+        }
         let _ = self.events.send(RemoteEvent {
             session_id: String::new(),
             topic: "resync".into(),
@@ -122,20 +184,24 @@ impl Client {
         let id = request.id;
         let (send, receive) = oneshot::channel();
         {
-            let mut pending = self.pending.lock().await;
+            let mut pending = self
+                .pending
+                .lock()
+                .map_err(|_| anyhow::anyhow!("SSH requests unavailable"))?;
             if pending.len() >= 16 {
                 bail!("Too many simultaneous SSH requests");
             }
             if pending.contains_key(&id) {
                 bail!("This request is already in flight");
             }
-            pending.insert(id, send);
+            pending.insert(id, Some(send));
         }
+        let _pending = PendingRequest { client: self, id };
         let result = tokio::time::timeout(Duration::from_secs(90), async {
             tokio::select! {
                 _ = shutdown.wait_for(|closed| *closed) => bail!("SSH connection closed; refresh before retrying an action"),
                 result = async {
-                    write_frame(&mut *self.writer.lock().await, &ClientFrame::Request(request)).await?;
+                    self.send(&ClientFrame::Request(request)).await?;
                     receive.await.context("SSH connection closed; refresh before retrying an action")
                 } => result,
             }
@@ -143,11 +209,24 @@ impl Client {
         .await
         .context("SSH request timed out; its outcome may be uncertain. Refresh before retrying.")
         .and_then(|r| r);
-        self.pending.lock().await.remove(&id);
         if result.is_err() {
             self.close();
         }
         result
+    }
+    async fn send(&self, frame: &ClientFrame) -> Result<()> {
+        let mut writer = self.writer.lock().await;
+        // A queued writer must recheck after a preceding interrupted write.
+        if self.is_closed() {
+            bail!("SSH connection closed. Reconnect to the host.");
+        }
+        let mut write = FrameWrite {
+            client: self,
+            complete: false,
+        };
+        write_frame(writer.as_mut().context("SSH connection closed")?, frame).await?;
+        write.complete = true;
+        Ok(())
     }
     pub async fn watch(
         self: &Arc<Self>,
@@ -161,10 +240,6 @@ impl Client {
             .to_string();
         let mut events = self.events.subscribe();
         let watch_id = request.id;
-        self.request(request)
-            .await?
-            .into_result()
-            .map_err(anyhow::Error::msg)?;
         struct Unwatch(std::sync::Weak<Client>, Uuid);
         impl Drop for Unwatch {
             fn drop(&mut self) {
@@ -179,6 +254,10 @@ impl Client {
             }
         }
         let guard = Unwatch(Arc::downgrade(self), watch_id);
+        self.request(request)
+            .await?
+            .into_result()
+            .map_err(anyhow::Error::msg)?;
         Ok(tokio::spawn(async move {
             let _guard = guard;
             loop {
@@ -217,7 +296,7 @@ impl Client {
             return Ok(());
         }
         let result = tokio::time::timeout(Duration::from_secs(5), async {
-            write_frame(&mut *self.writer.lock().await, &ClientFrame::Unwatch(id)).await
+            self.send(&ClientFrame::Unwatch(id)).await
         })
         .await;
         match result {
@@ -319,9 +398,19 @@ where
     let limits = Arc::new(tokio::sync::Semaphore::new(16));
     let work = async {
         loop {
-            let frame: ClientFrame = tokio::select! {
-                request = read_frame(&mut reader) => request?,
-                completed = tasks.join_next(), if !tasks.is_empty() => { if let Some(result) = completed { result??; } continue; }
+            let frame: ClientFrame = {
+                // read_frame consumes a length and then a body. Keep that same
+                // future alive while reaping handlers, or partial bytes vanish.
+                let next = read_frame(&mut reader);
+                tokio::pin!(next);
+                loop {
+                    tokio::select! {
+                        request = &mut next => break request?,
+                        completed = tasks.join_next(), if !tasks.is_empty() => {
+                            if let Some(result) = completed { result??; }
+                        }
+                    }
+                }
             };
             let request = match frame {
                 ClientFrame::Request(request) => request,

@@ -445,6 +445,9 @@ try {
     "second chat streams live",
   );
   await evaluate(
+    "window.gyroRemoteFixture.streamText('Work continued while this chat was away.')",
+  );
+  await evaluate(
     "[...document.querySelectorAll('.gyro-sidebar button')].find(b=>b.textContent.includes('Existing remote chat')).click()",
   );
   await until(
@@ -453,6 +456,47 @@ try {
         "document.querySelector('.gyro-remote-chat')?.innerText.includes('Live text from the host.')",
       ),
     "switch back to the first active chat",
+  );
+  await until(
+    () => evaluate(
+      "[...document.querySelectorAll('.gyro-run-segment-toggle')].some(b=>b.textContent.includes('Ran 1 command'))",
+    ),
+    "durable tool progress returns in the work timeline",
+  );
+  await evaluate(
+    "[...document.querySelectorAll('.gyro-run-segment-toggle')].find(b=>b.textContent.includes('Ran 1 command')).click()",
+  );
+  await until(
+    () => evaluate(
+      "document.querySelector('.gyro-remote-chat')?.innerText.includes('git status --short')",
+    ),
+    "returning to a chat reloads durable tool progress despite an unchanged host revision",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.gyro-remote-chat')?.innerText.includes('explicit browser fixture of a remote coding session')",
+    ),
+    true,
+    "returning to a chat restores persisted messages as well as live text",
+  );
+  await until(
+    () => evaluate(
+      "document.querySelector('.gyro-remote-chat')?.innerText.includes('Work continued while this chat was away.')",
+    ),
+    "catch-up restores progress produced while another chat was selected",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.gyro-remote-chat')?.textContent.includes('pnpm typecheck')",
+    ),
+    true,
+    "live tool progress remains alongside restored durable activity",
+  );
+  await until(
+    () => evaluate(
+      "window.gyroRemoteFixture.requests.filter(r=>r.operation.op==='history' && r.operation.sessionId==='existing-chat' && r.operation.revision).length >= 2",
+    ),
+    "subsequent refreshes still use conditional history reads",
   );
   assert.equal(
     await evaluate(
@@ -565,9 +609,9 @@ try {
   );
   assert.equal(
     await evaluate(
-      "document.querySelector('.gyro-sidebar-project-remote')?.textContent.trim()",
+      "document.querySelector('.gyro-sidebar-project-remote')?.getAttribute('aria-label')?.startsWith('Remote on ')",
     ),
-    "Remote",
+    true,
     "project has quiet remote marker",
   );
   assert.equal(
@@ -608,6 +652,23 @@ try {
     true,
     "Escape closes details and restores focus",
   );
+  // Real composer controls must use only the selected host's catalog.
+  await evaluate(`document.querySelector('.gyro-remote-chat button[aria-label^="Model:"]').click()`);
+  await until(() => evaluate("document.querySelectorAll('.gyro-model-rail-model').length === 2"), "host model list");
+  assert.equal(await evaluate("document.querySelectorAll('.gyro-model-rail-providers .gyro-model-rail-tile').length"), 1,
+    "local-only providers never leak into the remote model menu");
+  await evaluate("[...document.querySelectorAll('.gyro-model-rail-model')].find(b => b.textContent.includes('gpt-6') && !b.textContent.includes('gpt-6.1')).click()");
+  await until(() => evaluate("window.gyroRemoteFixture.sessions.find(s => s.id === 'existing-chat').modelId === 'gpt-6'"),
+    "model switch persists on the host before Send");
+  await evaluate(`(() => {
+    const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZqkAAAAASUVORK5CYII='), c => c.charCodeAt(0));
+    const data = new DataTransfer();
+    data.items.add(new File([bytes], 'remote-parity.png', { type: 'image/png' }));
+    document.querySelector('.gyro-remote-workspace textarea').dispatchEvent(
+      new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  })()`);
+  await until(() => evaluate("document.querySelector('.gyro-composer-attachment img')?.getAttribute('alt') === 'remote-parity.png'"),
+    "pasted image reaches the remote composer");
   const fields = await evaluate(
     "[...document.querySelectorAll('textarea')].map(e=>({className:e.className,placeholder:e.placeholder,disabled:e.disabled}))",
   );
@@ -640,6 +701,14 @@ try {
       ),
     "remote response",
   );
+  const submitted = await evaluate("window.gyroRemoteFixture.requests.findLast(r => r.operation.op === 'submit').operation");
+  assert.equal(submitted.model.modelId, "gpt-6", "Send uses the selected host model");
+  assert.equal(submitted.attachments.length, 1, "Send includes the pasted image");
+  assert.equal(submitted.attachments[0].path.startsWith("/fixture/host-attachments/"), true,
+    "client paths are replaced by host attachment paths");
+  await until(() => evaluate("Boolean(document.querySelector('.gyro-transcript-attachments img')?.complete && document.querySelector('.gyro-transcript-attachments img')?.naturalWidth)"),
+    "sent image preview loads from the host");
+  await shot("remote-model-image-chat.png");
   await evaluate("window.gyroRemoteFixture.addApproval('pnpm typecheck')");
   await until(
     () => evaluate("document.body.innerText.includes('pnpm typecheck')"),
@@ -960,6 +1029,11 @@ try {
         ok: true,
         evidence: "explicit browser fixture using production components",
         checks: [
+          "host-model-catalog",
+          "host-model-persistence",
+          "image-paste",
+          "image-upload-on-send",
+          "host-image-preview",
           "settings",
           "host-toggle",
           "invitation-cancel",
@@ -972,6 +1046,7 @@ try {
           "automatic-device-control",
           "host-started-live-text-and-commands",
           "catch-up-after-switching",
+          "durable-progress-restored-with-history-revisions",
           "host-context-and-plan-usage",
           "standard-new-session-remote-folder-picker",
           "submit",

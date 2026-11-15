@@ -169,7 +169,6 @@
   .gyro-settings-disclosure-group {
   margin: 0;
   border: 0;
-  border-top: 1px solid var(--gyro-border-soft);
   border-radius: 0;
   background: transparent;
 }
@@ -183,8 +182,8 @@
   .gyro-settings-disclosure-heading
   > h2
   > button {
-  min-height: var(--gyro-control-comfortable);
-  padding-block: var(--gyro-space-panel);
+  min-height: 0;
+  padding-block: 10px 12px;
 }
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
@@ -195,7 +194,7 @@
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
   .gyro-settings-disclosure-body {
-  padding: var(--gyro-space-standard) 0 var(--gyro-space-panel);
+  padding: 4px 0 0;
 }
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings

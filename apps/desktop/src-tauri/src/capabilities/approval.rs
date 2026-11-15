@@ -8,7 +8,7 @@ use crate::{
     },
     capabilities::access::{
         capability_access_for_call, capability_argument_string, capability_full_access_enabled,
-        narrower_capability_access,
+        capability_uses_language_server, narrower_capability_access,
     },
     capability_inspection, code_mode,
     command_execution::{model_command_boundary, model_terminal_request, ModelCommandContext},
@@ -41,6 +41,9 @@ use std::{
 };
 use tauri::{Emitter, Manager};
 use uuid::Uuid;
+
+const LANGUAGE_SERVER_EXECUTION_REASON: &str = "The model requested a workspace language server for this file. The language server may run project build scripts or plugins with your account's permissions.";
+
 pub(crate) fn capability_event(
     app: &tauri::AppHandle,
     bound: &BoundProviderCapabilityContext,
@@ -165,6 +168,21 @@ pub(crate) fn wait_for_capability_approval(
             serde_json::json!(["deny", "allow-once", "allow-project"])
         },
     });
+    if capability_uses_language_server(capability_id) {
+        let (reason, risk) = if class == CapabilityClass::TerminalExecute {
+            (
+                LANGUAGE_SERVER_EXECUTION_REASON,
+                "The language server may run project build scripts or plugins with your account's permissions.",
+            )
+        } else {
+            (
+                "The model requested language-server access to a sensitive workspace file. This approval is separate from permission to execute project code.",
+                "This separate approval allows the sensitive file to be read; language-server execution also requires permission.",
+            )
+        };
+        payload["reason"] = serde_json::json!(reason);
+        payload["risk"] = serde_json::json!(risk);
+    }
     provider_timeline::observe(
         app,
         &bound.session_id,

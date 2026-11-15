@@ -101,8 +101,10 @@ if (bootSurface === "embedded") {
     import("./menu-bar.css"),
     import("@gyro-dev/ui/styles.css"),
     import("@gyro-dev/ui/installed-update.css"),
+    import("@gyro-dev/ui/tooltips"),
   ])
-    .then(([{ MenuBarPopover }]) => {
+    .then(([{ MenuBarPopover }, , , , { installGyroTooltips }]) => {
+      installGyroTooltips();
       root.render(
         <React.StrictMode>
           <AppErrorBoundary>
@@ -127,8 +129,10 @@ if (bootSurface === "embedded") {
     import("@gyro-dev/ui/installed-update.css"),
     import("./menu-bar.css"),
     import("./dictation-access"),
+    import("@gyro-dev/ui/tooltips"),
   ])
-    .then(([{ App }]) => {
+    .then(([{ App }, , , , , { installGyroTooltips }]) => {
+      installGyroTooltips();
       root.render(
         <React.StrictMode>
           <AppErrorBoundary>

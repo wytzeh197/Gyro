@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   Check,
   Copy,
-  Laptop,
-  Monitor,
   ShieldCheck,
 } from "../../../../packages/ui/node_modules/lucide-react";
 import {
@@ -17,9 +15,61 @@ import {
   SettingsSection,
   SettingsStatus,
 } from "../../../../packages/ui/src/settings-presentation";
+import { SelectionTrack } from "../../../../packages/ui/src/selection-track";
+import {
+  DEVICE_KIND_OPTIONS,
+  DeviceIcon,
+  setDeviceKind,
+  useDeviceKind,
+} from "../../../../packages/ui/src/device-kind";
 import { useRemoteAccess } from "./context";
 import type { Peer } from "./types";
 import { SshSettings } from "./ssh-settings";
+
+/** Laptop or desktop icon for a device; the choice stays on this Mac. */
+function DeviceKindPicker({
+  id,
+  name,
+  compact = false,
+}: {
+  id: string;
+  name: string;
+  compact?: boolean;
+}) {
+  const kind = useDeviceKind(id, name);
+  return (
+    <SelectionTrack
+      label={`Icon for ${name}`}
+      className={`gyro-settings-segmented gyro-remote-device-kind${compact ? " is-compact" : ""}`}
+      value={kind}
+    >
+      {DEVICE_KIND_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={kind === option.value}
+          aria-label={compact ? option.label : undefined}
+          title={compact ? option.label : undefined}
+          className={kind === option.value ? "is-active" : ""}
+          onClick={() => setDeviceKind(id, option.value)}
+        >
+          <DeviceIcon kind={option.value} size={14} aria-hidden />
+          {!compact && <span>{option.label}</span>}
+        </button>
+      ))}
+    </SelectionTrack>
+  );
+}
+
+function PeerIcon({ peer, size = 18 }: { peer: Peer; size?: number }) {
+  return (
+    <DeviceIcon
+      kind={useDeviceKind(peer.id, peer.name)}
+      size={size}
+      aria-hidden
+    />
+  );
+}
 
 /** Device keys are hex; group them so people can compare them aloud. */
 const fingerprint = (id: string) =>
@@ -133,6 +183,7 @@ export default function RemoteAccessSettings() {
   const pairedPeers =
     status?.peers.filter((peer) => peer.transport !== "ssh") ?? [];
   const enabled = Boolean(status?.settings.enabled);
+  const ownKind = useDeviceKind(status?.deviceId, status?.settings.name);
   const hostingDown = enabled && status?.hostingActive === false;
   const controls = status ? Object.entries(status.controls) : [];
   const peerName = (id: string) =>
@@ -181,7 +232,7 @@ export default function RemoteAccessSettings() {
           <>
             <section className="gyro-remote-hero" aria-label="This Mac">
               <span className="gyro-remote-hero-icon" aria-hidden>
-                <Monitor size={18} />
+                <DeviceIcon kind={ownKind} size={18} />
               </span>
               <div className="gyro-remote-hero-text">
                 <strong>{status.settings.name}</strong>
@@ -199,9 +250,12 @@ export default function RemoteAccessSettings() {
                   )}
                 </span>
                 {method === "pairing" && status.deviceId && (
-                  <code title="This Mac's device code">
-                    {fingerprint(status.deviceId)}
-                  </code>
+                  <span className="gyro-remote-hero-code">
+                    Device code{" "}
+                    <code title="This Mac's device code">
+                      {fingerprint(status.deviceId)}
+                    </code>
+                  </span>
                 )}
               </div>
               <SettingsSwitch
@@ -238,12 +292,20 @@ export default function RemoteAccessSettings() {
                       ? "trusted device"
                       : "trusted devices"}
                   </span>
+                  <span aria-hidden="true" className="gyro-remote-meta-dot">
+                    ·
+                  </span>
                   <span>
                     {status.projects.length}{" "}
                     {status.projects.length === 1
                       ? "shared project"
                       : "shared projects"}
                   </span>
+                  {!enabled && (
+                    <span className="gyro-remote-meta-hint">
+                      Turn on remote access to pair
+                    </span>
+                  )}
                   <button
                     type="button"
                     className={
@@ -272,12 +334,12 @@ export default function RemoteAccessSettings() {
                     <p>Approve only if both Macs show the same code.</p>
                     <div className="gyro-remote-compare">
                       <div>
-                        <Monitor size={18} aria-hidden />
+                        <DeviceIcon kind={ownKind} size={18} aria-hidden />
                         <span>This Mac</span>
                         <code>{fingerprint(peer.id)}</code>
                       </div>
                       <div>
-                        <Laptop size={18} aria-hidden />
+                        <PeerIcon peer={peer} />
                         <span>{peer.name} should show</span>
                         <code>{fingerprint(peer.id)}</code>
                       </div>
@@ -424,6 +486,17 @@ export default function RemoteAccessSettings() {
                       }}
                     />
                   </SettingsRow>
+                  {status.deviceId && (
+                    <SettingsRow
+                      label="Icon"
+                      detail="How this Mac appears in your sidebar and settings."
+                    >
+                      <DeviceKindPicker
+                        id={status.deviceId}
+                        name={status.settings.name}
+                      />
+                    </SettingsRow>
+                  )}
                 </SettingsGroup>
                 <SettingsGroup
                   id="remote-shared-projects"
@@ -452,6 +525,7 @@ export default function RemoteAccessSettings() {
                 <SettingsGroup
                   id="remote-trusted-devices"
                   label="Trusted devices"
+                  defaultOpen={pairedPeers.length > 0}
                   summary={
                     pairedPeers.length
                       ? `${pairedPeers.length} ${pairedPeers.length === 1 ? "device" : "devices"}`
@@ -473,6 +547,7 @@ export default function RemoteAccessSettings() {
                       {connectedHostIds.includes(peer.id) && (
                         <SettingsStatus status="good">Connected</SettingsStatus>
                       )}
+                      <DeviceKindPicker id={peer.id} name={peer.name} compact />
                       <button
                         type="button"
                         className="gyro-secondary-button"
@@ -502,6 +577,10 @@ export default function RemoteAccessSettings() {
                   <SettingsGroup
                     id="remote-session-control"
                     label="Session control"
+                    attention={controls.some(
+                      ([, control]) =>
+                        control.owner === "local" && Boolean(control.requestedBy),
+                    )}
                     description="One device controls a coding session at a time."
                   >
                     {controls.map(([sessionId, control]) => (

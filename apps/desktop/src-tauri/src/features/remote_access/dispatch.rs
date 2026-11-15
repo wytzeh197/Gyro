@@ -113,6 +113,20 @@ pub(super) fn execute(runtime: &Runtime, peer: &str, request: &Request) -> Resul
                     .map_err(err)?,
             )
         }
+        Operation::SetModel { session_id, model } => {
+            validate_model(model)?;
+            let updated = open_store()?.update_session_model(
+                parse_uuid(session_id)?, Some(model.provider_id.clone()), None,
+                Some(model.model_id.clone()), None, model.reasoning_effort.clone(),
+            ).map_err(err)?.ok_or("Session not found")?;
+            value(updated)
+        }
+        Operation::UploadAttachment { session_id, upload_id, name, kind, offset, data, complete } =>
+            super::media::upload(runtime, peer, session_id, *upload_id, name, kind, *offset, data, *complete),
+        Operation::AttachWorkspaceFile { session_id, path } =>
+            value(super::media::workspace_attachment(runtime, session_id, path)?),
+        Operation::ReadImage { session_id, path, offset } =>
+            super::media::read_image(runtime, session_id, path, *offset),
         Operation::History {
             session_id,
             before,
@@ -170,7 +184,9 @@ pub(super) fn execute(runtime: &Runtime, peer: &str, request: &Request) -> Resul
             turn_id,
             message,
             model,
-        } => submit(runtime, session_id, turn_id, message, model),
+            attachments,
+            mode,
+        } => submit(runtime, session_id, turn_id, message, model, attachments, mode.as_deref()),
         Operation::Stop { session_id } => Ok(json!(crate::state::provider_run::stop_provider_run(
             &runtime.app,
             session_id,
@@ -216,6 +232,8 @@ pub(super) fn execute(runtime: &Runtime, peer: &str, request: &Request) -> Resul
                     serde_json::to_string(answers).map_err(err)?
                 ),
                 &model,
+                &[],
+                None,
             )
         }
         operation => super::workspace::execute(runtime, peer, operation),
@@ -234,7 +252,7 @@ fn hello(runtime: &Runtime) -> Result<Value, String> {
         json!({"id":p.id,"displayName":p.display_name,"models":models,"defaultModelId":p.default_model_id,"kind":p.kind,"runtimeStatus":status})
     }).collect::<Vec<_>>();
     Ok(
-        json!({"protocol":1,"hostId":runtime.node.get().unwrap().id(),"name":runtime.store.settings().map_err(err)?.name,"providers":providers,"selectedProviderId":config.selected_provider_id,"fullAccess":config.full_access,"requireCommandApproval":config.require_command_approval,"requireFileEditApproval":config.require_file_edit_approval,"capabilities":["liveCatchup","chat","files","git","terminal","approvals","questions","worktrees"],"experimental":true}),
+        json!({"protocol":1,"hostId":runtime.node.get().unwrap().id(),"name":runtime.store.settings().map_err(err)?.name,"providers":providers,"selectedProviderId":config.selected_provider_id,"fullAccess":config.full_access,"requireCommandApproval":config.require_command_approval,"requireFileEditApproval":config.require_file_edit_approval,"capabilities":["liveCatchup","chat","files","git","terminal","approvals","questions","worktrees","sessionModel","attachments","imagePreviews","chatModes"],"experimental":true}),
     )
 }
 fn validate_model(model: &ModelChoice) -> Result<(), String> {
@@ -278,8 +296,16 @@ fn submit(
     turn_id: &str,
     message: &str,
     model: &ModelChoice,
+    attachment_refs: &[gyro_remote::protocol::AttachmentRef],
+    mode: Option<&str>,
 ) -> Result<Value, String> {
     validate_model(model)?;
+    let mode = match mode.unwrap_or("normal") {
+        "normal" => crate::providers::chat_types::ChatMode::Normal,
+        "plan" => crate::providers::chat_types::ChatMode::Plan,
+        _ => return Err("Unsupported remote chat mode".into()),
+    };
+    let attachments = super::media::for_submit(runtime, session_id, attachment_refs)?;
     let turn = parse_uuid(turn_id)?;
     let message = crate::text::validate_chat_message(message)?;
     let session = runtime.session(session_id)?;
@@ -306,7 +332,7 @@ fn submit(
         session_id.into(),
         message.clone(),
         Some(turn_id.into()),
-        Vec::new(),
+        attachments.clone(),
     )?;
     let request = crate::providers::chat_types::ProviderChatRequest {
         // The explicit debug smoke returns before any provider process can start.
@@ -323,10 +349,10 @@ fn submit(
         full_access: config.full_access,
         suggest_title: true,
         workspace_path: Some(session.workspace_path.to_string_lossy().into()),
-        mode: crate::providers::chat_types::ChatMode::Normal,
+        mode,
         goal: None,
         plan: None,
-        attachments: Vec::new(),
+        attachments,
         workspace_context: None,
         workspace_check: None,
         side_chat_context: None,

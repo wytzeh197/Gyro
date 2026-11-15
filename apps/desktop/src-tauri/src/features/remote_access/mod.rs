@@ -1,6 +1,7 @@
 //! Experimental device access, separate from Cloud accounts and entitlements.
 pub(crate) mod commands;
 mod dispatch;
+pub(crate) mod media;
 mod mutation_locks;
 #[cfg(debug_assertions)]
 pub(crate) mod smoke;
@@ -39,6 +40,7 @@ pub(super) struct Runtime {
     pub controls: Mutex<Controls>,
     live_events: Mutex<gyro_remote::live_events::LiveEvents>,
     pub terminals: Mutex<HashMap<String, RemoteTerminal>>,
+    uploads: Mutex<media::Uploads>,
     mutation_locks: mutation_locks::MutationLocks,
     pub watches: Mutex<HashMap<String, RemoteWatch>>,
     #[cfg(debug_assertions)]
@@ -112,6 +114,7 @@ impl Runtime {
             controls: Mutex::new(Controls::default()),
             live_events: Mutex::new(gyro_remote::live_events::LiveEvents::default()),
             terminals: Mutex::new(HashMap::new()),
+            uploads: Mutex::new(media::Uploads::default()),
             mutation_locks: mutation_locks::MutationLocks::default(),
             watches: Mutex::new(HashMap::new()),
             #[cfg(debug_assertions)]
@@ -305,7 +308,8 @@ impl Runtime {
         }
         // Only mutations change state other devices should refetch. Publishing on reads made
         // every watching client reload on its own reload, an unbounded refresh loop.
-        if request.operation.mutates() && result.is_ok() {
+        if request.operation.mutates() && result.is_ok()
+            && !matches!(request.operation, Operation::UploadAttachment { complete: false, .. }) {
             if let Some(session) = request.operation.session_id() {
                 self.publish(session, "refresh", Value::Null);
             }

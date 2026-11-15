@@ -104,6 +104,300 @@ async fn client_at(path: &Path) -> Arc<stream::Client> {
         .await
         .unwrap()
 }
+
+async fn poll_server_pending(
+    server: &mut std::pin::Pin<Box<impl std::future::Future<Output = anyhow::Result<()>>>>,
+) {
+    std::future::poll_fn(|cx| {
+        assert!(
+            server.as_mut().poll(cx).is_pending(),
+            "the stream must stay open while a frame is incomplete"
+        );
+        std::task::Poll::Ready(())
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn completed_handlers_preserve_fragmented_request_headers_and_bodies() {
+    use crate::transport::{read_frame, write_frame};
+    use tokio::io::AsyncWriteExt;
+
+    for fragment_header in [true, false] {
+        let (mut client, host) = tokio::io::duplex(64 * 1024);
+        let release = Arc::new(tokio::sync::Notify::new());
+        let gate = release.clone();
+        let handler: Handler = Arc::new(move |_, req| {
+            let gate = gate.clone();
+            Box::pin(async move {
+                if matches!(req.operation, Operation::Projects) {
+                    gate.notified().await;
+                }
+                Response::result(req.id, Ok(Value::Null))
+            })
+        });
+        let (events, _) = broadcast::channel(8);
+        let mut server = Box::pin(stream::serve(
+            host,
+            handler,
+            events,
+            Arc::new(|_| {}),
+            Arc::new(Mutex::new(std::collections::HashMap::new())),
+        ));
+        write_frame(
+            &mut client,
+            &stream::Handshake {
+                version: 1,
+                client_id: Uuid::new_v4(),
+            },
+        )
+        .await
+        .unwrap();
+        let first = request(Operation::Projects);
+        write_frame(&mut client, &json!({"type":"request", "value":first}))
+            .await
+            .unwrap();
+        // Manually drive the server so handler completion happens exactly
+        // between consuming this fragment and receiving the remaining bytes.
+        poll_server_pending(&mut server).await;
+        let second = request(Operation::Hello);
+        let body = serde_json::to_vec(&json!({"type":"request", "value":second})).unwrap();
+        let mut frame = (body.len() as u32).to_be_bytes().to_vec();
+        frame.extend(body);
+        let split = if fragment_header {
+            2
+        } else {
+            4 + (frame.len() - 4) / 2
+        };
+        client.write_all(&frame[..split]).await.unwrap();
+        poll_server_pending(&mut server).await;
+        release.notify_one();
+        let response = tokio::time::timeout(
+            Duration::from_secs(2),
+            read_frame::<stream::Frame, _>(&mut client),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(matches!(response, stream::Frame::Response(r) if r.id == first.id));
+        // The handler has sent its response and finished. Reap it while the
+        // next frame's length/body is still partial, without any timing sleeps.
+        poll_server_pending(&mut server).await;
+        client.write_all(&frame[split..]).await.unwrap();
+        poll_server_pending(&mut server).await;
+        let response = tokio::time::timeout(
+            Duration::from_secs(2),
+            read_frame::<stream::Frame, _>(&mut client),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(matches!(response, stream::Frame::Response(r) if r.id == second.id));
+    }
+}
+
+async fn duplex_client(capacity: usize) -> (Arc<stream::Client>, tokio::io::DuplexStream) {
+    let (client, mut host) = tokio::io::duplex(capacity);
+    let (read, write) = tokio::io::split(client);
+    let (opened, handshake) = tokio::join!(
+        stream::Client::open(read, write, Uuid::new_v4()),
+        crate::transport::read_frame::<stream::Handshake, _>(&mut host)
+    );
+    handshake.unwrap();
+    (opened.unwrap(), host)
+}
+
+#[tokio::test]
+async fn cancelled_response_waits_release_pending_slots_without_closing_stream() {
+    use crate::transport::{read_frame, write_frame};
+    let (client, mut host) = duplex_client(64 * 1024).await;
+    // Exceed the admission limit cumulatively, with no responses for the
+    // abandoned requests. Each cancellation must return its own slot.
+    for _ in 0..20 {
+        let c = client.clone();
+        let pending = tokio::spawn(async move { c.request(request(Operation::Hello)).await });
+        tokio::time::timeout(Duration::from_secs(2), read_frame::<Value, _>(&mut host))
+            .await
+            .unwrap()
+            .unwrap();
+        pending.abort();
+        assert!(pending.await.unwrap_err().is_cancelled());
+        assert!(!client.is_closed());
+    }
+    let next = request(Operation::Projects);
+    let sent = next.clone();
+    let c = client.clone();
+    let pending = tokio::spawn(async move { c.request(sent).await });
+    let received: Value = read_frame(&mut host).await.unwrap();
+    assert_eq!(received["value"]["id"], next.id.to_string());
+    write_frame(
+        &mut host,
+        &stream::Frame::Response(Response::result(next.id, Ok(json!("still usable")))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        pending.await.unwrap().unwrap().into_result().unwrap(),
+        "still usable"
+    );
+}
+
+#[tokio::test]
+async fn delivered_responses_keep_their_id_reserved_until_the_request_settles() {
+    use crate::transport::{read_frame, write_frame};
+    let (client, mut host) = duplex_client(64 * 1024).await;
+    let (events, mut observed) = mpsc::unbounded_channel();
+    let c = client.clone();
+    let setup = tokio::spawn(async move {
+        c.watch(
+            request(Operation::Watch {
+                session_id: "s".into(),
+            }),
+            Arc::new(move |event| {
+                let _ = events.send(event);
+            }),
+        )
+        .await
+    });
+    let watch_request: Value = read_frame(&mut host).await.unwrap();
+    let watch_id = Uuid::parse_str(watch_request["value"]["id"].as_str().unwrap()).unwrap();
+    write_frame(
+        &mut host,
+        &stream::Frame::Response(Response::result(watch_id, Ok(Value::Null))),
+    )
+    .await
+    .unwrap();
+    let watch = setup.await.unwrap().unwrap();
+
+    let req = request(Operation::Hello);
+    let mut first = Box::pin(client.request(req.clone()));
+    std::future::poll_fn(|cx| {
+        assert!(std::future::Future::poll(first.as_mut(), cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    let _: Value = read_frame(&mut host).await.unwrap();
+    for _ in 0..2 {
+        write_frame(
+            &mut host,
+            &stream::Frame::Response(Response::result(req.id, Ok(json!("original")))),
+        )
+        .await
+        .unwrap();
+    }
+    // Event delivery is an ordered barrier proving that both responses were
+    // processed, while the original request future remains deliberately unpolled.
+    write_frame(
+        &mut host,
+        &stream::Frame::Event(RemoteEvent {
+            session_id: "s".into(),
+            topic: "barrier".into(),
+            payload: Value::Null,
+        }),
+    )
+    .await
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), observed.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let duplicate = tokio::time::timeout(Duration::from_secs(2), client.request(req.clone()))
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(duplicate.to_string().contains("already in flight"));
+    assert_eq!(first.await.unwrap().into_result().unwrap(), "original");
+
+    let c = client.clone();
+    let id = req.id;
+    let reused = tokio::spawn(async move { c.request(req).await });
+    let _: Value = read_frame(&mut host).await.unwrap();
+    write_frame(
+        &mut host,
+        &stream::Frame::Response(Response::result(id, Ok(json!("reused")))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        reused.await.unwrap().unwrap().into_result().unwrap(),
+        "reused"
+    );
+    watch.abort();
+}
+
+#[tokio::test]
+async fn cancelling_a_partial_write_closes_stream_and_rejects_queued_writes() {
+    use tokio::io::AsyncReadExt;
+    let (client, mut host) = duplex_client(16).await;
+    let c = client.clone();
+    let writing = tokio::spawn(async move { c.request(request(Operation::Hello)).await });
+    // The frame is larger than this duplex buffer. Reading only half its
+    // header proves bytes were sent while the rest of the write remains blocked.
+    let mut prefix = [0u8; 2];
+    host.read_exact(&mut prefix).await.unwrap();
+    let c = client.clone();
+    let queued = tokio::spawn(async move { c.request(request(Operation::Projects)).await });
+    tokio::task::yield_now().await;
+    writing.abort();
+    assert!(writing.await.unwrap_err().is_cancelled());
+    assert!(client.is_closed());
+    assert!(tokio::time::timeout(Duration::from_secs(2), queued)
+        .await
+        .unwrap()
+        .unwrap()
+        .is_err());
+    assert!(client.request(request(Operation::Hello)).await.is_err());
+    let mut remaining = Vec::new();
+    tokio::time::timeout(Duration::from_secs(2), host.read_to_end(&mut remaining))
+        .await
+        .expect("fail-close must deliver EOF even while the client is retained")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn cancelling_watch_setup_retires_the_admitted_subscription() {
+    use crate::transport::read_frame;
+    let (client, mut host) = duplex_client(64 * 1024).await;
+    let watch_request = request(Operation::Watch {
+        session_id: "s".into(),
+    });
+    let id = watch_request.id;
+    let c = client.clone();
+    let setup = tokio::spawn(async move { c.watch(watch_request, Arc::new(|_| {})).await });
+    let frame: Value = read_frame(&mut host).await.unwrap();
+    assert_eq!(frame["type"], "request");
+    // The host has the request but has not acknowledged it yet.
+    setup.abort();
+    assert!(setup.await.unwrap_err().is_cancelled());
+    let cancel: Value = tokio::time::timeout(Duration::from_secs(2), read_frame(&mut host))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(cancel["type"], "unwatch");
+    assert_eq!(cancel["value"], id.to_string());
+    assert!(!client.is_closed());
+}
+
+#[tokio::test]
+async fn client_failure_retires_the_owned_ssh_process() {
+    let connection = Connection::launch(
+        Path::new("/bin/sh"),
+        vec!["-c".into(), "exec /bin/sleep 30".into()],
+        Uuid::new_v4(),
+    )
+    .await
+    .unwrap();
+    assert!(connection.child.lock().unwrap().is_some());
+    connection.client.close();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while connection.child.lock().unwrap().is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("client-only shutdown must retire the retained connection's process");
+}
+
 #[tokio::test]
 async fn socket_multiplexes_requests_and_live_events_and_fences_scope_revocation() {
     let dir = private_dir();

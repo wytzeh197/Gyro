@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  ChatAttachment,
   ProviderChatStreamEvent,
   Session,
   SessionEvent,
@@ -12,8 +13,9 @@ import {
 } from "../provider-stream-events";
 import { mergeSessionHistoryPages } from "../session-event-order";
 import { RemoteHostClient } from "./client";
+import { clearRemoteAttachments } from "./attachments";
 import { useRemoteAccess } from "./context";
-import { readView, persistView } from "./view-state";
+import { readView, persistView, pendingSubmitOutcome } from "./view-state";
 import type {
   Control,
   GitSnapshot,
@@ -82,6 +84,7 @@ export function useRemoteWorkspace(
   const sessionId = view.sessionId;
   // Trusted, connected devices can act without a manual control step.
   const canAct = online;
+  const inFlightSubmits = useRef(new Set<string>());
   const streamOrder = useRef(new Map());
   const streamRevision = useRef(0);
   useEffect(() => {
@@ -193,23 +196,38 @@ export function useRemoteWorkspace(
           op: "requestStatus",
           requestId: pending.requestId,
         });
+        if (
+          !mounted.current ||
+          current !== generation.current ||
+          viewRef.current.sessionId !== selected.sessionId
+        )
+          return;
         const recorded = history.events.some(
           (event) =>
             event.turnId === pending.turnId && event.kind === "user-message",
         );
-        if (
-          recorded ||
-          receipt.status === "done" ||
-          receipt.status === "failed"
-        )
+        const outcome = pendingSubmitOutcome(pending, {
+          recorded,
+          status: receipt.status,
+          inFlight: inFlightSubmits.current.has(pending.requestId),
+          now: Date.now(),
+        });
+        if (outcome === "ran" && Array.isArray(pending.attachmentIds))
+          clearRemoteAttachments(hostId, selected.sessionId, pending.attachmentIds);
+        if (outcome !== "wait")
           setView((previous) => {
+            if (
+              previous.pendingSubmissions[selected.sessionId!]?.requestId !==
+              pending.requestId
+            )
+              return previous;
             const remaining = { ...previous.pendingSubmissions };
             delete remaining[selected.sessionId!];
             return {
               ...previous,
               pendingSubmissions: remaining,
               drafts:
-                recorded || receipt.status === "done"
+                outcome === "ran"
                   ? {
                       ...previous.drafts,
                       [selected.sessionId!]:
@@ -255,6 +273,10 @@ export function useRemoteWorkspace(
   useEffect(() => {
     generation.current++;
     earlierLoaded.current = false;
+    // Revisions are valid only while their transcript is retained. Switching
+    // clears the persisted events below, so re-fetch the selected chat's body
+    // instead of accepting an empty "unchanged" response from the host.
+    historyRevisions.current.clear();
     setEvents(optimistic.current.get(sessionId ?? "") ?? []);
     setData((previous) => ({
       ...previous,
@@ -338,6 +360,7 @@ export function useRemoteWorkspace(
     async <T>(
       operation: HostOperation,
       requestId?: string,
+      onSend?: () => void,
     ): Promise<T | undefined> => {
       if (!online) {
         setError("Reconnect to the host before acting. Your draft stays here.");
@@ -353,6 +376,8 @@ export function useRemoteWorkspace(
           "sessionId" in operation &&
           ([
             "renameSession",
+            "setModel",
+            "attachWorkspaceFile",
             "submit",
             "stop",
             "approval",
@@ -367,7 +392,17 @@ export function useRemoteWorkspace(
         )
           await client.request({ op: "claim", sessionId: operation.sessionId });
         if (!mounted.current || issued !== generation.current) return;
+        onSend?.();
         const result = await client.request<T>(operation, requestId);
+        if (operation.op === "setModel" && mounted.current && issued === generation.current) {
+          const updated = result as Session;
+          setData((previous) => ({
+            ...previous,
+            sessions: previous.sessions.map((session) => session.id === updated.id ? updated : session),
+            snapshot: previous.snapshot?.session.id === updated.id
+              ? { ...previous.snapshot, session: updated } : previous.snapshot,
+          }));
+        }
         return mounted.current && issued === generation.current
           ? result
           : undefined;
@@ -429,15 +464,57 @@ export function useRemoteWorkspace(
     }
     return undefined;
   }
-  async function submit(message: string, model: ModelChoice) {
+  const submitting = useRef(false);
+  async function submit(
+    message: string, model: ModelChoice, attachments: ChatAttachment[] = [],
+    mode: "normal" | "plan" = "normal",
+  ) {
     if (
       !sessionId ||
       !canAct ||
       busy ||
+      submitting.current ||
       data.snapshot?.running ||
       view.pendingSubmissions[sessionId]
     )
-      return;
+      return false;
+    message = message.trim() || (attachments.length ? "Please review the attached files." : "");
+    if (!message) return false;
+    submitting.current = true;
+    const issued = generation.current;
+    const uploaded: ChatAttachment[] = [];
+    let prepared = false;
+    try {
+      if (attachments.length) {
+        if (!data.info?.capabilities.includes("attachments"))
+          throw new Error("Update Gyro on the host to send attachments.");
+        setBusy(true);
+        setError(undefined);
+        for (const attachment of attachments) {
+          if (attachment.pending) throw new Error("Wait for the attachment to finish preparing.");
+          if (attachment.kind === "workspace-file") {
+            const prepared = await run<ChatAttachment>({
+              op: "attachWorkspaceFile", sessionId,
+              path: attachment.relativePath ?? attachment.path,
+            });
+            if (!prepared) throw new Error("The host could not prepare the project file.");
+            uploaded.push(prepared);
+          } else {
+            uploaded.push(await access.ports.invoke<ChatAttachment>("remote_upload_attachment", {
+              hostId, sessionId, attachment,
+            }));
+          }
+        }
+      }
+      if (!mounted.current || issued !== generation.current) return false;
+      prepared = true;
+    } catch (reason) {
+      fail(reason);
+      return false;
+    } finally {
+      if (mounted.current) setBusy(false);
+      if (!prepared) submitting.current = false;
+    }
     const currentDraft = view.drafts[sessionId] ?? "";
     const turnId = crypto.randomUUID(),
       requestId = crypto.randomUUID();
@@ -445,14 +522,47 @@ export function useRemoteWorkspace(
       ...previous,
       pendingSubmissions: {
         ...previous.pendingSubmissions,
-        [sessionId]: { requestId, turnId, message, draft: currentDraft },
+        [sessionId]: {
+          requestId,
+          turnId,
+          message,
+          draft: currentDraft,
+          attachmentIds: attachments.map((attachment) => attachment.id),
+          sentAt: Date.now(),
+        },
       },
     }));
+    let sent = false;
+    inFlightSubmits.current.add(requestId);
     const result = await run<{ accepted: boolean; event: SessionEvent }>(
-      { op: "submit", sessionId, turnId, message, model },
+      {
+        op: "submit", sessionId, turnId, message, model,
+        ...(uploaded.length ? { attachments: uploaded.map((attachment) => ({
+          path: attachment.kind === "workspace-file"
+            ? attachment.relativePath ?? attachment.path : attachment.path,
+          kind: attachment.kind, name: attachment.name,
+          contentHash: attachment.contentHash!,
+        })) } : {}),
+        ...(data.info?.capabilities.includes("chatModes") ? { mode } : {}),
+      },
       requestId,
+      () => {
+        sent = true;
+      },
     );
+    inFlightSubmits.current.delete(requestId);
+    // The submit never left this Mac (offline, or taking control failed), so
+    // the host cannot have run it. Unblock the composer and keep the draft.
+    if (!sent)
+      setView((previous) => {
+        if (previous.pendingSubmissions[sessionId]?.requestId !== requestId)
+          return previous;
+        const pendingSubmissions = { ...previous.pendingSubmissions };
+        delete pendingSubmissions[sessionId];
+        return { ...previous, pendingSubmissions };
+      });
     if (result?.accepted) {
+      clearRemoteAttachments(hostId, sessionId, attachments.map((attachment) => attachment.id));
       setEvents((previous) =>
         mergeSessionHistoryPages(previous, [result.event]),
       );
@@ -472,16 +582,24 @@ export function useRemoteWorkspace(
         };
       });
     }
+    submitting.current = false;
+    return Boolean(result?.accepted);
   }
   async function loadEarlier() {
     const first = events.find((event) => event.kind !== "session-created");
     if (!sessionId || !first) return;
+    const issued = generation.current;
     const page = await run<History>({
       op: "history",
       sessionId,
       before: first.id,
     });
-    if (page) {
+    if (
+      page &&
+      mounted.current &&
+      issued === generation.current &&
+      viewRef.current.sessionId === sessionId
+    ) {
       earlierLoaded.current = true;
       setEvents((previous) => mergeSessionHistoryPages(page.events, previous));
       setData((previous) => ({ ...previous, history: page }));

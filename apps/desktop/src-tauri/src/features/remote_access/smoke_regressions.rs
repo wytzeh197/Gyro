@@ -130,6 +130,137 @@ async fn hold_git(
     Ok((release, worker))
 }
 
+#[cfg(unix)]
+async fn ssh_terminal_regressions(
+    app: &tauri::AppHandle,
+    host: &Arc<Runtime>,
+    directory: &Path,
+    model: &ModelChoice,
+) -> anyhow::Result<()> {
+    let root = directory.join("ssh-terminal-project");
+    std::fs::create_dir_all(&root)?;
+    host.store.share(&root)?;
+    let project = host
+        .store
+        .projects()?
+        .into_iter()
+        .find(|p| p.path == root)
+        .unwrap();
+    let runtime = host.clone();
+    let handler: gyro_remote::transport::Handler = Arc::new(move |peer, request| {
+        let runtime = runtime.clone();
+        Box::pin(async move { runtime.handle(peer, request).await })
+    });
+    let runtime = Arc::downgrade(host);
+    let socket = directory.join("terminal-regression.sock");
+    let server = gyro_remote::ssh::Server::bind(
+        &socket,
+        handler,
+        host.node.get().unwrap().events.clone(),
+        Arc::new(move |peer| {
+            if let Some(runtime) = runtime.upgrade() {
+                runtime.controls.lock().unwrap().revoke(peer);
+                runtime.close_terminals(|t| t.peer == peer);
+            }
+        }),
+    )
+    .await?;
+    let stream = tokio::net::UnixStream::connect(&socket).await?;
+    let (read, write) = stream.into_split();
+    let client_id = Uuid::new_v4();
+    let peer = format!("ssh:{client_id}");
+    assert!(
+        !host.store.trusts(&peer, "client"),
+        "SSH must not require device pairing"
+    );
+    let client = gyro_remote::ssh::stream::Client::open(read, write, client_id).await?;
+    let created = client
+        .request(Request {
+            id: Uuid::new_v4(),
+            lease: None,
+            operation: Operation::CreateSession {
+                project_id: project.id.clone(),
+                title: "SSH terminal regression".into(),
+                model: model.clone(),
+                branch: None,
+            },
+        })
+        .await?
+        .into_result()
+        .map_err(anyhow::Error::msg)?;
+    let session = created["session"]["id"].as_str().unwrap();
+    let lease = created["control"]["generation"].as_u64().unwrap();
+    let operation = Operation::Terminal {
+        session_id: session.into(),
+        action: TerminalAction::Create,
+        pane_id: None,
+        input: None,
+        cols: None,
+        rows: None,
+        revision: None,
+    };
+    let mut requests = tokio::task::JoinSet::new();
+    for _ in 0..super::TERMINALS_PER_DEVICE + 4 {
+        let client = client.clone();
+        let operation = operation.clone();
+        requests.spawn(async move {
+            client
+                .request(Request {
+                    id: Uuid::new_v4(),
+                    lease: Some(lease),
+                    operation,
+                })
+                .await
+        });
+    }
+    let mut panes = Vec::new();
+    let mut rejected = 0;
+    while let Some(result) = requests.join_next().await {
+        match result??.into_result() {
+            Ok(value) => panes.push(value["paneId"].as_str().unwrap().to_string()),
+            Err(error) => {
+                assert!(error.contains("can be open per device"), "{error}");
+                rejected += 1;
+            }
+        }
+    }
+    assert_eq!(panes.len(), super::TERMINALS_PER_DEVICE);
+    assert_eq!(rejected, 4);
+    let terminals = app.state::<crate::terminal::types::TerminalProcessManager>();
+    for pane in &panes {
+        assert!(terminals.observe(pane, false).is_ok());
+    }
+    local_action(
+        host,
+        LocalAction::Unshare {
+            project_id: project.id,
+        },
+    )
+    .map_err(anyhow::Error::msg)?;
+    for pane in &panes {
+        assert!(!host.terminals.lock().unwrap().contains_key(pane));
+        assert!(
+            terminals.observe(pane, false).is_err(),
+            "unshare must close SSH PTYs"
+        );
+    }
+    let refused = client
+        .request(Request {
+            id: Uuid::new_v4(),
+            lease: Some(lease),
+            operation,
+        })
+        .await?;
+    assert!(
+        refused.error.is_some(),
+        "unshared SSH sessions cannot create more PTYs"
+    );
+    client.close();
+    drop(client);
+    drop(server);
+    Ok(())
+}
+
 pub(super) async fn run(
     app: &tauri::AppHandle,
     host: &Arc<Runtime>,
@@ -137,6 +268,8 @@ pub(super) async fn run(
     directory: &Path,
     model: &ModelChoice,
 ) -> anyhow::Result<Value> {
+    #[cfg(unix)]
+    ssh_terminal_regressions(app, host, directory, model).await?;
     let base = directory.join("regressions");
     let a = base.join("a");
     let b = base.join("b");
@@ -469,6 +602,9 @@ pub(super) async fn run(
         "secondary-root-watch-revoked",
         "secondary-root-terminal-closed",
         "unrelated-session-preserved",
-        "overlapping-share-preserved"
+        "overlapping-share-preserved",
+        "ssh-terminal-without-device-pairing",
+        "concurrent-terminal-quota",
+        "ssh-terminal-scope-revocation"
     ]))
 }

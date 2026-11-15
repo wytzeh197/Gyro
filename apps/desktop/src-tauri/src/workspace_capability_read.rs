@@ -19,11 +19,16 @@ pub(super) fn execute(
     let arguments = &request.arguments;
     let max_bytes = workspace_result_byte_limit(arguments)?;
     let requested_path = capability_argument_string(arguments, "path")?;
-    // A spill address names bytes this process already retired and read, so it never resolves
-    // against the workspace: no path normalization, no IDE buffer lookup, no file to authorize.
+    // Spill identifiers are deterministic and are not access tokens. Only the
+    // host-bound session may recover copies produced in its own namespace.
     if gyro_core::efficiency::spill::is_address(requested_path) {
+        let paths = gyro_core::GyroPaths::for_current_user()?;
+        let _scope = gyro_core::efficiency::spill::SessionScope::start(
+            &paths,
+            uuid::Uuid::parse_str(&bound.session_id)?,
+        );
         return read_spill(
-            &request.context.session_id,
+            &bound.session_id,
             arguments,
             requested_path,
             max_bytes,
@@ -149,10 +154,9 @@ const SPILL_RESULT_OVERHEAD: usize = 512;
 
 /// Read one window of a retired copy.
 ///
-/// The copy was disclosed by whatever read produced it, so there is no file to authorize here —
-/// but there is also no guarantee it still exists: the sweep drops old copies, and a machine
-/// without a data directory never wrote one. Absence is reported as such rather than as a
-/// workspace miss, so a caller does not go hunting for a path that was never a path.
+/// The enclosing entry point binds the verified session before reading. A
+/// different session's copy, a swept copy, and an old unscoped copy are all
+/// unavailable; knowing the address never bypasses this ownership boundary.
 fn read_spill(
     session_id: &str,
     arguments: &Value,
@@ -163,7 +167,7 @@ fn read_spill(
     let limit = max_bytes
         .saturating_sub(SPILL_RESULT_OVERHEAD)
         .clamp(1, SPILL_TOOL_WINDOW);
-    let Some(window) = gyro_core::efficiency::spill::read_window(address, offset, limit)? else {
+    let Some(window) = gyro_core::efficiency::spill::read_scoped_window(address, offset, limit)? else {
         anyhow::bail!(
             "{address} is not a copy this session can read: it was swept, or never written"
         );
@@ -254,7 +258,9 @@ mod spill_read_tests {
     #[test]
     fn fresh_reads_use_the_same_bounded_window_on_api_and_mcp() {
         use gyro_core::{CapabilityResponse, CapabilityResult, GyroPaths};
-        let paths = GyroPaths::from_base_dir(std::env::temp_dir().join("gyro-read-wire-test"));
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let _scope = gyro_core::efficiency::spill::SessionScope::start(&paths, uuid::Uuid::new_v4());
         for id in [
             CapabilityId::WorkspaceRead,
             CapabilityId::WorkspaceReadRange,
@@ -351,6 +357,9 @@ mod spill_read_tests {
 
     #[test]
     fn an_address_with_no_copy_reports_absence_not_a_workspace_miss() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = gyro_core::GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let _scope = gyro_core::efficiency::spill::SessionScope::start(&paths, uuid::Uuid::new_v4());
         let error = read_spill(
             "session",
             &json!({ "path": "spill://cap/tool/0000000000000000" }),
@@ -360,6 +369,37 @@ mod spill_read_tests {
         .err()
         .expect("no copy was ever written at this address");
         assert!(error.to_string().contains("never written"), "{error}");
+    }
+
+    #[test]
+    fn api_and_native_spills_can_only_be_recovered_by_the_bound_session() {
+        use gyro_core::{CapabilityResponse, CapabilityResult, GyroPaths};
+        use gyro_core::efficiency::spill::{self, SessionScope};
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let owner = uuid::Uuid::new_v4();
+        let other = uuid::Uuid::new_v4();
+        let id = CapabilityId::WorkspaceRead;
+        let text = "private source evidence\n".repeat(1500);
+        let address = spill::address(id.as_str(), id.provider_tool_name(), &text);
+        {
+            let _scope = SessionScope::start(&paths, owner);
+            let response = CapabilityResponse::completed("test", CapabilityResult {
+                call_id: uuid::Uuid::new_v4(), capability_id: id,
+                summary: "Read source".into(),
+                data: json!({"content":text, "path":"source.rs", "source":"disk"}),
+                resource: None,
+            });
+            let api = gyro_core::provider_runtime::tool_batch::model_response_text(&response).unwrap();
+            let native = crate::capabilities::mcp_server::capability_mcp_response(&paths, response, false).unwrap();
+            assert!(api.contains(&address));
+            assert!(native["content"][0]["text"].as_str().unwrap().contains(&address));
+            let (_, recovered, _) = read_spill(&owner.to_string(), &json!({}), &address, 8192).unwrap();
+            assert!(text.starts_with(recovered["content"].as_str().unwrap()));
+            assert!(!recovered["content"].as_str().unwrap().is_empty());
+        }
+        let _scope = SessionScope::start(&paths, other);
+        assert!(read_spill(&other.to_string(), &json!({}), &address, 8192).is_err());
     }
 }
 

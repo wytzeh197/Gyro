@@ -10,9 +10,10 @@ use crate::{
         access::{
             browser_capability_origin_scope, browser_observation,
             capability_access_with_full_access, capability_argument_string,
-            capability_argument_strings, capability_argument_u64, capability_full_access_enabled,
-            capability_git_diff_path, capability_grant_scope, capability_positive_position,
-            effective_capability_class, narrower_capability_access,
+            capability_argument_strings, capability_argument_u64, capability_denied_permission,
+            capability_full_access_enabled, capability_git_diff_path, capability_grant_scope,
+            capability_permission_classes, capability_positive_position,
+            capability_uses_language_server, narrower_capability_access,
             remember_model_browser_resource, require_model_browser_resource,
             unknown_workspace_task_message,
         },
@@ -1569,12 +1570,12 @@ pub(crate) fn handle_desktop_provider_capability_request_inner(
             "Council seats cannot use tools or mutate the workspace.".into(),
         );
     }
-    let class = match effective_capability_class(
+    let permission_classes = match capability_permission_classes(
         &bound.workspace,
         request.capability_id,
         &request.arguments,
     ) {
-        Ok(class) => class,
+        Ok(classes) => classes,
         Err(error) => return fail("invalid-arguments", error.to_string()),
     };
     let scope = if matches!(
@@ -1603,77 +1604,6 @@ pub(crate) fn handle_desktop_provider_capability_request_inner(
         Ok(scope) => scope,
         Err(error) => return fail("invalid-arguments", error.to_string()),
     };
-    let current_policy = match store.get_project_capability_policy(&bound.workspace_key) {
-        Ok(policy) => policy,
-        Err(error) => return fail("policy-unavailable", error.to_string()),
-    };
-    let config = match load_config_blocking() {
-        Ok(config) => config,
-        Err(error) => return fail("policy-unavailable", error),
-    };
-    let mut access = capability_access_with_full_access(
-        &bound,
-        &current_policy,
-        class,
-        &scope_kind,
-        &scope_value,
-        capability_full_access_enabled(&config)
-            && delegated_agents::full_access_ceiling(app, &bound.session_id),
-    );
-    // Only these delegation IDs may cross Plan's AgentRun class ceiling.
-    // Child execution is independently bound to Plan mode in the agent manager.
-    if bound.policy.mode == CapabilityRunMode::Plan
-        && matches!(
-            admission_id,
-            CapabilityId::AgentSpawn | CapabilityId::AgentSend | CapabilityId::ResearchRun
-        )
-    {
-        let snapshot = bound
-            .policy
-            .classes
-            .get(&CapabilityClass::AgentRun)
-            .copied()
-            .unwrap_or(CapabilityAccess::Deny);
-        access = narrower_capability_access(
-            snapshot,
-            current_policy.access_for(CapabilityClass::AgentRun),
-        );
-    }
-    access = delegated_agents::permission_access(access, admission_id, bound.policy.mode, &config);
-    // Live editor text is not part of ordinary Workspace reads. Even Full
-    // Access requires a fresh decision before disclosing an unsaved buffer.
-    if request.capability_id == CapabilityId::WorkspaceReadEditor
-        && access != CapabilityAccess::Deny
-    {
-        access = CapabilityAccess::Ask;
-    }
-    // Session-scoped origin memory: once the user allows a site for this chat,
-    // continued driving (click/type/scroll) on that origin does not re-prompt.
-    if access == CapabilityAccess::Ask
-        && class == CapabilityClass::BrowserNavigate
-        && scope_kind == "origin"
-        && app
-            .state::<session_browser::SessionBrowserManager>()
-            .is_origin_approved(&bound.session_id, &scope_value)
-            .unwrap_or(false)
-    {
-        access = CapabilityAccess::Allow;
-    }
-    if access == CapabilityAccess::Deny {
-        let _ = capability_event(
-            app,
-            &bound,
-            request.context.call_id,
-            request.capability_id,
-            CapabilityStatus::Denied,
-            "Gyro denied this capability under the current run policy.",
-            None,
-        );
-        return fail(
-            "policy-denied",
-            "Gyro denied this capability under the current run policy.".into(),
-        );
-    }
     let editor_fingerprint = if request.capability_id == CapabilityId::WorkspaceReadEditor {
         match editor_approval_fingerprint(app, &bound, &request.arguments) {
             Ok(value) => Some(value),
@@ -1693,76 +1623,155 @@ pub(crate) fn handle_desktop_provider_capability_request_inner(
     ) {
         return fail("audit-unavailable", error.to_string());
     }
-    if access == CapabilityAccess::Ask {
-        let approval = wait_for_capability_approval(
-            app,
+    // Every required permission must pass before dispatch can start a service
+    // or read file contents. Reload live policy after each approval wait.
+    for class in permission_classes.iter().copied() {
+        let current_policy = match store.get_project_capability_policy(&bound.workspace_key) {
+            Ok(policy) => policy,
+            Err(error) => return fail("policy-unavailable", error.to_string()),
+        };
+        let config = match load_config_blocking() {
+            Ok(config) => config,
+            Err(error) => return fail("policy-unavailable", error),
+        };
+        let mut access = capability_access_with_full_access(
             &bound,
-            request.context.call_id,
-            request.capability_id,
-            &request.arguments,
+            &current_policy,
             class,
             &scope_kind,
             &scope_value,
+            capability_full_access_enabled(&config)
+                && delegated_agents::full_access_ceiling(app, &bound.session_id),
         );
-        if approval.is_ok() {
-            if let Some(response) = capability_execution_guard::rejection(
-                app,
-                &store,
-                &bound,
-                &request,
-                &control.cancellation,
-            ) {
-                return response;
-            }
+        // Only these delegation IDs may cross Plan's AgentRun class ceiling.
+        // Child execution is independently bound to Plan mode in the agent manager.
+        if bound.policy.mode == CapabilityRunMode::Plan
+            && matches!(
+                admission_id,
+                CapabilityId::AgentSpawn | CapabilityId::AgentSend | CapabilityId::ResearchRun
+            )
+        {
+            let snapshot = bound
+                .policy
+                .classes
+                .get(&CapabilityClass::AgentRun)
+                .copied()
+                .unwrap_or(CapabilityAccess::Deny);
+            access = narrower_capability_access(
+                snapshot,
+                current_policy.access_for(CapabilityClass::AgentRun),
+            );
         }
-        match approval {
-            Ok(CapabilityApprovalDecision::Deny) => {
-                let _ = capability_event(
+        access =
+            delegated_agents::permission_access(access, admission_id, bound.policy.mode, &config);
+        // Live editor text is not part of ordinary Workspace reads. Even Full
+        // Access requires a fresh decision before disclosing an unsaved buffer.
+        if request.capability_id == CapabilityId::WorkspaceReadEditor
+            && access != CapabilityAccess::Deny
+        {
+            access = CapabilityAccess::Ask;
+        }
+        // Session-scoped origin memory: once the user allows a site for this chat,
+        // continued driving (click/type/scroll) on that origin does not re-prompt.
+        if access == CapabilityAccess::Ask
+            && class == CapabilityClass::BrowserNavigate
+            && scope_kind == "origin"
+            && app
+                .state::<session_browser::SessionBrowserManager>()
+                .is_origin_approved(&bound.session_id, &scope_value)
+                .unwrap_or(false)
+        {
+            access = CapabilityAccess::Allow;
+        }
+        if access == CapabilityAccess::Deny {
+            let _ = capability_event(
+                app,
+                &bound,
+                request.context.call_id,
+                request.capability_id,
+                CapabilityStatus::Denied,
+                "Gyro denied this capability under the current run policy.",
+                None,
+            );
+            return fail(
+                "policy-denied",
+                "Gyro denied this capability under the current run policy.".into(),
+            );
+        }
+        if access == CapabilityAccess::Ask {
+            let approval = wait_for_capability_approval(
+                app,
+                &bound,
+                request.context.call_id,
+                request.capability_id,
+                &request.arguments,
+                class,
+                &scope_kind,
+                &scope_value,
+            );
+            if approval.is_ok() {
+                if let Some(response) = capability_execution_guard::rejection(
                     app,
+                    &store,
                     &bound,
-                    request.context.call_id,
-                    request.capability_id,
-                    CapabilityStatus::Denied,
-                    "The user denied this capability.",
-                    None,
-                );
-                return fail("user-denied", "The user denied this capability.".into());
-            }
-            Ok(CapabilityApprovalDecision::AllowProject) => {
-                if let Err(error) =
-                    persist_capability_grant(&bound, class, scope_kind.clone(), scope_value.clone())
-                {
-                    return fail("grant-save-failed", error.to_string());
-                }
-                if class == CapabilityClass::BrowserNavigate && scope_kind == "origin" {
-                    let _ = app
-                        .state::<session_browser::SessionBrowserManager>()
-                        .approve_origin(&bound.session_id, &scope_value);
+                    &request,
+                    &control.cancellation,
+                ) {
+                    return response;
                 }
             }
-            Ok(CapabilityApprovalDecision::AllowOnce) => {
-                if class == CapabilityClass::BrowserNavigate && scope_kind == "origin" {
-                    let _ = app
-                        .state::<session_browser::SessionBrowserManager>()
-                        .approve_origin(&bound.session_id, &scope_value);
+            match approval {
+                Ok(CapabilityApprovalDecision::Deny) => {
+                    let _ = capability_event(
+                        app,
+                        &bound,
+                        request.context.call_id,
+                        request.capability_id,
+                        CapabilityStatus::Denied,
+                        "The user denied this capability.",
+                        None,
+                    );
+                    return fail("user-denied", "The user denied this capability.".into());
                 }
-            }
-            Err(error) => {
-                let cancelled = error.to_string().contains("cancelled");
-                let _ = capability_event(
-                    app,
-                    &bound,
-                    request.context.call_id,
-                    request.capability_id,
-                    if cancelled {
-                        CapabilityStatus::Cancelled
-                    } else {
-                        CapabilityStatus::Failed
-                    },
-                    &error.to_string(),
-                    None,
-                );
-                return fail("approval-failed", error.to_string());
+                Ok(CapabilityApprovalDecision::AllowProject) => {
+                    if let Err(error) = persist_capability_grant(
+                        &bound,
+                        class,
+                        scope_kind.clone(),
+                        scope_value.clone(),
+                    ) {
+                        return fail("grant-save-failed", error.to_string());
+                    }
+                    if class == CapabilityClass::BrowserNavigate && scope_kind == "origin" {
+                        let _ = app
+                            .state::<session_browser::SessionBrowserManager>()
+                            .approve_origin(&bound.session_id, &scope_value);
+                    }
+                }
+                Ok(CapabilityApprovalDecision::AllowOnce) => {
+                    if class == CapabilityClass::BrowserNavigate && scope_kind == "origin" {
+                        let _ = app
+                            .state::<session_browser::SessionBrowserManager>()
+                            .approve_origin(&bound.session_id, &scope_value);
+                    }
+                }
+                Err(error) => {
+                    let cancelled = error.to_string().contains("cancelled");
+                    let _ = capability_event(
+                        app,
+                        &bound,
+                        request.context.call_id,
+                        request.capability_id,
+                        if cancelled {
+                            CapabilityStatus::Cancelled
+                        } else {
+                            CapabilityStatus::Failed
+                        },
+                        &error.to_string(),
+                        None,
+                    );
+                    return fail("approval-failed", error.to_string());
+                }
             }
         }
     }
@@ -1772,6 +1781,41 @@ pub(crate) fn handle_desktop_provider_capability_request_inner(
         capability_execution_guard::rejection(app, &store, &bound, &request, &control.cancellation)
     {
         return response;
+    }
+    // The execution grant may be revoked while a later sensitive-file
+    // approval is waiting. Both permissions must still permit this action.
+    if capability_uses_language_server(request.capability_id) {
+        let current_policy = match store.get_project_capability_policy(&bound.workspace_key) {
+            Ok(policy) => policy,
+            Err(error) => return fail("policy-unavailable", error.to_string()),
+        };
+        let config = match load_config_blocking() {
+            Ok(config) => config,
+            Err(error) => return fail("policy-unavailable", error),
+        };
+        if capability_denied_permission(
+            &bound,
+            &current_policy,
+            &permission_classes,
+            &scope_kind,
+            &scope_value,
+            capability_full_access_enabled(&config)
+                && delegated_agents::full_access_ceiling(app, &bound.session_id),
+        )
+        .is_some()
+        {
+            let message = "Gyro denied this capability under the current run policy.";
+            let _ = capability_event(
+                app,
+                &bound,
+                request.context.call_id,
+                request.capability_id,
+                CapabilityStatus::Denied,
+                message,
+                None,
+            );
+            return fail("policy-denied", message.into());
+        }
     }
     if let Some(expected) = editor_fingerprint {
         if editor_approval_fingerprint(app, &bound, &request.arguments)

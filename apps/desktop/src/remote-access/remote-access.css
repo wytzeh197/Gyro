@@ -7,28 +7,37 @@
 .gyro-remote-settings {
   display: contents;
 }
+/* Remote folders are not draggable, so they miss the draggable row's inset.
+   Give them the same inset and columns so chevron, folder and name line up
+   with the local folders above them. */
+:root[data-theme] .gyro-sidebar .gyro-sidebar-project-row:has(.gyro-sidebar-project-remote) {
+  margin-bottom: 0;
+  padding-block: calc(1px * var(--gyro-ui-scale, 1));
+  padding-inline-start: calc(8px * var(--gyro-ui-scale, 1));
+}
 :root[data-theme]
   .gyro-sidebar
   .gyro-sidebar-project-toggle[aria-expanded]:has(
     > .gyro-sidebar-project-remote
   ) {
-  grid-template-columns:
-    var(--gyro-icon-compact) var(--gyro-icon-standard)
-    minmax(0, 1fr) max-content;
+  grid-template-columns: 12px 16px minmax(0, 1fr) max-content;
 }
+/* A quiet pill, not a second label: it marks where the folder lives. */
 .gyro-sidebar-project-toggle > .gyro-sidebar-project-remote {
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: var(--gyro-space-compact);
+  gap: 3px;
   margin-left: auto;
-  color: var(--gyro-muted);
-  font-size: var(--gyro-font-caption);
-  font-weight: inherit;
+  padding: 2px;
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-micro, 11px);
+  font-weight: 500;
+  line-height: 16px;
 }
 .gyro-sidebar-project-remote > svg {
-  width: var(--gyro-icon-compact);
-  height: var(--gyro-icon-compact);
+  width: 13px;
+  height: 13px;
 }
 .gyro-remote-toolbar,
 .gyro-remote-actions {
@@ -473,6 +482,10 @@
   font-family: var(--gyro-font-mono);
   font-size: var(--gyro-font-caption);
 }
+.gyro-remote-hero-code {
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-caption);
+}
 .gyro-remote-hero-meta {
   display: flex;
   flex-wrap: wrap;
@@ -483,6 +496,18 @@
 }
 .gyro-remote-hero-meta > button {
   margin-left: auto;
+}
+.gyro-remote-hero-meta .gyro-remote-meta-dot {
+  margin-inline: calc(var(--gyro-space-compact) - var(--gyro-space-comfortable));
+  color: var(--gyro-faint);
+}
+.gyro-remote-hero-meta .gyro-remote-meta-hint {
+  margin-left: auto;
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-caption);
+}
+.gyro-remote-hero-meta .gyro-remote-meta-hint + button {
+  margin-left: 0;
 }
 .gyro-remote-sheet {
   display: grid;
@@ -864,4 +889,17 @@
   background: var(--gyro-surface-soft);
   padding: var(--gyro-space-compact);
   gap: 0;
+}
+
+/* Device icon choice: laptop or desktop. */
+.gyro-remote-device-kind > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.gyro-remote-device-kind.is-compact > button {
+  padding-inline: 6px;
+}
+.gyro-remote-device-kind svg {
+  flex: none;
 }

@@ -4,7 +4,37 @@ export type PendingSubmit = {
   turnId: string;
   message: string;
   draft: string;
+  attachmentIds?: string[];
+  /** When the submit was issued. Missing on entries saved by older builds. */
+  sentAt?: number;
 };
+/** How long a host may take to record a submit it has already received. */
+export const PENDING_SUBMIT_GRACE_MS = 15_000;
+/**
+ * Decides what a pending submit became. The host writes a receipt as soon as
+ * it starts a submit, so no receipt once the request has ended and the grace
+ * period has passed means the host never started it.
+ */
+export function pendingSubmitOutcome(
+  pending: PendingSubmit,
+  facts: {
+    recorded: boolean;
+    status: string;
+    inFlight: boolean;
+    now: number;
+  },
+): "ran" | "notRun" | "wait" {
+  if (facts.recorded || facts.status === "done") return "ran";
+  if (facts.status === "failed") return "notRun";
+  const sentAt = typeof pending.sentAt === "number" ? pending.sentAt : 0;
+  if (
+    facts.status === "unknown" &&
+    !facts.inFlight &&
+    facts.now - sentAt >= PENDING_SUBMIT_GRACE_MS
+  )
+    return "notRun";
+  return "wait";
+}
 export type RemoteView = {
   projectId?: string;
   sessionId?: string;

@@ -4,13 +4,17 @@ import {
   Info,
   LoaderCircle,
   MoreHorizontal,
-  SquareTerminal,
 } from "../../../../packages/ui/node_modules/lucide-react";
 import {
   SettingsEmptyState,
   SettingsSelect,
 } from "../../../../packages/ui/src/settings-controls";
 import { SettingsStatus } from "../../../../packages/ui/src/settings-presentation";
+import {
+  DeviceIcon,
+  setDeviceKind,
+  useDeviceKind,
+} from "../../../../packages/ui/src/device-kind";
 import { useRemoteAccess } from "./context";
 import type { Peer, SshOptions } from "./types";
 
@@ -112,7 +116,7 @@ export function SshSettings() {
           {hosts.length ? (
             hosts.map((saved) => (
               <div className="gyro-remote-ssh-host" key={saved.id}>
-                <SquareTerminal size={20} aria-hidden />
+                <SshHostIcon id={saved.id} name={saved.name} />
                 <div className="gyro-remote-ssh-host-name">
                   <strong>{saved.name}</strong>
                   <span>
@@ -172,6 +176,7 @@ export function SshSettings() {
                         Disconnect
                       </button>
                     )}
+                    <SshHostKindToggle id={saved.id} name={saved.name} />
                     <button
                       type="button"
                       disabled={Boolean(busy)}
@@ -397,5 +402,25 @@ export function SshSettings() {
         Connected projects appear in your sidebar.
       </p>
     </div>
+  );
+}
+
+function SshHostIcon({ id, name }: { id: string; name: string }) {
+  return <DeviceIcon kind={useDeviceKind(id, name)} size={20} aria-hidden />;
+}
+
+/** The menu offers the other icon, so a Mac mini reached over SSH can show as a desktop. */
+function SshHostKindToggle({ id, name }: { id: string; name: string }) {
+  const next = useDeviceKind(id, name) === "laptop" ? "desktop" : "laptop";
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.currentTarget.closest("details")?.removeAttribute("open");
+        setDeviceKind(id, next);
+      }}
+    >
+      {next === "laptop" ? "Show as laptop" : "Show as desktop"}
+    </button>
   );
 }

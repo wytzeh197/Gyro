@@ -239,6 +239,7 @@ pub fn run() {
             crate::features::remote_access::commands::remote_access_status,
             crate::features::remote_access::commands::remote_access_action,
             crate::features::remote_access::commands::remote_host_request,
+            crate::features::remote_access::media::remote_upload_attachment,
             crate::features::remote_access::commands::remote_host_watch,
             crate::local_check::prepare_local_check,
             crate::cloud_connection::cloud_connection_view,

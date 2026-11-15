@@ -1,7 +1,7 @@
 use crate::provider_runtime::{
     accounting,
     codex_client::{codex_app_server_result, receive_codex_turn_response, CodexClient},
-    codex_turn_completion, file_patch_counts,
+    codex_home, codex_turn_completion, file_patch_counts,
     host::{
         self as host_services, emit_provider_activity_event, emit_provider_context_usage,
         publish_streamed_session_title, RunnerHost,
@@ -83,7 +83,13 @@ pub fn run_openai_codex_chat(
     // Removed on every exit, including the error returns before the read.
     let _output_file = TempFileGuard(output_path.clone());
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
-    let can_resume = resume_cursor.is_some_and(|cursor| cursor.kind == "codex-session");
+    let mut process = host.provider_command("codex", "openai")?;
+    host.apply_session_environment(&mut process, request)?;
+    let codex_home = codex_home::configure(&mut process, &host.paths()?)?;
+    let resume_cursor = resume_cursor.filter(|cursor| {
+        cursor.kind == "codex-session" && codex_home::owns_thread(&codex_home, &cursor.session_id)
+    });
+    let can_resume = resume_cursor.is_some();
     let history = if can_resume {
         None
     } else {
@@ -109,8 +115,6 @@ pub fn run_openai_codex_chat(
     );
 
     crate::provider_observation::native_prompt(&serde_json::json!(prompt));
-    let mut process = host.provider_command("codex", "openai")?;
-    host.apply_session_environment(&mut process, request)?;
     process.current_dir(cwd);
     let speed_config = host.config()?;
     process.args(crate::fast_mode::cli_args(
@@ -155,6 +159,9 @@ pub fn run_openai_codex_chat(
         request,
         &mut observed_session_id,
     );
+    if let Some(id) = observed_session_id.as_deref() {
+        codex_home::remember_thread(&codex_home, id)?;
+    }
     attempt.resume_cursor = observed_session_id.map(|session_id| ProviderResumeCursor {
         kind: "codex-session".into(),
         session_id,
@@ -305,7 +312,13 @@ pub fn run_openai_codex_app_server_chat(
     attempt: &mut ProviderRunAttempt,
 ) -> anyhow::Result<ProviderRunnerOutput> {
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
-    let can_resume = resume_cursor.is_some_and(|cursor| cursor.kind == "codex-session");
+    let mut process = host.provider_command("codex", "openai")?;
+    host.apply_session_environment(&mut process, request)?;
+    let codex_home = codex_home::configure(&mut process, &host.paths()?)?;
+    let resume_cursor = resume_cursor.filter(|cursor| {
+        cursor.kind == "codex-session" && codex_home::owns_thread(&codex_home, &cursor.session_id)
+    });
+    let can_resume = resume_cursor.is_some();
     let history = if can_resume {
         None
     } else {
@@ -328,9 +341,7 @@ pub fn run_openai_codex_app_server_chat(
         request.mode == ChatMode::Normal,
         can_resume,
     );
-    let mut process = host.provider_command("codex", "openai")?;
     let capability_args = host.codex_mcp_args(request)?;
-    host.apply_session_environment(&mut process, request)?;
     let speed_config = host.config()?;
     process.args(crate::fast_mode::cli_args(
         &speed_config,
@@ -440,6 +451,7 @@ pub fn run_openai_codex_app_server_chat(
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| anyhow::anyhow!("Codex did not return a thread id"))?
             .to_string();
+        codex_home::remember_thread(&codex_home, &thread_id)?;
         // The thread exists from here on, so a turn that is stopped or fails
         // below still leaves a cursor the retry can resume.
         attempt.resume_cursor = Some(ProviderResumeCursor {
@@ -892,6 +904,11 @@ pub fn run_openai_codex_context_compaction(
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
     let mut process = host.provider_command("codex", "openai")?;
     host.apply_session_environment(&mut process, request)?;
+    let codex_home = codex_home::configure(&mut process, &host.paths()?)?;
+    anyhow::ensure!(
+        codex_home::owns_thread(&codex_home, &resume_cursor.session_id),
+        "This chat needs a message in Gyro before native Codex compaction is available."
+    );
     process.current_dir(&cwd);
     let mut child = CodexClient::spawn(process, host.codex_client_options())
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;

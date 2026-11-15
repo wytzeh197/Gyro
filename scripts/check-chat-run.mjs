@@ -114,6 +114,31 @@ const activity = (activityKind, label, extra = {}, minutes = 0) =>
 const say = (message, minutes = 0) =>
   event("assistant-message", message, {}, minutes);
 
+// Recovery writes existing commentary events so a partial answer remains
+// visible after reload without masquerading as the turn's final response.
+const interruptedReply = event(
+  "system-event",
+  "Partial response (interrupted):\n\nThe first part of the answer.",
+  {
+    kind: "provider-activity",
+    activityKind: "commentary",
+    activityId: "partial-response:fixture",
+    partialResponse: true,
+    status: "failed",
+  },
+);
+for (const status of ["failed", "cancelled"]) {
+  const recovered = buildRunModel([interruptedReply], { status: { status } });
+  assert.equal(recovered.response, undefined, "a recovered fragment is not a final answer");
+  assert.ok(
+    recovered.steps.some((step) => step.kind === "say" && step.text === interruptedReply.message),
+    "the interrupted text and its label remain visible in work history",
+  );
+  assert.notEqual(recovered.phase.name, "done", "recovery never certifies completion");
+}
+const recoveredRetry = buildRunModel([interruptedReply, say("The completed answer.", 1)]);
+assert.equal(recoveredRetry.response?.message, "The completed answer.");
+
 // --- the defect that motivated the rebuild ------------------------------------
 
 // A real MCP identifier keeps its server and tool. The shape this replaces threw

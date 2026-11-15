@@ -16,6 +16,53 @@ use sha2::{Digest, Sha256};
 use std::path::{Component, Path};
 use tauri::Manager;
 
+/// A pending PTY occupies its device's slot before spawning. Revocation may
+/// remove that slot during creation; in that case the newly created process
+/// must be closed too, even though it is no longer in the remote terminal map.
+struct TerminalSlot<'a> {
+    runtime: &'a Runtime,
+    id: String,
+    retained: bool,
+}
+impl<'a> TerminalSlot<'a> {
+    fn reserve(runtime: &'a Runtime, session: &str, peer: &str) -> Result<Self, String> {
+        let mut terminals = runtime.terminals.lock().map_err(err)?;
+        if terminals.values().filter(|t| t.peer == peer).count() >= super::TERMINALS_PER_DEVICE {
+            return Err(format!(
+                "Close a remote terminal first; {} can be open per device",
+                super::TERMINALS_PER_DEVICE
+            ));
+        }
+        let id = format!("remote-{}", uuid::Uuid::new_v4());
+        terminals.insert(
+            id.clone(),
+            super::RemoteTerminal {
+                session: session.into(),
+                peer: peer.into(),
+            },
+        );
+        Ok(Self {
+            runtime,
+            id,
+            retained: false,
+        })
+    }
+}
+impl Drop for TerminalSlot<'_> {
+    fn drop(&mut self) {
+        if !self.retained {
+            if let Ok(mut terminals) = self.runtime.terminals.lock() {
+                terminals.remove(&self.id);
+            }
+            let _ = self
+                .runtime
+                .app
+                .state::<TerminalProcessManager>()
+                .close(&self.id);
+        }
+    }
+}
+
 pub(super) fn relative(path: &str) -> Result<(), String> {
     if path.is_empty()
         || Path::new(path).is_absolute()
@@ -189,26 +236,12 @@ pub(super) fn execute(
                 );
             }
             if *action == TerminalAction::Create {
-                if runtime
-                    .terminals
-                    .lock()
-                    .map_err(err)?
-                    .values()
-                    .filter(|t| t.peer == peer)
-                    .count()
-                    >= super::TERMINALS_PER_DEVICE
-                {
-                    return Err(format!(
-                        "Close a remote terminal first; {} can be open per device",
-                        super::TERMINALS_PER_DEVICE
-                    ));
-                }
-                let id = format!("remote-{}", uuid::Uuid::new_v4());
+                let mut slot = TerminalSlot::reserve(runtime, session_id, peer)?;
                 let snapshot = panes::create_terminal_pane_blocking(
                     &runtime.app,
                     &manager,
                     TerminalPaneRequest {
-                        pane_id: id.clone(),
+                        pane_id: slot.id.clone(),
                         title: "Remote terminal".into(),
                         command: "/bin/zsh".into(),
                         args: {
@@ -228,32 +261,19 @@ pub(super) fn execute(
                         ..Default::default()
                     },
                 )?;
-                runtime
+                // Unshare/revoke can race shell creation after initial admission.
+                // Use the same identity policy as initial admission, including
+                // same-user SSH peers, and reject removed pending reservations.
+                runtime.authorize(peer, operation)?;
+                if !runtime
                     .terminals
                     .lock()
                     .map_err(err)?
-                    .insert(
-                        id,
-                        super::RemoteTerminal {
-                            session: session_id.into(),
-                            peer: peer.into(),
-                        },
-                    );
-                // Unshare/revoke can race shell creation after initial admission.
-                // Cleanup handles panes registered before revocation; this check
-                // handles panes registered after that cleanup already ran.
-                let authorization = (|| {
-                    if !runtime.store.settings().map_err(err)?.enabled
-                        || !runtime.store.trusts(peer, "client")
-                    {
-                        return Err("Remote access was disabled or this device was revoked".into());
-                    }
-                    runtime.session(session_id).map(|_| ())
-                })();
-                if let Err(error) = authorization {
-                    runtime.close_terminals(|t| t.session == session_id && t.peer == peer);
-                    return Err(error);
+                    .contains_key(&slot.id)
+                {
+                    return Err("Remote terminal access was revoked while it was starting".into());
                 }
+                slot.retained = true;
                 return value(snapshot);
             }
             let pane = pane_id.as_deref().ok_or("Select a remote terminal")?;

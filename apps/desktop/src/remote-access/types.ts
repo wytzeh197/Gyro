@@ -128,6 +128,8 @@ export type HostOperation =
       branch?: string;
     }
   | { op: "renameSession"; sessionId: string; title: string }
+  | { op: "setModel"; sessionId: string; model: ModelChoice }
+  | { op: "attachWorkspaceFile"; sessionId: string; path: string }
   | { op: "history"; sessionId: string; before?: string; revision?: string }
   | { op: "snapshot"; sessionId: string; includeLiveEvents?: boolean }
   | {
@@ -141,6 +143,8 @@ export type HostOperation =
       turnId: string;
       message: string;
       model: ModelChoice;
+      attachments?: Array<{ path: string; kind: string; name: string; contentHash: string }>;
+      mode?: "normal" | "plan";
     }
   | {
       op: "approval";
@@ -153,6 +157,7 @@ export type HostOperation =
   | { op: "question"; sessionId: string; questionId: string; answers: unknown }
   | { op: "search"; sessionId: string; query: string }
   | { op: "readFile"; sessionId: string; path: string }
+  | { op: "readImage"; sessionId: string; path: string; offset: number }
   | {
       op: "writeFile";
       sessionId: string;

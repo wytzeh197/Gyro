@@ -366,19 +366,40 @@ impl Store {
             bail!("Too many sidebar projects");
         }
         let mut roots = Vec::new();
+        // Paths that cannot be resolved right now, exactly as the sidebar gave
+        // them. A project already shared from one of these keeps its row and
+        // its id: worktree scopes join on that id, so dropping the project
+        // while a disk is disconnected would revoke those sessions for good.
+        let mut unavailable = Vec::new();
         for project in projects {
             // A disconnected disk must not block the remaining sidebar projects.
             let Ok(root) = project.path.canonicalize() else {
+                unavailable.push(project.path.to_string_lossy().into_owned());
                 continue;
             };
             if !root.is_dir() || root.parent().is_none() {
                 continue;
             }
-            let name = project.name.trim();
-            if name.is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
-                bail!("Use a project name between 1 and 80 characters");
-            }
-            roots.push((root.to_string_lossy().into_owned(), name.to_owned()));
+            // One unusable name must not stop every other project from
+            // syncing, so fall back to the folder name.
+            let name = [
+                project.name.trim().to_owned(),
+                root.file_name()
+                    .map(|n| n.to_string_lossy())
+                    .unwrap_or_default()
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .take(80)
+                    .collect::<String>()
+                    .trim()
+                    .to_owned(),
+            ]
+            .into_iter()
+            .find(|n| !n.is_empty() && n.chars().count() <= 80 && !n.chars().any(char::is_control));
+            let Some(name) = name else {
+                continue;
+            };
+            roots.push((root.to_string_lossy().into_owned(), name));
         }
         let mut db = self.db()?;
         let tx = db.transaction()?;
@@ -390,7 +411,7 @@ impl Store {
             rows
         };
         for (id, path) in existing {
-            if !roots.iter().any(|(root, _)| root == &path) {
+            if !roots.iter().any(|(root, _)| root == &path) && !unavailable.contains(&path) {
                 tx.execute("delete from projects where id=?1", [id])?;
             }
         }
@@ -536,6 +557,10 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn by_path(s: &Store, path: &Path) -> Project {
+        let found = s.projects().unwrap().into_iter().find(|p| p.path == path);
+        found.unwrap()
+    }
     #[test]
     fn invitations_are_single_use_and_require_explicit_approval() {
         let d = tempfile::tempdir().unwrap();
@@ -587,6 +612,49 @@ mod tests {
         assert_eq!(s.projects().unwrap().len(), 1);
         s.sync_projects(&[]).unwrap();
         assert!(!s.authorizes("local", root.path()));
+    }
+    #[test]
+    fn sidebar_sync_keeps_a_project_whose_disk_is_away_and_tolerates_a_bad_name() {
+        let d = tempfile::tempdir().unwrap();
+        let volume = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let tree = tempfile::tempdir().unwrap();
+        let root = volume.path().canonicalize().unwrap().join("project");
+        std::fs::create_dir(&root).unwrap();
+        let s = Store::open(d.path()).unwrap();
+        let input = [
+            SidebarProject {
+                path: root.clone(),
+                name: "On disk".into(),
+            },
+            SidebarProject {
+                path: other.path().into(),
+                name: "\u{7}".into(),
+            },
+        ];
+        s.sync_projects(&input).unwrap();
+        let projects = s.projects().unwrap();
+        assert_eq!(projects.len(), 2, "a bad name must not fail the sync");
+        let shared = by_path(&s, &root);
+        s.scope("s", &shared.id, tree.path()).unwrap();
+        assert!(s.authorizes("s", tree.path()));
+        // The disk goes away: the share and its id stay, but nothing under the
+        // missing root is authorized.
+        std::fs::remove_dir(&root).unwrap();
+        s.sync_projects(&input).unwrap();
+        assert_eq!(by_path(&s, &root).id, shared.id);
+        assert!(!s.authorizes("local", &root));
+        assert!(s.authorizes("s", tree.path()));
+        // It comes back with the same id, and removing it from the sidebar
+        // still unshares it.
+        std::fs::create_dir(&root).unwrap();
+        s.sync_projects(&input).unwrap();
+        assert_eq!(by_path(&s, &root).id, shared.id);
+        assert!(s.authorizes("local", &root));
+        std::fs::remove_dir(&root).unwrap();
+        s.sync_projects(&input[1..]).unwrap();
+        assert_eq!(s.projects().unwrap().len(), 1);
+        assert!(!s.authorizes("s", tree.path()));
     }
     #[test]
     fn legacy_migration_promotes_only_locally_approved_clients() {

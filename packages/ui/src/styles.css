@@ -12,6 +12,7 @@
 @import "./chat-shell-design.css";
 @import "./chat-context-popovers.css";
 @import "./browser-panel-design.css";
+@import "./native-controls.css";
 
 .gyro-surface-row {
   align-items: center;

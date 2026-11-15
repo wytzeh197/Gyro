@@ -1,5 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
-import { Monitor } from "lucide-react";
+import { DeviceIcon, useDeviceKind } from "./device-kind";
 
 export type RemoteProjectChoice = {
   key: string;
@@ -16,6 +16,7 @@ export const RemoteAccessSlots = createContext<{
   settings?: ReactNode;
   /** Present only while rendering projects from the selected remote host. */
   projectHost?: string;
+  projectHostId?: string;
   /** Extra host-bound projects join the normal sidebar; local state stays mounted. */
   projects?: ReactNode;
   content?: ReactNode;
@@ -44,7 +45,8 @@ export function useRemoteProjectHost() {
   return useContext(RemoteAccessSlots).projectHost;
 }
 export function RemoteProjectIndicator() {
-  const host = useRemoteProjectHost();
+  const { projectHost: host, projectHostId } = useContext(RemoteAccessSlots);
+  const kind = useDeviceKind(projectHostId, host);
   if (!host) return null;
   return (
     <small
@@ -52,8 +54,7 @@ export function RemoteProjectIndicator() {
       title={`Remote on ${host}`}
       aria-label={`Remote on ${host}`}
     >
-      <Monitor aria-hidden="true" />
-      Remote
+      <DeviceIcon kind={kind} aria-hidden="true" />
     </small>
   );
 }

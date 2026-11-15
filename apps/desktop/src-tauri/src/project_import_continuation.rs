@@ -102,16 +102,33 @@ fn imported_auth_data_home_from_store(
 pub(super) fn resolve_login_data_home(
     request: &TerminalPaneRequest,
 ) -> anyhow::Result<Option<(String, String)>> {
-    let Some(session_id) = request.provider_auth_session_id.as_deref() else {
-        return Ok(None);
-    };
     // Other providers retain their existing login flow, including recovery
     // from a chat that was originally imported from a different provider.
     // Only the exact native login profiles are eligible for a scoped home.
     let Ok(provider_id) = login_provider_id(request) else {
         return Ok(None);
     };
-    imported_auth_data_home(session_id, provider_id)
+    let imported = request
+        .provider_auth_session_id
+        .as_deref()
+        .map(|session_id| imported_auth_data_home(session_id, provider_id))
+        .transpose()?
+        .flatten();
+    if provider_id == "openai" {
+        let mut command = Command::new("codex");
+        if let Some((variable, home)) = imported {
+            command.env(variable, home);
+        }
+        let home = gyro_core::provider_runtime::codex_home::configure(
+            &mut command,
+            &gyro_core::GyroPaths::for_current_user()?,
+        )?;
+        return Ok(Some((
+            "CODEX_HOME".into(),
+            home.to_string_lossy().into_owned(),
+        )));
+    }
+    Ok(imported)
 }
 
 fn login_provider_id(request: &TerminalPaneRequest) -> anyhow::Result<&'static str> {

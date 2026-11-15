@@ -6,7 +6,7 @@ import {
   askTextValue,
   reconcileGitPreparation,
   hasOnlyGitWarnings,
-  browserConfirm,
+  askConfirmation,
   ChatFileActionsContext,
   ChatFileScopeContext,
   ChatRetryContext,
@@ -43,7 +43,6 @@ import {
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
-  confirm as nativeConfirm,
   open,
   save as saveDialog,
 } from "@tauri-apps/plugin-dialog";
@@ -5764,23 +5763,10 @@ export function App() {
     [notify, refreshWorkspaceTree, workspaceRoots],
   );
 
-  /* The macOS WebView has no JavaScript dialog support, so confirmations go
-     through the native dialog plugin. Without this every `window.confirm` in
-     this file returned false and the guarded action silently did nothing. */
+  /* The macOS WebView has no JavaScript dialog support, and the native alert
+     looks nothing like Gyro, so confirmations open the in-app dialog. */
   useEffect(() => {
-    setConfirmActionHandler(async (message) => {
-      if (!isTauriRuntime()) {
-        return browserConfirm(message);
-      }
-      try {
-        return await nativeConfirm(message, {
-          title: "Gyro",
-          kind: "warning",
-        });
-      } catch {
-        return false;
-      }
-    });
+    setConfirmActionHandler((message) => askConfirmation(message));
     return () => setConfirmActionHandler(undefined);
   }, []);
 
@@ -8572,6 +8558,7 @@ export function App() {
       workspacePathOverride,
       startInHome = false,
       reveal = true,
+      select = false,
       taskTitle,
       workspaceTaskId,
     }: {
@@ -8584,6 +8571,8 @@ export function App() {
       startInHome?: boolean;
       /** Background tasks stay visible in the task rail until explicitly opened. */
       reveal?: boolean;
+      /** User launches can select their pane without opening the workspace drawer. */
+      select?: boolean;
       taskTitle?: string;
       workspaceTaskId?: string;
     }) => {
@@ -8650,6 +8639,9 @@ export function App() {
         } else {
           dispatchWorkbench({ type: "upsert-background-terminal-pane", pane });
         }
+      }
+      if (select) {
+        dispatchWorkbench({ type: "select-terminal-pane", paneId });
       }
       dispatchWorkbench({
         type: "run-terminal-pane",
@@ -8805,6 +8797,7 @@ export function App() {
         const started = await launchTerminalPane({
           profile,
           reveal: options?.reveal,
+          select: true,
           startInHome: !folderPath,
           workspacePathOverride: folderPath,
         });
@@ -14793,7 +14786,7 @@ export function App() {
     (profileId: string, options?: { reveal?: boolean }) => {
       setActiveProfileId(profileId);
       const profile = getCommandProfile(commandProfiles, profileId);
-      void launchTerminalPane({ profile, reveal: options?.reveal }).then(
+      void launchTerminalPane({ profile, reveal: options?.reveal, select: true }).then(
         (started) => {
           if (!started) {
             notify(

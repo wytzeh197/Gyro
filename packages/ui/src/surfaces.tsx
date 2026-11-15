@@ -58,7 +58,6 @@ import {
   Maximize2,
   MessageCirclePlus,
   MessageSquare,
-  Mic,
   Minimize2,
   Minus,
   Monitor,
@@ -99,6 +98,7 @@ import {
   createLucideIcon,
 } from "lucide-react";
 import { branchCommitDetail, recentBranches } from "./branch-recency";
+import { deviceKind } from "./device-kind";
 import {
   Fragment,
   memo,
@@ -467,6 +467,7 @@ import {
   dictationDraft,
   type DictationController,
 } from "./dictation";
+import { DictationControl } from "./dictation-control";
 import type { EnvironmentActionIntent } from "./environment-actions";
 import {
   environmentActions,
@@ -6191,10 +6192,25 @@ export function ChatSurface({
     (workspaceMode === "worktree" ? "New worktree branch" : "main");
   // A remote chat keeps its card even before the first prompt: the card is
   // where its connection and controls live.
+  const [environmentOverlayKey, setEnvironmentOverlayKey] = useState<string>();
+  const environmentKey = `${paneKey ?? ""}:${transcriptSessionId ?? "draft"}`;
+  useEffect(() => {
+    if (!isCompanionPanel) setEnvironmentOverlayKey(undefined);
+  }, [isCompanionPanel]);
   const isEnvironmentPopoverOpen =
     (!isEmptyStart || Boolean(environmentRemote)) &&
-    activeRailPanel === "environment" &&
-    !isCompanionPanel;
+    (isCompanionPanel
+      ? environmentOverlayKey === environmentKey
+      : activeRailPanel === "environment");
+  // Environment belongs to the chat. Opening it while a companion is visible
+  // must not call the rail action, which hands that companion's space back.
+  const toggleEnvironment = () => {
+    if (isCompanionPanel) {
+      setEnvironmentOverlayKey((current) =>
+        current === environmentKey ? undefined : environmentKey,
+      );
+    } else onToggleEnvironmentRail?.();
+  };
   const legacySidePanel =
     (activeRailPanel || hasCompanion) &&
     displayedRailPanel !== "tools" &&
@@ -6272,7 +6288,6 @@ export function ChatSurface({
         (onOpenCompanionTab ?? onSelectChatPanel)?.(tab);
       }}
       onSelectTab={onSelectChatPanel}
-      onShowEnvironment={!isTiled ? onToggleEnvironmentRail : undefined}
       onShowLauncher={onShowCompanionLauncher}
       onToggleToolPanel={isToolPanelAvailable ? onToggleToolPanel : undefined}
       isToolPanelOpen={isToolPanelAvailable && isToolPanelOpen === true}
@@ -6394,7 +6409,7 @@ export function ChatSurface({
           (!environmentTurn || environmentTurn.id === activeTurnId)
         }
         modelLabel={contextModel.modelLabel}
-        onClose={onToggleEnvironmentRail}
+        onClose={toggleEnvironment}
         onOpenReview={(scope) => {
           setReviewScope(scope);
           setReviewTurnFiles(undefined);
@@ -6428,7 +6443,9 @@ export function ChatSurface({
             (activeRailPanel && activeRailPanel !== "environment"))
             ? "has-environment"
             : "",
-          isEnvironmentPopoverOpen ? "has-environment-popover" : "",
+          isEnvironmentPopoverOpen
+            ? isCompanionPanel ? "has-environment-overlay" : "has-environment-popover"
+            : "",
           !sharedCompanion && hasCompanion ? "has-companion" : "",
           sharedCompanion ? "has-shared-companion" : "",
           isTiled ? "is-tiled" : "",
@@ -6615,7 +6632,9 @@ export function ChatSurface({
         (hasCompanion || (activeRailPanel && activeRailPanel !== "environment"))
           ? "has-environment"
           : "",
-        isEnvironmentPopoverOpen ? "has-environment-popover" : "",
+        isEnvironmentPopoverOpen
+            ? isCompanionPanel ? "has-environment-overlay" : "has-environment-popover"
+            : "",
         !sharedCompanion && hasCompanion ? "has-companion" : "",
         sharedCompanion ? "has-shared-companion" : "",
         isTiled ? "is-tiled" : "",
@@ -6713,15 +6732,13 @@ export function ChatSurface({
             onToggleDock={
               isCompanionPanel ? closeCompanion : onReopenCompanionDock
             }
-            onToggleEnvironmentRail={onToggleEnvironmentRail}
+            onToggleEnvironmentRail={toggleEnvironment}
             onTogglePlanPanel={onTogglePlanPanel}
             onToggleToolPanel={isToolPanelAvailable ? onToggleToolPanel : undefined}
             planCompletedCount={sessionPlan?.items.filter((item) => item.status === "complete").length ?? 0}
             planItemCount={sessionPlan?.items.length ?? 0}
             showClose={isTiled}
-            // While the dock is open its header carries this toggle, in the
-            // same spot beside the panel toggle, so nothing jumps sideways.
-            showEnvironment={!(isCompanionPanel && !isTiled)}
+            showEnvironment
             showEnvironmentInOverflow={false}
             showToolPanelInOverflow={false}
             showToolPanel={isToolPanelAvailable}
@@ -9082,7 +9099,10 @@ function ChatContextSection({
             action: `select-remote-project:${encodeURIComponent(project.key)}`,
             active: remote.selectedProjectKey === project.key,
             detail: `${project.hostName} · ${project.path}`,
-            icon: Monitor,
+            icon:
+              deviceKind(project.hostId, project.hostName) === "laptop"
+                ? Laptop
+                : Monitor,
             label: project.label,
             badge: "Remote",
             kind: "project" as const,
@@ -22241,14 +22261,7 @@ function Composer({
     "idle" | "starting" | "listening" | "processing"
   >("idle");
   const [dictationNotice, setDictationNotice] = useState("");
-  const dictationStatus =
-    dictationPhase === "starting"
-      ? "Starting microphone…"
-      : dictationPhase === "listening"
-        ? "Listening… Click the microphone to finish."
-        : dictationPhase === "processing"
-          ? "Finishing dictation…"
-          : dictationNotice;
+  const dismissDictationNotice = useCallback(() => setDictationNotice(""), []);
   const releaseDictation = useCallback(
     (restoreBase: boolean) => {
       const anchor = dictationAnchorRef.current;
@@ -24418,65 +24431,15 @@ function Composer({
           </div>
         ) : null}
         {dictation ? (
-          <button
-            aria-label={
-              dictationPhase === "starting"
-                ? "Cancel microphone start"
-                : dictationPhase === "listening"
-                  ? "Stop dictation"
-                  : dictationPhase === "processing"
-                    ? "Finishing dictation"
-                    : "Dictate"
-            }
-            aria-pressed={
-              dictationPhase === "starting" || dictationPhase === "listening"
-            }
-            aria-busy={
-              dictationPhase === "starting" || dictationPhase === "processing"
-            }
-            disabled={dictationPhase === "processing"}
-            className={[
-              "gyro-composer-tool",
-              "gyro-dictation-button",
-              dictationPhase === "listening" ? "is-listening" : "",
-              dictationPhase === "processing" || dictationPhase === "starting"
-                ? "is-processing"
-                : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            data-dictation-phase={dictationPhase}
-            onClick={() => {
+          <DictationControl
+            phase={dictationPhase}
+            notice={dictationNotice}
+            onDismissNotice={dismissDictationNotice}
+            onToggle={() => {
               setActivePopover(null);
               toggleDictation();
             }}
-            title={
-              dictationPhase === "starting"
-                ? "Cancel microphone start"
-                : dictationPhase === "listening"
-                  ? "Stop dictation"
-                  : dictationPhase === "processing"
-                    ? "Finishing dictation"
-                    : "Dictate"
-            }
-            type="button"
-          >
-            <Mic aria-hidden="true" size={17} />
-            <span aria-hidden="true" className="gyro-dictation-badge">
-              <span className="gyro-dictation-wave">
-                <span />
-                <span />
-                <span />
-              </span>
-              <Square
-                className="gyro-dictation-stop"
-                fill="currentColor"
-                size={7}
-                strokeWidth={0}
-              />
-              <span className="gyro-dictation-spinner" />
-            </span>
-          </button>
+          />
         ) : null}
         <button
           aria-label={
@@ -24597,11 +24560,6 @@ function Composer({
           )}
         </button>
       </div>
-      {dictation && dictationStatus ? (
-        <p className="gyro-dictation-status" role="status" aria-live="polite">
-          {dictationStatus}
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -27925,10 +27883,13 @@ function providerApprovalFromEvent(
       editorPreview: previewContent,
       scope: [scopeKind, scopeValue].filter(Boolean).join(" · "),
       reason:
-        capabilityId === "workspace-read-editor"
+        stringFromEventPayload(payload, "reason") ??
+        (capabilityId === "workspace-read-editor"
           ? "The model requested live text from your editor. Review the text below before sharing it."
-          : `The model requested ${capabilityId.replaceAll("-", " ")}.`,
-      risk: "This capability is restricted to the owning Chat and project.",
+          : `The model requested ${capabilityId.replaceAll("-", " ")}.`),
+      risk:
+        stringFromEventPayload(payload, "risk") ??
+        "This capability is restricted to the owning Chat and project.",
       changes: previewPath ? [{ path: previewPath }] : [],
       status:
         status === "approved" ||

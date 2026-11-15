@@ -37,6 +37,7 @@ export function RemoteNavigation({
           value={{
             ...slots,
             projectHost: catalog.host.name,
+            projectHostId: catalog.host.id,
             projects: undefined,
           }}
         >

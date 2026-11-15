@@ -40,7 +40,9 @@ export async function confirmAction(message: string): Promise<boolean> {
       return false;
     }
   }
-  /* A browser dev preview keeps the plain dialog; a host without one must not
-     block the action it is confirming. */
-  return hasNativeConfirm() ? window.confirm(message) : true;
+  /* No host handler (a browser preview or fixture): the in-app dialog. A host
+     with no document at all must not block the action it is confirming. */
+  if (typeof document === "undefined") return true;
+  const { askConfirmation } = await import("./confirm-dialog");
+  return askConfirmation(message);
 }

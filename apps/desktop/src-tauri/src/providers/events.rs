@@ -445,6 +445,9 @@ pub(crate) fn emit_provider_chat_frame(
     if context_compaction::summary_stream_muted(&request.session_id) {
         return;
     }
+    if matches!(phase, "failed" | "cancelled") && request.internal_purpose.is_none() {
+        super::partial_response::preserve(app, request, phase);
+    }
     session_title_stream::observe(app, request, phase, text_delta.as_deref());
     if phase == "delta" {
         super::markers::publish_live_plan_progress(app, request, text_delta.as_deref(), None);

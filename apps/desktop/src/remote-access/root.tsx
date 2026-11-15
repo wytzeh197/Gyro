@@ -103,14 +103,22 @@ export function RemoteWorkspaceRoot({
   }, []);
   const selectLocal = useCallback(() => setSelection(undefined), []);
   const projectSyncKey = useRef<string>();
+  const projectSyncedAt = useRef(0);
   const requestedProjects = useRef<Array<{ path: string; name: string }>>();
   const syncProjects = useCallback(
     (projects: Array<{ path: string; name: string }>) => {
       if (!native() && !suppliedPorts) return;
       requestedProjects.current = projects;
       const key = JSON.stringify(projects);
-      if (projectSyncKey.current === key) return;
+      // The host skips folders it cannot reach (a disconnected disk), so an
+      // unchanged list is still re-sent now and then to pick them up later.
+      if (
+        projectSyncKey.current === key &&
+        Date.now() - projectSyncedAt.current < 60_000
+      )
+        return;
       projectSyncKey.current = key;
+      projectSyncedAt.current = Date.now();
       void action({ action: "syncProjects", projects }).catch(() => {
         if (projectSyncKey.current === key) projectSyncKey.current = undefined;
         setError(

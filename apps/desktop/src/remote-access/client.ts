@@ -18,6 +18,7 @@ export interface HostClient {
   dispose(): void;
 }
 export interface NativePorts {
+  prepareMedia?: (file: File, kind: "image" | "video") => Promise<import("@gyro-dev/ui").ChatAttachment>;
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
   listen<T>(
     event: string,
@@ -35,6 +36,8 @@ export class RemoteHostClient implements HostClient {
   private subscription = 0;
   private watchId?: string;
   private terminalInputs = new Map<string, Promise<unknown>>();
+  private imagePreviews = new Map<string, Promise<string | undefined>>();
+  private imageUrls = new Set<string>();
   readonly hostId: string;
   private ports: NativePorts;
   constructor(hostId: string, ports: NativePorts) {
@@ -96,6 +99,38 @@ export class RemoteHostClient implements HostClient {
       const created = result as { session: { id: string }; control: Control };
       this.leases.set(created.session.id, created.control.generation);
     }
+    return result;
+  }
+  previewImage(sessionId: string, path: string): Promise<string | undefined> {
+    const key = `${sessionId}:${path}`;
+    const cached = this.imagePreviews.get(key);
+    if (cached) return cached;
+    const result = (async () => {
+      const parts: Uint8Array<ArrayBuffer>[] = [];
+      let offset = 0, revision: string | undefined, mime = "";
+      do {
+        const chunk = await this.request<{
+          data: string; nextOffset: number; total: number; revision: string; mimeType: string;
+        }>({ op: "readImage", sessionId, path, offset });
+        if (chunk.total > 10 * 1024 * 1024 || chunk.nextOffset <= offset ||
+            chunk.nextOffset > chunk.total || (revision && revision !== chunk.revision))
+          throw new Error("The host image changed while loading. Open it again.");
+        revision = chunk.revision;
+        mime = chunk.mimeType;
+        const decoded = Uint8Array.from(atob(chunk.data), (char) => char.charCodeAt(0));
+        if (decoded.length !== chunk.nextOffset - offset)
+          throw new Error("Incomplete host image.");
+        parts.push(decoded);
+        offset = chunk.nextOffset;
+        if (offset === chunk.total) break;
+      } while (!this.disposed);
+      if (this.disposed) return undefined;
+      const url = URL.createObjectURL(new Blob(parts, { type: mime }));
+      this.imageUrls.add(url);
+      return url;
+    })();
+    this.imagePreviews.set(key, result);
+    void result.catch(() => this.imagePreviews.delete(key));
     return result;
   }
   forgetControl(sessionId: string) {
@@ -180,6 +215,9 @@ export class RemoteHostClient implements HostClient {
   }
   dispose() {
     this.disposed = true;
+    for (const url of this.imageUrls) URL.revokeObjectURL(url);
+    this.imageUrls.clear();
+    this.imagePreviews.clear();
     this.subscription++;
     this.unsubscribe?.();
     // Release authority, never stop work. No mutation is replayed after a failure.

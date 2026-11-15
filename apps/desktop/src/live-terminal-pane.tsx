@@ -103,6 +103,11 @@ export function LiveTerminalPaneBody({
         }
 
         const dataDisposable = terminal.onData((data) => {
+          // Replaying a finished PTY can generate terminal protocol replies.
+          // Neither those replies nor keystrokes belong to an exited process.
+          if (statusRef.current !== "running" && statusRef.current !== "waiting") {
+            return;
+          }
           onWriteRef.current(pane.id, data);
         });
         const bellDisposable = terminal.onBell(() => {

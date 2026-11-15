@@ -79,6 +79,59 @@ const helpArticleGroups: { label: string; articles: HelpArticle[] }[] = [
     ],
   },
   {
+    label: "Remote access",
+    articles: [
+      {
+        title: "What is remote access?",
+        answer:
+          "Remote access lets you open the projects on another Mac from this one. You chat, run agents, and edit files on that Mac while you work here. The other Mac does the work and keeps the files.",
+        section: "remote-access",
+      },
+      {
+        title: "How do I pair two Macs?",
+        answer:
+          "On the Mac with the projects, open Settings → Remote access, turn it on, and copy the invitation. On the other Mac, paste it under Join with an invitation and choose Request pairing. Approve the request on the first Mac after checking that both show the same code.",
+        section: "remote-access",
+      },
+      {
+        title: "Which projects can a paired Mac see?",
+        answer:
+          "Projects in your sidebar are shared automatically while remote access is on. Remove a project from the sidebar to stop sharing it, or turn remote access off to stop sharing everything.",
+        section: "remote-access",
+      },
+      {
+        title: "Is remote access secure?",
+        answer:
+          "Traffic between Macs is end-to-end encrypted. Only devices you approve can connect, and you can revoke one at any time under Trusted devices. Relay operators can see connection metadata, such as when devices connect, but not your chats or files.",
+        section: "remote-access",
+      },
+      {
+        title: "Can I connect over SSH instead?",
+        answer:
+          "Yes. In Settings → Remote access, choose SSH and pick a host from your SSH config or enter an address. Gyro uses your existing SSH setup and keys, and saves the host so you can reconnect later.",
+        section: "remote-access",
+      },
+      {
+        title: "Who controls a session when two Macs are open?",
+        answer:
+          "One device controls a coding session at a time. The other can watch and ask for control. Approve or release requests under Session control.",
+        section: "remote-access",
+      },
+      {
+        title: "Why can't I reach the other Mac?",
+        answer:
+          "Make sure Gyro is open on the other Mac, remote access is on there, and both Macs are online. If it still fails, turn remote access off and on again on the host Mac. A Mac that is asleep can't be reached.",
+        section: "remote-access",
+      },
+      {
+        title: "How do I change a device's icon?",
+        answer:
+          "Under This Mac, choose Laptop or Desktop. For a trusted device, use the small icon toggle in its row. For an SSH host, use its ⋯ menu. The icon is saved only on this Mac.",
+        section: "remote-access",
+      },
+    ],
+  },
+  {
     label: "Troubleshooting and support",
     articles: [
       {
@@ -110,10 +163,11 @@ const helpArticleGroups: { label: string; articles: HelpArticle[] }[] = [
 
 const helpTopics = [
   { id: "getting-started", label: "Getting started", articles: [...helpArticleGroups[0]!.articles.slice(1), ...helpArticleGroups[2]!.articles] },
-  { id: "providers", label: "Providers", articles: [helpArticleGroups[0]!.articles[0]!, helpArticleGroups[3]!.articles[0]!] },
+  { id: "providers", label: "Providers", articles: [helpArticleGroups[0]!.articles[0]!, helpArticleGroups[4]!.articles[0]!] },
   { id: "permissions", label: "Permissions", articles: helpArticleGroups[1]!.articles },
-  { id: "troubleshooting", label: "Troubleshooting", articles: [helpArticleGroups[3]!.articles[1]!] },
-  { id: "support", label: "Support", articles: helpArticleGroups[3]!.articles.slice(2) },
+  { id: "remote-access", label: "Remote access", articles: helpArticleGroups[3]!.articles },
+  { id: "troubleshooting", label: "Troubleshooting", articles: [helpArticleGroups[4]!.articles[1]!] },
+  { id: "support", label: "Support", articles: helpArticleGroups[4]!.articles.slice(2) },
 ];
 
 const resources = [
@@ -124,6 +178,7 @@ const resources = [
   ["Security policy", "SECURITY.md"],
 ] as const;
 const sectionLabels: Partial<Record<SettingsSectionId, string>> = {
+  "remote-access": "Remote access",
   providers: "Models & accounts",
   efficiency: "Chat & agents",
   permissions: "Permissions",
@@ -162,7 +217,7 @@ export function SettingsHelp({
           id={searchId}
           type="search"
           aria-label="Search Help"
-          placeholder="Search questions, permissions, providers…"
+          placeholder="Search questions, permissions, remote access…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -183,7 +238,7 @@ export function SettingsHelp({
       </p>
       <div className="gyro-help-answers">
         {filtered.map((group) => (
-          <SettingsGroup key={group.label} id={`help-${group.id}`} label={group.label} summary={`${group.articles.length} ${group.articles.length === 1 ? "answer" : "answers"}`}>
+          <SettingsGroup key={group.label} collapsible={!terms.length} id={`help-${group.id}`} label={group.label} summary={`${group.articles.length} ${group.articles.length === 1 ? "answer" : "answers"}`}>
             <div className="gyro-help-topic">
             {group.articles.map((article) => (
               <details

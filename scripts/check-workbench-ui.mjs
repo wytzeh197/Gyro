@@ -5637,7 +5637,7 @@ expect(
     appSource.includes("const runCommandProfile = useCallback") &&
     appSource.includes("setActiveProfileId(profileId)") &&
     appSource.includes(
-      "void launchTerminalPane({ profile, reveal: options?.reveal })",
+      "void launchTerminalPane({ profile, reveal: options?.reveal, select: true })",
     ) &&
     appSource.includes("onRunCommandProfile={runCommandProfile}") &&
     appSource.includes('case "configure-cli-launcher"') &&

@@ -181,11 +181,21 @@ impl Connection {
             }
         });
         let client = stream::Client::open(output, input, client_id).await?;
-        Ok(Arc::new(Self {
-            client,
+        let connection = Arc::new(Self {
+            client: client.clone(),
             child: Mutex::new(Some(child)),
             stderr,
-        }))
+        });
+        // A failed stream can remain listed as a saved connection. Retire its
+        // SSH child immediately instead of waiting for manual reconnection.
+        let closed = Arc::downgrade(&connection);
+        tokio::spawn(async move {
+            client.closed().await;
+            if let Some(connection) = closed.upgrade() {
+                connection.close();
+            }
+        });
+        Ok(connection)
     }
     pub async fn hello(&self) -> Result<serde_json::Value> {
         let result = tokio::time::timeout(

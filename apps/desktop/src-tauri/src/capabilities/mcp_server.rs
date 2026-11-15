@@ -455,6 +455,17 @@ pub(crate) fn desktop_capability_tool_call(
             ),
         )
     });
+    // Completed results came through the broker's nonce/session/workspace
+    // checks. Bind only those validated results before serializing spill copies
+    // in this separate MCP process; the environment alone grants no ownership.
+    let _spill_scope = if response.status == CapabilityStatus::Completed {
+        Some(gyro_core::efficiency::spill::SessionScope::start(
+            paths,
+            Uuid::parse_str(&context.session_id)?,
+        ))
+    } else {
+        None
+    };
     capability_mcp_response(
         paths,
         response,

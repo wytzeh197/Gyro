@@ -380,6 +380,38 @@ async fn run(app: &tauri::AppHandle, directory: &Path) -> anyhow::Result<Value> 
     )
     .await?;
     assert_eq!(worktree_file["content"], "after\n");
+    // Model changes persist on the host before a turn is submitted.
+    let mut selected = model.clone();
+    selected.reasoning_effort = Some("high".into());
+    let changed = call(&client, &host_id, Operation::SetModel {
+        session_id: session.clone(), model: selected,
+    }, Some(generation)).await?;
+    assert_eq!(changed["reasoningEffort"], "high");
+    use base64::Engine as _;
+    let image = base64::engine::general_purpose::STANDARD.decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZqkAAAAASUVORK5CYII="
+    )?;
+    let upload_id = Uuid::new_v4();
+    let mut uploaded = Value::Null;
+    for (index, chunk) in image.chunks(17).enumerate() {
+        let offset = index * 17;
+        uploaded = call(&client, &host_id, Operation::UploadAttachment {
+            session_id: session.clone(), upload_id, name: "fixture.png".into(), kind: "image".into(),
+            offset, data: base64::engine::general_purpose::STANDARD.encode(chunk),
+            complete: offset + chunk.len() == image.len(),
+        }, Some(generation)).await?;
+    }
+    let preview = call(&client, &host_id, Operation::ReadImage {
+        session_id: session.clone(), path: uploaded["path"].as_str().unwrap().into(), offset: 0,
+    }, None).await?;
+    assert_eq!(base64::engine::general_purpose::STANDARD.decode(preview["data"].as_str().unwrap())?, image);
+    assert!(call(&client, &host_id, Operation::ReadImage {
+        session_id: worktree_session.clone(), path: uploaded["path"].as_str().unwrap().into(), offset: 0,
+    }, None).await.is_err());
+    let attachment = gyro_remote::protocol::AttachmentRef {
+        path: uploaded["path"].as_str().unwrap().into(), kind: "image".into(), name: "fixture.png".into(),
+        content_hash: uploaded["contentHash"].as_str().unwrap().into(),
+    };
     let turn = Uuid::new_v4().to_string();
     let submit = Request {
         id: Uuid::new_v4(),
@@ -389,6 +421,8 @@ async fn run(app: &tauri::AppHandle, directory: &Path) -> anyhow::Result<Value> 
             turn_id: turn.clone(),
             message: "Run deterministic fixture".into(),
             model: model.clone(),
+            attachments: vec![attachment],
+            mode: Some("plan".into()),
         },
     };
     client
@@ -407,6 +441,8 @@ async fn run(app: &tauri::AppHandle, directory: &Path) -> anyhow::Result<Value> 
     let events = crate::stores::open_store()
         .map_err(anyhow::Error::msg)?
         .read_recent_events(Uuid::parse_str(&session)?, 200)?;
+    let user_event = events.iter().find(|e| e.kind == gyro_core::SessionEventKind::UserMessage).unwrap();
+    assert_eq!(user_event.payload["attachments"][0]["contentHash"], uploaded["contentHash"]);
     assert_eq!(
         events
             .iter()
@@ -527,6 +563,6 @@ async fn run(app: &tauri::AppHandle, directory: &Path) -> anyhow::Result<Value> 
     other.close().await;
     host.node.get().unwrap().close().await;
     Ok(
-        json!({"ok":true,"checks":["unpaired-denied","host-approval-required","create-idempotent","shared-paths","automatic-device-control","file-conflict","approval-turn-fencing","approval-routing","git-stage-commit","git-stale-revision","worktree-session","worktree-scope-revocation","submit-idempotent","disconnect-keeps-running","remote-pty","stale-control-denied","other-device-denied","revocation"],"regressions":regressions,"provider":"deterministic fixture; no provider calls","transport":"two loopback endpoints; no public relay"}),
+        json!({"ok":true,"checks":["host-model-persistence","chunked-image-upload","host-image-preview","cross-session-image-denied","attachment-transcript","unpaired-denied","host-approval-required","create-idempotent","shared-paths","automatic-device-control","file-conflict","approval-turn-fencing","approval-routing","git-stage-commit","git-stale-revision","worktree-session","worktree-scope-revocation","submit-idempotent","disconnect-keeps-running","remote-pty","stale-control-denied","other-device-denied","revocation"],"regressions":regressions,"provider":"deterministic fixture; no provider calls","transport":"two loopback endpoints; no public relay"}),
     )
 }
