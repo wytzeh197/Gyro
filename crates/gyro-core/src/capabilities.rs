@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::io::{self, Write};
 use std::path::{Component, Path};
 use uuid::Uuid;
 
@@ -1320,13 +1321,39 @@ pub fn sanitize_capability_summary(value: &str) -> String {
 }
 
 pub fn validate_capability_result_data(value: Value) -> Result<Value> {
-    let encoded = serde_json::to_vec(&value)?;
-    if encoded.len() > MAX_CAPABILITY_RESULT_BYTES {
+    // Every accepted tool result passes through here, often after the caller
+    // already shaped it to this ceiling. Encoding the value into a buffer
+    // only to read `.len()` copied up to 128 KiB and dropped it. The counter
+    // is the same compact JSON and keeps none of it.
+    if json_byte_len(&value)? > MAX_CAPABILITY_RESULT_BYTES {
         return Err(anyhow!(
             "capability result exceeded the {MAX_CAPABILITY_RESULT_BYTES} byte limit"
         ));
     }
     Ok(value)
+}
+
+/// Compact JSON length of `value`.
+///
+/// `Value` serialization does not fail for a writer that accepts every
+/// buffer. A failure still rejects the result, which is what `to_vec` did.
+fn json_byte_len(value: &Value) -> Result<usize> {
+    struct ByteCounter(usize);
+
+    impl Write for ByteCounter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0 = self.0.saturating_add(buf.len());
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut counter = ByteCounter(0);
+    serde_json::to_writer(&mut counter, value)?;
+    Ok(counter.0)
 }
 
 #[cfg(test)]
@@ -1672,5 +1699,56 @@ mod tests {
         assert!(!capability_path_is_sensitive("src/main.rs"));
         assert!(!capability_path_is_sensitive("src/git/commit.rs"));
         assert!(!capability_path_is_sensitive("docs/main.git"));
+    }
+
+    #[test]
+    fn capability_result_byte_limit_matches_compact_json() {
+        let nested = serde_json::json!({
+            "content": "quote \" and emoji 🦀\n",
+            "n": [1, null, true]
+        });
+        assert_eq!(
+            validate_capability_result_data(nested.clone()).unwrap(),
+            nested
+        );
+
+        // One ASCII byte past the ceiling, and a quote, which compact JSON
+        // stores as two bytes. Either miss accepts a result the old buffer
+        // length rejected.
+        let fit = Value::String("x".repeat(MAX_CAPABILITY_RESULT_BYTES - 2));
+        assert_eq!(
+            serde_json::to_vec(&fit).unwrap().len(),
+            MAX_CAPABILITY_RESULT_BYTES
+        );
+        assert_eq!(validate_capability_result_data(fit.clone()).unwrap(), fit);
+
+        let over = Value::String("x".repeat(MAX_CAPABILITY_RESULT_BYTES - 1));
+        assert_eq!(
+            serde_json::to_vec(&over).unwrap().len(),
+            MAX_CAPABILITY_RESULT_BYTES + 1
+        );
+        assert!(validate_capability_result_data(over)
+            .unwrap_err()
+            .to_string()
+            .contains("capability result"));
+
+        let quotes = Value::String("\"".repeat((MAX_CAPABILITY_RESULT_BYTES - 2) / 2));
+        assert_eq!(
+            serde_json::to_vec(&quotes).unwrap().len(),
+            MAX_CAPABILITY_RESULT_BYTES
+        );
+        assert!(validate_capability_result_data(quotes).is_ok());
+
+        let quotes_over = Value::String("\"".repeat((MAX_CAPABILITY_RESULT_BYTES - 2) / 2 + 1));
+        assert!(serde_json::to_vec(&quotes_over).unwrap().len() > MAX_CAPABILITY_RESULT_BYTES);
+        assert!(validate_capability_result_data(quotes_over).is_err());
+
+        let crabs = MAX_CAPABILITY_RESULT_BYTES.saturating_sub(2) / "🦀".len();
+        let fitting_crabs = Value::String("🦀".repeat(crabs));
+        assert!(serde_json::to_vec(&fitting_crabs).unwrap().len() <= MAX_CAPABILITY_RESULT_BYTES);
+        assert!(validate_capability_result_data(fitting_crabs).is_ok());
+        let over_crabs = Value::String("🦀".repeat(crabs + 1));
+        assert!(serde_json::to_vec(&over_crabs).unwrap().len() > MAX_CAPABILITY_RESULT_BYTES);
+        assert!(validate_capability_result_data(over_crabs).is_err());
     }
 }
