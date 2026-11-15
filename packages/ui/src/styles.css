@@ -14682,10 +14682,7 @@ button.gyro-settings-row em::after {
 
 .gyro-usage-provider-select > span {
   color: var(--gyro-muted);
-  font-size: var(--gyro-font-tiny);
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+  font-size: var(--gyro-font-support);
 }
 
 .gyro-usage-provider-select select {

@@ -369,7 +369,7 @@ export function ProjectImportSettings({
 
   const scanAction = (
         <button
-          className="gyro-import-button gyro-primary-button"
+          className="gyro-import-button gyro-primary-button is-primary"
           disabled={
             busy ||
             loadingSources ||
@@ -503,7 +503,7 @@ export function ProjectImportSettings({
           )}
         </section>
       )}
-      {!scan ? <SettingsGroup id="review-selection" label="Projects"><SettingsEmptyState icon={<FolderOpen size={32} />} title="Scan for projects" description="Find chats stored locally. Review the selection before importing.">{scanAction}</SettingsEmptyState></SettingsGroup> : null}
+      {!scan ? <SettingsGroup id="review-selection" label="Projects"><SettingsEmptyState icon={<FolderOpen size={24} />} title="Scan for projects" description="Find chats stored locally. Review the selection before importing.">{scanAction}</SettingsEmptyState></SettingsGroup> : null}
       {scan && (
         <SettingsGroup id="review-selection" label="Review selection">
           <div className="gyro-import-projects-toolbar">

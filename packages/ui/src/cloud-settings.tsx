@@ -34,13 +34,12 @@ export function CloudSettings({
         title="Gyro Cloud"
         description="Optional cloud services, separate from your local workspace."
       >
-        <SettingsEmptyState icon={<Cloud size={40} />}
+        <SettingsEmptyState icon={<Cloud size={24} />}
           title="Cloud is not enabled in this build"
           description="Your local workspace and your own providers remain available." />
         <SettingsGroup id="cloud-release-availability" label="Chat backup">
           <SettingsRow label="Automatically back up chats" value="Unavailable">
             <SettingsSwitch label="Automatically back up chats" checked={false} disabled onChange={() => {}} />
-            <span className="gyro-settings-info-value">Unavailable</span>
           </SettingsRow>
         </SettingsGroup>
       </SettingsSection>

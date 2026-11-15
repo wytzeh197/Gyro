@@ -563,7 +563,31 @@
   align-items: center;
   gap: 8px;
   min-height: 36px;
-  padding: 4px 8px 0 14px;
+  padding: 4px 8px 0 6px;
+}
+
+.gyro-env-panel-toggle {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.gyro-env-panel-toggle:hover {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+}
+
+.gyro-env-panel-toggle:focus-visible {
+  outline: 2px solid var(--gyro-cobalt);
+  outline-offset: -2px;
 }
 
 .gyro-env-panel-status {

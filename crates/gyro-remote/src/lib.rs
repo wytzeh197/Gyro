@@ -2,6 +2,8 @@
 pub mod control;
 pub mod live_events;
 pub mod protocol;
+#[cfg(unix)]
+pub mod ssh;
 pub mod store;
 pub mod transport;
 pub use protocol::{Operation, RemoteEvent, Request, Response, ALPN};

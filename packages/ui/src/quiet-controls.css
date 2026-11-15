@@ -1,0 +1,234 @@
+/* Quiet-until-active option groups.
+   A group of choices reads as plain icon + label. Only the option you are on
+   carries a soft fill; hover gets a fainter wash. No item borders, no boxed
+   track around the group. Real actions (primary/secondary buttons) keep their
+   own button treatment so they still stand apart from choices.
+
+   Loaded last. Settings rules arrive from several layers (some with
+   !important), so these selectors lead with `html:root[data-theme]` to win on
+   specificity without leaning on load order. */
+
+:root {
+  --gyro-quiet-hover: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  --gyro-quiet-active: color-mix(in srgb, var(--gyro-text) 10%, transparent);
+  /* Navigation lists sit in a tinted sidebar, so they read lighter still. */
+  --gyro-quiet-nav-hover: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  --gyro-quiet-nav-active: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+}
+
+/* -- Segmented choices: Off/Peek/Follow, text size, density, motion, scope,
+      CLI focus. The track disappears; the sliding indicator is the fill. -- */
+html:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    .gyro-settings-segmented,
+    .gyro-workspace-settings-scopes,
+    .gyro-cli-launch-focus
+  ) {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  gap: 2px;
+  padding: 0;
+}
+
+html:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    .gyro-settings-segmented,
+    .gyro-workspace-settings-scopes,
+    .gyro-cli-launch-focus
+  )
+  > button {
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
+  color: var(--gyro-muted);
+}
+
+html:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    .gyro-settings-segmented,
+    .gyro-workspace-settings-scopes,
+    .gyro-cli-launch-focus
+  )
+  > button:not(.is-active):hover {
+  background: var(--gyro-quiet-hover);
+  color: var(--gyro-text);
+}
+
+html:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    .gyro-settings-segmented,
+    .gyro-workspace-settings-scopes,
+    .gyro-cli-launch-focus
+  )
+  > button.is-active {
+  background: var(--gyro-quiet-active);
+  box-shadow: none;
+  color: var(--gyro-text);
+}
+
+/* Once the sliding indicator is measured it carries the fill instead. */
+html:root[data-theme]
+  .gyro-settings-surface
+  .gyro-selection-track[data-selection-ready]
+  > button.is-active {
+  background: transparent;
+}
+
+html:root[data-theme]
+  .gyro-settings-surface
+  .gyro-selection-track
+  > .gyro-selection-indicator {
+  background: var(--gyro-quiet-active);
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
+}
+
+/* -- Settings sidebar: plain icon + label rows; the current page gets a light
+      wash, with no edge marker or inset bar. -- */
+html:root[data-theme] .gyro-app-shell .gyro-sidebar-action.is-settings-page {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+html:root[data-theme]
+  .gyro-app-shell
+  .gyro-sidebar-action.is-settings-page:not(.is-active):hover {
+  background: var(--gyro-quiet-nav-hover);
+}
+
+html:root[data-theme] .gyro-app-shell .gyro-sidebar-action.is-settings-page.is-active {
+  background: var(--gyro-quiet-nav-active);
+}
+
+html:root[data-theme]
+  .gyro-app-shell
+  .gyro-sidebar-action.is-settings-page.is-active::before {
+  display: none;
+}
+
+/* -- Settings pages: one divider rule. Lines sit under section titles only;
+      rows inside a section are separated by spacing, never by a rule. -- */
+html:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    [data-settings-page="keyboard"] .gyro-settings-row,
+    .gyro-workspace-keybindings label,
+    .gyro-help-topic details,
+    .gyro-cli-profiles-table td,
+    .gyro-provider-row,
+    .gyro-usage-toolbar
+  ) {
+  border-bottom-color: transparent;
+}
+
+/* Open sections don't echo their own values back in the header. */
+html:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-group
+  .gyro-settings-group-summary {
+  display: none;
+}
+
+/* Reset appears only when there is something to reset. */
+html:root[data-theme] .gyro-settings-surface .gyro-settings-group-reset:disabled {
+  display: none;
+}
+
+/* The appearance save-status strip stays as a live region but only shows
+   when a save fails. */
+html:root[data-theme]
+  .gyro-settings-surface
+  .gyro-appearance-scope:not(:has(.is-error)) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Read-only values read as information, not controls. */
+html:root[data-theme] .gyro-settings-surface .gyro-settings-info-value {
+  color: var(--gyro-muted);
+  font-weight: 400;
+}
+
+/* Keyboard shortcuts: plain muted glyphs, no keycap box. */
+html:root[data-theme] .gyro-settings-surface .gyro-settings-key {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gyro-muted);
+  font-family: inherit;
+  font-size: var(--gyro-font-support);
+  letter-spacing: 0.04em;
+}
+
+/* Number fields are sized for numbers; only glob lists run wide. */
+html:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-settings-list
+  input[type="number"] {
+  width: calc(96px * var(--gyro-ui-scale, 1));
+  max-width: 100%;
+  justify-self: end;
+}
+
+/* CLI launch count: a quiet stepper with no box around it. */
+html:root[data-theme] .gyro-settings-surface .gyro-cli-launch-stepper {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+html:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cli-launch-stepper
+  button:hover:not(:disabled) {
+  background: var(--gyro-quiet-hover);
+}
+
+/* No card inside a card: usage empty state sits flat in its section. */
+html:root[data-theme] .gyro-settings-surface .gyro-usage-empty {
+  border: 0;
+  min-height: 0;
+  padding: var(--gyro-space-section) 0;
+}
+
+/* Empty states share one icon size and rhythm. */
+html:root[data-theme] .gyro-settings-surface .gyro-settings-empty-state > svg,
+html:root[data-theme] .gyro-settings-surface .gyro-usage-empty > svg {
+  width: calc(24px * var(--gyro-ui-scale, 1));
+  height: calc(24px * var(--gyro-ui-scale, 1));
+  color: var(--gyro-faint);
+}
+
+/* Import: the archived toggle aligns to the same right edge as other rows. */
+html:root[data-theme] .gyro-settings-surface .gyro-import-archived {
+  flex: 1;
+  justify-content: space-between;
+}
+
+/* Settings sidebar fits a normal window without scrolling. */
+html:root[data-theme] .gyro-app-shell .gyro-sidebar-actions.is-settings-pages {
+  gap: calc(10px * var(--gyro-ui-scale, 1));
+}
+html:root[data-theme] .gyro-app-shell .gyro-sidebar-action.is-settings-page {
+  min-height: calc(27px * var(--gyro-ui-scale, 1));
+}
+
+/* Tools: "bundled with Gyro" already says it is core, so the badge goes;
+   other source badges use sentence case like the rest of the page. */
+html:root[data-theme] .gyro-settings-surface .gyro-workspace-contribution-title em.is-core {
+  display: none;
+}
+html:root[data-theme] .gyro-settings-surface .gyro-workspace-contribution-title em {
+  letter-spacing: 0;
+  text-transform: capitalize;
+}

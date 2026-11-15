@@ -38,7 +38,9 @@ export function RemoteWorkspaceRoot({
   const peers = status?.peers ?? [];
   const { catalogs, refresh: refreshCatalog } = useRemoteCatalog(
     ports,
-    status?.settings.enabled ? peers : [],
+    peers.filter(
+      (peer) => status?.settings.enabled || peer.transport === "ssh",
+    ),
   );
   const refreshSequence = useRef(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -124,9 +126,11 @@ export function RemoteWorkspaceRoot({
     }, 5000);
     return () => clearInterval(timer);
   }, [syncProjects]);
-  const activeHost = status?.settings.enabled
-    ? peers.find((p) => p.id === selection?.hostId)
-    : undefined;
+  const activeHost = peers.find(
+    (p) =>
+      p.id === selection?.hostId &&
+      (status?.settings.enabled || p.transport === "ssh"),
+  );
   useEffect(() => {
     if (selection && status && !activeHost) selectLocal();
   }, [selection, status, activeHost, selectLocal]);

@@ -1723,9 +1723,9 @@ function workItemFromCapabilityCall(
     // Terminal-shaped work → command row (matches "Ran command").
     case "command":
       return classifyCommandActivity({
-        command: summary ?? resourceLabel ?? label,
+        command: status === "failed" ? resourceLabel ?? label : summary ?? resourceLabel ?? label,
         id,
-        intent: summary,
+        intent: status === "failed" ? undefined : summary,
         error: status === "failed" ? summary : undefined,
         status,
       });

@@ -6,6 +6,8 @@ mod mutation_locks;
 pub(crate) mod smoke;
 #[cfg(debug_assertions)]
 mod smoke_regressions;
+#[cfg(unix)]
+mod ssh;
 mod workspace;
 use gyro_remote::{
     control::Controls,
@@ -25,11 +27,15 @@ use tauri::{Emitter, Listener, Manager};
 pub(crate) struct RemoteAccess {
     runtime: tokio::sync::Mutex<Option<Arc<Runtime>>>,
     active: std::sync::RwLock<Option<std::sync::Weak<Runtime>>>,
+    #[cfg(unix)]
+    ssh: ssh::Ssh,
 }
 pub(super) struct Runtime {
     pub app: tauri::AppHandle,
     pub store: Store,
     pub node: OnceLock<Arc<Node>>,
+    #[cfg(unix)]
+    ssh_server: OnceLock<gyro_remote::ssh::Server>,
     pub controls: Mutex<Controls>,
     live_events: Mutex<gyro_remote::live_events::LiveEvents>,
     pub terminals: Mutex<HashMap<String, RemoteTerminal>>,
@@ -101,6 +107,8 @@ impl Runtime {
             app: app.clone(),
             store: remote_store,
             node: OnceLock::new(),
+            #[cfg(unix)]
+            ssh_server: OnceLock::new(),
             controls: Mutex::new(Controls::default()),
             live_events: Mutex::new(gyro_remote::live_events::LiveEvents::default()),
             terminals: Mutex::new(HashMap::new()),
@@ -121,9 +129,9 @@ impl Runtime {
             })
         });
         let node = if loopback {
-            Node::bind_loopback(secret, handler).await
+            Node::bind_loopback(secret, handler.clone()).await
         } else {
-            Node::bind(secret, handler).await
+            Node::bind(secret, handler.clone()).await
         }
         .map_err(|_| "Could not start device networking".to_string())?;
         // Paired devices get long-lived connections; unknown identities only get a few
@@ -137,6 +145,27 @@ impl Runtime {
             .node
             .set(node.clone())
             .map_err(|_| "Device networking already started")?;
+        #[cfg(unix)]
+        if !loopback {
+            let path = gyro_core::GyroPaths::for_current_user()
+                .map_err(err)?
+                .base_dir
+                .join("remote-access/ssh.sock");
+            let weak = Arc::downgrade(&runtime);
+            let cleanup = Arc::new(move |peer: &str| {
+                if let Some(runtime) = weak.upgrade() {
+                    if let Ok(mut controls) = runtime.controls.lock() {
+                        controls.revoke(peer);
+                    }
+                    runtime.close_terminals(|t| t.peer == peer);
+                }
+            });
+            if let Ok(server) =
+                gyro_remote::ssh::Server::bind(&path, handler, node.events.clone(), cleanup).await
+            {
+                let _ = runtime.ssh_server.set(server);
+            }
+        }
         let weak = Arc::downgrade(&runtime);
         app.listen_any(crate::app::limits::PROVIDER_CHAT_EVENT, move |event| {
             let Some(runtime) = weak.upgrade() else {
@@ -287,7 +316,9 @@ impl Runtime {
         if !self.store.settings().map_err(err)?.enabled {
             return Err("Remote access is disabled on this Mac".into());
         }
-        if !self.store.trusts(peer, "client") {
+        // Iroh origins are fixed hex public keys. The reserved ssh: namespace
+        // is supplied only by our same-user, 0600 Unix socket after peer-cred checks.
+        if !peer.starts_with("ssh:") && !self.store.trusts(peer, "client") {
             return Err("This device is not trusted or its access was revoked".into());
         }
         if let Some(session) = operation.session_id() {
@@ -295,11 +326,27 @@ impl Runtime {
         }
         Ok(())
     }
+    fn ssh_hosting_active(&self) -> bool {
+        #[cfg(unix)]
+        {
+            return self.ssh_server.get().is_some();
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+    pub(super) fn stop_ssh_hosting(&self) {
+        #[cfg(unix)]
+        if let Some(server) = self.ssh_server.get() {
+            server.close();
+        }
+    }
     pub fn snapshot(&self) -> Result<Value, String> {
         let hosting_active =
             self.store.settings().map_err(err)?.enabled && self.node.get().is_some();
         Ok(
-            json!({"settings":self.store.settings().map_err(err)?,"hostingActive":hosting_active,"invitationActive":self.store.invitation_active().map_err(err)?,"deviceId":self.node.get().map(|n|n.id()),"peers":self.store.peers().map_err(err)?,"pending":self.store.pending().map_err(err)?,"projects":self.store.projects().map_err(err)?,"controls":self.controls.lock().map_err(err)?.all()}),
+            json!({"sshHostingActive":self.ssh_hosting_active(),"settings":self.store.settings().map_err(err)?,"hostingActive":hosting_active,"invitationActive":self.store.invitation_active().map_err(err)?,"deviceId":self.node.get().map(|n|n.id()),"peers":self.store.peers().map_err(err)?,"pending":self.store.pending().map_err(err)?,"projects":self.store.projects().map_err(err)?,"controls":self.controls.lock().map_err(err)?.all()}),
         )
     }
 }

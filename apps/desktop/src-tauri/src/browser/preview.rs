@@ -258,6 +258,7 @@ pub(crate) async fn capture_browser_preview_diagnostics(
         .title("Gyro browser diagnostics")
         .inner_size(1.0, 1.0)
         .visible(false)
+        .focused(false)
         .skip_taskbar(true)
         .incognito(true)
         .devtools(false)
@@ -289,11 +290,20 @@ pub(crate) async fn capture_session_browser_preview(
 ) -> Result<BrowserPreviewCapture, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let manager = app.state::<session_browser::SessionBrowserManager>();
+        let resource_id = manager
+            .get_snapshot(&session_id)?
+            .ok_or_else(|| "this chat has no open browser".to_string())?
+            .resource_id;
+        let before =
+            session_browser::observe_agent(&app, &session_id, "status", serde_json::json!({}))?;
+        // Readiness may have followed a redirect. Pin the document that is
+        // ready now, rather than rejecting it against a pre-wait snapshot.
         let owned = manager
             .get_snapshot(&session_id)?
             .ok_or_else(|| "this chat has no open browser".to_string())?;
-        let before =
-            session_browser::observe_agent(&app, &session_id, "status", serde_json::json!({}))?;
+        if owned.resource_id != resource_id {
+            return Err("browser changed during capture; take a new screenshot".into());
+        }
         let screenshot = session_browser::capture_session_browser_png(&app, &session_id)?;
         let after =
             session_browser::call_agent(&app, &session_id, "status", serde_json::json!({}))?;

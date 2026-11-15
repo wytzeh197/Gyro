@@ -256,7 +256,8 @@ export function ChatEnvironmentCard({
 }: ChatEnvironmentCardProps) {
   const isPanel = placement === "panel";
   const [isFolded, setIsFolded] = useState(true);
-  const [remoteDetailsOpen, setRemoteDetailsOpen] = useState(false);
+  const [isPanelExpanded, setIsPanelExpanded] = useState(false);
+  const remoteDetailsOpen = isPanelExpanded;
   const remoteTrigger = useRef<HTMLButtonElement>(null);
   const remoteDetailsId = useId();
   const isOpen = isPanel || !isFolded;
@@ -538,9 +539,6 @@ export function ChatEnvironmentCard({
       (action) => action.id !== "local",
     );
     const showBranchRow = !remote;
-    const hasRows = Boolean(
-      showBranchRow || runningPanes.length || workingAgents.length,
-    );
     // The panel says one thing at a time: what state the work is in, the plan
     // when there is one, the branch, and anything running. Empty rows stay out.
     const panelProgress = [
@@ -557,24 +555,48 @@ export function ChatEnvironmentCard({
         onKeyDown={(event) => {
           if (event.key === "Escape" && remoteDetailsOpen) {
             event.stopPropagation();
-            setRemoteDetailsOpen(false);
+            setIsPanelExpanded(false);
             remoteTrigger.current?.focus();
           }
         }}
       >
         <header className="gyro-env-panel-head">
-          <span
-            aria-hidden="true"
-            className={`gyro-env-card-dot ${remoteDown ? remoteDot : `is-${mode}`}`}
-          />
-          <span className="gyro-env-panel-status">
-            {remoteDown
-              ? remote.statusLabel
-              : panelStatus(mode, focus.status, blockedItem, focus.focus)}
-          </span>
-          {panelProgress ? (
-            <span className="gyro-env-card-mono is-dim">{panelProgress}</span>
-          ) : null}
+          <button
+            aria-label={
+              isPanelExpanded ? "Collapse environment" : "Expand environment"
+            }
+            aria-controls={remote ? `${bodyId} ${remoteDetailsId}` : bodyId}
+            aria-expanded={isPanelExpanded}
+            className="gyro-env-panel-toggle"
+            onClick={() => setIsPanelExpanded((expanded) => !expanded)}
+            type="button"
+          >
+            <span
+              aria-hidden="true"
+              className={`gyro-env-card-dot ${remoteDown ? remoteDot : `is-${mode}`}`}
+            />
+            <span className="gyro-env-panel-status">
+              {remoteDown
+                ? remote.statusLabel
+                : panelStatus(mode, focus.status, blockedItem, focus.focus)}
+            </span>
+            {panelProgress ? (
+              <span className="gyro-env-card-mono is-dim">{panelProgress}</span>
+            ) : null}
+            {isPanelExpanded ? (
+              <ChevronUp
+                aria-hidden="true"
+                className="gyro-env-card-chevron"
+                size={14}
+              />
+            ) : (
+              <ChevronDown
+                aria-hidden="true"
+                className="gyro-env-card-chevron"
+                size={14}
+              />
+            )}
+          </button>
           {onClose ? (
             <button
               aria-label="Close environment"
@@ -587,16 +609,6 @@ export function ChatEnvironmentCard({
             </button>
           ) : null}
         </header>
-        {items.length ? (
-          <div className="gyro-env-panel-plan">
-            {plan?.title ? (
-              <h3 className="gyro-env-panel-title">{plan.title}</h3>
-            ) : null}
-            <ol className="gyro-env-card-rail" id={bodyId}>
-              {railSteps}
-            </ol>
-          </div>
-        ) : null}
         {remote ? (
           <>
             <div className="gyro-env-panel-context">
@@ -625,7 +637,7 @@ export function ChatEnvironmentCard({
                 aria-expanded={remoteDetailsOpen}
                 aria-controls={remoteDetailsId}
                 title={`Remote on ${remote.host} · ${remote.statusLabel}`}
-                onClick={() => setRemoteDetailsOpen((open) => !open)}
+                onClick={() => setIsPanelExpanded((open) => !open)}
               >
                 <Monitor aria-hidden="true" />
                 <span className="gyro-env-card-ellipsis">
@@ -740,95 +752,119 @@ export function ChatEnvironmentCard({
             ) : null}
           </>
         ) : null}
-        {hasRows ? (
+        {showBranchRow ? (
           <div className="gyro-env-panel-rows">
-            {!showBranchRow ? null : (
-              <button
-                className="gyro-env-panel-row"
-                onClick={openReview}
-                title={
-                  changedFiles > 0
-                    ? `Review ${changedFiles} changed ${changedFiles === 1 ? "file" : "files"}`
-                    : "Review changes"
-                }
-                type="button"
-              >
-                <GitBranch aria-hidden="true" size={13} />
-                <span className="gyro-env-card-grow gyro-env-card-mono">
-                  {branch ?? "Changes"}
-                </span>
-                {hasTotals ? (
-                  <span className="gyro-env-card-mono">
-                    <Diff
-                      additions={totals.additions}
-                      deletions={totals.deletions}
-                    />
-                  </span>
-                ) : (
-                  <span className="is-dim">
-                    {totals.kind === "clean" ? "Clean" : null}
-                  </span>
-                )}
-              </button>
-            )}
-            {runningPanes.length ? (
-              <button
-                className="gyro-env-panel-row"
-                onClick={() => onOpenTab?.("terminal")}
-                title="Open terminal"
-                type="button"
-              >
-                <Terminal aria-hidden="true" size={13} />
-                <span className="gyro-env-card-grow gyro-env-card-ellipsis">
-                  {runningPanes.length === 1
-                    ? runningPanes[0]?.title
-                    : `${runningPanes.length} processes`}
-                </span>
-                <span
-                  aria-hidden="true"
-                  className="gyro-env-card-dot is-success"
-                />
-              </button>
-            ) : null}
-            {workingAgents.length ? (
-              <button
-                className="gyro-env-panel-row"
-                onClick={() => onOpenTab?.("agents")}
-                title="Show subagents"
-                type="button"
-              >
-                <Bot aria-hidden="true" size={13} />
-                <span className="gyro-env-card-grow gyro-env-card-ellipsis">
-                  {workingAgents.length === 1
-                    ? workingAgents[0]?.name
-                    : `${workingAgents.length} subagents`}
-                </span>
-                <span
-                  aria-hidden="true"
-                  className="gyro-env-card-dot is-accent"
-                />
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-        {primaryLabel && !isRunning && !remote ? (
-          <div className="gyro-env-panel-actions">
             <button
-              className="gyro-env-card-button"
+              className="gyro-env-panel-row"
               onClick={openReview}
+              title={
+                changedFiles > 0
+                  ? `Review ${changedFiles} changed ${changedFiles === 1 ? "file" : "files"}`
+                  : "Review changes"
+              }
               type="button"
             >
-              Review
-            </button>
-            <button
-              className={`gyro-env-card-button${remotePrimary ? "" : " is-primary"}`}
-              onClick={runPrimary}
-              type="button"
-            >
-              {primaryLabel}
+              <GitBranch aria-hidden="true" size={13} />
+              <span className="gyro-env-card-grow gyro-env-card-mono">
+                {branch ?? "Changes"}
+              </span>
+              {hasTotals ? (
+                <span className="gyro-env-card-mono">
+                  <Diff
+                    additions={totals.additions}
+                    deletions={totals.deletions}
+                  />
+                </span>
+              ) : (
+                <span className="is-dim">
+                  {totals.kind === "clean" ? "Clean" : null}
+                </span>
+              )}
             </button>
           </div>
         ) : null}
+        <div id={bodyId} hidden={!isPanelExpanded}>
+          {items.length ? (
+            <div className="gyro-env-panel-plan">
+              {plan?.title ? (
+                <h3 className="gyro-env-panel-title">{plan.title}</h3>
+              ) : null}
+              <ol className="gyro-env-card-rail">{railSteps}</ol>
+            </div>
+          ) : null}
+          {!items.length && !remote ? (
+            <p className="gyro-env-panel-title">
+              {liveBeat?.label ??
+                (isRunning ? "Waiting for activity…" : "No active work")}
+              {liveBeat?.ref ? (
+                <span className="gyro-env-card-mono is-dim">
+                  {" "}
+                  {liveBeat.ref}
+                </span>
+              ) : null}
+            </p>
+          ) : null}
+          {runningPanes.length || workingAgents.length ? (
+            <div className="gyro-env-panel-rows">
+              {runningPanes.length ? (
+                <button
+                  className="gyro-env-panel-row"
+                  onClick={() => onOpenTab?.("terminal")}
+                  title="Open terminal"
+                  type="button"
+                >
+                  <Terminal aria-hidden="true" size={13} />
+                  <span className="gyro-env-card-grow gyro-env-card-ellipsis">
+                    {runningPanes.length === 1
+                      ? runningPanes[0]?.title
+                      : `${runningPanes.length} processes`}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="gyro-env-card-dot is-success"
+                  />
+                </button>
+              ) : null}
+              {workingAgents.length ? (
+                <button
+                  className="gyro-env-panel-row"
+                  onClick={() => onOpenTab?.("agents")}
+                  title="Show subagents"
+                  type="button"
+                >
+                  <Bot aria-hidden="true" size={13} />
+                  <span className="gyro-env-card-grow gyro-env-card-ellipsis">
+                    {workingAgents.length === 1
+                      ? workingAgents[0]?.name
+                      : `${workingAgents.length} subagents`}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="gyro-env-card-dot is-accent"
+                  />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {primaryLabel && !isRunning && !remote ? (
+            <div className="gyro-env-panel-actions">
+              <button
+                className="gyro-env-card-button"
+                onClick={openReview}
+                type="button"
+              >
+                Review
+              </button>
+              <button
+                className={`gyro-env-card-button${remotePrimary ? "" : " is-primary"}`}
+                onClick={runPrimary}
+                type="button"
+              >
+                {primaryLabel}
+              </button>
+            </div>
+          ) : null}
+        </div>
       </section>
     );
   }

@@ -304,12 +304,6 @@
 }
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
-  [data-settings-page="keyboard"]
-  .gyro-settings-row {
-  border-bottom: 1px solid var(--gyro-border-soft);
-}
-:root[data-theme]
-  .gyro-settings-surface.is-minimal-settings
   .gyro-cli-profile-list,
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
@@ -338,9 +332,9 @@
 :root[data-theme]
   .gyro-app-shell
   .gyro-sidebar-action.is-settings-page.is-active {
-  background: var(--gyro-accent-soft);
+  background: var(--gyro-quiet-nav-active);
   color: var(--gyro-text);
-  box-shadow: inset 2px 0 var(--gyro-accent);
+  box-shadow: none;
 }
 :root[data-theme] .gyro-settings-sidebar-search .gyro-settings-topbar-search {
   border: 1px solid var(--gyro-border-soft);

@@ -12,6 +12,7 @@ export type Peer = {
   id: string;
   name: string;
   role: "host" | "client" | "both";
+  transport?: "ssh";
 };
 export type Project = { id: string; name: string; path: string };
 export type Control = {
@@ -19,7 +20,23 @@ export type Control = {
   generation: number;
   requestedBy?: string | null;
 };
+export type SshOptions = {
+  host: string;
+  user?: string;
+  port?: number;
+  identityFile?: string;
+  socketPath?: string;
+};
+export type SshHost = {
+  id: string;
+  name: string;
+  options: SshOptions;
+  connected: boolean;
+};
 export type AccessStatus = {
+  sshHosts?: SshHost[];
+  sshClientId?: string;
+  sshHostingActive?: boolean;
   hostingActive?: boolean;
   invitationActive?: boolean;
   settings: { enabled: boolean; name: string };

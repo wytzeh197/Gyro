@@ -78,7 +78,9 @@ function LocalApp() {
       onCreateCliSession={() => {}}
       onSelectSessions={() => setDestination("workspace")}
       onSelectWorkspaceLayout={() => setDestination("workspace")}
-      onSelectDestination={() => setDestination("settings")}
+      onSelectDestination={(next) =>
+        setDestination(next === "settings" ? "settings" : "workspace")
+      }
       onOpenToolPanel={() => {}}
       onOpenSettings={() => setDestination("settings")}
       onOpenCommandPalette={() => {}}

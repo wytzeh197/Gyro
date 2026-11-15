@@ -209,7 +209,7 @@ export default function RemoteWorkspace({
         type="button"
         className="gyro-primary-button"
         disabled={busy}
-        onClick={() => void workspace.load()}
+        onClick={() => void workspace.reconnect()}
       >
         Reconnect
       </button>
@@ -321,7 +321,7 @@ export default function RemoteWorkspace({
                   label: "Reconnect",
                   primary: true,
                   disabled: busy || workspace.loading,
-                  onClick: () => void workspace.load(),
+                  onClick: () => void workspace.reconnect(),
                 },
               ]
             : []),

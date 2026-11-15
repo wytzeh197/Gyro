@@ -904,7 +904,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::TerminalOpen,
         class: CapabilityClass::TerminalExecute,
-        description: "Start one visible, model-owned process in Gyro Terminal. Waits up to 1000ms by default so quick commands return completed, exitCode, and bounded output in this call. Inspect the exit code before continuing. Use yieldTimeMs: 0 for servers and watchers. For a finite command that is still running, use gyro_terminal_wait with the returned resource.id. A process still running when the turn ends is watched under the reply; if it exits without the user or model stopping it, Gyro relaunches the same command.",
+        description: "Start one visible, model-owned process in Gyro Terminal. Only one command can run per chat: never call terminal_open in parallel with itself or a background workspace task. Wait for the current command to finish before opening another; a busy error includes its resourceId. Waits up to 1000ms by default so quick commands return completed, exitCode, and bounded output in this call. Inspect the exit code before continuing. Use yieldTimeMs: 0 for servers and watchers. For a finite command that is still running, use gyro_terminal_wait with the returned resource.id. A process still running when the turn ends is watched under the reply; if it exits without the user or model stopping it, Gyro relaunches the same command.",
     },
     CapabilityDescriptor {
         id: CapabilityId::TerminalRead,

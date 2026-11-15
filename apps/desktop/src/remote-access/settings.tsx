@@ -11,6 +11,7 @@ import {
   SettingsGroup,
   SettingsRow,
   SettingsSwitch,
+  SettingsSegmented,
 } from "../../../../packages/ui/src/settings-controls";
 import {
   SettingsSection,
@@ -18,6 +19,7 @@ import {
 } from "../../../../packages/ui/src/settings-presentation";
 import { useRemoteAccess } from "./context";
 import type { Peer } from "./types";
+import { SshSettings } from "./ssh-settings";
 
 /** Device keys are hex; group them so people can compare them aloud. */
 const fingerprint = (id: string) =>
@@ -30,6 +32,7 @@ const fingerprint = (id: string) =>
 const countdown = (seconds: number) =>
   `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 export default function RemoteAccessSettings() {
+  const [method, setMethod] = useState<"pairing" | "ssh">("pairing");
   const {
     status,
     error: loadError,
@@ -127,6 +130,8 @@ export default function RemoteAccessSettings() {
   const secondsLeft = invitation
     ? Math.max(0, Math.ceil((invitation.expiresAt * 1000 - now) / 1000))
     : 0;
+  const pairedPeers =
+    status?.peers.filter((peer) => peer.transport !== "ssh") ?? [];
   const enabled = Boolean(status?.settings.enabled);
   const hostingDown = enabled && status?.hostingActive === false;
   const controls = status ? Object.entries(status.controls) : [];
@@ -144,7 +149,7 @@ export default function RemoteAccessSettings() {
   return (
     <SettingsSection
       title="Remote access"
-      description="Your sidebar projects appear on paired Macs, alongside their local chats. Experimental: both Macs need remote access on and Gyro open and awake."
+      description="Connect to another Mac and keep working in the same chats."
     >
       <div className="gyro-remote-settings">
         {(error || (status && loadError)) && (
@@ -193,7 +198,7 @@ export default function RemoteAccessSettings() {
                     <SettingsStatus status="neutral">Off</SettingsStatus>
                   )}
                 </span>
-                {status.deviceId && (
+                {method === "pairing" && status.deviceId && (
                   <code title="This Mac's device code">
                     {fingerprint(status.deviceId)}
                   </code>
@@ -211,384 +216,415 @@ export default function RemoteAccessSettings() {
                 }
               />
             </section>
-            <div className="gyro-remote-hero-meta">
-              <span>
-                {status.peers.length}{" "}
-                {status.peers.length === 1
-                  ? "trusted device"
-                  : "trusted devices"}
-              </span>
-              <span>
-                {status.projects.length}{" "}
-                {status.projects.length === 1
-                  ? "shared project"
-                  : "shared projects"}
-              </span>
-              <button
-                type="button"
-                className={
-                  pairIsPrimary
-                    ? "gyro-primary-button"
-                    : "gyro-secondary-button"
-                }
-                disabled={busy || !enabled}
-                title={enabled ? undefined : "Turn on remote access to pair"}
-                onClick={startInvitation}
-              >
-                {liveInvitation ? "New invitation" : "Pair a device"}
-              </button>
+            <div className="gyro-remote-methods">
+              <SettingsSegmented
+                label="Connection method"
+                value={method}
+                options={[
+                  { label: "Gyro pairing", value: "pairing" },
+                  { label: "SSH", value: "ssh" },
+                ]}
+                onChange={setMethod}
+              />
             </div>
-            {status.pending.map((peer, index) => (
-              <section
-                key={peer.id}
-                className="gyro-remote-sheet"
-                aria-label={`${peer.name} wants to connect`}
-              >
-                <strong className="gyro-remote-sheet-title">
-                  {peer.name} wants to connect
-                </strong>
-                <p>Approve only if both Macs show the same code.</p>
-                <div className="gyro-remote-compare">
-                  <div>
-                    <Monitor size={18} aria-hidden />
-                    <span>This Mac</span>
-                    <code>{fingerprint(peer.id)}</code>
-                  </div>
-                  <div>
-                    <Laptop size={18} aria-hidden />
-                    <span>{peer.name} should show</span>
-                    <code>{fingerprint(peer.id)}</code>
-                  </div>
-                </div>
-                <div className="gyro-remote-actions is-end">
-                  <button
-                    type="button"
-                    className="gyro-secondary-button"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(() =>
-                        action({ action: "reject", peerId: peer.id }),
-                      )
-                    }
-                  >
-                    Reject
-                  </button>
+            {method === "ssh" ? (
+              <SshSettings />
+            ) : (
+              <div className="gyro-remote-pairing" aria-label="Gyro pairing">
+                <div className="gyro-remote-hero-meta">
+                  <span>
+                    {pairedPeers.length}{" "}
+                    {pairedPeers.length === 1
+                      ? "trusted device"
+                      : "trusted devices"}
+                  </span>
+                  <span>
+                    {status.projects.length}{" "}
+                    {status.projects.length === 1
+                      ? "shared project"
+                      : "shared projects"}
+                  </span>
                   <button
                     type="button"
                     className={
-                      index === 0
+                      pairIsPrimary
                         ? "gyro-primary-button"
                         : "gyro-secondary-button"
                     }
-                    disabled={busy}
-                    onClick={() =>
-                      void run(() =>
-                        action({ action: "approve", peerId: peer.id }),
-                      )
+                    disabled={busy || !enabled}
+                    title={
+                      enabled ? undefined : "Turn on remote access to pair"
                     }
+                    onClick={startInvitation}
                   >
-                    <ShieldCheck size={14} aria-hidden /> Approve
+                    {liveInvitation ? "New invitation" : "Pair a device"}
                   </button>
                 </div>
-              </section>
-            ))}
-            {invitation && (
-              <section className="gyro-remote-sheet" aria-label="Pair a device">
-                <strong className="gyro-remote-sheet-title">
-                  Pair a device
-                </strong>
-                <ol className="gyro-remote-steps">
-                  <li className="is-done">
-                    <Check size={14} aria-hidden /> Create an invitation
-                  </li>
-                  <li className={expired ? undefined : "is-active"}>
-                    <span>2</span> Paste it on your other Mac
-                  </li>
-                  <li>
-                    <span>3</span> Check the code matches
-                  </li>
-                </ol>
-                <p>
-                  On the other Mac, open Remote access › Join with an
-                  invitation. Only pair devices you trust: a remote terminal
-                  runs with this Mac user's access.
-                </p>
-                {expired ? (
-                  <div className="gyro-remote-actions">
-                    <SettingsStatus status="warning">Expired</SettingsStatus>
-                    <span>Create a new invitation to pair.</span>
-                  </div>
-                ) : (
-                  <>
-                    <code
-                      id="gyro-copy-invitation"
-                      className="gyro-remote-invite"
-                      aria-label="Invitation for your other Mac"
-                      title={invitation.invitation}
-                    >
-                      {invitation.invitation}
-                    </code>
-                    <div className="gyro-remote-actions">
-                      <span role="timer">
-                        Expires in {countdown(secondsLeft)} · works once
-                      </span>
-                      <span className="gyro-remote-spacer" />
+                {status.pending.map((peer, index) => (
+                  <section
+                    key={peer.id}
+                    className="gyro-remote-sheet"
+                    aria-label={`${peer.name} wants to connect`}
+                  >
+                    <strong className="gyro-remote-sheet-title">
+                      {peer.name} wants to connect
+                    </strong>
+                    <p>Approve only if both Macs show the same code.</p>
+                    <div className="gyro-remote-compare">
+                      <div>
+                        <Monitor size={18} aria-hidden />
+                        <span>This Mac</span>
+                        <code>{fingerprint(peer.id)}</code>
+                      </div>
+                      <div>
+                        <Laptop size={18} aria-hidden />
+                        <span>{peer.name} should show</span>
+                        <code>{fingerprint(peer.id)}</code>
+                      </div>
+                    </div>
+                    <div className="gyro-remote-actions is-end">
                       <button
                         type="button"
                         className="gyro-secondary-button"
                         disabled={busy}
                         onClick={() =>
-                          void run(async () => {
-                            await action({ action: "cancelInvitation" });
-                            setInvitation(undefined);
-                          })
+                          void run(() =>
+                            action({ action: "reject", peerId: peer.id }),
+                          )
                         }
                       >
-                        Cancel
+                        Reject
                       </button>
                       <button
                         type="button"
                         className={
-                          pendingCount
-                            ? "gyro-secondary-button"
-                            : "gyro-primary-button"
+                          index === 0
+                            ? "gyro-primary-button"
+                            : "gyro-secondary-button"
                         }
+                        disabled={busy}
                         onClick={() =>
                           void run(() =>
-                            navigator.clipboard.writeText(
-                              invitation.invitation,
-                            ),
+                            action({ action: "approve", peerId: peer.id }),
                           )
                         }
                       >
-                        <Copy size={14} aria-hidden /> Copy invitation
+                        <ShieldCheck size={14} aria-hidden /> Approve
                       </button>
                     </div>
-                  </>
+                  </section>
+                ))}
+                {invitation && (
+                  <section
+                    className="gyro-remote-sheet"
+                    aria-label="Pair a device"
+                  >
+                    <strong className="gyro-remote-sheet-title">
+                      Pair a device
+                    </strong>
+                    <ol className="gyro-remote-steps">
+                      <li className="is-done">
+                        <Check size={14} aria-hidden /> Create an invitation
+                      </li>
+                      <li className={expired ? undefined : "is-active"}>
+                        <span>2</span> Paste it on your other Mac
+                      </li>
+                      <li>
+                        <span>3</span> Check the code matches
+                      </li>
+                    </ol>
+                    <p>
+                      On the other Mac, open Remote access › Join with an
+                      invitation. Only pair devices you trust: a remote terminal
+                      runs with this Mac user's access.
+                    </p>
+                    {expired ? (
+                      <div className="gyro-remote-actions">
+                        <SettingsStatus status="warning">
+                          Expired
+                        </SettingsStatus>
+                        <span>Create a new invitation to pair.</span>
+                      </div>
+                    ) : (
+                      <>
+                        <code
+                          id="gyro-copy-invitation"
+                          className="gyro-remote-invite"
+                          aria-label="Invitation for your other Mac"
+                          title={invitation.invitation}
+                        >
+                          {invitation.invitation}
+                        </code>
+                        <div className="gyro-remote-actions">
+                          <span role="timer">
+                            Expires in {countdown(secondsLeft)} · works once
+                          </span>
+                          <span className="gyro-remote-spacer" />
+                          <button
+                            type="button"
+                            className="gyro-secondary-button"
+                            disabled={busy}
+                            onClick={() =>
+                              void run(async () => {
+                                await action({ action: "cancelInvitation" });
+                                setInvitation(undefined);
+                              })
+                            }
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            className={
+                              pendingCount
+                                ? "gyro-secondary-button"
+                                : "gyro-primary-button"
+                            }
+                            onClick={() =>
+                              void run(() =>
+                                navigator.clipboard.writeText(
+                                  invitation.invitation,
+                                ),
+                              )
+                            }
+                          >
+                            <Copy size={14} aria-hidden /> Copy invitation
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </section>
                 )}
-              </section>
-            )}
-            {hostingDown && (
-              <p className="gyro-remote-error" role="status">
-                This Mac isn't reachable. Turn remote access off and on to
-                retry; Keychain may need unlocking.
-              </p>
-            )}
-            <SettingsGroup id="remote-this-mac" label="This Mac">
-              <SettingsRow
-                label="Device name"
-                detail="Shown on devices you pair with. Traffic is end-to-end encrypted; relay operators can see connection metadata."
-              >
-                <input
-                  className="gyro-settings-input"
-                  aria-label="Device name"
-                  value={name}
-                  maxLength={80}
-                  onChange={(event) => setName(event.target.value)}
-                  onBlur={() => {
-                    if (name !== status.settings.name)
-                      void run(() =>
-                        action({
-                          action: "configure",
-                          enabled: status.settings.enabled,
-                          name,
-                        }),
-                      );
-                  }}
-                />
-              </SettingsRow>
-            </SettingsGroup>
-            <SettingsGroup
-              id="remote-shared-projects"
-              label="Shared projects"
-              summary={
-                status.projects.length
-                  ? `${status.projects.length} shared`
-                  : undefined
-              }
-              description="Projects in your sidebar are automatically available to paired Macs while remote access is on."
-            >
-              {status.projects.length === 0 && (
-                <SettingsEmptyState
-                  title="No sidebar projects yet"
-                  description="Add a project to your sidebar to make it available to paired Macs."
-                />
-              )}
-              {status.projects.map((project) => (
-                <SettingsRow
-                  key={project.id}
-                  label={project.name}
-                  detail={project.path}
-                />
-              ))}
-            </SettingsGroup>
-            <SettingsGroup
-              id="remote-trusted-devices"
-              label="Trusted devices"
-              summary={
-                status.peers.length
-                  ? `${status.peers.length} ${status.peers.length === 1 ? "device" : "devices"}`
-                  : undefined
-              }
-            >
-              {status.peers.length === 0 && (
-                <SettingsEmptyState
-                  title="No trusted devices yet"
-                  description="Devices you pair appear here."
-                />
-              )}
-              {status.peers.map((peer) => (
-                <SettingsRow
-                  key={peer.id}
-                  label={peer.name}
-                  detail={`${peer.role === "client" ? "Can connect to this Mac" : peer.role === "both" ? "Host and client" : "Host you can open"} · ${fingerprint(peer.id)}`}
-                >
-                  {connectedHostIds.includes(peer.id) && (
-                    <SettingsStatus status="good">Connected</SettingsStatus>
-                  )}
-                  <button
-                    type="button"
-                    className="gyro-secondary-button"
-                    disabled={busy || !enabled}
-                    onClick={() => selectHost(peer)}
-                  >
-                    {connectedHostIds.includes(peer.id)
-                      ? "Open projects"
-                      : "Connect"}
-                  </button>
-                  <button
-                    type="button"
-                    className="gyro-secondary-button"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(() =>
-                        action({ action: "revoke", peerId: peer.id }),
-                      )
-                    }
-                  >
-                    Revoke
-                  </button>
-                </SettingsRow>
-              ))}
-            </SettingsGroup>
-            {controls.length > 0 && (
-              <SettingsGroup
-                id="remote-session-control"
-                label="Session control"
-                description="One device controls a coding session at a time."
-              >
-                {controls.map(([sessionId, control]) => (
+                {hostingDown && (
+                  <p className="gyro-remote-error" role="status">
+                    This Mac isn't reachable. Turn remote access off and on to
+                    retry; check the connection and try again.
+                  </p>
+                )}
+                <SettingsGroup id="remote-this-mac" label="This Mac">
                   <SettingsRow
-                    key={sessionId}
-                    label={`Session ${sessionId.slice(0, 8)}`}
-                    detail={
-                      control.owner === "local"
-                        ? control.requestedBy
-                          ? `${peerName(control.requestedBy)} asked for control`
-                          : "Controlled on this Mac"
-                        : `Controlled by ${peerName(control.owner)}`
-                    }
+                    label="Device name"
+                    detail="Shown on devices you pair with. Traffic is end-to-end encrypted; relay operators can see connection metadata."
                   >
-                    {control.owner === "local" && control.requestedBy && (
+                    <input
+                      className="gyro-settings-input"
+                      aria-label="Device name"
+                      value={name}
+                      maxLength={80}
+                      onChange={(event) => setName(event.target.value)}
+                      onBlur={() => {
+                        if (name !== status.settings.name)
+                          void run(() =>
+                            action({
+                              action: "configure",
+                              enabled: status.settings.enabled,
+                              name,
+                            }),
+                          );
+                      }}
+                    />
+                  </SettingsRow>
+                </SettingsGroup>
+                <SettingsGroup
+                  id="remote-shared-projects"
+                  label="Shared projects"
+                  summary={
+                    status.projects.length
+                      ? `${status.projects.length} shared`
+                      : undefined
+                  }
+                  description="Projects in your sidebar are automatically available to paired Macs while remote access is on."
+                >
+                  {status.projects.length === 0 && (
+                    <SettingsEmptyState
+                      title="No sidebar projects yet"
+                      description="Add a project to your sidebar to make it available to paired Macs."
+                    />
+                  )}
+                  {status.projects.map((project) => (
+                    <SettingsRow
+                      key={project.id}
+                      label={project.name}
+                      detail={project.path}
+                    />
+                  ))}
+                </SettingsGroup>
+                <SettingsGroup
+                  id="remote-trusted-devices"
+                  label="Trusted devices"
+                  summary={
+                    pairedPeers.length
+                      ? `${pairedPeers.length} ${pairedPeers.length === 1 ? "device" : "devices"}`
+                      : undefined
+                  }
+                >
+                  {pairedPeers.length === 0 && (
+                    <SettingsEmptyState
+                      title="No trusted devices yet"
+                      description="Devices you pair appear here."
+                    />
+                  )}
+                  {pairedPeers.map((peer) => (
+                    <SettingsRow
+                      key={peer.id}
+                      label={peer.name}
+                      detail={`${peer.role === "client" ? "Can connect to this Mac" : peer.role === "both" ? "Host and client" : "Host you can open"} · ${fingerprint(peer.id)}`}
+                    >
+                      {connectedHostIds.includes(peer.id) && (
+                        <SettingsStatus status="good">Connected</SettingsStatus>
+                      )}
+                      <button
+                        type="button"
+                        className="gyro-secondary-button"
+                        disabled={busy || !enabled}
+                        onClick={() => selectHost(peer)}
+                      >
+                        {connectedHostIds.includes(peer.id)
+                          ? "Open projects"
+                          : "Connect"}
+                      </button>
                       <button
                         type="button"
                         className="gyro-secondary-button"
                         disabled={busy}
                         onClick={() =>
                           void run(() =>
-                            action({
-                              action: "transfer",
-                              sessionId,
-                              peerId: control.requestedBy,
-                            }),
+                            action({ action: "revoke", peerId: peer.id }),
                           )
                         }
                       >
-                        Allow requesting device
+                        Revoke
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      className="gyro-secondary-button"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(() =>
-                          action({
-                            action:
-                              control.owner === "local" ? "release" : "reclaim",
-                            sessionId,
-                          }),
-                        )
-                      }
-                    >
-                      {control.owner === "local"
-                        ? "Release control"
-                        : "Take control"}
-                    </button>
-                  </SettingsRow>
-                ))}
-              </SettingsGroup>
-            )}
-            <SettingsGroup
-              id="remote-connect"
-              label="Join with an invitation"
-              description="Paste an invitation created on the Mac you want to use."
-            >
-              <div className="gyro-remote-stack">
-                <textarea
-                  id="gyro-paste-invitation"
-                  aria-label="Invitation from the host Mac"
-                  className="gyro-settings-input"
-                  placeholder="gyro-pair-v1:…"
-                  value={pasted}
-                  onChange={(event) => setPasted(event.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <div className="gyro-remote-actions">
-                  <button
-                    type="button"
-                    className="gyro-secondary-button"
-                    disabled={busy || !pasted.trim()}
-                    onClick={() =>
-                      void run(async () => {
-                        setPending(
-                          await action({ action: "pair", invitation: pasted }),
-                        );
-                        setPasted("");
-                      })
-                    }
+                    </SettingsRow>
+                  ))}
+                </SettingsGroup>
+                {controls.length > 0 && (
+                  <SettingsGroup
+                    id="remote-session-control"
+                    label="Session control"
+                    description="One device controls a coding session at a time."
                   >
-                    {busy ? "Connecting…" : "Request pairing"}
-                  </button>
-                  {pending && (
-                    <span role="status">
-                      {pending.status === "pending" ? (
-                        <SettingsStatus status="info">
-                          Waiting for approval · check the host shows{" "}
-                          {fingerprint(pending.peerId)}
-                        </SettingsStatus>
-                      ) : pending.status === "approved" ? (
-                        <SettingsStatus status="good">Approved</SettingsStatus>
-                      ) : (
-                        <SettingsStatus status="critical">
-                          Rejected or expired
-                        </SettingsStatus>
+                    {controls.map(([sessionId, control]) => (
+                      <SettingsRow
+                        key={sessionId}
+                        label={`Session ${sessionId.slice(0, 8)}`}
+                        detail={
+                          control.owner === "local"
+                            ? control.requestedBy
+                              ? `${peerName(control.requestedBy)} asked for control`
+                              : "Controlled on this Mac"
+                            : `Controlled by ${peerName(control.owner)}`
+                        }
+                      >
+                        {control.owner === "local" && control.requestedBy && (
+                          <button
+                            type="button"
+                            className="gyro-secondary-button"
+                            disabled={busy}
+                            onClick={() =>
+                              void run(() =>
+                                action({
+                                  action: "transfer",
+                                  sessionId,
+                                  peerId: control.requestedBy,
+                                }),
+                              )
+                            }
+                          >
+                            Allow requesting device
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="gyro-secondary-button"
+                          disabled={busy}
+                          onClick={() =>
+                            void run(() =>
+                              action({
+                                action:
+                                  control.owner === "local"
+                                    ? "release"
+                                    : "reclaim",
+                                sessionId,
+                              }),
+                            )
+                          }
+                        >
+                          {control.owner === "local"
+                            ? "Release control"
+                            : "Take control"}
+                        </button>
+                      </SettingsRow>
+                    ))}
+                  </SettingsGroup>
+                )}
+                <SettingsGroup
+                  id="remote-connect"
+                  label="Join with an invitation"
+                  description="Paste an invitation created on the Mac you want to use."
+                >
+                  <div className="gyro-remote-stack">
+                    <textarea
+                      id="gyro-paste-invitation"
+                      aria-label="Invitation from the host Mac"
+                      className="gyro-settings-input"
+                      placeholder="gyro-pair-v1:…"
+                      value={pasted}
+                      onChange={(event) => setPasted(event.target.value)}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <div className="gyro-remote-actions">
+                      <button
+                        type="button"
+                        className="gyro-secondary-button"
+                        disabled={busy || !pasted.trim()}
+                        onClick={() =>
+                          void run(async () => {
+                            setPending(
+                              await action({
+                                action: "pair",
+                                invitation: pasted,
+                              }),
+                            );
+                            setPasted("");
+                          })
+                        }
+                      >
+                        {busy ? "Connecting…" : "Request pairing"}
+                      </button>
+                      {pending && (
+                        <span role="status">
+                          {pending.status === "pending" ? (
+                            <SettingsStatus status="info">
+                              Waiting for approval · check the host shows{" "}
+                              {fingerprint(pending.peerId)}
+                            </SettingsStatus>
+                          ) : pending.status === "approved" ? (
+                            <SettingsStatus status="good">
+                              Approved
+                            </SettingsStatus>
+                          ) : (
+                            <SettingsStatus status="critical">
+                              Rejected or expired
+                            </SettingsStatus>
+                          )}
+                        </span>
                       )}
-                    </span>
-                  )}
-                  {paired && (
-                    <button
-                      type="button"
-                      className="gyro-secondary-button"
-                      onClick={() => selectHost(paired)}
-                    >
-                      Open remote workspace
-                    </button>
-                  )}
-                </div>
+                      {paired && (
+                        <button
+                          type="button"
+                          className="gyro-secondary-button"
+                          onClick={() => selectHost(paired)}
+                        >
+                          Open remote workspace
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </SettingsGroup>
               </div>
-            </SettingsGroup>
+            )}
           </>
         )}
       </div>

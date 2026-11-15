@@ -106,6 +106,8 @@ impl Store {
           create table if not exists projects(id text primary key,name text not null,path text not null unique);
           create table if not exists scopes(session text primary key,project text not null,path text not null);
           create table if not exists receipts(peer text not null,id text not null,hash text not null,status text not null,value text,primary key(peer,id));
+          create table if not exists ssh_hosts(id text primary key,value text not null);
+          create table if not exists ssh_meta(key text primary key,value text not null);
           create table if not exists submitted_turns(session text not null,turn text not null,primary key(session,turn));")?;
         Ok(Self {
             db: Mutex::new(db),
@@ -116,6 +118,49 @@ impl Store {
         self.db
             .lock()
             .map_err(|_| anyhow::anyhow!("Remote storage unavailable"))
+    }
+    #[cfg(unix)]
+    pub fn ssh_hosts(&self) -> Result<Vec<crate::ssh::SavedHost>> {
+        let db = self.db()?;
+        let mut statement = db.prepare("select value from ssh_hosts order by rowid")?;
+        let rows = statement.query_map([], |r| r.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
+    #[cfg(unix)]
+    pub fn save_ssh_host(&self, host: &crate::ssh::SavedHost) -> Result<()> {
+        host.options.validate()?;
+        let db = self.db()?;
+        let count: u64 = db.query_row("select count(*) from ssh_hosts", [], |r| r.get(0))?;
+        let existing: bool = db.query_row(
+            "select exists(select 1 from ssh_hosts where id=?1)",
+            [&host.id],
+            |r| r.get(0),
+        )?;
+        if !existing && count >= 16 {
+            bail!("At most 16 SSH hosts can be saved");
+        }
+        db.execute("insert into ssh_hosts values(?1,?2) on conflict(id) do update set value=excluded.value", params![host.id, serde_json::to_string(host)?])?;
+        Ok(())
+    }
+    #[cfg(unix)]
+    pub fn remove_ssh_host(&self, id: &str) -> Result<()> {
+        self.db()?
+            .execute("delete from ssh_hosts where id=?1", [id])?;
+        Ok(())
+    }
+    #[cfg(unix)]
+    pub fn ssh_client_id(&self) -> Result<Uuid> {
+        let db = self.db()?;
+        db.execute(
+            "insert or ignore into ssh_meta values('client_id',?1)",
+            [Uuid::new_v4().to_string()],
+        )?;
+        let value: String = db.query_row(
+            "select value from ssh_meta where key='client_id'",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(Uuid::parse_str(&value)?)
     }
     pub fn settings(&self) -> Result<Settings> {
         let value: Option<String> = self

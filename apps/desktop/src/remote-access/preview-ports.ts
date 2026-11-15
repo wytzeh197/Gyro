@@ -11,6 +11,7 @@ import type {
   HostRequest,
   Snapshot,
   TerminalSnapshot,
+  SshOptions,
 } from "./types";
 const hostId = "fixture-host";
 const clientId = "fixture-client";
@@ -29,6 +30,9 @@ const makeSession = (id: string, title: string): Session => ({
 export function createPreviewPorts() {
   const status: AccessStatus = {
     settings: { enabled: false, name: "Fixture Mac" },
+    sshHosts: [],
+    sshHostingActive: false,
+    sshClientId: "ssh:fixture-client",
     deviceId: clientId,
     peers: [{ id: hostId, name: "Remote Mac · Fixture", role: "host" }],
     pending: [],
@@ -71,6 +75,7 @@ export function createPreviewPorts() {
   const frames = new Map<string, ProviderChatStreamEvent[]>();
   const requests: HostRequest[] = [];
   let watchedSession: string | undefined;
+  let watchedHost = hostId;
   let approvals: Snapshot["approvals"] = [];
   let mutations: Snapshot["mutations"] = [];
   function emit(
@@ -81,7 +86,11 @@ export function createPreviewPorts() {
     if (sessionId !== watchedSession) return;
     for (const handler of listeners.get("gyro://remote-host-event") ?? [])
       handler({
-        payload: { hostId, watchId, event: { sessionId, topic, payload } },
+        payload: {
+          hostId: watchedHost,
+          watchId,
+          event: { sessionId, topic, payload },
+        },
       });
   }
   const port: NativePorts = {
@@ -95,11 +104,54 @@ export function createPreviewPorts() {
         if (args?.sessionId) {
           watchId = args.watchId;
           watchedSession = String(args.sessionId);
+          watchedHost = String(args.hostId);
         } else if (args?.watchId === watchId) watchedSession = undefined;
         return undefined as T;
       }
       if (command === "remote_access_action") {
         const request = args?.request as Record<string, unknown>;
+        if (request.action === "sshHosts")
+          return ["fixture-ssh-host", "fixture-offline"] as T;
+        if (request.action === "sshConnect") {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          const existing = status.sshHosts?.find(
+            (h) => h.id === request.hostId,
+          );
+          const options = existing?.options ?? (request.options as SshOptions);
+          if (options.host === "fixture-offline")
+            throw new Error(
+              "SSH connection refused (explicit browser fixture)",
+            );
+          const id = existing?.id ?? "ssh:fixture-host";
+          status.sshHosts = [
+            { id, name: "SSH Mac · Fixture", options, connected: true },
+          ];
+          status.peers = [
+            ...status.peers.filter((p) => p.id !== id),
+            { id, name: "SSH Mac · Fixture", role: "host", transport: "ssh" },
+          ];
+          return {
+            id,
+            name: "SSH Mac · Fixture",
+            role: "host",
+            transport: "ssh",
+          } as T;
+        }
+        if (
+          request.action === "sshDisconnect" ||
+          request.action === "sshRemove"
+        ) {
+          if (request.action === "sshRemove") {
+            status.sshHosts = status.sshHosts?.filter(
+              (h) => h.id !== request.hostId,
+            );
+            status.peers = status.peers.filter((p) => p.id !== request.hostId);
+          } else
+            status.sshHosts = status.sshHosts?.map((h) =>
+              h.id === request.hostId ? { ...h, connected: false } : h,
+            );
+          return undefined as T;
+        }
         if (request.action === "configure")
           status.settings = {
             name: String(request.name),
@@ -138,7 +190,12 @@ export function createPreviewPorts() {
       if (command !== "remote_host_request")
         throw new Error(`Fixture rejected local command: ${command}`);
       if (!online) throw new Error("Host unavailable (fixture)");
-      if (args?.hostId !== hostId) throw new Error("Wrong fixture host");
+      if (!args) throw new Error("Fixture request requires arguments");
+      if (
+        args?.hostId !== hostId &&
+        !status.sshHosts?.some((h) => h.id === args?.hostId && h.connected)
+      )
+        throw new Error("Wrong or disconnected fixture host");
       const request = args.request as HostRequest;
       if (receipts.has(request.id))
         return structuredClone(receipts.get(request.id)) as T;

@@ -55,7 +55,6 @@ export function AppearanceSettings({
   return (
     <div className="gyro-appearance-settings" onClickCapture={rememberEditedSection} onChangeCapture={rememberEditedSection}>
       <div className="gyro-appearance-scope">
-        <span>Applies across Gyro</span>
         <span
           aria-live="polite"
           aria-atomic="true"
@@ -68,7 +67,7 @@ export function AppearanceSettings({
               ? "Saved"
               : saveStatus === "error"
                 ? "Couldn’t save changes."
-                : "Changes apply immediately"}
+                : ""}
           {saveStatus === "error" && onRetrySave ? (
             <button onClick={onRetrySave} type="button">
               Retry save

@@ -16,41 +16,95 @@ use uuid::Uuid;
     deny_unknown_fields
 )]
 pub(crate) enum LocalAction {
-    Configure { enabled: bool, name: String },
+    Configure {
+        enabled: bool,
+        name: String,
+    },
     Invite,
     CancelInvitation,
-    Share { path: String },
-    SyncProjects { projects: Vec<SidebarProject> },
-    Unshare { project_id: String },
-    Approve { peer_id: String },
-    Reject { peer_id: String },
-    Revoke { peer_id: String },
-    Pair { invitation: String },
-    PairStatus { host_id: String },
-    Reclaim { session_id: String },
-    Release { session_id: String },
-    Transfer { session_id: String, peer_id: String },
-    Disconnect { host_id: String },
+    Share {
+        path: String,
+    },
+    SyncProjects {
+        projects: Vec<SidebarProject>,
+    },
+    Unshare {
+        project_id: String,
+    },
+    Approve {
+        peer_id: String,
+    },
+    Reject {
+        peer_id: String,
+    },
+    Revoke {
+        peer_id: String,
+    },
+    Pair {
+        invitation: String,
+    },
+    PairStatus {
+        host_id: String,
+    },
+    Reclaim {
+        session_id: String,
+    },
+    Release {
+        session_id: String,
+    },
+    Transfer {
+        session_id: String,
+        peer_id: String,
+    },
+    Disconnect {
+        host_id: String,
+    },
+    #[cfg(unix)]
+    SshHosts,
+    #[cfg(unix)]
+    SshConnect {
+        host_id: Option<String>,
+        options: Option<gyro_remote::ssh::Options>,
+    },
+    #[cfg(unix)]
+    SshDisconnect {
+        host_id: String,
+    },
+    #[cfg(unix)]
+    SshRemove {
+        host_id: String,
+    },
 }
 #[tauri::command]
 pub(crate) async fn remote_access_status(app: tauri::AppHandle) -> Result<Value, String> {
     let state = app.state::<RemoteAccess>();
     let slot = state.runtime.lock().await;
-    if let Some(r) = slot.as_ref() {
-        let runtime = r.clone();
-        drop(slot);
-        return tauri::async_runtime::spawn_blocking(move || runtime.snapshot())
-            .await
-            .map_err(err)?;
-    }
+    let runtime = slot.clone();
     drop(slot);
-    tauri::async_runtime::spawn_blocking(||{let s=store()?;Ok(json!({"settings":s.settings().map_err(err)?,"deviceId":null,"hostingActive":false,"invitationActive":false,"peers":s.peers().map_err(err)?,"pending":s.pending().map_err(err)?,"projects":s.projects().map_err(err)?,"controls":{}}))}).await.map_err(err)?
+    let mut snapshot = tauri::async_runtime::spawn_blocking(move || {
+        if let Some(runtime) = runtime { return runtime.snapshot(); }
+        let s = store()?;
+        Ok(json!({"settings":s.settings().map_err(err)?,"deviceId":null,"hostingActive":false,"sshHostingActive":false,"invitationActive":false,"peers":s.peers().map_err(err)?,"pending":s.pending().map_err(err)?,"projects":s.projects().map_err(err)?,"controls":{}}))
+    }).await.map_err(err)??;
+    #[cfg(unix)]
+    state.ssh.snapshot(&mut snapshot)?;
+    Ok(snapshot)
 }
 #[tauri::command]
 pub(crate) async fn remote_access_action(
     app: tauri::AppHandle,
     request: LocalAction,
 ) -> Result<Value, String> {
+    #[cfg(unix)]
+    if matches!(
+        &request,
+        LocalAction::SshHosts
+            | LocalAction::SshConnect { .. }
+            | LocalAction::SshDisconnect { .. }
+            | LocalAction::SshRemove { .. }
+    ) {
+        return super::ssh::action(&app, request).await;
+    }
     if let LocalAction::Configure {
         enabled: false,
         name,
@@ -74,6 +128,7 @@ pub(crate) async fn remote_access_action(
         let runtime = app.state::<RemoteAccess>().runtime.lock().await.take();
         *app.state::<RemoteAccess>().active.write().map_err(err)? = None;
         if let Some(runtime) = runtime {
+            runtime.stop_ssh_hosting();
             if let Some(node) = runtime.node.get() {
                 node.close().await;
             }
@@ -231,6 +286,17 @@ pub(crate) async fn remote_host_request(
     request: Request,
 ) -> Result<Value, String> {
     let state = app.state::<RemoteAccess>();
+    #[cfg(unix)]
+    if host_id.starts_with("ssh:") {
+        return state
+            .ssh
+            .connection(&host_id)?
+            .client
+            .request(request)
+            .await
+            .map_err(err)?
+            .into_result();
+    }
     let runtime = state.ensure(&app).await?;
     if !runtime.store.trusts(&host_id, "host") {
         return Err("Host is not paired".into());
@@ -259,6 +325,13 @@ pub(crate) async fn remote_host_watch(
     watch_id: String,
 ) -> Result<(), String> {
     let state = app.state::<RemoteAccess>();
+    #[cfg(unix)]
+    if host_id.starts_with("ssh:") {
+        return state
+            .ssh
+            .watch(app.clone(), host_id, session_id, watch_id)
+            .await;
+    }
     let runtime = state.ensure(&app).await?;
     if !runtime.store.trusts(&host_id, "host") {
         return Err("Host is not paired".into());

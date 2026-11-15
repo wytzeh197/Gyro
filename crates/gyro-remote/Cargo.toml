@@ -12,12 +12,13 @@ base64.workspace = true
 iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring", "portmapper", "fast-apple-datapath"] }
 iroh-mdns-address-lookup = "0.6.1"
 rand.workspace = true
+glob = "0.3"
 rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 subtle = "2.6"
-tokio = { version = "1", features = ["rt-multi-thread", "time", "macros", "net", "sync", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros", "net", "sync", "io-util", "process"] }
 uuid.workspace = true
 
 [dev-dependencies]

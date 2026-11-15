@@ -103,7 +103,7 @@ export function useRemoteWorkspace(
     const message = String(reason);
     setError(message);
     if (
-      /Host unavailable|not trusted|revoked|not paired|connection.*closed/i.test(
+      /Host unavailable|not trusted|revoked|not paired|connection.*closed|SSH host is disconnected/i.test(
         message,
       )
     )
@@ -159,7 +159,12 @@ export function useRemoteWorkspace(
         viewRef.current.sessionId !== selected.sessionId
       )
         return;
-      if (snapshot.control?.owner !== access.status?.deviceId)
+      if (
+        snapshot.control?.owner !==
+        (hostId.startsWith("ssh:")
+          ? access.status?.sshClientId
+          : access.status?.deviceId)
+      )
         client.forgetControl(selected.sessionId);
       if (history.revision)
         historyRevisions.current.set(selected.sessionId, history.revision);
@@ -240,7 +245,13 @@ export function useRemoteWorkspace(
         queueMicrotask(() => void load());
       }
     }
-  }, [client, access.status?.deviceId, fail]);
+  }, [
+    client,
+    hostId,
+    access.status?.deviceId,
+    access.status?.sshClientId,
+    fail,
+  ]);
   useEffect(() => {
     generation.current++;
     earlierLoaded.current = false;
@@ -580,6 +591,21 @@ export function useRemoteWorkspace(
     );
     return () => clearInterval(timer);
   }, [view.panel, sessionId, online]);
+  async function reconnect() {
+    if (busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      if (hostId.startsWith("ssh:"))
+        await access.action({ action: "sshConnect", hostId });
+      await load();
+      setStreamEpoch((value) => value + 1);
+    } catch (reason) {
+      fail(reason);
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }
   return {
     client,
     view,
@@ -597,6 +623,7 @@ export function useRemoteWorkspace(
     run,
     load,
     loadTools,
+    reconnect,
     toolsLoading:
       Boolean(sessionId && online) &&
       toolsLoadedFor !== `${sessionId}:${view.panel}`,

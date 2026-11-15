@@ -599,3 +599,269 @@
 .gyro-local-workspace-content {
   display: contents;
 }
+
+/* Remote access method switch and SSH setup reuse Gyro's settings primitives. */
+.gyro-remote-methods {
+  width: fit-content;
+  min-width: min(100%, calc(var(--gyro-control-height) * 9));
+}
+.gyro-remote-methods .gyro-settings-segmented {
+  width: 100%;
+}
+.gyro-remote-methods .gyro-settings-segmented button {
+  flex: 1;
+}
+.gyro-remote-pairing {
+  display: contents;
+}
+.gyro-remote-ssh {
+  display: grid;
+  gap: calc(var(--gyro-space-section) * 2);
+  min-width: 0;
+}
+.gyro-remote-ssh h2 {
+  margin: 0;
+  font-size: var(--gyro-font-lead);
+  font-weight: 600;
+}
+.gyro-remote-settings .gyro-remote-method-description {
+  margin: 0;
+  font-size: var(--gyro-font-body);
+}
+.gyro-remote-ssh-hosts {
+  margin-top: var(--gyro-space-panel);
+  border-block: thin solid var(--gyro-border);
+}
+.gyro-remote-ssh-host {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-panel);
+  padding: var(--gyro-space-panel) var(--gyro-space-standard);
+  min-width: 0;
+}
+.gyro-remote-ssh-host + .gyro-remote-ssh-host {
+  border-top: thin solid var(--gyro-border);
+}
+.gyro-remote-ssh-host-name {
+  flex: 1;
+  display: grid;
+  gap: var(--gyro-space-compact);
+  min-width: 0;
+}
+.gyro-remote-ssh-host-name strong {
+  font-weight: 600;
+}
+.gyro-remote-ssh-host-name span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  overflow-wrap: anywhere;
+}
+.gyro-remote-ssh-host > .gyro-settings-status {
+  flex: 1;
+  justify-content: center;
+}
+.gyro-remote-ssh-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+.gyro-remote-ssh-menu summary {
+  display: grid;
+  place-items: center;
+  min-width: var(--gyro-control-height);
+  min-height: var(--gyro-control-height);
+  list-style: none;
+  cursor: pointer;
+  border-radius: var(--gyro-radius-sm);
+}
+.gyro-remote-ssh-menu summary::-webkit-details-marker {
+  display: none;
+}
+.gyro-remote-ssh-menu summary:hover {
+  background: var(--gyro-control-bg);
+}
+.gyro-remote-ssh-menu > div {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 100%;
+  z-index: 3;
+  display: grid;
+  min-width: calc(var(--gyro-control-height) * 5);
+  padding: var(--gyro-space-compact);
+  border: thin solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-raised);
+  box-shadow: var(--gyro-lift-shadow);
+}
+.gyro-remote-ssh-menu button {
+  background: transparent;
+  border: 0;
+  color: var(--gyro-text);
+  text-align: start;
+  padding: var(--gyro-space-standard) var(--gyro-space-comfortable);
+  font: inherit;
+  font-size: var(--gyro-font-support);
+  border-radius: var(--gyro-radius-xs);
+  cursor: pointer;
+}
+.gyro-remote-ssh-menu button:hover {
+  background: var(--gyro-control-bg);
+}
+.gyro-remote-ssh-form {
+  display: grid;
+  gap: var(--gyro-space-section);
+}
+.gyro-remote-ssh-form fieldset {
+  display: grid;
+  gap: calc(var(--gyro-space-section) + var(--gyro-space-standard));
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.gyro-remote-ssh-fields {
+  display: grid;
+  gap: var(--gyro-space-standard);
+  width: min(100%, calc(var(--gyro-control-height) * 20));
+}
+.gyro-remote-ssh-fields label {
+  display: grid;
+  gap: var(--gyro-space-standard);
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-body);
+}
+.gyro-remote-ssh-fields .gyro-settings-input,
+.gyro-remote-ssh-fields .gyro-settings-select-field,
+.gyro-remote-ssh-fields .gyro-settings-select {
+  width: 100%;
+  max-width: none;
+}
+.gyro-remote-ssh-fields .gyro-settings-select-field {
+  display: block;
+}
+.gyro-remote-ssh-fields .gyro-settings-select {
+  min-height: var(--gyro-control-height);
+}
+.gyro-remote-text-button {
+  width: fit-content;
+  padding: var(--gyro-space-compact) 0;
+  border: 0;
+  background: none;
+  color: var(--gyro-muted);
+  text-decoration: underline;
+  text-underline-offset: var(--gyro-space-compact);
+  font: inherit;
+  font-size: var(--gyro-font-support);
+  cursor: pointer;
+}
+.gyro-remote-text-button:hover {
+  color: var(--gyro-text);
+}
+.gyro-remote-ssh-help {
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-support);
+}
+.gyro-remote-ssh-field-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) calc(var(--gyro-control-height) * 3);
+  gap: var(--gyro-space-panel);
+}
+.gyro-remote-ssh-advanced summary {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-comfortable);
+  list-style: none;
+  cursor: pointer;
+  font-weight: 600;
+  width: fit-content;
+}
+.gyro-remote-ssh-advanced summary::-webkit-details-marker {
+  display: none;
+}
+.gyro-remote-ssh-advanced[open] summary svg {
+  transform: rotate(90deg);
+}
+.gyro-remote-ssh-advanced > .gyro-remote-ssh-fields {
+  padding-top: var(--gyro-space-panel);
+  gap: var(--gyro-space-panel);
+}
+.gyro-remote-ssh-connect {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gyro-space-panel);
+  border-top: thin solid var(--gyro-border);
+  padding-top: var(--gyro-space-panel);
+}
+.gyro-remote-ssh-connect p {
+  margin: 0;
+}
+.gyro-remote-ssh-connect p + p {
+  display: flex;
+  gap: var(--gyro-space-standard);
+  align-items: start;
+  margin-top: var(--gyro-space-standard);
+}
+.gyro-remote-ssh-connect svg {
+  flex-shrink: 0;
+}
+.gyro-remote-ssh-connect button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+}
+.gyro-remote-settings .gyro-remote-ssh-error {
+  color: var(--gyro-danger);
+  margin: 0;
+}
+.gyro-remote-settings .gyro-remote-ssh-notice {
+  color: var(--gyro-text);
+  margin: 0;
+}
+.gyro-remote-settings .gyro-remote-ssh-footer {
+  border-top: thin solid var(--gyro-border);
+  padding-top: var(--gyro-space-section);
+  margin: 0;
+}
+.gyro-remote-ssh :is(button, input, select, summary):focus-visible {
+  outline: thin solid var(--gyro-focus-ring);
+  outline-offset: var(--gyro-space-compact);
+}
+.gyro-remote-ssh-spinner {
+  animation: gyro-ssh-rotate 1s linear infinite;
+}
+@keyframes gyro-ssh-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 700px) {
+  .gyro-remote-ssh-connect {
+    align-items: start;
+    flex-direction: column;
+  }
+  .gyro-remote-ssh-connect > button {
+    align-self: flex-end;
+  }
+  .gyro-remote-ssh-host {
+    flex-wrap: wrap;
+  }
+  .gyro-remote-ssh-host > .gyro-settings-status {
+    flex: 0 1 auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gyro-remote-ssh-spinner {
+    animation: none;
+  }
+}
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-remote-methods
+  .gyro-settings-segmented {
+  border: thin solid var(--gyro-border-strong);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-soft);
+  padding: var(--gyro-space-compact);
+  gap: 0;
+}

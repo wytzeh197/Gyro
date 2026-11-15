@@ -2315,6 +2315,7 @@ version = "0.1.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "glob",
  "iroh",
  "iroh-mdns-address-lookup",
  "iroh-relay",

@@ -448,8 +448,14 @@ pub(crate) fn claim_model_terminal(
     };
     // Keep completed resources readable until their owning chat replaces them.
     // Another chat starting a command must not erase a waiter's final result.
-    if terminals.get(&bound.session_id).is_some_and(is_running) {
-        anyhow::bail!("this chat already owns a live model terminal");
+    if let Some(owned) = terminals
+        .get(&bound.session_id)
+        .filter(|owned| is_running(owned))
+    {
+        anyhow::bail!(
+            "This chat already has a running command; the new command was not started. Call gyro_terminal_wait with resourceId \"{}\" to wait for it, then retry. Use gyro_terminal_read to inspect it; stop it only if the task calls for cancellation.",
+            owned.resource_id
+        );
     }
     if terminals.values().filter(|owned| is_running(owned)).count() >= MAX_MODEL_TERMINAL_PROCESSES
     {

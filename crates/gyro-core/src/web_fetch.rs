@@ -16,9 +16,8 @@ use url::Url;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
-/// Redirects may remain on the approved origin only. Following a different
-/// host, scheme, or port would bypass the capability broker's origin grant;
-/// the model must request that URL separately so its origin can be approved.
+/// Redirects remain on the approved origin unless the caller's policy callback
+/// explicitly authorizes the destination before its request is sent.
 const MAX_REDIRECTS: u32 = 5;
 /// Absolute ceiling for one fetch. The capability asks for less than this.
 pub const MAX_WEB_FETCH_BYTES: usize = 512 * 1024;
@@ -38,6 +37,16 @@ pub struct WebFetchPage {
 /// Fetch a text-like document. The caller has already decided that this URL is
 /// one the user allows; this function still refuses any scheme but http(s).
 pub fn fetch_text(url: &Url, max_bytes: usize) -> Result<WebFetchPage> {
+    fetch_text_with_redirect_policy(url, max_bytes, |_| Ok(false))
+}
+
+/// The broker may authorize a different origin before any request reaches it.
+/// The default entry point remains confined to the initially approved origin.
+pub fn fetch_text_with_redirect_policy(
+    url: &Url,
+    max_bytes: usize,
+    mut allow_redirect: impl FnMut(&Url) -> Result<bool>,
+) -> Result<WebFetchPage> {
     validate_fetch_url(url)?;
     let max_bytes = max_bytes.clamp(1, MAX_WEB_FETCH_BYTES);
     let agent = ureq::AgentBuilder::new()
@@ -68,7 +77,7 @@ pub fn fetch_text(url: &Url, max_bytes: usize) -> Result<WebFetchPage> {
             .join(location)
             .map_err(|_| anyhow!("web fetch redirect has an invalid destination"))?;
         validate_fetch_url(&next_url)?;
-        if next_url.origin() != url.origin() {
+        if next_url.origin() != url.origin() && !allow_redirect(&next_url)? {
             return Err(anyhow!(
                 "web fetch redirect leaves the approved origin; request {} separately",
                 redact_secrets(next_url.as_str())
@@ -281,6 +290,46 @@ mod tests {
             error.contains(&destination),
             "destination path must be available for a separately approved request: {error}"
         );
+        assert_eq!(
+            target.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
+
+    #[test]
+    fn fetch_follows_a_cross_origin_redirect_only_after_authorization() {
+        let (destination, target) = serve_once(text_response("text/plain", "authorized page"));
+        let (url, server) = serve_once(format!(
+            "HTTP/1.1 302 Found\r\nLocation: {destination}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ).into_bytes());
+        let mut checked = Vec::new();
+        let page = fetch_text_with_redirect_policy(&url, MAX_WEB_FETCH_BYTES, |next| {
+            checked.push(next.clone());
+            Ok(next == &destination)
+        })
+        .unwrap();
+        server.join().unwrap();
+        target.join().unwrap();
+        assert_eq!(checked, vec![destination.clone()]);
+        assert_eq!(page.requested_url, url.as_str());
+        assert_eq!(page.final_url, destination.as_str());
+        assert_eq!(page.text, "authorized page");
+    }
+
+    #[test]
+    fn redirect_policy_failure_never_contacts_the_destination() {
+        let target = TcpListener::bind("127.0.0.1:0").unwrap();
+        target.set_nonblocking(true).unwrap();
+        let destination = format!("http://{}/private", target.local_addr().unwrap());
+        let (url, server) = serve_once(format!(
+            "HTTP/1.1 302 Found\r\nLocation: {destination}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ).into_bytes());
+        let error = fetch_text_with_redirect_policy(&url, MAX_WEB_FETCH_BYTES, |_| {
+            anyhow::bail!("policy unavailable")
+        })
+        .unwrap_err();
+        server.join().unwrap();
+        assert!(error.to_string().contains("policy unavailable"));
         assert_eq!(
             target.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock

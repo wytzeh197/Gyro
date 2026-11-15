@@ -5850,6 +5850,22 @@ export function ChatSurface({
   const activeTurnId = isComposerSending
     ? (activeTranscriptTurnId(turns) ?? turns.at(-1)?.id)
     : undefined;
+  // Saving a recipe is an explicit chat action, available after a completed
+  // exchange. Partial answers and active runs cannot supply a finished source.
+  const canSaveWorkflow =
+    !isComposerSending &&
+    !activeTranscriptTurnId(turns) &&
+    turns.some(
+      (turn) =>
+        Boolean(turn.user) &&
+        (!turn.runStatus || turn.runStatus === "done") &&
+        turn.timelineEvents.some(
+          (event) =>
+            event.kind === "assistant-message" && event.message.trim().length > 0,
+        ),
+    );
+  const saveWorkflowFromChat =
+    canSaveWorkflow && onSaveWorkflow ? () => onSaveWorkflow() : undefined;
   // Reviewing per file is what "Ask first" is for. The other modes were chosen
   // precisely to stop being asked, so they keep the plain summary card.
   const isFileReviewEnabled = approvalModeForConfig(config) === "gated";
@@ -6009,7 +6025,6 @@ export function ChatSurface({
           return (
             <ChatTurn
               config={config}
-              onSaveWorkflow={onSaveWorkflow}
               onReviewWithAgent={codeReviews ? () => {
                 const turnId=turn.user?.turnId ?? turn.id;
                 setReviewScope({kind:"turn",turnId});
@@ -6074,7 +6089,6 @@ export function ChatSurface({
     ),
     [
       hasMoreBefore,
-      onSaveWorkflow,
       codeReviews, onOpenCompanionTab, onSelectChatPanel,
       subagents,
       isOnline,
@@ -6442,7 +6456,7 @@ export function ChatSurface({
             </div>
             <div className="gyro-thread-topbar-actions">
               <ChatSurfaceControls
-                onSaveWorkflow={onSaveWorkflow && events.some(event=>event.kind==="user-message") ? ()=>onSaveWorkflow() : undefined}
+                onSaveWorkflow={saveWorkflowFromChat}
                 isDockOpen={false}
                 isPlanOpen={false}
                 isToolPanelOpen={false}
@@ -6688,7 +6702,7 @@ export function ChatSurface({
             </span>
           ) : null}
           <ChatSurfaceControls
-                onSaveWorkflow={onSaveWorkflow && events.some(event=>event.kind==="user-message") ? ()=>onSaveWorkflow() : undefined}
+            onSaveWorkflow={saveWorkflowFromChat}
             compactOverflowActions={isTiled}
             isDockOpen={isCompanionPanel}
             isEnvironmentOpen={isEnvironmentPopoverOpen}
@@ -10827,7 +10841,7 @@ function WorkspaceSettingsEditor({
                     </article>
                   ))
                 ) : (
-                  <SettingsEmptyState icon={<FileCode2 size={28} />} title="No language services detected" description="Services appear here for the current project." />
+                  <SettingsEmptyState icon={<FileCode2 size={24} />} title="No language services detected" description="Services appear here for the current project." />
                 )}
               </div>
             </section>
@@ -10879,7 +10893,7 @@ function WorkspaceSettingsEditor({
                   {contributionError}
                 </p>
               ) : null}
-              {contributions.length === 0 ? <SettingsEmptyState icon={<Blocks size={28} />} title="No contributions installed" description="Add commands and views from a local manifest. New contributions stay disabled until you enable them." /> : null}
+              {contributions.length === 0 ? <SettingsEmptyState icon={<Blocks size={24} />} title="No contributions installed" description="Add commands and views from a local manifest. New contributions stay disabled until you enable them." /> : null}
               <div className="gyro-workspace-contribution-list">
                 {contributions.map((contribution) => (
                   <article key={contribution.id}>
@@ -11039,6 +11053,17 @@ function parsedLocalIdeContribution(
     views,
     commands,
   };
+}
+
+/** "Cmd+Shift+P" → "⇧⌘P" on macOS; other platforms keep the written form. */
+function formatShortcutLabel(value: string) {
+  if (!isMacPlatform()) return value.replace(/Cmd/g, "Ctrl");
+  const parts = value.split("+");
+  const key = parts.pop() ?? "";
+  const glyphs: Record<string, string> = { Ctrl: "⌃", Alt: "⌥", Option: "⌥", Shift: "⇧", Cmd: "⌘" };
+  const order = ["Ctrl", "Alt", "Option", "Shift", "Cmd"];
+  const modifiers = order.filter((name) => parts.includes(name)).map((name) => glyphs[name]);
+  return `${modifiers.join("")}${key.length === 1 ? key.toUpperCase() : key}`;
 }
 
 function workspaceKeybindingLabel(binding: WorkspaceKeybinding) {
@@ -18830,6 +18855,7 @@ function CliLaunchPresetEditor({
               <button
                 aria-label="Remove preset profile"
                 className="gyro-icon-button is-subtle"
+                title="Remove"
                 onClick={() => removeEntry(index)}
                 type="button"
               >
@@ -19561,7 +19587,7 @@ export function SettingsSurface({
                   <>
                     <SettingsRow
                       label="Auto-compact context"
-                      detail="Compacts at 80–90% of the model's known context window. API and local models compact between tool rounds; native providers compact at response boundaries. Summarizing a native session may use a provider call."
+                      detail="Summarize older turns when a chat nears the model's context limit. Native sessions may use a provider call."
                     >
                       <SettingsSelect
                         aria-label="Auto-compact context threshold"
@@ -20089,7 +20115,7 @@ export function SettingsSurface({
                     ))}
                   </div>
                 ) : (
-                  <SettingsEmptyState title="No usage recorded yet" description="Local usage appears here after your first run." />
+                  <SettingsEmptyState icon={<Gauge size={24} />} title="No usage recorded yet" description="Local usage appears here after your first run." />
                 )}
               </SettingsGroup>
               <SettingsGroup id="usage-limits" label="Budgets & warnings">
@@ -20201,7 +20227,7 @@ export function SettingsSurface({
             <SettingsSection
               icon={LockKeyhole}
               title="Permissions"
-              description={`Provider: ${providerConfigs.find((provider) => provider.id === config.selectedProviderId)?.displayName ?? "Selected provider"}. Choose when Gyro asks before commands and file edits.`}
+              description="Choose when Gyro asks before running commands or editing files."
             >
               <SettingsGroup id="agent-approvals" label="Agent approvals">
                 <SettingsRow
@@ -20244,12 +20270,12 @@ export function SettingsSurface({
                 <SettingsRow
                   label="Workspace boundary"
                   value="Provider-dependent"
-                  detail="File access depends on the provider and approval mode. Full access can allow work outside the project folder."
+                  detail="Set by the provider and approval mode. Full access can reach outside the project."
                 />
                 <SettingsRow
                   label="Network access"
                   value="Provider-dependent"
-                  detail="Network restrictions depend on the provider and CLI profile; these approval switches do not guarantee that network access is blocked."
+                  detail="Set by the provider and CLI profile. Approval switches don't block the network."
                 />
                 <SettingsRow
                   label="Secrets redaction"
@@ -20489,7 +20515,7 @@ export function SettingsSurface({
                     <h3 className="gyro-settings-subheading">{group.label}</h3>
                     {group.items.filter(([label, value]) => `${label} ${value}`.toLowerCase().includes(shortcutQuery.toLowerCase())).map(([label, value]) => (
                       <SettingsRow key={label} label={label}>
-                        <kbd className="gyro-settings-key">{value}</kbd>
+                        <kbd aria-label={value} className="gyro-settings-key">{formatShortcutLabel(value)}</kbd>
                       </SettingsRow>
                     ))}
                   </div>
@@ -25489,7 +25515,6 @@ const ChatTurn = memoWithStableCallbacks(ChatTurnView);
 function ChatTurnView({
   config,
   onReviewWithAgent,
-  onSaveWorkflow,
   artifactActions,
   subagents,
   fileReview,
@@ -25522,7 +25547,6 @@ function ChatTurnView({
   artifactActions?: ChatArtifactActions;
   config: GyroConfig;
   onReviewWithAgent?:()=>void;
-  onSaveWorkflow?: (turnId?:string)=>void;
   subagents?: SubagentSurfaceState;
   fileReview?: ChatTurnFileReview;
   isActive: boolean;
@@ -25728,8 +25752,6 @@ function ChatTurnView({
     Boolean(onContinueChat) &&
     (hasResponse || runModel.steps.length > 0 || missingFinalResponse) &&
     runModel.phase.name === "done";
-  const workflowTurnId =
-    !isRunning && hasResponse && onSaveWorkflow ? turn.user?.turnId : undefined;
   // A turn the provider never closed out can be resent; a cancelled one cannot
   // be reconnected. Both decisions stay here because they need the status event
   // the run model deliberately does not carry.
@@ -25944,33 +25966,22 @@ function ChatTurnView({
             summaries={fileReviewSummaries}
           />
         ) : null}
-        {workflowTurnId || (canContinue && !missingFinalResponse) ? (
+        {canContinue && !missingFinalResponse ? (
           <footer
             aria-label="Follow-up actions"
             className="gyro-chat-turn-actions"
           >
-            {workflowTurnId ? (
-              <button
-                type="button"
-                onClick={() => onSaveWorkflow?.(workflowTurnId)}
-              >
-                <ScrollText aria-hidden="true" size={14} />
-                Save as workflow
-              </button>
-            ) : null}
-            {canContinue && !missingFinalResponse ? (
-              <button
-                onClick={onContinueChat}
-                title={
-                  hasResponse
-                    ? "Continue this chat"
-                    : "Resume this turn from where it left off"
-                }
-                type="button"
-              >
-                Continue <ArrowRight aria-hidden="true" size={14} />
-              </button>
-            ) : null}
+            <button
+              onClick={onContinueChat}
+              title={
+                hasResponse
+                  ? "Continue this chat"
+                  : "Resume this turn from where it left off"
+              }
+              type="button"
+            >
+              Continue <ArrowRight aria-hidden="true" size={14} />
+            </button>
           </footer>
         ) : null}
       </div>

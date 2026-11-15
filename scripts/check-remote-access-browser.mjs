@@ -161,6 +161,123 @@ try {
     "local projects sync after hydration",
   );
   await shot("settings-dark.png");
+  await click("SSH");
+  await until(
+    () => evaluate("document.body.innerText.includes('No saved SSH hosts')"),
+    "SSH empty hosts",
+  );
+  await click("Connect");
+  await until(
+    () =>
+      evaluate(
+        "document.body.innerText.includes('Choose an SSH host or enter an address')",
+      ),
+    "SSH missing host validation",
+  );
+  await evaluate(
+    `(() => { const select = document.querySelector('.gyro-remote-ssh-form select'); select.value = 'fixture-offline'; select.dispatchEvent(new Event('change', {bubbles:true})); })()`,
+  );
+  await click("Connect");
+  await until(
+    () =>
+      evaluate("document.body.innerText.includes('SSH connection refused')"),
+    "SSH connection error",
+  );
+  await evaluate(
+    `(() => { const select = document.querySelector('.gyro-remote-ssh-form select'); select.value = 'fixture-ssh-host'; select.dispatchEvent(new Event('change', {bubbles:true})); })()`,
+  );
+  await click("Connect");
+  await until(
+    () => evaluate("document.body.innerText.includes('Connected to SSH Mac')"),
+    "SSH connected status",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('[role=switch][aria-label=\"Allow remote access\"]').getAttribute('aria-checked')",
+    ),
+    "false",
+    "outgoing SSH does not require local hosting",
+  );
+  await click("Back to Workspace");
+  await until(
+    () =>
+      evaluate(
+        "Boolean(document.querySelector('.gyro-sidebar-project-remote'))",
+      ),
+    "SSH projects discovered while hosting is off",
+  );
+  await click("Settings");
+  await until(
+    () =>
+      evaluate(
+        "[...document.querySelectorAll('button')].some(b => b.textContent.trim()==='SSH' && b.checkVisibility())",
+      ),
+    "settings method switch ready",
+  );
+  await click("SSH");
+  await until(
+    () => evaluate("document.body.innerText.includes('Saved SSH hosts')"),
+    "return to SSH settings",
+  );
+  await shot("ssh-settings-dark.png");
+  await call("Emulation.setDeviceMetricsOverride", {
+    width: 900,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await shot("ssh-settings-compact.png");
+  assert.equal(
+    await evaluate("document.documentElement.scrollWidth > innerWidth"),
+    false,
+    "SSH settings do not overflow compact viewport",
+  );
+  await call("Emulation.setDeviceMetricsOverride", {
+    width: 1440,
+    height: 1000,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await click("Enter an address manually");
+  await until(
+    () =>
+      evaluate(
+        "Boolean(document.querySelector('input[placeholder=\"mac-mini.local\"]'))",
+      ),
+    "manual SSH inputs",
+  );
+  await click("Choose from SSH config instead");
+  await evaluate(
+    "document.querySelector('.gyro-remote-ssh-menu summary').click()",
+  );
+  await click("Disconnect");
+  await until(
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-remote-ssh-host')?.innerText.includes('Not connected')",
+      ),
+    "SSH disconnect status",
+  );
+  await evaluate(
+    "document.querySelector('.gyro-remote-ssh-menu summary').click()",
+  );
+  await click("Connect");
+  await until(
+    () =>
+      evaluate(
+        "document.querySelector('.gyro-remote-ssh-host')?.innerText.includes('Connected') && !document.querySelector('.gyro-remote-ssh-host')?.innerText.includes('Connecting')",
+      ),
+    "SSH saved host reconnect",
+  );
+  await evaluate(
+    "document.querySelector('.gyro-remote-ssh-menu summary').click()",
+  );
+  await click("Remove host");
+  await until(
+    () => evaluate("document.body.innerText.includes('No saved SSH hosts')"),
+    "SSH remove host",
+  );
+  await click("Gyro pairing");
   await evaluate(
     "document.querySelector('[role=switch][aria-label=\"Allow remote access\"]').click()",
   );
