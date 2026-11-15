@@ -806,6 +806,15 @@ try {
     1,
     "one Reconnect action",
   );
+  await until(
+    () => evaluate("!document.querySelector('.gyro-sidebar-project-remote')"),
+    "offline host folders and cached chats disappear from the sidebar",
+  );
+  assert.equal(
+    await evaluate("document.querySelector('.gyro-sidebar')?.innerText.includes('Existing local chat')"),
+    true,
+    "host sleep preserves local sidebar chats",
+  );
   await shot("offline-dark.png");
   await evaluate("window.gyroRemoteFixture.setOnline(true)");
   await click("Reconnect");
@@ -829,12 +838,24 @@ try {
     "Keep this local draft",
     "local draft survives remote browsing",
   );
+  await until(
+    () => evaluate("Boolean(document.querySelector('.gyro-sidebar-project-remote'))"),
+    "remote folders return after the host reconnects",
+  );
+  await evaluate("window.gyroRemoteFixture.setOnline(false)");
+  await until(
+    () => evaluate("!document.querySelector('.gyro-sidebar-project-remote')"),
+    "background host sleep also removes cached chats while browsing locally",
+  );
   assert.equal(
-    await evaluate(
-      "Boolean(document.querySelector('.gyro-sidebar-project-remote'))",
-    ),
-    true,
-    "remote folders remain available while browsing local chats",
+    await evaluate(`document.querySelector('textarea[aria-label="Local draft"]')?.value`),
+    "Keep this local draft",
+    "background host sleep preserves the local draft",
+  );
+  await evaluate("window.gyroRemoteFixture.setOnline(true)");
+  await until(
+    () => evaluate("Boolean(document.querySelector('.gyro-sidebar-project-remote'))"),
+    "background discovery restores remote folders without manual reconnect",
   );
   await evaluate(
     "[...document.querySelectorAll('.gyro-sidebar button')].find(b=>b.textContent.includes('Existing remote chat')).click()",
