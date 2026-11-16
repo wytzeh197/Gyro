@@ -72,6 +72,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 fn main() {
+    // Storage re-executes this binary over the same private channel as the app.
+    if let Some(code) = gyro_core::keychain::run_read_helper() {
+        std::process::exit(code);
+    }
     #[cfg(all(target_os = "macos", debug_assertions))]
     if let Err(_) = run() {
         eprintln!("Isolated native Keychain acceptance failed. No real credentials or upstream errors are printed.");
