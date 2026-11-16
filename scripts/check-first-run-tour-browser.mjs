@@ -153,6 +153,7 @@ try {
     scene = "home",
     split = false,
     missing,
+    firstTask = false,
     width = 1440,
     height = 1024,
   } = {}) {
@@ -172,6 +173,7 @@ try {
     });
     if (split) params.set("split", "1");
     if (missing) params.set("missing", missing);
+    if (firstTask) params.set("firstTask", "1");
     const url = `${origin}/first-run-tour-fixture.html?${params}`;
     await call("Page.navigate", { url });
     await until(
@@ -195,6 +197,8 @@ try {
       const candidates=[...document.querySelectorAll(${JSON.stringify(selectors[index])})].filter(n => n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden' && !n.closest('[aria-hidden="true"], [inert], [hidden]'));
       const anchor=candidates.find(n=>n.closest('.gyro-chat-grid-slot.is-current-pane')) ?? candidates[0];
       const style=getComputedStyle(card);
+      const probe=document.createElement('span'); probe.style.backgroundColor='var(--gyro-ink-bg)'; card.append(probe);
+      const expectedPrimary=getComputedStyle(probe).backgroundColor; probe.remove();
       return { viewport:{width:innerWidth,height:innerHeight}, bodyZoom:getComputedStyle(document.body).zoom,
         anchor:rect(anchor), card:rect(card), spotlight:spot?.hidden ? null : rect(spot), layer:rect(layer),
         hasAnchor:layer?.dataset.hasAnchor, placement:card?.dataset.placement,
@@ -203,7 +207,7 @@ try {
         anchorInFocusedPane:Boolean(anchor?.closest('.gyro-chat-grid-slot.is-current-pane')), visibleAnchorCount:candidates.length,
         destination:document.documentElement.dataset.tourFixtureDestination, section:document.documentElement.dataset.tourFixtureSection,
         title:document.querySelector('.gyro-tour-title')?.textContent,
-        colors:{background:style.backgroundColor,border:style.borderColor,count:getComputedStyle(document.querySelector('.gyro-tour-step-count')).color,primary:getComputedStyle(document.querySelector('.gyro-tour-primary')).backgroundColor},
+        colors:{expectedPrimary,background:style.backgroundColor,border:style.borderColor,count:getComputedStyle(document.querySelector('.gyro-tour-step-count')).color,primary:getComputedStyle(document.querySelector('.gyro-tour-primary')).backgroundColor},
         contentOverflow:card.scrollWidth-card.clientWidth,
       };
     })()`);
@@ -279,11 +283,8 @@ try {
         `${name}: neutral ${token} (${metrics.colors[token]})`,
       );
     }
-    const rgb = metrics.colors.primary
-      .match(/[\d.]+/g)
-      .slice(0, 3)
-      .map(Number);
-    assert.ok(rgb[2] > rgb[0] + 20, `${name}: primary button retains blue`);
+    assert.equal(metrics.colors.primary, metrics.colors.expectedPrimary,
+      `${name}: primary button uses Gyro's current ink action token`);
     return metrics;
   }
   async function focusContainment() {
@@ -360,25 +361,13 @@ try {
   );
 
   const split = await load({ split: true, panel: "none", scene: "home" });
-  await waitStep(0, 4);
-  const focused = await inspect("split-focused-project", 0, split);
-  assert.equal(
-    focused.visibleAnchorCount,
-    2,
-    "split fixture exposes two real Project controls",
-  );
-  assert.equal(
-    focused.anchorInFocusedPane,
-    true,
-    "spotlight follows focused split chat",
-  );
-  await click("Next");
-  await waitStep(1, 4);
-  await inspect("split-focused-composer", 1, split);
+  // Compact split composers omit Project; the first available anchor is input.
+  await waitStep(0, 3);
+  const focused = await inspect("split-focused-composer", 1, split);
+  assert.equal(focused.visibleAnchorCount, 2, "split fixture exposes two real inputs");
+  assert.equal(focused.anchorInFocusedPane, true, "spotlight follows focused split chat");
   await key("Escape");
-  checks.push(
-    "Focused split chat wins over the first matching Project/input anchor",
-  );
+  checks.push("Focused split chat wins over the first matching input; unavailable Project step is omitted");
 
   // Large appearance changes real component tokens, independently of body zoom.
   const large = await load({ size: "large", zoom: "1.1" });
@@ -490,6 +479,24 @@ try {
   );
 
   assert.deepEqual(errors, [], "no browser exceptions or console errors");
+  // The optional first task remains an editable, unsent draft, with an exit.
+  for (const theme of ["dark", "light"]) {
+    const spec = await load({ theme, firstTask: true, width: 900, height: 700 });
+    for (let index = 0; index < 3; index++) {
+      await waitStep(index, 4);
+      await click("Next");
+    }
+    await waitStep(3, 4);
+    await inspect(`first-task-${theme}`, 3, spec);
+    assert.equal(await evaluate("document.querySelectorAll('.gyro-tour-primary').length"), 1);
+    await click("Try a first task");
+    await until(() => evaluate("!document.querySelector('.gyro-tour-card')"), "first task exits tour");
+    const prompt = await evaluate("document.documentElement.dataset.firstTaskPrompt");
+    assert.match(prompt, /Wait for my approval before editing/);
+    assert.match(prompt, /failed or unrun checks/);
+    assert.equal(await evaluate("document.querySelector('[data-tour=\"composer.input\"]').textContent || document.querySelector('[data-tour=\"composer.input\"]').value"), prompt);
+  }
+  checks.push("First-task action offers one primary, keeps Finish available, and prepares an editable prompt in both themes");
   // Only remove obsolete files from this script's preliminary capture names.
   // Preserve other design evidence that may share the output directory.
   const obsoleteNames = ["failure.png", "large-zoom-1.1-panel.png"];

@@ -2,5 +2,6 @@
 pub(crate) mod debug;
 pub(crate) mod language_server;
 pub(crate) mod task_discovery;
+pub(crate) mod task_problems;
 pub(crate) mod tasks;
 pub(crate) mod types;

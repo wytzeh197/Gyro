@@ -12,6 +12,12 @@ const MAIN_TRAFFIC_LIGHT_Y: f64 = 15.0;
 pub(crate) fn apply_macos_traffic_light_position<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
 ) {
+    apply_macos_native_window_controls(&window.as_ref().window());
+}
+
+/// Native windows remain addressable when Browser child webviews are attached.
+#[cfg(target_os = "macos")]
+pub(crate) fn apply_macos_native_window_controls<R: tauri::Runtime>(window: &tauri::Window<R>) {
     match window.ns_window() {
         Ok(ptr) if !ptr.is_null() => unsafe {
             inset_macos_traffic_lights(ptr, MAIN_TRAFFIC_LIGHT_X, MAIN_TRAFFIC_LIGHT_Y);

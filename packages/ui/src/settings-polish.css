@@ -37,7 +37,7 @@
 
 :root[data-theme] .gyro-provider-api-key-choices button {
   background: transparent;
-  border: 0.5px solid var(--gyro-premium-hairline-strong);
+  border: 0.5px solid transparent;
   border-radius: var(--gyro-radius-pill);
   box-shadow: none !important;
   color: var(--gyro-muted) !important;
@@ -48,13 +48,17 @@
   padding: 0 10px 0 6px !important;
 }
 
+/* Quiet until chosen: unselected providers are logo + name, hover is a faint
+   wash, and only the selected provider carries a fill (quiet-controls.css). */
+:root[data-theme]
+  .gyro-provider-api-key-choices
+  button:not(.is-selected):not(:disabled):hover {
+  background: var(--gyro-quiet-hover);
+}
+
 :root[data-theme] .gyro-provider-api-key-choices button.is-selected {
-  background: color-mix(in srgb, var(--gyro-text) 8%, transparent) !important;
-  border-color: color-mix(
-    in srgb,
-    var(--gyro-text) 28%,
-    var(--gyro-premium-hairline-strong)
-  ) !important;
+  background: var(--gyro-quiet-active) !important;
+  border-color: transparent !important;
   color: var(--gyro-text) !important;
 }
 
@@ -71,7 +75,7 @@
 :root[data-theme] .gyro-provider-api-key-row > input {
   background: var(--gyro-premium-control) !important;
   border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
-  border-radius: 8px !important;
+  border-radius: var(--gyro-radius-md) !important;
   color: var(--gyro-text) !important;
   flex: 1 1 200px !important;
   font-size: var(--gyro-font-micro) !important;
@@ -98,7 +102,7 @@
 :root[data-theme] .gyro-provider-api-key-row > button {
   background: transparent !important;
   border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
-  border-radius: 8px !important;
+  border-radius: var(--gyro-radius-md) !important;
   box-shadow: none !important;
   color: var(--gyro-text) !important;
   font-size: var(--gyro-font-caption) !important;
@@ -234,7 +238,7 @@
 :root[data-theme] .gyro-provider-custom-form :is(input, textarea) {
   background: var(--gyro-premium-control) !important;
   border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
-  border-radius: 8px !important;
+  border-radius: var(--gyro-radius-md) !important;
   color: var(--gyro-text) !important;
   font-size: var(--gyro-font-micro) !important;
   min-width: 0;
@@ -287,7 +291,7 @@
 :root[data-theme] .gyro-provider-custom-actions > button {
   background: transparent !important;
   border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
-  border-radius: 8px !important;
+  border-radius: var(--gyro-radius-md) !important;
   box-shadow: none !important;
   color: var(--gyro-text) !important;
   font-size: var(--gyro-font-caption) !important;
@@ -317,7 +321,7 @@
 :root[data-theme] .gyro-provider-custom-fetch > button {
   background: transparent !important;
   border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
-  border-radius: 8px !important;
+  border-radius: var(--gyro-radius-md) !important;
   box-shadow: none !important;
   color: var(--gyro-muted) !important;
   font-size: var(--gyro-font-caption) !important;
@@ -370,11 +374,9 @@
 
 :root[data-theme] .gyro-usage-provider-select > span {
   color: var(--gyro-muted) !important;
-  font-size: var(--gyro-font-tiny) !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.07em;
+  font-size: var(--gyro-font-support) !important;
+  font-weight: 400 !important;
   line-height: 1.4;
-  text-transform: uppercase;
 }
 
 :root[data-theme] .gyro-usage-provider-select .gyro-settings-select-field {

@@ -293,7 +293,7 @@ expect(
   /const addTerminalPane = useCallback\([\s\S]{0,1800}?const started = await launchTerminalPane\(\{[\s\S]{0,320}?reveal: options\?\.reveal/.test(
     app,
   ) &&
-    /const runCommandProfile = useCallback\([\s\S]{0,900}?launchTerminalPane\(\{ profile, reveal: options\?\.reveal \}\)/.test(
+    /const runCommandProfile = useCallback\([\s\S]{0,900}?launchTerminalPane\(\{ profile, reveal: options\?\.reveal, select: true \}\)/.test(
       app,
     ) &&
     /const launchCliPreset = useCallback\([\s\S]{0,2600}?reveal: options\?\.reveal/.test(

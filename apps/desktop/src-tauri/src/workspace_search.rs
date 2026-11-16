@@ -9,6 +9,25 @@ use gyro_core::{CancellationToken, ExecutionRequest, ExecutionStream};
 use serde::Deserialize;
 use std::{path::Path, time::Duration};
 
+/// How ripgrep matches the query. A bare `bool` converts to a regex flag with
+/// ripgrep's defaults (case-sensitive, no word boundary), which is what model
+/// capability search has always used.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RgMatchOptions {
+    pub use_regex: bool,
+    pub ignore_case: bool,
+    pub whole_word: bool,
+}
+
+impl From<bool> for RgMatchOptions {
+    fn from(use_regex: bool) -> Self {
+        Self {
+            use_regex,
+            ..Self::default()
+        }
+    }
+}
+
 pub(super) struct WorkspaceSearchScan {
     pub results: Vec<WorkspaceSearchResult>,
     pub incomplete: bool,
@@ -19,7 +38,7 @@ pub(super) fn run_workspace_rg_search(
     query: &str,
     globs: Option<&Vec<String>>,
     max_results: usize,
-    use_regex: bool,
+    use_regex: impl Into<RgMatchOptions>,
 ) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
     Ok(run_workspace_rg_search_scan(root, query, globs, max_results, use_regex)?.results)
 }
@@ -29,7 +48,7 @@ pub(super) fn run_workspace_rg_search_scan(
     query: &str,
     globs: Option<&Vec<String>>,
     max_results: usize,
-    use_regex: bool,
+    use_regex: impl Into<RgMatchOptions>,
 ) -> anyhow::Result<WorkspaceSearchScan> {
     run_scoped_workspace_rg_search(root, ".", query, globs, max_results, use_regex)
 }
@@ -42,8 +61,9 @@ pub(super) fn run_scoped_workspace_rg_search(
     query: &str,
     globs: Option<&Vec<String>>,
     max_results: usize,
-    use_regex: bool,
+    options: impl Into<RgMatchOptions>,
 ) -> anyhow::Result<WorkspaceSearchScan> {
+    let options = options.into();
     // Ripgrep ignores --glob for an explicit file operand. Refuse this
     // ambiguous combination instead of silently dropping the caller's filters.
     if root.join(directory).is_file() && globs.is_some_and(|globs| !globs.is_empty()) {
@@ -58,8 +78,14 @@ pub(super) fn run_scoped_workspace_rg_search(
         .args(["--json", "--line-buffered"]);
     command.arg("--max-count").arg(max_results.to_string());
     command.args(["--max-filesize", "4M"]);
-    if !use_regex {
+    if !options.use_regex {
         command.arg("--fixed-strings");
+    }
+    if options.ignore_case {
+        command.arg("--ignore-case");
+    }
+    if options.whole_word {
+        command.arg("--word-regexp");
     }
     if let Some(globs) = globs {
         for glob in globs {
@@ -761,6 +787,41 @@ mod tests {
             true
         )
         .is_err());
+    }
+
+    #[test]
+    fn search_options_control_case_and_word_matching() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::write(
+            workspace.path().join("words.txt"),
+            "Needle\nneedle\nneedles\n",
+        )
+        .unwrap();
+        let lines = |options: RgMatchOptions| {
+            let mut lines = run_workspace_rg_search(workspace.path(), "needle", None, 10, options)
+                .unwrap()
+                .into_iter()
+                .map(|result| result.line_number)
+                .collect::<Vec<_>>();
+            lines.sort_unstable();
+            lines
+        };
+        assert_eq!(lines(RgMatchOptions::default()), vec![2, 3]);
+        assert_eq!(
+            lines(RgMatchOptions {
+                ignore_case: true,
+                ..RgMatchOptions::default()
+            }),
+            vec![1, 2, 3]
+        );
+        assert_eq!(
+            lines(RgMatchOptions {
+                ignore_case: true,
+                whole_word: true,
+                ..RgMatchOptions::default()
+            }),
+            vec![1, 2]
+        );
     }
 
     #[test]

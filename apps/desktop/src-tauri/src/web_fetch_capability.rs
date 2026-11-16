@@ -10,12 +10,22 @@
 //! `check-browser-capability.mjs` set-matches, and this tool is not part of the
 //! in-app browser's contract.
 use crate::{
-    capabilities::access::capability_argument_string, capability_output_budget,
-    capability_workspace_helpers::workspace_result_bytes_schema, session_browser,
+    app::config::load_config_blocking,
+    capabilities::access::{
+        capability_access_with_full_access, capability_argument_string,
+        capability_full_access_enabled,
+    },
+    capability_output_budget,
+    capability_workspace_helpers::workspace_result_bytes_schema,
+    delegated_agents, session_browser,
     state::provider_run::BoundProviderCapabilityContext,
+    stores::open_store,
 };
-use gyro_core::{CapabilityId, CapabilityRequest, CapabilityResourceRef};
+use gyro_core::{
+    CapabilityAccess, CapabilityClass, CapabilityId, CapabilityRequest, CapabilityResourceRef,
+};
 use serde_json::{json, Value};
+use tauri::Manager;
 
 const WEB_FETCH_SCHEMA: &str = "gyro.web-fetch.v1";
 /// Modern announcement pages often put large script bundles before the article.
@@ -23,8 +33,8 @@ const WEB_FETCH_SCHEMA: &str = "gyro.web-fetch.v1";
 const WEB_FETCH_BYTES: usize = 256 * 1024;
 
 pub(super) fn execute(
-    _app: &tauri::AppHandle,
-    _bound: &BoundProviderCapabilityContext,
+    app: &tauri::AppHandle,
+    bound: &BoundProviderCapabilityContext,
     request: &CapabilityRequest,
 ) -> anyhow::Result<(String, Value, Option<CapabilityResourceRef>)> {
     let url = session_browser::parse_navigable_url(capability_argument_string(
@@ -41,7 +51,36 @@ pub(super) fn execute(
         );
     }
     let format = web_format(&request.arguments)?;
-    let page = gyro_core::fetch_text(&url, source_bytes)?;
+    let page = gyro_core::web_fetch::fetch_text_with_redirect_policy(&url, source_bytes, |next| {
+        // Recheck the live policy for every new destination. A redirect is not
+        // authority to leave the approved origin, even inside a delegated run.
+        let policy = open_store()
+            .map_err(anyhow::Error::msg)?
+            .get_project_capability_policy(&bound.workspace_key)?;
+        let config = load_config_blocking().map_err(anyhow::Error::msg)?;
+        let origin = next.origin().ascii_serialization();
+        let access = capability_access_with_full_access(
+            bound,
+            &policy,
+            CapabilityClass::BrowserNavigate,
+            "origin",
+            &origin,
+            capability_full_access_enabled(&config)
+                && delegated_agents::full_access_ceiling(app, &bound.session_id),
+        );
+        let access = delegated_agents::permission_access(
+            access,
+            CapabilityId::WebFetch,
+            bound.policy.mode,
+            &config,
+        );
+        Ok(access == CapabilityAccess::Allow
+            || (access == CapabilityAccess::Ask
+                && app
+                    .state::<session_browser::SessionBrowserManager>()
+                    .is_origin_approved(&bound.session_id, &origin)
+                    .unwrap_or(false)))
+    })?;
     let summary = format!(
         "Fetched {}{} ({} bytes{})",
         page.final_url,

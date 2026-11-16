@@ -1,3 +1,5 @@
+import type { WorkspaceSearchQuery } from "./types";
+
 function splitWorkspaceGlobText(value: string) {
   const patterns: string[] = [];
   let current = "";
@@ -47,4 +49,77 @@ export function workspaceSearchGlobText(
     )
     .map((glob) => (kind === "exclude" ? glob.replace(/^!+/, "") : glob))
     .join(", ");
+}
+
+/** Match flags carried by a Search view query. */
+export type WorkspaceSearchFlags = Pick<
+  WorkspaceSearchQuery,
+  "matchCase" | "wholeWord" | "useRegex"
+>;
+
+export function workspaceSearchFlags(
+  query: WorkspaceSearchFlags | undefined,
+): Required<WorkspaceSearchFlags> {
+  return {
+    matchCase: query?.matchCase === true,
+    wholeWord: query?.wholeWord === true,
+    useRegex: query?.useRegex === true,
+  };
+}
+
+/**
+ * The fields `search_workspace` reads for the Search view toggles. Match Case
+ * is off by default, as in VS Code, so the view sends `caseSensitive: false`.
+ */
+export function workspaceSearchRequestFlags(query: WorkspaceSearchFlags) {
+  const flags = workspaceSearchFlags(query);
+  return {
+    caseSensitive: flags.matchCase,
+    wholeWord: flags.wholeWord,
+    regex: flags.useRegex,
+  };
+}
+
+const WORD_CHARACTER = "[\\p{L}\\p{N}_]";
+
+/**
+ * A global RegExp with the same matching rules the backend search used, so
+ * Replace changes exactly what the results showed. Returns undefined for an
+ * empty query or a regex the browser cannot compile.
+ */
+export function workspaceSearchMatcher(
+  query: WorkspaceSearchQuery,
+): RegExp | undefined {
+  if (!query.query) return undefined;
+  const flags = workspaceSearchFlags(query);
+  const body = flags.useRegex
+    ? query.query
+    : query.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const source = flags.wholeWord
+    ? `(?<!${WORD_CHARACTER})(?:${body})(?!${WORD_CHARACTER})`
+    : body;
+  try {
+    return new RegExp(source, flags.matchCase ? "gu" : "giu");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Replace every match in `content`. Literal searches insert `replacement` as
+ * typed; regex searches expand `$1` and `$&` like VS Code.
+ */
+export function replaceWorkspaceSearchMatches(
+  content: string,
+  query: WorkspaceSearchQuery,
+  replacement: string,
+): { content: string; occurrences: number } | undefined {
+  const matcher = workspaceSearchMatcher(query);
+  if (!matcher) return undefined;
+  const occurrences = [...content.matchAll(matcher)].length;
+  if (occurrences === 0) return { content, occurrences };
+  const next = workspaceSearchFlags(query).useRegex
+    ? content.replace(matcher, replacement)
+    : content.replace(matcher, () => replacement);
+  return { content: next, occurrences };
 }

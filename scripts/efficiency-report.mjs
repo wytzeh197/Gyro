@@ -1,6 +1,11 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  pairedQuality,
+  tokenBreakdown,
+  failureBreakdown,
+} from "./efficiency-diagnostics.mjs";
 const p95 = (values) =>
   values.length
     ? [...values].sort((a, b) => a - b)[Math.ceil(values.length * 0.95) - 1]
@@ -315,6 +320,9 @@ export function report(records, spec = null) {
                 !evaluated.includes(r) && !r.outcome?.includes("budget-stop"),
             ).length,
             failedAttempts: evaluated.length - successes,
+            pairedQuality: pairedQuality(pairs, complete),
+            tokenBreakdown: tokenBreakdown(selected),
+            failureBreakdown: failureBreakdown(selected),
             retries: selected.every(
               (r) => Number.isSafeInteger(r.retries) && r.retries >= 0,
             )
@@ -395,11 +403,15 @@ export function report(records, spec = null) {
       "Fresh and resumed sessions do not establish cold or warm provider caches; observed cache-read counts are listed independently.",
       "Requested model IDs may be aliases; provider model revisions and equal cache conditions are not proven by the cohort identity.",
       "Routine-profile compares Gyro-requested low effort with an unspecified provider default; it does not prove what effort the provider used.",
+      "Paired quality changes describe this cohort, not statistical significance or production-wide improvement. Incomplete cohorts have no success-rate delta.",
+      "Input includes cache reads and writes; output includes reasoning. Unknown token breakdowns stay unknown, and observed subtotals are available in JSON.",
     ],
   };
 }
 export function markdown(result) {
   const shownEffort = (value) => value?.trim() || "provider default";
+  const number = (value) =>
+    value === null || value === undefined ? "unknown" : value;
   return (
     "# Gyro efficiency pilot\n\n| Provider / model / effort | Variant | Verified / attempts | Paired / priced | Cost reduction | p95 change | Gate |\n|---|---|---:|---:|---:|---:|---|\n" +
     result.groups
@@ -407,6 +419,27 @@ export function markdown(result) {
         (g) =>
           `| ${g.provider} / ${g.model} / ${shownEffort(g.effort)} | ${g.variant} | ${g.successes}/${g.attempts} | ${g.pairs}/${g.pricedPairs} | ${g.costReduction === null ? "unknown" : (g.costReduction * 100).toFixed(1) + "%"} | ${g.p95Slowdown === null ? "unknown" : (g.p95Slowdown * 100).toFixed(1) + "%"} | ${g.gate} |`,
       )
+      .join("\n") +
+    "\n\nPaired correctness (candidate versus baseline):\n\n| Provider / model / effort | Variant | Both verified | Improved / regressed | Neither verified | Unknown | Success-rate change | Coverage |\n|---|---|---:|---:|---:|---:|---:|---|\n" +
+    result.groups
+      .map((g) => {
+        const q = g.pairedQuality;
+        return `| ${g.provider} / ${g.model} / ${shownEffort(g.effort)} | ${g.variant} | ${q.bothVerified} | ${q.improved} / ${q.regressed} | ${q.neitherVerified} | ${q.unknown} | ${q.successRateChange === null ? "unknown" : (q.successRateChange * 100).toFixed(1) + " pp"} | ${q.coverage} |`;
+      })
+      .join("\n") +
+    "\n\nProvider-reported token totals (all attempts, including failures):\n\n| Provider / model / effort | Variant | Input | Uncached input | Cache read | Cache write | Output | Reasoning subset |\n|---|---|---:|---:|---:|---:|---:|---:|\n" +
+    result.groups
+      .map((g) => {
+        const t = g.tokenBreakdown;
+        return `| ${g.provider} / ${g.model} / ${shownEffort(g.effort)} | ${g.variant} | ${["inputTokens", "uncachedInputTokens", "cachedInputTokens", "cacheWriteTokens", "outputTokens", "reasoningOutputTokens"].map((key) => number(t[key].total)).join(" | ")} |`;
+      })
+      .join("\n") +
+    "\n\nFailure breakdown:\n\n| Provider / model / effort | Variant | Execution | Verification | Unknown verification | Budget stop | Unavailable |\n|---|---|---:|---:|---:|---:|---:|\n" +
+    result.groups
+      .map((g) => {
+        const f = g.failureBreakdown;
+        return `| ${g.provider} / ${g.model} / ${shownEffort(g.effort)} | ${g.variant} | ${f.executionFailed} | ${f.verificationFailed} | ${f.verificationUnknown} | ${f.budgetStopped} | ${f.unavailable} |`;
+      })
       .join("\n") +
     "\n\nSession conditions and provider-reported cache reads:\n\n| Provider / model / effort | Variant | Fresh / resumed | Cache read / reported zero / unknown |\n|---|---|---:|---:|\n" +
     result.groups

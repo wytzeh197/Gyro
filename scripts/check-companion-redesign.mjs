@@ -278,8 +278,12 @@ try {
   const env = await load("tools");
   await click("Environment");
   assert.ok(await evaluate("Boolean(document.querySelector('.gyro-chat-environment-popover'))"), "environment opens");
-  await inspect("environment", { ...env, tool: "closed" });
+  // Environment overlays the chat while the existing companion stays open.
+  await inspect("environment", env);
+  assert.ok(await evaluate("Boolean(document.querySelector('.gyro-companion-launcher')?.getClientRects().length)"), "environment preserves the tool launcher");
   await click("Close environment");
+  assert.equal(await evaluate("Boolean(document.querySelector('.gyro-chat-environment-popover'))"), false, "environment closes independently");
+  await inspect("environment-closed", env);
   const narrow = await load("review", {
     split: true,
     width: 1024,

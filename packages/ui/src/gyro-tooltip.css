@@ -1,0 +1,34 @@
+/* The themed bubble that replaces the system `title` tooltip. */
+.gyro-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--gyro-layer-tooltip);
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 4px 8px;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-sm);
+  background: var(--gyro-surface-raised);
+  box-shadow: 0 6px 20px var(--gyro-shadow);
+  color: var(--gyro-text);
+  font-family: var(--gyro-font-sans);
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 90ms ease;
+}
+.gyro-tooltip.is-visible {
+  opacity: 1;
+}
+.gyro-tooltip[hidden] {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gyro-tooltip {
+    transition: none;
+  }
+}

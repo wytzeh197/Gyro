@@ -1,10 +1,13 @@
 import {
   useEffect,
+  useId,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -27,7 +30,8 @@ import {
   type ComposerAnswerRef,
 } from "./chat-question-popup";
 import type { ChatQuestionAnswer } from "./chat-questions";
-import type { SessionPlan, SessionPlanItemStatus } from "./types";
+import { beginPlanProblemDrag } from "./problem-drag";
+import type { SessionPlan, SessionPlanItem, SessionPlanItemStatus } from "./types";
 
 const stepLabel = (count: number) =>
   `${count} ${count === 1 ? "step" : "steps"}`;
@@ -467,6 +471,92 @@ const nextStepStatus = (status: SessionPlanItemStatus): SessionPlanItemStatus =>
       ? "complete"
       : "todo";
 
+/** Keep the explanation outside the step scroller so it cannot be clipped. */
+function PlanBlockedBadge({ item, planTitle, workspacePath }: {
+  item: SessionPlanItem;
+  planTitle: string;
+  workspacePath?: string;
+}) {
+  const detail = item.detail;
+  const id = useId();
+  const anchor = useRef<HTMLElement>(null);
+  const tooltip = useRef<HTMLDivElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ left: 0, top: 0 });
+  const reason = detail?.trim() || "No blocking reason was recorded for this step.";
+  const cancel = () => clearTimeout(timer.current);
+  const close = () => { cancel(); setOpen(false); };
+  const leave = () => {
+    cancel();
+    timer.current = setTimeout(() => {
+      if (document.activeElement !== anchor.current) setOpen(false);
+    }, 160);
+  };
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+  useLayoutEffect(() => {
+    if (!open || !anchor.current || !tooltip.current) return;
+    const badge = anchor.current.getBoundingClientRect();
+    const bounds = tooltip.current.getBoundingClientRect();
+    setPosition({
+      left: Math.max(12, Math.min(badge.right - bounds.width, window.innerWidth - bounds.width - 12)),
+      top: Math.max(12, badge.bottom + bounds.height + 8 <= window.innerHeight - 12
+        ? badge.bottom + 8 : badge.top - bounds.height - 8),
+    });
+    const dismiss = () => { clearTimeout(timer.current); setOpen(false); };
+    const onScroll = (event: Event) => {
+      if (!tooltip.current?.contains(event.target as Node)) dismiss();
+    };
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") dismiss();
+    };
+    window.addEventListener("resize", dismiss);
+    document.addEventListener("scroll", onScroll, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("resize", dismiss);
+      document.removeEventListener("scroll", onScroll, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, reason]);
+
+  return (
+    <small
+      aria-describedby={open ? id : undefined}
+      className="gyro-plan-blocked-badge"
+      draggable
+      onDragStart={(event) => {
+        close();
+        beginPlanProblemDrag(event.dataTransfer, { id: item.id, title: item.title, detail }, planTitle, workspacePath);
+      }}
+      aria-label="Blocked. Drag to chat to attach this problem."
+      onBlur={close}
+      onFocus={() => { cancel(); setOpen(true); }}
+      onMouseEnter={() => { cancel(); setOpen(true); }}
+      onMouseLeave={leave}
+      ref={anchor}
+      tabIndex={0}
+    >
+      Blocked
+      {open && createPortal(
+        <div
+          className="gyro-plan-blocked-tooltip"
+          id={id}
+          onMouseEnter={cancel}
+          onMouseLeave={leave}
+          ref={tooltip}
+          role="tooltip"
+          style={position}
+        >
+          {reason}
+        </div>,
+        document.body,
+      )}
+    </small>
+  );
+}
+
 /**
  * The plan's steps inside the chat's Environment card: the same marks as the
  * plan panel in a compact list, with a way through to the full plan.
@@ -475,10 +565,12 @@ export function EnvironmentPlanSteps({
   onOpen,
   onStatusChange,
   plan,
+  workspacePath,
 }: {
   onOpen?: () => void;
   onStatusChange?: (itemId: string, status: SessionPlanItemStatus) => void;
   plan: SessionPlan;
+  workspacePath?: string;
 }) {
   return (
     <div className="gyro-environment-plan">
@@ -507,7 +599,9 @@ export function EnvironmentPlanSteps({
                 <PlanStepStatus status={item.status} />
               </button>
               <span title={item.title}>{item.title}</span>
-              {item.status === "blocked" ? <small>Blocked</small> : null}
+              {item.status === "blocked" ? (
+                <PlanBlockedBadge item={item} planTitle={planDisplayTitle(plan)} workspacePath={workspacePath} />
+              ) : null}
             </li>
           ))}
         </ol>

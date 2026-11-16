@@ -1,3 +1,4 @@
+import { BillingRights } from "./billing-rights";
 import { CreditCard } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { SettingsSection } from "./settings-presentation";
@@ -511,6 +512,7 @@ export function BillingSettings({
         <p>AI provider charges are managed separately.</p>
         {onOpenProviders ? <SettingsRow label="Open Models & accounts" onClick={onOpenProviders} value="→" /> : null}
       </SettingsGroup>
+      <BillingRights />
     </SettingsSection>;
   }
   const modernCloud = snapshot.cloudV2 || snapshot.productionCloud;
@@ -1026,6 +1028,7 @@ export function BillingSettings({
           </div>
         </SettingsGroup>
       ) : null}
+      <BillingRights />
     </SettingsSection>
   );
 }

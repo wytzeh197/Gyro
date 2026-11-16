@@ -58,3 +58,60 @@
   outline: 2px solid var(--gyro-focus-ring);
   outline-offset: 2px;
 }
+
+/* Confirmation: the same card with a tone icon and verb-named buttons. */
+.gyro-confirm-dialog {
+  width: min(400px, calc(100vw - 32px));
+  box-shadow: 0 18px 48px var(--gyro-shadow);
+  animation: gyro-confirm-in 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.gyro-confirm-dialog::backdrop {
+  backdrop-filter: blur(2px);
+}
+.gyro-confirm-dialog-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--gyro-space-standard);
+  align-items: start;
+}
+.gyro-confirm-dialog-head > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.gyro-confirm-dialog .gyro-text-prompt-message {
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+.gyro-confirm-dialog-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--gyro-radius-sm);
+  background: var(--gyro-accent-soft);
+  color: var(--gyro-accent);
+}
+.gyro-confirm-dialog.is-danger .gyro-confirm-dialog-icon {
+  background: var(--gyro-danger-soft);
+  color: var(--gyro-danger);
+}
+.gyro-confirm-dialog .gyro-primary-button.is-danger {
+  background: var(--gyro-danger);
+  border-color: var(--gyro-danger);
+  color: #fff;
+}
+.gyro-confirm-dialog .gyro-primary-button.is-danger:hover {
+  background: color-mix(in srgb, var(--gyro-danger) 86%, #000);
+}
+@keyframes gyro-confirm-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gyro-confirm-dialog {
+    animation: none;
+  }
+}

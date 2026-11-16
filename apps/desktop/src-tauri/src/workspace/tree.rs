@@ -221,9 +221,12 @@ impl WorkspaceWatchManager {
                 .lock()
                 .map_err(|_| "workspace watcher registry is unavailable".to_string())?
                 .contains_key(&root);
-            if watcher_active
-                || (cached.scanned_at.elapsed() < WORKSPACE_TREE_MAX_CACHE_AGE
-                    && cached
+            // A registered watcher is not proof that every event arrived.
+            // Bound cache age even while watching so a dropped notification
+            // cannot leave the Explorer stale indefinitely.
+            if cached.scanned_at.elapsed() < WORKSPACE_TREE_MAX_CACHE_AGE
+                && (watcher_active
+                    || cached
                         .directories
                         .iter()
                         .all(WorkspaceDirectoryStamp::is_current))
@@ -251,9 +254,10 @@ impl WorkspaceWatchManager {
         let manager = self.clone();
         let mut watcher = RecommendedWatcher::new(
             move |result: notify::Result<NotifyEvent>| {
-                if let Ok(event) = result {
-                    manager.schedule_rescan(event_root.clone(), event, app.clone());
-                }
+                // Notify errors mean the snapshot can no longer be trusted.
+                // Use the same coalesced rescan path instead of ignoring them.
+                let event = result.unwrap_or_else(|_| NotifyEvent::new(notify::EventKind::Any));
+                manager.schedule_rescan(event_root.clone(), event, app.clone());
             },
             NotifyConfig::default(),
         )
@@ -355,7 +359,8 @@ pub(crate) fn is_generated_workspace_dir(name: &str) -> bool {
 }
 
 pub(crate) fn workspace_watch_event_is_relevant(root: &Path, event: &NotifyEvent) -> bool {
-    event.paths.is_empty()
+    event.need_rescan()
+        || event.paths.is_empty()
         || event.paths.iter().any(|path| {
             let Ok(relative) = path.strip_prefix(root) else {
                 return false;
@@ -374,9 +379,9 @@ pub(crate) fn workspace_watch_event_is_relevant(root: &Path, event: &NotifyEvent
             if parents.any(|part| is_generated_workspace_dir(&part.as_os_str().to_string_lossy())) {
                 return false;
             }
-            // Build output churns on every compile; rescanning and re-running
-            // git status for it competes with clicks for the whole build. The
-            // folder appearing or vanishing still counts; its contents don't.
+            // Keep build-output suppression at the workspace root. Nested
+            // names such as src/build can contain source and must invalidate
+            // Explorer and Git state. The root folder itself still counts.
             let is_build_output = matches!(first.as_ref(), ".next" | "target" | "dist" | "build");
             !(is_build_output && components.next().is_some())
         })

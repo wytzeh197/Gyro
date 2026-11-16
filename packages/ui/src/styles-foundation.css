@@ -240,6 +240,8 @@
   --gyro-press-opacity: 0.94;
   /* Blocking decisions sit above menus and content-viewer overlays. */
   --gyro-layer-dialog: 11000;
+  /* Tooltips retain their existing position above dialogs and the tour. */
+  --gyro-layer-tooltip: 2147483000;
   /* Slash commands clear the composer picker (122), below the overlay (124). */
   --gyro-layer-composer-slash: 123;
   --gyro-effort-thumb-ink: #fff;
@@ -308,7 +310,7 @@
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--gyro-text-muted, #9299a3);
+  color: var(--gyro-muted);
   cursor: pointer;
   display: inline-flex;
   gap: 5px;

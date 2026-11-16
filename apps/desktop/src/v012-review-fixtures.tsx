@@ -108,6 +108,7 @@ const runtime: CodeReviewRuntime = {
         result = { discarded: 1 };
         break;
       case "capture":
+        if (data.scope) snapshot.scope = data.scope as CodeReviewSnapshot["scope"];
         result = snapshot;
         break;
       case "preview":

@@ -77,7 +77,9 @@ if (parameters.get("tour") === "skip") writeTourRecord(localStorage, "dismissed"
 const chatEdge = parameters.get("edge");
 const isStreamingEdge = chatEdge === "streaming";
 const isListLayoutEdge = chatEdge === "markdown-lists";
-const isCodeBlockEdge = chatEdge === "code-block" || isListLayoutEdge;
+const isRichResponseEdge = chatEdge === "rich-response";
+const isCodeBlockEdge =
+  chatEdge === "code-block" || isListLayoutEdge || isRichResponseEdge;
 const isStackedEdge = chatEdge === "stacked";
 const isThreeEdge = chatEdge === "three";
 const isSplitEdge = chatEdge === "split" || isStackedEdge || isThreeEdge;
@@ -195,6 +197,49 @@ if (chatEdge === "sidebar-many") {
     createdAt: at(-800 - index * 20),
     updatedAt: at(-800 - index * 20),
   })));
+}
+
+// Opt-in sidebar with standalone Recents chats and a second project, for
+// sidebar spacing reviews against a realistically filled navigator.
+if (chatEdge === "sidebar-full") {
+  const standalone = (index: number, title: string, providerId: string) => {
+    const path = `${WORKSPACE.replace(/\/[^/]+$/, "")}/gyro-chat-2026-11-${10 + index}`;
+    return {
+      ...session,
+      id: `ses_capture_recent_${index}`,
+      title,
+      providerId,
+      providerLabel: providerId === "openai" ? "Codex CLI" : "Claude Code",
+      workspacePath: path,
+      workspaceIdentity: {
+        ...session.workspaceIdentity,
+        roots: [{ id: `capture-recent-${index}`, path }],
+        activeRootId: `capture-recent-${index}`,
+      },
+      createdAt: at(-900 - index * 40),
+      updatedAt: at(-900 - index * 40),
+    };
+  };
+  const atlas = `${WORKSPACE.replace(/\/[^/]+$/, "")}/atlas`;
+  sessions.push(
+    {
+      ...session,
+      id: "ses_capture_atlas",
+      title: "Pull latest from GitHub",
+      workspacePath: atlas,
+      workspaceIdentity: {
+        ...session.workspaceIdentity,
+        roots: [{ id: "capture-atlas", path: atlas }],
+        activeRootId: "capture-atlas",
+      },
+      createdAt: at(-820),
+      updatedAt: at(-820),
+    },
+    standalone(1, "Traffic lights delay on launch", "anthropic"),
+    standalone(2, "Connection test", "anthropic"),
+    standalone(3, "Check with GitHub, is the release live", "openai"),
+    standalone(4, "Browser acceptance pass", "openai"),
+  );
 }
 
 let sequence = 0;
@@ -407,6 +452,26 @@ if (isCodeBlockEdge) {
         "",
         "- The retry loop has a ceiling.",
         "- The last error is thrown instead of swallowed.",
+        ...(isRichResponseEdge ? [
+          "",
+          "## Verification",
+          "",
+          "| Check | Result | Detail |",
+          "| :--- | :--- | ---: |",
+          "| Retry limit | Passed | 5 attempts |",
+          "| Recovery | Passed | 1 successful flush |",
+          "| Exhaustion | Passed | Last error preserved |",
+          "",
+          "Run the focused check:",
+          "",
+          "```sh",
+          "pnpm test --filter sync -- --runInBand --testNamePattern='preserves the last error after all retry attempts are exhausted'",
+          "```",
+          "",
+          "```",
+          "All retry checks passed.",
+          "```",
+        ] : []),
         ...(isListLayoutEdge ? [
           "",
           "Wrapping and numbered steps:",
@@ -1220,6 +1285,43 @@ const emptyUsageTotals = {
 };
 
 const invoke: Invoke = (command, args) => {
+  // Exercise chat's Save as workflow navigation without a native backend.
+  // Unknown fixture mutations fail explicitly rather than returning malformed data.
+  if (command.startsWith("workflow_")) {
+    const action = args?.action;
+    const root = session.workspaceIdentity.roots[0]!;
+    const project = {
+      sessionId: SESSION_ID,
+      rootId: root.id,
+      title: "aurora",
+      path: WORKSPACE,
+    };
+    if (command === "workflow_run_request") {
+      if (action === "projects") return [project];
+      if (action === "project") return project;
+      if (action === "jobs" || action === "runs") return [];
+      if (action === "setup")
+        return { rootId: root.id, roots: [root], providers: [], tasks: [] };
+    }
+    if (command === "workflow_definition_request" && action === "list")
+      return { rootId: root.id, roots: [root], definitions: [] };
+    if (command === "workflow_extraction_request") {
+      if (action === "list") return [];
+      if (action === "turns")
+        return chatEvents
+          .filter((event) => event.kind === "user-message")
+          .map((event) => ({
+            turnId: event.turnId,
+            eventId: event.id,
+            request: event.message,
+            status: "completed",
+            hasAnswer: true,
+          }));
+    }
+    return Promise.reject(
+      new Error("Workflow changes are unavailable in this chat preview."),
+    );
+  }
   if (command === "search_workspace") {
     const request = args?.request as { query: string };
     let pattern: RegExp;
@@ -1313,6 +1415,13 @@ const invoke: Invoke = (command, args) => {
   }
   if (command === "plugin:event|unlisten") {
     captureListeners.delete(Number(args?.eventId));
+    return null;
+  }
+  if (command === "plugin:event|emit") {
+    for (const [id, event] of captureListeners) {
+      if (event === args?.event)
+        callbacks.get(id)?.({ event, id, payload: args?.payload });
+    }
     return null;
   }
   if (command.startsWith("plugin:event|")) return 0;

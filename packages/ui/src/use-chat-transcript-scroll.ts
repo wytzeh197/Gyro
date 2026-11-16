@@ -1,6 +1,5 @@
 import {
   useCallback,
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -192,15 +191,14 @@ export function useChatTranscriptScroll({
     lastScrollTopRef.current = transcript.scrollTop;
     updateScrollPosition();
   }, [events, sessionId, updateScrollPosition]);
-  useEffect(() => {
-    const animationFrame = window.requestAnimationFrame(() => {
-      pinToBottom();
-      updateScrollPosition();
-    });
-    return () => window.cancelAnimationFrame(animationFrame);
+  // Tool activity can replace a tall streaming block with a compact row.
+  // Keep the new layout and its scroll position in the same paint.
+  useLayoutEffect(() => {
+    pinToBottom();
+    updateScrollPosition();
   }, [pinToBottom, events, updateScrollPosition]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const transcript = transcriptRef.current;
     const dock = liveChangesTarget?.parentElement;
     if (!transcript || typeof ResizeObserver === "undefined") return;
@@ -214,25 +212,37 @@ export function useChatTranscriptScroll({
           dockBounds.bottom -
             (composer?.getBoundingClientRect().top ?? dockBounds.top),
         )}px`;
-        transcript.style.setProperty(
-          "--gyro-composer-dock-height",
-          `${Math.ceil(dockBounds.height)}px`,
-        );
-        dock.style.setProperty("--gyro-composer-solid-height", composerHeight);
+        const dockHeight = `${Math.ceil(dockBounds.height)}px`;
+        if (
+          transcript.style.getPropertyValue("--gyro-composer-dock-height") !==
+          dockHeight
+        ) {
+          transcript.style.setProperty(
+            "--gyro-composer-dock-height",
+            dockHeight,
+          );
+        }
+        if (
+          dock.style.getPropertyValue("--gyro-composer-solid-height") !==
+          composerHeight
+        ) {
+          dock.style.setProperty(
+            "--gyro-composer-solid-height",
+            composerHeight,
+          );
+        }
       }
       pinToBottom();
       updateScrollPosition();
     };
     updateDockClearance();
-    let resizeFrame: number | undefined;
-    const observer = new ResizeObserver(() => {
-      if (resizeFrame !== undefined) return;
-      resizeFrame = window.requestAnimationFrame(() => {
-        resizeFrame = undefined;
-        updateDockClearance();
-      });
-    });
-    observer.observe(transcript);
+    // ResizeObserver runs before paint. Deferring this to another frame exposes
+    // the intermediate scroll position when tool details or the dock resize.
+    // Only write changed clearance values so observer delivery can settle.
+    const observer = new ResizeObserver(updateDockClearance);
+    // Dock clearance changes padding, not the viewport's outer size. Watching
+    // its content box would feed that padding write back into this observer.
+    observer.observe(transcript, { box: "border-box" });
     for (const child of transcript.children) observer.observe(child);
     const mutations = new MutationObserver((records) => {
       for (const record of records) {
@@ -256,7 +266,6 @@ export function useChatTranscriptScroll({
       window.removeEventListener("pointerup", releasePointer);
       window.removeEventListener("pointercancel", releasePointer);
       observer.disconnect();
-      if (resizeFrame !== undefined) window.cancelAnimationFrame(resizeFrame);
     };
   }, [liveChangesTarget, pinToBottom, updateScrollPosition]);
 

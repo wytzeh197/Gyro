@@ -173,8 +173,10 @@ export function SettingsDisclosure({
   return (
     <section
       ref={root}
+      id={id}
       className={`gyro-settings-disclosure-group${open ? " is-open" : ""}`}
       data-settings-disclosure={id}
+      data-settings-group={id}
       data-setting-key={title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}
       tabIndex={-1}
     >

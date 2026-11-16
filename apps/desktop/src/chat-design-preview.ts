@@ -9,6 +9,7 @@ root.id = "gyro-chat-design-preview";
 root.dataset.chatDesign = "applied";
 const scenes = [
   ["finished", "Finished · code & files", "active-chat", "code-block"],
+  ["rich", "Rich reply · tables & code", "active-chat", "rich-response"],
   ["lists", "Lists · wrapped & numbered", "active-chat", "markdown-lists"],
   ["streaming", "Live run", "active-chat", "streaming"],
   ["split", "Two real panes", "active-chat", "split"],

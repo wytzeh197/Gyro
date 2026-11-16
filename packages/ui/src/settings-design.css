@@ -1800,7 +1800,8 @@
 
 /* A status in the control lane keeps its dot: the row's blanket span rule would
    otherwise make it a block and collapse the dot. */
-:root[data-theme] .gyro-settings-surface .gyro-settings-row .gyro-settings-status {
+:root[data-theme] .gyro-settings-surface .gyro-settings-row .gyro-settings-status,
+:root[data-theme] .gyro-settings-surface .gyro-settings-header-actions .gyro-settings-status {
   display: inline-flex;
   align-items: center;
 }
@@ -2007,7 +2008,7 @@
 }
 
 /* Settings uses the same inset canvas and continuous surround as Sessions. */
-:root[data-theme] .gyro-app-shell.is-settings-layout > .gyro-main > .gyro-settings-surface {
+:root[data-theme] .gyro-app-shell.is-settings-layout > .gyro-main .gyro-settings-surface {
   border: 0;
   border-radius: var(--gyro-chat-canvas-radius);
   background: var(--gyro-pane);
@@ -2090,4 +2091,75 @@
    margin doubled it, so the description sat apart from its title. */
 :root[data-theme] .gyro-settings-surface .gyro-workspace-settings-list label > span > small {
   margin-top: 0;
+}
+
+/* Polish pass: one heading language for every group.
+   Open sections and folded disclosures both read as "title, then a hairline",
+   so a page never mixes two group styles. Content sits on the row edge. */
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-group {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-heading {
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-heading > h2 {
+  margin: 0;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-heading > h2 > button:hover {
+  background: transparent;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-heading > h2 > button:hover strong,
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-heading > h2 > button:hover svg {
+  color: var(--gyro-text);
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-heading > h2 > button > span {
+  gap: 2px;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-heading small {
+  font-size: var(--gyro-font-support);
+}
+
+/* Nested disclosures and subheadings start on the same edge as the rows. */
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-body .gyro-settings-more > summary {
+  padding-inline: 0;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-body .gyro-settings-subsection-title {
+  margin-inline: 0;
+}
+:root[data-theme] .gyro-settings-surface .gyro-settings-disclosure-body .gyro-model-council-disclosure > summary {
+  padding-inline: 0;
+}
+
+/* Help: topics are a tight list of folded headings, not spaced-out cards. */
+:root[data-theme] .gyro-settings-surface .gyro-help-answers {
+  gap: var(--gyro-space-card);
+}
+
+/* Usage: inner titles use the row title scale, not a tiny bold caption. */
+:root[data-theme] .gyro-settings-surface :is(.gyro-usage-toolbar, .gyro-usage-empty) strong {
+  font-size: var(--gyro-font-chrome);
+  font-weight: 500;
+}
+:root[data-theme] .gyro-settings-surface :is(.gyro-usage-toolbar, .gyro-usage-empty) span {
+  font-size: var(--gyro-font-support);
+}
+/* Workspace: the scope switch governs every row below it, so it sits in a
+   quiet bordered band instead of floating between the title and the groups. */
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-settings-editor
+  > .gyro-settings-row.gyro-settings-row {
+  padding-inline: var(--gyro-space-panel);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  margin-bottom: calc(20px * var(--gyro-ui-scale, 1));
+}
+/* Usage: an unreported allowance is a note, not a hero block. */
+:root[data-theme] .gyro-settings-surface.is-minimal-settings .gyro-usage-dashboard {
+  padding-bottom: 0;
+}
+:root[data-theme] .gyro-settings-surface.is-minimal-settings .gyro-usage-empty {
+  padding-block: 8px;
 }

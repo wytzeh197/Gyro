@@ -1,9 +1,13 @@
+import { createIdeTaskStatusUpdater } from "./ide-task-status";
+import { useRemoteWorkspaceSlots } from "../../../packages/ui/src/remote-access-context";
+import { CloudV3Settings, cloudV3Enabled } from "./cloud-v3-settings";
+import { CloudV3Navigation } from "./cloud-v3-navigation";
 import type { BrowserViewportMode } from "@gyro-dev/ui";
 import {
   askTextValue,
   reconcileGitPreparation,
   hasOnlyGitWarnings,
-  browserConfirm,
+  askConfirmation,
   ChatFileActionsContext,
   ChatFileScopeContext,
   ChatRetryContext,
@@ -29,6 +33,9 @@ import {
   validateWorkspaceEntryName,
   WorkspaceEditBar,
   workspaceEntryName,
+  replaceWorkspaceSearchMatches,
+  type DocumentSymbol,
+  workspaceSearchRequestFlags,
   WorkspacePathUndoContext,
   WorkspaceRenameDialog,
   type PullRequestDraft,
@@ -37,7 +44,6 @@ import {
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
-  confirm as nativeConfirm,
   open,
   save as saveDialog,
 } from "@tauri-apps/plugin-dialog";
@@ -223,6 +229,13 @@ import {
   editorBufferFromFile,
   useWorkspaceRename,
 } from "./editor/use-workspace-rename";
+import { applyTextEdits } from "./editor/workspace-edits";
+import { useDocumentSymbols } from "./editor/use-document-symbols";
+import { useAutoSave } from "./editor/use-auto-save";
+import {
+  editorCommandWouldStealTyping,
+  runEditorCommandLater,
+} from "./editor/editor-commands";
 import {
   MonacoEditorPane,
   type WorkspaceNavigationSource,
@@ -325,6 +338,7 @@ import {
   SYSTEM_ACCESS_STATUS_STORAGE_KEY,
 } from "./system-access-state";
 import { isTauriRuntime } from "./tauri-runtime";
+import { useSessionCreatedEvents } from "./use-session-created-events";
 import {
   readTerminalAttachmentSource,
   rememberTerminalAttachmentSource,
@@ -471,6 +485,9 @@ import {
   type BrowserPreviewCapture,
   type CapabilityActivity,
   type CapabilityApprovalDecision,
+  problemAttachmentName,
+  problemAttachmentText,
+  type ProblemDragPayload,
   type ChatAttachment,
   type ChatBrowserResource,
   type ChatCompanionTabId,
@@ -596,6 +613,9 @@ const SourceControlDiffEditor = lazy(
 );
 
 export function App() {
+  const remoteSlots = useRemoteWorkspaceSlots();
+  const remoteWorkspaceVisible = useRef(false);
+  remoteWorkspaceVisible.current = Boolean(remoteSlots.content);
   const quitConfirmation = useQuitConfirmation();
   const [workbench, dispatchWorkbench] = useMeasuredWorkbenchReducer(
     loadInitialWorkbenchState,
@@ -1047,9 +1067,9 @@ export function App() {
   const workspacePreparationRunRef = useRef("");
   const workspacePreparationPathRef = useRef("");
   const openGlobalSearch = useCallback(
-    (mode: "commands" | "files" | "global" = "global") => {
+    (mode: "commands" | "files" | "global" = "global", query = "") => {
       setCommandPaletteMode(mode);
-      setCommandPaletteQuery("");
+      setCommandPaletteQuery(query);
       setIsCommandPaletteOpen(true);
     },
     [],
@@ -3611,6 +3631,8 @@ export function App() {
     };
   }, [setEventsForSession]);
 
+  useSessionCreatedEvents(setSessions);
+
   useEffect(() => {
     if (!isTauriRuntime()) return;
     let disposed = false;
@@ -4551,6 +4573,7 @@ export function App() {
                 request: {
                   workspacePath: root,
                   query: query.query,
+                  ...workspaceSearchRequestFlags(query),
                   globs: globs.length > 0 ? globs : undefined,
                   maxResults: query.maxResults ?? settings.searchMaxResults,
                 },
@@ -5155,6 +5178,7 @@ export function App() {
     [commandProfiles, workbench.terminalPanes],
   );
 
+  const activeIdeTaskRuns = useRef(new Set<string>());
   const runIdeTask = useCallback(
     async (task: TaskDefinition) => {
       const root = workspaceActionRoot;
@@ -5170,65 +5194,29 @@ export function App() {
         );
         return;
       }
+      const runKey = JSON.stringify([root, task.id]);
+      if (activeIdeTaskRuns.current.has(runKey)) return;
+      activeIdeTaskRuns.current.add(runKey);
       const channelId = task.outputChannelId ?? `task-${task.id}`;
       const startedAt = Date.now();
       const commandLine = [task.command, ...task.args].join(" ");
-      const setTaskStatus = (
-        status: TaskDefinition["status"],
-        testStatus?: "running" | "passed" | "failed",
-      ) => {
-        const finished =
-          status === "done" || status === "failed" || status === "cancelled";
-        dispatchWorkbench({
-          type: "ide-set-task-status",
-          taskId: task.id,
-          status,
-          lastRunAt: new Date().toISOString(),
-          workspacePath: root,
-          commandLine,
-          durationMs:
-            finished && task.group !== "dev" && status !== "cancelled"
-              ? Date.now() - startedAt
-              : undefined,
-        });
-        if (task.group === "test" && testStatus) {
-          // Update the run test in place. Replacing the tree with only the
-          // tests that ran hid every other discovered test after one run.
-          const suite = workbench.ide.testTree[0];
-          const children = suite?.children ?? [];
-          const result = {
-            id: task.id,
-            label: task.label,
-            status: testStatus,
-          } as const;
-          const nextChildren = children.some((item) => item.id === task.id)
-            ? children.map((item) => (item.id === task.id ? result : item))
-            : [...children, result];
-          dispatchWorkbench({
-            type: "ide-set-test-tree",
-            tests: [
-              {
-                id: suite?.id ?? "workspace-tests",
-                label: suite?.label ?? "Workspace tests",
-                status: nextChildren.some((item) => item.status === "failed")
-                  ? "failed"
-                  : nextChildren.some((item) => item.status === "running")
-                    ? "running"
-                    : testStatus,
-                children: nextChildren,
-              },
-              ...workbench.ide.testTree.slice(1),
-            ],
-          });
-        }
-      };
+      const setTaskStatus = createIdeTaskStatusUpdater({
+        task, root, startedAt, commandLine,
+        testTree: workbench.ide.testTree, dispatch: dispatchWorkbench,
+      });
+      dispatchWorkbench({
+        type: "ide-set-task-diagnostics", workspacePath: root,
+        taskId: task.id, diagnostics: [],
+      });
       setTaskStatus("running", task.group === "test" ? "running" : undefined);
       // Dev servers and watchers run in a live PTY. They remain interactive,
       // render ANSI output correctly, and are not cut short by task timeouts.
       if (task.group === "dev") {
-        const started = await launchIdeDevTask(task, root);
-        if (!started) {
-          setTaskStatus("failed");
+        try {
+          const started = await launchIdeDevTask(task, root);
+          if (!started) setTaskStatus("failed");
+        } finally {
+          activeIdeTaskRuns.current.delete(runKey);
         }
         return;
       }
@@ -5253,6 +5241,7 @@ export function App() {
           lines: ["Preview task completed."],
         });
         setTaskStatus("done", task.group === "test" ? "passed" : undefined);
+        activeIdeTaskRuns.current.delete(runKey);
         return;
       }
       try {
@@ -5274,6 +5263,10 @@ export function App() {
           channelId,
           lines: [output.stdout, output.stderr].filter(Boolean),
         });
+        dispatchWorkbench({
+          type: "ide-set-task-diagnostics", workspacePath: root,
+          taskId: task.id, diagnostics: output.diagnostics ?? [],
+        });
         setTaskStatus(
           output.status === "done"
             ? "done"
@@ -5293,6 +5286,8 @@ export function App() {
           lines: [String(error)],
         });
         setTaskStatus("failed", task.group === "test" ? "failed" : undefined);
+      } finally {
+        activeIdeTaskRuns.current.delete(runKey);
       }
     },
     [
@@ -5744,23 +5739,10 @@ export function App() {
     [notify, refreshWorkspaceTree, workspaceRoots],
   );
 
-  /* The macOS WebView has no JavaScript dialog support, so confirmations go
-     through the native dialog plugin. Without this every `window.confirm` in
-     this file returned false and the guarded action silently did nothing. */
+  /* The macOS WebView has no JavaScript dialog support, and the native alert
+     looks nothing like Gyro, so confirmations open the in-app dialog. */
   useEffect(() => {
-    setConfirmActionHandler(async (message) => {
-      if (!isTauriRuntime()) {
-        return browserConfirm(message);
-      }
-      try {
-        return await nativeConfirm(message, {
-          title: "Gyro",
-          kind: "warning",
-        });
-      } catch {
-        return false;
-      }
-    });
+    setConfirmActionHandler((message) => askConfirmation(message));
     return () => setConfirmActionHandler(undefined);
   }, []);
 
@@ -6156,6 +6138,7 @@ export function App() {
   // stacks; the workspace journal only takes over when focus is elsewhere.
   useEffect(() => {
     const onUndoKey = (event: KeyboardEvent) => {
+      if (remoteWorkspaceVisible.current) return;
       if (
         !(event.metaKey || event.ctrlKey) ||
         event.key.toLowerCase() !== "z"
@@ -8551,6 +8534,7 @@ export function App() {
       workspacePathOverride,
       startInHome = false,
       reveal = true,
+      select = false,
       taskTitle,
       workspaceTaskId,
     }: {
@@ -8563,6 +8547,8 @@ export function App() {
       startInHome?: boolean;
       /** Background tasks stay visible in the task rail until explicitly opened. */
       reveal?: boolean;
+      /** User launches can select their pane without opening the workspace drawer. */
+      select?: boolean;
       taskTitle?: string;
       workspaceTaskId?: string;
     }) => {
@@ -8629,6 +8615,9 @@ export function App() {
         } else {
           dispatchWorkbench({ type: "upsert-background-terminal-pane", pane });
         }
+      }
+      if (select) {
+        dispatchWorkbench({ type: "select-terminal-pane", paneId });
       }
       dispatchWorkbench({
         type: "run-terminal-pane",
@@ -8784,6 +8773,7 @@ export function App() {
         const started = await launchTerminalPane({
           profile,
           reveal: options?.reveal,
+          select: true,
           startInHome: !folderPath,
           workspacePathOverride: folderPath,
         });
@@ -10246,6 +10236,63 @@ export function App() {
       workbench.ide.buffers,
       workspacePath,
     ],
+  );
+
+  const attachDroppedProblem = useCallback(
+    (problem: ProblemDragPayload, target?: {
+      draftKey: string;
+      sessionId?: string;
+      workspacePath?: string;
+    }) => {
+      const draftKey = target?.draftKey ?? activeDraftKey;
+      const sessionId = target ? target.sessionId : activeSessionId;
+      const sourceWorkspace = problem.workspacePath ?? (target ? target.workspacePath : workspacePath);
+      const content = problemAttachmentText({ ...problem, workspacePath: sourceWorkspace });
+      const id = `pending-problem:${crypto.randomUUID()}`;
+      const placeholder: ChatAttachment = {
+        id, path: id, kind: "ide-snapshot",
+        name: problemAttachmentName(problem),
+        size: new TextEncoder().encode(content).length,
+        mimeType: "text/plain",
+        pending: true,
+      };
+      setChatAttachments((current) => ({
+        ...current,
+        [draftKey]: [...(current[draftKey] ?? []), placeholder],
+      }));
+      const upload = withMediaUploadTimeout(invoke<ChatAttachment>("prepare_chat_attachment", {
+        request: {
+          sessionId: sessionId ?? NEW_CHAT_DRAFT_KEY,
+          workspacePath: sourceWorkspace,
+          path: "",
+          kind: "ide-snapshot",
+          name: placeholder.name,
+          relativePath: "diagnostic" in problem ? problem.diagnostic.path : "Blocked plan step",
+          bytes: Array.from(new TextEncoder().encode(content)),
+        },
+      })).catch((error) => {
+        notify("command-failed", "Problem could not be attached", String(error));
+        return undefined;
+      }).then((attachment) => {
+        setChatAttachments((current) => {
+          // Follow a draft moved to another chat while storage was pending.
+          // A chip removed by the user must never reappear.
+          const key = [draftKey, ...Object.keys(current)].find((key) =>
+            current[key]?.some((item) => item.id === id),
+          );
+          if (!key) return current;
+          const items = current[key] ?? [];
+          const keep = attachment && !items.some((item) => item.path === attachment.path);
+          return {
+            ...current,
+            [key]: items.flatMap((item) => item.id !== id ? [item] : keep ? [attachment] : []),
+          };
+        });
+        return attachment;
+      });
+      void trackPendingMedia(placeholder, upload);
+    },
+    [activeDraftKey, activeSessionId, notify, workspacePath],
   );
 
   const attachDroppedMedia = useCallback(
@@ -13660,6 +13707,16 @@ export function App() {
     [openEditorFile, workspaceRoots],
   );
 
+  const revealDocumentSymbol = useCallback(
+    (path: string, symbol: DocumentSymbol) =>
+      openEditorLocation(
+        path,
+        symbol.selectionRange.startLineNumber,
+        symbol.selectionRange.startColumn,
+      ),
+    [openEditorLocation],
+  );
+
   const closeEditorTab = useCallback(
     async (path: string, groupId?: string) => {
       const groupsWithPath = workbench.ide.layout.groups.filter((group) =>
@@ -13784,10 +13841,77 @@ export function App() {
     [notify],
   );
 
+  const languageRequestRef = useRef<
+    | ((
+        path: string,
+        method: string,
+        params: Record<string, unknown>,
+      ) => Promise<unknown>)
+    | undefined
+  >(undefined);
+  /**
+   * Format on save: asks the language server for whole-document edits and
+   * applies them only if the buffer is still the text the server formatted.
+   * A slow or failing server never blocks the save itself.
+   */
+  const formatBufferBeforeSave = useCallback(
+    async (path: string, root: string) => {
+      const settings = resolvedWorkspaceSettings(
+        workbench.preferences.workspaceUserSettings,
+        workbench.preferences.workspaceSettingsByWorkspace,
+        workbench.preferences.workspaceSettingsByFolder,
+        activeWorkspaceRoot,
+        root,
+      );
+      const request = languageRequestRef.current;
+      const before = editorBuffersRef.current[path]?.content;
+      if (
+        !settings.editorFormatOnSave ||
+        !request ||
+        before === undefined ||
+        workbench.ide.buffers[path]?.content !== before
+      )
+        return;
+      let timer: number | undefined;
+      try {
+        const edits = await Promise.race([
+          request(path, "textDocument/formatting", {
+            options: {
+              tabSize: settings.editorTabSize ?? 2,
+              insertSpaces: settings.editorInsertSpaces ?? true,
+            },
+          }),
+          new Promise<undefined>((resolve) => {
+            timer = window.setTimeout(() => resolve(undefined), 3000);
+          }),
+        ]);
+        if (!Array.isArray(edits) || edits.length === 0) return;
+        if (editorBuffersRef.current[path]?.content !== before) return;
+        const formatted = applyTextEdits(before, edits);
+        if (formatted !== before) updateEditorBuffer(path, formatted);
+      } catch {
+        // No formatter or a stale document: save the text as typed.
+      } finally {
+        window.clearTimeout(timer);
+      }
+    },
+    [
+      activeWorkspaceRoot,
+      updateEditorBuffer,
+      workbench.ide.buffers,
+      workbench.preferences.workspaceSettingsByFolder,
+      workbench.preferences.workspaceSettingsByWorkspace,
+      workbench.preferences.workspaceUserSettings,
+    ],
+  );
+
   const saveEditorBuffer = useCallback(
-    async (path: string) => {
-      const buffer = editorBuffersRef.current[path];
+    async (path: string, options?: { quiet?: boolean }) => {
       const root = workspaceRootForPath(workspaceRoots, path);
+      const initial = editorBuffersRef.current[path];
+      if (initial && root && !initial.truncated)
+        await formatBufferBeforeSave(path, root);
+      const buffer = editorBuffersRef.current[path];
       if (!buffer || !root) {
         notify("command-failed", "Save blocked", "Open a workspace first");
         return false;
@@ -13867,7 +13991,7 @@ export function App() {
         });
         if (selectedFileRef.current === path)
           setSelectedFileContent({ ...saved, content: live.content });
-        notify("tests-passed", "File saved", path);
+        if (!options?.quiet) notify("tests-passed", "File saved", path);
         void appendEditorEvent("file-write-approved", `Saved ${path}`, {
           path,
           contentHash: saved.contentHash,
@@ -13892,8 +14016,15 @@ export function App() {
         return false;
       }
     },
-    [appendEditorEvent, notify, workbench.ide.buffers, workspaceRoots],
+    [appendEditorEvent, formatBufferBeforeSave, notify, workspaceRoots],
   );
+  useAutoSave({
+    mode: effectiveWorkspaceSettings.filesAutoSave ?? "off",
+    delay: effectiveWorkspaceSettings.filesAutoSaveDelay ?? 1000,
+    buffers: workbench.ide.buffers,
+    activePath: workbench.ide.activePath,
+    save: (path) => saveEditorBuffer(path, { quiet: true }),
+  });
 
   const languageSessions = useLanguageSessions({
     roots: workspaceRoots,
@@ -13916,17 +14047,24 @@ export function App() {
         ),
       );
       dispatchWorkbench({
-        type: "ide-set-diagnostics",
-        diagnostics: [
-          ...workbench.ide.diagnostics.filter(
-            (diagnostic) => !publishedPaths.has(diagnostic.path),
-          ),
-          ...diagnostics,
-        ],
+        type: "ide-publish-lsp-diagnostics",
+        paths: [...publishedPaths].filter((path): path is string => Boolean(path)),
+        diagnostics,
       });
     },
   });
   const requestLanguageFeature = languageSessions.request;
+  languageRequestRef.current = requestLanguageFeature;
+  const symbolsPath =
+    selectedFile && workbench.ide.buffers[selectedFile] ? selectedFile : undefined;
+  useDocumentSymbols({
+    path: symbolsPath,
+    content: symbolsPath ? workbench.ide.buffers[symbolsPath]?.content : undefined,
+    request: requestLanguageFeature,
+    current: workbench.ide.documentSymbols,
+    onChange: (documentSymbols) =>
+      dispatchWorkbench({ type: "ide-set-document-symbols", documentSymbols }),
+  });
   const workspaceRename = useWorkspaceRename({
     roots: workspaceRoots,
     buffers: workbench.ide.buffers,
@@ -14040,6 +14178,7 @@ export function App() {
   );
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (remoteWorkspaceVisible.current) return;
       if (
         event.ctrlKey &&
         !event.metaKey &&
@@ -14122,9 +14261,13 @@ export function App() {
             "read_workspace_file_full",
             { workspacePath: root, path },
           );
-          const occurrences = file.content.split(searchText).length - 1;
-          if (occurrences === 0) continue;
-          const content = file.content.split(searchText).join(replacement);
+          const replaced = replaceWorkspaceSearchMatches(
+            file.content,
+            query,
+            replacement,
+          );
+          if (!replaced || replaced.occurrences === 0) continue;
+          const { content, occurrences } = replaced;
           const saved = await invoke<WorkspaceFileContent>(
             "write_workspace_file",
             {
@@ -14615,7 +14758,7 @@ export function App() {
     (profileId: string, options?: { reveal?: boolean }) => {
       setActiveProfileId(profileId);
       const profile = getCommandProfile(commandProfiles, profileId);
-      void launchTerminalPane({ profile, reveal: options?.reveal }).then(
+      void launchTerminalPane({ profile, reveal: options?.reveal, select: true }).then(
         (started) => {
           if (!started) {
             notify(
@@ -16332,9 +16475,18 @@ export function App() {
             void runAutomation(workbench.selectedAutomationId);
           }
           break;
+        case "editor.action.quickOutline":
+          // After the palette that ran this command has closed.
+          window.setTimeout(() => openGlobalSearch("files", "@"), 0);
+          break;
+        default:
+          runEditorCommandLater(commandId, () =>
+            notify("command-failed", "No editor to run this in", "Open a file in the editor first."),
+          );
       }
     },
     [
+      openGlobalSearch,
       addTerminalPane,
       addWorkspaceFolder,
       handleBrowserNavigate,
@@ -16543,6 +16695,7 @@ export function App() {
   const appShortcutHandler = useRef<(event: KeyboardEvent) => void>(() => {});
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (remoteWorkspaceVisible.current) return;
       const isCommand = event.metaKey || event.ctrlKey;
       if (event.defaultPrevented) return;
       if (event.key === "Escape") {
@@ -16578,6 +16731,7 @@ export function App() {
         openGlobalSearch("global");
       } else if (
         workspaceCommand &&
+        !editorCommandWouldStealTyping(workspaceCommand.id) &&
         (!workspaceCommand.requiresWorkspace ||
           Boolean(activeSession?.workspacePath ?? workspacePath)) &&
         (!workspaceCommand.requiresTrust || workspaceTrusted)
@@ -17354,6 +17508,10 @@ export function App() {
 
   const renderWorkspaceToolPanel = (isPrimary = false) => (
     <WorkspaceToolPanel
+      onSendProblemToChat={(diagnostic) => {
+        attachDroppedProblem({ diagnostic, workspacePath: workspaceActionRoot });
+        dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
+      }}
       activePaneTab={workbench.activePaneTab}
       activeProfileId={activeProfileId}
       browserPreview={browserPreview}
@@ -18110,6 +18268,14 @@ export function App() {
           maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
           onAgentAction={(action) => notify("terminal", "Agent action", action)}
           canAttachEditorSnapshot={canAttachEditorSnapshot}
+          onAttachProblem={(problem) => {
+            focusChatPane(pane);
+            attachDroppedProblem(problem, {
+              draftKey: paneDraftKey,
+              sessionId: pane.kind === "session" ? pane.sessionId : undefined,
+              workspacePath: pane.workspacePath,
+            });
+          }}
           onAttachMediaFiles={(files) => {
             focusChatPane(pane);
             void attachDroppedMedia(files, {
@@ -18496,6 +18662,7 @@ export function App() {
       isToolPanelAvailable={isBottomDrawerAvailable}
       maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
       canAttachEditorSnapshot={canAttachEditorSnapshot}
+      onAttachProblem={attachDroppedProblem}
       onAttachMediaFiles={attachDroppedMedia}
       onAttachMediaPaths={(paths) => {
         void (async () => {
@@ -18579,6 +18746,7 @@ export function App() {
 
   const appChrome = (
     <AppChrome
+      sidebarProjectsReady={sessionsLoadedRef.current}
       renderAiChat={renderWorkspaceChat}
       activePaneTab={workbench.activePaneTab}
       activeDestination={activeDestination}
@@ -18588,7 +18756,7 @@ export function App() {
       approvalCountsBySessionId={approvalCountsBySessionId}
       questionCountsBySessionId={questionCountsBySessionId}
       modelTerminalSessionIds={modelTerminalSessionIds}
-      accountNavigation={
+      accountNavigation={cloudV3Enabled ? <CloudV3Navigation selected={workbench.preferences.lastSettingsSection} onSelect={section => dispatchWorkbench({ type: "set-settings-section", section })} /> :
         <AccountNavigation
           account={cloudConnection}
           selected={workbench.preferences.lastSettingsSection}
@@ -18628,6 +18796,9 @@ export function App() {
       onAddTerminalPane={addTerminalPane}
       onCloseTerminalPane={requestCloseTerminalPane}
       onCreateSession={startNewChat}
+      onSelectNewSessionProject={(path, draft) =>
+        startNewChat({ workspacePath: path ?? "", initialDraft: draft })
+      }
       onCreateCliSession={createCliSession}
       onDeleteSession={deleteSession}
       onDismissNotification={(id) =>
@@ -18643,6 +18814,7 @@ export function App() {
       onOpenSettingsSection={openSettingsSection}
       onOpenWorkspace={openWorkspace}
       onAddWorkspaceFolder={addWorkspaceFolder}
+      onRevealSymbol={revealDocumentSymbol}
       onRemoveWorkspaceFolder={removeWorkspaceFolder}
       workspaceRootIssues={workspaceRootIssues}
       onSelectWorkspaceFolder={setSelectedWorkspaceRoot}
@@ -18947,6 +19119,7 @@ export function App() {
                       notify("terminal", "Agent action", action)
                     }
                     canAttachEditorSnapshot={canAttachEditorSnapshot}
+                    onAttachProblem={attachDroppedProblem}
                     onAttachMediaFiles={attachDroppedMedia}
                     onAttachMediaPaths={(paths) => {
                       void (async () => {
@@ -19068,6 +19241,10 @@ export function App() {
                 effectiveMinimapEnabled={
                   effectiveWorkspaceSettings.editorMinimapEnabled
                 }
+                breadcrumbsEnabled={
+                  effectiveWorkspaceSettings.editorBreadcrumbs !== false
+                }
+                onRevealSymbol={revealDocumentSymbol}
                 workspacePath={activeWorkspaceRoot}
                 workspaceTrusted={workspaceTrusted}
                 onOpenWorkspace={openWorkspace}
@@ -19276,6 +19453,7 @@ export function App() {
                       onOpenLocation={openWorkspaceLocation}
                       onRenameSymbol={workspaceRename.begin}
                       onLspRequest={requestLanguageFeature}
+                      editorSettings={effectiveWorkspaceSettings}
                       theme={resolvedTheme}
                     />
                   );
@@ -19363,7 +19541,9 @@ export function App() {
       ) : null}
       {activeDestination === "settings" || activeDestination === "providers" ? (
         <SettingsSurface
-          accountSettings={<AccountSettings account={cloudConnection} />}
+          billingSettings={cloudV3Enabled ? <CloudV3Settings page="billing" /> : undefined}
+          accountSettings={cloudV3Enabled ? <CloudV3Settings page="account" /> : <AccountSettings account={cloudConnection} />}
+          cloudSettings={cloudV3Enabled ? <CloudV3Settings /> : undefined}
           billingSnapshot={cloudConnection.snapshot}
           billingActions={{
             ...cloudConnection.actions,
@@ -19611,13 +19791,13 @@ export function App() {
       {activeDestination === "cloud" ? (
         <div className="gyro-settings-surface gyro-cloud-workspace">
           <div className="gyro-settings-content">
-            <CloudSettings
+            {cloudV3Enabled ? <CloudV3Settings /> : <CloudSettings
               workspace
               snapshot={cloudConnection.snapshot}
               actions={cloudConnection.actions}
               onOpenBilling={() => openSettingsSection("billing")}
               onManageCloud={() => openSettingsSection("cloud")}
-            />
+            />}
           </div>
         </div>
       ) : null}
@@ -19808,6 +19988,7 @@ export function App() {
           isToolPanelAvailable={isBottomDrawerAvailable}
           maxDraftLength={MAX_CHAT_MESSAGE_CHARS}
           canAttachEditorSnapshot={canAttachEditorSnapshot}
+          onAttachProblem={attachDroppedProblem}
           onAttachMediaFiles={attachDroppedMedia}
           onAttachMediaPaths={(paths) => {
             void (async () => {
@@ -19984,6 +20165,8 @@ export function App() {
               );
           }}
           onSelectFile={(path) => openEditorLocation(path)}
+          onSelectSymbol={revealDocumentSymbol}
+          symbols={workbench.ide.documentSymbols}
           onSelectSession={selectSession}
           onSelectWorkspaceLayout={selectWorkspaceLayout}
           hasWorkspace={Boolean(activeSession?.workspacePath ?? workspacePath)}
@@ -20054,7 +20237,7 @@ export function App() {
                 >
                   <AppearanceContext.Provider value={appearance}>
                     <LocalCheckHost
-                      sessions={sessions}
+                      sessions={sessions} events={sessionEventsById}
                       reminders={checkReminders.reminders}
                       onDismissReminder={checkReminders.dismiss}
                       cloudRequest={
@@ -20083,6 +20266,16 @@ export function App() {
                       {appChrome}
                       <FirstRunTour
                         destination={activeDestination}
+                        onStartFirstTask={async (initialDraft) => {
+                          const selected = isUserSelectedWorkspacePath(workspaceActionRoot)
+                            ? workspaceActionRoot : await openWorkspace();
+                          if (!selected) return;
+                          startNewChat({
+                            workspacePath: selected, initialDraft,
+                            draftKey: `first-task:${crypto.randomUUID()}`,
+                            preserveOpenPanes: true,
+                          });
+                        }}
                         onActiveChange={setIsFirstRunTourActive}
                         providerConfigured={workbench.providerStatuses.some(
                           (provider) =>

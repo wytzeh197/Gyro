@@ -79,11 +79,18 @@ pub(crate) fn task_run_blocking(request: TaskRunRequest) -> Result<IdeCommandOut
     }
     let working_directory = task_working_directory(&root, task.cwd.as_deref())?;
     let mut command = command_with_gui_path(&task.command);
-    command.current_dir(working_directory).args(&task.args);
+    command.current_dir(&working_directory).args(&task.args);
     configure_noninteractive_task_environment(&mut command, &task.command);
     let handle = TaskRunHandle::register(&root, &task.id);
     let mut output =
         run_workspace_task_output_with_cancellation(command, handle.token()).map_err(to_string)?;
+    output.diagnostics = super::task_problems::task_problems(
+        &root,
+        &working_directory,
+        &format!("task:{}", task.id),
+        &output.stdout,
+        &output.stderr,
+    );
     if output.status == "done" {
         output.stdout = format!("task {} completed\n{}", task.id, output.stdout);
     }
@@ -166,11 +173,60 @@ pub(crate) fn test_run_blocking(request: TestRunRequest) -> Result<IdeCommandOut
     }
     let working_directory = task_working_directory(&root, task.cwd.as_deref())?;
     let mut command = command_with_gui_path(&task.command);
-    command.current_dir(working_directory).args(&task.args);
+    command.current_dir(&working_directory).args(&task.args);
     configure_noninteractive_task_environment(&mut command, &task.command);
     let handle = TaskRunHandle::register(&root, &task.id);
     let mut output =
         run_workspace_task_output_with_cancellation(command, handle.token()).map_err(to_string)?;
+    output.diagnostics = super::task_problems::task_problems(
+        &root,
+        &working_directory,
+        &format!("task:{}", task.id),
+        &output.stdout,
+        &output.stderr,
+    );
     output.stdout = format!("tests {:?}\n{}", vec![task.id], output.stdout);
     Ok(output)
+}
+
+#[cfg(test)]
+mod problem_tests {
+    use super::*;
+    #[test]
+    fn native_task_and_test_results_publish_real_command_diagnostics() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir(root.join(".gyro")).unwrap();
+        std::fs::create_dir(root.join("member")).unwrap();
+        std::fs::write(root.join("member/main.ts"), "broken").unwrap();
+        let args = vec![
+            "-c".to_string(),
+            "printf 'main.ts(2,3): error TS2322: broken\\n' >&2; exit 1".to_string(),
+        ];
+        std::fs::write(root.join(".gyro/tasks.json"), serde_json::to_vec(&serde_json::json!({
+            "version": 1, "tasks":[{"id":"compiler", "label":"Check", "command":"/bin/sh", "args": args, "group":"test", "cwd":"member"}]
+        })).unwrap()).unwrap();
+        let request = TaskRunRequest {
+            workspace_path: root.display().to_string(),
+            task_id: "compiler".into(),
+            command: "/bin/sh".into(),
+            args: args.clone(),
+        };
+        let result = task_run_blocking(request).unwrap();
+        assert_eq!(result.status, "failed");
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].source, "task:compiler");
+        assert!(result.diagnostics[0].path.ends_with("/member/main.ts"));
+        let wire = serde_json::to_value(&result).unwrap();
+        assert_eq!(wire["diagnostics"][0]["startLineNumber"], 2);
+        let result = test_run_blocking(TestRunRequest {
+            workspace_path: root.display().to_string(),
+            test_ids: Some(vec!["compiler".into()]),
+            command: Some("/bin/sh".into()),
+            args: Some(args),
+        })
+        .unwrap();
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].start_column, 3);
+    }
 }

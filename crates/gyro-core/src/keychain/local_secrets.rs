@@ -50,6 +50,30 @@ pub(super) fn set(account: &str, value: &str) -> Result<()> {
     })
 }
 
+/// Resolve and insert once under the same cross-process store lock.
+pub(super) fn get_or_insert_with(
+    account: &str,
+    create: impl FnOnce() -> Result<String>,
+) -> Result<String> {
+    let dir = data_dir()?;
+    get_or_insert_at(&dir, account, create)
+}
+fn get_or_insert_at(
+    dir: &Path,
+    account: &str,
+    create: impl FnOnce() -> Result<String>,
+) -> Result<String> {
+    with_store(dir, true, |store| {
+        if let Some(value) = store.entries.get(account) {
+            return Ok(value.clone());
+        }
+        let value = create()?;
+        validate(account, &value)?;
+        store.entries.insert(account.into(), value.clone());
+        Ok(value)
+    })
+}
+
 #[cfg_attr(test, allow(dead_code))]
 pub(super) fn delete(account: &str) -> Result<()> {
     let dir = data_dir()?;
@@ -175,6 +199,24 @@ fn lock_exclusive(file: &File) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identity_creation_is_atomic_and_failed_migration_does_not_replace_it() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(get_or_insert_at(dir.path(), "identity", || anyhow::bail!(
+            "legacy key locked"
+        ))
+        .is_err());
+        assert!(!dir.path().join(FILE_NAME).exists());
+        assert_eq!(
+            get_or_insert_at(dir.path(), "identity", || Ok("original".into())).unwrap(),
+            "original"
+        );
+        assert_eq!(
+            get_or_insert_at(dir.path(), "identity", || panic!("must preserve identity")).unwrap(),
+            "original"
+        );
+    }
 
     #[test]
     fn saved_keys_stay_in_a_private_file_and_survive_a_second_write() {

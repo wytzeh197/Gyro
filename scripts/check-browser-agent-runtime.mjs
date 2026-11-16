@@ -151,6 +151,37 @@ try {
     if (!baseline) assert.equal(passed, true, name);
   };
   await check(
+    "background input and page observations preserve the person's typing target",
+    `(() => {
+      const typingTarget = document.createElement('textarea');
+      document.body.append(typingTarget);
+      typingTarget.focus();
+      typingTarget.value = 'still typing';
+      typingTarget.setSelectionRange(5, 5);
+      const original = Object.getOwnPropertyDescriptor(document, 'hasFocus');
+      Object.defineProperty(document, 'hasFocus', {configurable:true, value:()=>false});
+      try {
+        const field = document.querySelector('#project');
+        const ref = __gyroBrowserAgent.find({selector:'#project'}).results[0].ref;
+        const typed = __gyroBrowserAgent.type({ref,text:'updated in background'});
+        __gyroBrowserAgent.readPage({maxDepth:3});
+        __gyroBrowserAgent.status();
+        const rect = field.getBoundingClientRect();
+        const clicked = __gyroBrowserAgent.backgroundPointer({
+          action:'click',x:rect.x+rect.width/2,y:rect.y+rect.height/2
+        });
+        return typed.ok && clicked.ok && field.value === 'updated in background'
+          && document.activeElement === typingTarget
+          && typingTarget.value === 'still typing'
+          && typingTarget.selectionStart === 5 && typingTarget.selectionEnd === 5;
+      } finally {
+        if (original) Object.defineProperty(document, 'hasFocus', original);
+        else delete document.hasFocus;
+        typingTarget.remove();
+      }
+    })()`,
+  );
+  await check(
     "find resolves associated form labels",
     `(() => {
     const result = __gyroBrowserAgent.find({query:'Project name'});

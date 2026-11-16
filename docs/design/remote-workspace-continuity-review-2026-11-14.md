@@ -1,0 +1,34 @@
+# Remote workspace continuity
+
+Connecting to another Mac previously replaced the local App with a remote AppChrome. This hid the connecting Mac's projects and unmounted its active local workspace. The desktop now keeps one AppChrome and the local App mounted, adds host-scoped remote project rows beside the local folders, and displays remote content inside that shell.
+
+## Behavior
+
+- Local chats, folders, layout, and drafts remain on this Mac while remote projects are open. Remote IDs and paths never enter local session, provider, editor, or drag routing.
+- Remote folders use the existing folder and chat row components, Remote indicator, and compact more/less controls. The Environment card retains its inline remote indicator and host tools.
+- Sidebar project roots are synchronized automatically. Stable roots retain their remote project IDs; removing a root removes its shared access and invalidates affected remote tools.
+- Pairing approval grants both directions. Legacy approved inbound clients migrate to reciprocal peers; host records awaiting approval do not gain inbound authorization. Both Macs must enable Remote access.
+- Settings receive the invitation's live availability. Consuming or expiring the code dismisses the invitation panel; approval remains a separate explicit action. The joining Mac clears its pending form on approval.
+- Workspace cleanup releases only its own control generation. Local global editor shortcuts are inactive while remote content is visible.
+
+## Review
+
+- **Pass, source and browser fixture:** existing Gyro components and semantic tokens; no new palette or visual primitives.
+- **Pass, browser fixture:** local/remote folders coexist with identical paths and IDs; local history and draft survive switching; Remote marker stays inline; automatic project discovery; used invitation closes without waiting five minutes; compact remote chat list; offline/reconnect, files, Git, terminal, chat submission, and Environment details keyboard/focus behavior.
+- **Pass, source and Rust tests:** single-use invitations, explicit reciprocal approval, migration boundaries, stable project IDs, and removal of shared worktree scope.
+- **Pass, installed native app (2026-11-14):** Apple Silicon bundle installed at `~/Applications/Gyro.app`; signature and bundled frontend checked. After macOS Keychain approval, Remote access showed **On · Reachable**, automatic sidebar project sharing, and the existing paired MacBook as **Host and client**. An existing local chat opened with its original history after an unavailable-host connection attempt. All 213 original session IDs, 724 original session files, and the previously shared project ID were retained. The local test build used command-line package optimization overrides for faster compilation; repository build settings are unchanged.
+- **Unverified:** the new build on two physical Macs and live-provider requests across that pair. The MacBook reported unavailable during this native check; it still needs the updated app for the two-device retest. Browser evidence is an explicit fixture using production components, not a physical-device acceptance test.
+
+Validation: `pnpm -r typecheck`, `node scripts/check-ui-tokens.mjs`, `node scripts/check-sidebar-project-groups.mjs`, `node --experimental-strip-types scripts/check-remote-access-client.mjs`, `node scripts/check-remote-access-browser.mjs`, and `cargo test --release --locked -p gyro-remote --lib`.
+
+## Proposed project rule
+
+Connecting a device adds host-scoped projects to the existing workspace and preserves local navigation and state. The reason is continuity: opening another Mac should not make this Mac's work disappear. This is a proposed Gyro project rule; shared instructions have not been changed.
+
+## Sidebar connection notices correction
+
+Turning Remote access on must not add connection status messages to the host's project sidebar. Removed background connecting, unavailable/retry, and empty-host notices. Available remote project folders still appear automatically, and explicit remote workspace connection controls remain in that workspace. No tokens, visual primitives, or keyboard actions were added.
+
+Proposed Gyro rule: the project sidebar contains local and remote projects; background device discovery must not add standalone connection notices. This keeps enabling hosting from looking like a request to connect to another device. Shared instructions have not been changed.
+
+Verification for this correction: workspace TypeScript, UI token checks, and the remote browser flow passed, including absence of background peer notices while remote folders remain available. Reinstalled the local app, verified its signature and final frontend assets, confirmed **On · Reachable** with three automatically shared projects, then returned to a clean native sidebar. All 213 existing session IDs, session files, and configuration were preserved. The correction was pushed only after this native verification.

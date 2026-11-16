@@ -119,7 +119,8 @@
         const pointerDefault = send(target, "pointerdown", x, y, buttons);
         const mouseDefault =
           pointerDefault && send(target, "mousedown", x, y, buttons);
-        if (mouseDefault && typeof target.focus === "function")
+        // Background input must leave keyboard ownership with the user.
+        if (mouseDefault && document.hasFocus() && typeof target.focus === "function")
           target.focus({ preventScroll: true });
         const nativeRange =
           action !== "secondary-click" &&

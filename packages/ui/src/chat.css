@@ -26,6 +26,9 @@
   --gyro-chat-space-4: calc(16px * var(--gyro-ui-scale, 1));
   --gyro-chat-raised: var(--gyro-surface);
   --gyro-chat-hairline: var(--gyro-border);
+  /* Header bottom-border width; mirrored as top padding to keep controls
+     centred on the native traffic lights. Unscaled, like the border. */
+  --gyro-chat-header-hairline-width: 1px;
   --gyro-chat-motion-fast: 120ms;
   --gyro-chat-motion-normal: 240ms;
   --gyro-chat-motion-reduced: 1ms;
@@ -326,16 +329,11 @@
 }
 :root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-header {
   color: var(--gyro-muted);
+  font-size: var(--gyro-chat-small-size);
   font-weight: 400;
+  line-height: 1.5;
   min-height: 0;
   padding: 0;
-}
-:root[data-theme]
-  .gyro-chat-surface
-  .gyro-run.is-segments:has(> .gyro-run-rail)
-  > .gyro-run-header {
-  border-bottom: 1px solid var(--gyro-border-soft);
-  padding-bottom: calc(var(--gyro-chat-space-1) * 3.5);
 }
 :root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-rail {
   gap: 0;
@@ -352,7 +350,7 @@
   .gyro-run.is-segments
   .gyro-run-row-item
   + .gyro-run-row-item {
-  margin-top: calc(var(--gyro-chat-space-1) * 1.5);
+  margin-top: var(--gyro-chat-space-2);
 }
 :root[data-theme]
   .gyro-chat-surface
@@ -364,7 +362,7 @@
   .gyro-run.is-segments
   .gyro-run-row-item
   + .gyro-run-say-item {
-  margin-top: calc(var(--gyro-chat-space-1) * 2.5);
+  margin-top: var(--gyro-chat-block-gap);
 }
 :root[data-theme]
   .gyro-chat-surface
@@ -481,7 +479,7 @@
 :root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-call-text {
   display: flex;
   flex: 1 1 auto;
-  gap: 0.3em;
+  gap: var(--gyro-chat-space-2);
   min-width: 0;
 }
 :root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-call-verb {
@@ -817,35 +815,6 @@
 }
 
 :root[data-theme]
-  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
-  .gyro-response-code-block {
-  /* A lifted sheet rather than a dark well: the block reads as part of the
-     reply and keeps one hairline in both themes. */
-  border: 1px solid var(--gyro-border);
-  color: var(--gyro-code-text);
-  font-family: var(--gyro-font-mono);
-  font-size: var(--gyro-font-support);
-}
-
-:root[data-theme]
-  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
-  .gyro-response-table {
-  color: var(--gyro-text);
-  font-size: var(--gyro-font-support);
-}
-
-:root[data-theme]
-  :is(.gyro-chat-surface, .gyro-side-chat, .gyro-chat-companion-content)
-  .gyro-response-table
-  th {
-  color: var(--gyro-text);
-}
-:root[data-theme] .gyro-chat-surface .gyro-run.is-segments .gyro-run-header {
-  font-size: var(--gyro-chat-small-size);
-  line-height: 1.5;
-}
-
-:root[data-theme]
   .gyro-chat-surface
   .gyro-run.is-segments
   :is(.gyro-run-call, .gyro-run-segment-toggle, .gyro-run-calls-more) {
@@ -1052,6 +1021,17 @@
   box-shadow: 0 10px 30px
     color-mix(in srgb, var(--gyro-heavy-shadow) 50%, transparent);
   padding: calc(var(--gyro-chat-space-1) * 1.5);
+}
+
+/* The environment card is the panel's surface; the aside only places it. */
+:root[data-theme]
+  .gyro-chat-surface:is(.is-thread, .is-empty)
+  > .gyro-chat-environment-popover.is-env-card {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-xl);
+  box-shadow: none;
 }
 
 :root[data-theme] .gyro-chat-environment-popover > header {
@@ -1892,12 +1872,6 @@
   color: var(--gyro-muted);
 }
 :root[data-theme]
-  .gyro-chat-surface
-  .gyro-run.is-segments
-  .gyro-run-header-toggle {
-  min-height: 24px;
-}
-:root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-run-change-summary.is-complete {
   border-color: var(--gyro-border-soft);
@@ -2167,7 +2141,9 @@
   box-sizing: border-box;
   height: var(--gyro-chat-header-height);
   min-height: var(--gyro-chat-header-height);
-  padding-block: 0;
+  /* 1px top balances the 1px bottom hairline, so title and actions centre on
+     the native traffic lights (y 23), level with the sidebar window row. */
+  padding-block: var(--gyro-chat-header-hairline-width) 0;
   border-bottom: 1px solid var(--gyro-border-soft);
   box-shadow: none;
 }
@@ -3675,106 +3651,95 @@
   color: var(--gyro-muted);
 }
 
-.gyro-dictation-button {
+.gyro-dictation-control {
   position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
 }
-
-.gyro-dictation-button.is-listening {
-  background: color-mix(in srgb, var(--gyro-accent) 22%, transparent);
+:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-composer-bar .gyro-dictation-control .gyro-dictation-button {
+  align-items: center;
+  justify-content: center;
+  display: inline-flex;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-pill);
+  background: var(--gyro-surface);
+  color: var(--gyro-muted);
+  gap: var(--gyro-space-standard);
+}
+:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-composer-bar .gyro-dictation-control .gyro-dictation-button:hover {
+  background: var(--gyro-surface-raised);
   color: var(--gyro-text);
 }
-.gyro-dictation-badge {
-  align-items: center;
-  background: var(--gyro-accent);
-  border-radius: var(--gyro-radius-pill);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gyro-surface) 70%, transparent);
+:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-composer-bar .gyro-dictation-control .gyro-dictation-button.is-listening {
+  width: auto;
+  max-width: none;
+  flex-basis: auto;
+  aspect-ratio: auto;
+  padding-inline: var(--gyro-space-group);
+  background: color-mix(in srgb, var(--gyro-status-running) 12%, var(--gyro-surface));
+  border-color: var(--gyro-status-running);
   color: var(--gyro-text);
-  display: none;
-  height: calc(14px * var(--gyro-ui-scale, 1));
-  justify-content: center;
-  pointer-events: none;
-  position: absolute;
-  right: calc(1px * var(--gyro-ui-scale, 1));
-  top: calc(1px * var(--gyro-ui-scale, 1));
-  width: calc(14px * var(--gyro-ui-scale, 1));
 }
-
-.gyro-dictation-button.is-listening .gyro-dictation-badge,
-.gyro-dictation-button.is-processing .gyro-dictation-badge {
-  display: inline-flex;
+:root[data-theme] .gyro-chat-surface:is(.is-thread, .is-empty) .gyro-composer-bar .gyro-dictation-control .gyro-dictation-button.is-listening > svg {
+  color: var(--gyro-status-running);
 }
-
-.gyro-dictation-wave {
-  align-items: center;
-  display: inline-flex;
-  gap: calc(var(--gyro-chat-space-1) * 0.375);
-  height: 100%;
-  justify-content: center;
+.gyro-dictation-label {
+  font-size: var(--gyro-chat-meta-size);
+  font-weight: 500;
+  white-space: nowrap;
 }
-
-.gyro-dictation-wave > span {
-  animation: gyro-dictation-beat var(--gyro-chat-motion-spin) ease-in-out
-    infinite;
-  background: currentColor;
-  border-radius: var(--gyro-radius-pill);
-  display: block;
-  height: calc(5px * var(--gyro-ui-scale, 1));
-  width: calc(2px * var(--gyro-ui-scale, 1));
-}
-
-.gyro-dictation-wave > span:nth-child(2) {
-  animation-delay: var(--gyro-chat-motion-fast);
-}
-
-.gyro-dictation-wave > span:nth-child(3) {
-  animation-delay: var(--gyro-chat-motion-normal);
-}
-.gyro-dictation-stop,
-.gyro-dictation-button.is-listening:hover .gyro-dictation-wave,
-.gyro-dictation-button.is-listening:focus-visible .gyro-dictation-wave,
-.gyro-dictation-button.is-processing .gyro-dictation-wave {
-  display: none;
-}
-
-.gyro-dictation-button.is-listening:hover .gyro-dictation-stop,
-.gyro-dictation-button.is-listening:focus-visible .gyro-dictation-stop {
-  display: block;
-}
-
-.gyro-dictation-button.is-processing .gyro-dictation-stop {
-  display: none;
-}
-
-.gyro-dictation-spinner {
+.gyro-dictation-progress {
   animation: gyro-dictation-spin var(--gyro-chat-motion-spin) linear infinite;
-  border-radius: var(--gyro-radius-pill);
-  border: calc(1.5px * var(--gyro-ui-scale, 1)) solid
-    color-mix(in srgb, currentColor 32%, transparent);
-  border-top-color: currentColor;
-  display: none;
-  height: calc(8px * var(--gyro-ui-scale, 1));
-  width: calc(8px * var(--gyro-ui-scale, 1));
 }
-
-.gyro-dictation-button.is-processing .gyro-dictation-spinner {
-  display: block;
+.gyro-dictation-feedback {
+  position: absolute;
+  inset-block-end: calc(100% + var(--gyro-space-standard));
+  inset-inline-end: 0;
+  z-index: var(--gyro-layer-composer-slash);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gyro-space-standard);
+  width: max-content;
+  max-width: min(calc(var(--gyro-space-panel) * 18), calc(100vw - var(--gyro-space-panel) * 2));
+  box-sizing: border-box;
+  padding: var(--gyro-space-group);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-surface-raised);
+  color: var(--gyro-text);
 }
-
+.gyro-dictation-feedback p {
+  margin: 0;
+  font-size: var(--gyro-chat-meta-size);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.gyro-dictation-feedback button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: var(--gyro-control-compact);
+  height: var(--gyro-control-compact);
+  padding: 0;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  background: transparent;
+  color: var(--gyro-muted);
+  cursor: pointer;
+}
+.gyro-dictation-feedback button:hover {
+  color: var(--gyro-text);
+  background: var(--gyro-surface);
+}
+.gyro-dictation-control button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
 @media (prefers-reduced-motion: reduce) {
-  .gyro-dictation-wave > span {
+  .gyro-dictation-progress {
     animation: none;
   }
-
-  .gyro-dictation-spinner {
-    animation-duration: var(--gyro-chat-motion-spin);
-  }
-}
-
-.gyro-dictation-status {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-chat-meta-size);
-  margin: 0;
-  padding: 0 var(--gyro-chat-block-gap) calc(var(--gyro-chat-space-1) * 1.5);
 }
 
 .gyro-chat-surface-controls {
@@ -6596,19 +6561,11 @@
 
 .gyro-response-inline-code,
 .gyro-response-command-list code {
-  background: color-mix(
-    in srgb,
-    var(--gyro-chat-media-text) 10.5%,
-    transparent
-  );
+  background: var(--gyro-control-bg);
   border-radius: var(--gyro-radius-sm);
-  box-shadow:
-    inset 0 0 0 0.5px
-      color-mix(in srgb, var(--gyro-chat-media-text) 7.5%, transparent),
-    inset 0 1px 0
-      color-mix(in srgb, var(--gyro-chat-media-text) 4%, transparent);
+  box-shadow: inset 0 0 0 1px var(--gyro-border-soft);
   color: var(--gyro-text);
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--gyro-font-mono);
   /* A ladder step rather than 0.92em: mono renders optically larger than the
      14px body, and a fractional size renders soft on a non-retina display. */
   font-size: var(--gyro-font-support);
@@ -6653,45 +6610,73 @@
 }
 
 .gyro-response-code-block {
-  color: var(--gyro-text);
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  color: var(--gyro-code-text);
+  font-family: var(--gyro-font-mono);
   font-size: var(--gyro-font-support);
   max-width: 100%;
   overflow: auto;
-  padding: var(--gyro-chat-block-gap);
+  padding: var(--gyro-chat-space-4);
 }
 
 .gyro-response-code-block code {
   font: inherit;
 }
 
+.gyro-response-code {
+  min-width: 0;
+  border: 1px solid var(--gyro-chat-hairline);
+  border-radius: var(--gyro-chat-radius-card);
+  background: var(--gyro-chat-raised);
+}
+
+.gyro-response-code-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gyro-chat-space-2);
+  padding: var(--gyro-chat-space-1) var(--gyro-chat-block-gap)
+    var(--gyro-chat-space-1) var(--gyro-chat-space-4);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  color: var(--gyro-muted);
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-chat-meta-size);
+}
+
+.gyro-response-code-heading > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .gyro-response-table-wrap {
   max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
+  border: 1px solid var(--gyro-chat-hairline);
+  border-radius: var(--gyro-chat-radius-card);
 }
 
 .gyro-response-table {
   border-collapse: collapse;
+  color: var(--gyro-text);
   font-size: var(--gyro-font-support);
   line-height: 1.5;
   max-width: 100%;
+  width: 100%;
 }
 
 .gyro-response-table th,
 .gyro-response-table td {
-  border-bottom: 0.5px solid
-    color-mix(in srgb, var(--gyro-chat-media-text) 9%, transparent);
-  padding: calc(var(--gyro-chat-space-1) * 1.75) var(--gyro-chat-block-gap);
+  border-bottom: 1px solid var(--gyro-border-soft);
+  padding: var(--gyro-chat-space-2) var(--gyro-chat-block-gap);
   text-align: left;
   vertical-align: top;
 }
 
 .gyro-response-table th {
-  border-bottom-color: color-mix(
-    in srgb,
-    var(--gyro-chat-media-text) 17%,
-    transparent
-  );
+  background: var(--gyro-chat-raised);
+  border-bottom-color: var(--gyro-chat-hairline);
   color: var(--gyro-text);
   font-weight: 600;
   white-space: nowrap;
@@ -6702,38 +6687,13 @@
 }
 
 .gyro-response-table tbody tr:nth-child(even) {
-  background: color-mix(in srgb, var(--gyro-chat-media-text) 2.2%, transparent);
-}
-
-:root[data-theme="light"]
-  :is(.gyro-response-table th, .gyro-response-table td) {
-  border-bottom-color: color-mix(
-    in srgb,
-    var(--gyro-chat-media-shade) 10%,
-    transparent
-  );
-}
-
-:root[data-theme="light"] .gyro-response-table th {
-  border-bottom-color: color-mix(
-    in srgb,
-    var(--gyro-chat-media-shade) 19%,
-    transparent
-  );
-  color: var(--gyro-text);
-}
-
-:root[data-theme="light"] .gyro-response-table tbody tr:nth-child(even) {
-  background: color-mix(
-    in srgb,
-    var(--gyro-chat-media-shade) 2.2%,
-    transparent
-  );
+  background: var(--gyro-chat-raised);
 }
 
 .gyro-response-actions {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: var(--gyro-chat-space-2);
   margin-top: var(--gyro-chat-space-2);
   min-height: 28px;
@@ -6742,17 +6702,20 @@
   padding-left: 0;
 }
 
-.gyro-response-actions button {
+.gyro-response-actions button,
+.gyro-response-code-heading button {
   align-items: center;
   background: transparent;
   border: 0;
+  box-shadow: none;
   border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   display: inline-flex;
-  height: 28px;
+  height: var(--gyro-control-standard);
+  flex: none;
   justify-content: center;
   padding: 0;
-  width: 28px;
+  width: var(--gyro-control-standard);
 }
 
 .gyro-message-copy {
@@ -6780,6 +6743,49 @@
 .gyro-response-actions button:hover {
   background: color-mix(in srgb, var(--gyro-chat-media-text) 6%, transparent);
   color: var(--gyro-text);
+}
+
+.gyro-chat-turn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gyro-chat-space-2);
+  margin-top: var(--gyro-chat-block-gap);
+}
+
+.gyro-chat-turn-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gyro-chat-space-2);
+  min-height: var(--gyro-control-standard);
+  padding: var(--gyro-chat-space-1) var(--gyro-chat-space-2);
+  background: transparent;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--gyro-chat-meta-size);
+}
+
+.gyro-chat-turn-actions button:hover,
+.gyro-response-code-heading button:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+
+:is(
+    .gyro-chat-turn-actions,
+    .gyro-response-actions,
+    .gyro-response-code-heading
+  )
+  button:focus-visible,
+.gyro-response-table-wrap:focus-visible,
+.gyro-response-code-block:focus-visible,
+.gyro-run-header-toggle:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
 }
 
 @media (max-width: 780px) {
@@ -7050,23 +7056,6 @@
   box-shadow:
     inset 0 0 0 0.5px color-mix(in srgb, var(--gyro-shadow) 12%, transparent),
     0 12px 28px color-mix(in srgb, var(--gyro-shadow) 8%, transparent);
-}
-
-:root[data-theme="light"] .gyro-response-inline-code,
-:root[data-theme="light"] .gyro-response-command-list code {
-  background: color-mix(in srgb, var(--gyro-chat-raised) 8%, transparent);
-  box-shadow: inset 0 0 0 0.5px
-    color-mix(in srgb, var(--gyro-shadow) 10%, transparent);
-  color: var(--gyro-text);
-}
-
-:root[data-theme="light"] .gyro-response-link,
-:root[data-theme="light"] .gyro-response-link:hover {
-  color: var(--gyro-accent);
-}
-
-:root[data-theme="light"] .gyro-response-code-block {
-  color: var(--gyro-text);
 }
 
 :root[data-theme="light"] .gyro-response-actions button:hover {
@@ -11863,6 +11852,7 @@ button.gyro-response-changed-files:hover {
   font-weight: 400;
   gap: calc(var(--gyro-chat-space-1) * 1.25);
   letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
   min-height: 28px;
   padding: 0 0 calc(var(--gyro-chat-space-1) * 0.5);
   margin-bottom: var(--gyro-chat-block-gap);
@@ -11879,6 +11869,8 @@ button.gyro-response-changed-files:hover {
   display: flex;
   font: inherit;
   gap: calc(var(--gyro-chat-space-1) * 1.25);
+  min-height: var(--gyro-control-standard);
+  border-radius: var(--gyro-radius-sm);
   padding: 0;
 }
 
@@ -13952,10 +13944,6 @@ button.gyro-response-changed-files:hover {
   padding-top: var(--gyro-chat-turn-gap);
 }
 
-.gyro-response-actions button {
-  box-shadow: none;
-}
-
 .gyro-chat-thread-topbar {
   background: var(--gyro-pane);
   border-bottom-color: var(--gyro-border-soft);
@@ -15917,6 +15905,9 @@ button.gyro-response-changed-files:hover {
 }
 :root[data-theme] .gyro-app-shell.is-thread-layout .gyro-chat-thread-topbar {
   padding-right: var(--gyro-space-standard);
+  /* Re-assert the hairline balance (see the shared header rule) over later
+     thread-topbar padding resets. */
+  padding-top: var(--gyro-chat-header-hairline-width);
 }
 
 :root[data-theme]
@@ -17756,6 +17747,31 @@ button.gyro-response-changed-files:hover {
   line-height: 18px;
   padding: 0 calc(var(--gyro-chat-space-1) * 1.75);
 }
+.gyro-plan-blocked-badge {
+  cursor: help;
+}
+.gyro-plan-blocked-badge:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+.gyro-plan-blocked-tooltip {
+  background: var(--gyro-sidebar);
+  box-sizing: border-box;
+  border: 1px solid var(--gyro-premium-hairline);
+  border-radius: var(--gyro-radius-md);
+  box-shadow: 0 6px 24px var(--gyro-premium-shadow);
+  color: var(--gyro-text);
+  font-size: var(--gyro-chat-meta-size);
+  line-height: 1.5;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: var(--gyro-space-group) var(--gyro-chat-block-gap);
+  position: fixed;
+  white-space: pre-wrap;
+  width: min(300px, calc(100vw - 24px));
+  z-index: 1000;
+}
 .gyro-environment-plan-open {
   align-items: center;
   background: transparent;
@@ -17896,7 +17912,9 @@ button.gyro-response-changed-files:hover {
   .gyro-run.is-segments.is-minimal
   .gyro-run-segment
   > .gyro-motion-disclosure {
-  padding-left: calc(var(--gyro-icon-compact) + var(--gyro-space-standard));
+  margin-left: calc(var(--gyro-icon-compact) / 2);
+  padding-left: var(--gyro-chat-space-4);
+  border-left: 1px solid var(--gyro-border-soft);
 }
 :root[data-theme]
   .gyro-chat-surface
@@ -17909,7 +17927,11 @@ button.gyro-response-changed-files:hover {
   .gyro-chat-surface
   .gyro-run.is-segments.is-minimal
   .gyro-run-call.is-running {
+  /* Current calls stay on the flat work rail, including parallel batches. */
   color: var(--gyro-text);
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
 }
 :root[data-theme]
   .gyro-chat-surface
@@ -17917,6 +17939,8 @@ button.gyro-response-changed-files:hover {
   .gyro-run-call.is-running
   .gyro-run-call-text {
   animation: none;
+  flex-wrap: wrap;
+  row-gap: var(--gyro-chat-space-1);
 }
 :root[data-theme]
   .gyro-chat-surface
@@ -17930,6 +17954,21 @@ button.gyro-response-changed-files:hover {
   :is(.gyro-run-call.is-command, .gyro-run-call.is-file, .gyro-run-call.is-read)
   .gyro-run-call-target {
   font-family: var(--gyro-font-mono);
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments.is-minimal
+  .gyro-run-call.is-running
+  .gyro-run-call-target {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-run.is-segments.is-minimal
+  .gyro-run-call.is-running
+  .gyro-run-row-icon {
+  color: var(--gyro-status-running);
 }
 :root[data-theme]
   .gyro-chat-surface
@@ -18865,12 +18904,7 @@ button.gyro-response-changed-files:hover {
   margin-left: 0;
   padding-left: 0;
 }
-.gyro-chat-surface
-  :is(
-    .gyro-chat-run-change-summary,
-    .gyro-response-code-block,
-    .gyro-chat-file-card
-  ) {
+.gyro-chat-surface :is(.gyro-chat-run-change-summary, .gyro-chat-file-card) {
   border: 1px solid var(--gyro-chat-hairline);
 }
 :is(.gyro-response-code-block code, .gyro-response-inline-code),
@@ -18945,6 +18979,19 @@ button.gyro-response-changed-files:hover {
   max-width: none;
   max-height: calc(100% - var(--gyro-chat-space-2));
   margin: var(--gyro-chat-space-2) var(--gyro-chat-space-2) 0 0;
+}
+
+/* With a companion open, keep Environment inside the chat's grid column.
+   Absolute placement leaves both the transcript and companion geometry intact. */
+.gyro-chat-surface.is-thread.has-environment-overlay
+  > .gyro-chat-environment-popover {
+  position: absolute;
+  grid-column: 1;
+  grid-row: 2;
+  top: var(--gyro-chat-space-2);
+  right: var(--gyro-chat-space-2);
+  width: min(320px, calc(100% - 2 * var(--gyro-chat-space-2)));
+  max-height: calc(100% - 2 * var(--gyro-chat-space-2));
 }
 
 :root[data-theme] [data-chat-pane-drag][draggable="true"] {

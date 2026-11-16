@@ -282,6 +282,27 @@ try {
   );
   await screenshot("workflow-editor-dark");
   await click("Discard changes");
+  for (const name of [
+    "Fix and verify a bug",
+    "Fix a browser issue",
+    "Build and verify a feature",
+  ]) {
+    await click(name);
+    assert.equal(
+      await evaluate(
+        "document.querySelector('input[value=requirements]') !== null",
+      ),
+      true,
+    );
+    assert.equal(
+      await evaluate(
+        "document.querySelectorAll('.gyro-workflow-steps > li').length",
+      ),
+      3,
+      "implementation, verification and review",
+    );
+    await click("Discard changes");
+  }
   await click("Investigate a bug");
   assert.equal(
     await evaluate(

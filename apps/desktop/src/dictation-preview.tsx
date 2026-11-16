@@ -29,7 +29,7 @@ const config: GyroConfig = {
 
 const spoken = ["Add", "Add a microphone", "Add a microphone next to send"];
 
-function createFixtureDictation(): DictationController {
+function createFixtureDictation(scenario: string): DictationController {
   let timers: number[] = [];
   let active: DictationListener | null = null;
   const clear = () => {
@@ -41,31 +41,53 @@ function createFixtureDictation(): DictationController {
     start(listener) {
       clear();
       active = listener;
-      listener.onStart?.();
+      timers.push(window.setTimeout(() => listener.onStart?.(), 400));
+      if (scenario !== "speech") {
+        timers.push(
+          window.setTimeout(() => {
+            if (listener.signal.aborted || active !== listener) return;
+            listener.onError(
+              scenario === "silence"
+                ? "No speech was heard."
+                : "Allow microphone access in System Settings to dictate.",
+            );
+          }, 800),
+        );
+        return;
+      }
       spoken.forEach((text, index) => {
-        const id = window.setTimeout(() => {
-          if (listener.signal.aborted || active !== listener) return;
-          if (index === spoken.length - 1) {
-            active = null;
-            listener.onFinal(text);
-            return;
-          }
-          listener.onPartial(text);
-        }, 1600 * (index + 1));
+        const id = window.setTimeout(
+          () => {
+            if (listener.signal.aborted || active !== listener) return;
+            if (index === spoken.length - 1) {
+              active = null;
+              listener.onFinal(text);
+              return;
+            }
+            listener.onPartial(text);
+          },
+          1600 * (index + 1),
+        );
         timers.push(id);
       });
     },
     finish() {
       const listener = active;
       clear();
-      if (listener && !listener.signal.aborted) listener.onFinal(spoken.at(-1)!);
+      timers.push(
+        window.setTimeout(() => {
+          if (listener && !listener.signal.aborted)
+            listener.onFinal(spoken.at(-1)!);
+        }, 600),
+      );
     },
     stop: clear,
   };
 }
 
 function Fixture() {
-  const dictation = useMemo(createFixtureDictation, []);
+  const [scenario, setScenario] = useState("speech");
+  const dictation = useMemo(() => createFixtureDictation(scenario), [scenario]);
   const [draft, setDraft] = useState("Please");
   const [action, setAction] = useState("No action selected");
   return (
@@ -76,15 +98,38 @@ function Fixture() {
         .dictation-preview-controls strong { font-size: 13px; margin-right: auto; }
         .dictation-preview-controls button { background: var(--gyro-surface); color: var(--gyro-muted); border: 1px solid var(--gyro-border); border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 12px; cursor: pointer; }
         .dictation-preview-caption { margin: 0; padding: 10px 20px; color: var(--gyro-faint); font-size: 12px; }
-        .dictation-preview-stage { flex: 1; min-height: 0; display: grid; }
+        .dictation-preview-stage { flex: 1; min-height: 0; display: grid; overflow: auto; }
+        .dictation-preview-stage > .gyro-chat-surface { height: 100%; min-height: 0; }
+        .dictation-preview-stage .gyro-chat-start { min-height: 0; height: 100%; }
         .dictation-preview-result { margin: 0; padding: 10px 20px; border-top: 1px solid var(--gyro-border-soft); font-size: 12px; color: var(--gyro-muted); }
       `}</style>
-      <nav className="dictation-preview-controls" aria-label="Preview fixture controls">
+      <nav
+        className="dictation-preview-controls"
+        aria-label="Preview fixture controls"
+      >
         <strong>Dictation · component fixture</strong>
-        <button type="button" onClick={() => setDraft("Please")}>Draft: Please</button>
-        <button type="button" onClick={() => setDraft("")}>Clear draft</button>
+        <button type="button" onClick={() => setDraft("Please")}>
+          Draft: Please
+        </button>
+        <button type="button" onClick={() => setDraft("")}>
+          Clear draft
+        </button>
+        {["speech", "silence", "permission"].map((value) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={scenario === value}
+            onClick={() => setScenario(value)}
+          >
+            {value}
+          </button>
+        ))}
       </nav>
-      <p className="dictation-preview-caption">Actual Gyro composer. Fixture transcriber, no microphone. The mic sits left of Send. Click it to stream a canned sentence into the draft. Click again to finish and keep the words. Send stays a separate press.</p>
+      <p className="dictation-preview-caption">
+        Actual Gyro composer. Fixture transcriber, no microphone. The mic sits
+        left of Send. Click it to stream a canned sentence into the draft. Click
+        again to finish and keep the words. Send stays a separate press.
+      </p>
       <main className="dictation-preview-stage">
         <ChatSurface
           config={config}
@@ -97,10 +142,15 @@ function Fixture() {
           shellReady
         />
       </main>
-      <p className="dictation-preview-result" role="status">Draft: {draft || "(empty)"} · {action}</p>
+      <p className="dictation-preview-result" role="status">
+        Draft: {draft || "(empty)"} · {action}
+      </p>
     </div>
   );
 }
 
-document.documentElement.dataset.theme = "dark";
+document.documentElement.dataset.theme =
+  new URLSearchParams(location.search).get("theme") === "light"
+    ? "light"
+    : "dark";
 createRoot(document.getElementById("root")!).render(<Fixture />);

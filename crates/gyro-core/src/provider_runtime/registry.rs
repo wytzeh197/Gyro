@@ -53,6 +53,17 @@ impl ProviderRunner for CodexRunner {
         request: &ProviderChatRequest,
         resume: &ProviderResumeCursor,
     ) -> Option<anyhow::Result<Option<ProviderContextUsage>>> {
+        let home = (|| {
+            let mut command = host.prepare_command("codex", "openai", request)?;
+            super::codex_home::configure(&mut command, &host.paths()?)
+        })();
+        match home {
+            Ok(home) if !super::codex_home::owns_thread(&home, &resume.session_id) => {
+                return None;
+            }
+            Err(error) => return Some(Err(error)),
+            _ => {}
+        }
         Some(super::runners::codex::run_openai_codex_context_compaction(
             host, request, resume,
         ))

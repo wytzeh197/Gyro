@@ -28,6 +28,9 @@ const smoke = await read("apps/desktop/src-tauri/src/lsp_smoke.rs");
 const types = await read("packages/ui/src/types.ts");
 const chatRun = await read("packages/ui/src/chat-run.ts");
 const catalog = await read("packages/ui/src/provider-catalog.ts");
+const surfaces = await read("packages/ui/src/surfaces.tsx");
+const approval = await read("apps/desktop/src-tauri/src/capabilities/approval.rs");
+const execute = await read("apps/desktop/src-tauri/src/capabilities/execute.rs");
 
 const tools = [
   ["CodeDefinition", "code.definition", "gyro_code_definition"],
@@ -47,15 +50,15 @@ for (const [variant, id, tool] of tools) {
     capabilities.includes(`"${tool}"`),
     `${tool} is missing from provider_tool_name`,
   );
-  // The descriptors must exist, and stay inspection-class so Plan mode can
-  // advertise them.
+  // Language servers can execute project build scripts and plugins, so even
+  // semantic queries need command authority and must stay out of Plan mode.
   const descriptor = capabilities.match(
     new RegExp(`id: CapabilityId::${variant},[\\s\\S]{0,240}?description:`),
   )?.[0];
   assert.ok(descriptor, `${variant} has no descriptor`);
   assert.ok(
-    descriptor.includes("CapabilityClass::WorkspaceInspect"),
-    `${variant} must stay WorkspaceInspect`,
+    descriptor.includes("CapabilityClass::TerminalExecute"),
+    `${variant} must require TerminalExecute`,
   );
 }
 
@@ -79,6 +82,28 @@ assert.match(
   lib,
   /CapabilityId::WorkspaceRead\s*\n\s*\| CapabilityId::WorkspaceReadRange\s*\n\s*\| CapabilityId::WorkspaceReadEditor\s*\n\s*\| CapabilityId::CodeDefinition/,
   "code capabilities must join the sensitive-path upgrade",
+);
+// Source contract: the production broker must finish every permission gate
+// and its live-policy recheck before the sole dispatch that can start an LSP.
+// The Rust tests exercise the actual classification and policy decisions.
+const handler = execute.slice(
+  execute.indexOf("fn handle_desktop_provider_capability_request_inner("),
+);
+const permissionLoop = handler.indexOf("for class in permission_classes.iter().copied()");
+const finalGuard = handler.indexOf("// Approval can wait for minutes.");
+const permissionRecheck = handler.indexOf("if capability_denied_permission(");
+const dispatch = handler.indexOf("match execute_provider_capability(app, &bound, &request)");
+assert.ok(permissionLoop > 0 && finalGuard > permissionLoop);
+assert.ok(permissionRecheck > finalGuard && dispatch > permissionRecheck);
+const gates = handler.slice(permissionLoop, finalGuard);
+assert.ok(gates.includes("if access == CapabilityAccess::Deny"));
+assert.ok(gates.includes('return fail("user-denied"'));
+assert.ok(gates.includes("wait_for_capability_approval("));
+assert.ok(gates.includes("capability_execution_guard::rejection("));
+assert.ok(!gates.includes("execute_provider_capability("));
+assert.ok(
+  handler.slice(permissionRecheck, dispatch).includes('return fail("policy-denied"'),
+  "policy revocation after an approval wait must prevent dispatch",
 );
 assert.ok(lib.includes("mod lsp_smoke;"), "lsp_smoke module not declared");
 assert.ok(
@@ -126,28 +151,31 @@ for (const id of [
 // The labels and the tool mapping are executed from the shipped
 // implementations rather than pattern-matched: a refactor that keeps the
 // strings but drops the behaviour cannot pass.
-function executeFunction(source, fileName, functionName, argument) {
+function executeFunction(source, fileName, functionName, argument, dependencies = []) {
   const ast = ts.createSourceFile(
     fileName,
     source,
     ts.ScriptTarget.Latest,
     true,
-    ts.ScriptKind.TS,
+    fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
-  let declaration;
+  const declarations = new Map();
+  const names = [functionName, ...dependencies];
   const visit = (node) => {
     if (
       ts.isFunctionDeclaration(node) &&
-      node.name?.getText(ast) === functionName
+      names.includes(node.name?.getText(ast))
     ) {
-      declaration ??= node.getText(ast);
+      declarations.set(node.name.getText(ast), node.getText(ast));
     }
     ts.forEachChild(node, visit);
   };
   visit(ast);
-  assert.ok(declaration, `${fileName} no longer declares ${functionName}`);
+  for (const name of names) {
+    assert.ok(declarations.has(name), `${fileName} no longer declares ${name}`);
+  }
   const code = ts.transpileModule(
-    `${declaration}; globalThis.run = ${functionName};`,
+    `${[...declarations.values()].join("\n")}; globalThis.run = ${functionName};`,
     {
       compilerOptions: {
         target: ts.ScriptTarget.ES2022,
@@ -188,5 +216,37 @@ assert.deepEqual(
   ["files"],
   "code capabilities do not map to the files tool",
 );
+
+// Execute the shipped event adapter with the exact backend approval copy.
+// The existing card uses reason as its visible description.
+const executionReason = JSON.parse(
+  approval.match(/const LANGUAGE_SERVER_EXECUTION_REASON: &str = ("[^"\n]+");/)?.[1] ?? "null",
+);
+assert.match(executionReason, /may run project build scripts or plugins/);
+assert.ok(surfaces.includes("description={approval.reason ?? approval.risk}"));
+const approvalDependencies = [
+  "eventPayloadRecord", "stringFromEventPayload", "recordFromUnknown", "stringFromRecord",
+];
+for (const [variant] of tools) {
+  const capabilityId = variant.replace(/[A-Z]/g, (letter, index) => `${index ? "-" : ""}${letter.toLowerCase()}`);
+  const adapted = executeFunction(
+    surfaces,
+    "surfaces.tsx",
+    "providerApprovalFromEvent",
+    {
+      kind: "approval-requested",
+      payload: {
+        kind: "capability-approval", approvalId: "approval", capabilityId,
+        capabilityClass: "terminal-execute", scopeKind: "path", scopeValue: "src/main.rs",
+        reason: executionReason, risk: "Execution permission", status: "waiting",
+      },
+    },
+    approvalDependencies,
+  );
+  assert.equal(adapted.reason, executionReason, `${capabilityId} must show the execution risk`);
+  assert.equal(adapted.risk, "Execution permission");
+  assert.equal(adapted.scope, "path · src/main.rs");
+  assert.equal(adapted.status, "pending");
+}
 
 console.log("code intelligence checks passed");

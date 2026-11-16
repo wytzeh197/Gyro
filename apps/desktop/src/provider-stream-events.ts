@@ -204,6 +204,30 @@ export function mergePersistedAndOptimisticEvents(
   optimisticEvents?: SessionEvent[],
   maxEvents: number = Number.POSITIVE_INFINITY,
 ) {
+  // Terminal recovery replaces only the interrupted stream snapshot. Matching
+  // its original position (including timestamp) leaves a new retry on the same
+  // turn visible even though each attempt restarts its timeline counter.
+  const recoveredPositions = new Set(
+    persistedEvents
+      .filter((event) => recordFromUnknown(event.payload)?.partialResponse === true)
+      .map(recoveryPositionKey)
+      .filter((key): key is string => key !== undefined),
+  );
+  const isRecoveredStream = (event: SessionEvent) => {
+    const payload = recordFromUnknown(event.payload);
+    return (
+      (payload?.kind === "provider-stream" ||
+        (isProviderActivityEvent(event) && payload?.activityKind === "commentary" &&
+          payload.partialResponse !== true)) &&
+      recoveredPositions.has(recoveryPositionKey(event) ?? "")
+    );
+  };
+  if (recoveredPositions.size > 0) {
+    optimisticEvents = optimisticEvents?.filter((event) => !isRecoveredStream(event));
+    // Page merging can already include the live copy in its first argument,
+    // even after the optimistic buffer has been cleared.
+    persistedEvents = persistedEvents.filter((event) => !isRecoveredStream(event));
+  }
   if (!optimisticEvents || optimisticEvents.length === 0) {
     return persistedEvents;
   }
@@ -328,6 +352,15 @@ export function mergePersistedAndOptimisticEvents(
     }),
     maxEvents,
   );
+}
+
+function recoveryPositionKey(event: SessionEvent) {
+  const payload = recordFromUnknown(event.payload);
+  const order = canonicalTimelineOrder(payload?.timelineOrder);
+  const createdAt = payload?.timelineCreatedAt;
+  return event.turnId && order !== undefined && typeof createdAt === "string" && createdAt
+    ? `${event.sessionId}:${event.turnId}:${order}:${createdAt}`
+    : undefined;
 }
 
 type TimelineMatch = { event: SessionEvent; index: number };
@@ -475,10 +508,17 @@ export function resetStreamingAssistantForRetry(
   turnId: string,
 ) {
   return events.filter((event) => {
-    if (event.kind !== "assistant-message" || event.turnId !== turnId) {
+    if (event.turnId !== turnId) {
       return true;
     }
-    return recordFromUnknown(event.payload)?.streaming !== true;
+    const payload = recordFromUnknown(event.payload);
+    if (event.kind === "assistant-message") {
+      return payload?.streaming !== true;
+    }
+    // Native providers may reuse item ids on a retry. Retire their live
+    // commentary so the new attempt receives its own timestamp and text.
+    return !(isProviderActivityEvent(event) && payload?.activityKind === "commentary" &&
+      payload.partialResponse !== true && typeof payload.providerSequence === "number");
   });
 }
 

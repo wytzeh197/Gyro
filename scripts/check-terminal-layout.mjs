@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./check-terminal-launch-selection.mjs";
 import { navigateTabList } from "../packages/ui/src/tab-navigation.ts";
 import {
   activeTerminalPaneId,

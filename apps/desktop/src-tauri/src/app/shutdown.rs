@@ -1,7 +1,7 @@
 #[cfg(unix)]
 use crate::ipc::cli::provider_host_ipc_paths;
 #[cfg(target_os = "macos")]
-use crate::window_controls::apply_macos_traffic_light_position;
+use crate::window_controls::apply_macos_native_window_controls;
 use crate::{
     automation::runtime::AutomationSchedulerControl,
     ide::{language_server, types::DebugAdapterManager},
@@ -123,8 +123,11 @@ pub(crate) fn remove_provider_host_ipc_socket(paths: GyroPaths, host_pid: u32) {
 
 #[cfg(target_os = "macos")]
 pub(crate) fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> {
-    if let Some(window) = app.get_webview_window("main") {
-        apply_macos_traffic_light_position(&window);
+    // Browser child views make get_webview_window("main") return None even
+    // though the native window still exists. Reuse it instead of building a
+    // second webview with the already-registered "main" label.
+    if let Some(window) = app.get_window("main") {
+        apply_macos_native_window_controls(&window);
         window.unminimize()?;
         window.show()?;
         window.set_focus()?;
@@ -138,7 +141,7 @@ pub(crate) fn restore_main_window(app: &tauri::AppHandle) -> anyhow::Result<()> 
         .first()
         .context("Gyro has no configured main window")?;
     let window = tauri::WebviewWindowBuilder::from_config(app, config)?.build()?;
-    apply_macos_traffic_light_position(&window);
+    apply_macos_native_window_controls(&window.as_ref().window());
     window.show()?;
     window.set_focus()?;
     Ok(())

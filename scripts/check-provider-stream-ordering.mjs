@@ -10,6 +10,7 @@ import {
   mergePersistedAndOptimisticEvents,
   mergeLiveCapabilityEvent,
   mergeProviderResponseEvents,
+  resetStreamingAssistantForRetry,
   orderProviderChatStreamEvent,
   sameTimelineEvent,
   endsStreamedTextBlock,
@@ -46,6 +47,80 @@ assert.equal(
   "unsaved text",
 );
 assert.equal(storedEditorApproval.payload.editorPreview, undefined);
+
+// Durable interrupted output replaces its live copy without swallowing a
+// subsequent attempt that reuses the turn and timeline order.
+for (const status of ["failed", "cancelled"]) {
+  const firstTime = "2026-11-15T10:00:00.000Z";
+  const retryTime = "2026-11-15T10:01:00.000Z";
+  const ref = { current: new Map() };
+  const frame = {
+    sessionId: "interrupted", turnId: "same-turn", providerId: "openai",
+    eventId: "first", sequence: 1, phase: "delta", textDelta: "Incomplete answer",
+    timelineOrder: 2, timelineCreatedAt: firstTime,
+  };
+  applyProviderChatStreamDeltas(ref, () => {}, [frame]);
+  const live = ref.current.get(frame.sessionId);
+  const recovery = {
+    id: `recovered-${status}`, sessionId: frame.sessionId, turnId: frame.turnId,
+    createdAt: firstTime, kind: "system-event",
+    message: "Partial response (interrupted):\n\nIncomplete answer",
+    payload: {
+      kind: "provider-activity", activityKind: "commentary", activityId: `partial-${status}`,
+      partialResponse: true, status, timelineOrder: 2, timelineCreatedAt: firstTime,
+    },
+  };
+  for (const persisted of [[recovery], [...live, recovery]]) {
+    const merged = mergePersistedAndOptimisticEvents(persisted, live);
+    assert.deepEqual(merged.map((event) => event.id), [recovery.id],
+      "refresh must show one labeled partial, even when the page retained live text");
+  }
+  for (const emptyBuffer of [[], undefined]) {
+    assert.deepEqual(
+      mergePersistedAndOptimisticEvents([...live, recovery], emptyBuffer).map((event) => event.id),
+      [recovery.id], "clearing the optimistic buffer cannot retain an unlabeled partial",
+    );
+  }
+  assert.equal(mergePersistedAndOptimisticEvents(live, []), live,
+    "without recovery or optimistic data, preserve the original array");
+  ref.current.set(frame.sessionId, resetStreamingAssistantForRetry(live, frame.turnId));
+  applyProviderChatStreamDeltas(ref, () => {}, [{
+    ...frame, eventId: "retry", timelineCreatedAt: retryTime, textDelta: "Fresh retry answer",
+  }]);
+  const retried = mergePersistedAndOptimisticEvents([recovery], ref.current.get(frame.sessionId));
+  assert.equal(retried.length, 2);
+  assert.equal(retried.find((event) => event.kind === "assistant-message").message, "Fresh retry answer");
+  const final = { ...live[0], id: "final", message: "Completed answer", payload: { ...live[0].payload, kind: "provider-response", streaming: false } };
+  assert.equal(mergePersistedAndOptimisticEvents([recovery, final], live).length, 2,
+    "recovery cannot consume the completed response on the same turn");
+
+  const native = { current: new Map() };
+  const activity = {
+    ...frame, phase: "activity", activityId: "reused-native-id", activityKind: "commentary",
+    activityLabel: "Incomplete", activityStatus: "running",
+  };
+  applyProviderChatStreamActivity(native, () => {}, activity);
+  applyProviderChatStreamActivity(native, () => {}, {
+    ...activity, eventId: "tool", sequence: 2, timelineOrder: 3,
+    activityId: "tool", activityKind: "command", activityLabel: "Checked a file",
+  });
+  applyProviderChatStreamActivity(native, () => {}, {
+    ...activity, sequence: 3, activityLabel: "Incomplete answer",
+  });
+  const nativeLive = native.current.get(frame.sessionId);
+  assert.ok(nativeLive.some((event) => event.payload.activityId.includes("::continuation::")));
+  const restored = mergePersistedAndOptimisticEvents([recovery], nativeLive);
+  assert.equal(restored.filter((event) => event.payload.activityKind === "commentary").length, 1,
+    "segmented native commentary must not hide or duplicate recovery");
+  assert.ok(restored.some((event) => event.payload.activityId === "tool"));
+  native.current.set(frame.sessionId, resetStreamingAssistantForRetry(nativeLive, frame.turnId));
+  applyProviderChatStreamActivity(native, () => {}, {
+    ...activity, timelineCreatedAt: retryTime, activityLabel: "Native retry answer",
+  });
+  const nativeRetry = mergePersistedAndOptimisticEvents([recovery], native.current.get(frame.sessionId));
+  assert.ok(nativeRetry.some((event) => event.message === "Native retry answer"),
+    "native item ids reused on retry must receive a fresh position");
+}
 
 // Every catalog model (plus dynamically configured models) gets the same
 // ordering contract. This exercises normalized stream formats, not remote APIs.

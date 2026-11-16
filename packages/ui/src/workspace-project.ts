@@ -1,4 +1,5 @@
 import type { WorkspaceFile, WorkspaceScopedSettings } from "./types";
+import { normalizedWorkspaceEditorSettings } from "./workspace-editor-settings.ts";
 
 export const MAX_WORKSPACE_FOLDERS = 20;
 /**
@@ -45,6 +46,7 @@ function parsedWorkspaceSettings(value: unknown) {
       typeof record.editorMinimapEnabled === "boolean"
         ? record.editorMinimapEnabled
         : undefined,
+    ...normalizedWorkspaceEditorSettings(record),
   };
   const normalized = Object.fromEntries(
     Object.entries(settings).filter(([, setting]) => setting !== undefined),

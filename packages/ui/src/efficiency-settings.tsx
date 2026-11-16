@@ -64,7 +64,7 @@ export function EfficiencySettings({
     <SettingsGroup id="context-handling" label="Context">
       <SettingsRow
         label="Context efficiency"
-        detail="Enable validated context improvements. Experiments remain separate; model and reasoning choices stay yours."
+        detail="Use tested context improvements. Your model and reasoning choices stay as set."
       >
         <SettingsSwitch
           label="Context efficiency"

@@ -128,9 +128,9 @@ export function updateStatusSummary(
     case "development":
       return "The updater is off in development builds. Nothing is contacted and no release is installed.";
     case "checking":
-      return "Asking GitHub Releases for the newest signed Alpha build.";
+      return "Asking GitHub Releases for the newest signed Beta build.";
     case "current":
-      return "You are on the newest signed Alpha. Gyro keeps checking in the background.";
+      return "You are on the newest signed Beta. Gyro keeps checking in the background.";
     case "available":
       // The dot reads "Update available" and the primary button already names
       // the build to fetch, so there is nothing left for a sentence to add.
@@ -245,7 +245,7 @@ export function updateAnnouncement(state?: UpdateState): string {
     case "failed":
       return "The update did not finish. Try it again from Settings.";
     case "current":
-      return "Gyro is on the newest signed Alpha build.";
+      return "Gyro is on the newest signed Beta build.";
     default:
       return "";
   }

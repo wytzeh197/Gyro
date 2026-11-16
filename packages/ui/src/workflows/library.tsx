@@ -222,8 +222,8 @@ export function WorkflowLibraryPanel({
                   <small>
                     {draft.status} ·{" "}
                     {draft.sourceComplete
-                      ? "completed source task"
-                      : "source task not completed"}
+                      ? "source turn completed · recipe not yet verified"
+                      : "source turn incomplete · unproven draft"}
                   </small>
                 </div>
                 <div className="gyro-workflow-row-actions">

@@ -944,6 +944,22 @@ fn command_output_with_limits_scoped(
         request.env.push((name, Some(value)));
     }
     apply_health_data_home(&mut request, provider_id, data_home);
+    if provider_id == "openai" {
+        let mut command = std::process::Command::new("codex");
+        if let Some(source) = data_home {
+            command.env("CODEX_HOME", source);
+        }
+        let paths = crate::GyroPaths::for_current_user()
+            .map_err(|error| CommandOutputError::Unavailable(error.to_string()))?;
+        crate::provider_runtime::codex_home::configure(&mut command, &paths)
+            .map_err(|error| CommandOutputError::Unavailable(error.to_string()))?;
+        request.args.extend(command.get_args().map(OsString::from));
+        request.env.extend(
+            command
+                .get_envs()
+                .map(|(key, value)| (key.to_owned(), value.map(OsString::from))),
+        );
+    }
     let outcome = run_command(request, CancellationToken::default(), |_| {})
         .map_err(|error| CommandOutputError::Unavailable(error.to_string()))?;
     match &outcome.termination {

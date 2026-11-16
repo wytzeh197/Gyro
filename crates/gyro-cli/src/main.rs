@@ -1,8 +1,10 @@
 #[cfg(test)]
 use gyro_core::provider_runtime::support::is_stale_resume_error as is_stale_provider_resume_error;
+mod database;
 mod provider_approval;
 mod provider_deadline;
 mod runner_host;
+mod spill;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, CommandFactory, Parser, Subcommand};
@@ -31,6 +33,7 @@ use provider_approval::{
     ApprovalRequest as CodexApprovalRequest,
 };
 use serde::Serialize;
+use spill::SpillArgs;
 use std::error::Error as StdError;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
@@ -73,6 +76,8 @@ enum Commands {
     Automate(AutomateArgs),
     /// Validate local setup.
     Doctor(DoctorArgs),
+    /// List migration backups or restore one into a new database file.
+    Database(database::DatabaseArgs),
     /// Manage local Gyro configuration.
     Config(ConfigArgs),
     /// Generate shell completions on stdout.
@@ -97,24 +102,6 @@ struct CompletionsArgs {
     /// Shell to generate completions for.
     #[arg(value_enum)]
     shell: Shell,
-}
-
-#[derive(Debug, Args)]
-struct SpillArgs {
-    /// The `spill://` address a preview quoted.
-    address: String,
-
-    /// Emit versioned JSON instead of text.
-    #[arg(long, global = true)]
-    json: bool,
-
-    /// Byte offset to start the window at.
-    #[arg(long, global = true, default_value_t = 0)]
-    offset: usize,
-
-    /// Bytes to print. One window by default.
-    #[arg(long, global = true)]
-    limit: Option<usize>,
 }
 
 #[derive(Debug, Args)]
@@ -765,6 +752,7 @@ impl Cli {
             Some(Commands::Setup(args)) => args.json,
             Some(Commands::App(args)) => args.json,
             Some(Commands::Doctor(args)) => args.json,
+            Some(Commands::Database(args)) => args.json,
             Some(Commands::Approvals(args)) => args.json,
             Some(Commands::Spill(args)) => args.json,
             Some(Commands::ProviderPermissionServer) => false,
@@ -833,7 +821,10 @@ fn main() {
 
 fn run_cli(cli: Cli) -> Result<()> {
     let _process_scope = gyro_core::process_guard::ProcessLeaseScope::unleased();
-    recover_provider_mutations_on_startup()?;
+    // Recovery must remain available when the live database cannot open.
+    if !matches!(&cli.command, Some(Commands::Database(_))) {
+        recover_provider_mutations_on_startup()?;
+    }
     match cli.command {
         Some(Commands::Chat(args)) => interactive_chat(args),
         Some(Commands::Run(args)) => run_task(args),
@@ -843,10 +834,11 @@ fn run_cli(cli: Cli) -> Result<()> {
         Some(Commands::App(args)) => app_command(args),
         Some(Commands::Automate(args)) => automate_command(args),
         Some(Commands::Doctor(args)) => doctor(args),
+        Some(Commands::Database(args)) => database::run(args),
         Some(Commands::Config(args)) => config_command(args),
         Some(Commands::Completions(args)) => completions_command(args),
         Some(Commands::Approvals(args)) => approvals_command(args),
-        Some(Commands::Spill(args)) => spill_command(args),
+        Some(Commands::Spill(args)) => spill::run(args),
         Some(Commands::ProviderPermissionServer) => provider_permission_server(),
         Some(Commands::AgentSession(args)) => agent_session_command(args),
         Some(Commands::Relay(args)) => relay_command(args),
@@ -994,55 +986,6 @@ fn recover_provider_mutations_on_startup() -> Result<()> {
 fn completions_command(args: CompletionsArgs) -> Result<()> {
     let mut command = Cli::command();
     generate(args.shell, &mut command, "gyro", &mut io::stdout());
-    Ok(())
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SpillReadOutput {
-    address: String,
-    offset: usize,
-    total_bytes: usize,
-    truncated: bool,
-    next_offset: Option<usize>,
-    text: String,
-}
-
-/// Print one window of a spilled copy. The window is what keeps this from being a second way to
-/// flood a terminal: the address was handed out because the value was too big to carry.
-fn spill_command(args: SpillArgs) -> Result<()> {
-    const MAX_LIMIT: usize = 64 * 1024;
-    let limit = args
-        .limit
-        .unwrap_or(gyro_core::efficiency::spill::SPILL_READ_WINDOW);
-    if limit == 0 || limit > MAX_LIMIT {
-        return Err(cli_failure(
-            CliErrorCategory::InvalidInput,
-            format!("--limit must be between 1 and {MAX_LIMIT} bytes"),
-        ));
-    }
-    let window = gyro_core::efficiency::spill::read_window(&args.address, args.offset, limit)
-        .map_err(|error| cli_failure(CliErrorCategory::InvalidInput, error.to_string()))?;
-    let Some(window) = window else {
-        return Err(cli_failure(
-            CliErrorCategory::ExecutionFailed,
-            format!(
-                "no stored copy at {}; the sweep may have evicted it, or this machine never wrote one",
-                args.address
-            ),
-        ));
-    };
-    if args.json {
-        return print_json(&SpillReadOutput {
-            address: window.address.clone(),
-            offset: window.offset,
-            total_bytes: window.total_bytes,
-            truncated: window.truncated(),
-            next_offset: window.next_offset(),
-            text: window.text.clone(),
-        });
-    }
-    println!("{}", window.render());
     Ok(())
 }
 
@@ -5382,7 +5325,7 @@ done
             &script,
             r#"#!/bin/sh
 while [ "$1" = "-c" ]; do
- case "$2" in features.multi_agent=false|features.image_generation=false|features.fast_mode=true|service_tier=\"default\") shift 2 ;; *) exit 21 ;; esac
+ case "$2" in features.multi_agent=false|features.image_generation=false|features.fast_mode=true|service_tier=\"default\"|"sqlite_home=\"$CODEX_HOME\""|"log_dir=\"$CODEX_HOME/log\"") shift 2 ;; *) exit 21 ;; esac
 done
 test "$1" = "app-server" || exit 21
 test "$2" = "--stdio" || exit 22
@@ -5467,7 +5410,7 @@ printf '%s\n' '{"method":"turn/completed","params":{"turn":{"status":"completed"
             &script,
             r#"#!/bin/sh
 while [ "$1" = "-c" ]; do
- case "$2" in features.multi_agent=false|features.image_generation=false|features.fast_mode=true|service_tier=\"default\") shift 2 ;; *) exit 21 ;; esac
+ case "$2" in features.multi_agent=false|features.image_generation=false|features.fast_mode=true|service_tier=\"default\"|"sqlite_home=\"$CODEX_HOME\""|"log_dir=\"$CODEX_HOME/log\"") shift 2 ;; *) exit 21 ;; esac
 done
 test "$1" = "app-server" || exit 21
 test "$2" = "--stdio" || exit 22

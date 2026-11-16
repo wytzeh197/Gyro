@@ -182,16 +182,24 @@
   -webkit-appearance: none;
   width: var(--gyro-effort-thumb-size);
   height: var(--gyro-effort-thumb-size);
+  margin: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: 0;
   background: transparent;
+  box-shadow: none;
+  transform: none;
+  transition: none;
 }
 .gyro-effort-slider input::-moz-range-thumb {
   width: var(--gyro-effort-thumb-size);
   height: var(--gyro-effort-thumb-size);
+  margin: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: 0;
   background: transparent;
+  box-shadow: none;
+  transform: none;
+  transition: none;
 }
 .gyro-effort-slider input:focus-visible {
   outline: 1.9px solid var(--gyro-accent);
@@ -211,15 +219,15 @@
 /* Position and fill share one progress value and timing. Pointer motion is immediate. */
 .gyro-effort-slider-thumb {
   position: absolute;
-  inset-block-start: 0;
+  inset-block-start: 1.9px;
   inset-inline-start: calc(
-    (100% - var(--effort-thumb-size)) * var(--effort-progress)
+    (100% - var(--effort-thumb-size)) * var(--effort-progress) + 1.9px
   );
-  width: var(--effort-thumb-size);
-  height: var(--effort-thumb-size);
+  width: calc(var(--effort-thumb-size) - 3.8px);
+  height: calc(var(--effort-thumb-size) - 3.8px);
   box-sizing: border-box;
   border: 1px solid color-mix(in srgb, var(--gyro-text) 18%, transparent);
-  border-radius: 50%;
+  border-radius: var(--gyro-radius-sm);
   background: var(--gyro-effort-thumb-ink);
   box-shadow:
     0 1px 3px var(--gyro-premium-shadow-soft),

@@ -2362,6 +2362,9 @@ fn read_workspace_text_file(workspace: &Path, params: &Value) -> Result<String> 
         anyhow::bail!("ACP file exceeds the {} byte limit", ACP_MAX_FILE_BYTES);
     }
     let content = std::fs::read_to_string(&path)?;
+    // Redact the whole file before slicing so multiline credential context is
+    // retained, using the same position-preserving policy as governed reads.
+    let content = crate::security::redact_secrets_preserving_positions(&content);
     let line = params
         .get("line")
         .and_then(Value::as_u64)
@@ -3244,6 +3247,50 @@ done
         let no_diff = serde_json::json!([{ "type": "content" }]);
         assert_eq!(acp_diff_counts(Some(&no_diff)), None);
         assert_eq!(acp_diff_counts(None), None);
+    }
+
+    #[test]
+    fn direct_acp_reads_redact_embedded_secrets_before_selecting_lines() {
+        let temp = tempfile::tempdir().unwrap();
+        let credential = "fixture-秘密-🔑";
+        let bearer = "fixture-bearer-value";
+        let token = format!("ghp_{}", "x".repeat(36));
+        let source = format!(
+            "café 🦀\n\"api_key\":\n\"{credential}\"\nAuthorization: Bearer {bearer}\nlet value = \"{token}\";\nlast\n"
+        );
+        std::fs::write(temp.path().join("appsettings.json"), &source).unwrap();
+        let full =
+            super::read_workspace_text_file(temp.path(), &json!({"path": "appsettings.json"}))
+                .unwrap();
+        for secret in [credential, bearer, token.as_str()] {
+            assert!(
+                !full.contains(secret),
+                "ACP read exposed a fixture credential"
+            );
+        }
+        assert!(full.starts_with("café 🦀\n"));
+        assert!(full.ends_with("\nlast"));
+        assert_eq!(full.lines().count(), source.lines().count());
+        for (masked, original) in full.lines().zip(source.lines()) {
+            assert_eq!(
+                masked.encode_utf16().count(),
+                original.encode_utf16().count()
+            );
+        }
+        // The identifying key is on the previous line: redacting just this
+        // requested slice would disclose the value.
+        let slice = super::read_workspace_text_file(
+            temp.path(),
+            &json!({"path": "appsettings.json", "line": 3, "limit": 1}),
+        )
+        .unwrap();
+        assert!(!slice.contains(credential));
+        assert!(slice.contains('*'));
+        assert_eq!(slice, full.lines().nth(2).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("appsettings.json")).unwrap(),
+            source,
+        );
     }
 
     #[test]

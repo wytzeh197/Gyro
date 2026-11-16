@@ -13,7 +13,7 @@ const source = readFileSync(
 );
 const createPointer = vm.runInNewContext(source);
 
-function page() {
+function page(hasFocus = false) {
   const events = [];
   let focused = false;
   let blocked = false;
@@ -40,7 +40,7 @@ function page() {
     PointerEvent: PageEvent,
     MouseEvent: PageEvent,
   };
-  const document = { elementFromPoint: () => element };
+  const document = { hasFocus: () => hasFocus, elementFromPoint: () => element };
   const agent = {
     pointerTarget: ({ x }) => ({
       ok: true,
@@ -77,7 +77,10 @@ assert.deepEqual(
 );
 assert.equal(first.events.at(-1).clientX, 40);
 assert.equal(first.events.at(-1).clientY, 50);
-assert.equal(first.focused, true);
+assert.equal(first.focused, false, "private input cannot take keyboard focus");
+const foreground = page(true);
+assert.equal(foreground.run({ action: "click", x: 40, y: 50 }).ok, true);
+assert.equal(foreground.focused, true, "focused pages retain normal field focus");
 assert.equal(parent.events.length, 0);
 assert.equal(second.events.length, 0);
 assert.equal(parent.focused, false);
@@ -185,7 +188,7 @@ assert.equal(sensitive.events.length, 0);
   const run = createPointer(
     { pointerTarget: () => ({ ok: true }) },
     privateWindow,
-    { elementFromPoint: (x) => (x > 100 ? destination : origin) },
+    { hasFocus: () => false, elementFromPoint: (x) => (x > 100 ? destination : origin) },
   );
   assert.equal(
     run({ action: "drag", x: 10, y: 20, toX: 200, toY: 30 }).ok,
@@ -210,7 +213,7 @@ assert.equal(sensitive.events.length, 0);
   const rejected = createPointer(
     { pointerTarget: ({ x }) => ({ ok: true, sensitive: x > 80 && x < 120 }) },
     privateWindow,
-    { elementFromPoint: () => origin },
+    { hasFocus: () => false, elementFromPoint: () => origin },
   );
   const before = observed.length;
   assert.equal(
@@ -274,7 +277,7 @@ assert.equal(sensitive.events.length, 0);
       PointerEvent: DragEvent,
       MouseEvent: DragEvent,
     },
-    { elementFromPoint: (x) => (x > 100 ? destination : sourceElement) },
+    { hasFocus: () => false, elementFromPoint: (x) => (x > 100 ? destination : sourceElement) },
   );
   const result = run({ action: "drag", x: 10, y: 20, toX: 200, toY: 30 });
   assert.equal(result.ok, true);
@@ -332,7 +335,7 @@ assert.equal(sensitive.events.length, 0);
       PointerEvent: InputEvent,
       MouseEvent: InputEvent,
     },
-    { elementFromPoint: () => input },
+    { hasFocus: () => false, elementFromPoint: () => input },
   );
   assert.equal(
     run({ action: "drag", x: 25, y: 10, toX: 90, toY: 10 }).ok,
@@ -439,7 +442,7 @@ vm.runInNewContext(injected, {
       return [];
     }
   },
-  document: { elementFromPoint: () => installedTarget },
+  document: { hasFocus: () => false, elementFromPoint: () => installedTarget },
   console: quietConsole,
   addEventListener() {},
 });

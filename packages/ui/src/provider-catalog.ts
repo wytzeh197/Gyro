@@ -1054,6 +1054,33 @@ export function isProviderRuntimeUsable(
 }
 
 export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
+  if (config.hostModelCatalog) {
+    const enriched = providersForConfig({ ...config, hostModelCatalog: false });
+    return config.modelProviders.map((host) => {
+      const catalog = enriched.find((provider) => provider.id === host.id);
+      return {
+        ...catalog,
+        ...host,
+        capabilities: catalog?.capabilities,
+        models: host.models.map((model) => {
+          const fallback = catalog?.models.find((item) => item.id === model.id);
+          const known = getProviderCatalogEntry(host.id)?.models.find(
+            (item) => item.id === model.id,
+          );
+          return {
+            ...fallback,
+            ...model,
+            // Older hosts send IDs only. Do not let that placeholder hide a
+            // catalog label, but preserve explicit names supplied by the host.
+            displayName:
+              model.displayName === model.id
+                ? (known?.displayName ?? model.displayName)
+                : model.displayName,
+          };
+        }),
+      };
+    });
+  }
   const savedProviders = new Map(
     config.modelProviders.map((provider) => [provider.id, provider]),
   );

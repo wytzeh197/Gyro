@@ -31,6 +31,12 @@ pub(crate) fn command_for_provider(command: &str, provider_id: &str) -> anyhow::
     gyro_core::try_apply_stored_provider_api_key(&mut process, provider_id)?;
     #[cfg(test)]
     let _ = provider_id;
+    if provider_id == "openai" {
+        gyro_core::provider_runtime::codex_home::configure(
+            &mut process,
+            &gyro_core::GyroPaths::for_current_user()?,
+        )?;
+    }
     Ok(process)
 }
 

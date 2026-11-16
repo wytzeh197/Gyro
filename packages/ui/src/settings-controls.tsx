@@ -1,4 +1,5 @@
 import {
+  Children,
   createContext,
   useContext,
   useId,
@@ -108,6 +109,9 @@ export function SettingsRow({
   );
 }
 
+/** Groups with more rows than this fold unless told otherwise. */
+const FOLD_AFTER_ROWS = 3;
+
 export function SettingsGroup({
   label,
   id,
@@ -118,7 +122,7 @@ export function SettingsGroup({
   actions,
   attention,
   defaultOpen,
-  collapsible = false,
+  collapsible,
   children,
 }: {
   label: string;
@@ -129,13 +133,20 @@ export function SettingsGroup({
   summary?: string;
   actions?: ReactNode;
   attention?: boolean;
+  /** Unset: only the first group on a page starts open. */
   defaultOpen?: boolean;
+  /**
+   * Unset: short groups (a few rows) stay open; longer ones fold to a
+   * one-line summary. Pass true or false to override.
+   */
   collapsible?: boolean;
   children: ReactNode;
 }) {
   const headingId = useId();
   const key = id ?? settingsSearchKey(label);
-  if (collapsible) {
+  const folds =
+    collapsible ?? Children.toArray(children).length > FOLD_AFTER_ROWS;
+  if (folds) {
     return (
       <SettingsDisclosure
         id={key}
@@ -145,7 +156,7 @@ export function SettingsGroup({
         summary={badge ?? summary}
         actions={actions}
         attention={attention}
-        defaultOpen={defaultOpen ?? false}
+        defaultOpen={defaultOpen}
       >
         <div className="gyro-settings-group-rows">{children}</div>
       </SettingsDisclosure>

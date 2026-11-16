@@ -35,7 +35,7 @@
   animation: gyro-tour-arrive 160ms ease-out;
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-lg);
   box-shadow:
     0 16px 48px rgba(0, 0, 0, 0.24),
     0 2px 8px rgba(0, 0, 0, 0.12);

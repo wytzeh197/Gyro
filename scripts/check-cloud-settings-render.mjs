@@ -325,6 +325,12 @@ check("a scheduled plan stays distinct from the current plan", () => {
 });
 
 check("unconfigured, test and production prices cannot be confused", () => {
+  for (const status of ["unavailable", "signed-out", "offline"]) {
+    const rights = render(ui.BillingSettings, { snapshot: { status } });
+    for (const label of ["Read Cloud terms", "Download contract information", "Withdraw from contract", "Privacy and deletion", "Contact support"]) {
+      assert.ok(!isDisabled(button(rights, label)), `${status}: ${label} must remain available`);
+    }
+  }
   const unavailable = text(render(ui.BillingSettings));
   assert.doesNotMatch(unavailable, /€15|€49|\$10|\$40|VAT included/);
   const staging = text(

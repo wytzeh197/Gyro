@@ -100,8 +100,10 @@ if (bootSurface === "embedded") {
     import("./menu-bar.css"),
     import("@gyro-dev/ui/styles.css"),
     import("@gyro-dev/ui/installed-update.css"),
+    import("@gyro-dev/ui/tooltips"),
   ])
-    .then(([{ MenuBarPopover }]) => {
+    .then(([{ MenuBarPopover }, , , , { installGyroTooltips }]) => {
+      installGyroTooltips();
       root.render(
         <React.StrictMode>
           <AppErrorBoundary>
@@ -122,16 +124,19 @@ if (bootSurface === "embedded") {
 
   void Promise.all([
     import("./App"),
+    import("./remote-access/root"),
     import("@gyro-dev/ui/styles.css"),
     import("@gyro-dev/ui/installed-update.css"),
     import("./menu-bar.css"),
     import("./dictation-access"),
+    import("@gyro-dev/ui/tooltips"),
   ])
-    .then(([{ App }]) => {
+    .then(([{ App }, { RemoteWorkspaceRoot }, , , , , { installGyroTooltips }]) => {
+      installGyroTooltips();
       root.render(
         <React.StrictMode>
           <AppErrorBoundary>
-            <App />
+            <RemoteWorkspaceRoot><App /></RemoteWorkspaceRoot>
           </AppErrorBoundary>
         </React.StrictMode>,
       );

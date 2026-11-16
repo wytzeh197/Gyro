@@ -481,6 +481,48 @@ impl SessionBrowserManager {
         })?
     }
 
+    fn record_agent_result(
+        &self,
+        lease: &BrowserDocumentLease,
+        method: &str,
+        value: &Value,
+    ) -> Result<Value, String> {
+        self.with_resource_mut(&lease.resource, |slot| {
+            let changed = slot.navigation_id != lease.navigation_id
+                || !slot.document_committed
+                || slot.navigation_error.is_some();
+            if changed {
+                // A successful DOM action may itself start navigation before
+                // its callback arrives. Keep that receipt without replaying
+                // the action or writing old metadata into the new document.
+                if matches!(method, "click" | "type" | "formInput" | "backgroundPointer")
+                    && value.get("ok") == Some(&Value::Bool(true))
+                {
+                    return Ok(serde_json::json!({
+                        "id": slot.navigation_id,
+                        "loading": slot.loading,
+                        "documentCommitted": slot.document_committed,
+                        "documentChanged": true,
+                        "actionDispatched": true,
+                        "error": slot.navigation_error,
+                    }));
+                }
+                return Err("browser document changed while the action was waiting; an already dispatched action may have run, so observe the current page before retrying".into());
+            }
+            if let Some(url) = value.get("url").and_then(Value::as_str) {
+                if slot.url != url {
+                    slot.pointer_reference = None;
+                }
+                slot.url = url.to_string();
+                slot.committed_url = Some(url.to_string());
+            }
+            if let Some(title) = value.get("title").and_then(Value::as_str) {
+                slot.title = title.to_string();
+            }
+            Ok(serde_json::json!({"id":slot.navigation_id,"loading":slot.loading,"documentCommitted":true}))
+        })?
+    }
+
     fn capture_document(
         &self,
         session_id: &str,
@@ -529,38 +571,76 @@ impl SessionBrowserManager {
             "browser document is not ready for observation; inspect the browser for navigation status",
         )?;
         let guard = pending.guard();
-        let snapshot = self.wait_for_document(session_id)?;
-        let lease = BrowserDocumentLease {
-            resource: BrowserLease::from_snapshot(&snapshot),
-            navigation_id: snapshot.navigation_id,
+        // Only whole-page observations can follow redirects. Element refs and
+        // evidence checks remain bound to their original document.
+        let follow_navigation = method != "checkRead" && args.get("ref").is_none();
+        let initial = if follow_navigation {
+            self.capture_resource(session_id)?.1
+        } else {
+            self.wait_for_document(session_id)?
         };
+        let resource = BrowserLease::from_snapshot(&initial);
         loop {
             guard.check()?;
-            lease.validate(self)?;
-            match evaluate(
-                lease.clone(),
-                snapshot.clone(),
-                "status",
-                serde_json::json!({}),
-            ) {
-                Ok(status) => {
+            let snapshot = self.with_resource_mut(&resource, |slot| Self::snapshot_locked(slot))?;
+            if !follow_navigation && snapshot.navigation_id != initial.navigation_id {
+                return Err(
+                    "browser navigation changed while waiting for the observation document".into(),
+                );
+            }
+            if let Some(error) = &snapshot.navigation_error {
+                return Err(format!(
+                    "browser navigation {}: {}",
+                    error.kind, error.message
+                ));
+            }
+            if !snapshot.document_committed {
+                std::thread::sleep(Duration::from_millis(25));
+                continue;
+            }
+            let lease = BrowserDocumentLease {
+                resource: resource.clone(),
+                navigation_id: snapshot.navigation_id,
+            };
+            let result: Result<Option<Value>, String> = (|| {
+                lease.validate(self)?;
+                let status = evaluate(
+                    lease.clone(),
+                    snapshot.clone(),
+                    "status",
+                    serde_json::json!({}),
+                )?;
+                guard.check()?;
+                lease.validate(self)?;
+                // DOMContentLoaded is sufficient. Images and long-lived
+                // requests must not block observing usable pages.
+                if !matches!(
+                    status.get("readyState").and_then(Value::as_str),
+                    Some("interactive" | "complete")
+                ) {
+                    return Ok(None);
+                }
+                let value = if method == "status" {
+                    status
+                } else {
+                    evaluate(lease.clone(), snapshot, method, args.clone())?
+                };
+                guard.check()?;
+                lease.validate(self)?;
+                Ok(Some(value))
+            })();
+            match result {
+                Ok(Some(value)) => return Ok(value),
+                Ok(None) => {}
+                Err(error) => {
                     guard.check()?;
-                    lease.validate(self)?;
-                    // DOMContentLoaded is sufficient. Images, analytics, and
-                    // long-lived requests must not block observing usable pages.
-                    if matches!(
-                        status.get("readyState").and_then(Value::as_str),
-                        Some("interactive" | "complete")
-                    ) {
-                        return if method == "status" {
-                            Ok(status)
-                        } else {
-                            evaluate(lease, snapshot, method, args)
-                        };
+                    let changed = self.with_resource_mut(&resource, |slot| {
+                        slot.navigation_id != lease.navigation_id
+                    })?;
+                    if !(follow_navigation && changed) && error != "browser agent is not ready" {
+                        return Err(error);
                     }
                 }
-                Err(error) if error == "browser agent is not ready" => {}
-                Err(error) => return Err(error),
             }
             std::thread::sleep(Duration::from_millis(25));
         }
@@ -1366,7 +1446,9 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable)) {{
       return {{ ok: false, error: "target is not an editable text field" }};
     }}
-    el.focus();
+    // Updating a field does not require keyboard ownership. Focusing a hidden
+    // WKWebView can take the native responder away from the person's composer.
+    if (document.hasFocus()) el.focus({{ preventScroll: true }});
     const value = String(text ?? "");
     if ("value" in el) {{
       const proto = el.tagName.toLowerCase() === "textarea"
@@ -2643,19 +2725,7 @@ fn call_agent_for<R: Runtime>(
         ));
     }
     let mut value = sanitize_agent_result(method, value)?;
-    let navigation = manager.with_document_mut(&lease, |slot| {
-        if let Some(url) = value.get("url").and_then(Value::as_str) {
-            if slot.url != url {
-                slot.pointer_reference = None;
-            }
-            slot.url = url.to_string();
-            slot.committed_url = Some(url.to_string());
-        }
-        if let Some(title) = value.get("title").and_then(Value::as_str) {
-            slot.title = title.to_string();
-        }
-        serde_json::json!({"id":slot.navigation_id,"loading":slot.loading,"documentCommitted":true})
-    })?;
+    let navigation = manager.record_agent_result(&lease, method, &value)?;
     if let Some(object) = value.as_object_mut() {
         object.insert("navigation".into(), navigation);
     }

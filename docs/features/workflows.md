@@ -4,7 +4,9 @@ Implementation status: local source, unit tests and production-component browser
 fixtures. Native WebView and live-provider release acceptance remain open.
 
 Open **Automations → Workflows** to create or edit a project recipe, or use
-**Save as workflow** in a chat’s options/completed turn. Recipes live in
+**Save as workflow** in a chat’s ⋯ menu once the chat is idle and contains a
+completed user/assistant exchange. Reply footers and activity, error, and approval
+cards do not offer workflow creation. Recipes live in
 `.gyro/workflows/<id>.json`; saving does not call a provider or start a job.
 The source chat and chosen root determine authority. Private app state is not a
 project root.

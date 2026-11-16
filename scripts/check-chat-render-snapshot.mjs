@@ -723,7 +723,27 @@ try {
       return true;
     })()`);
     await pause(100);
+    // A late development reload can occur after the first hydration check.
+    // Never record an empty or wrong scene as the accepted local baseline.
+    const expectedPanes =
+      state.edge === "three"
+        ? 3
+        : ["split", "stacked"].includes(state.edge)
+          ? 2
+          : 1;
+    await waitFor(
+      () => evaluate(`(() => {
+        const panes = [...document.querySelectorAll('.gyro-chat-surface')];
+        return panes.length === ${expectedPanes} && panes.every(pane =>
+          pane.querySelector('.gyro-composer-shell') &&
+          (${state.scene !== "active-chat"} || (pane.classList.contains('is-thread') && pane.querySelector('.gyro-user-message-bubble')))
+        );
+      })()`),
+      `${state.name} populated scene before measurement`,
+    );
     snapshot[state.name] = await evaluate(measure(state.probes));
+    if (!snapshot[state.name].surface || !snapshot[state.name].composer)
+      throw new Error(`${state.name}: scene disappeared during measurement`);
     if (auditInvariants) {
       contracts[state.name] = await evaluate(
         `(${measureChatContract.toString()})()`,
@@ -831,7 +851,12 @@ if (invariantsOnly) {
 }
 
 if (update || recordBaseline) {
-  if (filter)
+  // Filtered measurements may be saved as a separate review artifact, but
+  // must never replace the complete repository baseline.
+  if (
+    filter &&
+    (update || baselinePath === resolve(repoRoot, "scripts/chat-render-baseline.json"))
+  )
     throw new Error("Refusing to write a partial baseline: unset the filter.");
   mkdirSync(dirname(baselinePath), { recursive: true });
   writeFileSync(baselinePath, `${JSON.stringify(snapshot, null, 2)}\n`);

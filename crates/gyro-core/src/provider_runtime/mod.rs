@@ -4,6 +4,7 @@ pub mod accounting;
 pub mod advisory;
 pub mod api_config;
 pub mod codex_client;
+pub mod codex_home;
 mod codex_startup;
 pub mod codex_turn_completion;
 pub mod file_patch_counts;

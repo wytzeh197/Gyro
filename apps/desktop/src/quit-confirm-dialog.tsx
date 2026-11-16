@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import "./quit-confirm-dialog.css";
+import { createPortal } from "react-dom";
 
 export function QuitConfirmDialog({
   onResolve,
@@ -44,7 +45,7 @@ export function QuitConfirmDialog({
     }
   }
 
-  return (
+  return createPortal(
     <dialog
       ref={dialogRef}
       className="gyro-quit-dialog"
@@ -86,6 +87,7 @@ export function QuitConfirmDialog({
           {pending === "quit" ? "Quitting…" : "Quit"}
         </button>
       </footer>
-    </dialog>
+    </dialog>,
+    document.body,
   );
 }

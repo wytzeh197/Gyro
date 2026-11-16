@@ -206,6 +206,36 @@ any generations. `--skip-build` explicitly records unverified build provenance.
 The task fixtures retain their own immutable snapshots. A report passing its
 quality gate still requires review before defaults change.
 
+## Stable-context comparison preparation (2026-11-15)
+
+`node scripts/prepare-efficiency-prefix-pilot.mjs` creates reviewable smoke and
+paired specs in a new temporary directory, plus a hashed preparation manifest.
+It uses the existing frozen repository fixtures. `--output NEW_DIRECTORY`
+chooses a destination and refuses an existing directory. Preparation makes no
+model calls and leaves providers/prices empty and execution budgets at zero;
+the real benchmark entry point rejects these templates until configured.
+
+The smoke spec is two task runs: one retry-repair task, one repetition, fresh
+sessions, baseline versus `stable-api-prefix`. It checks integration and receipts,
+not savings or whether enough tool rounds occurred to exercise retention. The
+paired spec uses all three frozen repository tasks, three repetitions and both
+session conditions: 36 task runs and 114 user prompts per selected provider.
+Those counts exclude tool-loop generations and retries and are not call budgets.
+Select an owned API route with native tool support; this policy does not apply
+to native CLI providers, Ollama or the JSON compatibility path.
+
+Reports now include paired correctness outcomes, a fixed failure breakdown, and
+provider-reported input, uncached input, cache read/write, output and reasoning
+totals. Failed attempts remain included. Incomplete cohorts do not receive a
+success-rate delta. Unknown token buckets remain unknown; JSON reports also
+include observed subtotals and known-run coverage. Cache tokens are subsets of
+input and reasoning is a subset of output, so neither is counted twice. These
+diagnostics do not change the existing qualification gates or establish a
+statistically significant quality improvement.
+
+`pnpm test:efficiency-pilot` includes diagnostics and preparation regression checks.
+No runtime efficiency default changed as part of this reporting work.
+
 ## Pilot and quality gate
 
 `docs/performance/efficiency-pilot.json` contains forty synthetic task fixtures:

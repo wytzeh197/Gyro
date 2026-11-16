@@ -187,7 +187,8 @@ const composerEnd = surfaces.indexOf("function ComposerMediaPreview");
 const composer = surfaces.slice(composerStart, composerEnd);
 assert.ok(composerStart >= 0 && composerEnd > composerStart);
 assert.match(composer, /dictation = browserDictation\(\)/);
-assert.match(composer, /<Mic /);
+assert.match(composer, /<DictationControl/);
+assert.doesNotMatch(composer, /gyro-dictation-status/);
 assert.equal(composer.includes('aria-label="Dictate message"'), false);
 
 assert.equal(
@@ -308,7 +309,7 @@ const plist = readFileSync(
   "utf8",
 );
 const desktopLib = readRepoSource(
-  new URL("../apps/desktop/src-tauri/src/lib.rs", import.meta.url),
+  new URL("../apps/desktop/src-tauri/src/app/setup.rs", import.meta.url),
   "utf8",
 );
 const accessState = readFileSync(

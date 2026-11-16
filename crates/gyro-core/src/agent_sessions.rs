@@ -274,7 +274,7 @@ impl AgentSessionStore {
     pub fn open(paths: GyroPaths) -> Result<Self> {
         paths.ensure()?;
         let conn = crate::sqlite::open_pooled_database(&paths.database_path)
-            .with_context(|| format!("open {}", paths.database_path.display()))?;
+            .map_err(|error| anyhow!("open {}: {error:#}", paths.database_path.display()))?;
         secure_private_file(&paths.database_path)?;
         let store = Self { paths, conn };
         store

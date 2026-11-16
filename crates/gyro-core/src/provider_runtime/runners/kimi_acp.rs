@@ -38,6 +38,90 @@ pub struct AcpProviderRuntime {
     pub runner: &'static str,
 }
 
+fn merge_acp_tool_activity(
+    activity: &mut ProviderActivity,
+    previous: &ProviderActivity,
+    provider_label: &str,
+) {
+    if activity.id != previous.id {
+        return;
+    }
+    if activity.kind == "tool" && activity.label == format!("{provider_label} tool") {
+        activity.kind = previous.kind.clone();
+        activity.label = previous.label.clone();
+    }
+    if activity.detail.is_none() {
+        activity.detail = previous.detail.clone();
+    }
+    if activity.file_counts.is_none() {
+        activity.file_counts = previous.file_counts;
+    }
+}
+
+#[cfg(test)]
+mod activity_tests {
+    use super::*;
+
+    #[test]
+    fn status_only_acp_updates_preserve_tool_identity_and_failure() {
+        let previous = ProviderActivity {
+            id: "fetch-1".into(),
+            kind: "tool".into(),
+            label: "gyro_web_fetch".into(),
+            detail: Some("https://docs.example/models".into()),
+            file_counts: None,
+            note: None,
+            status: "running".into(),
+        };
+        let mut update = ProviderActivity {
+            label: "xAI tool".into(),
+            detail: None,
+            status: "failed".into(),
+            ..previous.clone()
+        };
+        merge_acp_tool_activity(&mut update, &previous, "xAI");
+        assert_eq!(update.label, "gyro_web_fetch");
+        assert_eq!(update.detail, previous.detail);
+        assert_eq!(update.status, "failed");
+
+        let mut other = ProviderActivity {
+            id: "fetch-2".into(),
+            label: "xAI tool".into(),
+            detail: None,
+            ..update.clone()
+        };
+        merge_acp_tool_activity(&mut other, &previous, "xAI");
+        assert_eq!(other.label, "xAI tool");
+        assert_eq!(other.detail, None);
+    }
+
+    #[test]
+    fn status_only_acp_updates_preserve_command_kind_and_diff_counts() {
+        let previous = ProviderActivity {
+            id: "edit-1".into(),
+            kind: "file".into(),
+            label: "Updated README.md".into(),
+            detail: Some("README.md".into()),
+            file_counts: Some((3, 1)),
+            note: None,
+            status: "running".into(),
+        };
+        let mut update = ProviderActivity {
+            kind: "tool".into(),
+            label: "Kimi tool".into(),
+            detail: None,
+            file_counts: None,
+            status: "done".into(),
+            ..previous.clone()
+        };
+        merge_acp_tool_activity(&mut update, &previous, "Kimi");
+        assert_eq!(update.kind, "file");
+        assert_eq!(update.label, previous.label);
+        assert_eq!(update.file_counts, Some((3, 1)));
+        assert_eq!(update.status, "done");
+    }
+}
+
 pub fn acp_provider_runtime(provider_id: &str) -> Option<AcpProviderRuntime> {
     match provider_id {
         "kimi" => Some(AcpProviderRuntime {
@@ -350,14 +434,11 @@ pub fn run_kimi_acp_chat(
                 note: None,
                 status: activity.status.clone(),
             };
-            // The diff usually arrives on one frame; a later status-only
-            // update must not erase the counts it carried.
-            if activity.file_counts.is_none() {
-                if let Ok(sink) = activity_sink.lock() {
-                    activity.file_counts = sink
-                        .iter()
-                        .find(|item| item.id == activity.id)
-                        .and_then(|item| item.file_counts);
+            // ACP tool updates are patches: a status-only frame must not
+            // replace the tool's name, kind, target, or diff with placeholders.
+            if let Ok(sink) = activity_sink.lock() {
+                if let Some(previous) = sink.iter().find(|item| item.id == activity.id) {
+                    merge_acp_tool_activity(&mut activity, previous, provider_label);
                 }
             }
             emit_provider_activity_event(host, request, &activity, None);

@@ -1,4 +1,5 @@
 import { BILLING_SCENES, useBillingPreview } from "./billing-preview";
+import { useUsageSettingsPreview } from "./usage-settings-preview";
 import { createInitialWorkbenchState, workbenchReducer, type WorkbenchAction } from "@gyro-dev/ui";
 // Standalone production components. Preferences persist in fixture-only storage;
 // accounts, updater state, and workspace data are simulated.
@@ -211,6 +212,7 @@ function Preview() {
   const [launchView, setLaunchView] = useState<LaunchView>(
     () => (params.get("launch") as LaunchView | null) ?? extraPreferences.launchView,
   );
+  const usagePreview = useUsageSettingsPreview(params.get("usage"));
   const [failSave, setFailSave] = useState(params.has("failSave"));
   const failSaveRef = useRef(failSave);
   failSaveRef.current = failSave;
@@ -477,6 +479,7 @@ function Preview() {
       >
         {section === "billing" ? billing.accountForm : null}
         <SettingsSurface
+          {...usagePreview}
           accountSettings={params.has("nativeAccount") ? <NativeAccountSettings account={{snapshot: params.has("cloudUnavailable") ? {status: "unavailable", availability: "coming-soon"} : billing.snapshot, actions: billing.actions}} /> : <AccountSettings account={account} />}
           cloudSettings={accountScene && !params.has("cloudUnavailable") ? (
             <CloudSettings

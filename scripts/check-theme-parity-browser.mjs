@@ -174,7 +174,8 @@ try {
     if (["appearance", "providers"].includes(state.scene))
       await probe(".gyro-settings-surface h1", "settings heading");
     if (state.scene === "appearance") {
-      await probe(".gyro-appearance-scope > span", "appearance scope");
+      // The save-status live region is intentionally clipped unless saving fails.
+      await probe('[data-settings-group="theme"] .gyro-settings-group-description', "theme guidance");
       await click("System theme");
       for (const mode of ["dark", "light"]) {
         await call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: mode }] });

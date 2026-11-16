@@ -114,6 +114,31 @@ const activity = (activityKind, label, extra = {}, minutes = 0) =>
 const say = (message, minutes = 0) =>
   event("assistant-message", message, {}, minutes);
 
+// Recovery writes existing commentary events so a partial answer remains
+// visible after reload without masquerading as the turn's final response.
+const interruptedReply = event(
+  "system-event",
+  "Partial response (interrupted):\n\nThe first part of the answer.",
+  {
+    kind: "provider-activity",
+    activityKind: "commentary",
+    activityId: "partial-response:fixture",
+    partialResponse: true,
+    status: "failed",
+  },
+);
+for (const status of ["failed", "cancelled"]) {
+  const recovered = buildRunModel([interruptedReply], { status: { status } });
+  assert.equal(recovered.response, undefined, "a recovered fragment is not a final answer");
+  assert.ok(
+    recovered.steps.some((step) => step.kind === "say" && step.text === interruptedReply.message),
+    "the interrupted text and its label remain visible in work history",
+  );
+  assert.notEqual(recovered.phase.name, "done", "recovery never certifies completion");
+}
+const recoveredRetry = buildRunModel([interruptedReply, say("The completed answer.", 1)]);
+assert.equal(recoveredRetry.response?.message, "The completed answer.");
+
 // --- the defect that motivated the rebuild ------------------------------------
 
 // A real MCP identifier keeps its server and tool. The shape this replaces threw
@@ -1424,6 +1449,15 @@ const failedEditItem = workItemFromEvent(capabilityCall("workspace-edit", {
 }));
 assert.equal(failedEditItem.error, editFailure, "failed edits keep their recorded reason");
 assert.equal(failedEditItem.kind, "tool", "failed edits are not changed files");
+
+const terminalBusy = "This chat already has a running command; call gyro_terminal_wait with resourceId live-command";
+const busyTerminalItem = workItemFromEvent(capabilityCall("terminal-open", {
+  status: "failed", summary: terminalBusy,
+}));
+assert.equal(busyTerminalItem.kind, "command");
+assert.equal(busyTerminalItem.command, "Open terminal", "a rejected launch does not render its error as the command");
+assert.equal(busyTerminalItem.intent, undefined);
+assert.equal(busyTerminalItem.error, terminalBusy, "the wait instruction remains available in failure details");
 
 const commandFailure = "Exit code: 1\nError: Chromium executable was not found";
 const failedCommand = activity("command", "node scripts/check-theme.mjs", {

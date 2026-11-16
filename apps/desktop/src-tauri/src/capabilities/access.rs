@@ -133,6 +133,7 @@ pub(crate) fn effective_capability_class(
             | CapabilityId::CodeReferences
             | CapabilityId::CodeHover
             | CapabilityId::CodeSymbols
+            | CapabilityId::CodeFormat
             | CapabilityId::WorkspaceGitBlame
             | CapabilityId::WorkspaceGitShow
             | CapabilityId::WorkspaceGitLog
@@ -158,6 +159,37 @@ pub(crate) fn effective_capability_class(
         }
     }
     Ok(gyro_core::capability_descriptor(capability_id).class)
+}
+
+pub(crate) fn capability_uses_language_server(capability_id: CapabilityId) -> bool {
+    matches!(
+        capability_id,
+        CapabilityId::CodeDefinition
+            | CapabilityId::CodeReferences
+            | CapabilityId::CodeHover
+            | CapabilityId::CodeSymbols
+            | CapabilityId::CodeFormat
+    )
+}
+
+/// Language servers can run project build scripts and plugins, even for a
+/// read-only query. Sensitive-file access adds a gate; it never replaces the
+/// execution permission required to start or use the server.
+pub(crate) fn capability_permission_classes(
+    workspace: &Path,
+    capability_id: CapabilityId,
+    arguments: &serde_json::Value,
+) -> anyhow::Result<Vec<CapabilityClass>> {
+    let effective = effective_capability_class(workspace, capability_id, arguments)?;
+    if capability_uses_language_server(capability_id) {
+        let mut classes = vec![CapabilityClass::TerminalExecute];
+        if effective == CapabilityClass::WorkspaceSensitiveRead {
+            classes.push(effective);
+        }
+        Ok(classes)
+    } else {
+        Ok(vec![effective])
+    }
 }
 
 /// Models cannot list Workspace tasks, so an unknown id names the valid ones
@@ -408,6 +440,7 @@ pub(crate) fn capability_grant_scope(
         | CapabilityId::CodeReferences
         | CapabilityId::CodeHover
         | CapabilityId::CodeSymbols
+        | CapabilityId::CodeFormat
         | CapabilityId::WorkspaceGitBlame
         | CapabilityId::WorkspaceGitShow
         | CapabilityId::WorkspaceGitLog => Ok((
@@ -523,4 +556,26 @@ pub(crate) fn capability_access_for_call(
     } else {
         CapabilityAccess::Ask
     }
+}
+
+/// Recheck denials after all approval waits. Ask is valid here because each
+/// required class has already passed its approval gate (including AllowOnce).
+pub(crate) fn capability_denied_permission(
+    bound: &BoundProviderCapabilityContext,
+    current: &ProjectCapabilityPolicy,
+    classes: &[CapabilityClass],
+    scope_kind: &str,
+    scope_value: &str,
+    full_access: bool,
+) -> Option<CapabilityClass> {
+    classes.iter().copied().find(|class| {
+        capability_access_with_full_access(
+            bound,
+            current,
+            *class,
+            scope_kind,
+            scope_value,
+            full_access,
+        ) == CapabilityAccess::Deny
+    })
 }

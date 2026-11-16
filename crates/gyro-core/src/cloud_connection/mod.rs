@@ -7,6 +7,7 @@ pub mod supabase;
 mod tests;
 pub mod transport;
 pub mod v2;
+pub mod v3;
 use chrono::{DateTime, Utc};
 use contract::{Environment, Login, Mode, Revoked, Snapshot, VERSION};
 use serde::{Deserialize, Serialize};

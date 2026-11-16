@@ -1,0 +1,60 @@
+import { createContext, useContext, type ReactNode } from "react";
+import { DeviceIcon, useDeviceKind } from "./device-kind";
+
+export type RemoteProjectChoice = {
+  key: string;
+  hostId: string;
+  projectId: string;
+  path: string;
+  label: string;
+  hostName: string;
+};
+
+/** Native host integrations supply these slots; UI previews need no networking. */
+export const RemoteAccessSlots = createContext<{
+  navigation?: ReactNode;
+  settings?: ReactNode;
+  /** Present only while rendering projects from the selected remote host. */
+  projectHost?: string;
+  projectHostId?: string;
+  /** Extra host-bound projects join the normal sidebar; local state stays mounted. */
+  projects?: ReactNode;
+  content?: ReactNode;
+  selectLocal?: () => void;
+  projectChoices?: RemoteProjectChoice[];
+  selectedProjectKey?: string;
+  selectProject?: (key: string, draft: string) => void;
+  createSession?: () => void;
+  localProjects?: Array<{ path: string; label: string }>;
+  selectLocalProject?: (path: string | undefined, draft: string) => void;
+  syncProjects?: (projects: Array<{ path: string; name: string }>) => void;
+}>({});
+export function MachineNavigation() {
+  return useContext(RemoteAccessSlots).navigation ?? null;
+}
+export function RemoteAccessSettingsContent() {
+  return useContext(RemoteAccessSlots).settings ?? null;
+}
+export function useRemoteWorkspaceSlots() {
+  return useContext(RemoteAccessSlots);
+}
+export function RemoteProjectNavigation() {
+  return useContext(RemoteAccessSlots).projects ?? null;
+}
+export function useRemoteProjectHost() {
+  return useContext(RemoteAccessSlots).projectHost;
+}
+export function RemoteProjectIndicator() {
+  const { projectHost: host, projectHostId } = useContext(RemoteAccessSlots);
+  const kind = useDeviceKind(projectHostId, host);
+  if (!host) return null;
+  return (
+    <small
+      className="gyro-sidebar-project-remote"
+      title={`Remote on ${host}`}
+      aria-label={`Remote on ${host}`}
+    >
+      <DeviceIcon kind={kind} aria-hidden="true" />
+    </small>
+  );
+}

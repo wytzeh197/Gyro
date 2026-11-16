@@ -169,7 +169,6 @@
   .gyro-settings-disclosure-group {
   margin: 0;
   border: 0;
-  border-top: 1px solid var(--gyro-border-soft);
   border-radius: 0;
   background: transparent;
 }
@@ -183,8 +182,8 @@
   .gyro-settings-disclosure-heading
   > h2
   > button {
-  min-height: var(--gyro-control-comfortable);
-  padding-block: var(--gyro-space-panel);
+  min-height: 0;
+  padding-block: 10px 12px;
 }
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
@@ -195,7 +194,7 @@
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
   .gyro-settings-disclosure-body {
-  padding: var(--gyro-space-standard) 0 var(--gyro-space-panel);
+  padding: 4px 0 0;
 }
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
@@ -304,12 +303,6 @@
 }
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
-  [data-settings-page="keyboard"]
-  .gyro-settings-row {
-  border-bottom: 1px solid var(--gyro-border-soft);
-}
-:root[data-theme]
-  .gyro-settings-surface.is-minimal-settings
   .gyro-cli-profile-list,
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
@@ -338,9 +331,9 @@
 :root[data-theme]
   .gyro-app-shell
   .gyro-sidebar-action.is-settings-page.is-active {
-  background: var(--gyro-accent-soft);
+  background: var(--gyro-quiet-nav-active);
   color: var(--gyro-text);
-  box-shadow: inset 2px 0 var(--gyro-accent);
+  box-shadow: none;
 }
 :root[data-theme] .gyro-settings-sidebar-search .gyro-settings-topbar-search {
   border: 1px solid var(--gyro-border-soft);
@@ -513,9 +506,7 @@
   .gyro-help-answers {
   gap: calc(var(--gyro-space-section) * 2);
 }
-:root[data-theme]
-  .gyro-settings-surface.is-minimal-settings
-  .gyro-help-topic {
+:root[data-theme] .gyro-settings-surface.is-minimal-settings .gyro-help-topic {
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -647,4 +638,52 @@
   :root[data-theme] .gyro-settings-surface.is-minimal-settings {
     padding-inline: var(--gyro-space-section);
   }
+}
+
+/* Supporting copy follows the same reading rhythm as preference rows.
+   Legacy shortcut, import and provider blocks used 2–3px text gaps. */
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  :is(
+    .gyro-workspace-keybindings > div > label > span,
+    .gyro-workspace-contribution-title > span,
+    .gyro-provider-custom-list > li > div,
+    .gyro-usage-toolbar > div:first-child,
+    .gyro-import-archived > div,
+    .gyro-import-job-header > div,
+    .gyro-import-project-expand > span
+  ) {
+  gap: var(--gyro-space-standard);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-account-identity-text {
+  display: grid;
+  gap: var(--gyro-space-standard);
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-account-identity-text
+  > small {
+  margin-top: 0;
+}
+
+/* Nested setup sections need their own separation from the preceding list.
+   The outer page grid cannot space children inside a disclosure body. */
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-disclosure-body
+  > :is(
+    .gyro-settings-group.is-open-section,
+    div:has(> .gyro-settings-group.is-open-section)
+  ) {
+  margin-top: var(--gyro-space-section);
+}
+
+/* Standalone fields and dashboards have no row padding of their own. */
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-group-rows
+  > :is(.gyro-remote-stack, .gyro-usage-dashboard) {
+  padding-top: var(--gyro-space-card);
 }

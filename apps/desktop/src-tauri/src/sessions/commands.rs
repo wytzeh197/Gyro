@@ -415,11 +415,13 @@ pub(crate) async fn read_session_events(
 
 #[tauri::command]
 pub(crate) async fn append_user_message(
+    app: tauri::AppHandle,
     session_id: String,
     message: String,
     turn_id: Option<String>,
     #[allow(unused_variables)] attachments: Option<Vec<ChatAttachmentRequest>>,
 ) -> Result<SessionEvent, String> {
+    crate::features::remote_access::require_local_control(&app, &session_id)?;
     let message = validate_chat_message(&message)?;
     tauri::async_runtime::spawn_blocking(move || {
         append_user_message_blocking(

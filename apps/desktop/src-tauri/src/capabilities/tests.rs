@@ -1,4 +1,172 @@
 use super::*;
+use crate::capabilities::access::{capability_denied_permission, capability_permission_classes};
+
+const SEMANTIC_CODE_TOOLS: [CapabilityId; 5] = [
+    CapabilityId::CodeDefinition,
+    CapabilityId::CodeReferences,
+    CapabilityId::CodeHover,
+    CapabilityId::CodeSymbols,
+    CapabilityId::CodeFormat,
+];
+
+#[test]
+fn semantic_permission_revocation_during_another_approval_prevents_dispatch() {
+    let request = anthropic_provider_request();
+    let mut bound = bound_capability_context(&request);
+    let classes = [
+        CapabilityClass::TerminalExecute,
+        CapabilityClass::WorkspaceSensitiveRead,
+    ];
+    let mut current = ProjectCapabilityPolicy::defaults(bound.workspace_key.clone());
+    // Both one-time approvals have completed; their policies remain Ask.
+    assert_eq!(
+        capability_denied_permission(&bound, &current, &classes, "path", ".env", false),
+        None
+    );
+    for revoked in classes {
+        current = ProjectCapabilityPolicy::defaults(bound.workspace_key.clone());
+        current.classes.insert(revoked, CapabilityAccess::Deny);
+        assert_eq!(
+            capability_denied_permission(&bound, &current, &classes, "path", ".env", false),
+            Some(revoked),
+            "revoking {revoked:?} during any approval must prevent language-server dispatch"
+        );
+        // Full access keeps its existing explicit Normal-mode override.
+        assert_eq!(
+            capability_denied_permission(&bound, &current, &classes, "path", ".env", true),
+            None
+        );
+    }
+    for mode in [CapabilityRunMode::Plan, CapabilityRunMode::Council] {
+        bound.policy.mode = mode;
+        assert_eq!(
+            capability_denied_permission(&bound, &current, &classes, "path", ".env", true),
+            Some(CapabilityClass::TerminalExecute)
+        );
+    }
+}
+
+#[test]
+fn semantic_code_tools_require_execution_permission_even_in_read_only_modes() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("main.rs"), "fn main() {}\n").unwrap();
+    let mut request = anthropic_provider_request();
+    request.workspace_path = Some(temp.path().display().to_string());
+    let mut bound = bound_capability_context(&request);
+    let current = ProjectCapabilityPolicy::defaults(bound.workspace_key.clone());
+    let arguments = serde_json::json!({ "path": "main.rs", "line": 1, "column": 1 });
+
+    for id in SEMANTIC_CODE_TOOLS {
+        let classes = capability_permission_classes(&bound.workspace, id, &arguments).unwrap();
+        assert_eq!(classes, vec![CapabilityClass::TerminalExecute], "{id}");
+        let (kind, value) = capability_grant_scope(id, &arguments).unwrap();
+        assert_eq!((&*kind, &*value), ("path", "main.rs"), "{id}");
+        bound.policy.mode = CapabilityRunMode::Normal;
+        assert_eq!(
+            capability_access_with_full_access(&bound, &current, classes[0], &kind, &value, false),
+            CapabilityAccess::Ask,
+            "{id} must ask before a language server can start or receive a query"
+        );
+        for mode in [CapabilityRunMode::Plan, CapabilityRunMode::Council] {
+            bound.policy.mode = mode;
+            for full_access in [false, true] {
+                assert_eq!(
+                    capability_access_with_full_access(
+                        &bound,
+                        &current,
+                        classes[0],
+                        &kind,
+                        &value,
+                        full_access,
+                    ),
+                    CapabilityAccess::Deny,
+                    "{id}: {mode:?} must reject execution before server dispatch"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn semantic_sensitive_reads_require_both_permissions_and_independent_grants() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut request = anthropic_provider_request();
+    request.workspace_path = Some(temp.path().display().to_string());
+    let arguments = serde_json::json!({ "path": ".env", "line": 1, "column": 1 });
+
+    for id in SEMANTIC_CODE_TOOLS {
+        let mut bound = bound_capability_context(&request);
+        let mut current = ProjectCapabilityPolicy::defaults(bound.workspace_key.clone());
+        let classes = capability_permission_classes(&bound.workspace, id, &arguments).unwrap();
+        assert_eq!(
+            classes,
+            vec![
+                CapabilityClass::TerminalExecute,
+                CapabilityClass::WorkspaceSensitiveRead
+            ],
+            "{id}: a sensitive path must not replace command permission"
+        );
+        let (kind, value) = capability_grant_scope(id, &arguments).unwrap();
+        assert_eq!((&*kind, &*value), ("path", ".env"), "{id}");
+        for class in &classes {
+            assert_eq!(
+                capability_access_for_call(&bound, &current, *class, &kind, &value),
+                CapabilityAccess::Ask
+            );
+        }
+        for granted in &classes {
+            let grant = ProjectCapabilityGrant {
+                id: Uuid::new_v4(),
+                class: *granted,
+                scope_kind: kind.clone(),
+                scope_value: value.clone(),
+                created_at: chrono::Utc::now(),
+            };
+            bound.policy.grants = vec![grant.clone()];
+            current.grants = vec![grant];
+            for required in &classes {
+                assert_eq!(
+                    capability_access_for_call(&bound, &current, *required, &kind, &value),
+                    if required == granted {
+                        CapabilityAccess::Allow
+                    } else {
+                        CapabilityAccess::Ask
+                    },
+                    "{id}: granting {granted:?} must not grant {required:?}"
+                );
+            }
+        }
+        for denied in &classes {
+            current.classes.insert(*denied, CapabilityAccess::Deny);
+            assert_eq!(
+                capability_access_for_call(&bound, &current, *denied, &kind, &value),
+                CapabilityAccess::Deny,
+                "{id}: an existing grant cannot bypass a policy denial"
+            );
+        }
+        for mode in [CapabilityRunMode::Plan, CapabilityRunMode::Council] {
+            bound.policy.mode = mode;
+            assert_eq!(
+                capability_access_with_full_access(
+                    &bound,
+                    &current,
+                    CapabilityClass::TerminalExecute,
+                    &kind,
+                    &value,
+                    true,
+                ),
+                CapabilityAccess::Deny,
+                "{id}: sensitive targets must not bypass the {mode:?} execution ceiling"
+            );
+        }
+    }
+    assert_eq!(
+        capability_permission_classes(temp.path(), CapabilityId::WorkspaceRead, &arguments)
+            .unwrap(),
+        vec![CapabilityClass::WorkspaceSensitiveRead],
+        "ordinary sensitive reads should retain their existing single permission"
+    );
+}
 
 #[test]
 fn approval_guidance_replaces_prior_turn_policy_without_bypassing_broker() {
@@ -170,8 +338,8 @@ fn capability_diff_and_reload_scopes_are_conservative() {
         editor_schema["properties"]["selectionOnly"]["type"],
         "boolean"
     );
-    // Code intelligence reads a file, so a sensitive path upgrades it the
-    // same way a workspace read does, and its schemas require positions.
+    // Code intelligence also reads a file, so a sensitive path needs a
+    // sensitive-read gate as well as execution permission.
     assert_eq!(
         effective_capability_class(
             temp.path(),
@@ -238,6 +406,7 @@ fn sensitive_symlink_targets_require_approval_and_live_text_stays_out_of_metadat
         CapabilityId::CodeReferences,
         CapabilityId::CodeHover,
         CapabilityId::CodeSymbols,
+        CapabilityId::CodeFormat,
         CapabilityId::WorkspaceGitBlame,
         CapabilityId::WorkspaceGitShow,
         CapabilityId::WorkspaceGitLog,
@@ -251,6 +420,25 @@ fn sensitive_symlink_targets_require_approval_and_live_text_stays_out_of_metadat
                 "{id}: {path}"
             );
         }
+    }
+    for id in SEMANTIC_CODE_TOOLS {
+        for path in ["public.txt", "assets/config"] {
+            assert_eq!(
+                capability_permission_classes(&workspace, id, &serde_json::json!({ "path": path }))
+                    .unwrap(),
+                vec![
+                    CapabilityClass::TerminalExecute,
+                    CapabilityClass::WorkspaceSensitiveRead
+                ],
+                "{id}: {path} must retain both permissions after resolving the symlink"
+            );
+        }
+        assert!(capability_permission_classes(
+            &workspace,
+            id,
+            &serde_json::json!({ "path": "escape" }),
+        )
+        .is_err());
     }
     assert_eq!(
         effective_capability_class(

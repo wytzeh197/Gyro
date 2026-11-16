@@ -1,0 +1,11 @@
+[package]
+name = "gyro-synara-audit-probe"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+gyro-core = { path = "/Users/wytze/Gyro/crates/gyro-core" }
+rusqlite = { version = "0.41", features = ["bundled", "fallible_uint"] }
+serde_json = "1"
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }

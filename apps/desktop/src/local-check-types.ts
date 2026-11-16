@@ -26,6 +26,7 @@ export type CheckCriterion = {
 };
 export type CheckDraft = {
   sessionId: string;
+  task?: { sourceTurnId: string; previousPlanId?: string };
   previewUrl: string;
   command: string;
   browser?: BrowserCheck | null;

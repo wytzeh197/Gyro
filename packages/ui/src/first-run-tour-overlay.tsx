@@ -6,6 +6,7 @@ import type { AppDestination, SettingsSectionId } from "./types";
 import {
   TOUR_STEPS,
   TOUR_VERSION,
+  FIRST_TASK_PROMPT,
   logTourEvent,
   placeTourCard,
   readTourRecord,
@@ -22,6 +23,7 @@ export type FirstRunTourProps = {
   onNavigate: (destination: AppDestination) => void;
   onOpenSettings: (section: SettingsSectionId) => void;
   onActiveChange?: (active: boolean) => void;
+  onStartFirstTask?: (prompt: string) => void;
   storage?: TourStorage;
 };
 
@@ -31,6 +33,7 @@ export function FirstRunTour({
   onNavigate,
   onOpenSettings,
   onActiveChange,
+  onStartFirstTask,
   storage,
 }: FirstRunTourProps) {
   const [steps, setSteps] = useState<TourStep[]>([]);
@@ -117,6 +120,14 @@ export function FirstRunTour({
       destination={destination}
       index={index}
       onDismiss={() => finish("dismissed")}
+      onStartFirstTask={
+        onStartFirstTask
+          ? () => {
+              finish("complete");
+              onStartFirstTask(FIRST_TASK_PROMPT);
+            }
+          : undefined
+      }
       onMove={move}
       providerConfigured={providerConfigured}
       step={step}
@@ -131,6 +142,7 @@ function TourCoachmark({
   index,
   onDismiss,
   onMove,
+  onStartFirstTask,
   providerConfigured,
   step,
   total,
@@ -139,6 +151,7 @@ function TourCoachmark({
   index: number;
   onDismiss: () => void;
   onMove: (index: number) => void;
+  onStartFirstTask?: () => void;
   providerConfigured: boolean;
   step: TourStep;
   total: number;
@@ -262,13 +275,16 @@ function TourCoachmark({
         </h2>
         <p className="gyro-tour-body" id="gyro-tour-body">
           {step.body({ providerConfigured })}
+          {index + 1 === total && onStartFirstTask
+            ? " Try a first task prepares a prompt you can edit before sending."
+            : ""}
         </p>
         <div className="gyro-tour-actions">
           <button className="gyro-tour-skip" onClick={dismiss} type="button">
             Skip tour
           </button>
           <div className="gyro-tour-nav">
-            {index > 0 ? (
+            {index > 0 && !(index + 1 === total && onStartFirstTask) ? (
               <button
                 className="gyro-tour-secondary"
                 onClick={() => onMove(index - 1)}
@@ -277,12 +293,29 @@ function TourCoachmark({
                 Back
               </button>
             ) : null}
+            {index + 1 === total && onStartFirstTask ? (
+              <button
+                className="gyro-tour-secondary"
+                onClick={() => onMove(index + 1)}
+                type="button"
+              >
+                Finish
+              </button>
+            ) : null}
             <button
               className="gyro-tour-primary"
-              onClick={() => onMove(index + 1)}
+              onClick={() =>
+                index + 1 === total && onStartFirstTask
+                  ? onStartFirstTask()
+                  : onMove(index + 1)
+              }
               type="button"
             >
-              {index + 1 === total ? "Finish" : "Next"}
+              {index + 1 === total
+                ? onStartFirstTask
+                  ? "Try a first task"
+                  : "Finish"
+                : "Next"}
             </button>
           </div>
         </div>

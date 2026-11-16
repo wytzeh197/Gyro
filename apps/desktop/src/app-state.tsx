@@ -232,6 +232,7 @@ export type WorkspaceFileWriteRequest = {
 };
 
 export type IdeCommandOutput = {
+  diagnostics?: ProblemDiagnostic[];
   /** Mirrors the Rust bounded-command terminations, not just done/failed. */
   status:
     "done" | "failed" | "cancelled" | "timed-out" | "inactive" | "output-limit";

@@ -275,6 +275,55 @@ try {
         ": geometry, pin persistence, collapse persistence, new chat, search, workflows, hide/restore passed",
     );
   }
+  // The host receives new chats from another device without reloading or
+  // changing the active conversation. Repeat delivery must not duplicate rows.
+  await load("scene=chat&theme=light&reset=1");
+  await click(".gyro-sidebar-thread-main");
+  await until(
+    () => evaluate("!!document.querySelector('.gyro-session-row.is-active')"),
+    "existing conversation selected before remote creation",
+  );
+  const activeBeforeRemote = await evaluate(
+    "document.querySelector('.gyro-session-row.is-active')?.textContent",
+  );
+  assert.ok(activeBeforeRemote, "an existing conversation is active");
+  await evaluate(
+    `(async()=>{
+      const api=window.__TAURI_INTERNALS__;
+      const [base]=await api.invoke('list_sessions');
+      const session={...base,id:'10000000-0000-4000-8000-000000000099',title:'Chat created from MacBook',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
+      await api.invoke('plugin:event|emit',{event:'gyro://session-created',payload:session});
+      await api.invoke('plugin:event|emit',{event:'gyro://session-created',payload:session});
+    })()`,
+  );
+  await until(
+    () =>
+      evaluate(
+        "[...document.querySelectorAll('.gyro-sidebar-thread-main')].filter(e=>e.textContent.includes('Chat created from MacBook')).length===1",
+      ),
+    "remote-created chat appears once in the host sidebar",
+  );
+  assert.equal(
+    await evaluate(
+      "document.querySelector('.gyro-session-row.is-active')?.textContent",
+    ),
+    activeBeforeRemote,
+    "remote creation preserves the active conversation",
+  );
+  await evaluate(
+    `window.__TAURI_INTERNALS__.invoke('plugin:event|emit',{event:'gyro://session-title-updated',payload:{id:'10000000-0000-4000-8000-000000000099',title:'Renamed remote chat'}})`,
+  );
+  await until(
+    () =>
+      evaluate(
+        "[...document.querySelectorAll('.gyro-sidebar-thread-main')].some(e=>e.textContent.includes('Renamed remote chat'))",
+      ),
+    "remote-created chat receives later title updates",
+  );
+  console.log(
+    "Remote creation: live sidebar update, duplicate delivery, active conversation and title update passed",
+  );
+
   for (const theme of ["light", "dark"]) {
     await load(`scene=chat&theme=${theme}&edge=sidebar-many&reset=1`);
     const rows = () =>

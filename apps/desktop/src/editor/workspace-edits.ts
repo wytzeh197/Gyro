@@ -171,7 +171,7 @@ function positionOffset(
   return offset;
 }
 
-function applyTextEdits(content: string, rawEdits: unknown[]): string {
+export function applyTextEdits(content: string, rawEdits: unknown[]): string {
   const lines = textLineOffsets(content);
   const edits = rawEdits
     .map((value, index) => {

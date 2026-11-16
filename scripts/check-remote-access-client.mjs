@@ -1,0 +1,357 @@
+import assert from "node:assert/strict";
+import { RemoteHostClient } from "../apps/desktop/src/remote-access/client.ts";
+import { reconcileRemoteHistory } from "../apps/desktop/src/remote-access/history.ts";
+import {
+  emptyView,
+  readView,
+  persistView,
+  pendingSubmitOutcome,
+  PENDING_SUBMIT_GRACE_MS,
+} from "../apps/desktop/src/remote-access/view-state.ts";
+
+const calls = [],
+  listeners = new Set();
+let releaseInput;
+let pendingInput = false;
+let rejectInput = false;
+const ports = {
+  async invoke(command, args) {
+    calls.push({ command, args });
+    const operation = args?.request?.operation;
+    if (operation?.op === "claim") return { owner: "client", generation: 17 };
+    if (operation?.op === "terminal" && operation.action === "input") {
+      if (rejectInput) throw Error("connection lost");
+      if (pendingInput)
+        await new Promise((resolve) => {
+          releaseInput = resolve;
+        });
+    }
+    return {};
+  },
+  async listen(_event, handler) {
+    listeners.add(handler);
+    return () => listeners.delete(handler);
+  },
+};
+const a = new RemoteHostClient("host-a", ports);
+const b = new RemoteHostClient("host-b", ports);
+await a.request({ op: "claim", sessionId: "same-session-id" });
+await a.request(
+  { op: "stop", sessionId: "same-session-id" },
+  "fixed-request-id",
+);
+await b.request({ op: "stop", sessionId: "same-session-id" });
+const stops = calls.filter((c) => c.args?.request?.operation.op === "stop");
+assert.equal(stops[0].args.hostId, "host-a");
+assert.equal(stops[0].args.request.lease, 17);
+assert.equal(stops[0].args.request.id, "fixed-request-id");
+assert.equal(stops[1].args.hostId, "host-b");
+assert.equal(stops[1].args.request.lease, undefined);
+
+let observed = 0;
+const unlisten = await a.subscribe("same-session-id", () => observed++);
+const watch = calls.findLast((c) => c.command === "remote_host_watch").args
+  .watchId;
+for (const listener of listeners) {
+  listener({
+    payload: {
+      hostId: "host-b",
+      watchId: watch,
+      event: { sessionId: "same-session-id", topic: "refresh" },
+    },
+  });
+  listener({
+    payload: {
+      hostId: "host-a",
+      watchId: "old-watch",
+      event: { sessionId: "same-session-id", topic: "refresh" },
+    },
+  });
+  listener({
+    payload: {
+      hostId: "host-a",
+      watchId: watch,
+      event: { sessionId: "different-session", topic: "refresh" },
+    },
+  });
+  listener({
+    payload: {
+      hostId: "host-a",
+      watchId: watch,
+      event: { sessionId: "same-session-id", topic: "refresh" },
+    },
+  });
+}
+assert.equal(
+  observed,
+  1,
+  "events stay scoped to host, session and subscription",
+);
+unlisten();
+
+pendingInput = true;
+const first = a.request({
+  op: "terminal",
+  action: "input",
+  sessionId: "same-session-id",
+  paneId: "p",
+  input: "l",
+});
+const second = a.request({
+  op: "terminal",
+  action: "input",
+  sessionId: "same-session-id",
+  paneId: "p",
+  input: "s",
+});
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(
+  calls.filter((c) => c.args?.request?.operation.action === "input").length,
+  1,
+  "second keystroke waits for the first",
+);
+pendingInput = false;
+releaseInput();
+await Promise.all([first, second]);
+assert.deepEqual(
+  calls
+    .filter((c) => c.args?.request?.operation.action === "input")
+    .map((c) => c.args.request.operation.input),
+  ["l", "s"],
+);
+
+rejectInput = true;
+const before = calls.length;
+const failed = await Promise.allSettled([
+  a.request({
+    op: "terminal",
+    action: "input",
+    sessionId: "same-session-id",
+    paneId: "p",
+    input: "x",
+  }),
+  a.request({
+    op: "terminal",
+    action: "input",
+    sessionId: "same-session-id",
+    paneId: "p",
+    input: "y",
+  }),
+]);
+assert.ok(failed.every((result) => result.status === "rejected"));
+assert.equal(
+  calls
+    .slice(before)
+    .filter((c) => c.args?.request?.operation.action === "input").length,
+  1,
+  "queued keystrokes are not replayed after a connection failure",
+);
+
+const values = new Map();
+const storage = {
+  getItem: (key) => values.get(key) ?? null,
+  setItem: (key, value) => values.set(key, value),
+};
+values.set(
+  "gyro.remote.view.corrupt",
+  '{"panel":"wrong","buffers":{"x":1},"drafts":{"s":9},"pendingSubmissions":{"s":false}}',
+);
+assert.deepEqual(
+  readView("corrupt", storage),
+  emptyView(),
+  "damaged state is bounded and sanitized",
+);
+const view = { ...emptyView(), drafts: { sameSession: "keep this draft" } };
+const full = {
+  getItem: () => null,
+  setItem: () => {
+    throw Error("quota");
+  },
+};
+assert.equal(persistView("memory-a", view, full), false);
+assert.equal(
+  readView("memory-a", full).drafts.sameSession,
+  "keep this draft",
+  "a machine switch keeps drafts when disk storage is full",
+);
+assert.equal(
+  readView("memory-b", full).drafts.sameSession,
+  undefined,
+  "the same session ID on another host has its own draft",
+);
+
+a.dispose();
+b.dispose();
+assert.equal(
+  calls.findLast(
+    (c) =>
+      c.args?.hostId === "host-a" &&
+      c.args?.request?.operation.op === "release",
+  )?.args.request.lease,
+  17,
+  "view cleanup fences its release to the previous control generation",
+);
+await assert.rejects(a.request({ op: "projects" }), /closed/);
+assert.ok(
+  calls.every((call) =>
+    ["remote_host_request", "remote_host_watch"].includes(call.command),
+  ),
+  "remote clients never invoke a local execution command",
+);
+assert.ok(
+  !calls.some((call) => call.command === "stop_provider_chat"),
+  "disconnect does not stop host work",
+);
+
+// A subscription catches up before delivering frames that raced the snapshot.
+let finishCatchup;
+let catchupWatch;
+const catchupListeners = new Set();
+const catchupPorts = {
+  async invoke(command, args) {
+    if (command === "remote_host_watch") catchupWatch = args?.watchId;
+    if (args?.request?.operation.op === "hello")
+      return { capabilities: ["liveCatchup"] };
+    if (args?.request?.operation.op === "snapshot")
+      return new Promise((resolve) => {
+        finishCatchup = resolve;
+      });
+    return {};
+  },
+  async listen(_event, handler) {
+    catchupListeners.add(handler);
+    return () => catchupListeners.delete(handler);
+  },
+};
+const catchup = new RemoteHostClient("catchup-host", catchupPorts);
+await catchup.capabilities();
+const caught = [];
+const opening = catchup.subscribe("running-chat", (event) =>
+  caught.push(event.payload.sequence),
+);
+await new Promise((resolve) => setTimeout(resolve, 0));
+for (const handler of catchupListeners)
+  handler({
+    payload: {
+      hostId: "catchup-host",
+      watchId: catchupWatch,
+      event: {
+        sessionId: "running-chat",
+        topic: "provider",
+        payload: { sequence: 12 },
+      },
+    },
+  });
+assert.deepEqual(caught, [], "live frames wait while catch-up is in flight");
+finishCatchup({ liveEvents: [{ sequence: 10 }, { sequence: 11 }] });
+const closeCatchup = await opening;
+assert.deepEqual(
+  caught,
+  [10, 11, 12],
+  "catch-up is delivered before newer live frames",
+);
+closeCatchup();
+catchup.dispose();
+assert.equal(
+  catchupListeners.size,
+  0,
+  "catch-up subscription disposes its listener",
+);
+
+const pendingSubmit = {
+  requestId: "r",
+  turnId: "t",
+  message: "m",
+  draft: "m",
+  sentAt: 1_000,
+};
+const late = 1_000 + PENDING_SUBMIT_GRACE_MS;
+const facts = {
+  recorded: false,
+  status: "unknown",
+  inFlight: false,
+  now: late,
+};
+assert.equal(pendingSubmitOutcome(pendingSubmit, facts), "notRun");
+assert.equal(
+  pendingSubmitOutcome({ ...pendingSubmit, sentAt: undefined }, facts),
+  "notRun",
+  "a pending submit saved by an older build is not stuck forever",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, now: late - 1 }),
+  "wait",
+  "the host gets time to record a submit it already received",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, inFlight: true }),
+  "wait",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, status: "started" }),
+  "wait",
+  "a submit the host started is never cleared as not run",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, status: "uncertain" }),
+  "wait",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, status: "failed", now: 0 }),
+  "notRun",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, status: "done", now: 0 }),
+  "ran",
+);
+assert.equal(
+  pendingSubmitOutcome(pendingSubmit, { ...facts, recorded: true, now: 0 }),
+  "ran",
+);
+
+// A command's live and durable IDs differ. Repeated host history reads must
+// update the same visible row, never duplicate it or reset its disclosure.
+const liveCommand = {
+  id: "live-command",
+  sessionId: "remote-session",
+  turnId: "remote-turn",
+  createdAt: "2026-11-16T10:00:00Z",
+  kind: "system-event",
+  message: "Running command",
+  payload: {
+    kind: "provider-activity", activityId: "command-1", activityKind: "command",
+    label: "Running command", detail: "pnpm typecheck", status: "running",
+    timelineSequence: 5,
+  },
+};
+const savedCommand = {
+  ...liveCommand, id: "saved-command", message: "Ran command",
+  createdAt: "2026-11-16T10:00:01Z",
+  payload: { ...liveCommand.payload, label: "Ran command", status: "done", timelineSequence: 1 },
+};
+let transcript = reconcileRemoteHistory([liveCommand], [savedCommand], [liveCommand]);
+assert.equal(transcript.length, 1, "live and durable command copies render once");
+assert.equal(transcript[0].id, liveCommand.id, "host refresh preserves the visible row identity");
+assert.equal(transcript[0].payload.status, "done", "durable completion wins over an older live frame");
+assert.equal(transcript[0].payload.timelineSequence, 5, "refresh preserves the command's place in the conversation");
+assert.equal(savedCommand.id, "saved-command", "host pagination IDs stay unmodified");
+assert.equal(
+  reconcileRemoteHistory(transcript, [structuredClone(savedCommand)], [liveCommand]),
+  transcript,
+  "an unchanged host refresh does not rerender the transcript",
+);
+const stale = { ...savedCommand, payload: { ...savedCommand.payload, status: "running" } };
+assert.equal(reconcileRemoteHistory(transcript, [stale])[0].payload.status, "done",
+  "a delayed running snapshot cannot reopen completed work");
+const otherSession = { ...savedCommand, sessionId: "another-session" };
+assert.equal(reconcileRemoteHistory(transcript, [otherSession])[0].id, savedCommand.id,
+  "row identities never cross session boundaries");
+const earlier = { ...savedCommand, id: "older-command", turnId: "older-turn",
+  createdAt: "2026-11-15T10:00:00Z" };
+const expanded = reconcileRemoteHistory(transcript, [earlier, savedCommand]);
+assert.deepEqual(expanded.map(event => event.id), ["older-command", "live-command"],
+  "loading earlier history retains the current row identity");
+
+console.log(
+  "Remote client checks passed: history reconciliation, stable command rows, unchanged refreshes, pending submit outcomes, routing, leases, stale events, ordered input, uncertain input, draft isolation, storage recovery and ordered live catch-up.",
+);
